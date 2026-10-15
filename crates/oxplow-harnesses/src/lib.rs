@@ -9,6 +9,8 @@ mod claude;
 mod codex;
 mod opencode;
 mod shared;
+#[cfg(test)]
+mod text_contract;
 
 use std::sync::Arc;
 

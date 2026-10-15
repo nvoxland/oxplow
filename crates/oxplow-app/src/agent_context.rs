@@ -69,13 +69,19 @@ impl AgentContext {
     /// then takes whatever is undelivered — a nudge that lands after the
     /// window goes out on the thread's next tool call instead of being lost.
     /// Collection nudges come before advisories.
+    /// Nothing for a session whose harness can't carry context after a
+    /// tool call (`tool_context`): its nudges wait for a prompt.
     pub async fn post_tool_context(
         &self,
         svc: &Services,
         thread_id: &ThreadId,
         session_id: Option<&str>,
+        harness: Option<&str>,
         tool: Option<&ToolUse>,
     ) -> Option<String> {
+        if !carries(svc, harness, TOOL_CONTEXT) {
+            return None;
+        }
         // A plan just settled: a promotion or demotion while the plan was
         // up for approval gets no prompt event before the agent resumes, so
         // the banner rides this call's context. (A plan is never a test-run
@@ -101,12 +107,18 @@ impl AgentContext {
     /// when it changed for this session), the thread's undelivered nudges
     /// (prompt advisories, and the hints its last turn's end left), and the
     /// open effort's decisions (once per session, and when they change).
+    /// Nothing for a session whose harness can't carry context on a prompt
+    /// (`prompt_context`): nothing meant for its agent is taken.
     pub async fn prompt_context(
         &self,
         svc: &Services,
         thread_id: &ThreadId,
         session_id: Option<&str>,
+        harness: Option<&str>,
     ) -> Option<String> {
+        if !carries(svc, harness, PROMPT_CONTEXT) {
+            return None;
+        }
         let ctx_block = self
             .refreshed_session_context(svc, thread_id, session_id)
             .await;
@@ -241,6 +253,24 @@ impl AgentContext {
             .copied()?;
         (initial != current).then(|| role_change_banner(initial, current))
     }
+}
+
+/// The agent-harness feature: context oxplow returns to a prompt hook
+/// reaches the agent.
+pub const PROMPT_CONTEXT: &str = "prompt_context";
+/// The agent-harness feature: context oxplow returns to a tool hook
+/// reaches the agent before its next step.
+pub const TOOL_CONTEXT: &str = "tool_context";
+
+/// Whether `harness` (a session's, by registry key) declares `channel`.
+/// With no harness known (a hook from no session) the answer is sent.
+pub fn carries(svc: &Services, harness: Option<&str>, channel: &str) -> bool {
+    let Some(harness) = harness else {
+        return true;
+    };
+    svc.capabilities
+        .get("agent_harness", harness)
+        .is_some_and(|h| h.has_feature(channel))
 }
 
 /// Characters of nudges one hook carries to the agent; the rest wait for

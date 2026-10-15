@@ -26,7 +26,6 @@ struct Host {
     /// Deny every worktree write with this reason.
     deny_writes: Option<String>,
     context: Option<String>,
-    nudge: Option<String>,
     log: Mutex<Vec<String>>,
 }
 
@@ -68,15 +67,8 @@ impl AcpHost for Host {
     async fn turn_started(&self, _t: &ThreadId, _s: &str, prompt: &str) {
         self.log.lock().push(format!("turn_started {prompt}"));
     }
-    async fn tool_finished(
-        &self,
-        _t: &ThreadId,
-        _s: &str,
-        tool: &ToolUse,
-        _c: &serde_json::Value,
-    ) -> Option<String> {
+    async fn tool_finished(&self, _t: &ThreadId, _s: &str, tool: &ToolUse, _c: &serde_json::Value) {
         self.log.lock().push(format!("tool {}", tool.kind.as_str()));
-        self.nudge.clone()
     }
     async fn turn_ended(
         &self,
@@ -420,11 +412,12 @@ async fn a_second_prompt_during_a_turn_is_refused_not_queued() {
     assert_eq!(rig.prompts().len(), 1);
 }
 
+/// The host's context (the session context, and the nudges a turn's tool
+/// calls left in the store) rides each human prompt.
 #[tokio::test]
-async fn context_and_nudges_ride_the_next_human_prompt() {
+async fn the_context_rides_each_human_prompt() {
     let mut rig = open(Host {
         context: Some("CTX".into()),
-        nudge: Some("NUDGE".into()),
         ..Default::default()
     })
     .await;
@@ -440,7 +433,7 @@ async fn context_and_nudges_ride_the_next_human_prompt() {
             .collect()
     };
     assert_eq!(texts(0), vec!["CTX", "fake:bash cargo test"]);
-    assert_eq!(texts(1), vec!["CTX\n\nNUDGE", "next"]);
+    assert_eq!(texts(1), vec!["CTX", "next"]);
 }
 
 #[tokio::test]

@@ -374,10 +374,6 @@ fn write_plugin(project_dir: &Path, hook_base_url: &str, text: &AgentText) -> io
         &hooks_dir.join("hooks.json"),
         &build_hooks_json(hook_base_url),
     )?;
-    fs::write(
-        plugin_dir.join("AGENT_GUIDE.md"),
-        include_str!("../assets/AGENT_GUIDE.md"),
-    )?;
     write_skills(&plugin_dir.join("skills"), &text.skills)?;
     write_commands(&commands_dir, &text.commands)?;
     Ok(plugin_dir)
@@ -809,7 +805,6 @@ mod tests {
         for file in [
             ".claude-plugin/plugin.json",
             "hooks/hooks.json",
-            "AGENT_GUIDE.md",
             "commands/review-comments.md",
             "commands/configure.md",
         ] {

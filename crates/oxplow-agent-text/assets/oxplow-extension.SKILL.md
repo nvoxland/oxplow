@@ -270,7 +270,9 @@ empty: Nothing is waiting on you.
   and `examples` (at most 10) are dry-run by `check`: give each
   `answers: { sql.read: [[rows of the 1st read], …] }` so it doesn't
   depend on the project's data, and `expect_commands: [...]` or `refuses:
-  <part of the reason>`. `access: read` makes a command that only reads
+  <part of the reason>`. An agent is shown an `example:` input beside the
+  schema (a script's first example that runs, unless it declares one;
+  give one to a command over a `scope:` op). `access: read` makes a command that only reads
   and returns a `result` (it composes nothing). A command on a ref's menu (`ui.about`) gets `{ ref }` unless its
   `ui.input` says otherwise, so name its input field `ref`. `extensions/oxplow-bundled/` (bundled) is a
   working example.
@@ -625,7 +627,7 @@ An extension can add to the metric catalog with `measures:`, `metrics:`
 and `dimensions:` in `extension.yaml`, plus **fact collectors** (a
 `collectors:` entry with `facts:` instead of `entities:`) that record the
 facts — in the same schema the project's own extension uses (the `oxplow-metrics`
-skill and `/oxplow:new-metric` cover it).
+skill and oxplow's `new-metric` slash command cover it).
 
 ```yaml
 measures:
@@ -951,7 +953,7 @@ in `v_contribution_health` (`extension`, `contribution`, `kind`, `state` = `ok` 
   the user what it declares (the programs its collectors run, the hosts they
   reach, the credentials they read, advisories) and any `errors` /
   `problems`, and when they say go, run `oxplow.extension.install { git_url,
-  git_ref?, reviewed_sha: <its sha> }` (`mcp__oxplow__run_command`) — it
+  git_ref?, reviewed_sha: <its sha> }` (`run_command`) — it
   comes back as a proposal the user approves. It records the source in
   `source.yaml`. Updating is the same: `review_extension(name)`, then
   `oxplow.extension.update { name, reviewed_sha }`. Never

@@ -393,6 +393,21 @@ async fn handle_hook_inner(
     // records it as the thread's status). SubagentStart / SubagentStop:
     // the subagent the bearer's harness reads in the body. None of these
     // carry policy.
+    // PreCompact: the agent's context is about to be summarized, so what
+    // it was told goes with it — forget the session's baselines and the
+    // next prompt carries the session context and decisions again.
+    // (Claude Code delivers this; its HTTP SessionStart never arrives.)
+    if event == "PreCompact" {
+        ctx.services
+            .agent_context
+            .reset_session(session_id.as_deref());
+        return respond(
+            &ctx.services.harnesses,
+            Some(&principal.harness),
+            &HookAnswer::Ack,
+        )
+        .await;
+    }
     if matches!(
         event.as_str(),
         "SessionStart" | "SessionEnd" | "Notification" | "SubagentStart" | "SubagentStop"
@@ -564,6 +579,7 @@ async fn handle_hook_inner(
                     &ctx.services,
                     thread_id,
                     envelope_for_resume.session_id.as_deref(),
+                    harness,
                     tool.as_ref(),
                 )
                 .await
@@ -592,6 +608,7 @@ async fn handle_hook_inner(
                     &ctx.services,
                     thread_id,
                     envelope_for_resume.session_id.as_deref(),
+                    harness,
                 )
                 .await
             {

@@ -6570,6 +6570,42 @@ commands:
         assert_eq!(described, ["ai_profile:x/review"]);
     }
 
+    /// Every command an agent is offered — core's, oxplow-foundation's and
+    /// oxplow-bundled's — declares an example input beside its schema, and the
+    /// example fits: an agent reads a whole right input instead of guessing a
+    /// shape field by field (`.context/commands.md` "Exposure to agents").
+    #[tokio::test(flavor = "multi_thread")]
+    async fn every_command_an_agent_is_offered_has_an_example_that_fits() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "test").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+        let services = crate::Services::in_memory(dir.path()).await.unwrap();
+        let offered = services.commands.list(&oxplow_domain::Actor::Agent {
+            session_id: None,
+            thread_id: Some(oxplow_domain::ThreadId::new(7)),
+            stream_id: None,
+        });
+        assert!(offered.len() > 40, "{}", offered.len());
+        let mut missing = Vec::new();
+        let mut misfit = Vec::new();
+        for spec in &offered {
+            match oxplow_domain::commands::schema_example(&spec.input_schema) {
+                None => missing.push(spec.id.clone()),
+                Some(example) => {
+                    let validator =
+                        oxplow_domain::InputValidator::compile(&spec.input_schema).unwrap();
+                    if let Err(err) = validator.check(example) {
+                        misfit.push(format!("{}: {err}", spec.id));
+                    }
+                }
+            }
+        }
+        assert!(missing.is_empty(), "no example: {missing:#?}");
+        assert!(misfit.is_empty(), "example doesn't fit: {misfit:#?}");
+    }
+
     /// Oxplow ships two extensions: `oxplow-foundation`, its own commands
     /// over the scopes' operations, and `oxplow-bundled`: the
     /// review packet, the analytics lenses and the agent's advisories

@@ -143,7 +143,8 @@ impl Op {
     }
 
     /// The command `spec` declares, backed by this operation: its input
-    /// schema, undo and atomicity are the operation's, its access the
+    /// schema (with the declaration's example), undo and atomicity are the
+    /// operation's, its access the
     /// scope's, and the scope is among its needs. Its
     /// `invokers` and `confirm` stay within the operation's floor.
     pub fn command(&self, mut spec: CommandSpec) -> Result<Command, CommandError> {
@@ -153,7 +154,13 @@ impl Op {
             })?
             .access;
         self.within_floor(&spec)?;
+        // The declaration's example input (`example:`) is kept over the
+        // operation's schema.
+        let example = spec.input_schema.get("examples").cloned();
         spec.input_schema = self.input_schema.clone();
+        if let (Some(example), Some(schema)) = (example, spec.input_schema.as_object_mut()) {
+            schema.insert("examples".into(), example);
+        }
         spec.undoable = self.undoable;
         spec.atomicity = match self.handler {
             Handler::Tx(_) => Atomicity::Tx,

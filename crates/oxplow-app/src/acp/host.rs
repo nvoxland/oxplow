@@ -33,14 +33,15 @@ pub trait AcpHost: Send + Sync + 'static {
     /// Context to attach to the person's next prompt.
     async fn prompt_context(&self, thread: &ThreadId, session_id: &str) -> Option<String>;
     async fn turn_started(&self, thread: &ThreadId, session_id: &str, prompt: &str);
-    /// A tool call finished. Returns a nudge to attach to the next prompt.
+    /// A tool call finished: record it. What it leaves for the agent
+    /// (nudges) waits in the store for the next prompt's context.
     async fn tool_finished(
         &self,
         thread: &ThreadId,
         session_id: &str,
         tool: &ToolUse,
         content: &serde_json::Value,
-    ) -> Option<String>;
+    );
     /// The turn ended: record it, with its final answer and the counts the
     /// agent reported.
     async fn turn_ended(
@@ -109,6 +110,17 @@ impl ServicesAcpHost {
         }
     }
 
+    /// The hosted session's harness (its registry key).
+    async fn harness(&self, svc: &Services) -> Option<String> {
+        use oxplow_domain::stores::AgentSessionStore as _;
+        svc.agent_session_store
+            .get(&self.session)
+            .await
+            .ok()
+            .flatten()
+            .map(|session| session.harness)
+    }
+
     async fn ingest(&self, svc: &Services, env: HookEnvelope) {
         if let Err(err) = svc.hook_ingest.ingest(env).await {
             warn!(?err, "acp: hook ingest failed");
@@ -168,8 +180,9 @@ impl AcpHost for ServicesAcpHost {
 
     async fn prompt_context(&self, thread: &ThreadId, session_id: &str) -> Option<String> {
         let svc = self.svc.upgrade()?;
+        let harness = self.harness(&svc).await;
         svc.agent_context
-            .prompt_context(&svc, thread, Some(session_id))
+            .prompt_context(&svc, thread, Some(session_id), harness.as_deref())
             .await
     }
 
@@ -193,8 +206,10 @@ impl AcpHost for ServicesAcpHost {
         session_id: &str,
         tool: &ToolUse,
         content: &serde_json::Value,
-    ) -> Option<String> {
-        let svc = self.svc.upgrade()?;
+    ) {
+        let Some(svc) = self.svc.upgrade() else {
+            return;
+        };
         let mut env = self.envelope(
             HookKind::PostToolUse,
             thread,
@@ -204,9 +219,6 @@ impl AcpHost for ServicesAcpHost {
         );
         env.tool = Some(tool.clone());
         self.ingest(&svc, env).await;
-        svc.agent_context
-            .post_tool_context(&svc, thread, Some(session_id), Some(tool))
-            .await
     }
 
     async fn turn_ended(

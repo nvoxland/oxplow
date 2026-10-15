@@ -802,7 +802,7 @@ mod tests {
         let stream = svc.streams.list_streams().await.unwrap()[0].id.value();
         let context = svc
             .agent_context
-            .prompt_context(svc, &f.thread, Some("s"))
+            .prompt_context(svc, &f.thread, Some("s"), None)
             .await
             .unwrap_or_default();
         assert!(
@@ -826,7 +826,7 @@ mod tests {
         );
         let again = svc
             .agent_context
-            .prompt_context(svc, &f.thread, Some("s"))
+            .prompt_context(svc, &f.thread, Some("s"), None)
             .await
             .unwrap_or_default();
         assert!(
@@ -837,7 +837,7 @@ mod tests {
         settle().await;
         let third = svc
             .agent_context
-            .prompt_context(svc, &f.thread, Some("s"))
+            .prompt_context(svc, &f.thread, Some("s"), None)
             .await
             .unwrap_or_default();
         assert!(!third.contains("effort none"), "once per thread: {third}");
@@ -916,7 +916,7 @@ mod tests {
     async fn prompt(f: &crate::test_fixtures::EffortFixture) -> String {
         f.svc
             .agent_context
-            .prompt_context(&f.svc, &f.thread, Some("s"))
+            .prompt_context(&f.svc, &f.thread, Some("s"), None)
             .await
             .unwrap_or_default()
     }

@@ -13,7 +13,7 @@ Scope from `$ARGUMENTS`:
 
 Steps:
 
-1. Call `mcp__oxplow__list_comments` with the chosen `scope`
+1. Call `list_comments` with the chosen `scope`
    (`id` = this thread's `b-…` id, or the stream's `s-…` id) and
    `status: "needs_response"`. Each result carries the anchored
    `quote`, the message thread, and the comment's `intent`.

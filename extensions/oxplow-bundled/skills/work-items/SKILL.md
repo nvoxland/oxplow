@@ -1,6 +1,6 @@
 ---
 name: work-items
-description: The project's work list — when filing a work item is worth it, the work_item.* commands (create, transition, update, link, comment), states, epics and link types, and reading items (list_work_items, get_work_item, next_work_item, v_work_item). Loads on mcp__oxplow__run_command with work_item.*, on the work-item tools, and on v_work_item.
+description: The project's work list — when filing a work item is worth it, the work_item.* commands (create, transition, update, link, comment), states, epics and link types, and reading items (list_work_items, get_work_item, next_work_item, v_work_item). Loads on the oxplow `run_command` tool with work_item.*, on the work-item tools, and on v_work_item.
 ---
 
 # Work items

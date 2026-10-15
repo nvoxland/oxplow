@@ -2969,6 +2969,12 @@ export type ExtensionCommand = {
 	 */
 	stable: boolean,
 	examples: CommandExample[],
+	/**
+	 *  Its example input (`example:`, else a script's first example that
+	 *  runs): JSON Schema's `examples` on the input schema it registers
+	 *  with — what `list_commands` shows an agent and a refusal quotes.
+	 */
+	example: unknown | null,
 };
 
 // One instance of an extension's provider (`extensionInstances`).

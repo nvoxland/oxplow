@@ -127,6 +127,8 @@ pub const BUILT_INS: &[BuiltIn] = &[
             "telemetry",
             "runtime_text",
             "subagents",
+            "prompt_context",
+            "tool_context",
         ],
     ),
     harness(
@@ -138,17 +140,26 @@ pub const BUILT_INS: &[BuiltIn] = &[
             "telemetry",
             "runtime_text",
             "subagents",
+            "prompt_context",
+            "tool_context",
         ],
     ),
+    // Its bridge acts on a deny only: no hook context reaches its agent.
     harness(
         "oxplow:opencode",
         "opencode",
         &["terminal", "runtime_text", "subagents"],
     ),
+    // Context rides the person's next prompt; nothing mid-turn.
     harness(
         "oxplow:acp",
         "An ACP agent",
-        &["structured_transcript", "permission_prompts", "resume"],
+        &[
+            "structured_transcript",
+            "permission_prompts",
+            "resume",
+            "prompt_context",
+        ],
     ),
     // An ACP agent's program, as data (its preset or a project's).
     BuiltIn {
@@ -317,6 +328,14 @@ pub struct Implementation {
 }
 
 impl Implementation {
+    /// Whether it declares `feature`.
+    pub fn has_feature(&self, feature: &str) -> bool {
+        self.features
+            .get(feature)
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
+
     /// The commands only it offers: a provider instance's namespace
     /// (`<id>.*`); nothing for core's and the built-ins.
     fn surface(&self) -> Option<String> {

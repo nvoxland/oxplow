@@ -154,6 +154,111 @@ pub struct RunCommandParams {
     pub input: serde_json::Value,
 }
 
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct ListCommandsParams {
+    /// One command's id (`oxplow.work_item.create`): it alone, in full.
+    #[serde(default)]
+    pub id: Option<String>,
+    /// The start of the ids wanted (`oxplow.work_item.`): each, in full.
+    #[serde(default)]
+    pub prefix: Option<String>,
+}
+
+/// A summary's first sentence: what the index shows (the whole summary
+/// comes with the command).
+fn first_sentence(summary: &str) -> &str {
+    // A sentence ends at ". " before a capital: `e.g. no` goes on.
+    summary
+        .match_indices(". ")
+        .find(|(at, _)| {
+            summary[at + 2..]
+                .chars()
+                .next()
+                .is_some_and(char::is_uppercase)
+        })
+        .map_or(summary, |(at, _)| &summary[..=at])
+}
+
+/// A command as `list_commands`' index shows it.
+#[derive(Debug, Serialize)]
+struct CommandIndexEntry {
+    id: String,
+    summary: String,
+}
+
+/// A command as an agent needs it to run one: the person-facing parts of
+/// its spec (`ui`, `op`, `atomicity`, …) left out, and its example input
+/// shown once, beside the schema rather than inside it.
+#[derive(Debug, Serialize)]
+struct CommandView {
+    id: String,
+    summary: String,
+    input_schema: serde_json::Value,
+    example: Option<serde_json::Value>,
+    confirm: oxplow_domain::Confirm,
+    undoable: bool,
+}
+
+impl CommandView {
+    fn of(spec: &oxplow_domain::CommandSpec) -> Self {
+        let mut input_schema = spec.input_schema.clone();
+        let example = input_schema
+            .as_object_mut()
+            .and_then(|schema| schema.remove("examples"))
+            .and_then(|examples| examples.as_array()?.first().cloned());
+        Self {
+            id: spec.id.clone(),
+            summary: spec.summary.clone(),
+            input_schema,
+            example,
+            confirm: spec.confirm,
+            undoable: spec.undoable,
+        }
+    }
+}
+
+/// Why `list_commands` found nothing: the id or prefix isn't offered, and
+/// the offered commands whose ids end like the asked one.
+fn no_command_message(
+    offered: &[oxplow_domain::CommandSpec],
+    id: Option<&str>,
+    prefix: Option<&str>,
+) -> String {
+    let asked = id.or(prefix).unwrap_or_default();
+    let ending_in = |suffix: &str| -> Vec<&str> {
+        offered
+            .iter()
+            .map(|spec| spec.id.as_str())
+            .filter(|candidate| !suffix.is_empty() && candidate.ends_with(&format!(".{suffix}")))
+            .collect()
+    };
+    // `config.get` → `oxplow.config.get`; else by its last segment.
+    let whole = asked.trim_matches('.');
+    let mut alike = ending_in(whole);
+    if alike.is_empty() {
+        alike = ending_in(whole.rsplit('.').next().unwrap_or(whole));
+    }
+    let what = if id.is_some() {
+        "command"
+    } else {
+        "commands under"
+    };
+    if alike.is_empty() {
+        format!(
+            "no {what} `{asked}` is offered to you; `list_commands` with no arguments lists them"
+        )
+    } else {
+        format!(
+            "no {what} `{asked}` is offered to you; did you mean {}?",
+            alike
+                .iter()
+                .map(|candidate| format!("`{candidate}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct StreamIdParams {
     pub stream_id: String,
@@ -2492,17 +2597,49 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "The commands this agent may run through `run_command`, each with its \
-                       input schema, one-line summary, whether it needs a person's confirmation \
-                       and whether it is undoable. Commands are the one write path: every run \
-                       is validated, policy-checked, audited and logged as `command.executed`."
+        description = "The commands this agent may run through `run_command`. With no \
+                       arguments: every command's `id` and one-line `summary`. With `id` (one \
+                       command) or `prefix` (an area, `oxplow.work_item.`): each with its \
+                       `input_schema`, an `example` input that fits it, whether a person \
+                       `confirm`s it and whether it is `undoable`. Read a command this way \
+                       before its first run. Commands are the one write path: every run is \
+                       validated, policy-checked, audited and logged as `command.executed`."
     )]
     async fn list_commands(
         &self,
         extensions: rmcp::model::Extensions,
+        params: Parameters<ListCommandsParams>,
     ) -> Result<CallToolResult, McpError> {
         let actor = caller_of(&extensions).actor();
-        json_result(&self.services.commands.list(&actor))
+        let offered = self.services.commands.list(&actor);
+        let p = params.0;
+        if p.id.is_none() && p.prefix.is_none() {
+            let index: Vec<CommandIndexEntry> = offered
+                .into_iter()
+                .map(|spec| CommandIndexEntry {
+                    summary: first_sentence(&spec.summary).to_string(),
+                    id: spec.id,
+                })
+                .collect();
+            return json_result(&index);
+        }
+        let views: Vec<CommandView> = offered
+            .iter()
+            .filter(|spec| p.id.as_deref().is_none_or(|id| spec.id == id))
+            .filter(|spec| {
+                p.prefix
+                    .as_deref()
+                    .is_none_or(|pre| spec.id.starts_with(pre))
+            })
+            .map(CommandView::of)
+            .collect();
+        if views.is_empty() {
+            return Err(McpError::invalid_params(
+                no_command_message(&offered, p.id.as_deref(), p.prefix.as_deref()),
+                None,
+            ));
+        }
+        json_result(&views)
     }
 
     #[tool(
@@ -2516,7 +2653,8 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Run a command by its id with its input (see `list_commands`). Returns \
+        description = "Run a command by its id with its input (`list_commands { id }` shows its \
+                       schema and an example input). Returns \
                        `{ result, audit_id, event_id, inverse? }`. Invalid input names the \
                        failing field; a denied command says why. A command that needs a \
                        person's confirmation is not run: it is recorded as a proposal and \
@@ -4481,12 +4619,9 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("thread identity"), "{err}");
         // Listing needs no identity and shows agent-invocable commands.
-        let listed = server
-            .list_commands(rmcp::model::Extensions::new())
+        let specs = listed(&server, ListCommandsParams::default())
             .await
             .unwrap();
-        let text = listed.content[0].as_text().unwrap().text.clone();
-        let specs: Vec<serde_json::Value> = serde_json::from_str(&text).unwrap();
         let names: Vec<&str> = specs.iter().map(|s| s["id"].as_str().unwrap()).collect();
         for expected in [
             "oxplow.config.set",
@@ -4499,9 +4634,103 @@ mod tests {
         ] {
             assert!(names.contains(&expected), "{names:?}");
         }
-        assert!(specs
-            .iter()
-            .all(|s| s["input_schema"].is_object() && s["summary"].is_string()));
+        assert!(specs.iter().all(|s| s["summary"].is_string()));
+    }
+
+    /// `list_commands` with no arguments: every command's id and summary,
+    /// nothing more.
+    async fn listed(
+        server: &OxplowMcp,
+        params: ListCommandsParams,
+    ) -> Result<Vec<serde_json::Value>, McpError> {
+        let result = server
+            .list_commands(rmcp::model::Extensions::new(), Parameters(params))
+            .await?;
+        let text = result.content[0].as_text().unwrap().text.clone();
+        Ok(serde_json::from_str(&text).unwrap())
+    }
+
+    /// An agent discovers a command in two small steps instead of one huge
+    /// one: the index (ids and summaries), then one command — or one
+    /// namespace — with its schema, its example input, whether a person
+    /// confirms it and whether it undoes. The person-facing parts of a
+    /// spec (`ui`, `op`, `atomicity`, …) never reach it.
+    #[tokio::test]
+    async fn list_commands_is_an_index_then_one_command_with_its_example() {
+        let (_proj, _services, server) = boot().await;
+        let index = listed(&server, ListCommandsParams::default())
+            .await
+            .unwrap();
+        for entry in &index {
+            let mut keys: Vec<&String> = entry.as_object().unwrap().keys().collect();
+            keys.sort();
+            assert_eq!(keys, ["id", "summary"], "{entry}");
+        }
+        let size = serde_json::to_string(&index).unwrap().len();
+        // Fetched on demand, not every turn: ~3K tokens (every full spec was 164 KB).
+        assert!(size < 14_000, "the index is {size} bytes");
+        // A summary is cut at its first sentence; the command shows it whole.
+        assert_eq!(
+            first_sentence("Open a slot (`thread:thr1`). It starts nothing, e.g. no process."),
+            "Open a slot (`thread:thr1`)."
+        );
+        assert_eq!(first_sentence("One sentence"), "One sentence");
+
+        let one = listed(
+            &server,
+            ListCommandsParams {
+                id: Some("oxplow.config.get".into()),
+                prefix: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(one.len(), 1);
+        let mut keys: Vec<&String> = one[0].as_object().unwrap().keys().collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            [
+                "confirm",
+                "example",
+                "id",
+                "input_schema",
+                "summary",
+                "undoable"
+            ]
+        );
+        assert!(one[0]["example"].is_object(), "{}", one[0]);
+        // The example is shown once, not again inside the schema.
+        assert!(one[0]["input_schema"].get("examples").is_none());
+
+        let area = listed(
+            &server,
+            ListCommandsParams {
+                id: None,
+                prefix: Some("oxplow.config.".into()),
+            },
+        )
+        .await
+        .unwrap();
+        let ids: Vec<&str> = area.iter().map(|s| s["id"].as_str().unwrap()).collect();
+        assert!(ids.contains(&"oxplow.config.set"), "{ids:?}");
+        assert!(
+            ids.iter().all(|id| id.starts_with("oxplow.config.")),
+            "{ids:?}"
+        );
+        assert!(area.iter().all(|s| s["input_schema"].is_object()));
+
+        // An id it doesn't offer says so and names the ones that end alike.
+        let err = listed(
+            &server,
+            ListCommandsParams {
+                id: Some("config.get".into()),
+                prefix: None,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(err.message.contains("oxplow.config.get"), "{}", err.message);
     }
 
     /// The thread header is a claim, not a proof: an unknown thread, or a

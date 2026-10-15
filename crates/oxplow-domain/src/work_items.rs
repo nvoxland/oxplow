@@ -577,6 +577,9 @@ pub struct WorkItemTransitionInput {
     /// The item's ref (`work_item:oxplow:tsk42`, `work_item:issues:ENG-12`).
     #[serde(rename = "ref")]
     pub item_ref: String,
+    /// The canonical state: `todo`, `in_progress`, `blocked`, `done` or
+    /// `canceled`. The list's own name for a state (oxplow's `ready`)
+    /// goes in `native_state`.
     pub to: CanonicalState,
     /// The provider's own state, which must map to `to` (oxplow:
     /// `archived` with `done` or `canceled`).
@@ -595,7 +598,9 @@ pub struct WorkItemCreateInput {
     /// The parent's ref, on the same provider (needs `hierarchy`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_ref: Option<String>,
-    /// `todo` when absent.
+    /// The canonical state, `todo` when absent: `todo`, `in_progress`,
+    /// `blocked`, `done` or `canceled`. The list's own name for a state
+    /// (oxplow's `ready`) goes in `native_state`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<CanonicalState>,
     /// The provider's own state, which must map to `state` when both are
@@ -630,8 +635,13 @@ pub struct WorkItemUpdateInput {
     /// The parent's ref on the same provider, or `""` to detach.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_ref: Option<String>,
+    /// The canonical state: `todo`, `in_progress`, `blocked`, `done` or
+    /// `canceled`. The list's own name for a state (oxplow's `ready`)
+    /// goes in `native_state`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<CanonicalState>,
+    /// The provider's own state, which must map to `state` when both are
+    /// given.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_state: Option<String>,
     /// The provider's own fields to change (oxplow: `{ priority? }`).

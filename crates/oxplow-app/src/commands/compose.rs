@@ -88,6 +88,35 @@ pub struct SequenceCall {
     pub input: Value,
 }
 
+/// `SequenceInput`'s schema, with its example input: closing a work item
+/// and reporting the effort, one audited run.
+fn sequence_schema() -> Value {
+    let mut schema =
+        serde_json::to_value(schemars::schema_for!(SequenceInput)).expect("schema serializes");
+    let item = oxplow_domain::refs::build::of(oxplow_domain::refs::kind::WORK_ITEM, "oxplow:tsk12");
+    if let Some(object) = schema.as_object_mut() {
+        object.insert(
+            "examples".into(),
+            serde_json::json!([{
+                "calls": [
+                    {
+                        "name": "oxplow.work_item.transition",
+                        "input": { "ref": item, "to": "done" }
+                    },
+                    {
+                        "name": "oxplow.effort.report",
+                        "input": {
+                            "summary": "Fixed the login redirect loop.",
+                            "impacts": [{ "kind": "file", "id": "src/auth.rs", "action": "updated" }]
+                        }
+                    }
+                ]
+            }]),
+        );
+    }
+    schema
+}
+
 /// `oxplow.command.sequence`'s spec: also what an extension effect's run is
 /// audited as (`effect_triggers`).
 pub fn sequence_spec() -> CommandSpec {
@@ -98,8 +127,7 @@ pub fn sequence_spec() -> CommandSpec {
                   records they run in one transaction and undo together; when one goes to \
                   an external system they run in order, each landing as it runs, with no undo."
             .into(),
-        input_schema: serde_json::to_value(schemars::schema_for!(SequenceInput))
-            .expect("schema serializes"),
+        input_schema: sequence_schema(),
         invokers: Invokers::ALL,
         // The children decide: one that asks makes the sequence ask.
         confirm: Confirm::Never,

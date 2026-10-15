@@ -924,7 +924,8 @@ impl InputValidator {
 
     /// The first violation, as `Invalid { field: <JSON pointer>, … }`,
     /// saying what the schema accepts there (the object's fields, or the
-    /// value's choices) so the caller can fix it in one more call.
+    /// value's choices and what its field is for) and quoting the
+    /// schema's example input, so the caller can fix it in one more call.
     pub fn check(&self, input: &Value) -> Result<(), CommandError> {
         use jsonschema::error::ValidationErrorKind as Kind;
         match self.validator.iter_errors(input).next() {
@@ -939,19 +940,52 @@ impl InputValidator {
                     Kind::AnyOf { .. }
                     | Kind::OneOfNotValid { .. }
                     | Kind::Enum { .. }
-                    | Kind::Constant { .. } => at.and_then(|s| accepted_values(&self.schema, s)),
+                    | Kind::Constant { .. } => at
+                        .and_then(|s| accepted_values(&self.schema, s))
+                        .map(|values| match field_description(&self.schema, &path) {
+                            Some(about) => format!("{values}. {about}"),
+                            None => values,
+                        }),
                     _ => None,
                 };
+                let mut message = match accepted {
+                    Some(a) => format!("{err}. {a}"),
+                    None => err.to_string(),
+                };
+                if let Some(example) = self.example() {
+                    message.push_str(&format!(". Example input: {example}"));
+                }
                 Err(CommandError::Invalid {
                     field: if path.is_empty() { None } else { Some(path) },
-                    message: match accepted {
-                        Some(a) => format!("{err}. {a}"),
-                        None => err.to_string(),
-                    },
+                    message,
                 })
             }
         }
     }
+
+    /// The schema's first `examples` entry: a whole input that fits.
+    pub fn example(&self) -> Option<&Value> {
+        schema_example(&self.schema)
+    }
+}
+
+/// A schema's first `examples` entry (JSON Schema's own keyword): the
+/// example input a command declares beside its schema.
+pub fn schema_example(schema: &Value) -> Option<&Value> {
+    schema.get("examples")?.as_array()?.first()
+}
+
+/// "`field`: <its description>" for the field at `instance`, when its
+/// schema (or the property naming it) has one.
+fn field_description(root: &Value, instance: &str) -> Option<String> {
+    let name = instance.rsplit('/').next().filter(|n| !n.is_empty())?;
+    let parent = schema_at(root, &instance[..instance.len() - name.len() - 1])?;
+    let property = parent.get("properties")?.get(name)?;
+    let description = property
+        .get("description")
+        .or_else(|| resolved(root, property).get("description"))?
+        .as_str()?;
+    Some(format!("`{name}`: {description}"))
 }
 
 /// `node` with its `$ref`s followed, and an optional field's `T | null`
@@ -1217,6 +1251,61 @@ mod tests {
             ),
             "{state}"
         );
+    }
+
+    /// A refused input quotes the schema's example input, so a caller
+    /// that guessed the shape sees a whole right one; a refused value
+    /// also says what its field is for (its description).
+    #[test]
+    fn an_invalid_input_quotes_the_example_and_the_fields_description() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string" },
+                "state": {
+                    "description": "The canonical state; the list's own name goes in `native_state`.",
+                    "enum": ["todo", "done"]
+                }
+            },
+            "required": ["title"],
+            "additionalProperties": false,
+            "examples": [{ "title": "Fix the login loop", "state": "todo" }]
+        });
+        let v = InputValidator::compile(&schema).unwrap();
+        let message = |input: Value| match v.check(&input) {
+            Err(CommandError::Invalid { message, .. }) => message,
+            other => panic!("{other:?}"),
+        };
+        // The quoted example, parsed back (its key order is serde_json's).
+        let quoted = |message: &str| -> Value {
+            let (_, example) = message
+                .split_once(". Example input: ")
+                .unwrap_or_else(|| panic!("no example in {message}"));
+            serde_json::from_str(example).unwrap()
+        };
+        let example = json!({ "title": "Fix the login loop", "state": "todo" });
+
+        let unknown = message(json!({ "title": "t", "description": "d" }));
+        assert_eq!(quoted(&unknown), example, "{unknown}");
+
+        let state = message(json!({ "title": "t", "state": "ready" }));
+        assert!(
+            state.contains(
+                "`state`: The canonical state; the list's own name goes in `native_state`."
+            ),
+            "{state}"
+        );
+        assert_eq!(quoted(&state), example, "{state}");
+
+        // No example declared: nothing is added.
+        let bare =
+            InputValidator::compile(&json!({ "type": "object", "required": ["x"] })).unwrap();
+        match bare.check(&json!({})) {
+            Err(CommandError::Invalid { message, .. }) => {
+                assert!(!message.contains("Example"), "{message}")
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]

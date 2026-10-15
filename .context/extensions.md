@@ -3415,7 +3415,17 @@ commands:
     examples:
       - { name: happy, input: { ref: "work_item:oxplow:tsk1" }, expect_commands: [oxplow.work_item.transition] }
       - { name: gone, input: { ref: "work_item:oxplow:tsk9" }, answers: { sql.read: [[]] }, refuses: no such }
+    example: { ref: "work_item:oxplow:tsk1" }   # the input an agent is shown; a script's defaults to its first example that runs
 ```
+
+`example:` is the command's example input, for any handler (script,
+scope operation, provider op): it registers as JSON Schema's `examples`
+on the input schema the command ends up with, an operation's schema
+included, so `list_commands { id }` shows it to an agent and a refused
+input quotes it ([commands.md](./commands.md) "Exposure to agents"). A
+script command without one uses its first example that runs (not one
+expecting a refusal). Every command an agent is offered has one that
+fits (`every_command_an_agent_is_offered_has_an_example_that_fits`).
 
 A command may be **backed by an operation of one of the extension's
 providers**: `provider: fake` + `op: estimate`, the operation one its

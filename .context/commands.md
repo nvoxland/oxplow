@@ -87,7 +87,7 @@ ids. A command declares (`oxplow_domain::commands::CommandSpec`):
 
 | Field | Meaning |
 |---|---|
-| `input_schema` | JSON Schema; the bus validates the input first and names the failing field, plus what the schema accepts there (`InputValidator::check`: an object's fields, required first, for an unknown or missing one; the choices for a bad enum value), so a caller fixes it in one more call |
+| `input_schema` | JSON Schema; the bus validates the input first and names the failing field, plus what the schema accepts there (`InputValidator::check`: an object's fields, required first, for an unknown or missing one; the choices for a bad enum value and that field's `description`), and quotes the schema's example input, so a caller fixes it in one more call. The example is JSON Schema's own `examples` keyword, from the command's declaration (`example:` in its manifest, kept over its operation's schema by `Op::command`; a script command's first example that runs when it declares none; `oxplow.command.sequence`'s in `compose.rs`). Every command an agent is offered has one that fits (`every_command_an_agent_is_offered_has_an_example_that_fits`) |
 | `invokers` | which surfaces may run it: `human`, `agent`, `lens`, `job` (a model's tool call inside one of its extension's jobs; `false` unless said, and no constant — `Invokers::ALL` included — admits a job, so none of core's commands does) |
 | `confirm` | `Never`, `Always`, or `Destructive` — a person confirms; an agent never can. A command that only reads (`View` / `Read`) may not ask (`Command::new` / `with_confirm_for` refuse it — so a read or view scope's command can't declare `confirm`): it runs unrecorded, so nothing would resolve its proposal |
 | `undoable` | the handler returns an inverse call that `undo` applies |
@@ -965,8 +965,19 @@ waits for a person (`run_command` returns it as a success instead),
 ## Exposure to agents (MCP)
 
 Agents reach every command through two generic tools — `list_commands`
-(the specs the calling agent may run and that are offered now (step 0), with `input_schema`, `summary`,
-`confirm`, `undoable`) and `run_command { id, input }` (the outcome:
+and `run_command { id, input }`. `list_commands` answers in two steps,
+over the commands the calling agent may run and that are offered now
+(step 0): with no arguments, an index of `{ id, summary }`; with `id`
+(one command) or `prefix` (an area, `oxplow.work_item.`), each as the
+agent needs it — `id`, `summary`, `input_schema`, its `example` input
+(lifted out of the schema's `examples`, shown once), `confirm`,
+`undoable`. The person-facing parts of a spec (`ui`, `op`, `atomicity`,
+`needs`, `access`) never reach an agent. An id or prefix it doesn't offer
+is refused naming the offered ids that end alike (`config.get` →
+`oxplow.config.get`). Measured on our own sessions, agents guessed shapes
+rather than read a listing of every full spec (164 KB): the index keeps
+discovery cheap, the example makes the first call right, and a refusal
+quotes the example. `run_command` answers with the outcome:
 `result`, `audit_id`, `event_id`, `inverse?` — or, for a run that needs
 a person's confirmation, `{ kind: "proposed", proposal, message }`). Extensions never add MCP
 tools. `run_command` is an agent's only write path for records — the
@@ -1021,7 +1032,9 @@ declared over them with `register_declared`.
 4. Declare the command in `extensions/oxplow-foundation/extension.yaml`:
    `name: <area>.<verb>`, `summary`, `scope`, `op`, `invokers`
    (required; within the floor), `confirm` (at least the floor's),
-   `needs` (features), `ui`.
+   `needs` (features), `ui`, and — when an agent may run it — an
+   `example:` input: realistic, records named by canonical refs. An
+   agent is shown it beside the schema, and a refused input quotes it.
 5. Route the existing RPC/MCP entry points through `commands.run(...)`
    rather than calling the service directly, so the human's and the
    agent's runs are audited alike.
