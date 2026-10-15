@@ -1,6 +1,6 @@
 //! Reporting on an effort: `oxplow.effort.report` — optional words on the
-//! thread's current (else latest) effort: a summary and the impacts beyond
-//! its edits. It opens and closes nothing; which files and runs were the
+//! thread's current (else latest) effort: a summary, the impacts beyond
+//! its edits, and the claims the agent can back (`v_claim`, `recorded`). It opens and closes nothing; which files and runs were the
 //! effort's is observed, and an effort closed without a summary takes its
 //! last turn's final message (`.context/work-tracking.md`). `External`: it
 //! checks the summary's links against the worktree, so it can't run in the
@@ -13,7 +13,7 @@ use crate::commands::ops::Op;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use oxplow_db::{Database, EffortStore as _, SqliteEffortStore};
+use oxplow_db::{Database, EffortStore as _, NewClaim, SqliteEffortStore};
 use oxplow_domain::refs::build::thread_ref;
 use oxplow_domain::vcs::Vcs;
 use oxplow_domain::{Actor, CommandError, EffortImpact, ThreadId};
@@ -21,6 +21,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use super::reasoning::ClaimInput;
 use super::util::{failed, invalid, parse, ref_id, schema};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::effort_service::EffortService;
@@ -42,6 +43,12 @@ pub struct ReportInput {
     /// a work item, a commit, a finding.
     #[serde(default)]
     pub impacts: Vec<EffortImpact>,
+    /// What you claim about the work and can back ("the parser tests
+    /// pass", citing `run:<id>`): recorded on the effort for its review,
+    /// replacing the claims an earlier report stated that nobody reviewed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(max = 8))]
+    pub claims: Option<Vec<ClaimInput>>,
 }
 
 /// What reporting reads and writes.
@@ -140,10 +147,28 @@ async fn report(
     };
     let summary = input.summary.filter(|s| !s.trim().is_empty());
     let impacts = (!input.impacts.is_empty()).then_some(input.impacts);
-    if summary.is_some() || impacts.is_some() {
-        // Both land or neither: a run that fails leaves the effort as it was.
+    let session = match &actor {
+        Actor::Agent { session_id, .. } => session_id.map(|s| s.value()),
+        _ => None,
+    };
+    let claims = input.claims.map(|claims| {
+        claims
+            .into_iter()
+            .map(|c| NewClaim {
+                thread_id: thread.value(),
+                work_item: effort.work_item.clone(),
+                effort_id: Some(effort.id.value()),
+                statement: c.statement,
+                kind: c.kind.as_str().into(),
+                evidence_ref: c.evidence_ref,
+                agent_session_id: session,
+            })
+            .collect()
+    });
+    if summary.is_some() || impacts.is_some() || claims.is_some() {
+        // All land or none: a run that fails leaves the effort as it was.
         deps.efforts
-            .record_report(&effort.id, summary.clone(), impacts)
+            .record_report(&effort.id, summary.clone(), impacts, claims)
             .await
             .map_err(failed)?;
     }
@@ -163,7 +188,7 @@ async fn report(
     }))
 }
 
-/// `effort.report { thread?, summary?, impacts? }`.
+/// `effort.report { thread?, summary?, impacts?, claims? }`.
 pub fn report_op(deps: EffortDeps) -> Op {
     Op::new(
         "efforts.write",
@@ -434,5 +459,84 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(summary().await, json!("Rewrote the parser."));
+    }
+    /// Claims the agent states in its report are recorded on the effort
+    /// beside the ones a model reads in its answers: reading the answers
+    /// again leaves them, and reporting again restates the unreviewed ones
+    /// while a verified one stays.
+    #[tokio::test]
+    async fn reported_claims_are_recorded_beside_the_inferred_ones() {
+        let fx = services_with_effort().await;
+        let effort = oxplow_domain::refs::build::effort_ref(fx.effort);
+        let report = |claims: Value| {
+            let svc = fx.svc.clone();
+            let actor = agent(&fx);
+            async move {
+                svc.commands
+                    .run(&actor, REPORT, json!({ "claims": claims }), false)
+                    .await
+                    .unwrap()
+            }
+        };
+        report(json!([
+            { "statement": "the parser tests pass", "kind": "tests_pass", "evidence_ref": "run:1" },
+            { "statement": "no behavior change", "kind": "no_behavior_change" },
+        ]))
+        .await;
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                crate::commands::reasoning::REPLACE_INFERRED_CLAIMS,
+                json!({ "effort": effort, "claims": [
+                    { "statement": "handles empty input", "kind": "handles_case" },
+                ] }),
+                false,
+            )
+            .await
+            .unwrap();
+        let claims = || async {
+            let out = fx
+                .svc
+                .sql
+                .query_sql(
+                    "SELECT statement, provenance, evidence_ref, review FROM v_claim
+                     WHERE effort_id = ?1 ORDER BY statement",
+                    vec![oxplow_db::SqlCell::Int(fx.effort.value())],
+                    None,
+                )
+                .await
+                .unwrap();
+            serde_json::to_value(&out.rows).unwrap()
+        };
+        assert_eq!(
+            claims().await,
+            json!([
+                ["handles empty input", "inferred", null, null],
+                ["no behavior change", "recorded", null, null],
+                ["the parser tests pass", "recorded", "run:1", null],
+            ])
+        );
+
+        fx.svc
+            .db
+            .transaction(|tx| {
+                tx.execute(
+                    "UPDATE claim SET review = 'verified' WHERE statement = 'no behavior change'",
+                    [],
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        report(json!([{ "statement": "the lexer tests pass", "kind": "tests_pass" }])).await;
+        assert_eq!(
+            claims().await,
+            json!([
+                ["handles empty input", "inferred", null, null],
+                ["no behavior change", "recorded", null, "verified"],
+                ["the lexer tests pass", "recorded", null, null],
+            ])
+        );
     }
 }

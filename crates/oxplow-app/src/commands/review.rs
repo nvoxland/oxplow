@@ -382,6 +382,7 @@ mod tests {
             .transaction(move |tx| {
                 oxplow_db::insert_claim_tx(
                     tx,
+                    oxplow_db::ClaimProvenance::Inferred,
                     &NewClaim {
                         thread_id: thread.value(),
                         work_item: Some(oxplow_tasks::work_item_ref(task)),

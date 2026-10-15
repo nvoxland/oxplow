@@ -3,7 +3,7 @@
 # `infer-reasoning` effect and a person's Infer Again both come here). It
 # reads what the agent did — the conversation in the effort's window (each
 # turn's prompt and final answer), its tool calls, the decisions it did
-# record — into one digest, newest kept when it's long, and asks the
+# record and the claims it stated — into one digest, newest kept when it's long, and asks the
 # `reasoning` job for both lists in one call: the forks the agent resolved
 # without recording them, and the claims its answers made about its work.
 # The intent key names the effort (`reasoning:<effort ref>`), so asking
@@ -23,7 +23,7 @@ SYSTEM = """You review a coding agent's work session and report two things.
 
 Decisions: find the decisions it made without asking: forks where it picked one approach over another (where to put code, which library, what to change or leave, how to handle a case). Only real forks with a plausible alternative; skip routine steps. Don't repeat decisions it already recorded. For each: `question` is what had to be decided, `choice` what it chose, `alternatives` the options not taken, `why` its reasoning if visible, and `confidence` (low, medium or high) how sure you are it was a real decision. At most 8; an empty list is fine.
 
-Claims: find what the agent's answers (the "Agent:" lines) state about the outcome of its work: that tests pass, that behavior is unchanged, that a case is handled. Only claims the agent actually made; never infer one it didn't make. For each: `statement` is the claim in the agent's own words, `kind` is one of tests_pass, no_behavior_change, handles_case or other, and `evidence_ref` is a run id (like run:12) or test name the answer itself named for it, left out when it named none. At most 8; an empty list is fine.
+Claims: find what the agent's answers (the "Agent:" lines) state about the outcome of its work: that tests pass, that behavior is unchanged, that a case is handled. Only claims the agent actually made; never infer one it didn't make. Don't repeat claims it already stated. For each: `statement` is the claim in the agent's own words, `kind` is one of tests_pass, no_behavior_change, handles_case or other, and `evidence_ref` is a run id (like run:12) or test name the answer itself named for it, left out when it named none. At most 8; an empty list is fine.
 
 Reply with JSON only, no prose and no code fence:
 {"decisions": [{"question": "...", "choice": "...", "alternatives": ["..."], "why": "...", "confidence": "low"}], "claims": [{"statement": "...", "kind": "tests_pass", "evidence_ref": "run:12"}]}"""
@@ -81,12 +81,19 @@ def transform(x):
     recorded = read(
         "SELECT question FROM v_decision WHERE effort_id = :id AND provenance = 'recorded' ORDER BY id",
         effort_id)
+    stated = read(
+        "SELECT statement FROM v_claim WHERE effort_id = :id AND provenance = 'recorded' ORDER BY id",
+        effort_id)
 
     head = "Work item: " + found[0]["title"] + "\n"
     if recorded:
         head += "\nDecisions it already recorded (don't repeat these):\n"
         for r in recorded:
             head += "- " + r["question"] + "\n"
+    if stated:
+        head += "\nClaims it already stated (don't repeat these):\n"
+        for c in stated:
+            head += "- " + c["statement"] + "\n"
     tool_lines = []
     for t in reversed(tools):
         line = t["tool"]

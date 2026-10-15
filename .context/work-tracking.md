@@ -181,8 +181,8 @@ the thread has none open; a later item start links it (rule 1).
   It never asks for tracked work.
 - The Stop hook never refuses a stop.
 - Nothing the agent must call to close work. `oxplow.effort.report {thread?,
-  summary?, impacts?}` is optional and only annotates the thread's open
-  (else latest) effort; `v_effort.summary` defaults to the effort's last
+  summary?, impacts?, claims?}` is optional and only annotates the thread's open
+  (else latest) effort (claims it states land in `v_claim` as `recorded`); `v_effort.summary` defaults to the effort's last
   turn's final message.
 - "Waiting on you" is derived (a pending question or plan approval, the
   Notification hook's permission prompt, a final message ending in a

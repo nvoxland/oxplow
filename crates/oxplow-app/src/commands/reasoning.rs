@@ -1,9 +1,10 @@
 //! The agent's reasoning as records (P8.A7). `oxplow.effort.record_decision`:
 //! a fork the agent took without asking, which it records. Claims ("tests
-//! pass", "no behavior change") it doesn't record: a model reads them in an
-//! effort's answers, and `oxplow.effort.replace_inferred_claims` is their
-//! only writer, as `oxplow.effort.replace_inferred_decisions` is for the
-//! decisions it proposes. They land in `v_decision` / `v_claim` for the
+//! pass", "no behavior change") it states in `oxplow.effort.report`; the
+//! rest a model reads in an effort's answers, and
+//! `oxplow.effort.replace_inferred_claims` is their writer, as
+//! `oxplow.effort.replace_inferred_decisions` is for the decisions it
+//! proposes. They land in `v_decision` / `v_claim` for the
 //! review. All are `Record` and never ask. An agent's decision goes on its
 //! own thread whatever thread it names; the effort is the one open for
 //! `work_item` (which must be its stream's work), else its thread's open
@@ -14,7 +15,8 @@ use std::sync::Arc;
 
 use oxplow_db::effort_store::find_open_for_work_item_tx;
 use oxplow_db::reasoning_store::{
-    record_decision_tx, replace_inferred_claims_tx, replace_inferred_tx, NewClaim, NewDecision,
+    record_decision_tx, replace_claims_tx, replace_inferred_tx, ClaimProvenance, NewClaim,
+    NewDecision,
 };
 use oxplow_db::thread_store::get_tx as thread_tx;
 use oxplow_domain::events::schema::{EffortDecisionsInferred, EffortDecisionsInferredV1};
@@ -66,13 +68,14 @@ pub struct InferredClaimsInput {
     pub effort: String,
     /// What it holds after: every claim no reviewer acted on is replaced.
     #[schemars(length(max = 8))]
-    pub claims: Vec<InferredClaim>,
+    pub claims: Vec<ClaimInput>,
 }
 
-/// One claim the agent made about its work, in its own words.
+/// One claim the agent made about its work, in its own words: stated in
+/// `oxplow.effort.report`'s `claims`, or read in its answers.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct InferredClaim {
+pub struct ClaimInput {
     /// The claim, as the agent put it ("the parser tests pass").
     #[schemars(length(min = 1, max = 1000))]
     pub statement: String,
@@ -98,7 +101,7 @@ pub enum ClaimKind {
 }
 
 impl ClaimKind {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             ClaimKind::TestsPass => "tests_pass",
             ClaimKind::NoBehaviorChange => "no_behavior_change",
@@ -311,10 +314,11 @@ pub fn replace_inferred_decisions_op() -> Op {
     )
 }
 
-/// `effort.replace_inferred_claims { effort, claims }`: the only writer of
-/// claims — what a model read the agent claim in an effort's answers
-/// ("tests pass", "no behavior change"). Replaces the effort's claims a
-/// reviewer hasn't acted on; dismissed and reviewer-verified ones stay. The
+/// `effort.replace_inferred_claims { effort, claims }`: the writer of
+/// inferred claims — what a model read the agent claim in an effort's
+/// answers ("tests pass", "no behavior change"). Replaces the effort's
+/// inferred claims a reviewer hasn't acted on; the agent's recorded ones,
+/// dismissed and reviewer-verified ones stay. The
 /// thread and work item are the effort's. Whether each is backed is a
 /// review policy's call (oxplow-bundled's `claim_status`).
 pub fn replace_inferred_claims_op() -> Op {
@@ -340,8 +344,9 @@ pub fn replace_inferred_claims_op() -> Op {
                     agent_session_id: None,
                 })
                 .collect();
-            let count = replace_inferred_claims_tx(ctx.conn, effort.value(), &claims)
-                .map_err(CommandError::from)?;
+            let count =
+                replace_claims_tx(ctx.conn, effort.value(), ClaimProvenance::Inferred, &claims)
+                    .map_err(CommandError::from)?;
             Ok(HandlerOutput {
                 result: json!({
                     "effort": oxplow_domain::refs::build::effort_ref(effort),
@@ -590,7 +595,11 @@ mod tests {
             async move {
                 svc.db
                     .transaction(move |tx| {
-                        let id = oxplow_db::insert_claim_tx(tx, &claim)?;
+                        let id = oxplow_db::insert_claim_tx(
+                            tx,
+                            oxplow_db::ClaimProvenance::Inferred,
+                            &claim,
+                        )?;
                         tx.execute(
                             "UPDATE claim SET review = ?2 WHERE id = ?1",
                             rusqlite::params![id, review],

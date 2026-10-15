@@ -137,9 +137,30 @@ pub fn record_decision_tx(
     Ok(conn.last_insert_rowid())
 }
 
-/// Insert a claim about the agent's work, in the caller's transaction: what
-/// a model read in an effort's answers (`replace_inferred_claims_tx`).
-pub fn insert_claim_tx(conn: &rusqlite::Connection, c: &NewClaim) -> Result<i64, DomainError> {
+/// Where a claim came from: the agent stated it (`oxplow.effort.report`'s
+/// `claims`) or a model read it in the effort's answers
+/// (`oxplow.effort.replace_inferred_claims`). The review treats both alike.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClaimProvenance {
+    Recorded,
+    Inferred,
+}
+
+impl ClaimProvenance {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ClaimProvenance::Recorded => "recorded",
+            ClaimProvenance::Inferred => "inferred",
+        }
+    }
+}
+
+/// Insert a claim about the agent's work, in the caller's transaction.
+pub fn insert_claim_tx(
+    conn: &rusqlite::Connection,
+    provenance: ClaimProvenance,
+    c: &NewClaim,
+) -> Result<i64, DomainError> {
     if !["tests_pass", "no_behavior_change", "handles_case", "other"].contains(&c.kind.as_str()) {
         return Err(DomainError::Invalid(format!(
             "claim kind `{}` must be tests_pass, no_behavior_change, handles_case or other",
@@ -150,29 +171,30 @@ pub fn insert_claim_tx(conn: &rusqlite::Connection, c: &NewClaim) -> Result<i64,
         return Err(DomainError::Invalid("a claim needs a statement".into()));
     }
     conn.execute(
-        "INSERT INTO claim (thread_id, work_item, effort_id, statement, kind, evidence_ref, created_at, agent_session_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        rusqlite::params![c.thread_id, c.work_item, c.effort_id, c.statement, c.kind, c.evidence_ref, now_string(), c.agent_session_id],
+        "INSERT INTO claim (thread_id, work_item, effort_id, statement, kind, evidence_ref, created_at, agent_session_id, provenance)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        rusqlite::params![c.thread_id, c.work_item, c.effort_id, c.statement, c.kind, c.evidence_ref, now_string(), c.agent_session_id, provenance.as_str()],
     )
     .map_err(map_sql_err)?;
     Ok(conn.last_insert_rowid())
 }
 
-/// Replace effort `effort`'s claims with `claims`, in the caller's
-/// transaction: the ones a reviewer verified or dismissed (`review`) stay.
-/// Returns how many it stored.
-pub fn replace_inferred_claims_tx(
+/// Replace effort `effort`'s claims from `provenance` with `claims`, in the
+/// caller's transaction: the other source's claims stay, and so do the ones
+/// a reviewer verified or dismissed (`review`). Returns how many it stored.
+pub fn replace_claims_tx(
     conn: &rusqlite::Connection,
     effort: i64,
+    provenance: ClaimProvenance,
     claims: &[NewClaim],
 ) -> Result<usize, DomainError> {
     conn.execute(
-        "DELETE FROM claim WHERE effort_id = ?1 AND review IS NULL",
-        [effort],
+        "DELETE FROM claim WHERE effort_id = ?1 AND provenance = ?2 AND review IS NULL",
+        rusqlite::params![effort, provenance.as_str()],
     )
     .map_err(map_sql_err)?;
     for claim in claims {
-        insert_claim_tx(conn, claim)?;
+        insert_claim_tx(conn, provenance, claim)?;
     }
     Ok(claims.len())
 }
@@ -184,10 +206,6 @@ impl SqliteReasoningStore {
         self.db
             .transaction(move |tx| record_decision_tx(tx, &d))
             .await
-    }
-
-    async fn insert_claim(&self, c: NewClaim) -> Result<i64, DomainError> {
-        self.db.transaction(move |tx| insert_claim_tx(tx, &c)).await
     }
 }
 
@@ -284,16 +302,11 @@ mod tests {
             matches!(err, DomainError::Invalid(ref m) if m.contains("confidence")),
             "{err:?}"
         );
+        let mut vibes = claim("s");
+        vibes.kind = "vibes".into();
         let err = store
-            .insert_claim(NewClaim {
-                thread_id: 1,
-                work_item: None,
-                effort_id: None,
-                statement: "s".into(),
-                kind: "vibes".into(),
-                evidence_ref: None,
-                agent_session_id: None,
-            })
+            .db
+            .transaction(move |tx| insert_claim_tx(tx, ClaimProvenance::Recorded, &vibes))
             .await
             .unwrap_err();
         assert!(
@@ -365,5 +378,67 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(serde_json::to_value(&out.rows).unwrap(), json!([["low"]]));
+    }
+
+    fn claim(statement: &str) -> NewClaim {
+        NewClaim {
+            thread_id: 1,
+            work_item: Some("work_item:oxplow:tsk1".into()),
+            effort_id: Some(1),
+            statement: statement.into(),
+            kind: "tests_pass".into(),
+            evidence_ref: None,
+            agent_session_id: None,
+        }
+    }
+
+    /// An effort's claims come from two sources, one record: what the
+    /// agent stated (`recorded`) and what a model read in its answers
+    /// (`inferred`). Replacing one source's claims leaves the other's, and
+    /// a reviewed claim of either stays.
+    #[tokio::test]
+    async fn each_source_replaces_only_its_own_unreviewed_claims() {
+        use ClaimProvenance::{Inferred, Recorded};
+        let (db, _, layer) = seeded().await;
+        db.transaction(|tx| {
+            replace_claims_tx(
+                tx,
+                1,
+                Recorded,
+                &[claim("stated"), claim("stated, verified")],
+            )?;
+            replace_claims_tx(tx, 1, Inferred, &[claim("read"), claim("read, dismissed")])?;
+            tx.execute(
+                "UPDATE claim SET review = 'verified' WHERE statement = 'stated, verified'",
+                [],
+            )
+            .map_err(map_sql_err)?;
+            tx.execute(
+                "UPDATE claim SET review = 'dismissed' WHERE statement = 'read, dismissed'",
+                [],
+            )
+            .map_err(map_sql_err)?;
+            replace_claims_tx(tx, 1, Inferred, &[claim("read again")])?;
+            replace_claims_tx(tx, 1, Recorded, &[claim("stated again")])
+        })
+        .await
+        .unwrap();
+        let out = layer
+            .query_sql(
+                "SELECT statement, provenance, review FROM v_claim ORDER BY statement",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&out.rows).unwrap(),
+            json!([
+                ["read again", "inferred", null],
+                ["read, dismissed", "inferred", "dismissed"],
+                ["stated again", "recorded", null],
+                ["stated, verified", "recorded", "verified"],
+            ])
+        );
     }
 }

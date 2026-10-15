@@ -1,5 +1,6 @@
-# The effort's conversation, tool calls and recorded decisions become one
-# reasoning job, keyed by the effort. Each turn's final answer is in the request.
+# The effort's conversation, tool calls, recorded decisions and stated
+# claims become one reasoning job, keyed by the effort. Each turn's final
+# answer is in the request.
 input:
   command: oxplow.effort.infer_reasoning
   input: { effort: "effort:eff7" }
@@ -9,5 +10,6 @@ input:
       - [{ prompt: Add CSV export to reports, answer: Done; used the csv crate. }]
       - [{ tool: Bash, path: null, detail: cargo add csv, ok: 1 }, { tool: Edit, path: src/report.rs, detail: null, ok: 1 }]
       - [{ question: Where does export live? }]
+      - [{ statement: The export tests pass. }]
 expect:
   commands: [oxplow.reasoning.ask]

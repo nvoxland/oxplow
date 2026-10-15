@@ -755,13 +755,15 @@ pub trait EffortStore: Send + Sync {
     /// Overwrite the summary on an already-finished effort. Used
     /// when `record_effort` runs after the lifecycle finish has
     /// already closed the row.
-    /// Record a report on effort `id` — its summary and its impacts, each
-    /// when given — in one transaction: both land or neither does.
+    /// Record a report on effort `id` — its summary, its impacts and the
+    /// claims the agent stated (replacing its earlier unreviewed ones), each
+    /// when given — in one transaction: all land or none does.
     async fn record_report(
         &self,
         id: &EffortId,
         summary: Option<String>,
         impacts: Option<Vec<EffortImpact>>,
+        claims: Option<Vec<crate::NewClaim>>,
     ) -> Result<(), DomainError>;
     async fn list_files(&self, id: &EffortId) -> Result<Vec<EffortFile>, DomainError>;
     async fn list_impacts(&self, id: &EffortId) -> Result<Vec<EffortImpact>, DomainError>;
@@ -1262,6 +1264,7 @@ impl EffortStore for SqliteEffortStore {
         id: &EffortId,
         summary: Option<String>,
         impacts: Option<Vec<EffortImpact>>,
+        claims: Option<Vec<crate::NewClaim>>,
     ) -> Result<(), DomainError> {
         let id_for_sql = *id;
         let impacts_json = match impacts {
@@ -1278,6 +1281,14 @@ impl EffortStore for SqliteEffortStore {
                 }
                 if let Some(json) = &impacts_json {
                     set_impacts_json_tx(tx, id_for_sql, json.as_deref()).map_err(map_sql_err)?;
+                }
+                if let Some(claims) = &claims {
+                    crate::replace_claims_tx(
+                        tx,
+                        id_for_sql.value(),
+                        crate::ClaimProvenance::Recorded,
+                        claims,
+                    )?;
                 }
                 Ok(())
             })
@@ -2406,14 +2417,14 @@ mod tests {
             action: Some("created".into()),
         }];
         store
-            .record_report(&eff.id, Some("Done.".into()), Some(impacts.clone()))
+            .record_report(&eff.id, Some("Done.".into()), Some(impacts.clone()), None)
             .await
             .unwrap();
         let after = store.get_effort(&eff.id).await.unwrap().unwrap();
         assert_eq!(after.summary.as_deref(), Some("Done."));
         assert_eq!(store.list_impacts(&eff.id).await.unwrap(), impacts);
         store
-            .record_report(&eff.id, Some("Done, again.".into()), None)
+            .record_report(&eff.id, Some("Done, again.".into()), None, None)
             .await
             .unwrap();
         assert_eq!(store.list_impacts(&eff.id).await.unwrap(), impacts);
