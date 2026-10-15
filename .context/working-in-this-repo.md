@@ -375,6 +375,25 @@ command surface is the `export_ts_bindings` test + the
 `oxplow-surface-parity` crate (they catch a command missing from the
 renderer surface, or the IPC/daemon transports drifting) — not line %.
 
+## Async futures and the thread stack
+
+Every thread runs on tokio's default 2 MiB stack — the daemon, the app and
+the tests; there is no override. A command, effect, collector or model call
+nests the others, and a debug build keeps each nested future inline in its
+parent, plus a copy in every generic wrapper that takes it by value. So a
+wrapper around a whole run (`ExtensionActivation::read`, `read_pinned`,
+`SqlGateway::read_in` / `read_generation`) boxes its future first and returns
+a small one: the nest below it holds a pointer, not the run. A new generic
+wrapper over a command, AI or hook run does the same; a stack overflow in a
+test is this, not a reason to raise the stack.
+
+To measure: `RUSTC_BOOTSTRAP=1 CARGO_TARGET_DIR=<scratch> cargo rustc -p
+oxplow-app --lib -- -Zprint-type-sizes`, filtered to `{async fn body …}` and
+`{async block …}` (the largest were 88 KB before the wrappers boxed, 16 KB
+after). To find the least stack a test needs, run it with
+`RUST_MIN_STACK=<bytes>`. `collector_runner`'s default-stack test runs a
+model-calling collector through the command bus on a 2 MiB thread.
+
 ## Rust formatting & lints
 
 CI runs `cargo fmt --all -- --check` AND `cargo clippy --workspace

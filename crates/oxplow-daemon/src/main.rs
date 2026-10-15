@@ -6,9 +6,11 @@
 
 use std::sync::Arc;
 
-fn main() {
-    oxplow_daemon::runtime().block_on(oxplow_daemon::run_main(
+#[tokio::main]
+async fn main() {
+    oxplow_daemon::run_main(
         "oxplow-daemon",
         Arc::new(oxplow_ai::secrets::KeychainSecrets),
-    ));
+    )
+    .await;
 }

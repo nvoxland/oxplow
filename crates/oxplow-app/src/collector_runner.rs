@@ -3097,6 +3097,79 @@ pub(crate) mod tests {
         }
     }
 
+    /// A command that runs an entity collector whose script asks a model
+    /// nests the bus, the collector run and the model call, and that whole
+    /// nest fits tokio's default 2 MiB thread stack in a debug build: no
+    /// thread here gets more.
+    #[test]
+    fn a_collector_calling_a_model_through_the_command_fits_a_default_stack() {
+        std::thread::Builder::new()
+            .name("default-stack".into())
+            .stack_size(2 * 1024 * 1024)
+            .spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(async {
+                        let fx = crate::test_fixtures::services_with_effort().await;
+                        let svc = &fx.svc;
+                        let reply = json!({ "answers": { "label": { "type": "choice", "choice": "bug", "probabilities": { "bug": 0.9, "feature": 0.1 } } } });
+                        let (base, _) = oxplow_ai_fake::mock(
+                            "/chat/completions",
+                            200,
+                            json!({ "choices": [{ "message": { "content": reply.to_string() } }], "usage": { "prompt_tokens": 4, "completion_tokens": 2 } }),
+                        )
+                        .await;
+                        crate::test_fixtures::approve_ai_providers(svc);
+                        svc.ai
+                            .save_provider(
+                                crate::ai_service::ProviderConfig {
+                                    id: "m".into(),
+                                    kind: "openai_compatible".into(),
+                                    base_url: Some(base),
+                                },
+                                None,
+                            )
+                            .unwrap();
+                        svc.ai
+                            .set_role(
+                                &oxplow_ai::config::Role::DECIDE,
+                                Some(crate::ai_service::RoleBinding::new("m", "x")),
+                            )
+                            .unwrap();
+                        extension(
+                            &svc.layout.project_dir,
+                            "work",
+                            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT 'a' AS ref\"\n    entities:\n      - { name: kind, key: ref, columns: { ref: text, kind: text } }\n",
+                            &[(
+                                "kind.star",
+                                "def transform(input):\n    rows = []\n    for r in input[\"rows\"]:\n        a = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"])\n        rows.append({\"ref\": r[\"ref\"], \"kind\": a[\"label\"]})\n    return {\"entities\": {\"kind\": rows}}\n",
+                            )],
+                        );
+                        crate::test_fixtures::activate_with_problems(svc).await;
+                        let root = svc.layout.project_dir.clone();
+                        let ctx = Collectors::of(svc, &root);
+                        let version = version_of(&ctx, "work", "star").await;
+                        approve_reviewed(&ctx, "work", "star", &version).unwrap();
+                        let out = svc
+                            .commands
+                            .run(
+                                &oxplow_domain::Actor::Human,
+                                SYNC,
+                                json!({ "collector": "collector:work/star" }),
+                                false,
+                            )
+                            .await
+                            .unwrap();
+                        assert_eq!(out.result["rowCounts"]["kind"], 1, "{out:?}");
+                    });
+            })
+            .unwrap()
+            .join()
+            .expect("the nest fits a 2 MiB stack");
+    }
+
     /// The command names a collector by its ref: a string that isn't a
     /// collector ref (or has no `<extension>/<id>`) is refused at
     /// `/collector`, and an unknown collector is not found.

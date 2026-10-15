@@ -118,26 +118,36 @@ impl SqlGateway {
     }
 
     /// Re-enter a retained run's reader scope before looking up declarations.
-    pub(crate) async fn read_in<F: std::future::Future>(
-        &self,
-        run: &oxplow_domain::run::RunContext,
+    /// Boxes `future` up front (see `ExtensionActivation::read`).
+    pub(crate) fn read_in<'a, F>(
+        &'a self,
+        run: &'a oxplow_domain::run::RunContext,
         future: F,
-    ) -> Result<F::Output, DomainError> {
-        let run = self.activation.pin_run(run).await?;
-        let pin = run
-            .host_generation::<crate::extension_activation::GenerationPin>()
-            .expect("pinned gateway context");
-        self.activation.read_pinned(pin, future).await
+    ) -> impl std::future::Future<Output = Result<F::Output, DomainError>> + 'a
+    where
+        F: std::future::Future + 'a,
+    {
+        let future = Box::pin(future);
+        async move {
+            let run = self.activation.pin_run(run).await?;
+            let pin = run
+                .host_generation::<crate::extension_activation::GenerationPin>()
+                .expect("pinned gateway context");
+            self.activation.read_pinned(pin, future).await
+        }
     }
 
     /// Retain this gateway's generation before looking up declarations or
     /// handlers which a later query/invocation will use. Standalone gateways
     /// execute directly; nested scopes inherit their current pin.
-    pub(crate) async fn read_generation<F: std::future::Future>(
-        &self,
+    pub(crate) fn read_generation<'a, F>(
+        &'a self,
         future: F,
-    ) -> Result<F::Output, DomainError> {
-        self.activation.read(future).await
+    ) -> impl std::future::Future<Output = Result<F::Output, DomainError>> + 'a
+    where
+        F: std::future::Future + 'a,
+    {
+        self.activation.read(future)
     }
 
     pub(crate) async fn pin_run(

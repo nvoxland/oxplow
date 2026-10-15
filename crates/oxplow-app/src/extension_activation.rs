@@ -369,33 +369,52 @@ impl ExtensionActivation {
 
     /// Nested calls inherit their existing pin, including when a writer is
     /// waiting. Reacquiring Tokio's fair lock there would deadlock the parent.
-    pub async fn read<F: Future>(&self, future: F) -> Result<F::Output, DomainError> {
-        let pin = self
-            .pin_as(Cow::Borrowed(std::any::type_name::<F>()))
-            .await?;
-        Box::pin(self.read_pinned(&pin, future)).await
+    ///
+    /// The reads box `future` before anything else: they wrap whole command,
+    /// AI and hook runs, which nest one another, and a debug build's
+    /// generic wrappers each kept a copy of the future they wrap, so the
+    /// nest outgrew a default thread stack. Boxed once here, every layer
+    /// below holds a pointer.
+    pub fn read<'a, F>(
+        &'a self,
+        future: F,
+    ) -> impl Future<Output = Result<F::Output, DomainError>> + 'a
+    where
+        F: Future + 'a,
+    {
+        let future = Box::pin(future);
+        async move {
+            let pin = self
+                .pin_as(Cow::Borrowed(std::any::type_name::<F>()))
+                .await?;
+            self.read_pinned(&pin, future).await
+        }
     }
 
-    pub async fn read_pinned<F: Future>(
-        &self,
-        pin: &GenerationPin,
+    pub fn read_pinned<'a, F>(
+        &'a self,
+        pin: &'a GenerationPin,
         future: F,
-    ) -> Result<F::Output, DomainError> {
-        if !Arc::ptr_eq(&pin.owner, &self.state) {
-            return Err(DomainError::Invalid(
-                "generation pin belongs to another project".into(),
-            ));
+    ) -> impl Future<Output = Result<F::Output, DomainError>> + 'a
+    where
+        F: Future + 'a,
+    {
+        let future = Box::pin(future);
+        async move {
+            if !Arc::ptr_eq(&pin.owner, &self.state) {
+                return Err(DomainError::Invalid(
+                    "generation pin belongs to another project".into(),
+                ));
+            }
+            let mut pins = READERS.try_with(Clone::clone).unwrap_or_default();
+            if !pins
+                .iter()
+                .any(|existing| Arc::ptr_eq(&existing.owner, &self.state))
+            {
+                pins.push(pin.clone());
+            }
+            Ok(READERS.scope(pins, future).await)
         }
-        let mut pins = READERS.try_with(Clone::clone).unwrap_or_default();
-        if !pins
-            .iter()
-            .any(|existing| Arc::ptr_eq(&existing.owner, &self.state))
-        {
-            pins.push(pin.clone());
-        }
-        // Boxed: a pinned read wraps whole command, AI and hook runs, which
-        // nest one another; inline, they overflow a debug thread's stack.
-        Ok(Box::pin(READERS.scope(pins, future)).await)
     }
 
     /// A retained context can carry the same pin across a spawned host task.
