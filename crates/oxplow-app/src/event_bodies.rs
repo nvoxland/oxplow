@@ -109,6 +109,7 @@ mod tests {
         f.svc
             .hook_ingest
             .ingest(HookEnvelope {
+                session_title: None,
                 kind: HookKind::PostToolUse,
                 thread_id: Some(f.thread),
                 stream_id: None,
@@ -167,6 +168,7 @@ mod tests {
             f.svc
                 .hook_ingest
                 .ingest(HookEnvelope {
+                    session_title: None,
                     kind: HookKind::UserPromptSubmit,
                     thread_id: Some(f.thread),
                     stream_id: None,

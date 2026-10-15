@@ -8,6 +8,9 @@ import { AnswersStrip } from "../components/Answers/AnswersStrip.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { AgentSessionRow } from "../agentSessions.js";
+import { ConversationPicker } from "../components/ConversationPicker.js";
+import type { PickerMode } from "../components/conversationRows.js";
+import { useState } from "react";
 
 interface AgentSessionPageProps {
   thread: Thread | null;
@@ -23,6 +26,12 @@ interface AgentSessionPageProps {
   onOpenSettings?(): void;
   /** Open a page (an answer's links); the agent tab has no route context. */
   onOpenPage?(ref: TabRef): void;
+  /** Its harness lists its saved conversations: the person may choose one. */
+  canChooseConversation?: boolean;
+  /** The conversation picker open over the terminal, if one is. */
+  picker?: PickerMode | null;
+  /** Open (a mode) or close (`null`) the conversation picker. */
+  onPicker?(mode: PickerMode | null): void;
 }
 
 /**
@@ -41,7 +50,13 @@ export function AgentSessionPage({
   onOpenDiff,
   onOpenSettings,
   onOpenPage,
+  canChooseConversation,
+  picker,
+  onPicker,
 }: AgentSessionPageProps) {
+  // Bumped when the session moved to another conversation: its pane
+  // opens that one once the stopped process has exited.
+  const [restartKey, setRestartKey] = useState(0);
   // Only linkify terminal paths that are real workspace files/dirs, so dotted
   // words in agent prose (e.g. a collector name) aren't turned into broken links.
   const isLinkablePath = useWorkspaceLinkIndex(stream?.id);
@@ -87,7 +102,18 @@ export function AgentSessionPage({
         {/* A flex column all the way down: a percentage height under a flex
           *  item doesn't resolve, so the terminal kept its own height when
           *  the strip grew, was clipped, and never refit (tsk1042). */}
-        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", position: "relative" }}>
+          {picker && onPicker ? (
+            <ConversationPicker
+              sessionId={session.id}
+              mode={picker}
+              onCancel={() => onPicker(null)}
+              onChosen={() => {
+                onPicker(null);
+                setRestartKey((k) => k + 1);
+              }}
+            />
+          ) : null}
           {/* Keyed on the session: another session's pane is another
             *  agent, so React must not reuse this xterm for it. */}
           <TerminalPane
@@ -97,6 +123,8 @@ export function AgentSessionPage({
             startOnActivate
             stopped={session.stoppedByUser}
             onStartFresh={() => startAgentSessionFresh(session.id, true)}
+            onChooseAnother={canChooseConversation && onPicker ? () => onPicker("resume") : undefined}
+            restartKey={restartKey}
             onStart={() => {
               void startAgentSession(session.id).catch(() => undefined);
             }}

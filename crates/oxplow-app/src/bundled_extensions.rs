@@ -1226,6 +1226,7 @@ mod tests {
     async fn waiting_on_me_lists_unanswered_questions() {
         let f = crate::test_fixtures::services_with_effort().await;
         let hook = |kind, payload: serde_json::Value| crate::hook_ingest::HookEnvelope {
+            session_title: None,
             kind,
             thread_id: Some(f.thread),
             stream_id: None,
@@ -2152,6 +2153,7 @@ mod tests {
                 for kind in [HookKind::UserPromptSubmit, HookKind::Stop] {
                     svc.hook_ingest
                         .ingest(crate::hook_ingest::HookEnvelope {
+                            session_title: None,
                             kind,
                             thread_id: Some(thread),
                             stream_id: None,

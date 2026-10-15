@@ -127,11 +127,28 @@ no `||`). The pane is told what happened:
   parse the output for auth versus config versus transport; the terminal
   shows it.
 - The ended banner for `unable_to_resume` keeps the saved conversation and
-  offers **Retry** (resume the same id) and **Start Fresh** (a second click
-  confirms; runs `agent_session.start_fresh`, the only way to a new
-  conversation). Another end offers **Start Again**, which also resumes.
-  Choosing another native conversation is not built (no harness lists
-  them yet).
+  offers **Retry** (resume the same id), **Choose another…** (where the
+  harness declares `conversation_list`; "Choosing another conversation"
+  below) and **Start Fresh** (a second click confirms; runs
+  `agent_session.start_fresh`, the only way to a new conversation).
+  Another end offers **Start Again**, which also resumes.
+
+**Choosing another conversation.** A harness that declares
+`conversation_list` lists its saved conversations for the session's
+worktree (`AgentHarness::conversations`: Claude's transcripts under its
+config dir, named by their last `custom-title` / `ai-title` record with the
+first thing the person typed; opencode's `session list --format json`;
+Codex's app server `thread/list`). `list_native_conversations` (UI-only)
+adds whether the session is on each and the other open session on one.
+`ConversationPicker` (opened by the banner's Choose another, or the agent
+tab's **Switch Conversation…** / **Fork Conversation…**) shows them —
+title, else first prompt, else id; ↑/↓, Enter, Escape — and runs
+`oxplow.agent_session.resume_conversation` (refused for one open in
+another session, naming it; undo goes back) or `fork_conversation` (the
+next launch forks it: `--resume <id> --fork-session`, `codex fork`,
+`opencode -s <id> --fork`; a `conversation_fork` harness). Both stop the
+running process; the page bumps the pane's `restartKey`, and the pane
+opens the session again once that process has exited.
 
 **Read-only session lookup (tsk139).** `lookup_terminal_session({ sessionId })`
 (core in `crates/oxplow-rpc/src/commands/terminal.rs`; Tauri shim +

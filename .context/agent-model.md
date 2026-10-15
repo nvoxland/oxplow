@@ -431,14 +431,19 @@ contract): what a built-in answers in code, a provider declares or answers
 by a verb of the same name. A harness's declaration names the optional
 verbs it has as features — `transcript` (`turns`), `telemetry`
 (`token_readings`), `runtime_text` (`refresh_text`), `subagents`
-(`prompt`, `subagent`) — and the two context channels, `prompt_context`
-and `tool_context`:
+(`prompt`, `subagent`), `conversation_list` (`conversations`: its saved
+conversations for a worktree), `conversation_fork` (a launch with
+`LaunchInput.fork` continues a copy) — and the two context channels,
+`prompt_context` and `tool_context`. `session_title(body)` (Claude's
+`session_title` on a prompt) is the name the harness gives the session's
+conversation, written to `agent_session.native_title`. The UI reads each
+harness's features from `list_agent_harnesses` (`HarnessListing.features`):
 
 | Harness (key) | Features |
 |---|---|
-| Claude Code (`claude`) | terminal, permission_prompts, resume, transcript, telemetry, runtime_text, subagents, prompt_context, tool_context |
-| Codex (`codex`) | terminal, resume, telemetry, runtime_text, subagents, prompt_context, tool_context |
-| opencode (`opencode`) | terminal, runtime_text, subagents, prompt_context, tool_context |
+| Claude Code (`claude`) | terminal, permission_prompts, resume, transcript, telemetry, runtime_text, subagents, prompt_context, tool_context, conversation_list, conversation_fork |
+| Codex (`codex`) | terminal, resume, telemetry, runtime_text, subagents, prompt_context, tool_context, conversation_list, conversation_fork |
+| opencode (`opencode`) | terminal, resume, runtime_text, subagents, prompt_context, tool_context, conversation_list, conversation_fork |
 | ACP agent (`acp`) | structured_transcript, permission_prompts, resume, prompt_context |
 
 (`crates/oxplow-app/src/capabilities.rs`, the `harness(…)` built-ins.)

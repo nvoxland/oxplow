@@ -151,6 +151,7 @@ pub(crate) mod tests {
 
     fn envelope(kind: HookKind, thread: ThreadId) -> HookEnvelope {
         HookEnvelope {
+            session_title: None,
             kind,
             thread_id: Some(thread),
             stream_id: None,

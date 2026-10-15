@@ -309,6 +309,7 @@ pub(crate) async fn launch_session(
             identity_env: identity,
             system_prompt: system_prompt.map(str::to_string),
             resume: Some(session.resume_session_id.clone()).filter(|r| !r.is_empty()),
+            fork: session.fork_next,
             text,
             config: config.clone(),
             oxplow_executable: executable,
@@ -522,6 +523,8 @@ mod tests {
             pid: None,
             last_seen_at: None,
             stopped_by_user_at: None,
+            native_title: String::new(),
+            fork_next: false,
         };
         assert!(super::has_a_terminal(&open).is_ok());
         let chat = AgentSession {
@@ -560,6 +563,8 @@ mod tests {
             pid: None,
             last_seen_at: None,
             stopped_by_user_at: None,
+            native_title: String::new(),
+            fork_next: false,
         };
         assert!(super::not_stopped(&s).is_ok());
         s.stopped_by_user_at = Some(now);

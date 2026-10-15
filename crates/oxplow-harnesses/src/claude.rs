@@ -30,8 +30,8 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 
 use oxplow_domain::agent::harness::{
-    AgentHarness, Endpoints, HarnessError, HarnessSetting, Interact, Launch, LaunchInput,
-    LaunchSpec, RuntimeRoots, Transcript,
+    AgentHarness, ConversationQuery, Endpoints, HarnessError, HarnessSetting, Interact, Launch,
+    LaunchInput, LaunchSpec, NativeConversation, RuntimeRoots, Transcript,
 };
 use oxplow_domain::agent::observe::{
     HookAnswer, OtlpRecord, Prompt, TokenReading, Turn, UsageDelta,
@@ -101,14 +101,15 @@ impl AgentHarness for Claude {
         // A saved conversation is always resumed, never replaced by a fresh
         // one. Looking for its transcript only classifies, so a resume that
         // fails can say the transcript wasn't found.
-        let (resume, transcript_missing) = match input.resume.as_deref().filter(|r| !r.is_empty()) {
+        let (resume, transcript_missing) = match super::shared::saved(input) {
             None => (Resume::Fresh, false),
-            Some(id) => {
+            Some(saved) => {
+                let id = saved.id;
                 let missing = input.home.as_deref().is_some_and(|home| {
                     let dir = config_dir(home, std::env::var_os("CLAUDE_CONFIG_DIR"));
                     resume_state(&dir, &cwd, id) == ResumeState::Missing
                 });
-                (Resume::Saved(resume_args(id)), missing)
+                (Resume::Saved(resume_args(saved)), missing)
             }
         };
         let strict_mcp = strict_mcp(&input.config)?;
@@ -190,6 +191,36 @@ impl AgentHarness for Claude {
             },
             None => Prompt::Person { text: text.into() },
         })
+    }
+
+    /// Its transcripts under the effective config dir, for the worktree
+    /// (`transcripts`).
+    async fn conversations(
+        &self,
+        query: &ConversationQuery,
+    ) -> Result<Vec<NativeConversation>, HarnessError> {
+        let Some(home) = query.home.clone() else {
+            return Err(HarnessError::Unavailable(
+                "its conversations are on the machine the stream runs on".into(),
+            ));
+        };
+        let dir = config_dir(&home, std::env::var_os("CLAUDE_CONFIG_DIR"))
+            .join("projects")
+            .join(encode_cwd(&query.cwd.to_string_lossy()));
+        let limit = query.limit;
+        tokio::task::spawn_blocking(move || transcripts(&dir, limit))
+            .await
+            .map_err(|e| HarnessError::Unavailable(e.to_string()))?
+            .map_err(|e| HarnessError::Unavailable(format!("reading its transcripts: {e}")))
+    }
+
+    /// A prompt hook names the session's custom title, once it has one.
+    fn session_title(&self, body: &serde_json::Value) -> Option<String> {
+        body.get("session_title")
+            .and_then(|t| t.as_str())
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_string)
     }
 
     /// `SubagentStart` / `SubagentStop` name it by `agent_id` / `agent_type`.
@@ -491,8 +522,9 @@ fn strict_mcp(config: &serde_json::Value) -> Result<bool, HarnessError> {
 }
 
 /// `claude --resume <id>`'s arguments.
-fn resume_args(id: &str) -> String {
-    format!("--resume {}", shell_escape(id))
+fn resume_args(saved: super::shared::Saved<'_>) -> String {
+    let fork = if saved.fork { " --fork-session" } else { "" };
+    format!("--resume {}{fork}", shell_escape(saved.id))
 }
 
 /// `claude` with its plugin, prompt and MCP config, resumed as `resume`
@@ -574,6 +606,163 @@ fn config_dir(home: &Path, env: Option<std::ffi::OsString>) -> PathBuf {
     match env.filter(|v| !v.is_empty()) {
         Some(dir) => PathBuf::from(dir),
         None => home.join(".claude"),
+    }
+}
+
+/// The most of a transcript's head and of its tail read to name it.
+const SUMMARY_WINDOW: u64 = 64 * 1024;
+/// The most of a first prompt kept.
+const FIRST_PROMPT_CHARS: usize = 200;
+
+/// The saved conversations in `dir` (a project folder under the config
+/// dir), newest first, at most `limit`. A folder that isn't there has
+/// none. The transcript format is Claude's own and changes between
+/// versions, so each is read for what it can tell and nothing is guessed:
+/// its title (the last `custom-title`, else the last `ai-title`) from its
+/// head and tail, and its first prompt and start from its head.
+fn transcripts(dir: &Path, limit: usize) -> io::Result<Vec<NativeConversation>> {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut files: Vec<(std::time::SystemTime, u64, String)> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(id) = path
+            .extension()
+            .filter(|e| *e == "jsonl")
+            .and(path.file_stem())
+            .map(|s| s.to_string_lossy().into_owned())
+        else {
+            continue;
+        };
+        let Ok(meta) = entry.metadata() else { continue };
+        if !meta.is_file() {
+            continue;
+        }
+        files.push((
+            meta.modified().unwrap_or(std::time::UNIX_EPOCH),
+            meta.len(),
+            id,
+        ));
+    }
+    files.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.2.cmp(&b.2)));
+    files.truncate(limit);
+    Ok(files
+        .into_iter()
+        .map(|(modified, size, id)| {
+            let (head, tail) =
+                head_and_tail(&dir.join(format!("{id}.jsonl")), size).unwrap_or_default();
+            let summary = summarize(&head, &tail);
+            NativeConversation {
+                id,
+                title: summary.title,
+                first_prompt: summary.first_prompt,
+                started_at: summary.started_at,
+                updated_at: modified
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .ok()
+                    .and_then(|d| i64::try_from(d.as_millis()).ok())
+                    .map(oxplow_domain::Timestamp::from_unix_ms),
+                size_bytes: Some(size),
+                parent: None,
+            }
+        })
+        .collect())
+}
+
+/// The first and last [`SUMMARY_WINDOW`] bytes of a file of `size` bytes
+/// (the tail empty when the head holds it all), each cut to whole lines.
+fn head_and_tail(path: &Path, size: u64) -> io::Result<(String, String)> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = fs::File::open(path)?;
+    let mut head = Vec::new();
+    (&mut f).take(SUMMARY_WINDOW).read_to_end(&mut head)?;
+    let mut tail = Vec::new();
+    if size > SUMMARY_WINDOW {
+        f.seek(SeekFrom::Start(
+            size.saturating_sub(SUMMARY_WINDOW).max(SUMMARY_WINDOW),
+        ))?;
+        f.read_to_end(&mut tail)?;
+    }
+    let whole_lines = |bytes: Vec<u8>, from_start: bool| {
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+        if from_start {
+            text.rsplit_once('\n')
+                .map(|(lines, _)| lines.to_string())
+                .unwrap_or_default()
+        } else {
+            text.split_once('\n')
+                .map(|(_, lines)| lines.to_string())
+                .unwrap_or_default()
+        }
+    };
+    let head = if size > SUMMARY_WINDOW {
+        whole_lines(head, true)
+    } else {
+        String::from_utf8_lossy(&head).into_owned()
+    };
+    Ok((head, whole_lines(tail, false)))
+}
+
+#[derive(Default)]
+struct TranscriptSummary {
+    title: Option<String>,
+    first_prompt: Option<String>,
+    started_at: Option<oxplow_domain::Timestamp>,
+}
+
+fn summarize(head: &str, tail: &str) -> TranscriptSummary {
+    let records = |text: &str| -> Vec<serde_json::Value> {
+        text.lines()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect()
+    };
+    let (head, tail) = (records(head), records(tail));
+    let text_of = |r: &serde_json::Value, key: &str| {
+        r.get(key)
+            .and_then(|v| v.as_str())
+            .filter(|t| !t.trim().is_empty())
+            .map(str::to_string)
+    };
+    let titled = |kind: &str, key: &str| {
+        head.iter()
+            .chain(tail.iter())
+            .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some(kind))
+            .filter_map(|r| text_of(r, key))
+            .next_back()
+    };
+    let started_at = head
+        .iter()
+        .find_map(|r| r.get("timestamp").and_then(|t| t.as_str()))
+        .and_then(|t| oxplow_domain::Timestamp::parse(t).ok());
+    let first_prompt = head
+        .iter()
+        .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("user"))
+        .filter(|r| r.get("isMeta").and_then(|m| m.as_bool()) != Some(true))
+        .find_map(|r| {
+            let content = r.get("message")?.get("content")?;
+            let text = match content {
+                serde_json::Value::String(t) => t.clone(),
+                serde_json::Value::Array(parts) => parts
+                    .iter()
+                    .find(|p| p.get("type").and_then(|t| t.as_str()) == Some("text"))?
+                    .get("text")?
+                    .as_str()?
+                    .to_string(),
+                _ => return None,
+            };
+            let text = text.trim();
+            // A command's caveat, a slash command, a hand-back: not words
+            // the person typed.
+            (!text.is_empty() && !text.starts_with('<'))
+                .then(|| text.chars().take(FIRST_PROMPT_CHARS).collect())
+        });
+    TranscriptSummary {
+        title: titled("custom-title", "customTitle").or_else(|| titled("ai-title", "aiTitle")),
+        first_prompt,
+        started_at,
     }
 }
 
@@ -754,6 +943,20 @@ mod tests {
         assert_eq!(keys, ["mcpServers"]);
     }
 
+    /// A fork resumes a copy of the saved conversation under a new id.
+    #[test]
+    fn a_fork_resumes_a_copy() {
+        let h = harness("oxplow:claude-code", "claude");
+        let cmd = pty(&crate::test_launch::launch_fork(h.as_ref(), "saved").launch).to_string();
+        assert!(
+            cmd.contains("--resume '\\''saved'\\'' --fork-session"),
+            "{cmd}"
+        );
+        let plain = pty(&launch_in(h.as_ref(), Some("saved"), None, &serde_json::json!({})).launch)
+            .to_string();
+        assert!(!plain.contains("--fork-session"), "{plain}");
+    }
+
     /// A resume id whose transcript is gone is still resumed — never
     /// replaced by a fresh conversation — and flagged, so a failed resume
     /// can say why.
@@ -793,6 +996,78 @@ mod tests {
             resume_state(&config_dir(&home, None), cwd, "here"),
             ResumeState::Unknown
         );
+    }
+
+    /// Its saved conversations are the transcripts under its config dir's
+    /// project folder for the worktree, newest first: each named by its
+    /// last custom title, else its generated one, with the first thing the
+    /// person typed (not a command's caveat); another worktree's aren't
+    /// listed, and a folder that isn't there lists none.
+    #[test]
+    fn its_conversations_are_the_worktrees_transcripts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        let cwd = "/repo/wt";
+        let dir = config_dir(home, None)
+            .join("projects")
+            .join(encode_cwd(cwd));
+        fs::create_dir_all(&dir).unwrap();
+        let line = |v: serde_json::Value| format!("{v}\n");
+        let named = [
+            line(json!({"type":"mode","mode":"normal"})),
+            line(json!({"type":"user","timestamp":"2026-10-01T10:00:00.000Z","message":{"role":"user","content":"<local-command-caveat>ignore</local-command-caveat>"}})),
+            line(json!({"type":"user","timestamp":"2026-10-01T10:00:01.000Z","message":{"role":"user","content":"Fix the login flow"}})),
+            line(json!({"type":"ai-title","aiTitle":"Login flow fix"})),
+            line(json!({"type":"custom-title","customTitle":"auth-work"})),
+        ]
+        .concat();
+        fs::write(dir.join("aaa.jsonl"), named).unwrap();
+        let generated = [
+            line(json!({"type":"user","timestamp":"2026-10-02T09:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Speed up the build"}]}})),
+            line(json!({"type":"ai-title","aiTitle":"Faster build"})),
+        ]
+        .concat();
+        fs::write(dir.join("bbb.jsonl"), generated).unwrap();
+        fs::write(dir.join("ccc.jsonl"), "").unwrap();
+        fs::write(dir.join("notes.txt"), "not a transcript").unwrap();
+        let other = config_dir(home, None)
+            .join("projects")
+            .join(encode_cwd("/repo/other"));
+        fs::create_dir_all(&other).unwrap();
+        fs::write(other.join("zzz.jsonl"), "").unwrap();
+        // Newest first: ccc, bbb, aaa.
+        let set_mtime = |name: &str, secs: u64| {
+            let f = fs::File::options()
+                .write(true)
+                .open(dir.join(name))
+                .unwrap();
+            f.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs))
+                .unwrap();
+        };
+        set_mtime("aaa.jsonl", 1_000);
+        set_mtime("bbb.jsonl", 2_000);
+        set_mtime("ccc.jsonl", 3_000);
+
+        let found = transcripts(&dir, 10).unwrap();
+        let summary: Vec<(&str, Option<&str>, Option<&str>)> = found
+            .iter()
+            .map(|c| (c.id.as_str(), c.title.as_deref(), c.first_prompt.as_deref()))
+            .collect();
+        assert_eq!(
+            summary,
+            [
+                ("ccc", None, None),
+                ("bbb", Some("Faster build"), Some("Speed up the build")),
+                ("aaa", Some("auth-work"), Some("Fix the login flow")),
+            ]
+        );
+        assert_eq!(
+            found[2].started_at.map(|t| t.to_string()).as_deref(),
+            Some("2026-10-01T10:00:00.000000Z")
+        );
+        assert!(found[1].size_bytes.unwrap() > 0);
+        assert_eq!(transcripts(&dir, 1).unwrap().len(), 1);
+        assert!(transcripts(&home.join("absent"), 10).unwrap().is_empty());
     }
 
     #[test]
@@ -839,7 +1114,10 @@ mod tests {
     /// ends the PTY and is reported, never answered with a fresh session.
     #[test]
     fn a_saved_resume_is_execd_with_no_fallback() {
-        let saved = run(Resume::Saved(resume_args("sess-1")));
+        let saved = run(Resume::Saved(resume_args(crate::shared::Saved {
+            id: "sess-1",
+            fork: false,
+        })));
         let (_, resumed) = saved.split_once("exit 127; }; ").unwrap();
         assert!(resumed.starts_with("exec claude --resume"), "{saved}");
         assert!(!saved.contains("||") || !resumed.contains("||"), "{saved}");

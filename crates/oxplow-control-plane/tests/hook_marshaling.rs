@@ -276,7 +276,13 @@ async fn set_resume_session_id(services: &Services, thread_id: ThreadId, session
     services
         .db
         .transaction(move |tx| {
-            oxplow_db::agent_session_store::set_resume_tx(tx, id, &session, Timestamp::now())
+            oxplow_db::agent_session_store::bind_tx(
+                tx,
+                id,
+                &session,
+                oxplow_domain::agent_session::BindingOrigin::Started,
+                Timestamp::now(),
+            )
         })
         .await
         .unwrap();

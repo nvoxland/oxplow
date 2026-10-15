@@ -46,6 +46,26 @@ pub fn program_and_guard(program: Option<&str>, bin: &str) -> (String, String) {
     }
 }
 
+/// The saved conversation a launch continues: its id, and whether as a
+/// copy (a fork) rather than itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Saved<'a> {
+    pub id: &'a str,
+    pub fork: bool,
+}
+
+/// What `input` continues, if anything.
+pub fn saved(input: &oxplow_domain::agent::harness::LaunchInput) -> Option<Saved<'_>> {
+    input
+        .resume
+        .as_deref()
+        .filter(|r| !r.is_empty())
+        .map(|id| Saved {
+            id,
+            fork: input.fork,
+        })
+}
+
 /// A session started fresh, or resumed: the harness's own session `args`
 /// (`--resume <id>`).
 pub enum Resume {
@@ -371,6 +391,36 @@ fn owner_only(path: &Path) -> io::Result<()> {
 #[cfg(not(unix))]
 fn owner_only(_path: &Path) -> io::Result<()> {
     Ok(())
+}
+
+/// How long a harness's CLI may take to answer a metadata question.
+pub const METADATA_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// What `program args…` prints, within [`METADATA_TIMEOUT`]; a failure
+/// to start, a nonzero exit or a timeout is
+/// [`HarnessError::Unavailable`], with what it printed to stderr.
+pub async fn program_output(
+    program: &str,
+    args: &[&str],
+) -> Result<String, oxplow_domain::agent::harness::HarnessError> {
+    use oxplow_domain::agent::harness::HarnessError;
+    let run = tokio::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .output();
+    let out = tokio::time::timeout(METADATA_TIMEOUT, run)
+        .await
+        .map_err(|_| HarnessError::Unavailable(format!("`{program}` didn't answer in time")))?
+        .map_err(|e| HarnessError::Unavailable(format!("running `{program}`: {e}")))?;
+    if !out.status.success() {
+        return Err(HarnessError::Unavailable(format!(
+            "`{program} {}` failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 #[cfg(test)]

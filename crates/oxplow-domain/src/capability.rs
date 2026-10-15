@@ -425,6 +425,8 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
             "subagents",
             "prompt_context",
             "tool_context",
+            "conversation_list",
+            "conversation_fork",
         ],
         provider: Some(&AGENT_HARNESS),
     },

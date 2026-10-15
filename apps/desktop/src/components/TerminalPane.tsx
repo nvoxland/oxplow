@@ -123,6 +123,8 @@ export function TerminalPane({
   stopped,
   onStart,
   onStartFresh,
+  onChooseAnother,
+  restartKey,
 }: {
   paneTarget: string;
   visible: boolean;
@@ -138,6 +140,12 @@ export function TerminalPane({
   /// The person chose to start a fresh conversation, dropping the saved
   /// one; resolves once the backend forgot it (the pane then opens).
   onStartFresh?(): Promise<void>;
+  /// The person wants another of the harness's saved conversations: the
+  /// host shows its picker. Offered only where the harness lists them.
+  onChooseAnother?(): void;
+  /// Changing it opens the session again: the host moved it to another
+  /// conversation (chosen, or a fork) and its process was stopped.
+  restartKey?: number;
   /// Fires when the user presses Escape in live mode (i.e. signals
   /// Claude Code to cancel the in-flight turn). Lets the host
   /// synthesize an Interrupt hook so the working-dot flips to idle
@@ -181,6 +189,16 @@ export function TerminalPane({
   // Opens the pane's session again (set once the terminal is open): after
   // the daemon restarted, or when a send finds the session gone (tsk1026).
   const reopenRef = useRef<(() => void) | null>(null);
+  // The host moved the session to another conversation (`restartKey`):
+  // open it again once the stopped process has exited, or now if it had.
+  const restartPendingRef = useRef(false);
+  const restartSeenRef = useRef(restartKey);
+  useEffect(() => {
+    if (restartKey === restartSeenRef.current) return;
+    restartSeenRef.current = restartKey;
+    if (endedRef.current) reopenRef.current?.();
+    else restartPendingRef.current = true;
+  }, [restartKey]);
   // The session's process exited: the pane says so and offers Start Again.
   const [ended, setEnded] = useState<{ exitCode: number | null; outcome: ExitOutcome } | null>(null);
   const endedRef = useRef(false);
@@ -484,6 +502,13 @@ export function TerminalPane({
         if (msg?.kind === "data") term.write(msg.bytes);
         if (msg?.kind === "exit") {
           endedRef.current = true;
+          // The host stopped it to move it to another conversation: open
+          // that one instead of saying it ended.
+          if (restartPendingRef.current) {
+            restartPendingRef.current = false;
+            reopenRef.current?.();
+            return;
+          }
           setEnded({ exitCode: msg.exitCode, outcome: msg.outcome });
         }
       };
@@ -739,8 +764,12 @@ export function TerminalPane({
           }}
         >
           <span>{exitBanner(ended).text}</span>
-          {exitBanner(ended).actions.map((action) =>
-            action === "start-fresh" ? (
+          {exitBanner(ended, { canChoose: !!onChooseAnother }).actions.map((action) =>
+            action === "choose-another" ? (
+              <button key={action} type="button" data-testid="terminal-choose-another" onClick={() => onChooseAnother?.()}>
+                Choose another…
+              </button>
+            ) : action === "start-fresh" ? (
               onStartFresh ? (
                 <button
                   key={action}

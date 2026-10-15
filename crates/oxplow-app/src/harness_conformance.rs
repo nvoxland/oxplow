@@ -185,6 +185,7 @@ async fn scratch_launch(
         ],
         system_prompt: None,
         resume: None,
+        fork: false,
         text: Default::default(),
         config: config.clone(),
         oxplow_executable: "/bin/false".into(),

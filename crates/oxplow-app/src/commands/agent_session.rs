@@ -18,9 +18,10 @@ use std::sync::{Arc, RwLock};
 
 use oxplow_config::OxplowConfig;
 use oxplow_db::agent_session_store::{
-    get_tx, insert_tx, set_resume_tx, set_stopped_tx, set_title_tx,
+    bind_tx, get_tx, insert_tx, set_fork_next_tx, set_stopped_tx, set_title_tx, unbind_tx,
 };
 use oxplow_domain::agent::registry::{AcpAdapterRegistry, HarnessRegistry};
+use oxplow_domain::agent_session::BindingOrigin;
 use oxplow_domain::agent_session::{
     AgentSession, NewAgentSession, SessionCloseReason, SessionKind,
 };
@@ -41,6 +42,8 @@ pub const CLOSE: &str = "oxplow.agent_session.close";
 pub const STOP: &str = "oxplow.agent_session.stop";
 pub const START: &str = "oxplow.agent_session.start";
 pub const START_FRESH: &str = "oxplow.agent_session.start_fresh";
+pub const RESUME_CONVERSATION: &str = "oxplow.agent_session.resume_conversation";
+pub const FORK_CONVERSATION: &str = "oxplow.agent_session.fork_conversation";
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -76,6 +79,26 @@ pub struct RenameInput {
     /// The session (`agent_session:ses3`).
     pub session: String,
     pub title: String,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ConversationInput {
+    /// The session (`agent_session:ses3`).
+    pub session: String,
+    /// One of its harness's saved conversations (its id).
+    pub conversation: String,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ForkInput {
+    /// The session (`agent_session:ses3`).
+    pub session: String,
+    /// The saved conversation to fork (its id); default the one the
+    /// session is on.
+    #[serde(default)]
+    pub conversation: Option<String>,
 }
 
 fn call(name: &str, input: serde_json::Value) -> Option<CommandCall> {
@@ -381,7 +404,7 @@ pub fn start_fresh_op() -> Op {
                 return Err(invalid("/session", "the session is closed"));
             }
             let now = Timestamp::now();
-            set_resume_tx(ctx.conn, session.id, "", now)?;
+            unbind_tx(ctx.conn, session.id, None, now)?;
             set_stopped_tx(ctx.conn, session.id, None, now)?;
             let after = get_tx(ctx.conn, session.id)?
                 .ok_or_else(|| invalid("/session", "the session vanished"))?;
@@ -390,6 +413,145 @@ pub fn start_fresh_op() -> Op {
     )
     .open_to(Invokers::HUMAN_ONLY)
     .confirm_at_least(Confirm::Destructive)
+}
+
+/// What a person calls `session` in a message.
+fn named(session: &AgentSession) -> String {
+    [&session.title, &session.native_title]
+        .into_iter()
+        .map(|t| t.trim())
+        .find(|t| !t.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| session.harness.clone())
+}
+
+/// `conversation` checked as one the slot may take: not empty, and not
+/// open in another slot on its host (one conversation runs in one).
+fn free_conversation(
+    ctx: &TxCtx<'_>,
+    session: &AgentSession,
+    conversation: &str,
+) -> Result<(), CommandError> {
+    if conversation.trim().is_empty() {
+        return Err(invalid("/conversation", "name a saved conversation"));
+    }
+    if let Some(other) = oxplow_db::agent_session_store::bound_elsewhere_tx(
+        ctx.conn,
+        conversation,
+        session.host.as_deref(),
+        session.id,
+    )? {
+        return Err(invalid(
+            "/conversation",
+            format!(
+                "it is open in the session `{}` ({}): switch to that one, or fork it",
+                named(&other),
+                oxplow_domain::refs::build::agent_session_ref(other.id)
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// `agent_session.resume_conversation { session, conversation }`: the
+/// session takes one of its harness's saved conversations (the person
+/// chose it). The process it runs stops; the UI spawns the next, which
+/// resumes the chosen one. The conversation it was on stays saved, and
+/// undoing goes back to it. A person's only.
+pub fn resume_conversation_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
+    Op::new(
+        "agent_sessions.write",
+        "resume_conversation",
+        schema::<ConversationInput>(),
+        true,
+        Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+            let input: ConversationInput = parse(input)?;
+            let session = load(ctx, &input.session)?;
+            in_own_stream(ctx, session.thread_id)?;
+            if !session.is_open() {
+                return Err(invalid("/session", "the session is closed"));
+            }
+            free_conversation(ctx, &session, &input.conversation)?;
+            let now = Timestamp::now();
+            bind_tx(
+                ctx.conn,
+                session.id,
+                &input.conversation,
+                BindingOrigin::Chosen,
+                now,
+            )?;
+            set_stopped_tx(ctx.conn, session.id, None, now)?;
+            let after = get_tx(ctx.conn, session.id)?
+                .ok_or_else(|| invalid("/session", "the session vanished"))?;
+            let previous = session.resume_session_id.clone();
+            let processes = processes.clone();
+            let id = session.id;
+            Ok(HandlerOutput {
+                inverse: (!previous.is_empty() && previous != input.conversation)
+                    .then(|| {
+                        call(
+                            RESUME_CONVERSATION,
+                            json!({ "session": input.session, "conversation": previous }),
+                        )
+                    })
+                    .flatten(),
+                after_commit: Some(Box::new(move || processes.kill(id))),
+                ..result(&after)
+            })
+        })),
+    )
+    .open_to(Invokers::HUMAN_ONLY)
+}
+
+/// `agent_session.fork_conversation { session, conversation? }`: the
+/// session's next launch forks a saved conversation — the one it is on,
+/// or the one named — into a new one, which it is bound to once the
+/// harness names it. The process it runs stops; the original stays
+/// saved. A person's only.
+pub fn fork_conversation_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
+    Op::new(
+        "agent_sessions.write",
+        "fork_conversation",
+        schema::<ForkInput>(),
+        false,
+        Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+            let input: ForkInput = parse(input)?;
+            let session = load(ctx, &input.session)?;
+            in_own_stream(ctx, session.thread_id)?;
+            if !session.is_open() {
+                return Err(invalid("/session", "the session is closed"));
+            }
+            let now = Timestamp::now();
+            match input.conversation.as_deref() {
+                Some(other) if other != session.resume_session_id => {
+                    if other.trim().is_empty() {
+                        return Err(invalid("/conversation", "name a saved conversation"));
+                    }
+                    // Forking doesn't take the original: another slot may
+                    // be on it.
+                    bind_tx(ctx.conn, session.id, other, BindingOrigin::Chosen, now)?;
+                }
+                _ if session.resume_session_id.is_empty() => {
+                    return Err(invalid(
+                        "/conversation",
+                        "the session is on no saved conversation: name one to fork",
+                    ));
+                }
+                _ => {}
+            }
+            set_fork_next_tx(ctx.conn, session.id, true, now)?;
+            set_stopped_tx(ctx.conn, session.id, None, now)?;
+            let after = get_tx(ctx.conn, session.id)?
+                .ok_or_else(|| invalid("/session", "the session vanished"))?;
+            let processes = processes.clone();
+            let id = session.id;
+            Ok(HandlerOutput {
+                after_commit: Some(Box::new(move || processes.kill(id))),
+                ..result(&after)
+            })
+        })),
+    )
+    .open_to(Invokers::HUMAN_ONLY)
 }
 
 /// The agent-session commands, for the bus.
@@ -403,9 +565,11 @@ pub fn ops(
         open_op(config, harnesses, adapters),
         rename_op(),
         close_op(processes.clone()),
-        stop_op(processes),
+        stop_op(processes.clone()),
         start_op(),
         start_fresh_op(),
+        resume_conversation_op(processes.clone()),
+        fork_conversation_op(processes),
     ]
 }
 
@@ -524,7 +688,13 @@ mod tests {
         fx.svc
             .db
             .transaction(move |tx| {
-                set_resume_tx(tx, session, "conv-1", Timestamp::now())?;
+                oxplow_db::agent_session_store::bind_tx(
+                    tx,
+                    session,
+                    "conv-1",
+                    oxplow_domain::agent_session::BindingOrigin::Started,
+                    Timestamp::now(),
+                )?;
                 set_stopped_tx(tx, session, Some(Timestamp::now()), Timestamp::now())?;
                 Ok(())
             })
@@ -536,6 +706,113 @@ mod tests {
         let s = get(&fx, fx.session).await;
         assert_eq!(s.resume_session_id, "");
         assert!(s.stopped_by_user_at.is_none());
+    }
+
+    /// A person moves a session to a saved conversation of their choosing:
+    /// it is bound `chosen`, its stop clears, and undoing goes back to the
+    /// one it was on. One open in another session is refused, naming it.
+    /// An agent may do neither this nor a fork.
+    #[tokio::test]
+    async fn a_person_resumes_a_chosen_conversation() {
+        let fx = services_with_effort().await;
+        let me = agent_session_ref(fx.session);
+        let other = open(
+            &fx,
+            &Actor::Human,
+            serde_json::json!({ "thread": thread_ref(fx.thread), "harness": "claude" }),
+        )
+        .await;
+        let (session, other_id) = (fx.session, other.id);
+        fx.svc
+            .db
+            .transaction(move |tx| {
+                bind_tx(tx, session, "c1", BindingOrigin::Started, Timestamp::now())?;
+                bind_tx(
+                    tx,
+                    other_id,
+                    "taken",
+                    BindingOrigin::Started,
+                    Timestamp::now(),
+                )
+            })
+            .await
+            .unwrap();
+        let chosen = run(
+            &fx,
+            &Actor::Human,
+            RESUME_CONVERSATION,
+            serde_json::json!({ "session": me, "conversation": "c9" }),
+            false,
+        )
+        .await
+        .unwrap();
+        let s = get(&fx, fx.session).await;
+        assert_eq!(s.resume_session_id, "c9");
+        fx.svc
+            .commands
+            .undo(&Actor::Human, chosen.audit_id.unwrap(), true)
+            .await
+            .unwrap();
+        assert_eq!(get(&fx, fx.session).await.resume_session_id, "c1");
+
+        let err = run(
+            &fx,
+            &Actor::Human,
+            RESUME_CONVERSATION,
+            serde_json::json!({ "session": me, "conversation": "taken" }),
+            false,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { field: Some(f), message } if f == "/conversation" && message.contains(&agent_session_ref(other.id))),
+            "{err:?}"
+        );
+        for (name, input) in [
+            (
+                RESUME_CONVERSATION,
+                serde_json::json!({ "session": me, "conversation": "c2" }),
+            ),
+            (FORK_CONVERSATION, serde_json::json!({ "session": me })),
+        ] {
+            let err = run(&fx, &agent(&fx), name, input, true).await.unwrap_err();
+            assert!(
+                matches!(err, CommandError::Denied { .. }),
+                "{name}: {err:?}"
+            );
+        }
+    }
+
+    /// A fork marks the next launch to fork the conversation the session
+    /// is on, or the one named; a session on none must name one.
+    #[tokio::test]
+    async fn a_fork_marks_the_next_launch() {
+        let fx = services_with_effort().await;
+        let me = agent_session_ref(fx.session);
+        let err = run(
+            &fx,
+            &Actor::Human,
+            FORK_CONVERSATION,
+            serde_json::json!({ "session": me }),
+            false,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/conversation"),
+            "{err:?}"
+        );
+        run(
+            &fx,
+            &Actor::Human,
+            FORK_CONVERSATION,
+            serde_json::json!({ "session": me, "conversation": "c5" }),
+            false,
+        )
+        .await
+        .unwrap();
+        let s = get(&fx, fx.session).await;
+        assert_eq!((s.resume_session_id.as_str(), s.fork_next), ("c5", true));
     }
 
     /// The input is checked: an unknown field and a bad value name their
@@ -641,6 +918,7 @@ mod tests {
         fx.svc
             .hook_ingest
             .ingest(crate::hook_ingest::HookEnvelope {
+                session_title: None,
                 kind: oxplow_domain::HookKind::UserPromptSubmit,
                 thread_id: Some(fx.thread),
                 stream_id: None,

@@ -50,6 +50,9 @@ pub struct HarnessListing {
     pub enabled: bool,
     /// The settings it reads from its `agentConfig` entry.
     pub settings: Vec<HarnessSettingListing>,
+    /// The `agent_harness` features it declares (`resume`,
+    /// `conversation_list`, …): what the UI offers for its sessions.
+    pub features: Vec<String>,
 }
 
 /// A harness setting, as Settings → Agents shows it.
@@ -65,7 +68,11 @@ pub struct HarnessSettingListing {
 /// Every registered harness in priority order: the ones `agents:` names,
 /// in its order (the first is a new session's default), then the rest as
 /// declared.
-pub fn listing(registry: &HarnessRegistry, agents: &[String]) -> Vec<HarnessListing> {
+pub fn listing(
+    registry: &HarnessRegistry,
+    capabilities: &crate::capabilities::CapabilityRegistry,
+    agents: &[String],
+) -> Vec<HarnessListing> {
     use oxplow_domain::agent::harness::Transcript;
     let mut all = registry.all();
     all.sort_by_key(|h| {
@@ -90,6 +97,16 @@ pub fn listing(registry: &HarnessRegistry, agents: &[String]) -> Vec<HarnessList
                     placeholder: s.placeholder,
                 })
                 .collect(),
+            features: capabilities
+                .get("agent_harness", h.id())
+                .and_then(|i| i.features.as_object().cloned())
+                .map(|f| {
+                    f.into_iter()
+                        .filter(|(_, on)| on.as_bool() == Some(true))
+                        .map(|(name, _)| name)
+                        .collect()
+                })
+                .unwrap_or_default(),
         })
         .collect()
 }
@@ -195,6 +212,31 @@ mod tests {
         }
     }
 
+    fn no_capabilities() -> crate::capabilities::CapabilityRegistry {
+        crate::capabilities::CapabilityRegistry::new(
+            Vec::new(),
+            oxplow_domain::vocabulary::VocabularyHandle::core(),
+        )
+    }
+
+    /// A harness's declared features ride its listing, so the UI offers
+    /// what its sessions can do (choosing another conversation).
+    #[test]
+    fn the_listing_carries_each_harnesss_features() {
+        let r = HarnessRegistry::new(std::sync::Arc::new(String::new));
+        let claude = declared("agent_harness", "claude", "oxplow:claude-code");
+        register(&r, std::slice::from_ref(&claude));
+        let capabilities = no_capabilities();
+        capabilities.set_declared(vec![Implementation {
+            features: serde_json::json!({ "resume": true, "conversation_list": true, "transcript": false }),
+            ..claude
+        }]);
+        let mut features = listing(&r, &capabilities, &[])[0].features.clone();
+        features.sort();
+        assert_eq!(features, ["conversation_list", "resume"]);
+        assert!(listing(&r, &no_capabilities(), &[])[0].features.is_empty());
+    }
+
     /// What's declared is registered under its key; what no longer is goes.
     #[test]
     fn the_declared_harnesses_are_registered() {
@@ -261,7 +303,7 @@ mod tests {
         );
         let rows = |agents: &[&str]| {
             let agents: Vec<String> = agents.iter().map(|a| a.to_string()).collect();
-            listing(&r, &agents)
+            listing(&r, &no_capabilities(), &agents)
                 .into_iter()
                 .map(|h| (h.id, h.chat, h.enabled))
                 .collect::<Vec<_>>()
@@ -288,7 +330,7 @@ mod tests {
                 declared("agent_harness", "opencode", "oxplow:opencode"),
             ],
         );
-        let rows = listing(&r, &[]);
+        let rows = listing(&r, &no_capabilities(), &[]);
         let keys = |id: &str| -> Vec<String> {
             rows.iter()
                 .find(|h| h.id == id)

@@ -129,6 +129,8 @@ pub const BUILT_INS: &[BuiltIn] = &[
             "subagents",
             "prompt_context",
             "tool_context",
+            "conversation_list",
+            "conversation_fork",
         ],
     ),
     harness(
@@ -142,6 +144,8 @@ pub const BUILT_INS: &[BuiltIn] = &[
             "subagents",
             "prompt_context",
             "tool_context",
+            "conversation_list",
+            "conversation_fork",
         ],
     ),
     // Its bridge appends a prompt hook's context to the user's message and a
@@ -151,10 +155,13 @@ pub const BUILT_INS: &[BuiltIn] = &[
         "opencode",
         &[
             "terminal",
+            "resume",
             "runtime_text",
             "subagents",
             "prompt_context",
             "tool_context",
+            "conversation_list",
+            "conversation_fork",
         ],
     ),
     // Context rides the person's next prompt; nothing mid-turn.

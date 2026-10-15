@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use oxplow_domain::agent_session::{
-    AgentSession, NewAgentSession, SessionCloseReason, SessionKind,
+    AgentSession, BindingOrigin, NewAgentSession, SessionCloseReason, SessionKind,
 };
 use oxplow_domain::stores::AgentSessionStore;
 use oxplow_domain::{AgentSessionId, DomainError, ThreadId, Timestamp};
@@ -14,7 +14,8 @@ use crate::database::{map_sql_err, string_to_ts, ts_to_string, Database};
 use oxplow_domain::vocabulary::VocabularyHandle;
 
 const COLUMNS: &str = "id, thread_id, kind, harness, acp_agent, title, resume_session_id, host,
-                       opened_at, closed_at, closed_reason, updated_at, pid, last_seen_at, stopped_by_user_at";
+                       opened_at, closed_at, closed_reason, updated_at, pid, last_seen_at, stopped_by_user_at,
+                       native_title, fork_next";
 
 fn conv(e: DomainError) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
@@ -62,6 +63,8 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentSession> {
             .map(|s| string_to_ts(&s))
             .transpose()
             .map_err(conv)?,
+        native_title: row.get("native_title")?,
+        fork_next: row.get::<_, i64>("fork_next")? != 0,
     })
 }
 
@@ -215,19 +218,133 @@ pub fn close_tx(
     Ok(n == 1)
 }
 
-/// Record the harness's own session id, to resume it later.
-pub fn set_resume_tx(
+/// Bind the slot to native conversation `native_id`, which it resumes
+/// from now on: its open binding ends, one with `origin` opens, the
+/// previous conversation's native title goes (never copied across) and a
+/// pending fork is done. Binding the conversation it is bound to already
+/// changes nothing.
+pub fn bind_tx(
     conn: &Connection,
     id: AgentSessionId,
-    resume_session_id: &str,
+    native_id: &str,
+    origin: BindingOrigin,
     now: Timestamp,
 ) -> Result<(), DomainError> {
+    let at = ts_to_string(now);
+    let current: Option<String> = conn
+        .query_row(
+            "SELECT resume_session_id FROM agent_session WHERE id = ?1",
+            [id.value()],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(map_sql_err)?;
+    if current.as_deref() == Some(native_id) {
+        return Ok(());
+    }
     conn.execute(
-        "UPDATE agent_session SET resume_session_id = ?2, updated_at = ?3 WHERE id = ?1",
-        params![id.value(), resume_session_id, ts_to_string(now)],
+        "UPDATE agent_session_binding SET unbound_at = ?2
+          WHERE agent_session_id = ?1 AND unbound_at IS NULL",
+        params![id.value(), at],
+    )
+    .map_err(map_sql_err)?;
+    conn.execute(
+        "INSERT INTO agent_session_binding (agent_session_id, native_id, origin, bound_at)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![id.value(), native_id, origin.as_str(), at],
+    )
+    .map_err(map_sql_err)?;
+    conn.execute(
+        "UPDATE agent_session SET resume_session_id = ?2, native_title = '', fork_next = 0,
+                updated_at = ?3
+          WHERE id = ?1",
+        params![id.value(), native_id, at],
     )
     .map_err(map_sql_err)?;
     Ok(())
+}
+
+/// Leave the slot bound to no conversation (a fresh start, a `/clear`),
+/// when it is still bound to `expected` (any, with `None`): a newer one
+/// that replaced it stays. Whether it was unbound.
+pub fn unbind_tx(
+    conn: &Connection,
+    id: AgentSessionId,
+    expected: Option<&str>,
+    now: Timestamp,
+) -> Result<bool, DomainError> {
+    let at = ts_to_string(now);
+    let n = conn
+        .execute(
+            "UPDATE agent_session SET resume_session_id = '', native_title = '', fork_next = 0,
+                    updated_at = ?3
+              WHERE id = ?1 AND resume_session_id <> '' AND (?2 IS NULL OR resume_session_id = ?2)",
+            params![id.value(), expected, at],
+        )
+        .map_err(map_sql_err)?;
+    if n == 1 {
+        conn.execute(
+            "UPDATE agent_session_binding SET unbound_at = ?2
+              WHERE agent_session_id = ?1 AND unbound_at IS NULL",
+            params![id.value(), at],
+        )
+        .map_err(map_sql_err)?;
+    }
+    Ok(n == 1)
+}
+
+/// The harness's name for the slot's conversation, when `native_id` is
+/// still the one it is bound to (a late hook from a previous one changes
+/// nothing). Whether it changed.
+pub fn set_native_title_tx(
+    conn: &Connection,
+    id: AgentSessionId,
+    native_id: &str,
+    title: &str,
+    now: Timestamp,
+) -> Result<bool, DomainError> {
+    let n = conn
+        .execute(
+            "UPDATE agent_session SET native_title = ?3, updated_at = ?4
+              WHERE id = ?1 AND resume_session_id = ?2 AND native_title <> ?3",
+            params![id.value(), native_id, title, ts_to_string(now)],
+        )
+        .map_err(map_sql_err)?;
+    Ok(n == 1)
+}
+
+/// Whether the next launch forks the bound conversation.
+pub fn set_fork_next_tx(
+    conn: &Connection,
+    id: AgentSessionId,
+    fork: bool,
+    now: Timestamp,
+) -> Result<(), DomainError> {
+    conn.execute(
+        "UPDATE agent_session SET fork_next = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id.value(), i64::from(fork), ts_to_string(now)],
+    )
+    .map_err(map_sql_err)?;
+    Ok(())
+}
+
+/// The open slot, other than `except`, bound to `native_id` on `host`
+/// (`None` = local): one conversation can't run in two slots.
+pub fn bound_elsewhere_tx(
+    conn: &Connection,
+    native_id: &str,
+    host: Option<&str>,
+    except: AgentSessionId,
+) -> Result<Option<AgentSession>, DomainError> {
+    Ok(query(
+        conn,
+        "WHERE resume_session_id = ?1 AND closed_at IS NULL AND id <> ?2
+           AND coalesce(host, '') = coalesce(?3, '')
+         ORDER BY id LIMIT 1",
+        params![native_id, except.value(), host],
+    )?
+    .into_iter()
+    .next())
 }
 
 /// Record the OS pid of the process running the session; every spawn
@@ -284,25 +401,6 @@ pub fn touch_seen_tx(
                 ts_to_string(now),
                 ts_to_string(Timestamp::from_unix_ms(now.unix_ms() - SEEN_GRANULARITY_MS))
             ],
-        )
-        .map_err(map_sql_err)?;
-    Ok(n == 1)
-}
-
-/// Forget the session's resume id when it is still `resume_session_id` —
-/// that harness session is gone (cleared, or its transcript missing); a
-/// newer one that replaced it stays. Whether it was forgotten.
-pub fn forget_resume_tx(
-    conn: &Connection,
-    id: AgentSessionId,
-    resume_session_id: &str,
-    now: Timestamp,
-) -> Result<bool, DomainError> {
-    let n = conn
-        .execute(
-            "UPDATE agent_session SET resume_session_id = '', updated_at = ?3
-              WHERE id = ?1 AND resume_session_id = ?2",
-            params![id.value(), resume_session_id, ts_to_string(now)],
         )
         .map_err(map_sql_err)?;
     Ok(n == 1)
@@ -448,9 +546,9 @@ mod tests {
         assert!(opened.is_open());
         assert_eq!(get_tx(&conn, opened.id).unwrap(), Some(opened.clone()));
 
-        set_resume_tx(&conn, opened.id, "r9", at(2)).unwrap();
-        // Forgetting a resume id that was replaced leaves the newer one.
-        assert!(!forget_resume_tx(&conn, opened.id, "r8", at(2)).unwrap());
+        bind_tx(&conn, opened.id, "r9", BindingOrigin::Started, at(2)).unwrap();
+        // Unbinding a conversation that was replaced leaves the newer one.
+        assert!(!unbind_tx(&conn, opened.id, Some("r8"), at(2)).unwrap());
         assert_eq!(
             set_title_tx(&conn, opened.id, "review", at(3)).unwrap(),
             Some(String::new())
@@ -464,6 +562,96 @@ mod tests {
         assert_eq!(back.closed_at, Some(at(4)));
         assert_eq!(back.closed_reason, Some(SessionCloseReason::Closed));
         assert_eq!(back.updated_at, at(4));
+    }
+
+    /// Each conversation a slot is bound to is a binding, ended when the
+    /// next opens or the slot is unbound; the native title belongs to one
+    /// conversation and isn't carried to the next; a late title from a
+    /// replaced conversation changes nothing; a bind clears a pending fork.
+    #[test]
+    fn a_slots_bindings_are_its_conversations_in_order() {
+        let conn = fixture();
+        let s = insert_tx(
+            &conn,
+            &NewAgentSession::terminal(ThreadId::new(1), "claude"),
+            at(0),
+        )
+        .unwrap();
+        bind_tx(&conn, s.id, "c1", BindingOrigin::Started, at(1)).unwrap();
+        bind_tx(&conn, s.id, "c1", BindingOrigin::Switched, at(2)).unwrap();
+        assert!(set_native_title_tx(&conn, s.id, "c1", "Login fix", at(3)).unwrap());
+        set_fork_next_tx(&conn, s.id, true, at(4)).unwrap();
+        assert!(get_tx(&conn, s.id).unwrap().unwrap().fork_next);
+        bind_tx(&conn, s.id, "c2", BindingOrigin::Forked, at(5)).unwrap();
+        let back = get_tx(&conn, s.id).unwrap().unwrap();
+        assert_eq!(
+            (
+                back.resume_session_id.as_str(),
+                back.native_title.as_str(),
+                back.fork_next
+            ),
+            ("c2", "", false)
+        );
+        assert!(!set_native_title_tx(&conn, s.id, "c1", "Late", at(6)).unwrap());
+        assert!(unbind_tx(&conn, s.id, None, at(7)).unwrap());
+        assert!(
+            !unbind_tx(&conn, s.id, None, at(8)).unwrap(),
+            "nothing left to unbind"
+        );
+        let rows: Vec<(String, String, Option<String>)> = conn
+            .prepare("SELECT native_id, origin, unbound_at FROM agent_session_binding WHERE agent_session_id = ?1 ORDER BY id")
+            .unwrap()
+            .query_map([s.id.value()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            [
+                (
+                    "c1".to_string(),
+                    "started".to_string(),
+                    Some(ts_to_string(at(5)))
+                ),
+                (
+                    "c2".to_string(),
+                    "forked".to_string(),
+                    Some(ts_to_string(at(7)))
+                ),
+            ]
+        );
+    }
+
+    /// One conversation runs in one open slot per host.
+    #[test]
+    fn a_conversation_bound_in_another_open_slot_is_found() {
+        let conn = fixture();
+        let a = insert_tx(
+            &conn,
+            &NewAgentSession::terminal(ThreadId::new(1), "claude"),
+            at(0),
+        )
+        .unwrap();
+        let b = insert_tx(
+            &conn,
+            &NewAgentSession::terminal(ThreadId::new(2), "claude"),
+            at(0),
+        )
+        .unwrap();
+        bind_tx(&conn, a.id, "c1", BindingOrigin::Started, at(1)).unwrap();
+        assert_eq!(
+            bound_elsewhere_tx(&conn, "c1", None, b.id)
+                .unwrap()
+                .map(|s| s.id),
+            Some(a.id)
+        );
+        assert_eq!(bound_elsewhere_tx(&conn, "c1", None, a.id).unwrap(), None);
+        assert_eq!(
+            bound_elsewhere_tx(&conn, "c1", Some("box"), b.id).unwrap(),
+            None
+        );
+        close_tx(&conn, a.id, SessionCloseReason::Closed, at(2)).unwrap();
+        assert_eq!(bound_elsewhere_tx(&conn, "c1", None, b.id).unwrap(), None);
     }
 
     #[test]

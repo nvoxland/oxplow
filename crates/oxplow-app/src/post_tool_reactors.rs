@@ -163,6 +163,7 @@ mod tests {
         body: serde_json::Value,
     ) -> HookEnvelope {
         HookEnvelope {
+            session_title: None,
             kind,
             thread_id: Some(thread),
             stream_id: None,

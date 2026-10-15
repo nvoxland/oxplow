@@ -119,6 +119,36 @@ pub struct AgentSession {
     /// When the person deliberately stopped it; `None` once started again
     /// and after a crash or restart (which resume on activation).
     pub stopped_by_user_at: Option<Timestamp>,
+    /// The name the harness gives the bound conversation; empty when it
+    /// gave none.
+    pub native_title: String,
+    /// The next launch forks the bound conversation instead of resuming it.
+    pub fork_next: bool,
+}
+
+/// How a slot came to be bound to a native conversation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum BindingOrigin {
+    /// Its first conversation, or one begun after it had none.
+    Started,
+    /// The harness moved it to another (a native `/resume`, `/branch`).
+    Switched,
+    /// A launch forked the one it was bound to.
+    Forked,
+    /// The person chose a saved one.
+    Chosen,
+}
+
+impl BindingOrigin {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            BindingOrigin::Started => "started",
+            BindingOrigin::Switched => "switched",
+            BindingOrigin::Forked => "forked",
+            BindingOrigin::Chosen => "chosen",
+        }
+    }
 }
 
 impl AgentSession {

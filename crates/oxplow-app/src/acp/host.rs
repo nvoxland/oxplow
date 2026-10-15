@@ -97,6 +97,7 @@ impl ServicesAcpHost {
         prompt: Option<String>,
     ) -> HookEnvelope {
         HookEnvelope {
+            session_title: None,
             kind,
             thread_id: Some(*thread),
             stream_id: self.stream_id,
@@ -312,6 +313,7 @@ impl AcpHost for ServicesAcpHost {
             return;
         };
         let env = HookEnvelope {
+            session_title: None,
             kind: HookKind::Interrupt,
             thread_id: Some(*thread),
             stream_id: self.stream_id,

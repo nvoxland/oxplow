@@ -89,10 +89,16 @@ test("the ended banner says what happened and offers the right actions", () => {
   });
   expect(early.text).toContain("Couldn't resume the saved conversation (exit 1)");
   expect(early.actions).toEqual(["retry", "start-fresh"]);
-  const missing = exitBanner({
-    exitCode: 1,
-    outcome: { kind: "unable_to_resume", reason: "transcript_missing", exitCode: 1 },
-  });
+  const missingOutcome = { kind: "unable_to_resume", reason: "transcript_missing", exitCode: 1 } as const;
+  const missing = { ...exitBanner({ exitCode: 1, outcome: missingOutcome }), outcome: missingOutcome };
   expect(missing.text).toContain("transcript wasn't found");
   expect(missing.actions).toEqual(["retry", "start-fresh"]);
+  // Where its harness can list its saved conversations, the person can
+  // choose another one to resume.
+  expect(exitBanner({ exitCode: 1, outcome: missing.outcome }, { canChoose: true }).actions).toEqual([
+    "retry",
+    "choose-another",
+    "start-fresh",
+  ]);
+  expect(exitBanner({ exitCode: 0, outcome: { kind: "ended" } }, { canChoose: true }).actions).toEqual(["start-again"]);
 });

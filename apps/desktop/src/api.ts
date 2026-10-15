@@ -1,6 +1,7 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
 import type {
   BackgroundTask,
+  ListedConversation,
   TabReport,
   SecretRef,
   BegunSignIn,
@@ -1427,6 +1428,26 @@ export async function startAgentSession(sessionId: string): Promise<void> {
  *  Destructive: the caller confirms first. */
 export async function startAgentSessionFresh(sessionId: string, confirmed: boolean): Promise<void> {
   await runCommand("oxplow.agent_session.start_fresh", { session: agentSessionRef(sessionId) }, confirmed);
+}
+
+/// The saved conversations an agent session's harness keeps for its
+/// worktree, newest first (`list_native_conversations`).
+export async function listNativeConversations(sessionId: string): Promise<ListedConversation[]> {
+  return unwrap(await commands.listNativeConversations(sessionId));
+}
+
+/// Move an agent session to one of its harness's saved conversations.
+export async function resumeConversation(sessionId: string, conversation: string): Promise<void> {
+  await runCommand("oxplow.agent_session.resume_conversation", { session: agentSessionRef(sessionId), conversation });
+}
+
+/// Have an agent session's next launch fork a saved conversation (the one
+/// it is on, without `conversation`).
+export async function forkConversation(sessionId: string, conversation?: string): Promise<void> {
+  await runCommand("oxplow.agent_session.fork_conversation", {
+    session: agentSessionRef(sessionId),
+    ...(conversation ? { conversation } : {}),
+  });
 }
 
 export async function renameAgentSession(sessionId: string, title: string): Promise<void> {

@@ -23,6 +23,7 @@ pub async fn list_agent_harnesses(
     let config = read_config(&svc.config);
     Ok(oxplow_app::harnesses::listing(
         &svc.harnesses,
+        &svc.capabilities,
         &config.agents,
     ))
 }

@@ -207,6 +207,16 @@ commands:
     scope: agent_sessions.write
     op: start
     invokers: { human: true, agent: false, lens: false }
+  - name: agent_session.fork_conversation
+    summary: "Fork a saved conversation into an agent session (`agent_session:ses3`): its next launch continues a copy of the conversation it is on, or of `conversation`, and keeps the original saved. Its running process stops. A person's only."
+    scope: agent_sessions.write
+    op: fork_conversation
+    invokers: { human: true, agent: false, lens: false }
+  - name: agent_session.resume_conversation
+    summary: "Move an agent session (`agent_session:ses3`) to one of its harness's saved conversations (`conversation`, its id): its running process stops and the next launch resumes the chosen one. Refused when another open session is on it. The one it was on stays saved. A person's only."
+    scope: agent_sessions.write
+    op: resume_conversation
+    invokers: { human: true, agent: false, lens: false }
   - name: agent_session.start_fresh
     summary: "Give an agent session a new conversation (`agent_session:ses3`): forgets its saved conversation and clears its stop. The only way a session gets a new conversation; resuming never does. A person's only."
     scope: agent_sessions.write

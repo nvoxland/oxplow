@@ -25,6 +25,7 @@ pub mod changes;
 pub mod collectors;
 pub mod comments;
 pub mod config;
+pub mod conversations;
 pub mod dashboards;
 pub mod effort;
 pub mod events;

@@ -141,6 +141,7 @@ async fn a_session_of(
             identity_env: identity,
             system_prompt: None,
             resume: None,
+            fork: false,
             text: AgentText::default(),
             config: serde_json::json!({}),
             oxplow_executable: "/bin/false".into(),

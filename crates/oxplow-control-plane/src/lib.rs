@@ -436,6 +436,7 @@ async fn handle_hook_inner(
             _ => None,
         };
         let envelope = HookEnvelope {
+            session_title: None,
             kind,
             thread_id,
             stream_id,
@@ -488,6 +489,16 @@ async fn handle_hook_inner(
         _ => (None, None),
     };
 
+    // The name the bearer's harness gives the session's conversation, when
+    // the hook says one.
+    let session_title = body_value.as_ref().and_then(|body| {
+        ctx.services
+            .harnesses
+            .get(&principal.harness)
+            .ok()
+            .and_then(|h| h.session_title(body))
+    });
+
     // A tool hook's call in oxplow's vocabulary, as the bearer's harness
     // maps its body: what the policy, the ingest and the context read.
     let tool = match (kind, body_value.as_ref()) {
@@ -507,6 +518,7 @@ async fn handle_hook_inner(
             // Logged with the policy's decision, so the record shows what
             // the runtime did.
             let envelope = HookEnvelope {
+                session_title: None,
                 kind,
                 thread_id,
                 stream_id,
@@ -538,6 +550,7 @@ async fn handle_hook_inner(
     }
 
     let envelope = HookEnvelope {
+        session_title,
         kind,
         thread_id,
         stream_id,

@@ -12,7 +12,8 @@ use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
 
 use oxplow_domain::agent::harness::{
-    AgentHarness, HarnessError, Interact, Launch, LaunchInput, LaunchSpec, RuntimeRoots, Transcript,
+    AgentHarness, ConversationQuery, HarnessError, Interact, Launch, LaunchInput, LaunchSpec,
+    NativeConversation, RuntimeRoots, Transcript,
 };
 use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading};
 use oxplow_domain::agent::text::{AgentText, Text};
@@ -62,7 +63,7 @@ impl AgentHarness for Codex {
             spec: LaunchSpec::Pty {
                 command: command(
                     &input.workspace.to_string_lossy(),
-                    input.resume.as_deref().filter(|r| !r.is_empty()),
+                    super::shared::saved(input),
                     program.as_deref(),
                     &overrides,
                     embedded,
@@ -84,6 +85,24 @@ impl AgentHarness for Codex {
         text: &AgentText,
     ) -> Result<(), HarnessError> {
         refresh_worktree_skills(&roots.workspaces, &skills_and_commands(text)).map_err(runtime)
+    }
+
+    /// Its threads begun in the worktree, from its app server
+    /// (`thread/list`); a subagent's thread isn't one to resume.
+    async fn conversations(
+        &self,
+        query: &ConversationQuery,
+    ) -> Result<Vec<NativeConversation>, HarnessError> {
+        let program = query.resolve_program("codex").ok_or_else(|| {
+            HarnessError::Unavailable("`codex` isn't installed where oxplow looks".into())
+        })?;
+        let listed = app_server_request(
+            &program,
+            "thread/list",
+            serde_json::json!({ "cwd": query.cwd, "limit": query.limit, "archived": false }),
+        )
+        .await?;
+        Ok(threads_of(&listed))
     }
 
     async fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
@@ -283,11 +302,103 @@ async fn supports_embedded_mode(program: Option<&str>) -> bool {
     supported
 }
 
+/// One request to a short-lived `codex app-server` (JSON-RPC over stdio):
+/// the handshake, then `method` with `params`, its result read back. The
+/// process is killed once it has answered, or after
+/// [`super::shared::METADATA_TIMEOUT`].
+async fn app_server_request(
+    program: &str,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, HarnessError> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let mut child = tokio::process::Command::new(program)
+        .arg("app-server")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| HarnessError::Unavailable(format!("starting `{program} app-server`: {e}")))?;
+    let mut stdin = child.stdin.take().expect("piped");
+    let stdout = child.stdout.take().expect("piped");
+    let requests = [
+        serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": { "clientInfo": { "name": "oxplow", "version": env!("CARGO_PKG_VERSION") } } }),
+        serde_json::json!({ "jsonrpc": "2.0", "method": "initialized" }),
+        serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": method, "params": params }),
+    ];
+    let exchange = async {
+        for r in &requests {
+            stdin.write_all(format!("{r}\n").as_bytes()).await?;
+        }
+        stdin.flush().await?;
+        let mut lines = BufReader::new(stdout).lines();
+        while let Some(line) = lines.next_line().await? {
+            let Ok(message) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
+            if message.get("id") == Some(&serde_json::json!(2)) && message.get("method").is_none() {
+                return Ok(Some(message));
+            }
+        }
+        Ok::<_, std::io::Error>(None)
+    };
+    let answered = tokio::time::timeout(super::shared::METADATA_TIMEOUT, exchange)
+        .await
+        .map_err(|_| HarnessError::Unavailable("its app server didn't answer in time".into()))?
+        .map_err(|e| HarnessError::Unavailable(format!("talking to its app server: {e}")))?
+        .ok_or_else(|| {
+            HarnessError::Unavailable("its app server ended without answering".into())
+        })?;
+    drop(child);
+    if let Some(error) = answered.get("error") {
+        return Err(HarnessError::Unavailable(format!(
+            "its app server refused `{method}`: {error}"
+        )));
+    }
+    Ok(answered.get("result").cloned().unwrap_or_default())
+}
+
+/// The threads a `thread/list` result holds, a subagent's left out.
+fn threads_of(listed: &serde_json::Value) -> Vec<NativeConversation> {
+    let at = |t: &serde_json::Value, key: &str| {
+        t.get(key)
+            .and_then(|v| v.as_i64())
+            .map(|secs| oxplow_domain::Timestamp::from_unix_ms(secs.saturating_mul(1000)))
+    };
+    let text = |t: &serde_json::Value, key: &str| {
+        t.get(key)
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+    };
+    listed
+        .get("data")
+        .and_then(|d| d.as_array())
+        .into_iter()
+        .flatten()
+        .filter(|t| t.get("parentThreadId").is_none_or(|p| p.is_null()))
+        .filter_map(|t| {
+            Some(NativeConversation {
+                id: t.get("id")?.as_str()?.to_string(),
+                title: text(t, "name"),
+                first_prompt: text(t, "preview"),
+                started_at: at(t, "createdAt"),
+                updated_at: at(t, "updatedAt"),
+                size_bytes: None,
+                parent: text(t, "forkedFromId"),
+            })
+        })
+        .collect()
+}
+
 /// `codex --cd <cwd>` with its overrides and explicit embedded mode when
-/// supported, or `codex resume` for `resume`.
+/// supported, or `codex resume` (`codex fork` for a fork) for `resume`.
 fn command(
     cwd: &str,
-    resume: Option<&str>,
+    resume: Option<super::shared::Saved<'_>>,
     program: Option<&str>,
     overrides: &[String],
     embedded: bool,
@@ -300,10 +411,11 @@ fn command(
         .collect();
     let base = match resume {
         None => format!("{prog}{mode} --cd {}{config_args}", shell_escape(cwd)),
-        Some(id) => format!(
-            "{prog}{mode} resume --cd {}{config_args} {}",
+        Some(saved) => format!(
+            "{prog}{mode} {} --cd {}{config_args} {}",
+            if saved.fork { "fork" } else { "resume" },
             shell_escape(cwd),
-            shell_escape(id)
+            shell_escape(saved.id)
         ),
     };
     in_shell(cwd, &guard, &format!("exec {base}"))
@@ -522,6 +634,70 @@ mod tests {
         );
     }
 
+    /// Its threads come from its app server's `thread/list`, a
+    /// subagent's left out; an app server that refuses is unavailable.
+    #[tokio::test]
+    async fn its_conversations_come_from_its_app_server() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let bin = tmp.path().join("codex");
+        let script = |answer: &str| {
+            format!(
+                "#!/bin/sh\n[ \"$1\" = app-server ] || exit 2\nread a; read b; read c\necho '{{\"id\":1,\"result\":{{}}}}'\necho '{{\"method\":\"note\",\"params\":{{}}}}'\necho '{answer}'\n"
+            )
+        };
+        fs::write(
+            &bin,
+            script(r#"{"id":2,"result":{"data":[{"id":"t1","name":"Login fix","preview":"fix the login","createdAt":100,"updatedAt":200,"parentThreadId":null,"forkedFromId":"t0"},{"id":"t2","name":null,"preview":"","createdAt":1,"updatedAt":2,"parentThreadId":"t1"}],"nextCursor":null}}"#),
+        )
+        .unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        let h = harness("oxplow:codex-cli", "codex");
+        let query = oxplow_domain::agent::harness::ConversationQuery {
+            cwd: "/repo/wt".into(),
+            home: None,
+            search_path: vec![tmp.path().to_path_buf()],
+            limit: 10,
+        };
+        let found = h.conversations(&query).await.unwrap();
+        assert_eq!(found.len(), 1, "the subagent's thread isn't listed");
+        assert_eq!(
+            (
+                found[0].id.as_str(),
+                found[0].title.as_deref(),
+                found[0].first_prompt.as_deref(),
+                found[0].parent.as_deref()
+            ),
+            ("t1", Some("Login fix"), Some("fix the login"), Some("t0"))
+        );
+        assert_eq!(
+            found[0].updated_at,
+            Some(oxplow_domain::Timestamp::from_unix_ms(200_000))
+        );
+        fs::write(
+            &bin,
+            script(r#"{"id":2,"error":{"code":-32600,"message":"no"}}"#),
+        )
+        .unwrap();
+        assert!(matches!(
+            h.conversations(&query).await,
+            Err(HarnessError::Unavailable(_))
+        ));
+    }
+
+    /// A fork starts `codex fork` on the saved conversation.
+    #[test]
+    fn a_fork_runs_codex_fork() {
+        let h = harness("oxplow:codex-cli", "codex");
+        let l = crate::test_launch::launch_fork(h.as_ref(), "sess-w");
+        let (command, _) = crate::test_launch::pty(&l.launch);
+        assert!(
+            command.contains(" fork --cd ") && command.contains("sess-w"),
+            "{command}"
+        );
+        assert!(!command.contains(" resume "), "{command}");
+    }
+
     #[test]
     fn launch_builds_the_command_and_env() {
         let h = harness("oxplow:codex-cli", "codex");
@@ -645,7 +821,7 @@ mod tests {
             assert!(embedded);
             let cmd = command(
                 tmp.path().to_str().unwrap(),
-                resume,
+                resume.map(|id| crate::shared::Saved { id, fork: false }),
                 Some(path),
                 &["mcp_servers.oxplow.url=\"http://127.0.0.1:9/mcp\"".into()],
                 embedded,
@@ -684,7 +860,17 @@ mod tests {
         .unwrap();
         assert!(!supports_embedded_mode(Some(path)).await);
         assert_eq!(fs::read_to_string(&probes).unwrap().lines().count(), 2);
-        assert!(!command("/repo", Some("saved"), Some(path), &[], false).contains("--no-daemon"));
+        assert!(!command(
+            "/repo",
+            Some(crate::shared::Saved {
+                id: "saved",
+                fork: false
+            }),
+            Some(path),
+            &[],
+            false
+        )
+        .contains("--no-daemon"));
 
         fs::write(&program, "#!/bin/sh\nexit 1\n").unwrap();
         assert!(!supports_embedded_mode(Some(path)).await);

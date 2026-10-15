@@ -416,6 +416,7 @@ mod tests {
                 ] {
                     svc.hook_ingest
                         .ingest(crate::hook_ingest::HookEnvelope {
+                            session_title: None,
                             kind,
                             thread_id: Some(thread),
                             stream_id: None,

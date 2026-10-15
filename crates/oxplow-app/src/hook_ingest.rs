@@ -35,6 +35,7 @@
 //! one lock held from the transaction to the emit, so they reach the UI
 //! in commit order.
 
+use oxplow_domain::agent_session::BindingOrigin;
 use oxplow_domain::vocabulary::VocabularyHandle;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -122,6 +123,11 @@ pub struct HookEnvelope {
     #[serde(skip)]
     #[specta(skip)]
     pub subagent: Option<Subagent>,
+    /// The name its harness gives the session's conversation, when the
+    /// hook says (Claude's `session_title` on a prompt). In-process only.
+    #[serde(skip)]
+    #[specta(skip)]
+    pub session_title: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -531,6 +537,10 @@ fn record_tx(
             track_session_tx(conn, ev, thread, &row, sid, starts, now)?;
         }
     }
+    // The name the harness gives the conversation, for the slot bound to it.
+    if let (Some(id), Some(native), Some(title)) = (slot, session, env.session_title.as_deref()) {
+        oxplow_db::agent_session_store::set_native_title_tx(conn, id, native, title, now)?;
+    }
     applied.turn = open_turn_ids_in_tx(conn, thread, slot)?.first().copied();
     match env.kind {
         // A subagent handing its report back: the agent goes on working on
@@ -794,7 +804,19 @@ fn track_session_tx(
         ev.append(conn, &env)?;
     }
     if let Some(id) = row.session.filter(|_| row.resume_session_id != session) {
-        oxplow_db::agent_session_store::set_resume_tx(conn, id, session, now)?;
+        // How the slot came to this conversation: its first (or the first
+        // since it had none), the copy a fork launch made, or one the
+        // harness moved it to.
+        let fork_next =
+            oxplow_db::agent_session_store::get_tx(conn, id)?.is_some_and(|s| s.fork_next);
+        let origin = if row.resume_session_id.is_empty() {
+            BindingOrigin::Started
+        } else if fork_next {
+            BindingOrigin::Forked
+        } else {
+            BindingOrigin::Switched
+        };
+        oxplow_db::agent_session_store::bind_tx(conn, id, session, origin, now)?;
     }
     Ok(())
 }
@@ -853,7 +875,7 @@ fn end_session_tx(
         .with_subject(session_subject(thread, row.session));
     ev.append(conn, &env)?;
     if let Some(id) = row.session.filter(|_| reason == Some("clear")) {
-        oxplow_db::agent_session_store::forget_resume_tx(conn, id, session, now)?;
+        oxplow_db::agent_session_store::unbind_tx(conn, id, Some(session), now)?;
     }
     Ok(())
 }
@@ -1201,6 +1223,7 @@ mod tests {
         body: serde_json::Value,
     ) -> HookEnvelope {
         HookEnvelope {
+            session_title: None,
             kind,
             thread_id: Some(tid),
             stream_id: None,
@@ -1341,6 +1364,94 @@ mod tests {
                 ("Bash".into(), None)
             ]
         );
+    }
+
+    /// The slot's bindings follow the conversations its prompts name: the
+    /// first is `started`, another the harness moved it to `switched`, and
+    /// the new one after a fork launch `forked`. A title the harness gives
+    /// the conversation a prompt names is the slot's native title, and it
+    /// isn't carried to the next.
+    #[tokio::test]
+    async fn a_slot_records_its_conversations_and_their_titles() {
+        let (svc, tid) = fixture().await;
+        let prompt = |id: &str, title: Option<&str>| HookEnvelope {
+            session_title: title.map(str::to_string),
+            ..hook(
+                HookKind::UserPromptSubmit,
+                tid,
+                Some(id),
+                json!({"prompt": "go"}),
+            )
+        };
+        let slot = |svc: &HookIngestService| {
+            let db = svc.db.clone();
+            async move {
+                db.read(
+                    |c| Ok(oxplow_db::agent_session_store::get_tx(c, first_session())?.unwrap()),
+                )
+                .await
+                .unwrap()
+            }
+        };
+        svc.ingest(prompt("c1", Some("Login fix"))).await.unwrap();
+        assert_eq!(slot(&svc).await.native_title, "Login fix");
+        svc.ingest(prompt("c2", None)).await.unwrap();
+        let now = slot(&svc).await;
+        assert_eq!(
+            (now.resume_session_id.as_str(), now.native_title.as_str()),
+            ("c2", "")
+        );
+        svc.ingest(prompt("c1", Some("Back again"))).await.unwrap();
+        assert_eq!(slot(&svc).await.native_title, "Back again");
+        svc.db
+            .transaction(|tx| {
+                oxplow_db::agent_session_store::bind_tx(
+                    tx,
+                    first_session(),
+                    "c2",
+                    BindingOrigin::Switched,
+                    Timestamp::now(),
+                )?;
+                oxplow_db::agent_session_store::set_fork_next_tx(
+                    tx,
+                    first_session(),
+                    true,
+                    Timestamp::now(),
+                )
+            })
+            .await
+            .unwrap();
+        svc.ingest(prompt("c3", None)).await.unwrap();
+        let origins: Vec<(String, String)> = svc
+            .db
+            .read(|c| {
+                let mut st = c
+                    .prepare("SELECT native_id, origin FROM agent_session_binding ORDER BY id")
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = st
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .map_err(oxplow_db::map_sql_err)?
+                    .collect::<rusqlite::Result<_>>()
+                    .map_err(oxplow_db::map_sql_err)?;
+                Ok(rows)
+            })
+            .await
+            .unwrap();
+        let origins: Vec<(&str, &str)> = origins
+            .iter()
+            .map(|(a, b)| (a.as_str(), b.as_str()))
+            .collect();
+        assert_eq!(
+            origins,
+            [
+                ("c1", "started"),
+                ("c2", "switched"),
+                ("c1", "switched"),
+                ("c2", "switched"),
+                ("c3", "forked")
+            ]
+        );
+        assert!(!slot(&svc).await.fork_next);
     }
 
     /// The harness session a session resumes is the one its own prompts
@@ -2035,6 +2146,7 @@ mod tests {
             }
         };
         let envelope = |kind, prompt: Option<&str>| HookEnvelope {
+            session_title: None,
             kind,
             thread_id: Some(tid),
             stream_id: None,
@@ -2062,6 +2174,7 @@ mod tests {
     async fn user_prompt_opens_turn_and_marks_running() {
         let (svc, tid) = fixture().await;
         let env = HookEnvelope {
+            session_title: None,
             kind: HookKind::UserPromptSubmit,
             thread_id: Some(tid),
             stream_id: None,
@@ -2086,6 +2199,7 @@ mod tests {
         let (svc, tid) = fixture().await;
         // Open a turn first.
         let prompt_env = HookEnvelope {
+            session_title: None,
             kind: HookKind::UserPromptSubmit,
             thread_id: Some(tid),
             stream_id: None,
@@ -2099,6 +2213,7 @@ mod tests {
         };
         svc.ingest(prompt_env).await.unwrap();
         let stop = HookEnvelope {
+            session_title: None,
             kind: HookKind::Stop,
             thread_id: Some(tid),
             stream_id: None,
@@ -2120,6 +2235,7 @@ mod tests {
     async fn interrupt_closes_open_turn() {
         let (svc, tid) = fixture().await;
         svc.ingest(HookEnvelope {
+            session_title: None,
             kind: HookKind::UserPromptSubmit,
             thread_id: Some(tid),
             stream_id: None,
@@ -2134,6 +2250,7 @@ mod tests {
         .await
         .unwrap();
         svc.ingest(HookEnvelope {
+            session_title: None,
             kind: HookKind::Interrupt,
             thread_id: Some(tid),
             stream_id: None,
@@ -2173,6 +2290,7 @@ mod tests {
         let takes = std::sync::Arc::new(Takes::default());
         let svc = svc.with_turn_snapshots(takes.clone());
         svc.ingest(HookEnvelope {
+            session_title: None,
             kind: HookKind::UserPromptSubmit,
             thread_id: Some(tid),
             stream_id: None,
@@ -2187,6 +2305,7 @@ mod tests {
         .await
         .unwrap();
         let stop = svc.ingest(HookEnvelope {
+            session_title: None,
             kind: HookKind::Stop,
             thread_id: Some(tid),
             stream_id: None,
@@ -2217,6 +2336,7 @@ mod tests {
     async fn an_interrupt_with_no_open_turn_changes_nothing() {
         let (svc, tid) = fixture().await;
         let hook = |kind, prompt: Option<&str>, payload: serde_json::Value| HookEnvelope {
+            session_title: None,
             kind,
             thread_id: Some(tid),
             stream_id: None,
@@ -2266,6 +2386,7 @@ mod tests {
         // Stop) must not error — it just lands the status transition.
         let (svc, tid) = fixture().await;
         svc.ingest(HookEnvelope {
+            session_title: None,
             kind: HookKind::Stop,
             thread_id: Some(tid),
             stream_id: None,
@@ -2288,6 +2409,7 @@ mod tests {
     async fn envelope_without_thread_id_persists_event_only() {
         let (svc, tid) = fixture().await;
         svc.ingest(HookEnvelope {
+            session_title: None,
             kind: HookKind::UserPromptSubmit,
             thread_id: None,
             stream_id: None,
@@ -2312,6 +2434,7 @@ mod tests {
         let (svc, tid) = fixture().await;
         for prompt in ["first", "mid-turn re-prompt"] {
             svc.ingest(HookEnvelope {
+                session_title: None,
                 kind: HookKind::UserPromptSubmit,
                 thread_id: Some(tid),
                 stream_id: None,

@@ -81,12 +81,16 @@ export function isStopped(error: unknown): boolean {
 }
 
 /** What the ended banner says and offers. A resume that failed before a
- *  turn ran keeps the saved conversation: Retry resumes it again, Start
- *  fresh deliberately begins a new one. Any other end offers Start Again,
+ *  turn ran keeps the saved conversation: Retry resumes it again, Choose
+ *  another (where its harness lists its saved conversations) resumes a
+ *  different one, Start fresh deliberately begins a new one. Any other end offers Start Again,
  *  which resumes the saved conversation as well. */
-export function exitBanner(ended: { exitCode: number | null; outcome: ExitOutcome }): {
+export function exitBanner(
+  ended: { exitCode: number | null; outcome: ExitOutcome },
+  can: { canChoose?: boolean } = {},
+): {
   text: string;
-  actions: Array<"start-again" | "retry" | "start-fresh">;
+  actions: Array<"start-again" | "retry" | "choose-another" | "start-fresh">;
 } {
   const o = ended.outcome;
   if (o.kind === "unable_to_resume") {
@@ -96,7 +100,7 @@ export function exitBanner(ended: { exitCode: number | null; outcome: ExitOutcom
         : "it exited before the conversation started";
     return {
       text: `Couldn't resume the saved conversation (exit ${o.exitCode}): ${why}. It is kept — retry, or start a fresh one.`,
-      actions: ["retry", "start-fresh"],
+      actions: can.canChoose ? ["retry", "choose-another", "start-fresh"] : ["retry", "start-fresh"],
     };
   }
   return {

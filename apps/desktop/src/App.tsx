@@ -164,6 +164,7 @@ import { computePagesDirectory } from "./components/RailHud/sections.js";
 import { NON_TRACKED_KINDS } from "./components/RailHud/history.js";
 import { resolveActiveTabRef } from "./tabs/resolveActiveTabRef.js";
 import { buildTabReport } from "./tabs/tabReport.js";
+import type { PickerMode } from "./components/conversationRows.js";
 import { useThreadPageTabs } from "./tabs/useThreadPageTabs.js";
 import { dropFromMru, MAX_PAGE_TABS, selectLruEvictions, touchMru } from "./tabs/tabLru.js";
 import {
@@ -303,6 +304,8 @@ export function App() {
   const [sessionStatuses, setSessionStatuses] = useState<Record<string, AgentStatusEntry>>({});
   // The agent session whose tab's Rename… strip is open.
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
+  // The conversation picker open over a session's terminal, and for what.
+  const [conversationPicker, setConversationPicker] = useState<{ sessionId: string; mode: PickerMode } | null>(null);
   const { statuses: agentStatuses, questions: agentQuestions } = useMemo(
     () => threadStatuses(Object.values(sessionStatuses)),
     [sessionStatuses],
@@ -2539,6 +2542,8 @@ export function App() {
         ),
       };
     };
+    // The features a session's harness declares (`agent_harness`).
+    const harnessFeatures = (harness: string): string[] => harnesses.find((h) => h.id === harness)?.features ?? [];
     const pageRenderers: Record<PageKind, (ref: TabRef, nav: SlotNav) => CenterTab | null> = {
       agent_session: (ref) => {
         const sessionId = (ref.payload as { sessionId: string }).sessionId;
@@ -2560,6 +2565,27 @@ export function App() {
               enabled: !!session,
               run: () => setRenamingSessionId(sessionId),
             },
+            // Its harness's saved conversations: switch to one, or fork one.
+            ...(session?.kind === "terminal" && harnessFeatures(session.harness).includes("conversation_list")
+              ? [
+                  {
+                    id: "agent-session.switch-conversation",
+                    label: "Switch Conversation…",
+                    enabled: true,
+                    run: () => setConversationPicker({ sessionId, mode: "resume" }),
+                  },
+                  ...(harnessFeatures(session.harness).includes("conversation_fork")
+                    ? [
+                        {
+                          id: "agent-session.fork-conversation",
+                          label: "Fork Conversation…",
+                          enabled: true,
+                          run: () => setConversationPicker({ sessionId, mode: "fork" as const }),
+                        },
+                      ]
+                    : []),
+                ]
+              : []),
             // A terminal agent's process: stopping keeps the slot and the
             // saved conversation, and it stays stopped until started.
             ...(session?.kind === "terminal"
@@ -2590,6 +2616,9 @@ export function App() {
               onOpenDiff={handleOpenDiff}
               onOpenSettings={() => handleOpenPage(indexRef("settings"))}
               onOpenPage={handleOpenPage}
+              canChooseConversation={!!session && harnessFeatures(session.harness).includes("conversation_list")}
+              picker={conversationPicker?.sessionId === sessionId ? conversationPicker.mode : null}
+              onPicker={(mode) => setConversationPicker(mode ? { sessionId, mode } : null)}
             />
           ),
         };

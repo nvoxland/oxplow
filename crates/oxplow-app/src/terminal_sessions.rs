@@ -367,6 +367,7 @@ impl TerminalSessionRegistry {
                         drop(keys);
                         if let (Some(pane), Some(ingest)) = (agent, exits.get()) {
                             let exit = crate::hook_ingest::HookEnvelope {
+                                session_title: None,
                                 kind: oxplow_domain::HookKind::SessionEnd,
                                 thread_id: Some(pane.thread),
                                 stream_id: None,
@@ -679,7 +680,13 @@ mod tests {
             .id;
         svc.db
             .transaction(move |tx| {
-                oxplow_db::agent_session_store::set_resume_tx(tx, session, "h1", Timestamp::now())
+                oxplow_db::agent_session_store::bind_tx(
+                    tx,
+                    session,
+                    "h1",
+                    oxplow_domain::agent_session::BindingOrigin::Started,
+                    Timestamp::now(),
+                )
             })
             .await
             .unwrap();

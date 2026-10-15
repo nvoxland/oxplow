@@ -143,6 +143,7 @@ mod test_launch {
             run(
                 h,
                 Some(resume),
+                false,
                 None,
                 &serde_json::json!({}),
                 Some(home.path()),
@@ -163,9 +164,23 @@ mod test_launch {
         run(
             h,
             resume,
+            false,
             system_prompt,
             config,
             home,
+            tempfile::tempdir().unwrap(),
+        )
+    }
+
+    /// `h` launched to fork saved conversation `resume`, as [`launch_in`].
+    pub fn launch_fork(h: &dyn AgentHarness, resume: &str) -> Launched {
+        run(
+            h,
+            Some(resume),
+            true,
+            None,
+            &serde_json::json!({}),
+            None,
             tempfile::tempdir().unwrap(),
         )
     }
@@ -176,23 +191,33 @@ mod test_launch {
         h: &dyn AgentHarness,
         config: &serde_json::Value,
     ) -> Result<Launched, oxplow_domain::agent::harness::HarnessError> {
-        try_run(h, None, None, config, None, tempfile::tempdir().unwrap())
+        try_run(
+            h,
+            None,
+            false,
+            None,
+            config,
+            None,
+            tempfile::tempdir().unwrap(),
+        )
     }
 
     fn run(
         h: &dyn AgentHarness,
         resume: Option<&str>,
+        fork: bool,
         system_prompt: Option<&str>,
         config: &serde_json::Value,
         home: Option<&Path>,
         dir: tempfile::TempDir,
     ) -> Launched {
-        try_run(h, resume, system_prompt, config, home, dir).expect("it launches")
+        try_run(h, resume, fork, system_prompt, config, home, dir).expect("it launches")
     }
 
     fn try_run(
         h: &dyn AgentHarness,
         resume: Option<&str>,
+        fork: bool,
         system_prompt: Option<&str>,
         config: &serde_json::Value,
         home: Option<&Path>,
@@ -231,6 +256,7 @@ mod test_launch {
             identity_env: identity,
             system_prompt: system_prompt.map(str::to_string),
             resume: resume.map(str::to_string),
+            fork,
             text: oxplow_agent_text::core_text(),
             config: config.clone(),
             oxplow_executable: "/bin/oxplow".into(),

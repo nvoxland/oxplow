@@ -9,8 +9,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use oxplow_domain::agent::harness::{
-    AgentHarness, HarnessError, HarnessSetting, Interact, Launch, LaunchInput, LaunchSpec,
-    RuntimeRoots, Transcript,
+    AgentHarness, ConversationQuery, HarnessError, HarnessSetting, Interact, Launch, LaunchInput,
+    LaunchSpec, NativeConversation, RuntimeRoots, Transcript,
 };
 use oxplow_domain::agent::observe::HookAnswer;
 use oxplow_domain::agent::text::AgentText;
@@ -78,7 +78,7 @@ impl AgentHarness for Opencode {
             spec: LaunchSpec::Pty {
                 command: command(
                     &input.workspace.to_string_lossy(),
-                    input.resume.as_deref().filter(|r| !r.is_empty()),
+                    super::shared::saved(input),
                     program.as_deref(),
                     model,
                 ),
@@ -113,6 +113,22 @@ impl AgentHarness for Opencode {
     /// Its bridge posts Claude Code's shape, its tools renamed to Claude's
     /// (`assets/opencode-hooks.js`), except its patch tool: `apply_patch`
     /// with the patch as `patchText`, an edit of every file it names.
+    /// `opencode session list --format json`, those begun in the worktree.
+    async fn conversations(
+        &self,
+        query: &ConversationQuery,
+    ) -> Result<Vec<NativeConversation>, HarnessError> {
+        let program = query.resolve_program("opencode").ok_or_else(|| {
+            HarnessError::Unavailable("`opencode` isn't installed where oxplow looks".into())
+        })?;
+        let listed = super::shared::program_output(
+            &program,
+            &["session", "list", "--format", "json", "-n", LIST_SCAN],
+        )
+        .await?;
+        sessions_in(&listed, &query.cwd.to_string_lossy(), query.limit)
+    }
+
     async fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
         let mut tool = claude_shaped_tool_use(body)?;
         if tool.name == "apply_patch" {
@@ -201,14 +217,64 @@ fn split_frontmatter_description(asset: &str) -> (Option<String>, String) {
 }
 
 /// `opencode -m <model>`, resuming `resume`.
-fn command(cwd: &str, resume: Option<&str>, program: Option<&str>, model: &str) -> String {
+fn command(
+    cwd: &str,
+    resume: Option<super::shared::Saved<'_>>,
+    program: Option<&str>,
+    model: &str,
+) -> String {
     let (prog, guard) = program_and_guard(program, "opencode");
     let base = format!("{prog} -m {}", shell_escape(model));
     let resume = match resume {
         None => Resume::Fresh,
-        Some(id) => Resume::Saved(format!("-s {}", shell_escape(id))),
+        Some(saved) => Resume::Saved(format!(
+            "-s {}{}",
+            shell_escape(saved.id),
+            if saved.fork { " --fork" } else { "" }
+        )),
     };
     in_shell(cwd, &guard, &resume_or_fresh(&base, resume))
+}
+
+/// How many of its newest sessions are read to find a worktree's.
+const LIST_SCAN: &str = "500";
+
+/// The sessions `listed` (its `session list --format json`) begun in
+/// `cwd`, newest first, at most `limit`.
+fn sessions_in(
+    listed: &str,
+    cwd: &str,
+    limit: usize,
+) -> Result<Vec<NativeConversation>, HarnessError> {
+    let rows: Vec<serde_json::Value> = serde_json::from_str(listed.trim())
+        .map_err(|e| HarnessError::Unavailable(format!("reading its session list: {e}")))?;
+    let at = |r: &serde_json::Value, key: &str| {
+        r.get(key)
+            .and_then(|v| v.as_i64())
+            .map(oxplow_domain::Timestamp::from_unix_ms)
+    };
+    let mut out: Vec<NativeConversation> = rows
+        .iter()
+        .filter(|r| r.get("directory").and_then(|d| d.as_str()) == Some(cwd))
+        .filter_map(|r| {
+            Some(NativeConversation {
+                id: r.get("id")?.as_str()?.to_string(),
+                title: r
+                    .get("title")
+                    .and_then(|t| t.as_str())
+                    .filter(|t| !t.is_empty())
+                    .map(str::to_string),
+                first_prompt: None,
+                started_at: at(r, "created"),
+                updated_at: at(r, "updated"),
+                size_bytes: None,
+                parent: None,
+            })
+        })
+        .collect();
+    out.sort_by_key(|c| std::cmp::Reverse(c.updated_at));
+    out.truncate(limit);
+    Ok(out)
 }
 
 /// The inline opencode config carried per spawn (merged on top of the
@@ -434,6 +500,73 @@ console.log(JSON.stringify({{ posts, prompt, tool }}));
     use super::*;
     use crate::test_launch::{harness, launch_in, project_only};
     use tempfile::TempDir;
+
+    /// Its session list, filtered to the worktree's, newest first.
+    #[test]
+    fn its_conversations_are_the_worktrees_sessions() {
+        let listed = r#"[
+          {"id":"ses_old","title":"Older","updated":1000,"created":900,"directory":"/repo/wt"},
+          {"id":"ses_new","title":"Newer","updated":3000,"created":2900,"directory":"/repo/wt"},
+          {"id":"ses_else","title":"Elsewhere","updated":5000,"created":4900,"directory":"/repo/other"}
+        ]"#;
+        let found = sessions_in(listed, "/repo/wt", 10).unwrap();
+        assert_eq!(
+            found
+                .iter()
+                .map(|c| (c.id.as_str(), c.title.as_deref()))
+                .collect::<Vec<_>>(),
+            [("ses_new", Some("Newer")), ("ses_old", Some("Older"))]
+        );
+        assert_eq!(
+            found[0].started_at,
+            Some(oxplow_domain::Timestamp::from_unix_ms(2900))
+        );
+        assert_eq!(sessions_in(listed, "/repo/wt", 1).unwrap().len(), 1);
+        assert!(sessions_in("not json", "/repo/wt", 1).is_err());
+    }
+
+    /// Through its CLI: a program that prints the list.
+    #[tokio::test]
+    async fn its_conversations_come_from_its_cli() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let bin = tmp.path().join("opencode");
+        fs::write(
+            &bin,
+            "#!/bin/sh\n[ \"$1 $2 $3 $4\" = 'session list --format json' ] || exit 2\necho '[{\"id\":\"ses_a\",\"title\":\"A\",\"updated\":1,\"created\":1,\"directory\":\"/repo/wt\"}]'\n",
+        )
+        .unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        let h = harness("oxplow:opencode", "opencode");
+        let query = oxplow_domain::agent::harness::ConversationQuery {
+            cwd: "/repo/wt".into(),
+            home: None,
+            search_path: vec![tmp.path().to_path_buf()],
+            limit: 10,
+        };
+        let found = h.conversations(&query).await.unwrap();
+        assert_eq!(found[0].id, "ses_a");
+        let none = oxplow_domain::agent::harness::ConversationQuery {
+            search_path: vec![],
+            ..query
+        };
+        assert!(matches!(
+            h.conversations(&none).await,
+            Err(HarnessError::Unavailable(_))
+        ));
+    }
+
+    /// A fork continues the saved session as a new one (`--fork`).
+    #[test]
+    fn a_fork_continues_a_copy() {
+        let h = harness("oxplow:opencode", "opencode");
+        let l = crate::test_launch::launch_fork(h.as_ref(), "sess-w");
+        let (command, _) = crate::test_launch::pty(&l.launch);
+        assert!(
+            command.contains(" -s ") && command.contains("sess-w") && command.contains(" --fork"),
+            "{command}"
+        );
+    }
 
     #[test]
     fn launch_builds_the_command_and_env() {

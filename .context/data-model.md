@@ -470,7 +470,14 @@ One agent slot a person opened on a thread (V32; `ses<n>`, ref
   `updated_at`, `pid` and `last_seen_at` (V49) and `stopped_by_user_at`
   (V50: when the person deliberately stopped it — set by
   `oxplow.agent_session.stop`, cleared by `start` / `start_fresh`; a
-  crash or restart leaves it NULL; while set, no terminal is spawned).
+  crash or restart leaves it NULL; while set, no terminal is spawned),
+  `native_title` (V78: the name its harness gives the bound conversation —
+  Claude's `/rename` or generated title, through a prompt hook's
+  `session_title` — cleared when the slot moves to another, never
+  copied across) and `fork_next` (V78: the next launch forks the bound
+  conversation instead of resuming it). `v_agent_session.display_name`
+  is `title`, else `native_title`, else harness and opened date: the one
+  place a session is named.
 - **Live identity:** `pid` is the OS pid of the process the daemon
   spawned for the session (`HookIngestService::record_agent_pid`, called
   at every spawn, so a restart overwrites it; also stamps `last_seen_at`).
@@ -487,11 +494,18 @@ One agent slot a person opened on a thread (V32; `ses<n>`, ref
   harness process ending (a PTY exit, `/clear`, an ACP close) logs
   `agent.session.ended` and leaves the row open, so its tab keeps the
   ended notice and the resume id.
-- **Resume id:** the hook ingest records the harness's session id on its
-  first sighting (`set_resume_tx`) and forgets it on a `/clear` of exactly
-  that session; a launch never forgets it (only
-  `oxplow.agent_session.start_fresh` does). Forgetting on `/clear` is
-  conditional (`forget_resume_tx`): a newer id that replaced it stays.
+- **Resume id and its bindings (V78):** `resume_session_id` is the open
+  row of `agent_session_binding` (`v_agent_session_binding`: `native_id`,
+  `origin`, `bound_at`, `unbound_at`); `bind_tx` is its one writer — it
+  ends the open binding, opens the next, clears `native_title` and
+  `fork_next`. The hook ingest binds the id a prompt or `SessionStart`
+  names when it differs: `started` (the slot had none), `forked` (a fork
+  launch's new id) or `switched` (a native `/resume`, `/branch`).
+  `oxplow.agent_session.resume_conversation` binds `chosen`. A `/clear` of
+  exactly the bound session and `start_fresh` unbind (`unbind_tx`,
+  conditional on the expected id, so a newer one stays); a launch never
+  does. `bound_elsewhere_tx` keeps one conversation in one open slot per
+  host. V78 backfilled a `started` binding for every bound slot.
 - **Turns and events carry it.** `agent_turn.agent_session_id` (nullable:
   a hook from an agent oxplow didn't start claims none) and the
   `event_log.agent_session_id` anchor (`Anchors.agent_session_id`, named
