@@ -243,7 +243,8 @@ ref's content), `sql.read/query` (`oxplow.sql.query`), `search.read/search`
 (`oxplow.search.find`), `pages.read/open` (`oxplow.page.open`),
 `agent_text.read/skill` (`oxplow.skill.read`), `lenses.read/run`
 (`oxplow.lens.run`: the lens's text, or the `LensRun` with `format: json`),
-`vcs.read/{diff,blame}`, `lsp.read/*` (`oxplow.code.*`),
+`vcs.read/{diff,blame,log,status,branches}` (`oxplow.vcs.log` pages history
+from any revision, past what `v_commit` indexes), `lsp.read/*` (`oxplow.code.*`),
 `changes.read/ensure` (`oxplow.change.ensure`: it writes only the derived
 change cache, so it stays a read), `knowledge.read/{comments,drift}`,
 `extensions.check/{validate,preview,review}` (a review clones the

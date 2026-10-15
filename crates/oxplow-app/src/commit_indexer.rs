@@ -146,7 +146,7 @@ pub async fn index_recent(
                 ws,
                 LogQuery {
                     limit: Some(limit as u32),
-                    all: false,
+                    ..LogQuery::default()
                 },
             )
             .await

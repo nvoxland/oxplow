@@ -17,6 +17,9 @@
 //! 6. **Blame** — each line names the revision that last changed it; in
 //!    the working tree an uncommitted line names none.
 //!
+//! 9. **Log queries** — history starts from any revision, narrows to a
+//!    path, pages after the last id of a page, and refuses a start that
+//!    names nothing.
 //! 8. **Branch deletion** — a merged branch deletes; an unmerged one
 //!    is refused as "not fully merged" unless forced (its commits would
 //!    be lost).
@@ -186,7 +189,7 @@ pub async fn head_resolves_and_the_log_walks_newest_first(p: &dyn Vcs, ws: &Path
             ws,
             LogQuery {
                 limit: Some(2),
-                all: false,
+                ..LogQuery::default()
             },
         )
         .await
@@ -201,6 +204,46 @@ pub async fn head_resolves_and_the_log_walks_newest_first(p: &dyn Vcs, ws: &Path
     assert_eq!(detail.files.len(), 1);
     assert_eq!(detail.files[0].path, "a.txt");
     assert_eq!(detail.files[0].status, FileStatus::Modified);
+}
+
+/// 9. History starts from any revision, narrows to a path, resumes after a
+///    page's last id and refuses an unknown start.
+pub async fn the_log_starts_anywhere_narrows_to_a_path_and_pages(p: &dyn Vcs, ws: &Path) {
+    write(ws, "a.txt", "1\n");
+    let first = commit(p, ws, "first").await;
+    write(ws, "b.txt", "1\n");
+    let second = commit(p, ws, "second").await;
+    write(ws, "a.txt", "2\n");
+    let third = commit(p, ws, "third").await;
+    let ids = |log: Vec<oxplow_domain::vcs::RevisionInfo>| {
+        log.into_iter().map(|r| r.id).collect::<Vec<_>>()
+    };
+    let from_second = LogQuery {
+        from: Some(second.clone()),
+        ..LogQuery::default()
+    };
+    let walked = ids(p.log(ws, from_second).await.unwrap());
+    assert_eq!(walked[..2], [second.clone(), first.clone()]);
+    assert!(!walked.contains(&third), "later history is left out");
+    let only_a = LogQuery {
+        path: Some("a.txt".into()),
+        ..LogQuery::default()
+    };
+    assert_eq!(
+        ids(p.log(ws, only_a).await.unwrap()),
+        vec![third.clone(), first.clone()]
+    );
+    let after_third = LogQuery {
+        after: Some(third.clone()),
+        limit: Some(1),
+        ..LogQuery::default()
+    };
+    assert_eq!(ids(p.log(ws, after_third).await.unwrap()), vec![second]);
+    let unknown = LogQuery {
+        from: Some("no-such-rev".into()),
+        ..LogQuery::default()
+    };
+    assert!(p.log(ws, unknown).await.is_err());
 }
 
 /// 6. Blame names the revision that last changed each line — at a
@@ -324,6 +367,12 @@ mod tests {
     async fn git_branches_meet_at_their_merge_base() {
         let ws = workspace();
         branches_meet_at_their_merge_base(&GitProvider, ws.path()).await;
+    }
+
+    #[tokio::test]
+    async fn git_the_log_starts_anywhere_narrows_to_a_path_and_pages() {
+        let ws = workspace();
+        the_log_starts_anywhere_narrows_to_a_path_and_pages(&GitProvider, ws.path()).await;
     }
 
     #[tokio::test]

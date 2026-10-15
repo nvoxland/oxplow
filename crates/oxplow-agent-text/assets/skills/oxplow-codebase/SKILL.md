@@ -27,6 +27,8 @@ every stream. `v_model_column` documents each column.
   Who changes a file most: the same join, `GROUP BY c.author`. Who last
   changed each line: the `vcs_blame { path, revision? }` tool (`working`,
   `snap:<id>` or `git:<rev>`; an uncommitted line names no commit).
+  History past the index (any revision, one path, paged) is the
+  `oxplow.vcs.log` command; `v_commit` is for joins.
 - **`v_branch`** — local and remote-tracking branches (`name`, `kind`,
   `head_sha`, `is_default`, and the `stream_id` that has it checked
   out); **`v_tag`** — tags and their commits.

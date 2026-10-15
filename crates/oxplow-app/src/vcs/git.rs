@@ -401,11 +401,19 @@ impl Vcs for GitProvider {
         let ws = ws.to_path_buf();
         blocking(move || {
             repo_check(&ws)?;
+            // A start that names nothing is an error, not an empty history.
+            if let (false, Some(from)) = (query.all, &query.from) {
+                oxplow_git::resolve_revision(&ws, from)
+                    .map_err(|_| VcsError::UnknownRevision(from.clone()))?;
+            }
             let log = oxplow_git::get_git_log(
                 &ws,
                 oxplow_git::GitLogOptions {
                     limit: query.limit.map(|n| n as usize),
                     all: query.all,
+                    from: query.from,
+                    path: query.path,
+                    after: query.after,
                 },
             );
             Ok(log.commits.into_iter().map(info).collect())

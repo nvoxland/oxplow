@@ -129,17 +129,16 @@ async fn provider_pair(
     }
 }
 
-/// The stream's history from its head, newest first — or every branch's
-/// with `all`. (The UI reads history from `v_commit`; this is the live
-/// walk for agents.)
+/// The stream's history from `query.from` (its head by default), newest
+/// first — or every branch's with `all`. (The UI reads history from
+/// `v_commit`; this is the live walk for agents.)
 pub async fn log(
     svc: &Services,
     stream_id: Option<&str>,
-    limit: Option<u32>,
-    all: bool,
+    query: LogQuery,
 ) -> Result<Vec<RevisionInfo>, DomainError> {
     let ws = svc.worktrees.resolve(stream_id).await.into_local_path();
-    Ok(svc.vcs.log(&ws, LogQuery { limit, all }).await?)
+    Ok(svc.vcs.log(&ws, query).await?)
 }
 
 pub async fn branches(svc: &Services, stream_id: Option<&str>) -> Result<Vec<Branch>, DomainError> {

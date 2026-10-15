@@ -869,6 +869,12 @@ commands:
     op: blame
     invokers: { human: true, agent: true, lens: true }
     example: {"path": "src/lib.rs"}
+  - name: vcs.branches
+    summary: "A stream's branches: name, remote, head revision and whether it is the default."
+    scope: vcs.read
+    op: branches
+    invokers: { human: true, agent: true, lens: true }
+    example: {}
   - name: vcs.diff
     summary: "What changed between two versions of the tree. Per file with line counts; versions are `working`, `snap:<id>` or `git:<rev>`; `from` absent diffs against the empty tree. `since_fork: true` compares `to` with where it forked from `from` — a branch's own changes against `git:main`."
     scope: vcs.read
@@ -876,6 +882,18 @@ commands:
     invokers: { human: true, agent: true, lens: true }
     example: {"from": "git:main", "to": "working", "since_fork": true}
   # vcs.remote
+  - name: vcs.log
+    summary: "A stream's history from a revision, newest first, paged, with no horizon and any branch: `from` (a branch, tag or id; the head by default), `path` (only revisions that changed it), `limit` (50, at most 500), `cursor` (the previous page's `next_cursor`). Past what `v_commit` indexes, this is the way."
+    scope: vcs.read
+    op: log
+    invokers: { human: true, agent: true, lens: true }
+    example: {"from": "main", "path": "src/lib.rs", "limit": 20}
+  - name: vcs.status
+    summary: "A stream's changed files against its head (added, modified, deleted, untracked, conflicted) and the operation in progress, if one is."
+    scope: vcs.read
+    op: status
+    invokers: { human: true, agent: true, lens: true }
+    example: {}
   - name: vcs.fetch
     summary: "Fetch from a remote."
     scope: vcs.remote

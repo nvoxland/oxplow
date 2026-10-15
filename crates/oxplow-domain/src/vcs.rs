@@ -50,6 +50,14 @@ pub struct LogQuery {
     pub limit: Option<u32>,
     /// Every branch's history, not only the head's.
     pub all: bool,
+    /// Where the walk starts: any revision (a branch, a tag, an id); the
+    /// head when absent. Ignored with `all`.
+    pub from: Option<String>,
+    /// Only the revisions that changed this workspace-relative path.
+    pub path: Option<String>,
+    /// Resume after this revision: the walk up to and including it is
+    /// skipped (the last id of the previous page).
+    pub after: Option<String>,
 }
 
 /// One revision, as a list shows it.

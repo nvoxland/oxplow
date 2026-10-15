@@ -48,8 +48,16 @@ pub struct GitLogResult {
 #[derive(Debug, Clone, Default)]
 pub struct GitLogOptions {
     pub limit: Option<usize>,
-    /// When true, walks every ref (`--all`); otherwise walks HEAD.
+    /// When true, walks every ref (`--all`); otherwise walks `from`, else HEAD.
     pub all: bool,
+    /// Where the walk starts: any revision (a branch, a tag, a sha);
+    /// HEAD when absent. Ignored with `all`.
+    pub from: Option<String>,
+    /// Only the commits that changed this repo-relative path.
+    pub path: Option<String>,
+    /// Resume after this commit: the walk's commits up to and including it
+    /// are skipped (the last sha of the previous page).
+    pub after: Option<String>,
 }
 
 pub fn get_git_log(repo_path: &Path, options: GitLogOptions) -> GitLogResult {
@@ -67,17 +75,42 @@ pub fn get_git_log(repo_path: &Path, options: GitLogOptions) -> GitLogResult {
     };
     if options.all {
         let _ = walk.push_glob("refs/*");
+    } else if let Some(from) = &options.from {
+        let Some(oid) = repo
+            .revparse_single(from)
+            .ok()
+            .and_then(|o| o.peel_to_commit().ok())
+            .map(|c| c.id())
+        else {
+            return empty();
+        };
+        if walk.push(oid).is_err() {
+            return empty();
+        }
     } else if walk.push_head().is_err() {
         return empty();
     }
     let _ = walk.set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL);
     let limit = options.limit.unwrap_or(200);
 
+    let mut skipping = options.after.is_some();
     let mut commits = Vec::with_capacity(limit);
-    for oid in walk.flatten().take(limit) {
+    for oid in walk.flatten() {
+        if commits.len() >= limit {
+            break;
+        }
+        if skipping {
+            skipping = options.after.as_deref() != Some(oid.to_string().as_str());
+            continue;
+        }
         let Ok(commit) = repo.find_commit(oid) else {
             continue;
         };
+        if let Some(path) = &options.path {
+            if !touches(&repo, &commit, path) {
+                continue;
+            }
+        }
         let author = commit.author();
         commits.push(GitLogCommit {
             sha: oid.to_string(),
@@ -95,6 +128,20 @@ pub fn get_git_log(repo_path: &Path, options: GitLogOptions) -> GitLogResult {
         branch_heads,
         tags,
     }
+}
+
+/// Whether `commit` changed `path` against its first parent (a root
+/// commit: whether it has the path).
+fn touches(repo: &git2::Repository, commit: &git2::Commit, path: &str) -> bool {
+    let Ok(tree) = commit.tree() else {
+        return false;
+    };
+    let parent = commit.parent(0).ok().and_then(|p| p.tree().ok());
+    let mut opts = git2::DiffOptions::new();
+    opts.pathspec(path);
+    repo.diff_tree_to_tree(parent.as_ref(), Some(&tree), Some(&mut opts))
+        .map(|d| d.deltas().len() > 0)
+        .unwrap_or(false)
 }
 
 /// Every tag with the commit it points at (annotated tags peeled),
@@ -341,6 +388,61 @@ mod tests {
             },
         );
         assert_eq!(result.commits.len(), 2);
+    }
+
+    /// History starts from any revision, is filtered to a path, and
+    /// resumes after the last commit of a page, with no horizon.
+    #[test]
+    fn log_starts_anywhere_filters_by_path_and_pages_by_the_last_sha() {
+        let dir = make_repo_with_commits(5);
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        let mid = head.parent(0).unwrap().parent(0).unwrap();
+        repo.branch("old", &mid, false).unwrap();
+        let from_old = get_git_log(
+            dir.path(),
+            GitLogOptions {
+                from: Some("old".into()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(from_old.commits.len(), 3);
+        assert_eq!(from_old.commits[0].subject, "commit 2");
+
+        let touching = get_git_log(
+            dir.path(),
+            GitLogOptions {
+                path: Some("f1.txt".into()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(touching.commits.len(), 1);
+        assert_eq!(touching.commits[0].subject, "commit 1");
+
+        let page = |after: Option<String>| {
+            get_git_log(
+                dir.path(),
+                GitLogOptions {
+                    limit: Some(2),
+                    after,
+                    ..Default::default()
+                },
+            )
+            .commits
+        };
+        let first = page(None);
+        let second = page(Some(first[1].sha.clone()));
+        let third = page(Some(second[1].sha.clone()));
+        let subjects: Vec<&str> = first
+            .iter()
+            .chain(&second)
+            .chain(&third)
+            .map(|c| c.subject.as_str())
+            .collect();
+        assert_eq!(
+            subjects,
+            ["commit 4", "commit 3", "commit 2", "commit 1", "commit 0"]
+        );
     }
 
     #[test]

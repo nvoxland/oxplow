@@ -168,6 +168,22 @@ snapshot head is scanned too. (The wiki's old `@<rev>` link syntax went
 in P5.C3: a link names a file; its version is the edge's pin —
 [knowledge.md](./knowledge.md).)
 
+## The agent's VCS reads
+
+An agent reads the repository through the provider, as `vcs.read`
+operations declared as commands (`oxplow.vcs.*`, run with `run_command`):
+`log` (history from `from` — a branch, tag or id, the head by default —
+optionally narrowed to a `path`, newest first, paged: `limit` 50 and at
+most 500, `cursor` the previous page's `next_cursor`; the walk starts at
+the revision and skips through the cursor, so there is no horizon and any
+branch works), `status` (the changed files against the head, plus the
+operation in progress), `branches`, `diff` and `blame`. `LogQuery` carries
+`from`, `path` and `after` for it, so any provider answers the same
+query (`vcs_conformance` "Log queries"). The stream is the caller's own
+unless the call names one; a named stream that doesn't exist is refused
+(`resolve_strict`), never read from the primary. The models keep the
+indexed history (`v_commit`) for joins.
+
 ## The stream's reads (P5.B4)
 
 `oxplow_app::vcs::reads` is what the UI and agent tools call: `head`
@@ -176,7 +192,7 @@ in P5.C3: a link names a file; its version is the edge's pin —
 `merge_base(a, b)` — each routed by stream and naming versions as
 `Revision`s (a snapshot answers with the revision its tree equals). RPCs
 `vcs_head`, `vcs_status`, `vcs_blame`, `vcs_revision`, `vcs_merge_base`
-(`vcs_blame` is also on MCP; an agent runs `git status` in its worktree) replaced `get_repo_conflict_state`,
+replaced `get_repo_conflict_state`,
 `get_workspace_status_summary`, `git_blame`, `local_blame`,
 `get_commit_detail` and `get_branch_changes`; MCP `git_diff` became
 `diff { from?, to, since_fork }`. On the desktop: the changed-files lists

@@ -54,7 +54,12 @@ pub async fn vcs_log(
     limit: Option<u32>,
     all: bool,
 ) -> Result<Vec<RevisionInfo>, IpcError> {
-    Ok(reads::log(svc, stream_id.as_deref(), limit, all).await?)
+    let query = oxplow_domain::vcs::LogQuery {
+        limit,
+        all,
+        ..Default::default()
+    };
+    Ok(reads::log(svc, stream_id.as_deref(), query).await?)
 }
 
 pub async fn vcs_branches(
