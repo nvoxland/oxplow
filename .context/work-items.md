@@ -123,7 +123,7 @@ name, a built `work_item:oxplow:` ref or `tsk` id parsing in desktop code.
 - **`readWorkList(thread | null)`** reads a thread's list or the backlog
   in list order (`rank`, then `created_at`) and buckets it into a
   **`WorkList`** by state (an item with a child on the list is an epic;
-  done and canceled share `done`), with the thread's followups.
+  done and canceled share `done`).
   `readWorkItem`, `readWorkItemsByRef` and `readWorkItems` (the Board's
   scopes: a thread, the backlog, everything) read the rest;
   `readItemEfforts(ref)` an item's activity.

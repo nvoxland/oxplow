@@ -26,7 +26,7 @@ command):
 |---|---|
 | select a thread, switch stream, report the open page | UI selection pointers, not project facts |
 | page visits, usage recording, forgetting a page | implicit navigation telemetry, not an intent: an audit row per tab switch would flood `command_audit`. Their views re-read `v_page_visit` / `v_usage_event` on `ModelsChanged` (P8.A10) |
-| follow-ups, background-task progress | in memory and transient |
+| background-task progress | in memory and transient |
 | hook ingest, ACP prompt / cancel / permission answers, terminal input | agent-session activity, born as `agent.*` events ([data-model.md](./data-model.md) "event_log"); oxplow never synthesizes agent input |
 | terminal / ACP session open and close, LSP restart and requests | process control and protocol passthrough: an agent session's *process*. Its slot — opening, renaming, closing an `agent_session` — is a command (`oxplow.agent_session.*`), and closing it stops the process |
 | the left-nav panel layout (`set_panel_layout`) | a UI layout pointer, like the selection pointers |
@@ -70,8 +70,7 @@ push each UI event (its `EMITTERS` table), and
 `every_ui_event_has_an_emitter` fails on a variant with none (a listener
 no one wakes — tsk789). What's left there is a signal no model carries —
 the config swap, agent status, an orphaned stream
-(`StreamOrphaned`), background tasks, a thread's in-memory follow-ups
-(`FollowupsChanged` bridged from `FollowupStore` like background tasks), the LSP server list, a snapshot take, VCS refs, the
+(`StreamOrphaned`), background tasks, the LSP server list, a snapshot take, VCS refs, the
 workspace, a provider sign-in finishing (`CredentialChanged`: the token
 is in the keychain, which no model reads); every other view re-reads a model on `ModelsChanged`
 (P8.A2–A10).
@@ -464,48 +463,10 @@ IPC methods (all go through `ipc-contract.ts` → `main.ts` →
 UI subscribe helper: `subscribeSnapshotEvents(streamId, fn)` filters
 `file-snapshot.created` by stream and unpacks the payload.
 
-## Transient agent follow-ups
-
-`FollowupStore` (`crates/oxplow-app/src/followup.rs`) is a pure in-memory
-map keyed by `threadId`. It backs the plan pane's follow-up reminders
-(IPC `add_followup`, `remove_followup`, `list_followups`); an agent has no
-tool for them (a follow-up is a work item or a thread note). No
-SQLite involvement, no migration, lost on runtime restart.
-
-Surfaces:
-
-- The store exposes `add/remove/list/clear/subscribe`. The runtime
-  re-publishes its `subscribe` events as `followup.changed`
-  (`{ threadId, kind: "added" | "removed" | "cleared", id }`) on the
-  EventBus.
-- `workItems.readWorkList(threadId)` (the Plan's read) buckets the
-  thread's `v_work_item` rows and adds its current followups
-  (the `list_followups` IPC op) in the `followups` field, so PlanPane /
-  TaskGroupList see them alongside the list's items.
-- IPC: only one new method — `removeFollowup(threadId, id)` — used by
-  the ✕ dismiss button on each follow-up row. Adds happen
-  only through the `add_followup` IPC op, which no agent tool mirrors any more
-  (an agent's follow-up is a work item or a thread note); the UI never adds.
-- `useBackendSubscriptions` re-reads the affected thread's work on
-  `followup.changed`, and every loaded thread's (and the backlog's) when
-  a model its reads read changes (`readsChanged` over the lists' `reads`:
-  `v_work_item`, `v_work_item_comment`, …).
-
-Rendering: `WorkGroupList.tsx` renders each follow-up as an italic
-muted "↳ follow-up: <note>" line at the very top of the To Do section
-(only on the root group, never on epic-children panes), with a single
-✕ dismiss button. No status icon, no drag, no context menu.
-
-When to use a follow-up vs. a task: see the agent skill at
-`.oxplow/runtime/claude-plugin/skills/oxplow-runtime/SKILL.md`. Rule:
-if the deferred ask warrants a row the user reviews/accepts, file a
-task; if it's just a within-conversation bookmark, add a follow-up
-and remove it in the same turn you handle it. Never carry both.
-
 ## Background tasks (long-running op progress)
 
 `BackgroundTaskStore` (`crates/oxplow-app/src/background_task.rs`) is
-another in-memory store, modeled on `FollowupStore`. It surfaces "what
+an in-memory store. It surfaces "what
 is the runtime doing right now" rows in the bottom-bar
 `BackgroundTaskIndicator` (`apps/desktop/src/components/`). No SQLite, no
 migration, lost on restart. Done/failed rows linger for a 4s grace

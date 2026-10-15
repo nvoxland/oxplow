@@ -122,7 +122,6 @@ pub mod extension_state;
 pub mod extensions;
 pub mod external_process;
 pub mod file_ref_version;
-pub mod followup;
 #[cfg(test)]
 mod foundation_collectors_tests;
 pub mod grants;
@@ -238,7 +237,6 @@ pub use background_task::{
     BackgroundTask, BackgroundTaskChange, BackgroundTaskChangeKind, BackgroundTaskKind,
     BackgroundTaskStatus, BackgroundTaskStore, StartInput, UpdateInput,
 };
-pub use followup::{Followup, FollowupStore};
 // Re-export the effort store trait + row type so downstream crates that
 // hold a `Services` (e.g. oxplow-control-plane, which doesn't depend on
 // oxplow-db directly) can call the trait methods its public
@@ -705,7 +703,6 @@ pub struct Services {
     pub comment_store: Arc<SqliteCommentStore>,
     pub hook_ingest: HookIngestService,
     pub background_tasks: BackgroundTaskStore,
-    pub followups: FollowupStore,
     pub pty: oxplow_pty::PtyManager,
     pub blobs: blob_store::BlobStore,
     /// Reads a captured file's bytes from whichever store holds them.
@@ -1273,8 +1270,6 @@ impl Services {
         // through it (tsk48).
         let background_tasks = BackgroundTaskStore::new();
         bridge_background_task_events(&background_tasks, &event_bus);
-        let followups = FollowupStore::new();
-        bridge_followup_events(&followups, &event_bus);
 
         // The metric runner (fact collectors → substrate). Holds leaf Arcs
         // only (never `Arc<Services>`); the `collector.triggers` consumer
@@ -1964,7 +1959,6 @@ impl Services {
             comment_store,
             hook_ingest,
             background_tasks,
-            followups,
             pty,
             blobs,
             snapshot_content,
@@ -2138,24 +2132,6 @@ impl Services {
 /// the row and decides terminal vs non-terminal from `status`) is
 /// sufficient. Without this bridge the bottom-bar indicator stays
 /// silent and `awaitBackgroundTask` never resolves.
-/// A thread's in-memory follow-ups changed: the renderer re-reads that
-/// thread's (tsk789).
-fn bridge_followup_events(store: &FollowupStore, bus: &EventBus) {
-    let mut rx = store.subscribe();
-    let bus = bus.clone();
-    tokio::spawn(async move {
-        loop {
-            match rx.recv().await {
-                Ok(thread_id) => bus.emit(OxplowEvent::FollowupsChanged { thread_id }),
-                // Missed some: which threads isn't known, so nothing to
-                // name; the next change reaches its thread.
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            }
-        }
-    });
-}
-
 fn bridge_background_task_events(store: &BackgroundTaskStore, bus: &EventBus) {
     let mut rx = store.subscribe();
     let bus = bus.clone();
@@ -2180,25 +2156,6 @@ fn bridge_background_task_events(store: &BackgroundTaskStore, bus: &EventBus) {
 mod tests {
     use super::*;
     use tempfile::tempdir;
-
-    /// tsk789: a follow-up added or removed reaches the renderer as
-    /// `FollowupsChanged` for its thread.
-    #[tokio::test]
-    async fn a_followup_change_reaches_the_bus() {
-        let (store, bus) = (FollowupStore::new(), EventBus::new());
-        let mut ui = bus.subscribe_ui();
-        bridge_followup_events(&store, &bus);
-        let thread = oxplow_domain::ThreadId::new(4);
-        store.add(thread, "later".into());
-        let got = tokio::time::timeout(std::time::Duration::from_secs(2), ui.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(
-            matches!(got, OxplowEvent::FollowupsChanged { thread_id } if thread_id == thread),
-            "{got:?}"
-        );
-    }
 
     #[tokio::test]
     async fn boot_creates_state_dir() {

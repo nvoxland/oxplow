@@ -45,7 +45,6 @@ export function mergeThreadWork(lists: WorkList[]): WorkList {
   return bucketWorkList(
     "",
     lists.flatMap((l) => l.all),
-    lists.flatMap((l) => l.followups),
     unionReads(lists.map((l) => l.reads)),
   );
 }

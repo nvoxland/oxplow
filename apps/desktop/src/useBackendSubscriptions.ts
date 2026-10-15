@@ -146,8 +146,6 @@ export function useBackendSubscriptions(
     reloadAll();
     const unsubscribe = subscribeOxplowEvents((event) => {
       if (readsChanged(event as Record<string, unknown>, allReads())) reloadAll();
-      // Followups are in-memory, not a model: their own event.
-      else if (event.kind === "followupsChanged") void reloadThread(event.threadId as string);
     });
     // Re-hydrate after a remote-daemon WS reconnect (events missed while
     // the socket was down).

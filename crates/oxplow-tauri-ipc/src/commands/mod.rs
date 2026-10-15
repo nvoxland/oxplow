@@ -10,7 +10,6 @@ pub mod background;
 pub mod branch;
 pub mod config;
 pub mod effort;
-pub mod followup;
 pub mod generated;
 pub mod hooks;
 pub mod launch;

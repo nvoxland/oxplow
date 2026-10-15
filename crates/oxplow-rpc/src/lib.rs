@@ -237,10 +237,6 @@ macro_rules! oxplow_command_table {
                 command_open_after => $crate::commands::bus::command_open_after { id: String, result: ::oxplow_domain::Json } -> Option<String>,
                 undo_command => $crate::commands::bus::undo_command { audit_id: i64, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 decide_proposal => $crate::commands::bus::decide_proposal { proposal: i64, approve: bool } -> Option<::oxplow_domain::CommandOutcome>,
-                // followup
-                list_followups => $crate::commands::followup::list_followups { thread_id: ::oxplow_domain::ThreadId } -> Vec<::oxplow_app::Followup>,
-                add_followup => $crate::commands::followup::add_followup { thread_id: ::oxplow_domain::ThreadId, body: String } -> ::oxplow_app::Followup,
-                remove_followup => $crate::commands::followup::remove_followup { id: String } -> (),
                 // hooks
                 ingest_hook_event => $crate::commands::hooks::ingest_hook_event { envelope: ::oxplow_app::HookEnvelope } -> (),
                 list_agent_events => $crate::commands::hooks::list_agent_events { thread_id: Option<::oxplow_domain::ThreadId>, stream_id: Option<::oxplow_domain::StreamId>, limit: Option<usize> } -> Vec<::oxplow_domain::StoredEvent>,

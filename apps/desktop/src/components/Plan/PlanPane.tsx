@@ -15,7 +15,6 @@ import {
 import {
   listOpenAgentTurns,
   type OpenAgentTurn,
-  removeFollowup,
   subscribeAgentTurns,
 } from "../../api.js";
 import { decodeWorkItemDrag, dragHasWorkItems } from "../../agent-context-dnd.js";
@@ -576,10 +575,6 @@ export function PlanPane({
                 isSectionCollapsed={isSectionCollapsed}
                 onToggleSectionCollapsed={onToggleSectionCollapsed}
                 openTurns={mode === "thread" && !group.epic ? openTurns : []}
-                followups={isRootThread && !group.epic ? threadWork?.followups ?? [] : []}
-                onDismissFollowup={isRootThread && threadId
-                  ? (id) => runWithError("Dismiss follow-up", removeFollowup(threadId, id))
-                  : undefined}
                 visibleSections={visibleSections}
                 sectionItemLimit={sectionItemLimit}
               />

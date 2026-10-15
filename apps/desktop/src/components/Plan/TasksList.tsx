@@ -24,7 +24,7 @@ export function TasksList(props: Omit<PlanPaneProps, "onlyStates" | "excludeStat
     const matches = (i: WorkList["all"][number]) =>
       chosen.every(([name, values]) => values.includes(String(i.native[name] ?? "")));
     const parents = new Set(list.all.filter(matches).map((i) => i.parentRef).filter((p): p is string => p !== null));
-    return bucketWorkList(list.threadId, list.all.filter((i) => matches(i) || parents.has(i.ref)), list.followups, list.reads);
+    return bucketWorkList(list.threadId, list.all.filter((i) => matches(i) || parents.has(i.ref)), list.reads);
   }, [props.threadWork, props.fields, filter]);
 
   // visibleSections in props takes precedence — Tasks page passes

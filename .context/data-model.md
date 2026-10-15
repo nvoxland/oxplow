@@ -273,8 +273,7 @@ the same with no reason of their own.
 Every externally-visible entity id is a SQLite **autoincrement INTEGER**
 rendered with a fixed **3-letter type prefix** at the application boundary,
 e.g. `str5` (stream), `thr21` (thread), `tsk38` (task), `eff7` (effort),
-`not3` (note), `trn9` (agent-turn), `ses4` (agent session), `cmt2` (comment),
-`fup1` (follow-up).
+`not3` (note), `trn9` (agent-turn), `ses4` (agent session), `cmt2` (comment).
 The prefix lives only in Rust (`Display`/serde) and in the TypeScript
 bindings (each id type is a `string`); **DB columns and the FKs that point
 at them are plain `INTEGER`**. The single source of truth is

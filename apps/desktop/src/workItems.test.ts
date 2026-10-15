@@ -117,7 +117,6 @@ test("a work list: an item with a child is an epic, the rest by state", () => {
   const list = bucketWorkList(
     "thr2",
     [item("e", "todo"), item("c", "in_progress", "e"), item("b", "blocked"), item("d", "done"), item("x", "canceled"), item("n", "todo")],
-    [],
     { models: [], tables: [], measures: [] },
   );
   expect(list.epics.map((i) => i.ref)).toEqual(["e"]);

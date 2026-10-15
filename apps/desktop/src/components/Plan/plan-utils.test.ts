@@ -35,7 +35,7 @@ function item(ref: string, state: CanonicalState, extra: Partial<WorkItem> = {})
   };
 }
 
-const list = (items: WorkItem[]) => bucketWorkList("thr1", items, [], NO_READS);
+const list = (items: WorkItem[]) => bucketWorkList("thr1", items, NO_READS);
 
 test("classifyState buckets each state into exactly one section", () => {
   expect(classifyState("in_progress")).toBe("inProgress");
@@ -98,7 +98,6 @@ test("openBacklogCount counts ready + blocked + in progress, not done", () => {
   const backlog = bucketWorkList(
     null,
     [item("r1", "todo"), item("r2", "todo"), item("b1", "blocked"), item("p1", "in_progress"), item("d1", "done")],
-    [],
     NO_READS,
   );
   expect(openBacklogCount(backlog)).toBe(4);

@@ -66,8 +66,6 @@ pub enum WorkspaceChangeKind {
     rename_all_fields = "camelCase"
 )]
 pub enum OxplowEvent {
-    /// Followups for a thread.
-    FollowupsChanged { thread_id: ThreadId },
     /// Background task progress.
     BackgroundTasksChanged,
     /// The set of known language servers changed (Mason package
