@@ -1,6 +1,6 @@
 ---
 name: oxplow-collection
-description: Standing rules for oxplow's effort-scoped collection (which tests ran + diff coverage). Loads when running tests, when the user asks about test coverage or "what tests ran", and on /oxplow:configure. Keeps the runs you make visible to oxplow without bit-rot after a one-time configure.
+description: Standing rules for oxplow's effort-scoped collection (which tests ran + diff coverage). Loads when running tests, when the user asks about test coverage or "what tests ran", and on oxplow's `configure` slash command. Keeps the runs you make visible to oxplow without bit-rot after a one-time configure.
 ---
 
 # Collection — keep coverage flowing per effort
@@ -54,15 +54,15 @@ collectors in the project's own extension, `oxplow/extensions/project/extension.
 ## When the data is missing
 
 - **A stack isn't emitting a report** (no report collector reads it, or
-  the project has none yet) → run `/oxplow:configure`, which wires
+  the project has none yet) → run oxplow's `configure` slash command, which wires
   **every** test stack in the repo.
 - **A report was written outside a run oxplow saw** → run its collector
   by hand: `oxplow.collector.sync { collector: "collector:project/<id>" }`
-  (`mcp__oxplow__run_command`); it reads the report now and records it
+  (`run_command`); it reads the report now and records it
   in your thread, through the same deterministic parse.
 
 Do not file a follow-up to "add coverage later" — either it's
-configured and automatic, or you run `/oxplow:configure` now.
+configured and automatic, or you run oxplow's `configure` slash command now.
 
 ## A report format oxplow doesn't parse yet
 

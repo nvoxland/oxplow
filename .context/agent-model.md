@@ -228,7 +228,9 @@ once: the OTLP route asks each registered harness once per export.
 A built-in's declaration names the optional verbs it has as features —
 `transcript` (`turns`), `telemetry` (`token_readings`), `runtime_text`
 (`refresh_text`) and `subagents` (`prompt`, `subagent`); Claude has all
-four, Codex all but `transcript`, opencode `runtime_text`.
+four, Codex all but `transcript`, opencode `runtime_text` and `subagents`.
+Two more say which hook answers reach its agent, `prompt_context` and
+`tool_context` ("What every agent is told").
 
 **Resuming.** `shared::resume_or_fresh` builds the resume: a session the
 harness resumes is `exec`'d directly (`Resume::Saved`), so its process is the agent's and its exit ends the PTY. There is no
@@ -856,7 +858,7 @@ vocabulary (`tool_use`), as any harness's names do:
 - `acp/human_prompt.rs` `compose` is the only way to make a `HumanPrompt`, and `wire::AgentConn::prompt` accepts nothing else.
 - The session calls it only for `Command::Prompt`, which only `AcpManager::submit_human_prompt` sends.
 - A second prompt while a turn runs is `TurnInFlight`, never queued.
-- Session context, advisories, decisions and post-tool nudges ride the person's prompt as a visible leading block (shown behind a disclosure on the user item).
+- Session context, advisories, decisions and the nudges the turn's tool calls left ride the person's prompt as a visible leading block (shown behind a disclosure on the user item). An ACP agent declares `prompt_context` and not `tool_context`: its tool calls are recorded, and what they leave waits in the nudge store for that prompt ("What every agent is told").
 - `acp/guard_tests.rs` scans the Rust source so that:
   - `PromptRequest` appears only in `wire.rs`;
   - no raw `"session/prompt"` appears outside the fake;
@@ -1569,7 +1571,9 @@ restarts. **Every advisory hit is a nudge**, whatever its trigger: prompt
 and turn-end hits are persisted too, and `AgentContext::prompt_context`
 takes the thread's undelivered nudges like a tool call does — so a hint a
 turn's end raised reaches the agent at the next prompt (or tool call),
-stamped `delivered_at` when it does.
+stamped `delivered_at` when it does. Nothing is taken for a session whose
+harness lacks the hook's channel (`prompt_context`, `tool_context`): its
+nudges stay undelivered rather than being stamped and lost.
 
 These are surfaced UI-side only (the agent never reads them back): an
 "Agent Nudges" H2 section on the task page (after each effort's Metrics)
@@ -1752,145 +1756,70 @@ oxplow hooks, and are **not suppressible** from the Claude Code plugin side:
   harness-injected on IDE focus, not a oxplow hook. Revisit if Claude
   Code adds a customization hook.
 
-## Session-context injection
+## What every agent is told (the text contract)
 
-The thread id always resolves to *something* at agent-spawn time: the
-spawn path (`open_terminal_session`) calls
-`ThreadService::selected_or_active(&stream_id)`, which falls back from
-the user's explicit selection → the writer (active) thread → the first
-queued thread. This guarantees `OXPLOW_THREAD_ID` and the
-visible `<session-context>` note's thread line are populated for any
-stream that has at least one thread (boot seeds a thread, running the project's default agent, for
-every primary stream, so this is always true in practice).
+Every agent session, whatever its harness, is told the same things;
+a harness only delivers them. The pieces:
 
-On every `UserPromptSubmit`, the runtime builds a fresh
-`<session-context>` note (a short Markdown status card explaining the
-current stream, worktree, branch, thread, and access role) and returns
-it as `hookSpecificOutput.additionalContext` so the agent stays pointed
-at the right ids mid-session. The runtime caches the last-emitted block per
-agent session id (`last_context_by_session_id`) and **skips emission
-when the candidate block is byte-identical to what was already sent** —
-re-sending the same string is pure overhead since the agent's prompt
-cache still holds the prior value. The first turn on a session, and any
-turn after the block's contents change (thread flip, writer promotion,
-title edit), emits normally. `SessionStart` clears the baseline so
-startup, resume, clear, and compact receive one fresh note. If a project
-wants to disable injection entirely, set `injectSessionContext: false`
-in `.oxplow/project.yaml` — default is `true`.
+| Piece | What | Where it comes from |
+|---|---|---|
+| Preamble | How to work in oxplow: nothing to file, end with the question, reading errors, the references oxplow puts in a prompt (`@<path>`, `[oxplow ref …]`, `[oxplow work_item: …]`, `[oxplow lens …]`) | `oxplow_agent_text::WORKING_IN_OXPLOW` (`assets/working-in-oxplow.md`, ≤ 1 KB) |
+| Launch prompt | The preamble, then thread and stream custom prompts, `agentPromptAppend`, the testing hint; the session context only for a harness without `prompt_context`; the skill index only for one without `runtime_text` | `agent_prompt::assemble_system_prompt(config, stream, thread, harness, skills)`, given the session's declared harness |
+| Skills, slash commands | Core's and the active extensions' | `AgentText`; a harness with `runtime_text` writes them where its agent discovers them, one without is given the index and `get_skill` |
+| Session context | Stream, worktree, branch, thread, access, the writer's agent, a role change | Prompt-time context, below |
+| Decisions | The open effort's recorded ones | Prompt-time context |
+| Nudges | Hints, the collection nudge | Prompt- or tool-time context |
+| Server instructions | What oxplow knows, writes are commands, answer with `show_lens` | MCP `get_info` |
 
-### Writer thread's agent
+**Two context channels, declared.** What oxplow returns to a hook reaches
+the agent only if its harness carries it there. A harness declares the
+channels it has as `agent_harness` features: `prompt_context` (context
+returned to a prompt hook reaches the agent with that prompt) and
+`tool_context` (context returned to a tool hook reaches it before its
+next step). `AgentContext::prompt_context` / `post_tool_context` take the
+session's harness and give nothing for a channel it lacks
+(`agent_context::carries`), so nothing meant for its agent is taken:
+nudges wait in the store. Claude Code and Codex declare both, an ACP
+agent `prompt_context` (its host prepends it to the person's next prompt),
+opencode neither (its bridge acts on a deny only).
 
-A **read-only** thread's note also carries a `**Writer thread:**` line —
-the stream's writer thread, and its live agent's harness key, pid and the
-harness's own session id (`Thread (thr1) — agent `claude`, pid 11684,
-session `…``) — so the agent can match it against `ListAgents` output and
-message it. The agent is the writer thread's newest open session whose
-`agent_session.pid` names a process that still exists
-(`live_writer_agent` in `agent_context.rs`, using
-`daemon_supervisor::process_alive`); with no live agent the line is
-omitted. A writer thread's own note never has it. It rides the same
-change-detection as the rest of the block, so a restarted writer agent
-(new pid) re-emits it. Built by `build_session_context_block_full`.
+**Once, then on change.** On every prompt, `prompt_context` builds the
+`<session-context>` block and the decisions block and sends each only
+when it differs from what that agent session was last sent
+(`should_emit`, keyed by the harness's session id; the decisions under
+`<session_id>#decisions`, capped at 15, recorded ones only — inferred
+decisions are the reviewer's). The first prompt of a session always
+carries both, which is why the launch prompt leaves the session context
+out for a harness with `prompt_context`. A compaction or a fresh start
+forgets them (`AgentContext::reset_session`): on `PreCompact` (Claude
+Code's; its HTTP `SessionStart` never arrives) and on `SessionStart`
+(Codex's), so after a compaction the agent gets its context and its
+earlier decisions back. `injectSessionContext: false` in
+`.oxplow/project.yaml` turns the block off.
 
-### ROLE CHANGE banner
+**The writer's agent.** A read-only thread's block carries a
+`**Writer thread:**` line naming the stream's writer thread and its live
+agent (harness key, pid, the harness's session id), so the agent can find
+it in `ListAgents` (`live_writer_agent`, `build_session_context_block_full`).
 
-The initial system prompt's `NON_WRITER_PROMPT_BLOCK` is frozen at
-launch and replayed via cache-read on every turn, so a mid-session
-writer promotion used to leave the agent acting read-only long after
-the UI flipped it. To supersede the stale block in-place,
-`build_session_context_block_with_role` (in
-`crates/oxplow-app/src/agent_prompt.rs`) accepts an `initial_role`
-input and appends a prominent `**Access changed:**` note before
-`</session-context>` when the current role differs from it. The
-control plane (`crates/oxplow-control-plane/src/lib.rs::RoleState`)
-captures the role once per agent session id in
-`initial_role_by_session_id` on the first hook it sees for that
-session — UserPromptSubmit OR a plan's (`kind: plan`) PostToolUse, whichever
-fires first — so the comparison baseline is stable across subsequent
-turns. Both directions are covered:
+**A role change.** The block appends an `**Access changed:**` note when
+the thread's role differs from the one it had when the session was first
+seen (`initial_role_by_session_id`, captured on its first hook):
+promoted to writer, or made read-only (wiki pages still go through
+`oxplow.knowledge.write_page`). A plan's PostToolUse (`kind: plan`)
+carries the note alone, for a promotion while the plan waited for
+approval, since no prompt comes between.
 
-- **read-only → writer.** Explains that the earlier read-only instruction
-  no longer applies and task filing is still required before edits.
-- **writer → read-only.** Explains that project edits are now blocked
-  while wiki capture remains allowed.
-
-No banner is emitted when the role has not changed, so steady-state
-turns don't grow.
-
-The banner reaches the agent via two complementary injection points:
-
-1. **UserPromptSubmit.** `refreshed_session_context` builds a fresh
-   `<session-context>` block (with the banner appended when the role
-   has flipped) and returns it as
-   `hookSpecificOutput.additionalContext`. Fires on every prompt
-   when `inject_session_context: true` (default).
-2. **A plan's PostToolUse** (`kind: plan`, Claude's `ExitPlanMode`). When the user promotes the thread
-   while it's sitting on the plan-mode approval prompt, no
-   UserPromptSubmit fires between "Leave plan mode" and the agent
-   resuming. `role_change_banner_for` injects the banner via the
-   PostToolUse `additionalContext` channel so the agent learns about
-   the role flip before its next tool call.
-
-## Decisions fed back to the agent (tsk298)
-
-Decisions the agent records (`oxplow.effort.record_decision` → `v_decision`) are fed
-back to it in two places. Only `provenance = 'recorded'` rows: decisions
-oxplow *inferred* after the fact ([ai-providers.md](./ai-providers.md))
-are guesses for the reviewer, never presented to the agent as its own.
-
-**On `UserPromptSubmit`**
-
-- The open effort's decisions, capped at 15 and most recent last, ride
-  the same `additionalContext` as the session-context block. They're
-  built by `oxplow_app::reasoning::effort_decisions_block`.
-- They're deduped with the same per-session state (the key is
-  `<session_id>#decisions`). So they're sent on the first prompt of a
-  session and again only when they change.
-- `SessionStart` (startup / resume / clear / compact) clears that key, so
-  **after a compaction the agent gets its earlier decisions back**. That
-  is the point: agents otherwise forget their own choices across
-  compaction.
-
-## Preamble vs skill split
-
-`buildBatchAgentPrompt` is intentionally terse — session ids, writer
-flag, and a pointer to the skills. Procedural policy is consolidated in
-one orchestrator-side skill (manifest registered alongside other
-skills in the agent prompt builder; not yet a dedicated Rust module):
-`oxplow-runtime` merges filing (when to file, how to shape items,
-acceptance-criteria style, epic-with-children rule), lifecycle
-(status conventions, epic rollup, notes), and dispatch (orchestrator
-vs subagent execution mode, brief composition). Its description
-combines all trigger contexts so it still loads when any of the
-legacy invocation paths apply, but contributes a single index line
-per turn instead of three.
-Reason: the preamble is replayed via cache-read on every turn; skills
-load only when the agent needs them. Keep additions to the preamble
-situational (what changes per thread), not educational (how to use the
-tools).
-
-## Custom prompt addendum
-
-`config.agentPromptAppend` (loaded from `.oxplow/project.yaml` via
-`loadProjectConfig` in `crates/oxplow-config/src/lib.rs`) is concatenated into every
-agent's system prompt by `buildBatchAgentPrompt` (in `crates/oxplow-runtime/src/lib.rs`). The
-Settings modal (`apps/desktop/src/components/SettingsModal.tsx`) reads/writes this
-via `runtime.setAgentPromptAppend` which calls `writeProjectConfig` to
-persist back to YAML.
-
-A new value applies to **agent sessions started after Save** — existing
-sessions keep the prompt they launched with.
-
-After `agentPromptAppend`, `buildBatchAgentPrompt` also appends:
-- `# Stream instructions` + `stream.custom_prompt` if the stream has a
-  non-empty custom prompt (set on `StreamSettingsPage`,
-  persisted to `streams.custom_prompt` — see data-model.md v18).
-- `# Thread instructions` + `thread.custom_prompt` if the thread has a
-  non-empty custom prompt (set on `ThreadSettingsPage`,
-  persisted to `threads.custom_prompt` — see data-model.md v18).
-
-These are the last sections before the prompt is finalized, so they can
-provide finer-grained overrides without displacing earlier context.
+**The conformance half that's built.**
+`oxplow-harnesses`' `text_contract` launches every terminal harness with
+a marked system prompt and checks the prompt, every skill and every
+slash command reach its agent: its command line, its environment, or a
+file it was given (JSON values searched inside). What a launch doesn't
+deliver yet is pinned in `KNOWN_GAPS` (Codex: its instructions and its
+slash commands), and the test fails when a gap closes or a new one
+opens. `hook_goldens` pins the hook answers byte for byte, including a
+harness without channels being acked and a compaction bringing the
+context back.
 
 ## Agent status
 

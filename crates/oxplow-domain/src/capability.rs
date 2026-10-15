@@ -423,6 +423,8 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
             "telemetry",
             "runtime_text",
             "subagents",
+            "prompt_context",
+            "tool_context",
         ],
         provider: Some(&AGENT_HARNESS),
     },

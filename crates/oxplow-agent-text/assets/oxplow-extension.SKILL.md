@@ -627,7 +627,7 @@ An extension can add to the metric catalog with `measures:`, `metrics:`
 and `dimensions:` in `extension.yaml`, plus **fact collectors** (a
 `collectors:` entry with `facts:` instead of `entities:`) that record the
 facts — in the same schema the project's own extension uses (the `oxplow-metrics`
-skill and `/oxplow:new-metric` cover it).
+skill and oxplow's `new-metric` slash command cover it).
 
 ```yaml
 measures:
@@ -953,7 +953,7 @@ in `v_contribution_health` (`extension`, `contribution`, `kind`, `state` = `ok` 
   the user what it declares (the programs its collectors run, the hosts they
   reach, the credentials they read, advisories) and any `errors` /
   `problems`, and when they say go, run `oxplow.extension.install { git_url,
-  git_ref?, reviewed_sha: <its sha> }` (`mcp__oxplow__run_command`) — it
+  git_ref?, reviewed_sha: <its sha> }` (`run_command`) — it
   comes back as a proposal the user approves. It records the source in
   `source.yaml`. Updating is the same: `review_extension(name)`, then
   `oxplow.extension.update { name, reviewed_sha }`. Never

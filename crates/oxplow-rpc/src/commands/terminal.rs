@@ -194,7 +194,22 @@ pub async fn open_terminal_session(
         .get(session.harness.as_str())
         .map_err(|e| IpcError::invalid(e.to_string()))?;
     let config = read_config(&ctx.config);
-    let prompt = assemble_system_prompt(&config, &stream, Some(&thread));
+    let declared = ctx
+        .capabilities
+        .get("agent_harness", &session.harness)
+        .ok_or_else(|| {
+            IpcError::invalid(format!(
+                "no agent harness `{}` is declared",
+                session.harness
+            ))
+        })?;
+    let prompt = assemble_system_prompt(
+        &config,
+        &stream,
+        Some(&thread),
+        &declared,
+        &oxplow_app::capabilities::agent_text(ctx),
+    );
     let harness_config = config
         .agent_config
         .get(&session.harness)

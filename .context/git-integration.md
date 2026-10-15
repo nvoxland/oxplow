@@ -527,12 +527,13 @@ nudge of their own".
 
 ### Non-writer threads still cannot call git
 
-`NON_WRITER_PROMPT_BLOCK` (`crates/oxplow-runtime/src/write_guard.rs`) explicitly
-forbids git mutations for non-writer threads — they share the
-worktree with the writer and any ref/index change corrupts the
-writer's in-progress work. The write-guard hook denies edits (`kind:
-edit`) in those threads, and the prompt block covers shell commands
-(which the hook can't classify reliably).
+Non-writer threads share the worktree with the writer, and any ref or
+index change corrupts the writer's in-progress work. The write-guard
+hook denies their edits (`kind: edit`), and the `oxplow.vcs.*` commands
+are `Write` commands a non-writer thread is refused. A git command run
+in a shell isn't classified: the session context's Access line ("project
+file edits are blocked") is all that tells a read-only thread to leave
+git alone.
 
 ## Commit indexer
 

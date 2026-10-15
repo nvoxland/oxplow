@@ -111,10 +111,20 @@ pub async fn acp_open_session(
         .harnesses
         .get(session.harness.as_str())
         .map_err(|e| IpcError::invalid(e.to_string()))?;
-    let system_prompt = oxplow_app::agent_prompt::assemble_acp_system_prompt(
+    let declared = svc
+        .capabilities
+        .get("agent_harness", &session.harness)
+        .ok_or_else(|| {
+            IpcError::invalid(format!(
+                "no agent harness `{}` is declared",
+                session.harness
+            ))
+        })?;
+    let system_prompt = oxplow_app::agent_prompt::assemble_system_prompt(
         &config,
         &stream,
         Some(&thread),
+        &declared,
         &oxplow_app::capabilities::agent_text(ctx),
     );
     // The ACP agent's program, as this project resolves it: the harness's

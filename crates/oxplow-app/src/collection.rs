@@ -3527,7 +3527,7 @@ fn names_configured_runner(cfg: &oxplow_config::TestingConfig, run: &str) -> boo
 
 /// The PostToolUse nudge shown when a detected test run produced no
 /// report oxplow could parse for the effort. Tool-agnostic: it names only
-/// the project's own configured command (or routes to `/oxplow:configure`),
+/// the project's own configured command (or routes to oxplow's `configure` command),
 /// so it works for any current/future test tool without the hook knowing
 /// anything tool-specific. It doesn't repeat the agent's command back (the
 /// agent just wrote it), and with a `fastCommand` it names only that one:
@@ -3558,7 +3558,7 @@ fn report_nudge_message(cfg: &oxplow_config::TestingConfig, has_report_collector
             .to_string()
     } else {
         "That test run's results can't reach the effort: this project reads no test \
-         reports. Run /oxplow:configure to wire this stack's report(s)."
+         reports. Run oxplow's `configure` slash command to wire this stack's report(s)."
             .to_string()
     }
 }
@@ -4030,7 +4030,7 @@ mod tests {
         // Names the project's own command — tool-agnostic, no built-in
         // tool→command knowledge in the hook.
         assert!(msg.contains("bun run test:collect"), "{msg}");
-        assert!(!msg.contains("/oxplow:configure"), "{msg}");
+        assert!(!msg.contains("`configure` slash command"), "{msg}");
     }
 
     /// With a fast command configured, the nudge names only it: which
@@ -4052,7 +4052,7 @@ mod tests {
         // Nothing reads reports → route to the agent-driven configure flow
         // (which adapts to any tool).
         let msg = report_nudge_message(&testing(None, None), false);
-        assert!(msg.contains("/oxplow:configure"), "{msg}");
+        assert!(msg.contains("`configure` slash command"), "{msg}");
         let with_collectors = report_nudge_message(&testing(None, None), true);
         assert!(
             with_collectors.contains("testing.command"),
@@ -7573,7 +7573,7 @@ mod tests {
 
         #[tokio::test]
         async fn on_post_tool_use_routes_to_configure_when_no_collection_profile() {
-            // No collection block → nudge routes to /oxplow:configure.
+            // No collection block → nudge routes to oxplow's configure command.
             let h = build(None).await;
             // No test command and no report collectors by default.
             let result = h
@@ -7587,8 +7587,8 @@ mod tests {
                 .unwrap();
             let nudge = result.expect("nudge returned even without report collectors");
             assert!(
-                nudge.contains("/oxplow:configure"),
-                "nudge should route to /oxplow:configure when no profile exists; got: {nudge}"
+                nudge.contains("`configure` slash command"),
+                "nudge should route to the configure command when no profile exists; got: {nudge}"
             );
         }
 

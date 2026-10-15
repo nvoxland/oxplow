@@ -192,8 +192,6 @@ pub(super) struct Actor {
     recorded: HashSet<String>,
     /// Paths written through `fs/write_text_file` this turn.
     fs_written: HashSet<String>,
-    /// Post-tool nudges waiting for the person's next prompt.
-    nudges: Vec<String>,
     /// The system prompt, when it rides the first prompt.
     pending_system_prompt: Option<String>,
     replaying: bool,
@@ -223,7 +221,6 @@ impl Actor {
             rejected: HashSet::new(),
             recorded: HashSet::new(),
             fs_written: HashSet::new(),
-            nudges: Vec::new(),
             pending_system_prompt: None,
             replaying: false,
         }
@@ -412,7 +409,6 @@ impl Actor {
         {
             parts.push(c);
         }
-        parts.append(&mut self.nudges);
         let context = (!parts.is_empty()).then(|| parts.join("\n\n"));
         let hp = super::human_prompt::compose(&text, context.as_deref());
 
@@ -773,18 +769,14 @@ impl Actor {
             }
         }
         if let Some(call) = mapping::tool_use(&tool) {
-            if let Some(n) = self
-                .host
+            self.host
                 .tool_finished(
                     self.thread(),
                     &self.session_id,
                     &call,
                     &mapping::content(&tool),
                 )
-                .await
-            {
-                self.nudges.push(n);
-            }
+                .await;
         }
     }
 

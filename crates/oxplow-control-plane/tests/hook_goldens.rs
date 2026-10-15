@@ -245,3 +245,97 @@ async fn every_built_in_harness_renders_the_golden_deny() {
         );
     }
 }
+
+/// Post `event` as agent session `bearer` (not the thread's newest).
+async fn post_as(
+    cp: &ControlPlane,
+    bearer: &str,
+    event: &str,
+    body: serde_json::Value,
+) -> serde_json::Value {
+    let resp = reqwest::Client::new()
+        .post(format!("{}/{}", cp.hook_base_url(), event))
+        .bearer_auth(bearer)
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    resp.json().await.unwrap()
+}
+
+/// A harness whose hook answers never reach its agent (opencode's bridge
+/// acts only on a deny; it declares neither `prompt_context` nor
+/// `tool_context`) is answered with an ack, and nothing meant for its agent
+/// is taken: a nudge stays undelivered rather than being stamped and lost.
+#[tokio::test]
+async fn a_harness_without_hook_context_is_acked_and_keeps_its_nudges() {
+    let (cp, svc, root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let session = svc
+        .agent_session_store
+        .open(&oxplow_domain::agent_session::NewAgentSession::terminal(
+            tid, "opencode",
+        ))
+        .await
+        .unwrap();
+    let bearer = common::bearer_for(&svc, session.id).await;
+    svc.nudge_store
+        .record(oxplow_db::agent_nudge_store::NewAgentNudge {
+            thread_id: tid.to_string(),
+            kind: "report-less-run".into(),
+            message: "Your test run wrote no report oxplow could read.".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let prompt = post_as(
+        &cp,
+        &bearer,
+        "UserPromptSubmit",
+        serde_json::json!({ "prompt": "go", "session_id": "o1" }),
+    )
+    .await;
+    assert_eq!(prompt, serde_json::json!({}));
+    let mut after = edit(&root.join("src/x.rs"));
+    after["session_id"] = "o1".into();
+    after["tool_response"] = serde_json::json!({ "success": true });
+    assert_eq!(
+        post_as(&cp, &bearer, "PostToolUse", after).await,
+        serde_json::json!({})
+    );
+    let waiting = svc
+        .nudge_store
+        .take_for_agent(&tid.to_string(), 2_000)
+        .await
+        .unwrap();
+    assert_eq!(waiting.len(), 1, "the nudge is still undelivered");
+}
+
+/// After a compaction the agent's context is fresh: the next prompt
+/// carries the session context (and decisions) again, though they haven't
+/// changed. Claude Code delivers `PreCompact` (its HTTP `SessionStart`
+/// never arrives).
+#[tokio::test]
+async fn a_compaction_brings_the_context_back_on_the_next_prompt() {
+    let (cp, svc, root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let prompt = || serde_json::json!({ "prompt": "go", "session_id": "s1" });
+    let first = post(&cp, &svc, "UserPromptSubmit", tid, prompt()).await;
+    golden("prompt_context_first", &first, &root);
+    assert_eq!(
+        post(&cp, &svc, "UserPromptSubmit", tid, prompt()).await,
+        serde_json::json!({})
+    );
+    let compact = post(
+        &cp,
+        &svc,
+        "PreCompact",
+        tid,
+        serde_json::json!({ "session_id": "s1", "trigger": "auto" }),
+    )
+    .await;
+    assert_eq!(compact, serde_json::json!({}));
+    let after = post(&cp, &svc, "UserPromptSubmit", tid, prompt()).await;
+    golden("prompt_context_first", &after, &root);
+}
