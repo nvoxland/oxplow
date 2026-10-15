@@ -1959,6 +1959,67 @@ mod tests {
         assert_eq!(col(&rows, 2), ["todo"]);
     }
 
+    /// Finished items come newest first by when they closed, even within
+    /// one year (`closed_at` is RFC 3339 text), after the open ones.
+    #[tokio::test]
+    async fn thread_work_lists_finished_items_newest_first() {
+        use oxplow_db::SqlCell::Text;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let thread = f.thread.to_string();
+        let mut refs = Vec::new();
+        for title in ["older done", "newer done", "still open"] {
+            let item = crate::test_fixtures::file_item(
+                &f.svc,
+                serde_json::json!({ "title": title, "thread": thread }),
+            )
+            .await;
+            refs.push(oxplow_tasks::work_item_ref(item));
+        }
+        for r in &refs[..2] {
+            f.svc
+                .commands
+                .run(
+                    &oxplow_domain::Actor::Human,
+                    "oxplow.work_item.transition",
+                    serde_json::json!({ "ref": r, "to": "done" }),
+                    false,
+                )
+                .await
+                .unwrap();
+        }
+        let (older, newer) = (refs[0].clone(), refs[1].clone());
+        f.svc
+            .db
+            .transaction(move |tx| {
+                tx.execute(
+                    "UPDATE work_item SET closed_at = '2026-01-05T09:00:00Z' WHERE ref = ?1",
+                    [&older],
+                )
+                .and_then(|_| {
+                    tx.execute(
+                        "UPDATE work_item SET closed_at = '2026-03-01T09:00:00Z' WHERE ref = ?1",
+                        [&newer],
+                    )
+                })
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let rows = run_bundled_lens_with(
+            &f,
+            "oxplow-foundation/thread-work",
+            &[("thread", Text(format!("thread:thr{}", f.thread.value())))],
+        )
+        .await;
+        let titles: Vec<&str> = rows
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r[1].as_str().unwrap())
+            .collect();
+        assert_eq!(titles, ["still open", "newer done", "older done"], "{rows}");
+    }
+
     /// What to pick up next on a thread's list: ready items in list order,
     /// an open blocker holding one until it closes, and a ready epic first
     /// coming with its ready descendants as one unit.
