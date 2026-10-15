@@ -79,7 +79,7 @@ type RenameTarget = { kind: "stream" | "thread"; id: string };
  *   - Thread rows: two-letter glyph, weight 600, slightly indented in
  *     the overlay; in the strip they share the same column.
  *   - The active stream's writer thread is marked with a corner fold
- *     (a small right triangle in `--writer-mark`) on its tab's top-right
+ *     (a small right triangle in `--writer-mark`) on its tab's top-left
  *     corner — not an accent outline, which reads as selected. The
  *     activity dot sits on the right end at half height, clear of it;
  *     both are in the same place in strip and overlay.
@@ -1017,22 +1017,20 @@ function IconCell({
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              position: "relative",
               borderRightWidth: 1,
               borderRightStyle: "solid",
               borderRightColor: isStream ? "rgba(0, 0, 0, 0.3)" : "var(--border-strong)",
             }}
           >
             {letter}
-            {/* On the glyph part, so it lines up with the strip's. */}
-            {isWriter && !isStream ? <WriterMark right={0} /> : null}
           </span>
           <span style={{ flex: 1, minWidth: 0, display: "flex", paddingLeft: 10 }}>{label}</span>
         </>
       ) : (
         letter
       )}
-      {isWriter && !isStream && label === undefined ? <WriterMark right={-1} /> : null}
+      {/* At the window's edge, so the strip's and the panel's line up. */}
+      {isWriter && !isStream ? <WriterMark /> : null}
       {/* Threads always show the agent's activity indicator. Mirrors
           the fallback the Agent tab uses (App.tsx — `agentStatuses[id]
           ?? "waiting"`) so a never-attached thread still reads as the
@@ -1057,8 +1055,8 @@ function IconCell({
 }
 
 /** The writer thread's corner fold: a right triangle, its right angle in
- *  the tab's top-right corner, in `--writer-mark`. */
-function WriterMark({ right }: { right: number }) {
+ *  the tab's top-left corner, in `--writer-mark`. */
+function WriterMark() {
   return (
     <span
       data-testid="navigator-writer-badge"
@@ -1066,13 +1064,13 @@ function WriterMark({ right }: { right: number }) {
       style={{
         position: "absolute",
         top: -1,
-        right,
+        left: 0,
         display: "flex",
         color: "var(--writer-mark)",
       }}
     >
       <svg width="7" height="7" viewBox="0 0 7 7" aria-hidden fill="currentColor">
-        <path d="M0 0H7V7Z" />
+        <path d="M0 0H7L0 7Z" />
       </svg>
     </span>
   );

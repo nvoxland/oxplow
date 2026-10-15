@@ -31,7 +31,7 @@ sinks.
 |-------------------------|---------------|--------------------------------------------|
 | `--surface-app`         | `#0f1115`     | App background, page bodies (darkest content tier) |
 | `--surface-card`        | `#161a20`     | Cards, inner content surfaces, rail panels |
-| `--writer-mark`         | `#edc948`     | The Navigator's writer thread: a corner fold on its tab's top-right (amber, same as `--chart-6`; not `--accent`, which means selected) |
+| `--writer-mark`         | `#edc948`     | The Navigator's writer thread: a corner fold on its tab's top-left (amber, same as `--chart-6`; not `--accent`, which means selected) |
 | `--surface-chrome`      | `#1b2129`     | Lighter **chrome frame** around the dark content — rail aside, Navigator strip, content-panel surround. The content recesses below it. |
 | `--surface-rail`        | `#13161b`     | Legacy rail tier (PageNavBar fallback, TerminalTabStrip, TaskDetail) — chrome surfaces moved to `--surface-chrome` |
 | `--surface-tab-active`  | `#1c2027`     | Currently-focused tab body                 |

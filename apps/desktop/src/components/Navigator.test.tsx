@@ -449,12 +449,12 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
   expect(writer.style.borderWidth).toBe("1px 1px 0px 0px");
   expect(queued.style.borderWidth).toBe("1px 1px 1px 0px");
   // The writer is not outlined like the selection: a corner fold in the
-  // writer colour marks its top-right corner.
+  // writer colour marks its top-left corner, at the window's edge.
   const mark = writer.querySelector("[data-testid=navigator-writer-badge]") as HTMLElement;
   expect(mark.getAttribute("title")).toMatch(/Writer/);
   expect(mark.style.color).toBe("var(--writer-mark)");
   expect(mark.style.top).toBe("-1px");
-  expect(mark.style.right).toBe("-1px");
+  expect(mark.style.left).toBe("0px");
   expect(queued.querySelector("[data-testid=navigator-writer-badge]")).toBeNull();
   // A dark cut in the background's colour falls between stacked tabs; the
   // outer right and bottom edges keep their frame.
