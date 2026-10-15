@@ -37,6 +37,13 @@ test("a person configures, checks and enables the fake tracker, and an item reac
   await expect(page.getByTestId("integration-status-e2e/fake")).toContainText("Ready");
   await page.getByTestId("capabilities-work_items-project-fake").click();
   await expect(page.getByTestId("capabilities-work_items-project-fake")).toBeChecked();
+  // The choice is the daemon's once it lists the fake as the active work list.
+  await until("the fake to be the active work list", 30_000, async () => {
+    const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
+      sql: "SELECT 1 FROM v_capability_provider WHERE capability = 'work_items' AND provider = 'fake' AND active = 1 AND available = 1",
+    });
+    return out.rows.length === 1;
+  });
   // Made with no provider named: the active one, which Settings → Capabilities chose.
   await run(daemon, "oxplow.work_item.create", { title: "Kiwi from oxplow" });
   await expect.poll(() => fakeState(daemon.project)).toContain("Kiwi from oxplow");
