@@ -366,7 +366,7 @@ uses on its `RunContext` (the mode first, so a pure run never asks a model;
 then the declaration; then the authority; all recorded) and builds the
 worker's host set. Every host goes through it: entity and fact collectors,
 commands, effects and policies. A script that uses a service it doesn't
-declare is a load error. Discovery is `list_services` (MCP), `oxplow
+declare is a load error. Discovery is the `v_scope` model, `oxplow
 extension check --services` and the generated reference table.
 `examples/extensions/triage` combines all three and runs end to end
 (`crates/oxplow-sdk/tests/examples.rs`). Not here:

@@ -299,4 +299,25 @@ mod tests {
             ("acme.work.count".to_string(), json!({ "sql": "SELECT 1" }))
         );
     }
+
+    /// The agent model doc's tool table names every tool oxplow offers.
+    #[tokio::test]
+    async fn every_foundation_tool_is_in_the_agent_model_doc() {
+        let fx = services_with_task_effort().await;
+        let doc = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.context/agent-model.md"),
+        )
+        .unwrap();
+        let missing: Vec<String> = offered(&fx.svc, &agent(&fx))
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|t| t.name)
+            .filter(|name| !doc.contains(&format!("`{name}")))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "not in .context/agent-model.md: {missing:?}"
+        );
+    }
 }

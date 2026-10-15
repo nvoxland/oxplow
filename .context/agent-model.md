@@ -219,13 +219,17 @@ its own the same way, under its namespace ([extensions.md](./extensions.md)
 calls `mcp__oxplow__run_command`, `mcp__oxplow__oxplow_query_sql`. No other
 spelling is accepted.
 
+Every tool foundation declares is named below
+(`every_foundation_tool_is_in_the_agent_model_doc` pins it).
+
 | Purpose | Tools |
 |---|---|
 | Read oxplow's data | `oxplow_query_sql` (one read-only statement over the `v_*` models, live models included — [semantic-layer.md](./semantic-layer.md) "Live models"), `oxplow_read { ref }`, `oxplow_search` (BM25 over tasks, comments, notes, wiki and file contents) |
 | Code and revisions | `oxplow_vcs_log` (a stream's history from any revision, paged, past the index), `oxplow_vcs_status`, `oxplow_vcs_branches`, `oxplow_diff` (versions `working`, `snap:<id>`, `git:<rev>`; `since_fork`), `oxplow_vcs_blame` (through the `Vcs` provider; `working`, `snap:<id>` or `git:<rev>`), `oxplow_code_definition`, `oxplow_code_references`, `oxplow_code_hover`, `oxplow_code_call_hierarchy`, `oxplow_code_symbols` (a file's symbols from its language server, else oxplow's tree-sitter reading of the live file, saying which), `oxplow_code_workspace_symbols` (the editor's language servers, [lsp.md](./lsp.md)), `oxplow_ensure_change` (a change's analysis, then `v_change_*` through `oxplow_query_sql`) |
 | Write | `run_command`, after `list_commands` |
 | Ask a model | `oxplow_ai_decide` (typed questions about some text, on the `decide` role), `oxplow_ai_summarize` (on `summarize`): recorded computations paid with the person's key, as the asking thread ([ai-providers.md](./ai-providers.md)) |
-| Show the person | `oxplow_show_lens`, `oxplow_run_lens`, `oxplow_run_lens_action` |
+| Show the person | `oxplow_show_lens`, `oxplow_run_lens`, `oxplow_run_lens_action`, `oxplow_navigate` (takes them to any ref's page, switching stream when needed) |
+| Common questions, typed | foundation lenses with `tool:`: `oxplow_thread_work`, `oxplow_work_next`, `oxplow_effort_files`, `oxplow_effort_summary`, `oxplow_file_history`, `oxplow_recent_commits`, `oxplow_snapshots`, `oxplow_thread_notes` — each returns what its lens shows, for a model that shouldn't have to write SQL for them |
 | What the person has | `oxplow_get_open_page` (the page open in a thread, a lens re-run with their params), `oxplow_list_comments` (their anchored comments, hydrated) |
 | Wiki | `oxplow_wiki_ref_drift` (one stale ref's diff against its pin) |
 | Extension authoring | `oxplow_validate_extension`, `oxplow_preview_extension`, `oxplow_preview_collector`, `oxplow_review_extension` |
@@ -344,19 +348,23 @@ Param structs are snake_case, and that stays the advertised schema. But
 tool outputs are camelCase and weak models (opencode's default) send
 `threadId` and hit an opaque `-32602 missing field`.
 `lenient_params::Parameters` (`crates/oxplow-mcp/src/lenient_params.rs`)
-is a drop-in for rmcp's `Parameters<T>` (same name, so `#[tool]` still
-derives the schema from `T`): before deserializing it adds a snake_case
-copy of any camelCase or kebab key, recursively, never removing the
-original, and a genuinely missing field is a clear `McpError`
-(`lenient_from_object`, `to_snake_case`). Every tool gets it. Inferable
-fields are optional and inferred in the handler where safe
-(`oxplow_list_comments`' `scope`).
+is a drop-in for rmcp's `Parameters<T>` on core's two tools (same name,
+so `#[tool]` still derives the schema from `T`): before deserializing it
+adds a snake_case copy of any camelCase or kebab key, recursively, never
+removing the original, and a genuinely missing field is a clear
+`McpError` (`lenient_from_object`, `to_snake_case`). A declared tool's
+input reaches a command whose schema refuses unknown keys, so there a
+top-level camelCase key is *renamed* to the schema property it stands for
+(`fold_to_schema`). Inferable fields are optional and inferred in the
+handler where safe (`oxplow_list_comments`' `scope`).
 
 ### The ServerHandler is hand-rolled — re-diff it on every rmcp bump
 
 `impl ServerHandler for OxplowMcp` writes out `list_tools`, `call_tool`
-and `get_tool` instead of `#[tool_handler]`, only so `list_tools` can
-stamp `read_only_hint`. rmcp can change what the macro generates without
+and `get_tool` instead of `#[tool_handler]`: the router holds only core's
+two tools, and the declared ones are listed and resolved per caller
+(`oxplow_app::agent_tools::offered`; `tools/list` is `cache_scope:
+private`, since what a caller is offered depends on who it is). rmcp can change what the macro generates without
 our copy following (rmcp 3 added `result_type` / `ttl_ms` /
 `cache_scope` and made `call_tool` return `CallToolResponse`). On an rmcp
 upgrade, diff the three methods against `rmcp-macros/src/tool_handler.rs`.
@@ -374,11 +382,11 @@ consent or setting, their selection or input, live status pushed to the
 UI, runtime infra, an ancestry walk the VCS answers, file I/O the agent
 does with its own tools) or `Model { models }` (a UI read an agent makes
 through those published models with `oxplow_query_sql`). `tests/parity.rs`
-enumerates the registered names on each side
-(`oxplow_mcp::registered_tool_names()`, a capturing
-`tauri_specta::LanguageExt`) and fails on anything unclassified,
-dangling, or a `Both` row missing a side. A new `#[tool]` or
-`#[tauri::command]` needs a row; a UI-only row says why
+enumerates the names on each side (core's tools,
+`oxplow_mcp::core_tool_names()`, plus the declared ones an agent is
+offered on a booted project; a capturing `tauri_specta::LanguageExt`) and
+fails on anything unclassified, dangling, or a `Both` row missing a side.
+A new `tool:` or `#[tauri::command]` needs a row; a UI-only row says why
 (`every_ui_only_row_says_why`); a model row names published core models
 (`every_model_counterpart_is_published`).
 
