@@ -79,7 +79,7 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
     };
     assert_eq!(
         row("SELECT page, resolve FROM v_ref_kind WHERE kind = 'github_pr'").await,
-        serde_json::json!([["page:github/pr", "v_github_pull_request"]])
+        serde_json::json!([["page:github/pr?ref={ref}", "v_github_pull_request"]])
     );
     assert_eq!(
         row("SELECT title FROM v_github_pull_request WHERE ref = 'github_pr:12'").await,
@@ -199,9 +199,9 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
     };
     assert_eq!(
         hits.iter()
-            .map(|h| (h.kind.as_str(), h.ref_id.as_str()))
+            .map(|h| (h.kind.as_str(), h.reference.as_str()))
             .collect::<Vec<_>>(),
-        [("github_pr", "12")],
+        [("github_pr", "github_pr:12")],
         "{hits:?}"
     );
 }

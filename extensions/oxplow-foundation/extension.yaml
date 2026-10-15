@@ -785,12 +785,12 @@ commands:
     example: {"ref": "file:src/auth.rs@git:HEAD#L10-40"}
   # search.read
   - name: search.find
-    summary: "Site-wide BM25 search across tasks, comments, notes, wiki pages and file contents. Tokens match as stemmed prefixes. `stream_id` scopes file/stream-bound hits to one worktree (wiki etc. always included); omit it to search everything. `kinds` optionally restricts to task|comment|note|wiki|file. Returns hits ranked best-first."
+    summary: "Site-wide BM25 search across every searchable kind (`v_ref_kind.searchable`: work items, wiki pages, comments, thread notes, an extension's) and file contents. Tokens match as stemmed prefixes. `stream_id` scopes file/stream-bound hits to one worktree (wiki etc. always included); omit it to search everything. `kinds` optionally restricts to some of those kinds, or `file`. Each hit names the `ref` it found (read it with `oxplow_read`, show it with `oxplow_navigate`); best first."
     scope: search.read
     op: search
     invokers: { human: true, agent: true, lens: true }
     tool: search
-    example: {"query": "oauth redirect", "kinds": ["wiki", "task"], "limit": 10}
+    example: {"query": "oauth redirect", "kinds": ["wiki", "work_item"], "limit": 10}
   # sql.read
   - name: sql.query
     summary: "Run ONE read-only SQL statement over the published `v_*` models. It takes `SELECT`/`WITH` over the views lenses and the UI read (`v_model` lists them; physical tables are refused). Joins across views are fine. Metrics read as columns of a grid: `SELECT bucket, zone, MEASURE('<metric key>') FROM metric_grid('day'|'week'|'month'[, '<dimension>'])` (keys in v_metric_spec, dimensions in v_dimension). Positional params `?1`, `?2`, … bind from `params`. Returns `{columns, rows, truncated, reads, generation, coverage}`; rows are positional arrays; `truncated` means more rows existed than `limit`. `coverage` names the collector behind each collected model it read and how its last run stands (`current`, `stale`, `failed`, `disabled`, `needs_approval`, `never`): a complete result over a failed collector is still missing data. Writes, PRAGMA, ATTACH and multiple statements are rejected; queries time out after 5s. `v_model_column` documents every column."

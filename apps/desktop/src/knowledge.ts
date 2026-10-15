@@ -6,7 +6,7 @@
  * Writes are `knowledge.*` commands (`writeWikiPage`).
  */
 import { querySql, searchSite } from "./api.js";
-import { wikiRef } from "./refs/ref.js";
+import { parseRef, wikiRef } from "./refs/ref.js";
 import { unionReads } from "./lens/lensRerun.js";
 import type { CapabilityProvider } from "./workItems.js";
 import type { Reads, SearchHit, SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
@@ -127,7 +127,7 @@ export async function readWikiFreshness(slug: string): Promise<{ rows: WikiRefFr
 }
 
 export function searchHitsOf(hits: SearchHit[]): WikiPageSearchHit[] {
-  return hits.filter((h) => h.kind === "wiki").map((h) => ({ slug: h.ref_id, title: h.title, snippet: h.snippet }));
+  return hits.filter((h) => h.kind === "wiki").map((h) => ({ slug: parseRef(h.ref)?.id ?? "", title: h.title, snippet: h.snippet }));
 }
 
 /** Pages whose title or body matches `query` (the site search). */

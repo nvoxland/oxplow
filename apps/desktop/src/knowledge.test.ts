@@ -42,8 +42,8 @@ test("freshness reads v_knowledge_ref rows", () => {
 
 test("title and body search is the site search's wiki hits", () => {
   const hits = [
-    { kind: "wiki", ref_id: "auth", stream_id: null, title: "Auth", snippet: "…login…", score: 1 },
-    { kind: "task", ref_id: "tsk1", stream_id: null, title: "x", snippet: "", score: 1 },
+    { kind: "wiki", ref: "wiki:auth", stream_id: null, title: "Auth", snippet: "…login…", score: 1 },
+    { kind: "work_item", ref: "work_item:oxplow:tsk1", stream_id: null, title: "x", snippet: "", score: 1 },
   ] as SearchHit[];
   expect(searchHitsOf(hits)).toEqual([{ slug: "auth", title: "Auth", snippet: "…login…" }]);
 });

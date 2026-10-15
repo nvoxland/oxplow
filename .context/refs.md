@@ -34,17 +34,17 @@ readable identity, its **ref**, `<kind>:<id>[@rev][#frag]`
 | Where | Build | Read |
 |---|---|---|
 | Rust | `oxplow_domain::refs::build::{effort_ref, file_ref, wiki_ref, …}` — one per core kind; `of(kind, id)` / `at(kind, id, rev, frag)` for a kind known only at run time; a work list builds its own items' refs (`oxplow_tasks::work_item_ref`) | `build::parse_as::<T>(r, kind)` (typed id), `id_of(r, kind)` (decoded id), `parse_kind(r, kind)` (keeps rev and frag), `kind_of(r)`; kind names are `refs::kind::{EFFORT, FILE, …}` |
-| SQL (models, lenses, scripts' queries) | the owning model's `ref` column (`oxplow_db::ref_models::REF_MODELS`: `v_effort.ref`, `v_decision.ref`, `v_thread.ref`, …) — the only SQL that spells a prefix | `SELECT ref`, `WHERE ref = :ref`, `JOIN … ON x.ref = y.subject`; never `'kind:' || id`, never `substr` on a ref |
+| SQL (models, lenses, scripts' queries) | the owning model's `ref` column (`oxplow_db::ref_models::CORE_KINDS`: `v_effort.ref`, `v_decision.ref`, `v_thread.ref`, …) — the only SQL that spells a prefix | `SELECT ref`, `WHERE ref = :ref`, `JOIN … ON x.ref = y.subject`; never `'kind:' || id`, never `substr` on a ref |
 | Starlark (commands, effects, collectors, policies) | `ref.build(kind, id, rev=, frag=)` (`id` a string or an int) | `ref.parse(r)` → `{kind, id, rev, frag}`, `ref.id(r, kind=)`, `ref.kind(r)`, `ref.is_ref(v)` |
 | TS (desktop) | `refs/ref.ts` builders (`effortRef`, `wikiRef`, `pageRef`, `refOf`, …) | `parseRef`, `idOf`, `isRefOfKind` |
 
 **Resolving.** `ref_resolver::resolve_ref` names any ref: richer
 resolvers for `work_item`, `commit`, `file`, `dir`, `wiki` and
 `finding`; any other core kind through its owning model's title column
-(`REF_MODELS`); an extension's kind through the `resolve` view its
+(`ref_models::CORE_KINDS`); an extension's kind through the `resolve` view its
 `ref_kinds:` names. Nothing resolves it → `resolved: false`.
 
-**Guards.** `refs/refs.guard.test.ts` (TS), `source_guards::refs_are_built_and_parsed_through_the_grammar` (Rust) and `source_guards::scripts_and_sql_carry_refs_rather_than_spelling_them` (shipped `.star`, lens and model SQL, embedded Starlark templates; a kind's owning model in `REF_MODELS` is exempt) refuse a hand-built or hand-parsed ref outside the owning
+**Guards.** `refs/refs.guard.test.ts` (TS), `source_guards::refs_are_built_and_parsed_through_the_grammar` (Rust) and `source_guards::scripts_and_sql_carry_refs_rather_than_spelling_them` (shipped `.star`, lens and model SQL, embedded Starlark templates; a kind's owning model in `ref_models::CORE_KINDS` is exempt) refuse a hand-built or hand-parsed ref outside the owning
 place. When one fires, the fix is the builder or reader above — or, when
 a kind has none, adding it to `refs::build` / `ref_models` — never a
 string.
@@ -246,22 +246,49 @@ them all. The documented one is the github example's `github_pr`
 (`[[pr:12]]`, its `pr` page). A `wikilink:` prefix two extensions share
 costs only the sugar; each namespaced kind still registers.
 
-**Searchable kinds** (P9.D3). An extension's kind declared `searchable:
-<model>` has that model's rows (`ref`, `title`, `body`) in the site-wide
-index under its kind — an asset per kind (`kind_search.rs`), so search
-hits carry `{ kind, ref_id }` for extensions' kinds as for core ones and the
-desktop routes them through `searchHitTarget`. Core's tasks, comments,
-thread notes and wiki pages are indexed the same way (tsk864): each an
-asset over its `v_search_<kind>` model (`kind_search::CORE_KINDS`),
-whose rows also carry their stream and aren't bounded. Like every
+**What a kind's declarer says of it, core's and an extension's alike.**
+`v_ref_kind` lists every kind with three things beside its id pattern:
+`resolve` (the model that holds one, by its `ref`), `page` (where one
+opens) and `searchable` (what site search indexes it from). An extension
+says them in `ref_kinds:`; core says them in
+`oxplow_db::ref_models::CORE_KINDS` (its owner model, a `Page` and a
+search feed per kind), and the vocabulary pass writes both into
+`ref_kind`. Nothing else in core lists kinds for these purposes.
+
+**Where a ref opens: one opener.** `page` is a tab-id template: `{ref}`
+(the ref is its own tab id — files, wiki pages, work items, efforts, …),
+`{<column>}` of its `resolve` row (`{thread_ref}`: a thread note opens
+its thread), `{a|b}` the first non-empty of two (`{effort_ref|thread_ref}`:
+a decision opens its effort, else its thread), or a fixed page
+(`page:comments`); an extension's kind is `page:<ext>/<page>?ref={ref}`.
+NULL is a kind with no page (an event, a proposal). The desktop's one
+opener (`tabs/refOpener.ts`: `refTarget`, and `refTargetNow` when the
+template reads no row) fills it (`refKinds.pageTabId`) and says whether
+the window opens a tab, selects a thread or a stream, or opens nothing;
+search hits and `oxplow_navigate` go through it, and `refFromTabId`
+falls back to the template for any kind it has no case for, so a
+wikilink, a lens link or a backlink to an extension's kind opens the
+same page. Before the registry is read, a ref opens as itself.
+
+**Searchable kinds** (P9.D3). Every kind `v_ref_kind` lists with a
+`searchable` view has that view's rows (`ref`, `title`, `body`,
+`stream_id`, optional `version`) in the site-wide index under its kind —
+an asset per kind (`kind_search.rs`), registered from `ref_kind` alone.
+A hit carries the `ref` it found (`work_item:oxplow:tsk7`,
+`file:src/a.rs`) and nothing about opening it: the caller opens it like
+any ref. Core's feeds (`v_search_work_item`, `_comment`, `_thread_note`,
+`_wiki`; tsk864) carry their stream and aren't bounded; an extension's
+are project-global and bounded. The search kind is the ref kind
+(`thread_note`, not `note`). Like every
 published model, a feed's `ref` is the canonical ref a hit opens
 (`work_item:oxplow:tsk7`, `thread_note:not5`, `comment:cmt3`,
-`wiki:<slug>`; tsk922) — `CORE_KINDS` names the prefix each search kind's
-rows carry before the id — and a refused read of a table names its own
+`wiki:<slug>`; tsk922) — and a refused read of a table names its own
 model first (`read v_work_item or …`). Only files stay
 on the `search.index` pump consumer, since their text comes from
 snapshot blobs. A restate writes only the entries that differ (tsk896):
-each `search_entry` keeps its title-and-body hash (`content_hash`, V164,
+each `search_entry` keeps its version (`version`, V77 renamed V164's
+`content_hash`): the feed's own `version` column when it has one, else its
+title-and-body hash (V164,
 replacing V158's kind-wide digest, which skipped an unchanged kind but
 rewrote every entry on any edit) — so a start, which registers every kind
 and builds each once, rewrites nothing when nothing changed, and editing
@@ -296,7 +323,7 @@ wherever it is (tsk853): its `asset_state`, its `asset_failure` (a kind
 whose recomputes only ever failed has nothing else), or entries in the
 index with neither — a restate can commit after a removal's cleanup, or
 a process die between the two — every kind in `search_entry` that isn't
-core's (`kind_search::CORE_KINDS`, or files) or declared searchable.
+a file's or declared searchable.
 
 `refs::validate_ref` parses a ref and checks it against the kind
 registry. The event log's `append_tx` runs it on every `subject`

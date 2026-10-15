@@ -1,19 +1,18 @@
 //! Search kinds whose rows come from a model (P9.D3, tsk864;
-//! `.context/refs.md` "Searchable kinds"): an extension's kind declared
-//! `searchable: <model>` has that model's rows (`ref`, `title`, `body`)
-//! in the site-wide index (`search_fts`) under its kind, so the launcher
-//! finds `[[pr:12]]` by its title; core's tasks, comments, thread notes and
-//! wiki pages are indexed the same way from `v_search_<kind>`
-//! ([`CORE_KINDS`]), each row with its stream. Files aren't: their input
-//! is snapshot blobs, so the `search.index` consumer indexes them.
+//! `.context/refs.md` "Searchable kinds"): every kind `ref_kind` lists
+//! with a `searchable` view — core's (`oxplow_db::ref_models`) and an
+//! extension's (`searchable: <model>`) alike — has that view's rows
+//! (`ref`, `title`, `body`, `stream_id`) in the site-wide index
+//! (`search_fts`) under the kind. Files aren't a model's: their input is
+//! snapshot blobs, so the `search.index` consumer indexes them.
 //!
 //! It is **index-time ingestion, as an asset** — not a query-time UNION:
 //! `search_fts` owns the text it ranks (BM25 and `snippet()` need it in
 //! the index), and a UNION would run every extension's SQL on each
 //! keystroke, unranked. The index of one kind is derived data whose
 //! inputs are tables (the model's, followed through the lineage), so it
-//! is a [`Materializer`]: recomputed, whole, in its own transaction when
-//! a commit touches one of them — never in the writer's.
+//! is a [`Materializer`]: recomputed in its own transaction when a commit
+//! touches one of them — never in the writer's.
 //!
 //! [`Assets::sync_search_kinds`] keeps one per searchable kind in
 //! `ref_kind` (what the vocabulary pass restates): a new or changed kind
@@ -23,17 +22,19 @@
 //! An extension's kind is bounded: at most [`MAX_ROWS`] rows, each body cut at
 //! [`MAX_BODY`] bytes; core's aren't. A row whose `ref` isn't one of the
 //! kind's (`<kind>:<id>`, the id matching its pattern) is skipped. A
-//! recompute writes only the entries whose title or body changed, were
-//! added or went (`restate_kind_tx`, per-entry hashes; tsk896), so an edit
-//! writes one entry and a start with nothing changed writes nothing.
+//! recompute writes only the entries that changed, were added or went: a
+//! feed with a `version` column is planned from its versions alone and
+//! reads the title and body of the changed rows only (a kind of many
+//! large rows, such as turns); one without is compared by each row's
+//! title-and-body hash.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use oxplow_db::search_store::EntryKey;
 use oxplow_db::Database;
 use oxplow_domain::DomainError;
-use rusqlite::OptionalExtension;
 
 use crate::assets::{Assets, Materializer, Recomputed};
 
@@ -41,37 +42,9 @@ use crate::assets::{Assets, Materializer, Recomputed};
 pub const MAX_ROWS: usize = 20_000;
 /// The most bytes of one row's body it indexes.
 pub const MAX_BODY: usize = 16 * 1024;
-
-/// Core's kinds indexed from a model: the search kind, its view, the
-/// kind of the canonical ref its rows carry (up to the id) (tsk922: a published model's
-/// `ref` is a canonical ref, the one a hit opens), and the id. The view's
-/// rows carry a `stream_id`.
-pub const CORE_KINDS: &[(&str, &str, &str, &str)] = &[
-    (
-        "work_item",
-        "v_search_work_item",
-        oxplow_domain::refs::kind::WORK_ITEM,
-        r"^[a-z][a-z0-9_]*:.+$",
-    ),
-    (
-        "comment",
-        "v_search_comment",
-        oxplow_domain::refs::kind::COMMENT,
-        r"^cmt\d+$",
-    ),
-    (
-        "note",
-        "v_search_note",
-        oxplow_domain::refs::kind::THREAD_NOTE,
-        r"^not\d+$",
-    ),
-    (
-        "wiki",
-        "v_search_wiki",
-        oxplow_domain::refs::kind::WIKI,
-        r"^.+$",
-    ),
-];
+/// The most changed rows a versioned recompute reads the text of in one
+/// query.
+const TEXT_CHUNK: usize = 500;
 
 /// The asset of a kind's index: `search:<kind>`.
 pub fn asset_name(kind: &str) -> String {
@@ -87,14 +60,13 @@ pub(crate) struct SearchableKind {
     /// The view's SQL as compiled: an edit of the model changes it — and
     /// what the index holds — without touching the tables (tsk851).
     sql: String,
-    /// What a row's `ref` is up to its id: `<kind>:` for an extension's kind,
-    /// the canonical ref's for core's (`work_item:oxplow:`).
-    ref_prefix: String,
     id_pattern: String,
     /// The tables behind the view.
     tables: Vec<String>,
-    /// Core's: its rows carry their stream and aren't bounded.
+    /// Core's: its rows aren't bounded.
     core: bool,
+    /// Its view has a `version` column: a recompute is planned from it.
+    versioned: bool,
 }
 
 /// The index of one kind.
@@ -125,74 +97,204 @@ impl Materializer for KindSearchIndex {
     }
 
     async fn recompute(&self, _full: bool) -> Result<Recomputed, DomainError> {
-        let (kind, view, core) = (self.kind.clone(), self.spec.view.clone(), self.spec.core);
-        let spec_prefix = self.spec.ref_prefix.clone();
-        let id = regex::Regex::new(&self.spec.id_pattern)
+        let kind = self.kind.clone();
+        let spec = self.spec.clone();
+        let id = regex::Regex::new(&spec.id_pattern)
             .map_err(|e| DomainError::Invalid(format!("ref kind `{kind}`'s id pattern: {e}")))?;
         let indexed = self
             .db
             .transaction(move |tx| {
-                let (stream, limit) = if core {
-                    ("CAST(stream_id AS TEXT)", String::new())
-                } else {
-                    ("NULL", format!(" LIMIT {}", MAX_ROWS + 1))
+                let feed = Feed {
+                    tx,
+                    kind: &kind,
+                    spec: &spec,
+                    id: &id,
                 };
-                let sql = format!(
-                    "SELECT CAST(ref AS TEXT), CAST(title AS TEXT), CAST(body AS TEXT), {stream} \
-                     FROM \"{}\"{limit}",
-                    view.replace('"', "\"\""),
-                );
-                let mut st = tx.prepare(&sql).map_err(oxplow_db::map_sql_err)?;
-                type Row = (Option<String>, Option<String>, Option<String>, Option<String>);
-                let rows: Vec<Row> = st
-                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
-                    .map_err(oxplow_db::map_sql_err)?
-                    .collect::<rusqlite::Result<_>>()
-                    .map_err(oxplow_db::map_sql_err)?;
-                let bound = if core { usize::MAX } else { MAX_ROWS };
-                if rows.len() > bound {
-                    tracing::warn!(%kind, %view, "more than {MAX_ROWS} rows; the rest aren't searchable");
+                if spec.versioned {
+                    feed.restate_by_version()
+                } else {
+                    feed.restate_by_text()
                 }
-                let prefix = spec_prefix.as_str();
-                let mut entries: BTreeMap<oxplow_db::search_store::EntryKey, (String, String)> =
-                    BTreeMap::new();
-                let mut skipped = 0usize;
-                for (r, title, body, stream) in rows.into_iter().take(bound) {
-                    // One of the kind's refs, or it isn't something a hit
-                    // could open.
-                    let Some(ref_id) = r
-                        .as_deref()
-                        .and_then(|r| r.strip_prefix(prefix))
-                        .filter(|id_text| id.is_match(id_text))
-                    else {
-                        skipped += 1;
-                        continue;
-                    };
-                    let mut body = body.unwrap_or_default();
-                    if !core && body.len() > MAX_BODY {
-                        let mut end = MAX_BODY;
-                        while !body.is_char_boundary(end) {
-                            end -= 1;
-                        }
-                        body.truncate(end);
-                    }
-                    entries.insert(
-                        (ref_id.to_string(), stream),
-                        (title.unwrap_or_default(), body),
-                    );
-                }
-                if skipped > 0 {
-                    tracing::warn!(%kind, %view, skipped, "rows whose `ref` isn't one of the kind's weren't indexed");
-                }
-                let count = entries.len();
-                oxplow_db::search_store::restate_kind_tx(tx, &kind, &entries)?;
-                Ok(count)
             })
             .await?;
         Ok(Recomputed {
             row_count: Some(indexed as i64),
             ..Recomputed::default()
         })
+    }
+}
+
+/// One kind's feed, read in a recompute's transaction.
+struct Feed<'a> {
+    tx: &'a rusqlite::Connection,
+    kind: &'a str,
+    spec: &'a SearchableKind,
+    id: &'a regex::Regex,
+}
+
+impl Feed<'_> {
+    /// A row's stream: core's carry one; an extension's rows are
+    /// project-global.
+    fn stream(&self) -> &'static str {
+        if self.spec.core {
+            "CAST(stream_id AS TEXT)"
+        } else {
+            "NULL"
+        }
+    }
+
+    fn view(&self) -> String {
+        format!("\"{}\"", self.spec.view.replace('"', "\"\""))
+    }
+
+    /// The bound on its rows: none for core's.
+    fn limit(&self) -> String {
+        if self.spec.core {
+            String::new()
+        } else {
+            format!(" LIMIT {}", MAX_ROWS + 1)
+        }
+    }
+
+    /// `(ref, stream)` of a row as an entry key: the id after `<kind>:`,
+    /// when it is one of the kind's ids — else nothing a hit could open.
+    fn key(&self, reference: Option<String>, stream: Option<String>) -> Option<EntryKey> {
+        let id = reference?
+            .strip_prefix(&format!("{}:", self.kind))
+            .filter(|id| self.id.is_match(id))?
+            .to_string();
+        Some((id, stream))
+    }
+
+    fn body(&self, body: Option<String>) -> String {
+        let mut body = body.unwrap_or_default();
+        if !self.spec.core && body.len() > MAX_BODY {
+            let mut end = MAX_BODY;
+            while !body.is_char_boundary(end) {
+                end -= 1;
+            }
+            body.truncate(end);
+        }
+        body
+    }
+
+    fn warn_bounds(&self, rows: usize, skipped: usize) {
+        if !self.spec.core && rows > MAX_ROWS {
+            tracing::warn!(kind = %self.kind, view = %self.spec.view, "more than {MAX_ROWS} rows; the rest aren't searchable");
+        }
+        if skipped > 0 {
+            tracing::warn!(kind = %self.kind, view = %self.spec.view, skipped, "rows whose `ref` isn't one of the kind's weren't indexed");
+        }
+    }
+
+    /// Every row's text, compared by its hash.
+    fn restate_by_text(&self) -> Result<usize, DomainError> {
+        let sql = format!(
+            "SELECT CAST(ref AS TEXT), CAST(title AS TEXT), CAST(body AS TEXT), {} FROM {}{}",
+            self.stream(),
+            self.view(),
+            self.limit()
+        );
+        let mut st = self.tx.prepare(&sql).map_err(oxplow_db::map_sql_err)?;
+        type Row = (
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        );
+        let rows: Vec<Row> = st
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .map_err(oxplow_db::map_sql_err)?
+            .collect::<rusqlite::Result<_>>()
+            .map_err(oxplow_db::map_sql_err)?;
+        let total = rows.len();
+        let mut entries: BTreeMap<EntryKey, (String, String)> = BTreeMap::new();
+        let mut skipped = 0usize;
+        for (reference, title, body, stream) in rows.into_iter().take(self.bound()) {
+            match self.key(reference, stream) {
+                Some(key) => {
+                    entries.insert(key, (title.unwrap_or_default(), self.body(body)));
+                }
+                None => skipped += 1,
+            }
+        }
+        self.warn_bounds(total, skipped);
+        oxplow_db::search_store::restate_kind_tx(self.tx, self.kind, &entries)?;
+        Ok(entries.len())
+    }
+
+    /// Every row's version, then the text of the changed rows only.
+    fn restate_by_version(&self) -> Result<usize, DomainError> {
+        let sql = format!(
+            "SELECT CAST(ref AS TEXT), {}, CAST(version AS TEXT) FROM {}{}",
+            self.stream(),
+            self.view(),
+            self.limit()
+        );
+        let mut st = self.tx.prepare(&sql).map_err(oxplow_db::map_sql_err)?;
+        type Row = (Option<String>, Option<String>, Option<String>);
+        let rows: Vec<Row> = st
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map_err(oxplow_db::map_sql_err)?
+            .collect::<rusqlite::Result<_>>()
+            .map_err(oxplow_db::map_sql_err)?;
+        let total = rows.len();
+        let mut versions: BTreeMap<EntryKey, String> = BTreeMap::new();
+        let mut skipped = 0usize;
+        for (reference, stream, version) in rows.into_iter().take(self.bound()) {
+            match self.key(reference, stream) {
+                Some(key) => {
+                    versions.insert(key, version.unwrap_or_default());
+                }
+                None => skipped += 1,
+            }
+        }
+        self.warn_bounds(total, skipped);
+        let plan = oxplow_db::search_store::plan_restate_tx(self.tx, self.kind, &versions)?;
+        let mut texts: BTreeMap<EntryKey, (String, String)> = BTreeMap::new();
+        for chunk in plan.write.chunks(TEXT_CHUNK) {
+            let refs: Vec<String> = chunk
+                .iter()
+                .map(|((id, _), ..)| format!("{}:{id}", self.kind))
+                .collect();
+            let sql = format!(
+                "SELECT CAST(ref AS TEXT), {}, CAST(title AS TEXT), CAST(body AS TEXT) \
+                 FROM {} WHERE ref IN ({})",
+                self.stream(),
+                self.view(),
+                vec!["?"; refs.len()].join(", ")
+            );
+            let mut st = self.tx.prepare(&sql).map_err(oxplow_db::map_sql_err)?;
+            let found = st
+                .query_map(rusqlite::params_from_iter(&refs), |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                })
+                .map_err(oxplow_db::map_sql_err)?
+                .collect::<rusqlite::Result<
+                    Vec<(
+                        Option<String>,
+                        Option<String>,
+                        Option<String>,
+                        Option<String>,
+                    )>,
+                >>()
+                .map_err(oxplow_db::map_sql_err)?;
+            for (reference, stream, title, body) in found {
+                if let Some(key) = self.key(reference, stream) {
+                    texts.insert(key, (title.unwrap_or_default(), self.body(body)));
+                }
+            }
+        }
+        oxplow_db::search_store::apply_restate_tx(self.tx, self.kind, &plan, &texts)?;
+        Ok(versions.len())
+    }
+
+    fn bound(&self) -> usize {
+        if self.spec.core {
+            usize::MAX
+        } else {
+            MAX_ROWS
+        }
     }
 }
 
@@ -207,20 +309,21 @@ struct Searchable {
 
 async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
     // Each kind with its view's compiled SQL (none while the view isn't
-    // published).
-    let kinds: Vec<(String, String, String, String, Option<String>)> = db
+    // published) and whether the view has a `version` column.
+    type Declared = (String, String, String, bool, Option<String>, bool);
+    let kinds: Vec<Declared> = db
         .read(|tx| {
             let mut st = tx
                 .prepare(
-                    "SELECT k.kind, k.searchable, k.id_pattern, \
-                            (SELECT sql FROM sqlite_master WHERE type = 'view' AND name = k.searchable) \
+                    "SELECT k.kind, k.searchable, k.id_pattern, k.extension IS NULL, \
+                            (SELECT sql FROM sqlite_master WHERE type = 'view' AND name = k.searchable), \
+                            EXISTS (SELECT 1 FROM pragma_table_info(k.searchable) WHERE name = 'version') \
                      FROM ref_kind k WHERE k.searchable IS NOT NULL ORDER BY k.kind",
                 )
                 .map_err(oxplow_db::map_sql_err)?;
             let rows = st
                 .query_map([], |r| {
-                    let kind: String = r.get(0)?;
-                    Ok((kind.clone(), r.get(1)?, format!("{kind}:"), r.get(2)?, r.get(3)?))
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
                 })
                 .map_err(oxplow_db::map_sql_err)?
                 .collect::<rusqlite::Result<_>>()
@@ -228,34 +331,6 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
             Ok(rows)
         })
         .await?;
-    // Core's kinds, from their views as the registry has them.
-    let core: Vec<(String, String, String, String, Option<String>)> = db
-        .read(|tx| {
-            CORE_KINDS
-                .iter()
-                .map(|(kind, view, ref_kind, id)| {
-                    let sql: Option<String> = tx
-                        .query_row(
-                            "SELECT sql FROM sqlite_master WHERE type = 'view' AND name = ?1",
-                            [view],
-                            |r| r.get(0),
-                        )
-                        .optional()
-                        .map_err(oxplow_db::map_sql_err)?;
-                    Ok((
-                        kind.to_string(),
-                        view.to_string(),
-                        format!("{ref_kind}:"),
-                        id.to_string(),
-                        sql,
-                    ))
-                })
-                .collect()
-        })
-        .await?;
-    let core_kinds: std::collections::BTreeSet<String> =
-        core.iter().map(|(kind, ..)| kind.clone()).collect();
-    let kinds: Vec<_> = kinds.into_iter().chain(core).collect();
     let views: Vec<String> = kinds.iter().map(|(_, view, ..)| view.clone()).collect();
     let tables = crate::assets::tables_behind(db, &views).await?;
     let declared = kinds.iter().map(|(kind, ..)| kind.clone()).collect();
@@ -263,18 +338,17 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
         .into_iter()
         // A view the compiler hasn't published (yet, or any more) has
         // nothing to index; it registers once the registry lists it.
-        .filter_map(|(kind, view, ref_prefix, id_pattern, sql)| {
+        .filter_map(|(kind, view, id_pattern, core, sql, versioned)| {
             let tables = tables.get(&view)?.clone();
-            let core = core_kinds.contains(&kind);
             Some((
                 kind,
                 SearchableKind {
-                    core,
                     view,
                     sql: sql?,
-                    ref_prefix,
                     id_pattern,
                     tables,
+                    core,
+                    versioned,
                 },
             ))
         })
@@ -318,7 +392,7 @@ impl Assets {
         // What was indexed for a kind that is no longer searchable goes —
         // found wherever it is left: its state, its failure, or entries
         // with neither (a restate that committed after a cleanup, or a
-        // process that died between the two), core's kinds aside (tsk853).
+        // process that died between the two), files aside (tsk853).
         let keep: Vec<String> = declared.into_iter().collect();
         self.db()
             .transaction(move |tx| {
@@ -334,11 +408,9 @@ impl Assets {
                     .map_err(oxplow_db::map_sql_err)?
                     .collect::<rusqlite::Result<_>>()
                     .map_err(oxplow_db::map_sql_err)?;
-                // Core's kinds are always declared; files aren't a model's.
+                // Files aren't a model's.
                 let gone = found.iter().filter(|kind| {
-                    !keep.contains(kind)
-                        && !CORE_KINDS.iter().any(|(k, ..)| k == kind)
-                        && kind.as_str() != crate::indexer::KIND_FILE
+                    !keep.contains(kind) && kind.as_str() != crate::indexer::KIND_FILE
                 });
                 for kind in gone {
                     oxplow_db::search_store::restate_kind_tx(tx, kind, &BTreeMap::new())?;
@@ -472,7 +544,12 @@ ref_kinds:
                 .await
                 .unwrap()
                 .into_iter()
-                .map(|h| (h.ref_id, h.title))
+                .map(|h| {
+                    (
+                        h.reference.trim_start_matches("acme_pr:").to_string(),
+                        h.title,
+                    )
+                })
                 .collect();
             let ids: Vec<&str> = hits.iter().map(|(id, _)| id.as_str()).collect();
             if ids == want {
@@ -545,10 +622,10 @@ ref_kinds:
         assert_eq!(
             (
                 by_body[0].kind.as_str(),
-                by_body[0].ref_id.as_str(),
+                by_body[0].reference.as_str(),
                 by_body[0].stream_id.clone()
             ),
-            ("acme_pr", "12", None)
+            ("acme_pr", "acme_pr:12", None)
         );
         assert!(
             by_body[0].snippet.contains("frobnication"),
@@ -1184,7 +1261,7 @@ mod core_tests {
         let note: oxplow_domain::NoteId =
             serde_json::from_value(out["note"]["id"].clone()).unwrap();
         eventually("the note is found", || {
-            found(&svc, "gadget", Some(stream.id), "note")
+            found(&svc, "gadget", Some(stream.id), "thread_note")
         })
         .await;
         let vocabulary = svc.vocabulary.clone();
@@ -1198,7 +1275,7 @@ mod core_tests {
             .await
             .unwrap();
         eventually("the deleted note leaves", || async {
-            entries(&svc, "note").await.is_empty()
+            entries(&svc, "thread_note").await.is_empty()
         })
         .await;
 

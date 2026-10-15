@@ -1,6 +1,6 @@
 //! `search.read/search { query, stream_id?, kinds?, limit? }`: site-wide
-//! BM25 search over tasks, comments, notes, wiki pages and a stream's
-//! files, best first.
+//! BM25 search over every searchable kind (`v_ref_kind.searchable`) and a
+//! stream's files, best first; each hit names the ref it found.
 
 use std::sync::Arc;
 
@@ -24,7 +24,8 @@ pub struct SiteSearchInput {
     /// wiki are always included). Omit to search every stream.
     #[serde(default)]
     pub stream_id: Option<String>,
-    /// Restrict to a subset of kinds: `task | comment | note | wiki | file`.
+    /// Restrict to these kinds: any `v_ref_kind` lists as `searchable`
+    /// (`work_item`, `wiki`, `thread_note`, an extension's), or `file`.
     #[serde(default)]
     pub kinds: Option<Vec<String>>,
     /// Max hits to return (default 50).

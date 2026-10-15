@@ -16,7 +16,7 @@
  * covers every constructor).
  */
 
-import { refKindInfo } from "../refKinds.js";
+import { pageTabId } from "../refKinds.js";
 import type { PageKind, RoutePageKind, TabRef } from "./tabState.js";
 import {
   WORKING,
@@ -254,39 +254,6 @@ export function duplicateBlockRef(payload: DuplicateBlockPayload): TabRef {
 export function extPageRef(extension: string, page: string, params?: Record<string, string>): TabRef {
   const id = extPageRefString(extension, page, params);
   return { id, kind: "ext-page", payload: params ? { extension, page, params } : { extension, page } };
-}
-
-/** The page that opens a ref of an extension's kind: the page its
- *  `ref_kinds:` entry names, given `?ref=`. Null for any other ref. */
-function extensionRefPage(ref: string, kind: string): TabRef | null {
-  const info = refKindInfo(kind);
-  if (!info) return null;
-  const ext = extPageOf(splitKindParams(info.page, "page")?.head ?? "");
-  return ext ? extPageRef(ext.extension, ext.page, { ref }) : null;
-}
-
-/** Where a unified-search hit opens: a page, a file (in the editor), or
- *  nowhere — a note has no page of its own, and a kind no installed
- *  extension declares opens nothing. A hit of an extension's ref kind (a
- *  `searchable:` kind, P9.D3) opens that kind's page with `?ref=`, as a
- *  `[[…]]` of it does. */
-export function searchHitTarget(hit: { kind: string; ref_id: string }): { page: TabRef } | { file: string } | null {
-  switch (hit.kind) {
-    case "work_item":
-      return { page: workItemTabRef(refOf("work_item", hit.ref_id)) };
-    case "wiki":
-      return { page: wikiPageRef(hit.ref_id) };
-    case "comment":
-      return { page: commentsRef() };
-    case "file":
-      return { file: hit.ref_id };
-    case "note":
-      return null;
-    default: {
-      const page = extensionRefPage(`${hit.kind}:${hit.ref_id}`, hit.kind);
-      return page ? { page } : null;
-    }
-  }
 }
 
 /** The extension and page of an extension's page, `page:<extension>/<page>`
@@ -626,8 +593,13 @@ export function refFromTabId(id: string): TabRef | null {
       const extParams = Object.fromEntries(params.entries());
       return extPageRef(ext.extension, ext.page, Object.keys(extParams).length ? extParams : undefined);
     }
-    default:
-      return extensionRefPage(id, kind);
+    default: {
+      // Any other kind opens where its page template says (an
+      // extension's kind: its page, given the ref), when that needs
+      // nothing but the ref; `refOpener` reads the row for one that does.
+      const tab = pageTabId(id);
+      return tab !== null && tab !== id ? refFromTabId(tab) : null;
+    }
   }
 }
 

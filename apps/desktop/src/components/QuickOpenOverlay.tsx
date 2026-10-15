@@ -543,8 +543,8 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
               if (result.kind === "hit") {
                 return (
                   <button type="button"
-                    key={`hit:${result.hit.kind}:${result.hit.ref_id}:${result.hit.stream_id ?? ""}`}
-                    data-testid={`launcher-hit-${result.hit.kind}:${result.hit.ref_id}`}
+                    key={`hit:${result.hit.ref}:${result.hit.stream_id ?? ""}`}
+                    data-testid={`launcher-hit-${result.hit.ref}`}
                     data-row-index={index}
                     onClick={() => confirm(result)}
                     style={{
@@ -556,7 +556,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                       <PageKindIcon kind={result.hit.kind} size={14} style={{ color: "var(--text-secondary)" }} />
                     </span>
                     <span style={{ flexShrink: 0, maxWidth: "40%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {result.hit.title || result.hit.ref_id}
+                      {result.hit.title || result.hit.ref}
                     </span>
                     <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--muted)", fontSize: 11 }}>
                       {result.hit.snippet}

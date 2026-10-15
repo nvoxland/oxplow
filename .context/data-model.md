@@ -656,7 +656,8 @@ row has `id`, `thread_id`, `body`, `author` (free-form: `agent`, `user`,
 its `[[…]]` links are `page_ref` edges from `thread_note`, and each
 change logs `knowledge.note.written@2` / `deleted@2` (V31 rewrote the
 v1 rows, which named the note `task_note:not<n>`, and v1 went). `v_thread_note` reads it,
-`v_search_note` indexes it.
+`v_search_thread_note` indexes it (`thread_ref` on `v_thread_note`, v3, is
+where a note opens: its thread).
 
 **`task_note`** holds only the comments on oxplow's tasks
 (`oxplow.work_item.comment`; `task_id` NOT NULL), which reach
@@ -2319,15 +2320,16 @@ FTS5 virtual table (`tokenize = 'porter unicode61'`, `prefix = '2 3'`) storing
 or removed in place (a `UNIQUE` index over `(kind, ref_id, COALESCE(stream_id,''))`
 enforces identity, treating global rows' `NULL` stream as `''`).
 
-- `kind` ∈ `task | comment | note | wiki | file`, or a **searchable
-  extension ref kind** (`acme_pr`, P9.D3); `ref_id` is the task id, comment
-  id, note id, wiki slug, repo-relative path, or the extension ref's id.
+- `kind` is a ref kind `v_ref_kind` lists as `searchable` (core's
+  `work_item`, `comment`, `thread_note`, `wiki`; an extension's, P9.D3), or
+  `file`; `ref_id` is the ref's id after `<kind>:`, and a hit is the ref.
   Every kind but `file` is derived from a model by an asset per kind
-  (`kind_search.rs`, `restate_kind_tx`: only entries added, changed or
-  gone are written, by each entry's `content_hash`, V164; tsk896); core's read `v_search_work_item` (the active work list's items,
-through the interface; kind `work_item`, its id `<provider>:<id>`) /
-`_comment` / `_note` / `_wiki`
-  (tsk864). Files are upserted by the `search.index` pump consumer from
+  (`kind_search.rs`: `plan_restate_tx` decides from each entry's `version`
+  — the feed's own `version` column, else its title-and-body hash; V77
+  renamed V164's `content_hash` — and `apply_restate_tx` writes only
+  entries added, changed or gone; tsk896); core's read `v_search_work_item`
+  (the active work list's items, through the interface) / `_comment` /
+  `_thread_note` / `_wiki` (tsk864). Files are upserted by the `search.index` pump consumer from
   `snapshot.taken` (`indexer.rs`).
 - `stream_id` is `NULL` for project-global rows (wiki, a backlog task) and
   the owning stream otherwise. Search filters `stream_id = ?  OR stream_id

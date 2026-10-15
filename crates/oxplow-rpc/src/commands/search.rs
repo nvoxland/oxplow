@@ -5,11 +5,11 @@ use oxplow_db::SearchHit;
 
 use crate::error::IpcError;
 
-/// Site-wide BM25 search across tasks, comments, notes, wiki pages, and
-/// per-stream file contents. `stream_id` scopes file/stream-bound hits to one
+/// Site-wide BM25 search across every searchable kind (`v_ref_kind.searchable`)
+/// and per-stream file contents; each hit names the ref it found. `stream_id` scopes file/stream-bound hits to one
 /// worktree (project-global hits like wiki always included); `None` searches
-/// everything. `kinds` optionally restricts to a subset
-/// (`task|comment|note|wiki|file`). Results are ranked best-first.
+/// everything. `kinds` optionally restricts to some of those kinds (or
+/// `file`). Results are ranked best-first.
 pub async fn search(
     svc: &Services,
     query: String,

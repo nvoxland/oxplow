@@ -534,7 +534,7 @@ export async function listStreams(): Promise<Stream[]> {
 
 /// Site-wide BM25 search. `streamId` scopes file/stream-bound hits to one
 /// worktree (project-global hits like wiki always included); `null` searches
-/// everything. `kinds` optionally restricts to task|comment|note|wiki|file.
+/// everything. `kinds` optionally restricts to searchable kinds (`v_ref_kind`) or `file`.
 export async function searchSite(
   query: string,
   streamId: string | null,

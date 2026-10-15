@@ -392,7 +392,7 @@
     - { not_null: id }
     - { unique: id }
 - name: decision
-  version: 4
+  version: 5
   description: "Decisions: forks the agent resolved while working (what it chose, what it didn't, why), recorded by the agent or inferred by oxplow. What a reviewer most wants to check."
   columns:
     - { name: "id", type: "INTEGER", doc: "Decision id." }
@@ -408,6 +408,8 @@
     - { name: "provenance", type: "TEXT", doc: "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "ref", type: "TEXT", doc: "`decision:<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v4)" }
+    - { name: "effort_ref", type: "TEXT", doc: "Its effort's ref (`effort:eff<n>`), when it was made during one: where a decision opens. (v5)" }
+    - { name: "thread_ref", type: "TEXT", doc: "Its thread's ref (`thread:thr<n>`): where a decision opens when it has no effort. (v5)" }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -641,9 +643,9 @@
   tests:
     - { not_null: ref }
     - { unique: ref }
-- name: search_note
-  version: 2
-  description: "What site search indexes for each thread note: the `note` kind's index is restated from these rows when they change."
+- name: search_thread_note
+  version: 3
+  description: "What site search indexes for each thread note: the `thread_note` kind's index is restated from these rows when they change."
   columns:
     - { name: "ref", type: "TEXT", doc: "The note's canonical ref (`thread_note:not<n>`): what a hit opens." }
     - { name: "title", type: "TEXT", doc: "Empty: a note has no title." }
@@ -832,9 +834,9 @@
     - { not_null: target }
     - { unique: target }
 - name: ref_kind
-  version: 2
+  version: 3
   key: [kind]
-  description: "Every kind of ref the running vocabulary knows: core's, and those extensions declare (`ref_kinds:`, with how to show one). A removed extension's kinds leave with it."
+  description: "Every kind of ref the running vocabulary knows, core's and those extensions declare (`ref_kinds:`), each with what its declarer says of it: the model that holds one, where one opens, and what search indexes it from. A removed extension's kinds leave with it."
   columns:
     - { name: "kind", type: "TEXT", doc: "The kind (`work_item`, `acme_pr`)." }
     - { name: "extension", type: "TEXT", doc: "The extension that declares it; NULL for a core kind." }
@@ -842,10 +844,10 @@
     - { name: "id_pattern", type: "TEXT", doc: "The regex its ids match." }
     - { name: "revisioned", type: "INTEGER", doc: "1 when a ref to one may carry `@rev`." }
     - { name: "wikilinks", type: "TEXT", doc: "JSON array of its `[[prefix:…]]` sugar (`git` for `commit`)." }
-    - { name: "resolve", type: "TEXT", doc: "The view whose `title` names one, by its `ref` column; NULL for a core kind." }
-    - { name: "page", type: "TEXT", doc: "The page that opens one (`page:<extension>/<page>`, given `?ref=`); NULL for a core kind." }
+    - { name: "resolve", type: "TEXT", doc: "The view holding one, by its `ref` column (an extension's has a `title`); NULL for a kind no model holds (a file, a page). (v3: core kinds too)" }
+    - { name: "page", type: "TEXT", doc: "Where one opens, a tab-id template: `{ref}` is the ref itself, `{<column>}` a column of its `resolve` row, `{a|b}` the first of them that isn't empty (`{ref}`; `{thread_ref}` for a thread note; `page:acme/pr?ref={ref}` for an extension's kind). NULL for a kind with no page. (v3: a template, core kinds too)" }
     - { name: "icon", type: "TEXT", doc: "Its icon's name (one of `REF_KIND_ICONS`); NULL for a core kind." }
-    - { name: "searchable", type: "TEXT", doc: "The view whose rows (`ref`, `title`, `body`) the site-wide search indexes under the kind; NULL for a core kind (core indexes its own) and for an extension's kind that isn't searchable." }
+    - { name: "searchable", type: "TEXT", doc: "The view whose rows (`ref`, `title`, `body`, `stream_id`, optional `version`) site search indexes under the kind; NULL for a kind that isn't searched. (v3: core kinds too)" }
   tests:
     - { not_null: kind }
 - name: contribution_health
@@ -1321,7 +1323,7 @@
     - { not_null: id }
     - { unique: id }
 - name: thread_note
-  version: 2
+  version: 3
   description: "A thread's notes: the capture pad an agent writes as it works (`oxplow.knowledge.add_note`; ref `thread_note:not<n>`)."
   columns:
     - { name: "id", type: "INTEGER", doc: "Note id (`not<n>`)." }
@@ -1330,6 +1332,7 @@
     - { name: "author", type: "TEXT", doc: "Who wrote it (`agent`, `user`, …)." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "ref", type: "TEXT", doc: "`thread_note:not<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
+    - { name: "thread_ref", type: "TEXT", doc: "Its thread's ref (`thread:thr<n>`): where a note opens. (v3)" }
   tests:
     - { not_null: id }
     - { unique: id }

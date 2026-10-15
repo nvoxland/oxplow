@@ -1116,7 +1116,7 @@ fn script_and_sql_sources() -> Vec<(String, String)> {
 
 /// Every place a script, lens query or model SQL spells or takes apart a
 /// ref of a core kind by hand, as `path:line text`. A kind's owning model
-/// (`oxplow_db::ref_models::REF_MODELS`) spells its prefix in its `ref`
+/// (`oxplow_db::ref_models::owners`) spells its prefix in its `ref`
 /// column and is exempt.
 fn hand_made_script_refs() -> Vec<String> {
     use regex::Regex;
@@ -1134,8 +1134,7 @@ fn hand_made_script_refs() -> Vec<String> {
         format!(r#"(?i)(?:startswith|endswith|len|length)\(\s*["'](?:{alt}):"#),
     ]
     .map(|p| Regex::new(&p).expect("a fixed pattern"));
-    let owners: BTreeSet<String> = oxplow_db::ref_models::REF_MODELS
-        .iter()
+    let owners: BTreeSet<String> = oxplow_db::ref_models::owners()
         .map(|m| {
             format!(
                 "crates/oxplow-db/models/{}.sql",

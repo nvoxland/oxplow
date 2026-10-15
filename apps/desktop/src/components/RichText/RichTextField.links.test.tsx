@@ -18,7 +18,7 @@ const ACME_PR: RefKind = {
   idPattern: "^\\d+$",
   wikilinks: [],
   resolve: "pull_request",
-  page: "page:acme/pr",
+  page: "page:acme/pr?ref={ref}",
   icon: "git-pull-request",
 };
 

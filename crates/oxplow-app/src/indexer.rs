@@ -226,7 +226,7 @@ mod tests {
             .unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].kind, KIND_FILE);
-        assert_eq!(hits[0].ref_id, "src/frob.rs");
+        assert_eq!(hits[0].reference, "file:src/frob.rs");
 
         // A later capture with no blob = deletion → index row removed.
         let snap2 = capture_file(&svc, &stream.id, "src/frob.rs", None).await;

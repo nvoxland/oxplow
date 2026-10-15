@@ -13,7 +13,7 @@ const ACME_PR: RefKind = {
   idPattern: "^\\d+$",
   wikilinks: ["pr"],
   resolve: "v_acme_prs",
-  page: "page:acme/pr",
+  page: "page:acme/pr?ref={ref}",
   icon: "git-pull-request",
 };
 
@@ -83,10 +83,21 @@ describe("an extension's ref kind (P8.D7)", () => {
   test("reads v_ref_kind rows", () => {
     const kinds = refKindsFromResult({
       columns: ["kind", "extension", "label", "id_pattern", "wikilinks", "resolve", "page", "icon"],
-      rows: [["acme_pr", "acme", "Pull request", "^\\d+$", '["pr"]', "v_acme_prs", "page:acme/pr", "git-pull-request"]],
+      rows: [["acme_pr", "acme", "Pull request", "^\\d+$", '["pr"]', "v_acme_prs", "page:acme/pr?ref={ref}", "git-pull-request"]],
       truncated: false,
       reads: { models: [], tables: [] },
     } as never);
     expect(kinds).toEqual([ACME_PR]);
   });
+});
+
+// Core's kinds come in the same list, with no extension, label or icon.
+test("a core kind's row reads as one", () => {
+  const kinds = refKindsFromResult({
+    columns: ["kind", "extension", "label", "id_pattern", "wikilinks", "resolve", "page", "icon"],
+    rows: [["thread_note", null, null, "^not\\d+$", "[]", "v_thread_note", "{thread_ref}", null]],
+    truncated: false,
+    reads: { models: [], tables: [] },
+  } as never);
+  expect(kinds[0]).toMatchObject({ kind: "thread_note", extension: null, label: null, icon: null, page: "{thread_ref}" });
 });

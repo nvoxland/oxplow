@@ -5917,12 +5917,14 @@ export type ScriptsConfig = {
 };
 
 /**
- *  One ranked search result. `stream_id` is `None` for project-global
- *  entities (wiki pages); `score` is the BM25 score (lower = better match).
+ *  One ranked search result: the ref it found (`work_item:oxplow:tsk7`,
+ *  `file:src/a.rs`), which the caller opens the way it opens any ref.
+ *  `stream_id` is `None` for project-global entities (wiki pages);
+ *  `score` is the BM25 score (lower = better match).
  */
 export type SearchHit = {
 	kind: string,
-	ref_id: string,
+	ref: string,
 	stream_id: string | null,
 	title: string,
 	snippet: string,

@@ -23,12 +23,15 @@ use oxplow_domain::DomainError;
 
 use crate::database::Database;
 
-/// One ranked search result. `stream_id` is `None` for project-global
-/// entities (wiki pages); `score` is the BM25 score (lower = better match).
+/// One ranked search result: the ref it found (`work_item:oxplow:tsk7`,
+/// `file:src/a.rs`), which the caller opens the way it opens any ref.
+/// `stream_id` is `None` for project-global entities (wiki pages);
+/// `score` is the BM25 score (lower = better match).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct SearchHit {
     pub kind: String,
-    pub ref_id: String,
+    #[serde(rename = "ref")]
+    pub reference: String,
     pub stream_id: Option<String>,
     pub title: String,
     pub snippet: String,
@@ -66,23 +69,31 @@ pub fn sanitize_query(raw: &str) -> String {
 /// belongs to one — `None` for a project-global entry.
 pub type EntryKey = (String, Option<String>);
 
-/// Make `kind`'s entries `entries` (`(ref_id, stream)` → `(title,
-/// body)`), in the caller's transaction: what a kind whose whole index is
-/// derived from a model does on each recompute, and — with none — how a
-/// kind leaves the index. Only what differs is written (tsk896): an entry
-/// whose title and body hash as stored is left alone, a changed one is
-/// rewritten in place, a new one added, a gone one removed.
-pub fn restate_kind_tx(
+/// What a restate of one kind changes, decided from versions alone: the
+/// entries to write (new, or whose version differs from the stored one)
+/// and the stored entries that are gone. Only the entries in `write`
+/// need their title and body read.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RestatePlan {
+    /// Each entry to write, its version and its stored rowid (`None` for a
+    /// new one).
+    pub write: Vec<(EntryKey, String, Option<i64>)>,
+    /// The rowids of the stored entries that are gone.
+    pub remove: Vec<i64>,
+}
+
+/// What it takes to make `kind`'s entries `versions` (`(ref_id, stream)` →
+/// version), against what is stored: an entry whose version is as stored
+/// is left alone.
+pub fn plan_restate_tx(
     conn: &rusqlite::Connection,
     kind: &str,
-    entries: &std::collections::BTreeMap<EntryKey, (String, String)>,
-) -> Result<Restated, DomainError> {
+    versions: &std::collections::BTreeMap<EntryKey, String>,
+) -> Result<RestatePlan, DomainError> {
     let sql = crate::database::map_sql_err;
     let mut stored: std::collections::HashMap<EntryKey, (i64, Option<String>)> = {
         let mut st = conn
-            .prepare(
-                "SELECT rowid, ref_id, stream_id, content_hash FROM search_entry WHERE kind = ?1",
-            )
+            .prepare("SELECT rowid, ref_id, stream_id, version FROM search_entry WHERE kind = ?1")
             .map_err(sql)?;
         let rows = st
             .query_map(params![kind], |r| {
@@ -91,15 +102,41 @@ pub fn restate_kind_tx(
             .map_err(sql)?;
         rows.collect::<rusqlite::Result<_>>().map_err(sql)?
     };
+    let mut plan = RestatePlan::default();
+    for (key, version) in versions {
+        match stored.remove(key) {
+            Some((_, Some(old))) if &old == version => {}
+            Some((rowid, _)) => plan.write.push((key.clone(), version.clone(), Some(rowid))),
+            None => plan.write.push((key.clone(), version.clone(), None)),
+        }
+    }
+    plan.remove = stored.into_values().map(|(rowid, _)| rowid).collect();
+    plan.remove.sort_unstable();
+    Ok(plan)
+}
+
+/// Carry out `plan` for `kind`, `texts` holding the title and body of
+/// every entry it writes.
+pub fn apply_restate_tx(
+    conn: &rusqlite::Connection,
+    kind: &str,
+    plan: &RestatePlan,
+    texts: &std::collections::BTreeMap<EntryKey, (String, String)>,
+) -> Result<Restated, DomainError> {
+    let sql = crate::database::map_sql_err;
     let mut out = Restated::default();
-    for ((ref_id, stream), (title, body)) in entries {
-        let hash = entry_hash(title, body);
-        match stored.remove(&(ref_id.clone(), stream.clone())) {
-            Some((_, Some(old))) if old == hash => {}
-            Some((rowid, _)) => {
+    for (key, version, rowid) in &plan.write {
+        let Some((title, body)) = texts.get(key) else {
+            return Err(DomainError::Invalid(format!(
+                "search kind `{kind}`: no text read for `{}`",
+                key.0
+            )));
+        };
+        match rowid {
+            Some(rowid) => {
                 conn.execute(
-                    "UPDATE search_entry SET content_hash = ?2 WHERE rowid = ?1",
-                    params![rowid, hash],
+                    "UPDATE search_entry SET version = ?2 WHERE rowid = ?1",
+                    params![rowid, version],
                 )
                 .map_err(sql)?;
                 conn.execute(
@@ -111,9 +148,9 @@ pub fn restate_kind_tx(
             }
             None => {
                 conn.execute(
-                    "INSERT INTO search_entry (kind, ref_id, stream_id, content_hash) \
+                    "INSERT INTO search_entry (kind, ref_id, stream_id, version) \
                      VALUES (?1, ?2, ?3, ?4)",
-                    params![kind, ref_id, stream, hash],
+                    params![kind, key.0, key.1, version],
                 )
                 .map_err(sql)?;
                 conn.execute(
@@ -125,7 +162,7 @@ pub fn restate_kind_tx(
             }
         }
     }
-    for (rowid, _) in stored.into_values() {
+    for rowid in &plan.remove {
         conn.execute("DELETE FROM search_fts WHERE rowid = ?1", params![rowid])
             .map_err(sql)?;
         conn.execute("DELETE FROM search_entry WHERE rowid = ?1", params![rowid])
@@ -133,6 +170,24 @@ pub fn restate_kind_tx(
         out.removed += 1;
     }
     Ok(out)
+}
+
+/// Make `kind`'s entries `entries` (`(ref_id, stream)` → `(title,
+/// body)`), in the caller's transaction, each versioned by its title and
+/// body's hash: what a kind whose feed declares no `version` does on each
+/// recompute, and — with none — how a kind leaves the index. Only what
+/// differs is written (tsk896).
+pub fn restate_kind_tx(
+    conn: &rusqlite::Connection,
+    kind: &str,
+    entries: &std::collections::BTreeMap<EntryKey, (String, String)>,
+) -> Result<Restated, DomainError> {
+    let versions = entries
+        .iter()
+        .map(|(key, (title, body))| (key.clone(), entry_hash(title, body)))
+        .collect();
+    let plan = plan_restate_tx(conn, kind, &versions)?;
+    apply_restate_tx(conn, kind, &plan, entries)
 }
 
 /// What a restate wrote.
@@ -320,9 +375,11 @@ impl SqliteSearchStore {
 
                 let mut stmt = conn.prepare(&sql)?;
                 let rows = stmt.query_map(params_from_iter(values), |row| {
+                    let kind: String = row.get(0)?;
+                    let id: String = row.get(1)?;
                     Ok(SearchHit {
-                        kind: row.get(0)?,
-                        ref_id: row.get(1)?,
+                        reference: format!("{kind}:{id}"),
+                        kind,
                         stream_id: row.get(2)?,
                         title: row.get(3)?,
                         snippet: row.get(4)?,
@@ -366,8 +423,8 @@ mod tests {
         .unwrap();
         let hits = s.search("login", Some("s-a"), &[], 10).await.unwrap();
         assert_eq!(hits.len(), 2, "both task and global wiki match");
-        assert!(hits.iter().any(|h| h.kind == "task" && h.ref_id == "1"));
-        assert!(hits.iter().any(|h| h.kind == "wiki" && h.ref_id == "auth"));
+        assert!(hits.iter().any(|h| h.reference == "task:1"));
+        assert!(hits.iter().any(|h| h.reference == "wiki:auth"));
     }
 
     #[tokio::test]
@@ -411,7 +468,10 @@ mod tests {
             .await
             .unwrap();
         let hits = s.search("widget", Some("s-a"), &[], 10).await.unwrap();
-        let ids: Vec<&str> = hits.iter().map(|h| h.ref_id.as_str()).collect();
+        let ids: Vec<&str> = hits
+            .iter()
+            .map(|h| h.reference.as_str().split_once(':').unwrap().1)
+            .collect();
         assert!(ids.contains(&"src/a.rs"), "stream a's file is in scope");
         assert!(
             !ids.contains(&"src/b.rs"),
@@ -512,6 +572,54 @@ mod tests {
         assert_eq!(got, vec![("file", Some("s-b")), ("task", Some("s-a"))]);
     }
 
+    /// A feed with versions is planned from them alone: the same versions
+    /// plan nothing, one changed version plans that one entry (the only
+    /// text the caller then reads), and a gone entry is removed.
+    #[tokio::test]
+    async fn a_versioned_restate_plans_only_the_changed_entries() {
+        let s = store().await;
+        let key = |id: &str| (id.to_string(), Some("str1".to_string()));
+        let versions = |second: &str| {
+            std::collections::BTreeMap::from([
+                (key("trn1"), "v1".to_string()),
+                (key("trn2"), second.to_string()),
+            ])
+        };
+        let texts = std::collections::BTreeMap::from([
+            (key("trn1"), ("one".to_string(), "first turn".to_string())),
+            (key("trn2"), ("two".to_string(), "second turn".to_string())),
+        ]);
+        let db = s.db.clone();
+        let (first, texts) = (versions("v1"), texts.clone());
+        db.transaction(move |tx| {
+            let plan = plan_restate_tx(tx, "turn", &first)?;
+            assert_eq!(plan.write.len(), 2);
+            apply_restate_tx(tx, "turn", &plan, &texts)
+        })
+        .await
+        .unwrap();
+        let plan = |v: std::collections::BTreeMap<EntryKey, String>| {
+            let db = s.db.clone();
+            async move {
+                db.transaction(move |tx| plan_restate_tx(tx, "turn", &v))
+                    .await
+                    .unwrap()
+            }
+        };
+        assert_eq!(plan(versions("v1")).await, RestatePlan::default());
+        let changed = plan(versions("v2")).await;
+        assert_eq!(changed.write.len(), 1);
+        assert_eq!(changed.write[0].0, key("trn2"));
+        assert!(changed.write[0].2.is_some(), "rewritten in place");
+        let gone = plan(std::collections::BTreeMap::from([(
+            key("trn1"),
+            "v1".to_string(),
+        )]))
+        .await;
+        assert!(gone.write.is_empty());
+        assert_eq!(gone.remove.len(), 1);
+    }
+
     /// tsk864, tsk896: a restate writes only what differs — the same
     /// entries write nothing, an edit to one of three rewrites that one,
     /// and none removes the kind.
@@ -556,7 +664,10 @@ mod tests {
         assert_eq!(restate(entries("gadget")).await, r(0, 1, 0));
         let hits = s.search("gadget", Some("str1"), &[], 10).await.unwrap();
         assert_eq!(
-            (hits[0].kind.as_str(), hits[0].ref_id.as_str()),
+            (
+                hits[0].kind.as_str(),
+                hits[0].reference.as_str().split_once(':').unwrap().1
+            ),
             ("task", "tsk2")
         );
         assert!(s.search("cog", None, &[], 10).await.unwrap().is_empty());
@@ -584,7 +695,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(hits.len(), 1, "both words present → match");
-        assert_eq!(hits[0].ref_id, "architecture-overview");
+        assert_eq!(hits[0].reference, "wiki:architecture-overview");
         // Words may be non-adjacent too (AND, not phrase).
         assert_eq!(
             s.search("workspace invariant", None, &[], 10)

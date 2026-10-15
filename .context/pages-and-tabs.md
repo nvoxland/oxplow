@@ -409,8 +409,10 @@ The launcher does everything in one box:
 - **Typing** → ranked results, pages → **commands** → files → body hits.
   Commands are the bus's offers (`commandOffers`, passed in as `offers`)
   that can run now (`searchableCommands`); the same offers feed the menu
-  bar (`menuBar.ts`). Body hits come from `searchSite` (BM25 over tasks / comments /
-  wiki / notes / file contents). The ordering is a pure helper —
+  bar (`menuBar.ts`). Body hits come from `searchSite` (BM25 over every
+  searchable kind and file contents); a hit is a ref, opened through the
+  ref opener (`openSearchHit` → `planNavigation` → `tabs/refOpener.ts`),
+  which may select a thread or switch stream. The ordering is a pure helper —
   `buildQuickOpenResults` in `components/quickOpenResults.ts` — so it's
   unit-tested without mounting React.
 
@@ -558,6 +560,16 @@ adapter-component pattern from `CommitGraphTable`'s
 `CommitRowDispatcher`.
 
 ## Linking between tabs — single chokepoint rule
+
+**What a ref opens is the registry's; how is the click's.** A kind's
+`v_ref_kind.page` template says where its refs open, for core and
+extension kinds alike, and `tabs/refOpener.ts` (`refTarget`;
+`refTargetNow` when no row is needed) is the one function that fills
+it: a tab, a thread or stream to select, or nothing ([refs.md](./refs.md)
+"Where a ref opens"). Search hits and `oxplow_navigate`
+(`planNavigation`) go through it; `refFromTabId` uses the same template
+for any kind it has no case for. Never add a per-surface switch on a ref's
+kind to decide where it opens.
 
 **Browser-tab semantics are non-negotiable: plain-click navigates
 in-tab; only Cmd/Ctrl-click + middle-click + right-click open a new

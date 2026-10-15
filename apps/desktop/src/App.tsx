@@ -152,7 +152,7 @@ import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { agentSessionRef, computeDiffId, diskFilePath, pageKindOf, refFromTabId, closedThreadsRef, commentsRef, dashboardsRef, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newSessionRef, newStreamRef, newTaskRef, alertsRef, searchHitTarget, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, type DiffViewPayload } from "./tabs/pageRefs.js";
+import { agentSessionRef, computeDiffId, diskFilePath, pageKindOf, refFromTabId, closedThreadsRef, commentsRef, dashboardsRef, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newSessionRef, newStreamRef, newTaskRef, alertsRef, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, type DiffViewPayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
@@ -1824,14 +1824,20 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handleOpenFile, handleOpenWiki, selectedThreadId, selectedThreadWork, setCenterActive, stream?.id]);
 
-  /** Navigate to a unified-search hit. Shared by the search palette and
-   *  the quick-open overlay's body-hit rows. */
+  /** Navigate to a unified-search hit: wherever its ref opens
+   *  (`tabs/refOpener.ts`, by way of `planNavigation`) — a page here, or
+   *  the thread or stream it names. A hit whose ref opens nothing does
+   *  nothing. */
   const openSearchHit = useCallback((hit: import("./api.js").SearchHit) => {
-    const target = searchHitTarget(hit);
-    if (!target) return;
-    if ("file" in target) void handleOpenFile(target.file);
-    else handleOpenPage(target.page);
-  }, [handleOpenPage, handleOpenFile]);
+    void (async () => {
+      const plan = await planNavigation({ ref: hit.ref }, threadStatesRef.current, stream?.id ?? null);
+      if (stream?.id !== plan.streamId) await handleSwitch(plan.streamId);
+      if (plan.selectThread && plan.threadId) await handleSelectThread(plan.streamId, plan.threadId);
+      if (plan.page) handleOpenPage(plan.page);
+    })().catch(() => undefined);
+    // handleSwitch / handleSelectThread are plain functions over state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handleOpenPage, stream?.id]);
 
   /**
    * Browser-style in-tab navigation. Replaces the page tab whose
@@ -2222,7 +2228,7 @@ export function App() {
         // and is focused in the thread it belongs to, then the window
         // switches to that stream and thread.
         navigate: async (input) => {
-          const plan = planNavigation(input, threadStates, stream?.id ?? null);
+          const plan = await planNavigation(input, threadStates, stream?.id ?? null);
           if (plan.page) {
             if (!plan.threadId) throw new Error(`stream \`${plan.streamId}\` has no thread`);
             await open({ ref: plan.page.id }, { threadId: plan.threadId, actor: "human", call: null }, true);

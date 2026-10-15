@@ -1,8 +1,10 @@
 /**
- * The ref kinds extensions declare (P8.D6–D7, `.context/extensions.md` →
- * "Ref kinds"), read from `v_ref_kind`: how the chrome draws one (icon,
- * label), where one opens (its extension's page, given `?ref=`), how a
- * `[[…]]` names one, and which model titles it.
+ * Every ref kind the vocabulary knows (`.context/refs.md` "The kind
+ * registry"), read from `v_ref_kind`: core's and those extensions declare
+ * (P8.D6–D7, `.context/extensions.md` → "Ref kinds"). How the chrome draws
+ * one (an extension's icon and label), where one opens (its page
+ * template, `pageTabId`), how a `[[…]]` names one, and which model holds
+ * it.
  *
  * One process-wide list, loaded by `useRefKindsLoader` (mounted once, in
  * `App`) and re-read when `v_ref_kind` changes; the pure helpers
@@ -73,26 +75,33 @@ export const REF_KIND_ICONS: Readonly<Record<string, LucideIcon>> = {
   "zap": Zap,
 };
 
-/** One extension's ref kind, as `v_ref_kind` lists it. */
+/** One ref kind, as `v_ref_kind` lists it. */
 export interface RefKind {
   kind: string;
-  extension: string;
-  label: string;
+  /** The extension that declares it; null for a core kind. */
+  extension: string | null;
+  /** What one is called; null for a core kind (the chrome names those). */
+  label: string | null;
   /** The anchored regex its ids match. */
   idPattern: string;
   /** Its `[[prefix:…]]` sugar. */
   wikilinks: string[];
-  /** The view whose `title` names one, by `ref`. */
-  resolve: string;
-  /** The page that opens one: `page:<extension>/<page>`. */
-  page: string;
-  icon: string;
+  /** The view holding one, by its `ref` column; null when no model does. */
+  resolve: string | null;
+  /** Where one opens, a tab-id template (`{ref}`, `{thread_ref}`,
+   *  `page:acme/pr?ref={ref}`); null when it has no page. */
+  page: string | null;
+  icon: string | null;
 }
 
 export function refKindsFromResult(result: SqlQueryResult): RefKind[] {
   return result.rows.map((row) => {
     const at = (name: string) => row[result.columns.indexOf(name)] ?? null;
     const text = (name: string) => String(at(name) ?? "");
+    const maybe = (name: string) => {
+      const v = at(name);
+      return v === null || v === undefined || v === "" ? null : String(v);
+    };
     let wikilinks: string[] = [];
     try {
       const parsed: unknown = JSON.parse(text("wikilinks") || "[]");
@@ -102,13 +111,13 @@ export function refKindsFromResult(result: SqlQueryResult): RefKind[] {
     }
     return {
       kind: text("kind"),
-      extension: text("extension"),
-      label: text("label"),
+      extension: maybe("extension"),
+      label: maybe("label"),
       idPattern: text("id_pattern"),
       wikilinks,
-      resolve: text("resolve"),
-      page: text("page"),
-      icon: text("icon"),
+      resolve: maybe("resolve"),
+      page: maybe("page"),
+      icon: maybe("icon"),
     };
   });
 }
@@ -122,9 +131,56 @@ export function setRefKinds(kinds: readonly RefKind[]): void {
   for (const l of listeners) l();
 }
 
-/** An extension's ref kind by name, or null (a core kind, or unknown). */
+/** A ref kind by name, or null (unknown, or the list isn't loaded yet). */
 export function refKindInfo(kind: string): RefKind | null {
   return current.get(kind) ?? null;
+}
+
+/** The `{…}` placeholders of a page template, each its alternatives in
+ *  order (`{effort_ref|thread_ref}`), with where it sits. */
+function placeholders(template: string): Array<{ at: number; end: number; names: string[] }> {
+  return [...template.matchAll(/\{([^{}]+)\}/g)].map((m) => ({
+    at: m.index,
+    end: m.index + m[0].length,
+    names: m[1]!.split("|"),
+  }));
+}
+
+/** The columns of its `resolve` row that `ref`'s page template reads, and
+ *  the view to read them from; null when it reads none (`{ref}`, a page)
+ *  or its kind has no page. */
+export function pageColumns(ref: string): { view: string; columns: string[] } | null {
+  const kind = parseRef(ref)?.kind;
+  const info = kind ? current.get(kind) : undefined;
+  if (!info?.page || !info.resolve) return null;
+  const columns = [...new Set(placeholders(info.page).flatMap((p) => p.names))].filter((c) => c !== "ref");
+  return columns.length ? { view: info.resolve, columns } : null;
+}
+
+/**
+ * The tab id `ref` opens as, by its kind's page template (`v_ref_kind.page`):
+ * `{ref}` is the ref itself, `{col}` that column of `row` (its `resolve`
+ * row), `{a|b}` the first of them that isn't empty. A value after the `?`
+ * is a query parameter, encoded as one. Null when its kind has no page,
+ * or the template names a column `row` doesn't give.
+ */
+export function pageTabId(ref: string, row: Readonly<Record<string, unknown>> = {}): string | null {
+  const kind = parseRef(ref)?.kind;
+  const template = kind ? current.get(kind)?.page : null;
+  if (!template) return null;
+  const query = template.indexOf("?");
+  let out = "";
+  let last = 0;
+  for (const p of placeholders(template)) {
+    const value = p.names
+      .map((name) => (name === "ref" ? ref : row[name]))
+      .find((v) => v !== null && v !== undefined && v !== "");
+    if (value === undefined) return null;
+    const text = String(value);
+    out += template.slice(last, p.at) + (query >= 0 && p.at > query ? encodeURIComponent(text) : text);
+    last = p.end;
+  }
+  return out + template.slice(last);
 }
 
 /** The icon of an extension's ref kind, or null. */
@@ -147,7 +203,8 @@ export function extensionWikilinkRef(interior: string): string | null {
   // The backend's order (`canonical_wikilink`): a `wikilink:` sugar, then
   // a kind's own name. Load keeps them apart (tsk933); one order keeps the
   // UI and the backend naming the same ref regardless.
-  const kind = [...current.values()].find((k) => k.wikilinks.includes(head)) ?? current.get(head);
+  const extensions = [...current.values()].filter((k) => k.extension !== null);
+  const kind = extensions.find((k) => k.wikilinks.includes(head)) ?? extensions.find((k) => k.kind === head);
   // The pattern runs in JS's backtracking engine: the load check keeps it
   // in one explicit ASCII form both engines read alike, with no repeats
   // that could share characters unfenced, so no id makes it backtrack
@@ -167,8 +224,8 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-/** The extensions' ref kinds; a component that draws refs of those kinds reads
- *  this so it redraws when they change. */
+/** The ref kinds; a component that draws or opens refs reads this so it
+ *  redraws when they change. */
 export function useRefKinds(): ReadonlyMap<string, RefKind> {
   return useSyncExternalStore(
     subscribe,
@@ -177,11 +234,11 @@ export function useRefKinds(): ReadonlyMap<string, RefKind> {
   );
 }
 
-/** Every extension's ref kind, and what was read. */
+/** Every ref kind, and what was read. */
 export async function readRefKinds(): Promise<{ kinds: RefKind[]; reads: Reads }> {
   const res = await querySql(
     `SELECT kind, extension, label, id_pattern, wikilinks, resolve, page, icon
-       FROM v_ref_kind WHERE extension IS NOT NULL ORDER BY kind`,
+       FROM v_ref_kind ORDER BY kind`,
     [],
     1_000,
   );

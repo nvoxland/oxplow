@@ -1,4 +1,6 @@
-SELECT id, thread_id, work_item, effort_id, turn_id, question, choice,
-       alternatives_json AS alternatives, confidence, why, provenance, created_at,
-       CAST('decision:' || id AS TEXT) AS ref
-FROM source('decision')
+SELECT d.id, d.thread_id, d.work_item, d.effort_id, d.turn_id, d.question, d.choice,
+       d.alternatives_json AS alternatives, d.confidence, d.why, d.provenance, d.created_at,
+       CAST('decision:' || d.id AS TEXT) AS ref,
+       (SELECT e.ref FROM ref('effort') e WHERE e.id = d.effort_id) AS effort_ref,
+       (SELECT t.ref FROM ref('thread') t WHERE t.id = d.thread_id) AS thread_ref
+FROM source('decision') d

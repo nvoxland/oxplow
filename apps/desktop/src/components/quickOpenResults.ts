@@ -1,5 +1,5 @@
 import { fuzzyMatches } from "../fuzzy-match.js";
-import { pageRef, refOf } from "../refs/ref.js";
+import { pageRef, parseRef, refOf } from "../refs/ref.js";
 import type { SearchHit, WorkspaceIndexedFile } from "../api.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { MenuPlace } from "../tauri-bridge/generated/bindings.js";
@@ -49,7 +49,7 @@ export function dedupeSiteHits(
   hits: SearchHit[],
   matchedFilePaths: ReadonlySet<string>,
 ): SearchHit[] {
-  return hits.filter((h) => !(h.kind === "file" && matchedFilePaths.has(h.ref_id)));
+  return hits.filter((h) => !(h.kind === "file" && matchedFilePaths.has(parseRef(h.ref)?.id ?? "")));
 }
 
 /// Split a query on whitespace and require each token to fuzzy-match
@@ -96,7 +96,7 @@ function isExactMatch(r: QuickOpenResult, q: string): boolean {
       return base.toLowerCase() === q || r.file.path.toLowerCase() === q;
     }
     case "hit":
-      return r.hit.title.toLowerCase() === q || r.hit.ref_id.toLowerCase() === q;
+      return r.hit.title.toLowerCase() === q || (parseRef(r.hit.ref)?.id ?? "").toLowerCase() === q;
     case "ask":
       return false;
   }
@@ -113,7 +113,7 @@ function resultKey(r: QuickOpenResult): string {
     case "file":
       return refOf("file", r.file.path);
     case "hit":
-      return `hit:${r.hit.kind}:${r.hit.ref_id}:${r.hit.stream_id ?? ""}`;
+      return `hit:${r.hit.ref}:${r.hit.stream_id ?? ""}`;
     case "ask":
       return "ask";
   }

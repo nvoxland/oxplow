@@ -203,7 +203,7 @@ describe("edges to any ref", () => {
 
   test("a link to an extension's kind opens the page its ref_kinds names", () => {
     setRefKinds([
-      { kind: "acme_pr", extension: "acme", label: "PR", idPattern: ".*", wikilinks: [], resolve: "", page: "page:acme/pr", icon: "" },
+      { kind: "acme_pr", extension: "acme", label: "PR", idPattern: ".*", wikilinks: [], resolve: "", page: "page:acme/pr?ref={ref}", icon: "" },
     ]);
     try {
       const entry = edgeToOutboundEntry(edge({ target_kind: "acme_pr", target_id: "12", source_label: "PR 12" }));

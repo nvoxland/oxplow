@@ -50,11 +50,12 @@ pub fn check_links_in(world: &LinkWorld<'_>, body: &str) -> Vec<LinkWarning> {
     let mut out = Vec::new();
     for link in classify_wikilinks(world.kinds, body) {
         match (&link.reference, &link.canonical) {
-            // A kind the vocabulary knows with no typed probe here: a
-            // kind an extension declares is checked against its `resolve` model, any
-            // other is a link as it stands (tsk894).
+            // A kind the vocabulary knows with no typed probe here: one a
+            // model holds (`v_ref_kind.resolve`, core's or an extension's)
+            // is checked against it, any other is a link as it stands
+            // (tsk894).
             (None, Some(canonical)) => {
-                if let Some(reason) = unresolved_extension_ref(world, canonical) {
+                if let Some(reason) = unresolved_ref(world, canonical) {
                     out.push(LinkWarning {
                         target: link.raw.clone(),
                         reason,
@@ -239,11 +240,11 @@ fn exists(conn: &rusqlite::Connection, sql: &str, param: &dyn rusqlite::ToSql) -
         .unwrap_or(false)
 }
 
-/// `Some(reason)` when `canonical` is of an extension's kind whose `resolve`
+/// `Some(reason)` when `canonical` is of a kind whose `resolve`
 /// model has no row for it (`v_ref_kind.resolve`, by its `ref` column).
 /// A kind with no `resolve` model, or one that can't be read, isn't
 /// probed.
-fn unresolved_extension_ref(
+fn unresolved_ref(
     world: &LinkWorld<'_>,
     canonical: &oxplow_domain::refs::grammar::CanonicalRef,
 ) -> Option<String> {
@@ -350,14 +351,19 @@ mod tests {
         assert!(warnings[0].reason.contains("not a recognized reference"));
     }
 
-    /// tsk894: a ref of any kind the vocabulary knows is a link — an
-    /// effort — even with no typed view to probe.
+    /// tsk894: a ref of any kind the vocabulary knows is a link. One of a
+    /// kind no model holds (a shell page) is a link as it stands; one a
+    /// model holds — an effort, core's or an extension's — is checked
+    /// against that model's rows.
     #[tokio::test]
     async fn accepts_refs_of_kinds_with_no_probe() {
         let dir = git_repo();
         let services = Services::in_memory(dir.path()).await.unwrap();
-        let warnings = check_links(&services, "See [[effort:eff1]].").await;
+        let warnings = check_links(&services, "See [[page:settings]].").await;
         assert!(warnings.is_empty(), "got {warnings:?}");
+        let warnings = check_links(&services, "See [[effort:eff1]].").await;
+        assert_eq!(warnings.len(), 1, "got {warnings:?}");
+        assert!(warnings[0].reason.contains("no row in `v_effort`"));
         // A work item is checked against the active list's items: another
         // list's isn't one.
         let warnings = check_links(&services, "See [[work_item:issues:ENG-12]].").await;

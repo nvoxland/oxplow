@@ -358,27 +358,45 @@ fn register_kinds(declared: &Declared, errors: &mut BTreeMap<String, Vec<String>
     kinds
 }
 
-/// `v_ref_kind`'s rows: every registered kind, an extension's with how
-/// to show it.
+/// `v_ref_kind`'s rows: every registered kind with what its declarer
+/// says of it — an extension's `ref_kinds:` entry, or core's
+/// (`oxplow_db::ref_models`): the model that holds one, where one opens
+/// and what search indexes it from.
 fn kind_rows(kinds: &KindRegistry, declared: &Declared) -> Vec<RefKindRow> {
     kinds
         .kinds()
         .map(|k| {
+            let row = RefKindRow {
+                kind: k.kind.clone(),
+                id_pattern: k.id_regex.to_string(),
+                revisioned: k.revisioned,
+                wikilinks: k.wikilink_prefixes.clone(),
+                ..RefKindRow::default()
+            };
             let decl = declared
                 .iter()
                 .flat_map(|d| &d.kinds)
                 .find(|d| d.kind == k.kind);
-            RefKindRow {
-                kind: k.kind.clone(),
-                extension: decl.map(|d| d.extension.clone()),
-                label: decl.map(|d| d.label.clone()),
-                searchable: decl.and_then(|d| d.searchable.clone()),
-                id_pattern: k.id_regex.to_string(),
-                revisioned: k.revisioned,
-                wikilinks: k.wikilink_prefixes.clone(),
-                resolve: decl.map(|d| d.resolve.clone()),
-                page: decl.map(|d| d.page.clone()),
-                icon: decl.map(|d| d.icon.clone()),
+            if let Some(d) = decl {
+                return RefKindRow {
+                    extension: Some(d.extension.clone()),
+                    label: Some(d.label.clone()),
+                    searchable: d.searchable.clone(),
+                    resolve: Some(d.resolve.clone()),
+                    // Its page, given the ref.
+                    page: Some(format!("{}?ref={{ref}}", d.page)),
+                    icon: Some(d.icon.clone()),
+                    ..row
+                };
+            }
+            match oxplow_db::ref_models::core_kind(&k.kind) {
+                Some(core) => RefKindRow {
+                    resolve: core.owner.map(|(view, _)| view.to_string()),
+                    page: core.page.map(|p| p.template()),
+                    searchable: core.searchable.map(str::to_string),
+                    ..row
+                },
+                None => row,
             }
         })
         .collect()
@@ -543,6 +561,70 @@ mod tests {
     /// P8.D6: a declared ref kind links (`[[pr:12]]` → `acme_pr:12`) and
     /// is listed while its extension is installed, and is unrecognized
     /// once it's gone.
+    /// Core's kinds are listed with what core declares of them, as an
+    /// extension's are: the model that holds one, where one opens, and
+    /// what search indexes it from; a kind no model holds has none.
+    #[tokio::test]
+    async fn core_kinds_are_listed_with_their_model_page_and_search_feed() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        crate::test_fixtures::activate_with_problems(&f.svc).await;
+        let rows = f
+            .svc
+            .sql
+            .query_sql(
+                "SELECT kind, resolve, page, searchable FROM v_ref_kind \
+                 WHERE kind IN ('work_item', 'thread_note', 'decision', 'comment', 'file', 'event') \
+                 ORDER BY kind",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap()
+            .rows;
+        let text = |s: &str| SqlCell::Text(s.into());
+        assert_eq!(
+            rows,
+            vec![
+                vec![
+                    text("comment"),
+                    text("v_comment"),
+                    text("page:comments"),
+                    text("v_search_comment")
+                ],
+                vec![
+                    text("decision"),
+                    text("v_decision"),
+                    text("{effort_ref|thread_ref}"),
+                    SqlCell::Null(())
+                ],
+                vec![
+                    text("event"),
+                    text("v_event"),
+                    SqlCell::Null(()),
+                    SqlCell::Null(())
+                ],
+                vec![
+                    text("file"),
+                    SqlCell::Null(()),
+                    text("{ref}"),
+                    SqlCell::Null(())
+                ],
+                vec![
+                    text("thread_note"),
+                    text("v_thread_note"),
+                    text("{thread_ref}"),
+                    text("v_search_thread_note")
+                ],
+                vec![
+                    text("work_item"),
+                    text("v_work_item"),
+                    text("{ref}"),
+                    text("v_search_work_item")
+                ],
+            ]
+        );
+    }
+
     #[tokio::test]
     async fn a_declared_ref_kind_links_while_its_extension_is_installed() {
         use crate::extension_ref_kinds::tests::{write_acme, MANIFEST as ACME};
@@ -570,7 +652,7 @@ mod tests {
             listed.rows,
             vec![vec![
                 SqlCell::Text("acme".into()),
-                SqlCell::Text("page:acme/pr".into()),
+                SqlCell::Text("page:acme/pr?ref={ref}".into()),
                 SqlCell::Text("git-pull-request".into())
             ]]
         );
