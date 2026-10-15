@@ -345,6 +345,92 @@ console.log(JSON.stringify(posts));
         );
     }
 
+    /// The bridge hands what oxplow answers to the model — a prompt hook's
+    /// context as a synthetic part of the user's message, a tool hook's
+    /// appended to the tool's result — and sends the agent's final message
+    /// with the Stop, so ending a reply with a question sets waiting. Run
+    /// under bun with `fetch` answering and a stubbed plugin client.
+    #[test]
+    fn its_bridge_delivers_hook_context_and_sends_the_final_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let driver = dir.path().join("drive.mjs");
+        let bridge =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/opencode-hooks.js");
+        std::fs::write(
+            &driver,
+            format!(
+                r#"import {{ OxplowHooks }} from {bridge};
+const posts = [];
+const context = {{ UserPromptSubmit: "CTX-PROMPT", PostToolUse: "CTX-TOOL" }};
+globalThis.fetch = async (url, init) => {{
+  const event = url.split("/").pop();
+  posts.push({{ event, payload: JSON.parse(init.body) }});
+  const text = context[event];
+  return {{ json: async () => text ? {{ hookSpecificOutput: {{ hookEventName: event, additionalContext: text }} }} : {{}} }};
+}};
+process.env.OXPLOW_HOOK_BASE_URL = "http://hook.invalid";
+const messages = [
+  {{ info: {{ role: "user" }}, parts: [{{ type: "text", text: "do it" }}] }},
+  {{ info: {{ role: "assistant" }}, parts: [{{ type: "text", text: "first" }}] }},
+  {{ info: {{ role: "assistant" }}, parts: [{{ type: "tool", tool: "bash" }}, {{ type: "text", text: "Which one" }}, {{ type: "text", text: "should I use?" }}] }},
+];
+const hooks = await OxplowHooks({{ client: {{ session: {{
+  get: async () => ({{ data: {{}} }}),
+  messages: async () => ({{ data: messages }}),
+}} }} }});
+const prompt = {{ message: {{ id: "msg_1", sessionID: "ses1" }}, parts: [{{ type: "text", text: "hello" }}] }};
+await hooks["chat.message"]({{ sessionID: "ses1" }}, prompt);
+const tool = {{ title: "t", output: "result", metadata: {{}} }};
+await hooks["tool.execute.after"]({{ tool: "read", sessionID: "ses1", callID: "c1", args: {{}} }}, tool);
+await hooks.event({{ event: {{ type: "session.idle", properties: {{ sessionID: "ses1" }} }} }});
+console.log(JSON.stringify({{ posts, prompt, tool }}));
+"#,
+                bridge = serde_json::to_string(&format!("file://{}", bridge.display())).unwrap()
+            ),
+        )
+        .unwrap();
+        let out = std::process::Command::new("bun")
+            .arg(&driver)
+            .output()
+            .expect("bun runs the bridge (the repo's JS runtime)");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let run: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+
+        // The prompt's context is a synthetic text part after the person's.
+        let parts = run["prompt"]["parts"].as_array().unwrap();
+        assert_eq!(parts.len(), 2, "{parts:?}");
+        assert_eq!(parts[0]["text"], "hello");
+        assert_eq!(parts[1]["type"], "text");
+        assert_eq!(parts[1]["text"], "CTX-PROMPT");
+        assert_eq!(parts[1]["synthetic"], true);
+        assert_eq!(parts[1]["sessionID"], "ses1");
+        assert_eq!(parts[1]["messageID"], "msg_1");
+        assert!(parts[1]["id"].as_str().unwrap().starts_with("prt_"));
+
+        // The tool's context follows its result.
+        let result = run["tool"]["output"].as_str().unwrap();
+        assert!(
+            result.starts_with("result") && result.ends_with("CTX-TOOL"),
+            "{result}"
+        );
+
+        // The Stop carries the last assistant message, its text parts joined.
+        let stop = run["posts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["event"] == "Stop")
+            .expect("a Stop");
+        assert_eq!(
+            stop["payload"]["last_assistant_message"],
+            "Which one\nshould I use?"
+        );
+    }
+
     use super::*;
     use crate::test_launch::{harness, launch_in, project_only};
     use tempfile::TempDir;

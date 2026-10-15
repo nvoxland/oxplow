@@ -299,7 +299,10 @@ persists its own harness, so Claude and Codex sessions run concurrently.
 - Claude runs `claude --plugin-dir <abs> --append-system-prompt <text>
   --mcp-config <json> [--resume <sid>]`.
 - Codex runs `codex --cd <worktree>` or `codex resume --cd <worktree>
-  <sid>`, plus CLI config overrides for oxplow MCP and lifecycle hooks.
+  <sid>`, plus CLI config overrides for oxplow MCP and lifecycle hooks, and
+  the system prompt as `--config developer_instructions="…"` (a TOML
+  string: `shared::toml_string` escapes newlines and quotes), which Codex
+  puts at the head of its developer message.
 - opencode runs `opencode -m <model> [-s <sid>]` (with a fresh-session
   fallback when the saved resume id is stale). The model is the harness
   config's `model` (`agentConfig.opencode.model`), defaulting to
@@ -487,7 +490,12 @@ depends only on the domain; core's text and the answerability questions live in
   `~/.codex`), so the launch writes them into the worktree's
   `.agents/skills/<name>/` (`shared::write_worktree_skills`), each folder
   with a `*` `.gitignore` and the `.oxplow` marker. Another agent that
-  reads `.agents/skills` there sees them too.
+  reads `.agents/skills` there sees them too. Codex has no project-level
+  slash-command files (its prompts live in the person's `~/.codex/prompts`,
+  which oxplow doesn't write), so each command is a skill beside the others
+  named `oxplow-<command>`, described by the command's description and
+  holding its prompt (`skills_and_commands` in `codex.rs`); `$oxplow-configure`
+  runs it.
 - opencode writes `.oxplow/runtime/opencode-plugin/` —
   `plugin/oxplow-hooks.js` (an opencode JS plugin loaded via the
   `plugin` array in `OPENCODE_CONFIG_CONTENT`), `skills/` (named by the
@@ -495,17 +503,26 @@ depends only on the domain; core's text and the answerability questions live in
   with the per-session system prompt. The JS
   bridge translates opencode plugin hooks into the same Claude-shaped
   payloads the control plane parses: `chat.message` →
-  `UserPromptSubmit`, `tool.execute.before` → `PreToolUse` (a deny
+  `UserPromptSubmit` (an answer's `additionalContext` is pushed onto the
+  message's parts as a `synthetic` text part, which the model reads), `tool.execute.before` → `PreToolUse` (a deny
   response throws inside opencode, which blocks the tool call — so the
   write guard works; opencode's lowercase tool
   names and `filePath` arg are mapped to Claude's `Edit`/`Write`/… and
   `file_path`), `tool.execute.after` → `PostToolUse` (each call's
-  `callID` as `tool_use_id`, so a call's two hooks pair; its bash tool's
+  `callID` as `tool_use_id`, so a call's two hooks pair — and an answer's
+  `additionalContext` is appended to the tool's result, which the model
+  reads; its bash tool's
   `metadata.exit` as `tool_response.exit_code`, so a failed command reads
   as failed — `opencode.rs`
   `its_bridge_sends_the_call_id_the_exit_code_and_a_childs_parent` runs the
   bridge under bun), and the
-  `session.idle` event → `Stop`. Subagent sessions (`parentID` set) are filtered out of
+  `session.idle` event → `Stop`, carrying `last_assistant_message` (the text
+  parts of the session's last assistant message, read through the plugin
+  client), so a reply ending in a question sets waiting.
+  `its_bridge_delivers_hook_context_and_sends_the_final_message` runs it
+  under bun with `fetch` and the client stubbed, and the behavior was
+  checked against opencode 1.17.4 with a stub model server: the request
+  the model got held the prompt's context and the tool result's. Subagent sessions (`parentID` set) are filtered out of
   UserPromptSubmit/Stop so child activity doesn't flip the thread's
   turn lifecycle; their tool hooks are posted as the parent's
   (`session_id: parentID`) with `agent_id: <child sessionID>` and
@@ -1778,9 +1795,10 @@ returned to a prompt hook reaches the agent with that prompt) and
 next step). `AgentContext::prompt_context` / `post_tool_context` take the
 session's harness and give nothing for a channel it lacks
 (`agent_context::carries`), so nothing meant for its agent is taken:
-nudges wait in the store. Claude Code and Codex declare both, an ACP
-agent `prompt_context` (its host prepends it to the person's next prompt),
-opencode neither (its bridge acts on a deny only).
+nudges wait in the store. Claude Code, Codex and opencode declare both
+(opencode's bridge adds a synthetic part to the user's message and appends
+to the tool's result), an ACP agent `prompt_context` (its host prepends it
+to the person's next prompt).
 
 **Once, then on change.** On every prompt, `prompt_context` builds the
 `<session-context>` block and the decisions block and sends each only
@@ -1814,9 +1832,8 @@ approval, since no prompt comes between.
 a marked system prompt and checks the prompt, every skill and every
 slash command reach its agent: its command line, its environment, or a
 file it was given (JSON values searched inside). What a launch doesn't
-deliver yet is pinned in `KNOWN_GAPS` (Codex: its instructions and its
-slash commands), and the test fails when a gap closes or a new one
-opens. `hook_goldens` pins the hook answers byte for byte, including a
+deliver is pinned in `KNOWN_GAPS` (empty: every terminal harness delivers
+all of it), and the test fails when a gap opens or closes. `hook_goldens` pins the hook answers byte for byte, including a
 harness without channels being acked and a compaction bringing the
 context back.
 

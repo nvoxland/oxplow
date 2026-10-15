@@ -264,9 +264,9 @@ async fn post_as(
     resp.json().await.unwrap()
 }
 
-/// A harness whose hook answers never reach its agent (opencode's bridge
-/// acts only on a deny; it declares neither `prompt_context` nor
-/// `tool_context`) is answered with an ack, and nothing meant for its agent
+/// A harness whose hook answers never reach its agent (one that declares
+/// neither `prompt_context` nor `tool_context`: here a harness no
+/// capability names) is answered with an ack, and nothing meant for its agent
 /// is taken: a nudge stays undelivered rather than being stamped and lost.
 #[tokio::test]
 async fn a_harness_without_hook_context_is_acked_and_keeps_its_nudges() {
@@ -275,7 +275,7 @@ async fn a_harness_without_hook_context_is_acked_and_keeps_its_nudges() {
     let session = svc
         .agent_session_store
         .open(&oxplow_domain::agent_session::NewAgentSession::terminal(
-            tid, "opencode",
+            tid, "bare",
         ))
         .await
         .unwrap();

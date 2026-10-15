@@ -9,13 +9,19 @@
 /// bearer, which is the whole of who they come from.
 ///
 /// Mappings:
-///   chat.message        -> UserPromptSubmit
+///   chat.message        -> UserPromptSubmit (an answer's `additionalContext`
+///                          joins the user's message as a synthetic text
+///                          part, which the model reads)
 ///   tool.execute.before -> PreToolUse   (a child session's are posted as
 ///                          its parent's, run by subagent `agent_type: task`;
 ///                          deny response -> throw, which
 ///                          blocks the tool call in opencode)
-///   tool.execute.after  -> PostToolUse
-///   event session.idle  -> Stop         (closes the turn; never refused)
+///   tool.execute.after  -> PostToolUse  (an answer's `additionalContext` is
+///                          appended to the tool's result, which the model
+///                          reads)
+///   event session.idle  -> Stop         (closes the turn; never refused;
+///                          carries the agent's last message, so a reply
+///                          ending in a question sets waiting)
 ///
 /// Everything is best-effort: a hook POST failure must never break the
 /// agent, matching oxplow's side-band hook policy.
@@ -101,6 +107,35 @@ export const OxplowHooks = async ({ client }) => {
       : { session_id: sessionID };
   }
 
+  // What oxplow asks the model to read with an answer, if anything.
+  const contextOf = (res) => {
+    const text = res?.hookSpecificOutput?.additionalContext;
+    return typeof text === "string" && text !== "" ? text : null;
+  };
+
+  // A part id opencode accepts: `prt_` and a unique tail.
+  let partCounter = 0;
+  const partId = () =>
+    `prt_${Date.now().toString(16)}${(partCounter++).toString(16).padStart(4, "0")}${Math.random()
+      .toString(16)
+      .slice(2, 10)}`;
+
+  // The text of the session's last assistant message: its text parts, in
+  // order. Empty when the session can't be read.
+  async function lastAssistantMessage(sessionID) {
+    try {
+      const res = await client.session.messages({ path: { id: sessionID } });
+      const messages = res && typeof res === "object" && "data" in res ? res.data : res;
+      const last = [...(messages || [])].reverse().find((m) => m?.info?.role === "assistant");
+      return (last?.parts || [])
+        .filter((p) => p && p.type === "text" && typeof p.text === "string")
+        .map((p) => p.text)
+        .join("\n");
+    } catch {
+      return "";
+    }
+  }
+
   return {
     "chat.message": async (input, output) => {
       const sessionID = input.sessionID || output.message?.sessionID;
@@ -109,7 +144,17 @@ export const OxplowHooks = async ({ client }) => {
         .filter((p) => p && p.type === "text" && typeof p.text === "string")
         .map((p) => p.text)
         .join("\n");
-      await post("UserPromptSubmit", { session_id: sessionID, prompt: text });
+      const context = contextOf(await post("UserPromptSubmit", { session_id: sessionID, prompt: text }));
+      if (context) {
+        output.parts.push({
+          id: partId(),
+          sessionID,
+          messageID: output.message?.id ?? input.messageID,
+          type: "text",
+          text: context,
+          synthetic: true,
+        });
+      }
     },
 
     "tool.execute.before": async (input, output) => {
@@ -131,7 +176,7 @@ export const OxplowHooks = async ({ client }) => {
       // Its bash tool reports the command's exit code as `metadata.exit`;
       // other tools have none, and send none.
       const exit = output?.metadata?.exit;
-      await post("PostToolUse", {
+      const res = await post("PostToolUse", {
         ...(await whose(input.sessionID)),
         tool_use_id: input.callID,
         tool_name: toolName(input.tool),
@@ -142,13 +187,18 @@ export const OxplowHooks = async ({ client }) => {
           ...(typeof exit === "number" ? { exit_code: exit } : {}),
         },
       });
+      const context = contextOf(res);
+      if (context && output) output.output = `${output.output ?? ""}\n\n${context}`;
     },
 
     event: async ({ event }) => {
       if (!event || event.type !== "session.idle") return;
       const sessionID = event.properties?.sessionID;
       if (await isChildSession(sessionID)) return;
-      await post("Stop", { session_id: sessionID });
+      await post("Stop", {
+        session_id: sessionID,
+        last_assistant_message: await lastAssistantMessage(sessionID),
+      });
     },
   };
 };

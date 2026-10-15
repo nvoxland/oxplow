@@ -13,13 +13,7 @@ use crate::test_launch::{harness, launch_in, pty};
 
 /// What a harness's launch doesn't deliver yet, each a gap to close (and
 /// then drop from here): `(harness, what)`.
-const KNOWN_GAPS: &[(&str, &str)] = &[
-    // Codex is given no instructions and no prompts.
-    ("codex", "system prompt"),
-    ("codex", "command review-comments"),
-    ("codex", "command configure"),
-    ("codex", "command new-metric"),
-];
+const KNOWN_GAPS: &[(&str, &str)] = &[];
 
 const SYSTEM_PROMPT: &str = "OXPLOW-TEXT-CONTRACT-SYSTEM-PROMPT";
 

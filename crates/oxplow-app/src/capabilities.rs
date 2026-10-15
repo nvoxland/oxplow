@@ -144,11 +144,18 @@ pub const BUILT_INS: &[BuiltIn] = &[
             "tool_context",
         ],
     ),
-    // Its bridge acts on a deny only: no hook context reaches its agent.
+    // Its bridge appends a prompt hook's context to the user's message and a
+    // tool hook's to the tool's result.
     harness(
         "oxplow:opencode",
         "opencode",
-        &["terminal", "runtime_text", "subagents"],
+        &[
+            "terminal",
+            "runtime_text",
+            "subagents",
+            "prompt_context",
+            "tool_context",
+        ],
     ),
     // Context rides the person's next prompt; nothing mid-turn.
     harness(

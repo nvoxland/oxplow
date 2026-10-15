@@ -15,7 +15,7 @@ use oxplow_domain::agent::harness::{
     AgentHarness, HarnessError, Interact, Launch, LaunchInput, LaunchSpec, RuntimeRoots, Transcript,
 };
 use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, TokenReading};
-use oxplow_domain::agent::text::AgentText;
+use oxplow_domain::agent::text::{AgentText, Text};
 use oxplow_domain::agent::tool::{ToolKind, ToolUse};
 use oxplow_domain::events::schema::TokenKind;
 
@@ -45,8 +45,14 @@ impl AgentHarness for Codex {
 
     async fn launch(&self, input: &LaunchInput) -> Result<Launch, HarnessError> {
         let ep = &input.endpoints;
-        write_worktree_skills(&input.workspace, &input.text.skills).map_err(runtime)?;
+        write_worktree_skills(&input.workspace, &skills_and_commands(&input.text))
+            .map_err(runtime)?;
         let mut overrides = config_overrides(&input.oxplow_executable, &ep.mcp_endpoint_url);
+        // Its instructions mechanism: `developer_instructions` joins the
+        // developer message ahead of the skills list.
+        if let Some(prompt) = input.system_prompt.as_deref() {
+            overrides.push(format!("developer_instructions={}", toml_string(prompt)));
+        }
         // Its exporter rides `--config otel.*`, to the same receiver as
         // Claude's; the session's bearer rides its env.
         overrides.extend(otel_overrides(&ep.otlp_base_url));
@@ -77,7 +83,7 @@ impl AgentHarness for Codex {
         roots: &RuntimeRoots,
         text: &AgentText,
     ) -> Result<(), HarnessError> {
-        refresh_worktree_skills(&roots.workspaces, &text.skills).map_err(runtime)
+        refresh_worktree_skills(&roots.workspaces, &skills_and_commands(text)).map_err(runtime)
     }
 
     async fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
@@ -91,6 +97,44 @@ impl AgentHarness for Codex {
     async fn render(&self, answer: &HookAnswer) -> serde_json::Value {
         super::shared::render(answer)
     }
+}
+
+/// Codex has no slash-command files a project can carry (its prompts live
+/// in the person's `~/.codex/prompts`, which oxplow doesn't write), so each
+/// command is a skill named `oxplow-<command>` in the worktree's skills
+/// folder, described by the command's own description and holding its
+/// prompt; `$oxplow-<command>` runs it.
+fn skills_and_commands(text: &AgentText) -> Vec<Text> {
+    let mut all = text.skills.clone();
+    all.extend(text.commands.iter().map(|command| {
+        let (description, prompt) = split_description(&command.body);
+        let name = format!("oxplow-{}", command.name);
+        Text {
+            body: format!(
+                "---\nname: {name}\ndescription: {}\n---\n\n{prompt}\n",
+                toml_string(
+                    &description.unwrap_or_else(|| format!("The oxplow {} command.", command.name))
+                )
+            ),
+            name,
+        }
+    }));
+    all
+}
+
+/// A command's frontmatter `description:` and the prompt after it.
+fn split_description(asset: &str) -> (Option<String>, String) {
+    let Some((front, body)) = asset
+        .strip_prefix("---\n")
+        .and_then(|rest| rest.split_once("\n---\n"))
+    else {
+        return (None, asset.trim().to_string());
+    };
+    let description = front
+        .lines()
+        .find_map(|l| l.strip_prefix("description:"))
+        .map(|d| d.trim().to_string());
+    (description, body.trim().to_string())
 }
 
 /// Its token counts: the `codex.turn.token_usage` counter, else a
@@ -508,6 +552,43 @@ mod tests {
             "Authorization=Bearer secret-bearer"
         );
         assert!(!command.contains("--dangerously-bypass-hook-trust"));
+    }
+
+    /// Codex gets the system prompt as `developer_instructions` — a TOML
+    /// string, so its newlines and quotes survive — and each slash command as
+    /// a worktree skill carrying the command's prompt.
+    #[test]
+    fn launch_hands_codex_its_instructions_and_commands() {
+        let h = harness("oxplow:codex-cli", "codex");
+        let prompt = "Line one\n\"quoted\" line two";
+        let l = launch_in(h.as_ref(), None, Some(prompt), &serde_json::json!({}));
+        let LaunchSpec::Pty { command, .. } = &l.launch.spec else {
+            panic!("not a PTY launch")
+        };
+        assert!(
+            command.contains(r#"developer_instructions="Line one\n\"quoted\" line two""#),
+            "{command}"
+        );
+        let skill =
+            std::fs::read_to_string(l.workspace.join(".agents/skills/oxplow-configure/SKILL.md"))
+                .unwrap();
+        assert!(
+            skill.starts_with("---\nname: oxplow-configure\ndescription: \""),
+            "{skill}"
+        );
+        let text = oxplow_agent_text::core_text();
+        let configure = text
+            .commands
+            .iter()
+            .find(|c| c.name == "configure")
+            .unwrap();
+        let (_, prompt) = split_description(&configure.body);
+        assert!(skill.contains(&prompt));
+    }
+
+    #[test]
+    fn a_toml_string_escapes_what_would_end_or_break_the_line() {
+        assert_eq!(toml_string("a\nb\t\"c\"\\"), "\"a\\nb\\t\\\"c\\\"\\\\\"");
     }
 
     #[test]
