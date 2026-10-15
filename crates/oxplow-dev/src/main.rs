@@ -1,5 +1,9 @@
 //! `oxplow-dev`: helpers for working on oxplow itself, never shipped.
 //!
+//! `oxplow-dev wiki …` does the same for the project's wiki, through the
+//! `knowledge.*` commands (the wiki as the store, whatever the project
+//! has active).
+//!
 //! `oxplow-dev task …` reads and changes oxplow's tasks while the project
 //! has no work list active (the bundled extension disabled to strip oxplow
 //! to its core). It runs oxplow's own `work_item.*` commands on a command
@@ -31,6 +35,13 @@ oxplow-dev task update <id> [--title T] [--body B] [--parent ID]
 oxplow-dev task comment <id> <body>
 oxplow-dev task link <id> <target> <blocks|discovered_from|relates_to|duplicates|supersedes|replies_to|about>
 oxplow-dev task unlink <id> <target> <link type>
+
+oxplow-dev wiki list                         the pages (slug, title)
+oxplow-dev wiki show <slug>
+oxplow-dev wiki write <slug> [--title T] [--file F]   body from F, else stdin
+oxplow-dev wiki delete <slug>
+oxplow-dev wiki note <body>                  a note on the acting thread (needs --thread)
+oxplow-dev wiki search <text>                pages whose slug, title or body has it
 
 oxplow-dev --help                            this
 
@@ -70,6 +81,10 @@ async fn run(mut args: Vec<String>, env_thread: Option<String>) -> Result<String
         Some("task") => {
             let tasks = Tasks::open(&project, thread.as_deref())?;
             tasks.run(args.split_off(1)).await
+        }
+        Some("wiki") => {
+            let tasks = Tasks::open(&project, thread.as_deref())?;
+            tasks.wiki(args.split_off(1)).await
         }
         _ => Err(format!("usage:\n{USAGE}")),
     }
@@ -131,6 +146,7 @@ impl Tasks {
             db: db.clone(),
             vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
         };
+        let links_for_notes = links.clone();
         use oxplow_app::commands::work_item as w;
         for op in [
             w::transition_op(work_items.clone(), db.clone()),
@@ -140,6 +156,29 @@ impl Tasks {
             w::unlink_op(work_items.clone(), links),
             w::comment_op(work_items.clone()),
         ] {
+            bus.add_op(op).map_err(|e| e.to_string())?;
+        }
+        // The wiki as the knowledge store, whatever the project has
+        // active: pages are `.oxplow/wiki/<slug>.md`, recorded as the app does.
+        let wiki_id = "oxplow-dev-wiki";
+        let stores = Arc::new(oxplow_domain::knowledge::KnowledgeRegistry::new(Arc::new(
+            move || wiki_id.to_string(),
+        )));
+        stores.register(Arc::new(oxplow_app::knowledge::WikiKnowledge {
+            id: wiki_id.into(),
+            project_dir: layout.project_dir.clone(),
+        }));
+        for op in oxplow_app::knowledge::ops(oxplow_app::knowledge::KnowledgeTarget {
+            project_dir: layout.project_dir.clone(),
+            vcs: Arc::new(oxplow_app::vcs::GitProvider),
+            db: db.clone(),
+            vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
+            stores,
+            wiki: Arc::new(oxplow_app::knowledge::WikiFollow::default()),
+        })
+        .into_iter()
+        .chain(oxplow_app::commands::note::ops(links_for_notes))
+        {
             bus.add_op(op).map_err(|e| e.to_string())?;
         }
         // Declared as oxplow's own commands in its foundation extension.
@@ -218,11 +257,114 @@ impl Tasks {
         }
     }
 
+    /// `oxplow-dev wiki …`: the pages through the knowledge commands.
+    async fn wiki(&self, mut args: Vec<String>) -> Result<String, String> {
+        let title = take_flag(&mut args, "--title");
+        let file = take_flag(&mut args, "--file");
+        if let Some(unknown) = args.iter().find(|a| a.starts_with("--")) {
+            return Err(format!("unknown option `{unknown}`\nusage:\n{USAGE}"));
+        }
+        let arg = |i: usize, what: &str| {
+            args.get(i)
+                .cloned()
+                .ok_or_else(|| format!("missing {what}\nusage:\n{USAGE}"))
+        };
+        match args.first().map(String::as_str) {
+            Some("list") => {
+                let rows = self
+                    .rows("SELECT slug, title FROM wiki_page ORDER BY slug", vec![])
+                    .await?;
+                Ok(rows
+                    .iter()
+                    .map(|r| format!("{}\t{}", r[0], r[1]))
+                    .collect::<Vec<_>>()
+                    .join("\n"))
+            }
+            Some("show") => {
+                let slug = arg(1, "<slug>")?;
+                let rows = self
+                    .rows(
+                        "SELECT title, body FROM wiki_page WHERE slug = ?1",
+                        vec![slug.clone()],
+                    )
+                    .await?;
+                let r = rows.first().ok_or_else(|| format!("no page `{slug}`"))?;
+                Ok(r[1].clone())
+            }
+            Some("search") => {
+                let needle = format!("%{}%", arg(1, "<text>")?);
+                let rows = self
+                    .rows(
+                        "SELECT slug, title FROM wiki_page
+                          WHERE slug LIKE ?1 OR title LIKE ?1 OR body LIKE ?1 ORDER BY slug",
+                        vec![needle],
+                    )
+                    .await?;
+                Ok(rows
+                    .iter()
+                    .map(|r| format!("{}\t{}", r[0], r[1]))
+                    .collect::<Vec<_>>()
+                    .join("\n"))
+            }
+            Some("write") => {
+                let slug = arg(1, "<slug>")?;
+                let body = match file {
+                    Some(path) => {
+                        std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?
+                    }
+                    None => {
+                        let mut body = String::new();
+                        std::io::Read::read_to_string(&mut std::io::stdin(), &mut body)
+                            .map_err(|e| e.to_string())?;
+                        body
+                    }
+                };
+                let mut input = Map::new();
+                input.insert("slug".into(), json!(slug));
+                input.insert("body".into(), json!(body));
+                put(&mut input, "title", title);
+                self.command("oxplow.knowledge.write_page", input).await
+            }
+            Some("delete") => {
+                let mut input = Map::new();
+                input.insert("slug".into(), json!(arg(1, "<slug>")?));
+                // Naming the page to delete is the confirmation.
+                self.confirmed_command("oxplow.knowledge.delete_page", input)
+                    .await
+            }
+            Some("note") => {
+                let mut input = Map::new();
+                input.insert("body".into(), json!(arg(1, "<body>")?));
+                self.command("oxplow.knowledge.add_note", input).await
+            }
+            _ => Err(format!("usage:\n{USAGE}")),
+        }
+    }
+
     /// Run `name` through the bus; its result, pretty.
     async fn command(&self, name: &str, input: Map<String, Value>) -> Result<String, String> {
+        self.run_command(name, input, false).await
+    }
+
+    /// [`Self::command`] for one that asks to be confirmed, which the person
+    /// running it here has just done.
+    async fn confirmed_command(
+        &self,
+        name: &str,
+        input: Map<String, Value>,
+    ) -> Result<String, String> {
+        self.run_command(name, input, true).await
+    }
+
+    async fn run_command(
+        &self,
+        name: &str,
+        input: Map<String, Value>,
+        confirmed: bool,
+    ) -> Result<String, String> {
         let out = self
             .bus
-            .run(&self.actor, name, Value::Object(input), false)
+            .run(&self.actor, name, Value::Object(input), confirmed)
             .await
             .map_err(|e| e.to_string())?;
         // The interface answers `{ ref, state? }`; this is oxplow's task
@@ -443,5 +585,89 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.contains("tsk"), "{err}");
+    }
+
+    /// The wiki is read and written through the knowledge commands: a page
+    /// written (body from a file) is listed, shown and found by search, its
+    /// links are checked, a note lands on the thread, and a deleted page is
+    /// gone — the record and the file as the app keeps them.
+    #[tokio::test]
+    async fn the_wiki_is_read_and_written_through_the_knowledge_commands() {
+        let dir = project().await;
+        let p = dir.path();
+        let body = p.join("body.md");
+        std::fs::write(&body, "# Wombats\n\nThey dig burrows.\n").unwrap();
+        let body = body.display().to_string();
+        let written = dev(p, &["wiki", "write", "wombats", "--file", &body])
+            .await
+            .unwrap();
+        assert!(written.contains("wiki:wombats"), "{written}");
+        assert!(p.join(".oxplow/wiki/wombats.md").is_file());
+        assert!(dev(p, &["wiki", "list"])
+            .await
+            .unwrap()
+            .contains("wombats\tWombats"));
+        let shown = dev(p, &["wiki", "show", "wombats"]).await.unwrap();
+        assert!(shown.contains("They dig burrows."), "{shown}");
+        assert!(dev(p, &["wiki", "search", "BURROWS"])
+            .await
+            .unwrap()
+            .contains("wombats"));
+        assert!(dev(p, &["wiki", "search", "platypus"])
+            .await
+            .unwrap()
+            .is_empty());
+        // A title replaces the heading; a link that doesn't resolve is refused.
+        dev(
+            p,
+            &[
+                "wiki",
+                "write",
+                "wombats",
+                "--title",
+                "Wombat facts",
+                "--file",
+                &body,
+            ],
+        )
+        .await
+        .unwrap();
+        assert!(dev(p, &["wiki", "list"])
+            .await
+            .unwrap()
+            .contains("wombats\tWombat facts"));
+        std::fs::write(&body, "# Bad\n\nSee [[file:nope/missing.rs]].\n").unwrap();
+        let err = dev(p, &["wiki", "write", "bad", "--file", &body])
+            .await
+            .unwrap_err();
+        assert!(err.contains("nope/missing.rs"), "{err}");
+        assert!(!dev(p, &["wiki", "list"]).await.unwrap().contains("bad"));
+        // A note goes on the thread the call acts as.
+        let noted = dev(
+            p,
+            &["--thread", "thr1", "wiki", "note", "Burrows are deep."],
+        )
+        .await
+        .unwrap();
+        assert!(noted.contains("Burrows are deep."), "{noted}");
+        dev(p, &["wiki", "delete", "wombats"]).await.unwrap();
+        assert!(!p.join(".oxplow/wiki/wombats.md").exists());
+        assert!(dev(p, &["wiki", "list"]).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_bad_wiki_call_says_how_to_call() {
+        let dir = project().await;
+        for args in [
+            &["wiki", "frobnicate"][..],
+            &["wiki", "show"],
+            &["wiki", "write", "x", "--bogus", "1"],
+        ] {
+            let err = dev(dir.path(), args).await.unwrap_err();
+            assert!(
+                err.contains("usage") || err.contains("missing"),
+                "{args:?}: {err}"
+            );
+        }
     }
 }

@@ -92,7 +92,7 @@ was a read/append race: advancing to the latest Main message could skip a peer
 reply posted in between. If such a mailbox is reused, track and acknowledge
 peer message UUIDs individually. A file does not wake an idle session.
 
-### oxplow-dev: tasks while the work list is none
+### oxplow-dev: tasks and the wiki while the work list is none
 
 Stripping oxplow to its core (disabling `oxplow-bundled` in
 `.oxplow/project.yaml`, uncommitted) leaves this project with no work
@@ -108,8 +108,22 @@ cargo run -q -p oxplow-dev -- task transition tsk12 done
 cargo run -q -p oxplow-dev -- task update tsk12 [--title …] [--body …] [--parent …]
 cargo run -q -p oxplow-dev -- task comment tsk12 "…"
 cargo run -q -p oxplow-dev -- task link tsk12 tsk13 blocks
+cargo run -q -p oxplow-dev -- wiki list
+cargo run -q -p oxplow-dev -- wiki show some-page
+cargo run -q -p oxplow-dev -- wiki write some-page [--title …] [--file body.md]   # body from stdin without --file
+cargo run -q -p oxplow-dev -- wiki delete some-page
+cargo run -q -p oxplow-dev -- --thread thr1 wiki note "…"
+cargo run -q -p oxplow-dev -- wiki search burrows
 cargo run -q -p oxplow-dev -- --help
 ```
+
+`wiki` runs the `oxplow.knowledge.*` commands on the same bus with oxplow's
+wiki as the store, whatever the project has active (pages are
+`.oxplow/wiki/<slug>.md`, recorded as the app records them, links checked).
+`list`, `show` and `search` read the recorded `wiki_page` rows (`search` is a
+case-insensitive substring over slug, title and body, not the site search
+index). `wiki note` needs a thread (`--thread` or `$OXPLOW_THREAD_ID`).
+`wiki delete` is confirmed by being named.
 
 `--help` / `-h` / `help` print this and do nothing, before the database
 is opened; an option a command doesn't take is refused (both used to
