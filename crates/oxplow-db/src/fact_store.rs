@@ -2143,7 +2143,7 @@ impl SqliteFactStore {
     ///
     /// **Compaction, not deletion (tsk211).** The capture row and every one of
     /// its facts survive, so no metric value, trend point, or count changes —
-    /// only `list_effort_observations`' Tests/Coverage detail for old runs is
+    /// only the effort Tests/Coverage detail for old runs is
     /// lost. That is why this is safe to have ON by default, unlike
     /// `prune_aged_captures` (which deletes facts and stays opt-in).
     ///

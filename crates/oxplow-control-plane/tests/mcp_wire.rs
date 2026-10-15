@@ -110,7 +110,7 @@ async fn mcp_session_initializes_lists_and_calls_tools_over_http() {
             .unwrap_or_else(|| panic!("{name} missing from tools/list"))
     };
     // Our hand-rolled list_tools stamps read-only hints (tsk203) …
-    assert_eq!(tool("ping")["annotations"]["readOnlyHint"], true);
+    assert_eq!(tool("get_skill")["annotations"]["readOnlyHint"], true);
     // … and leaves mutating tools gated.
     assert_ne!(tool("run_command")["annotations"]["readOnlyHint"], true);
 
@@ -121,12 +121,18 @@ async fn mcp_session_initializes_lists_and_calls_tools_over_http() {
         Some(&session),
         json!({
             "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-            "params": {"name": "ping", "arguments": {}}
+            "params": {"name": "get_skill", "arguments": {"name": "oxplow-extension"}}
         }),
     )
     .await;
     let call = call.unwrap();
-    assert_eq!(call["result"]["content"][0]["text"], "pong", "{call}");
+    assert!(
+        call["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("# Building oxplow lenses"),
+        "{call}"
+    );
 }
 
 #[tokio::test]

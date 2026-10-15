@@ -54,8 +54,7 @@ terminal.
 - **Live questions** go to the language server itself through the MCP
   tools: `code_definition`, `code_references`, `code_hover`,
   `code_symbols` (a file), `code_workspace_symbols`,
-  `code_call_hierarchy` (who calls / what it calls) and
-  `code_diagnostics`. Use them for "what calls X" and anything the
+  `code_call_hierarchy` (who calls / what it calls). Use them for "what calls X" and anything the
   stored snapshot view can't know.
 
 ## Errors the person saw (`v_op_error`)
@@ -72,7 +71,7 @@ without a screenshot:
   `SELECT event_id, at, label, command, message FROM v_op_error ORDER BY
   at DESC LIMIT 5`.
 - **The output itself** is the event's `output` body: call
-  `read_event_content` with the row's `event_id` and `output`. A row with
+  `read` with `event:<event_id>#output`. A row with
   `output_size` NULL had nothing captured; its `message` is all there is.
 - Rows are kept 30 days and their output 14; an older row keeps its label
   with the details NULL.

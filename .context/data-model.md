@@ -545,7 +545,7 @@ the default Work panel view — archived rows fold into the Done
 section's bucketing but aren't rendered unless the user flips the "Show
 archived (N)" toggle in the Done section header. The same header carries
 an "Archive all" action that bulk-archives every visible Done/Canceled
-row. `next_work_item`'s blocker check reads the interface, where
+row. The work-next lens's blocker check reads the interface, where
 archived is done or canceled. `parent_id` chains items under
 epics. The `description` (markdown) is the single prose field, structured
 however the author sees fit — the model is not prompted toward any
@@ -681,8 +681,7 @@ capture pad, written by `oxplow.knowledge.add_note` / `oxplow.knowledge.update_n
 (P8.A6). An orchestrator handing a question to an Explore subagent
 allocates an empty note first and the subagent fills in its body with
 `oxplow.knowledge.update_note`. The orchestrator reads them
-back via `oxplow__list_thread_notes` / `listThreadNotes(threadId)` —
-reverse-chronological, capped at 100.
+back via `query_sql` over `v_thread_note` or `listThreadNotes(threadId)` (UI).
 
 ### `effort` — `EffortStore` (`crates/oxplow-db/src/effort_store.rs`)
 
@@ -969,8 +968,8 @@ seeders for tests.
   file_count)` (STRICT). `snapshot_id` is where the worktree is after
   the take; `parent_snapshot_id` where it was before (the stream's
   current snapshot = its latest op's `snapshot_id`). Readable as
-  `v_snapshot_op`; listed newest first by `list_ops` (RPC + MCP
-  `list_snapshot_ops { stream_id, limit? }`, P2.11). V45 adds
+  `v_snapshot_op`; listed newest first by `list_ops` (RPC
+  `list_snapshot_ops { stream_id, limit? }`). V45 adds
   `provider TEXT` (the snapshot implementation that took it; NULL for
   older ops) and `contents INTEGER NOT NULL DEFAULT 1` (0 when the take
   kept no file bytes), exposed on `v_snapshot_op`. V46 adds `handle
@@ -979,7 +978,7 @@ seeders for tests.
   parent core hands the provider's next mark (`.context/providers.md` "A
   snapshots provider").
 - **A snapshot row carries its creating op** (P2.11): the stream listing
-  (`list_snapshots_for_stream`) joins each snapshot's FIRST op for its
+  (the `list_snapshots_for_stream` IPC op, `v_snapshot`) joins each snapshot's FIRST op for its
   `parent_snapshot_id`, `trigger` and `over_budget`. The diff view's
   "previous" for a single snapshot is that recorded parent
   (`previousSnapshotId` in `apps/desktop/src/diffViewModel.ts`), falling
@@ -1086,7 +1085,7 @@ every 24h) GCs `.oxplow/snapshots/objects/` down to
 (default 7 days, `snapshotRetentionDays` in `.oxplow/project.yaml`)
 plus each `(stream, path)`'s newest row at ANY age — so every
 worktree's current tree stays viewable/rollbackable forever. Older
-content reads degrade to "expired": `read_file_snapshot` → `None`
+content reads degrade to "expired": reading a snapshot's file (`read` `@snap:<id>`, the IPC read) → `None`
 (`SnapshotFileError::Expired` in `oxplow_app::snapshot_files`), restores
 refuse with an explicit message, never a half-restore.
 
@@ -1441,7 +1440,7 @@ hash whatever order their keys arrived in) and cut to 256 KiB on a
 character boundary — `size` is the whole body's, `truncated` says only the
 first part was kept. It is read through `oxplow_app::event_bodies::read`,
 by **event id and body** (`input` / `output`), never by bare hash: the
-person's IPC read sees any stream, the MCP `read_event_content` only the
+person's IPC read sees any stream, the MCP `read` of `event:<id>#…` only the
 caller's own stream's events, and both return at most 64 KiB of text with
 `truncated`. `list_agent_events` returns at most 1,000 rows. The retention
 sweep deletes a body after its namespace's window and the event stays. It is separate from the snapshot blob store because the
@@ -1633,7 +1632,7 @@ person's moves are `retry_dead_letter(id)` (re-runs the consumer now;
 `retried` on success, else `pending` with the new error; refused unless
 the letter is `pending`) and `discard_dead_letter(id)` — **RPC only**
 (parity `ui`): a person decides a letter's fate. `list_dead_letters(all?)`
-is RPC + MCP. Also
+is RPC; an agent reads `v_event_dead_letter`. Also
 `v_event`, `v_event_dead_letter`, `v_event_checkpoint` in the semantic
 layer (V94). Nothing is skipped silently.
 
@@ -1808,7 +1807,7 @@ The `effort_evidence` asset rebuilds each effort's rows from its own run
 captures (`metric_capture.effort_id`, trigger `on-report`;
 `CollectionService::effort_observations_from_metrics`) and stores them
 in `effort_observation_row` (V80, read as `v_effort_observation`); the panel and
-MCP `list_effort_observations` read those. `effort_evidence_state` records the
+an agent (`query_sql`) read those. `effort_evidence_state` records the
 signature each effort's rows were computed from — the count and newest id of
 its run captures and its file count (`effort_evidence_store.rs` `SIG`; V7
 restamped stored ones) — so a closed effort whose runs or files move is

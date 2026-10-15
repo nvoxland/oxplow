@@ -601,7 +601,7 @@ one, and one that posts none (Codex) still ends.
    anchor:
    - every prompt → `agent.prompt.submitted` (`reprompt: true` inside an
      open turn), its text in `event_content` (`prompt: ContentRef`, read
-     with `read_event_content` body `prompt`) — so a re-prompt's text is
+     with `read` on `event:<id>#prompt`) — so a re-prompt's text is
      kept, not only the turn's first; a prompt with no turn open also opens
      one (`agent.turn.started`);
    - PreToolUse → `agent.tool.requested` with the policy's `decision`
@@ -1088,20 +1088,18 @@ Subagent tool calls reach the hooks like any other, so a subagent's
 edits and test runs land in the thread's effort with nothing from it:
 there is no dispatch protocol, brief or subagent skill. An Explore
 subagent can still write its finding to a thread note allocated for it
-(`oxplow.knowledge.add_note`, then `oxplow.knowledge.update_note`), read back with
-`list_thread_notes`.
+(`oxplow.knowledge.add_note`, then `oxplow.knowledge.update_note`), read back
+with `query_sql` over `v_thread_note`.
 
-`next_work_item` (`crates/oxplow-mcp/src/lib.rs`, backed by
-`oxplow_app::work_item_reads::next`) suggests what to work on next on a
-thread's list, whichever list is active, in one of three shapes:
-- `{ mode: "epic", epic, children }` — the first ready (`todo`) item, in
-  list order, is an epic (an item with children); its ready descendants
-  no open `blocks` link holds are its children.
-- `{ mode: "standalone", items }` — the head is not an epic; every ready
-  non-epic item no open blocker holds, to pick one or a cluster.
-- `{ mode: "empty" }` — nothing ready (always, with none).
+What to pick up next on a thread's list comes from the bundled lens
+`oxplow-bundled/work-next` (`run_lens` with param `thread:
+"thread:thr3"`), over `v_work_item`, whichever list is active: an epic
+with its ready descendants, or every ready non-epic item, open `blocks`
+links holding an item back; empty with nothing ready (always, with no
+list). A list in order is `query_sql` over `v_work_item` (`WHERE
+thread_id = … ORDER BY rank IS NULL, rank, created_at`).
 
-`/work-next` (the bundled extension's command) calls it and works the item it picks, moving it to
+`/work-next` (the bundled extension's command) runs that lens and works the item it picks, moving it to
 `in_progress` so the effort links to it. Claude Code's built-in
 `TaskCreate` is a within-turn micro-planner and never mirrors oxplow
 items.
@@ -1124,10 +1122,21 @@ plain names like `run_command`. With the harness's own `mcp__oxplow__`
 namespace on top, the agent calls `mcp__oxplow__run_command`; no other
 spelling of a tool name is accepted.
 
+**`read { ref }`** (`oxplow_app::ref_read`) reads anything a ref names and
+returns `{ ref, kind, row, related, content, truncated }`: the owning
+model's row by ref, `related` lists (a work item's `links` and `comments`,
+a commit's or an effort's `files`), and `content` for the kinds whose body
+no model holds: a file at a revision (`file:src/a.rs` is the working tree;
+`file:src/a.rs@git:HEAD#L10-40`; `@snap:<id>` a local-history snapshot), an
+event's stored body (`event:<id>#input`, `#output` or `#prompt`; only the
+caller's own stream's events) and a lens's definition
+(`lens:<ext>/<slug>`). Content stops at 64 KB with `truncated: true`; ask
+for lines (`#L…`) to read further. It replaces the per-kind read tools.
+
 **Tools read the interface.** No MCP tool belongs to one implementation:
-the work-item tools (`list_work_items`, `get_work_item`,
-`next_work_item`) read whichever list is active (empty with none), so
-the tool list never changes with a switch. What an implementation owns
+work-item reads (`query_sql` over `v_work_item`, `read` of a
+`work_item:` ref, the work-next lens) go through whichever list is
+active (empty with none), so the tool list never changes with a switch. What an implementation owns
 is commands — an external provider instance's namespace — offered only while it's
 active (`capabilities::Active::refusal`).
 
@@ -1204,33 +1213,33 @@ fails. A UI-only row must say why (`every_ui_only_row_says_why`), and a
 model row must name published core models
 (`every_model_counterpart_is_published`).
 
-Domains mirrored onto MCP so far (beyond the original task/wiki/comment
-surface): **VCS reads** (`git_status`, `vcs_log`, `vcs_blame`, `diff`
-(two revisions; `since_fork` for a branch's own changes), `read_at` —
-revisions are `working`, `snap:<id>` or `git:<rev>` — and
-`vcs_branches`; `stream_id` optional;
-mutations stay on Bash); **snapshots / local history**
-(`list_snapshots_for_stream`, `list_files_for_snapshot`,
-`get_snapshot_stats`, `list_snapshot_change_entries` take a `snapshot_id`
-— a whole capture; `get_file_snapshot` and `read_file_snapshot` take a
-`file_snapshot_id` — one captured file row; `read_file_at_snapshot
-{ snapshot_id, path }` reads a path as of a capture. Restoring is the
-destructive `oxplow.snapshot.restore_file` command (an agent's is a proposal —
-P8.A9). Reads and restore share `oxplow_app::snapshot_files::SnapshotFiles`, and a
-restore writes into the row's stream's worktree, not the primary
-checkout — P2.9, tsk433);
-**code quality** (`run_code_quality_scan`, `list_code_quality_scans`,
-`list_code_quality_findings` — the scan orchestration is shared via
-`Services::run_code_quality_scan`); **selection** (`select_thread`,
-`switch_stream`; a thread's and a stream's lifecycle are the `thread.*`
-and `stream.*` commands, comments and notes the `knowledge.*` ones, all
-through `run_command`, P8.A3–A6); and **site-wide search** (`search` —
-BM25 over tasks/comments/notes/wiki/file-contents via the unified FTS index,
-fed by the `search:<kind>` assets for tasks, comments, notes and wiki and the
-`search.index` consumer for files; optional `stream_id` scopes file hits).
-A file's captured history is the model `v_snapshot_file`, and an
-effort's files (claimed or observed) `v_effort_file`; git mutations
-stay on the agent's own git.
+What an agent reads, and how. Almost every read is a published model through
+`query_sql`: streams (`v_stream`), threads and their work (`v_thread`,
+`v_work_item`), thread notes (`v_thread_note`), efforts and their evidence
+(`v_effort`, `v_effort_observation`, `v_effort_file`), commits and branches
+(`v_commit`, `v_commit_file`, `v_branch`), a stream's capture history
+(`v_snapshot`, `v_snapshot_op`, `v_snapshot_file`), dashboards (`v_dashboard`,
+`v_dashboard_item`), duplicate-block findings (`v_code_quality_finding`),
+dead letters (`v_event_dead_letter`) and language-server diagnostics
+(`v_diagnostic`). The tools that stay are the ones a model can't be: **file
+and revision content** (`read` for a file at a revision, `diff`, `vcs_blame`, `git_status`;
+revisions are `working`, `snap:<id>` or `git:<rev>`; `stream_id` optional;
+mutations stay on Bash), **captured content** (a captured file row's path
+and snapshot come from `query_sql` over `v_snapshot_file`, then `read`
+`file:<path>@snap:<snapshot id>`; restoring is the
+destructive `oxplow.snapshot.restore_file` command, an agent's a proposal;
+reads and restore share `oxplow_app::snapshot_files::SnapshotFiles`, and a
+restore writes into the row's stream's worktree, not the primary checkout),
+**live language-server answers** (`code_*`), and **site-wide search**
+(`search` — BM25 over tasks/comments/notes/wiki/file-contents via the unified
+FTS index, fed by the `search:<kind>` assets for tasks, comments, notes and
+wiki and the `search.index` consumer for files; optional `stream_id` scopes
+file hits). Selection (`select_thread`, `switch_stream`) and the plan pane's
+in-memory follow-ups are the person's, not an agent's: an agent's thread is its
+session's, a thread's and a stream's lifecycle are the `thread.*` and
+`stream.*` commands, comments and notes the `knowledge.*` ones, all through
+`run_command`; a follow-up is a work item or a thread note. Git mutations stay
+on the agent's own git.
 
 The `kind` discriminator (`epic`/`task`/`subtask`/`bug`/`note`) was
 removed end-to-end — `oxplow.work_item.create` takes none and a task row no
@@ -1239,10 +1248,10 @@ longer carries one. An "epic" is just any task that has children
 computed on read.
 
 **Id-prefix validation at the boundary.** Every tool that takes a
-string id (`thread_id`, `stream_id`, `note_id`, `followup_id`, …) calls
+string id (`thread_id`, `stream_id`, …) calls
 `expect_id_kind(tool, param, value, expected_prefix)` before
 constructing the typed id. Ids are `<3-letter-prefix><int>` strings
-(`str…` → stream, `thr…` → thread, `not…` → note, `fup…` → follow-up,
+(`str…` → stream, `thr…` → thread, `not…` → note,
 `eff…` → effort, `cmt…` → comment, …; see
 [data-model.md](./data-model.md#entity-ids)). The check parses the value
 via `oxplow_domain::AnyId` and confirms its kind matches the expected
@@ -1255,7 +1264,7 @@ expected. This converts what
 would otherwise surface as an opaque downstream `FOREIGN KEY
 constraint failed` into something actionable. Add the same call at
 the top of any new tool handler — see `IdPrefix` and the
-`ID_STREAM` / `ID_THREAD` / `ID_NOTE` / `ID_FOLLOWUP` constants in
+`ID_STREAM` / `ID_THREAD` constants in
 `crates/oxplow-mcp/src/lib.rs`. A work item is named by its ref, or a
 loose id of the active list (resolved by the `work_item.*` commands).
 
@@ -1264,8 +1273,8 @@ between canonical states directly — `blocked → in_progress` (unblock)
 and `done → in_progress` (reopen) need no hop through `todo`; archive
 is `{ to: done|canceled, native_state: archived }`.
 
-- Work-item reads are MCP tools (`list_work_items`, `get_work_item`,
-  `next_work_item`, `get_open_effort`, …) over the work-item interface;
+- Work-item reads are `query_sql` over `v_work_item`, `read` of a
+  `work_item:` ref and the work-next lens, over the work-item interface;
   every write is `run_command` (P8.A10 deleted the MCP task-write tools —
   `create_task`, `update_task`, `complete_task`, `upsert_task`,
   `transition_tasks`, `reorder_tasks`, `file_epic_with_children`):
@@ -1325,18 +1334,11 @@ is `{ to: done|canceled, native_state: archived }`.
   its captures. Subagent tool calls reach the hooks like any other, so a
   subagent's runs need nothing from it; `oxplow.test.record_run` is only for
   counts oxplow couldn't parse from a run's output.
-- `add_followup({ threadId, note })` / `remove_followup({ threadId, id })` /
-  `list_followups({ threadId })` — orchestrator-only, in-memory transient
-  follow-up reminders. No DB row, lost on runtime restart. Surfaces as
-  italic muted "↳ follow-up: …" lines at the top of the To Do section
-  in the Work panel. Use when you defer a sub-ask mid-turn that doesn't
-  warrant a full `oxplow.work_item.create`. Always call `remove_followup` in
-  the same turn you handle it. Never file both a follow-up and a real
-  task for the same concern. NOT exposed to subagents — the dispatch
-  brief deliberately omits any mention of follow-ups so subagents can't
-  stash bookmarks they'll never come back to handle. See the agent
-  skill at `.oxplow/runtime/claude-plugin/skills/oxplow-runtime/SKILL.md`
-  for the decision rule (follow-up vs. task). Storage:
+- **Follow-ups** (the plan pane's `add_followup` / `list_followups` /
+  `remove_followup`) are the person's UI-only reminders: in-memory, no DB row,
+  lost on runtime restart, shown as italic muted "↳ follow-up: …" lines at the
+  top of the To Do section. An agent has no tool for them; a follow-up an agent
+  defers is a work item (`oxplow.work_item.create`) or a thread note. Storage:
   `crates/oxplow-app/src/followup.rs`; runtime publishes the bus event
   `followup.changed` so the UI re-reads that thread's work
   (`workItems.readWorkList`).
@@ -1393,7 +1395,7 @@ is `{ to: done|canceled, native_state: archived }`.
 
 **Code tools** (`crates/oxplow-mcp/src/lib.rs`): `code_definition`,
 `code_references`, `code_hover`, `code_symbols`,
-`code_workspace_symbols`, `code_call_hierarchy`, `code_diagnostics` —
+`code_workspace_symbols`, `code_call_hierarchy` —
 typed answers from code intelligence, over the same
 shared language-server sessions the editor uses (`.context/lsp.md`). When no
 server is configured for a language, the error is self-describing — it
@@ -1531,14 +1533,11 @@ or report coverage numbers itself**, because oxplow parses the report
 deterministically (`observed`). Both are core text (`core_text` in
 `crates/oxplow-agent-text/src/lib.rs`), which every harness writes. The ingestion side (PostToolUse test
 detector, the report collectors a detected run reads, `oxplow.collector.sync` for
-one run by hand, `oxplow.test.record_run`, and the `list_effort_observations` /
-`get_open_effort` MCP reads) is documented in `.context/collection.md`.
-`get_open_effort({ thread_id })` answers "what is this thread's
-currently-open effort?" — returns `{ open, effortId, workItem,
-startedAt, hasStartSnapshot }` (`workItem` its linked work-item ref;
-`open:false` with null ids when none): whether an
-effort is open before a run is recorded, and whether its diff coverage has
-a baseline (`hasStartSnapshot`).
+one run by hand, `oxplow.test.record_run`, and the `v_effort_observation` /
+`v_effort` reads) is documented in `.context/collection.md`.
+A thread's open effort is the `v_effort` row with `ended_at IS NULL` for its
+`thread_id`: whether one is open before a run is recorded, and whether its
+diff coverage has a baseline (`start_snapshot_id IS NOT NULL`).
 Report parsing is **pluggable**: a report collector names a bundled parser
 (`entry: oxplow:<junit|lcov|cobertura|jacoco|clippy|eslint>`, jq programs in
 `crates/oxplow-script`) or its own jaq / Starlark / exec script, no

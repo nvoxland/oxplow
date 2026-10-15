@@ -74,7 +74,7 @@ snippets.
 To offload a read-heavy question to an Explore subagent, allocate its
 note first (`oxplow.knowledge.add_note {}` returns `note.id`) and have it write
 its finding once, at the end, with `oxplow.knowledge.update_note { note, body }`.
-Read it back with `list_thread_notes`.
+Read it back with `query_sql` over `v_thread_note`.
 
 # Commands (the one write path)
 

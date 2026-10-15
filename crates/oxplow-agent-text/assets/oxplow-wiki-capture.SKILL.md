@@ -152,8 +152,8 @@ auto-loads when you write a fence and carries the syntax rules.
 ## Folding in Explore findings
 
 If this turn dispatched Explore subagents that wrote their findings
-into thread notes (`oxplow.knowledge.update_note`), call
-`list_thread_notes` and
+into thread notes (`oxplow.knowledge.update_note`), read
+`v_thread_note` with `query_sql` and
 incorporate their findings into the wiki page rather than discarding
 them. Subagent notes are otherwise invisible — the wiki is where they
 become durable.

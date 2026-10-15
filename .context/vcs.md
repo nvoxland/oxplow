@@ -153,12 +153,12 @@ into VCS ids.
 
 The neutral RPCs are `read_at { streamId, path, revision }`, `files_at`,
 `diff { streamId, from, to }` and `changed_paths` (same arguments, UI
-only), and MCP `read_at`. A view that doesn't show line counts calls
+only), and, for an agent, MCP `read` of `file:<path>@<revision>`. A view that doesn't show line counts calls
 `changed_paths`. The daemon finishes every request it gets (dropping a
 result in the UI doesn't cancel the work), so a view that refreshes on
 workspace events routes those refreshes through `coalescedRefresh`
 (debounced, single-flight) rather than starting a diff per event. The MCP VCS
-reads (`read_at`, `diff`, `vcs_blame`, `vcs_log`, `git_status`) default
+reads (`diff`, `vcs_blame`, `git_status`, and `read` of a file at a revision) default
 a missing `stream_id` to the caller's own stream — its header, else its
 thread's — and to the primary only for an anonymous caller (tsk555; the
 extension, lens and change tools do the same, tsk574); they replaced
@@ -214,8 +214,8 @@ rename in between stays; tsk573). A `v_branch.name` is the branch's local name f
 checks out and shows `name` as is (`pickedBranch`, tsk567). What is computed stays live: `vcs_divergence`,
 `vcs_revisions_between`, `vcs_file_history` (the index keeps 500
 commits per head; a file's full history can be older),
-`vcs_list_adoptable_workspaces`, and for agents `vcs_log` /
-`vcs_branches` (MCP too). Git-native reads keep `git_` names:
+`vcs_list_adoptable_workspaces`, and for agents `v_commit`,
+`v_commit_file` and `v_branch` through `query_sql`. Git-native reads keep `git_` names:
 `git_change_scopes`, `git_resolve_commit_ref_labels`,
 `git_list_recent_remote_branches`. Deleted: `get_git_log`,
 `get_commits_ahead_of`, `list_file_commits`, `list_branches`,

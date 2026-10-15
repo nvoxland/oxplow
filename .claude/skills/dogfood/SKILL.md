@@ -78,8 +78,7 @@ selectors; screenshot when looks matter, and read the image.
    thread, or run a second stream in parallel. Useful IPC for
    inspection: `query_sql` over `v_work_item` / `v_effort` (a thread's
    work, an item's efforts), `list_threads` (`{"streamId":"str1"}`),
-   `list_effort_observations`
-   (`{"effortId":"effNN"}`), `run_command` to file a task
+   `v_effort_observation`, `run_command` to file a task
    (`{"name":"work_item.create","input":{"title":…,"body":…,"state":"todo","native":{"thread":"thr1"}},"confirmed":false}`;
    no `native.thread` = backlog).
 4. **Review what landed** through oxplow itself: Git Dashboard →

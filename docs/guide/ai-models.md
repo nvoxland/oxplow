@@ -95,16 +95,16 @@ something its model is restricted from.
 
 ## What your agent can do
 
-Your coding agent sees three MCP tools:
+Your coding agent is a model itself, so it asks none for you. It has one
+MCP tool here:
 
 - `list_ai_roles`: what's configured.
-- `ai_decide`: ask the `decide` model typed questions about some text.
-- `ai_summarize`: summarize text with the `summarize` model.
 
-Both spend your key. Each answer is recorded against the thread that
-asked, and asking the same thing again reuses it instead of calling the
-model. Neither is marked read-only, so your agent's own permission
-prompts treat them like any other tool that acts.
+A person can read what an earlier model call was asked and answered in the app.
+
+Extension collectors that ask a model (`ai_classify`,
+`ai_summarize` and the rest) spend your key; each answer is recorded, and
+asking the same thing again reuses it instead of calling the model.
 
 It can't change providers, roles or keys.
 

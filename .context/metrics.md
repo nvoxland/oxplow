@@ -383,8 +383,8 @@ welded to collection.
   >
   > **Detail COMPACTION is the on-by-default sibling (tsk211).** Distinct from
   > the prune above: `compact_capture_details` only NULLs `metric_capture.
-  > detail_json` — the verbatim per-run payload behind `list_effort_observations`'
-  > Tests/Coverage panel. The capture row and every fact survive, so no metric
+  > detail_json` — the verbatim per-run payload behind the effort Tests/Coverage
+  > panel. The capture row and every fact survive, so no metric
   > value, trend point or count can change; that is exactly why it defaults ON
   > while the fact-deleting prune stays opt-in. Dedup is unaffected —
   > `idempotency_key` is derived from `detail_json` at WRITE time into its own

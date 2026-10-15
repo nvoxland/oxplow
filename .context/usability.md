@@ -955,7 +955,7 @@ no caller may bypass the bus to write to the terminal.
     automatically on the next prompt).
   - note → `@.oxplow/wiki/<slug>.md `.
   - work item → `[oxplow work_item:<provider>:<id>: "<title>" (<state>)] `
-    (plain-text reference; the agent reads it with `get_work_item`).
+    (plain-text reference; the agent reads it with `read`).
   - any canonical ref → `[oxplow ref <ref>] ` — **Ask About This**
     (below). The agent guide says how to read each kind.
   - Always trailing space so the user can keep typing.

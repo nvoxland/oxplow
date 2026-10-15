@@ -6,8 +6,7 @@ AI providers you configure, the roles that decide which model does what, the
 
 > **Status (epic tsk275):** built: providers, keychain keys, roles, the
 > client, call records (`oxplow-ai`, `oxplow-app/src/ai_service.rs`,
-> `v_ai_call`), Settings → AI, and the `list_ai_roles` / `ai_decide` /
-> `ai_summarize` MCP tools, inferred decisions, project role overrides,
+> `v_ai_call`), Settings → AI, and the `list_ai_roles` MCP tool, inferred decisions, project role overrides,
 > recorded computations (`AiCompute`, `v_ai_result`, P5.E1) and the
 > `ai_*` Starlark builtins for collectors (P5.E2). **Not
 > yet:** a models.dev catalog.
@@ -102,8 +101,8 @@ ai:
 | Role | Used for |
 |---|---|
 | `main` | general reasoning: `extract` (a collector's `ai_extract`); the fallback of oxplow-bundled's `decisions` profile (inferred decisions) |
-| `summarize` | summaries of sessions, efforts, changes (`summarize`, MCP `ai_summarize`) |
-| `decide` | typed questions with probabilities, Jev-shaped (`classify`, `score`, `decide`, MCP `ai_decide`) |
+| `summarize` | summaries of sessions, efforts, changes (`summarize`) |
+| `decide` | typed questions with probabilities, Jev-shaped (`classify`, `score`, `decide`) |
 
 A role exists only once something asks it. A config naming a role oxplow
 dropped (`fast`, `embed`, `review`: nothing asked them) fails to load,
@@ -408,9 +407,9 @@ an id, a description, a required `fallback` built-in role and optional
   (`request_hash`, `response_hash`). `ai` is one of core's namespaces with
   no events; its bodies keep 30 days (`CORE_WINDOWS`) and the rows stay.
   A person reads one with RPC `read_ai_call { id, body: request |
-  response }`, an agent with MCP `read_ai_call` — only the calls recorded
-  as its own thread (`oxplow_app::ai_calls::read`, capped at 64 KiB like
-  an event body). What a provider adapter wraps around a request
+  response }` (a person's only: an agent asks no models through oxplow,
+  and has no tool for it; `oxplow_app::ai_calls::read`, capped at 64 KiB
+  like an event body). What a provider adapter wraps around a request
   (`decide_via_chat`'s JSON instructions, an API's own envelope) is the
   adapter's, not part of it.
 - Tests use `oxplow_ai_fake::mock` and `mock_sse` (a reply as timed
@@ -450,8 +449,8 @@ column is what core's callers and the collector builtins default to.
 |---|---|---|
 | `classify(caller, role, text, labels)` | `decide` (a `choice` question, `CLASSIFY_INSTRUCTIONS`) | `{ label, probabilities }` |
 | `score(caller, role, text, levels)` | `decide` (a `score` question, levels lowest first, `SCORE_INSTRUCTIONS`) | `{ level, score, probabilities }` |
-| `decide(caller, role, state, questions)` | `decide` (any named `noul` / `choice` / `score` questions) — MCP `ai_decide` asks it | answers by question name (a reply missing one is refused) |
-| `summarize(caller, role, text, focus?)` | `summarize` (`summarize_system`) — the one summarize path: MCP `ai_summarize` asks it too | the summary |
+| `decide(caller, role, state, questions)` | `decide` (any named `noul` / `choice` / `score` questions) | answers by question name (a reply missing one is refused) |
+| `summarize(caller, role, text, focus?)` | `summarize` (`summarize_system`) — the one summarize path | the summary |
 | `extract(caller, role, instructions, text, schema)` | `main`, JSON mode; the schema is in the system prompt | JSON matching `schema` (checked with `InputValidator`; a mismatch is refused, naming the pointer) |
 
 **The version follows the prompt.** There is no version constant to
@@ -514,17 +513,10 @@ turn's prompt (`turn_kind`).
 
 - `list_ai_roles`: providers (with `keySet`, never keys) and every role's
   binding.
-- `ai_decide`: typed questions (`noul` / `choice` / `score`) about some
-  text, on the `decide` role (an agent can't pick a costlier one) — a
-  recorded computation (`AiCompute::decide`), returning `{ answers,
-  cached }`.
-- `ai_summarize`: text through the `summarize` role, with an optional focus
-  — a recorded computation (`AiCompute::summarize`, tsk571), so the same
-  text and focus is one call.
-- `read_ai_call { id, body }`: what one of its own calls was asked or
-  answered (see the client notes above).
+- Asking a model is not an agent tool (an agent is a model); collectors
+  keep their `ai_*` builtins.
 
-Each is paid with the person's key, so neither is a read-only tool (no
+Asking a model is paid with the person's key, so it is not a read-only tool (no
 `read_only_hint`: a harness doesn't auto-approve it), each takes at most
 `AI_TEXT_MAX` (100,000) characters of text, and each records as the
 asking thread (caller `thread:<id>`, from the session's bearer); a

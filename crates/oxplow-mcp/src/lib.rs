@@ -20,7 +20,7 @@ use oxplow_app::ref_resolver::{self, RefSummary};
 use oxplow_app::session_auth::Principal;
 use oxplow_app::Services;
 use oxplow_domain::comment::CommentThread;
-use oxplow_domain::stores::{CommentStore, ThreadNoteStore, ThreadStore};
+use oxplow_domain::stores::CommentStore;
 use oxplow_domain::{CommentStatus, StreamId, ThreadId};
 
 mod lenient_params;
@@ -109,39 +109,6 @@ const ANONYMOUS_WRITE: &str = "this MCP connection carries no thread identity (i
     through an agent session's bearer), so it may not run commands; oxplow's own harness \
     configs connect with one — reconnect through one";
 
-/// The most text an agent's model call takes (`ai_decide`'s `state`,
-/// `ai_summarize`'s `text`), in characters: each call is paid with the
-/// person's key.
-const AI_TEXT_MAX: usize = 100_000;
-
-/// What an agent's model call is recorded as: the asking thread's ref. A
-/// connection with no thread identity asks nothing — the call is paid
-/// with the person's key, and someone must have asked for it.
-fn ai_caller(extensions: &rmcp::model::Extensions) -> Result<String, McpError> {
-    caller_of(extensions)
-        .thread_id
-        .map(oxplow_domain::refs::build::thread_ref)
-        .ok_or_else(|| {
-            McpError::invalid_request(
-                "this MCP connection carries no thread identity (it didn't come through an \
-                 agent session's bearer), so it may not call a model; oxplow's own harness \
-                 configs connect with one — reconnect through one",
-                None,
-            )
-        })
-}
-
-fn check_ai_text(field: &str, text: &str) -> Result<(), McpError> {
-    let n = text.chars().count();
-    if n > AI_TEXT_MAX {
-        return Err(McpError::invalid_params(
-            format!("`{field}` is {n} characters; a model call takes at most {AI_TEXT_MAX}"),
-            None,
-        ));
-    }
-    Ok(())
-}
-
 // ---------- request shapes ----------
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -152,6 +119,15 @@ pub struct RunCommandParams {
     /// The command's input, matching its `input_schema`.
     #[serde(default)]
     pub input: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ReadParams {
+    /// What to read, by its ref: `file:src/a.rs@git:HEAD#L10-40`,
+    /// `work_item:oxplow:tsk12`, `commit:<sha>`, `event:<id>#output`,
+    /// `lens:<ext>/<slug>`.
+    #[serde(rename = "ref")]
+    pub reference: String,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -260,25 +236,8 @@ fn no_command_message(
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct StreamIdParams {
-    pub stream_id: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ThreadIdParams {
     pub thread_id: String,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-struct ListWorkItemsParams {
-    /// The list to read: a thread's (`thr3`) or `"backlog"` (items on no
-    /// thread).
-    list: String,
-    /// The canonical states to keep — any of "todo", "in_progress",
-    /// "blocked", "done", "canceled". Omit for the open ones (todo,
-    /// in_progress, blocked).
-    #[serde(default)]
-    states: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -286,27 +245,6 @@ pub struct WorkItemRefParams {
     /// The item's ref, `work_item:<provider>:<id>`.
     #[serde(rename = "ref")]
     pub item_ref: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ListEffortObservationsParams {
-    /// Effort id to read directly. Omit to use the open effort on
-    /// `thread_id`.
-    pub effort_id: Option<String>,
-    pub thread_id: Option<String>,
-    /// Optional kind filter: `test-run` | `diff-coverage` | `static-analysis`.
-    pub kind: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct GetDashboardParams {
-    /// Dashboard id (`dsh<n>`).
-    pub id: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct GetOpenEffortParams {
-    pub thread_id: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -321,58 +259,11 @@ pub struct ListCommentsParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SearchParams {
-    pub query: String,
-    #[serde(default = "default_limit")]
-    pub limit: u32,
-}
-
-fn default_limit() -> u32 {
-    20
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SlugParams {
-    pub slug: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WikiRefDriftParams {
     /// Wiki slug (without `.md`).
     pub slug: String,
     /// Repo-relative file path referenced by the page.
     pub path: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct AddFollowupParams {
-    pub thread_id: String,
-    pub body: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct FollowupIdParams {
-    pub id: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct GetThreadContextParams {
-    pub thread_id: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct EpicChildSpec {
-    pub title: String,
-    /// The child task's prose body (required).
-    pub description: String,
-    pub kind: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct FindNotesForNoteParams {
-    pub slug: String,
-    #[serde(default = "default_limit")]
-    pub limit: u32,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -390,13 +281,6 @@ pub struct PageRefParams {
 
 fn default_page_ref_limit() -> u32 {
     100
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ListDeadLettersParams {
-    /// Include `retried` and `discarded` letters too (default: `pending` only).
-    #[serde(default)]
-    pub all: bool,
 }
 
 /// A place in a stream's file (`code_*` tools). Line and column are
@@ -457,30 +341,12 @@ pub struct ListCodeUnitsParams {
     pub path: String,
 }
 
-/// A dimension-equality filter for the metric reads.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-pub struct McpDimEq {
-    pub key: String,
-    pub value: String,
-}
-
 /// Optional stream selector shared by the stream-scoped VCS read tools.
 /// Omit `stream_id` to read the caller's own stream (the primary only for
 /// a caller with no thread identity).
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct GitStreamParams {
     pub stream_id: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct GitLogParams {
-    /// The stream whose history to read; the caller's when absent.
-    pub stream_id: Option<String>,
-    /// Max commits to return.
-    pub limit: Option<u32>,
-    /// Include all branches (`--all`) rather than just the current branch.
-    #[serde(default)]
-    pub all: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -518,13 +384,6 @@ pub struct ReadAtParams {
     /// Which version: `working`, `snap:<snapshot id>`, or `git:<rev>`
     /// (a sha, branch, tag or `HEAD`).
     pub revision: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SnapshotStreamParams {
-    pub stream_id: String,
-    /// Max snapshots to return (default 200).
-    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -594,7 +453,7 @@ pub struct RunLensParams {
 pub struct RunLensActionParams {
     /// Lens id: `<extension>/<slug>`.
     pub id: String,
-    /// The action's id, as the lens declares it (see `get_lens` → `actions`).
+    /// The action's id, as the lens declares it (see `read` of `lens:<ext>/<slug>` → `actions`).
     pub action: String,
     /// Param overrides by name, as for `run_lens`.
     pub params: Option<std::collections::BTreeMap<String, serde_json::Value>>,
@@ -602,7 +461,7 @@ pub struct RunLensActionParams {
     pub stream_id: Option<String>,
     /// Your thread, as for `run_lens`.
     pub thread_id: Option<String>,
-    /// For a row action (`row: true` in `get_lens` → `actions`): the row
+    /// For a row action (`row: true` in `read` of `lens:<ext>/<slug>` → `actions`): the row
     /// it runs on, column → value, as `run_lens` returned it.
     pub row: Option<std::collections::BTreeMap<String, serde_json::Value>>,
 }
@@ -621,40 +480,11 @@ pub struct EnsureChangeParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct AiQuestionParam {
-    /// `noul` (yes/no: returns the probability of yes), `choice` (pick one
-    /// of `options`) or `score` (place it on the ordered `levels`).
-    #[serde(rename = "type")]
-    pub kind: String,
-    /// The question, e.g. "Does this change alter public behavior?".
-    pub instructions: String,
-    /// For `choice`: the options.
-    pub options: Option<Vec<String>>,
-    /// For `score`: the levels, lowest first.
-    pub levels: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct AiDecideParams {
-    /// What the questions are about: a diff, a description, some text.
-    pub state: String,
-    /// Questions by a short name you choose (e.g. `risky`).
-    pub questions: std::collections::BTreeMap<String, AiQuestionParam>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ReadAiCallParams {
     /// The call's id (`v_ai_call.id`).
     pub id: i64,
     /// Which body: `request` or `response`.
     pub body: oxplow_app::ai_calls::AiCallBody,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct AiSummarizeParams {
-    pub text: String,
-    /// What to focus on, e.g. "risks" or "what changed for users".
-    pub focus: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -727,55 +557,6 @@ pub struct SiteSearchParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SnapshotIdParams {
-    /// A `snapshot` id — one whole capture (integer, as
-    /// `list_snapshots_for_stream` returns).
-    pub snapshot_id: i64,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct FileSnapshotIdParams {
-    /// A `file_snapshot` id — one captured file row (integer, as
-    /// `list_files_for_snapshot` returns).
-    pub file_snapshot_id: i64,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct EventContentParams {
-    /// The event's id (`v_event.id`), e.g. an `agent.tool.finished`.
-    pub event_id: String,
-    /// Which body: `input` or `output`.
-    pub body: oxplow_app::event_bodies::EventBodyKey,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct FileAtSnapshotParams {
-    /// A `snapshot` id — one whole capture.
-    pub snapshot_id: i64,
-    /// A repo-relative path.
-    pub path: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CodeQualityScanIdParams {
-    /// A duplication scan id (from `run_duplication_scan_at`).
-    pub scan_id: i64,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SelectThreadMcpParams {
-    pub stream_id: String,
-    /// Thread to select, or omit/null to clear the selection.
-    pub thread_id: Option<String>,
-}
-
-#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct SwitchStreamParams {
-    /// Stream to make current, or omit/null to clear.
-    pub stream_id: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct GetSkillParams {
     /// Skill name, e.g. `oxplow-extension`.
     pub name: String,
@@ -788,13 +569,6 @@ impl OxplowMcp {
             services,
             tool_router: Self::tool_router(),
         }
-    }
-
-    // ---------- liveness / version ----------
-
-    #[tool(description = "Liveness check: returns \"pong\".")]
-    async fn ping(&self) -> Result<CallToolResult, McpError> {
-        Ok(CallToolResult::success(vec![ContentBlock::text("pong")]))
     }
 
     #[tool(
@@ -821,58 +595,6 @@ impl OxplowMcp {
                 ))
             }
         }
-    }
-
-    #[tool(description = "Get the running oxplow daemon version.")]
-    async fn app_version(&self) -> Result<CallToolResult, McpError> {
-        Ok(CallToolResult::success(vec![ContentBlock::text(env!(
-            "CARGO_PKG_VERSION"
-        ))]))
-    }
-
-    // ---------- streams ----------
-
-    #[tool(description = "List all streams (primary + worktrees) in this project.")]
-    async fn list_streams(&self) -> Result<CallToolResult, McpError> {
-        let list = self
-            .services
-            .streams
-            .list_streams()
-            .await
-            .map_err(internal)?;
-        json_result(&list)
-    }
-
-    #[tool(
-        description = "List the user's dashboards (id + title). A dashboard is a grid of metric \
-                       tiles. Use `get_dashboard` for one dashboard's tiles (tsk138)."
-    )]
-    async fn list_dashboards(&self) -> Result<CallToolResult, McpError> {
-        let list = self
-            .services
-            .dashboard_store
-            .list()
-            .await
-            .map_err(internal)?;
-        json_result(&list)
-    }
-
-    #[tool(
-        description = "Get one dashboard plus its tiles, in display order. `id` is a `dsh<n>` id."
-    )]
-    async fn get_dashboard(
-        &self,
-        params: Parameters<GetDashboardParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let id = oxplow_domain::DashboardId::try_from_str(&params.0.id)
-            .ok_or_else(|| McpError::invalid_params("expected a dashboard id (dsh…)", None))?;
-        let got = self
-            .services
-            .dashboard_store
-            .get(id)
-            .await
-            .map_err(internal)?;
-        json_result(&got)
     }
 
     #[tool(
@@ -1143,119 +865,6 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Ask a model a typed question about some text, cheaply: yes/no (`noul`, \
-                       returns the probability of yes), `choice` among options, or `score` on \
-                       ordered levels, each with probabilities, on the `decide` role. Good for \
-                       second opinions like \"is this diff risky?\". Recorded: the same \
-                       questions on the same text are answered once (`cached`). Fails if the \
-                       role has no model; the person assigns one in Settings → AI."
-    )]
-    async fn ai_decide(
-        &self,
-        extensions: rmcp::model::Extensions,
-        params: Parameters<AiDecideParams>,
-    ) -> Result<CallToolResult, McpError> {
-        use oxplow_app::ai_service::Question;
-        let caller = ai_caller(&extensions)?;
-        let p = params.0;
-        check_ai_text("state", &p.state)?;
-        let mut questions = std::collections::BTreeMap::new();
-        for (name, q) in p.questions {
-            let bad = |m: &str| McpError::invalid_params(format!("question `{name}`: {m}"), None);
-            let question = match q.kind.as_str() {
-                "noul" => Question::Noul {
-                    instructions: q.instructions,
-                },
-                "choice" => Question::Choice {
-                    instructions: q.instructions,
-                    options: q
-                        .options
-                        .filter(|o| !o.is_empty())
-                        .ok_or_else(|| bad("a choice needs options"))?,
-                },
-                "score" => Question::Score {
-                    instructions: q.instructions,
-                    levels: q
-                        .levels
-                        .filter(|l| !l.is_empty())
-                        .ok_or_else(|| bad("a score needs levels"))?,
-                },
-                other => return Err(bad(&format!("type `{other}` isn't noul, choice or score"))),
-            };
-            questions.insert(name, question);
-        }
-        let decision = self
-            .services
-            .ai_compute
-            .decide(
-                caller.as_str(),
-                &oxplow_app::ai_service::Role::DECIDE,
-                &p.state,
-                &questions,
-            )
-            .await
-            .map_err(compute_error)?;
-        json_result(&serde_json::json!({
-            "answers": decision.value,
-            "cached": decision.cached,
-        }))
-    }
-
-    #[tool(
-        description = "Summarize text with oxplow's `summarize` role (a model the person \
-                       configured in Settings → AI), optionally with a focus. Useful for long \
-                       logs or documents you don't need verbatim. Recorded: the same text and \
-                       focus are summarized once."
-    )]
-    async fn ai_summarize(
-        &self,
-        extensions: rmcp::model::Extensions,
-        params: Parameters<AiSummarizeParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let caller = ai_caller(&extensions)?;
-        let p = params.0;
-        check_ai_text("text", &p.text)?;
-        let summary = self
-            .services
-            .ai_compute
-            .summarize(
-                caller.as_str(),
-                &oxplow_app::ai_service::Role::SUMMARIZE,
-                &p.text,
-                p.focus.as_deref(),
-            )
-            .await
-            .map_err(compute_error)?;
-        Ok(CallToolResult::success(vec![ContentBlock::text(
-            summary.value,
-        )]))
-    }
-
-    #[tool(
-        description = "Read what one of your own model calls (`ai_decide`, `ai_summarize`; \
-                       `v_ai_call` rows whose caller is your thread) was asked (`request`) or \
-                       answered (`response`): `{text, size, truncated}`, the text capped at 64 \
-                       KiB. Null when it has no such body (a failed call's response) or \
-                       retention removed it (after 30 days)."
-    )]
-    async fn read_ai_call(
-        &self,
-        extensions: rmcp::model::Extensions,
-        params: Parameters<ReadAiCallParams>,
-    ) -> Result<CallToolResult, McpError> {
-        use oxplow_app::ai_calls::{read, AiCallBodyError};
-        let caller = ai_caller(&extensions)?;
-        let p = params.0;
-        let body = read(&self.services, p.id, p.body, Some(&caller))
-            .await
-            .map_err(|e| match e {
-                AiCallBodyError::Storage(e) => internal(e),
-                other => McpError::invalid_params(other.to_string(), None),
-            })?;
-        json_result(&body)
-    }
-
-    #[tool(
         description = "Before installing (`git_url`) or updating (`name`) an extension: clone it \
                        and report what it would bring in, installing nothing: the extension as it \
                        would load (lenses, sources with the programs they run, the hosts they \
@@ -1434,35 +1043,6 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Get one lens's full definition: its SQL query, params with defaults, viz \
-                       and column/link settings, and the file it lives in."
-    )]
-    async fn get_lens(
-        &self,
-        extensions: rmcp::model::Extensions,
-        params: Parameters<LensIdParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        check_optional_stream("get_lens", p.stream_id.as_deref())?;
-        // Omitted: the caller's own stream (tsk574).
-        let stream = self
-            .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
-            .await;
-        let root = self
-            .services
-            .worktrees
-            .resolve(stream.as_deref())
-            .await
-            .into_local_path();
-        let lens = self
-            .services
-            .extension_catalog
-            .find_lens(&root, &p.id)
-            .map_err(|e| lens_error(&p.id, e))?;
-        json_result(&lens)
-    }
-
-    #[tool(
         description = "Run a lens and read what the human sees on its page: by default its text \
                        rendering (a table, a chart's series, a grid's children) plus the resolved \
                        params, columns, row count and alert; `format: \"json\"` returns the raw \
@@ -1530,7 +1110,7 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Run one of a lens's actions (see `get_lens` → `actions`): the command it \
+        description = "Run one of a lens's actions (see `read` of `lens:<ext>/<slug>` → `actions`): the command it \
                        declares, run as the lens acting for you — so the same rules apply as if \
                        you ran the command yourself (a command you can't run, or one that needs \
                        a person's confirmation, is refused). A row action (`row: true`) needs the \
@@ -1683,6 +1263,33 @@ impl OxplowMcp {
     }
 
     #[tool(
+        description = "Read what a ref names: its model's row (every column), what sits beside \
+                       it (a work item's links and comments, a commit's or an effort's files) \
+                       and, for a body no model holds, its content. `file:src/a.rs` reads the \
+                       working tree; `file:src/a.rs@git:HEAD#L10-40` a revision's lines \
+                       (`@snap:<id>` a local-history snapshot); `event:<id>#output` (or \
+                       `#input`, `#prompt`) one of your stream's events' stored bodies; \
+                       `lens:<ext>/<slug>` a lens's definition. Any `ref` a model's column \
+                       holds reads the same way (`work_item:…`, `commit:…`, `effort:…`, \
+                       `thread:…`, `wiki:…`). Content stops at 64 KB, saying so."
+    )]
+    async fn read(
+        &self,
+        extensions: rmcp::model::Extensions,
+        params: Parameters<ReadParams>,
+    ) -> Result<CallToolResult, McpError> {
+        use oxplow_app::ref_read::{read, ReadError};
+        let stream = caller_of(&extensions).stream_id;
+        let out = read(&self.services, &params.0.reference, stream)
+            .await
+            .map_err(|e| match e {
+                ReadError::Storage(e) => internal(e),
+                other => McpError::invalid_params(other.to_string(), None),
+            })?;
+        json_result(&out)
+    }
+
+    #[tool(
         description = "Run ONE read-only SQL statement (`SELECT`/`WITH`) over the published \
                        models — the `v_*` views lenses and the UI read (`v_model` lists them; \
                        physical tables are refused). Joins across views are fine. Metrics read \
@@ -1789,26 +1396,6 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "The stream's history from its head, newest first (`all` spans every \
-                          branch; `limit` caps the count)."
-    )]
-    async fn vcs_log(
-        &self,
-        extensions: rmcp::model::Extensions,
-        params: Parameters<GitLogParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        check_optional_stream("vcs_log", p.stream_id.as_deref())?;
-        let sid = self
-            .stream_or_callers(&caller_of(&extensions), p.stream_id)
-            .await;
-        let log = oxplow_app::vcs::reads::log(&self.services, sid.as_deref(), p.limit, p.all)
-            .await
-            .map_err(domain_err)?;
-        json_result(&log)
-    }
-
-    #[tool(
         description = "Blame a file: the revision, author and time that last changed each \
                           line, at `revision` (default `working`; an uncommitted line names no \
                           revision)."
@@ -1846,308 +1433,12 @@ impl OxplowMcp {
         self.diff_as(&caller_of(&extensions), params.0).await
     }
 
-    #[tool(
-        description = "Read a file as it is in one version of the tree: `working` (on disk), \
-                          `snap:<id>` (a local-history snapshot) or `git:<rev>` (a sha, branch, \
-                          tag or HEAD). Returns null when the path isn't in that version."
-    )]
-    async fn read_at(
-        &self,
-        extensions: rmcp::model::Extensions,
-        params: Parameters<ReadAtParams>,
-    ) -> Result<CallToolResult, McpError> {
-        self.read_at_as(&caller_of(&extensions), params.0).await
-    }
-
-    #[tool(
-        description = "The project's branches — local and remote-tracking — with their \
-                          heads; `is_default` marks the default branch."
-    )]
-    async fn vcs_branches(&self) -> Result<CallToolResult, McpError> {
-        let branches = oxplow_app::vcs::reads::branches(&self.services, None)
-            .await
-            .map_err(domain_err)?;
-        json_result(&branches)
-    }
-
     // ---------- snapshots / local history (read + restore) ----------
     //
-    // Thin mirrors of the IPC snapshot reads over `services.snapshot_store` /
-    // `blobs`, so the agent can inspect and restore its own change history.
-    // (Unlike the UI reads, these don't strip `generated` paths — the agent
-    // sees the raw capture history.) The composed dashboard DTOs
-    // (`list_file_snapshots`) stay IPC-only. Ids are honest: a `snapshot_id`
-    // is a whole capture, a `file_snapshot_id` one captured file row
-    // (P2.9); reads and restore share `oxplow_app::snapshot_files`.
-
-    #[tool(description = "List snapshot rows for a stream (one per capture batch), newest first.")]
-    async fn list_snapshots_for_stream(
-        &self,
-        params: Parameters<SnapshotStreamParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind(
-            "list_snapshots_for_stream",
-            "stream_id",
-            &params.0.stream_id,
-            ID_STREAM,
-        )?;
-        let stream_id = oxplow_domain::StreamId::try_from_str(&params.0.stream_id)
-            .ok_or_else(|| McpError::invalid_params("invalid stream id", None))?;
-        let rows = self
-            .services
-            .snapshot_store
-            .list_snapshots_for_stream(stream_id, params.0.limit.unwrap_or(200) as usize)
-            .await
-            .map_err(internal)?;
-        json_result(&rows)
-    }
-
-    #[tool(
-        description = "The stream's snapshot operation log, newest first: every take (a new \
-                       snapshot, or one that found the tree unchanged) with its trigger \
-                       (turn_end, quiet, effort_start, …), parent snapshot, turn/effort anchors, \
-                       elapsed time and budget (over_budget when it ran over)."
-    )]
-    async fn list_snapshot_ops(
-        &self,
-        params: Parameters<SnapshotStreamParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind(
-            "list_snapshot_ops",
-            "stream_id",
-            &params.0.stream_id,
-            ID_STREAM,
-        )?;
-        let stream_id = oxplow_domain::StreamId::try_from_str(&params.0.stream_id)
-            .ok_or_else(|| McpError::invalid_params("invalid stream id", None))?;
-        let ops = self
-            .services
-            .snapshot_store
-            .list_ops(stream_id, params.0.limit.unwrap_or(200) as usize)
-            .await
-            .map_err(internal)?;
-        json_result(&ops)
-    }
-
-    #[tool(description = "List every file_snapshot row captured under one snapshot id.")]
-    async fn list_files_for_snapshot(
-        &self,
-        params: Parameters<SnapshotIdParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let rows = self
-            .services
-            .snapshot_store
-            .list_files_for_snapshot(params.0.snapshot_id)
-            .await
-            .map_err(internal)?;
-        json_result(&rows)
-    }
-
-    #[tool(description = "Get one captured file row by its file_snapshot id (null if absent).")]
-    async fn get_file_snapshot(
-        &self,
-        params: Parameters<FileSnapshotIdParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let row = self
-            .services
-            .snapshot_store
-            .get(params.0.file_snapshot_id)
-            .await
-            .map_err(internal)?;
-        json_result(&row)
-    }
-
-    #[tool(description = "Created/modified/deleted counts for a snapshot.")]
-    async fn get_snapshot_stats(
-        &self,
-        params: Parameters<SnapshotIdParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let stats = self
-            .services
-            .snapshot_store
-            .stats_for_snapshot(params.0.snapshot_id)
-            .await
-            .map_err(internal)?;
-        json_result(&stats)
-    }
-
-    #[tool(description = "Per-file change entries for one snapshot (git-log-like shape).")]
-    async fn list_snapshot_change_entries(
-        &self,
-        params: Parameters<SnapshotIdParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let rows = self
-            .services
-            .snapshot_store
-            .list_changes_for_snapshot(params.0.snapshot_id)
-            .await
-            .map_err(internal)?;
-        json_result(&rows)
-    }
-
-    #[tool(
-        description = "Read a captured file row (file_snapshot id) as a (UTF-8 lossy) string. \
-                          Null when the row is gone or has no content (oversize, a deletion, \
-                          or expired from Local History)."
-    )]
-    async fn read_file_snapshot(
-        &self,
-        params: Parameters<FileSnapshotIdParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let content = self
-            .services
-            .snapshot_files()
-            .read_file_snapshot(params.0.file_snapshot_id)
-            .await
-            .ok()
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
-        json_result(&content)
-    }
-
-    #[tool(
-        description = "Read a stored event body — an `agent.tool.*` event's `input` or \
-                          `output` — by the event's id (`v_event.id`) in this connection's \
-                          stream: `{text, size, truncated}`, the text capped at 64 KiB \
-                          (`truncated` when less than the whole). Null when the event has no \
-                          such body or retention removed it."
-    )]
-    async fn read_event_content(
-        &self,
-        extensions: rmcp::model::Extensions,
-        params: Parameters<EventContentParams>,
-    ) -> Result<CallToolResult, McpError> {
-        use oxplow_app::event_bodies::{read, EventBodyError};
-        let actor = self.verified_actor(&caller_of(&extensions)).await?;
-        // An agent reads its own stream's bodies only.
-        let oxplow_domain::Actor::Agent {
-            stream_id: Some(stream),
-            ..
-        } = actor
-        else {
-            return Err(internal("a verified caller is an agent with a stream"));
-        };
-        let p = params.0;
-        let body = read(&self.services, &p.event_id, p.body, Some(stream))
-            .await
-            .map_err(|e| match e {
-                EventBodyError::Storage(e) => internal(e),
-                other => McpError::invalid_params(other.to_string(), None),
-            })?;
-        json_result(&body)
-    }
-
-    #[tool(
-        description = "Read a path as it was at a snapshot (a whole capture, snapshot id) as a \
-                          (UTF-8 lossy) string. Null when the path didn't exist then. Errors when that \
-                          snapshot was taken by 'Track changes only', which keeps no file contents."
-    )]
-    async fn read_file_at_snapshot(
-        &self,
-        params: Parameters<FileAtSnapshotParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        let content = self
-            .services
-            .snapshot_files()
-            .read_file_at_snapshot(p.snapshot_id, &p.path)
-            .await
-            .map_err(snapshot_file_error)?
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
-        json_result(&content)
-    }
-
-    // ---------- code quality (duplication) ----------
-    //
-    // The per-function metrics scan was retired (tsk229) — those signals live in
-    // the metric substrate now (`v_metric_spec` via query_sql; `oxplow.collector.sync`).
-    // Duplicate-block detection remains an inherent feature; read its findings
-    // here.
-
-    #[tool(description = "List the duplicate-block findings produced by a duplication scan.")]
-    async fn list_code_quality_findings(
-        &self,
-        params: Parameters<CodeQualityScanIdParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let findings = self
-            .services
-            .code_quality_store
-            .list_findings(params.0.scan_id)
-            .await
-            .map_err(internal)?;
-        json_result(&findings)
-    }
-
-    // ---------- UI selection ----------
-    //
-    // Selection pointers are off the bus (ipc-and-stores.md). A stream's
-    // branch checkout is `oxplow.vcs.checkout_branch`.
-
-    #[tool(description = "Select (focus) a thread on a stream, or clear the selection.")]
-    async fn select_thread(
-        &self,
-        params: Parameters<SelectThreadMcpParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind("select_thread", "stream_id", &params.0.stream_id, ID_STREAM)?;
-        if let Some(tid) = &params.0.thread_id {
-            expect_id_kind("select_thread", "thread_id", tid, ID_THREAD)?;
-        }
-        let stream_id = parse_stream_id(&params.0.stream_id)?;
-        let thread_id = params
-            .0
-            .thread_id
-            .as_deref()
-            .map(parse_thread_id)
-            .transpose()?;
-        self.services
-            .threads
-            .select(&stream_id, thread_id.as_ref())
-            .await
-            .map_err(internal)?;
-        json_result(&serde_json::json!({ "ok": true }))
-    }
-
-    #[tool(description = "Set the current/active stream (or omit stream_id to clear it).")]
-    async fn switch_stream(
-        &self,
-        params: Parameters<SwitchStreamParams>,
-    ) -> Result<CallToolResult, McpError> {
-        check_optional_stream("switch_stream", params.0.stream_id.as_deref())?;
-        let id = params
-            .0
-            .stream_id
-            .as_deref()
-            .map(parse_stream_id)
-            .transpose()?;
-        self.services
-            .streams
-            .set_current(id.as_ref())
-            .await
-            .map_err(internal)?;
-        json_result(&serde_json::json!({ "ok": true }))
-    }
-
-    // ---------- threads ----------
-
-    #[tool(description = "List threads attached to the given stream.")]
-    async fn list_thread_work(
-        &self,
-        params: Parameters<StreamIdParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind(
-            "list_thread_work",
-            "stream_id",
-            &params.0.stream_id,
-            ID_STREAM,
-        )?;
-        let stream_id = parse_stream_id(&params.0.stream_id)?;
-        let list = self
-            .services
-            .thread_store
-            .list_for_stream(&stream_id)
-            .await
-            .map_err(internal)?;
-        json_result(&list)
-    }
+    // The listings are `v_snapshot`, `v_snapshot_op` and `v_snapshot_file`
+    // through `query_sql`; these read file content. Ids are honest: a
+    // `snapshot_id` is a whole capture, a `file_snapshot_id` one captured
+    // file row; reads share `oxplow_app::snapshot_files`.
 
     // ---------- work items ----------
     //
@@ -2155,214 +1446,7 @@ impl OxplowMcp {
     // (`oxplow_app::work_item_reads`); with none, they're empty. Writes
     // are the `work_item.*` commands, through `run_command`.
 
-    #[tool(
-        description = "List the work items on a list: a thread's (`list: \"thr3\"`) or the \
-                       backlog (`list: \"backlog\"`), in list order. `states` keeps the given \
-                       canonical states (todo, in_progress, blocked, done, canceled); omitted, \
-                       the open ones. Each body is cut to 500 chars — get_work_item has the whole \
-                       item. Items come from the active work list, whichever it is."
-    )]
-    async fn list_work_items(
-        &self,
-        params: Parameters<ListWorkItemsParams>,
-    ) -> Result<CallToolResult, McpError> {
-        use oxplow_app::work_item_reads::{list, Scope};
-        let ListWorkItemsParams {
-            list: which,
-            states,
-        } = params.0;
-        let scope = if which == "backlog" {
-            Scope::Backlog
-        } else {
-            expect_id_kind("list_work_items", "list", &which, ID_THREAD)?;
-            Scope::Thread(parse_thread_id(&which)?)
-        };
-        let states = states.unwrap_or_else(|| {
-            ["todo", "in_progress", "blocked"]
-                .map(str::to_string)
-                .to_vec()
-        });
-        if let Some(bad) = states
-            .iter()
-            .find(|s| !["todo", "in_progress", "blocked", "done", "canceled"].contains(&s.as_str()))
-        {
-            return Err(McpError::invalid_params(
-                format!(
-                    "list_work_items: unknown state \"{bad}\"; valid: todo, in_progress, blocked, \
-                     done, canceled"
-                ),
-                None,
-            ));
-        }
-        let rows = list(&self.services.sql, &scope, &states)
-            .await
-            .map_err(internal)?;
-        json_result(&rows)
-    }
-
-    #[tool(
-        description = "Get one work item by ref (`work_item:<provider>:<id>`): the whole item, its \
-                       links (both ways) and its comments. Null when it isn't on the active list."
-    )]
-    async fn get_work_item(
-        &self,
-        params: Parameters<WorkItemRefParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let item = oxplow_app::work_item_reads::get(&self.services.sql, &params.0.item_ref)
-            .await
-            .map_err(internal)?;
-        json_result(&item)
-    }
-
-    #[tool(
-        description = "What to work on next on a thread's list. If the first ready (`todo`) item \
-                       is an epic (an item with children), returns it and its ready descendants \
-                       as one unit (`mode: \"epic\"`); otherwise every ready item that isn't an \
-                       epic, to pick one or a related cluster (`mode: \"standalone\"`). Items an \
-                       open `blocks` link holds are skipped. `mode: \"empty\"` when nothing is \
-                       ready."
-    )]
-    async fn next_work_item(
-        &self,
-        params: Parameters<ThreadIdParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind(
-            "next_work_item",
-            "thread_id",
-            &params.0.thread_id,
-            ID_THREAD,
-        )?;
-        let thread_id = parse_thread_id(&params.0.thread_id)?;
-        let next = oxplow_app::work_item_reads::next(&self.services.sql, &thread_id)
-            .await
-            .map_err(internal)?;
-        json_result(&next)
-    }
-
-    // ---------- thread notes ----------
-    //
-    // Per-task notes (`add_work_note` / `list_work_notes`) were
-    // retired: `effort.summary` already carries "what
-    // shipped on this item", so a parallel note table for the same
-    // purpose was duplicative. Thread-scoped notes stay — they back
-    // the Explore-subagent findings flow.
-
-    #[tool(description = "List thread-scoped notes.")]
-    async fn list_thread_notes(
-        &self,
-        params: Parameters<ThreadIdParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind(
-            "list_thread_notes",
-            "thread_id",
-            &params.0.thread_id,
-            ID_THREAD,
-        )?;
-        let id = parse_thread_id(&params.0.thread_id)?;
-        let notes = self
-            .services
-            .thread_note_store
-            .list_for_thread(&id)
-            .await
-            .map_err(internal)?;
-        json_result(&notes)
-    }
-
     // ---------- collection (test runs + diff coverage) ----------
-
-    #[tool(
-        description = "Discover the thread's currently-open effort. Returns `{ open, effortId, \
-            workItem, startedAt, hasStartSnapshot }` — `open:false` (with null ids) when no effort \
-            is open. Use this to confirm an effort is open before `oxplow.collector.sync` on a report \
-            collector or `oxplow.test.record_run`, and to see whether its diff coverage has a baseline \
-            (`hasStartSnapshot:false` ⇒ none)."
-    )]
-    async fn get_open_effort(
-        &self,
-        params: Parameters<GetOpenEffortParams>,
-    ) -> Result<CallToolResult, McpError> {
-        use oxplow_db::EffortStore as _;
-        expect_id_kind(
-            "get_open_effort",
-            "thread_id",
-            &params.0.thread_id,
-            ID_THREAD,
-        )?;
-        let tid = parse_thread_id(&params.0.thread_id)?;
-        let effort = self
-            .services
-            .effort_store
-            .find_open_for_thread(&tid)
-            .await
-            .map_err(internal)?;
-        let payload = match effort {
-            Some(e) => serde_json::json!({
-                "open": true,
-                "effortId": e.id.to_string(),
-                "workItem": e.work_item,
-                "startedAt": e.started_at,
-                "hasStartSnapshot": e.start_snapshot_id.is_some(),
-            }),
-            None => serde_json::json!({
-                "open": false,
-                "effortId": serde_json::Value::Null,
-                "workItem": serde_json::Value::Null,
-            }),
-        };
-        json_result(&payload)
-    }
-
-    #[tool(
-        description = "List collection observations (test-run / diff-coverage / static-analysis) for an effort. \
-            Pass `effort_id` to read it directly, or `thread_id` to use that thread's open \
-            effort. Optional `kind` filter."
-    )]
-    async fn list_effort_observations(
-        &self,
-        params: Parameters<ListEffortObservationsParams>,
-    ) -> Result<CallToolResult, McpError> {
-        use oxplow_db::EffortStore as _;
-        let effort_id = match (params.0.effort_id, params.0.thread_id) {
-            (Some(e), _) => e,
-            (None, Some(t)) => {
-                expect_id_kind("list_effort_observations", "thread_id", &t, ID_THREAD)?;
-                let tid = parse_thread_id(&t)?;
-                match self
-                    .services
-                    .effort_store
-                    .find_open_for_thread(&tid)
-                    .await
-                    .map_err(internal)?
-                {
-                    Some(effort) => effort.id.to_string(),
-                    None => {
-                        return Err(McpError::invalid_params(
-                            "no open effort on that thread",
-                            None,
-                        ))
-                    }
-                }
-            }
-            (None, None) => {
-                return Err(McpError::invalid_params(
-                    "provide effort_id or thread_id",
-                    None,
-                ))
-            }
-        };
-        let effort = oxplow_domain::EffortId::try_from_str(&effort_id).ok_or_else(|| {
-            McpError::invalid_params(format!("`{effort_id}` is not an effort id"), None)
-        })?;
-        // The stored evidence (the `effort_evidence` asset's rows), not a
-        // second computation of it.
-        let rows = self
-            .services
-            .effort_evidence_store
-            .list_observations(effort.value(), params.0.kind)
-            .await
-            .map_err(internal)?;
-        json_result(&rows)
-    }
 
     #[tool(
         description = "List the project's architectural ZONE table (the `zones:` block in \
@@ -2478,100 +1562,7 @@ impl OxplowMcp {
         json_result(&drift)
     }
 
-    // ---------- followups ----------
-
-    #[tool(description = "Add a followup reminder for a thread.")]
-    async fn add_followup(
-        &self,
-        params: Parameters<AddFollowupParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind("add_followup", "thread_id", &params.0.thread_id, ID_THREAD)?;
-        let id = parse_thread_id(&params.0.thread_id)?;
-        let item = self.services.followups.add(id, params.0.body);
-        json_result(&item)
-    }
-
-    #[tool(description = "List followups attached to a thread.")]
-    async fn list_followups(
-        &self,
-        params: Parameters<ThreadIdParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind(
-            "list_followups",
-            "thread_id",
-            &params.0.thread_id,
-            ID_THREAD,
-        )?;
-        let id = parse_thread_id(&params.0.thread_id)?;
-        let list = self.services.followups.list_for_thread(&id);
-        json_result(&list)
-    }
-
-    #[tool(description = "Remove a single followup by id.")]
-    async fn remove_followup(
-        &self,
-        params: Parameters<FollowupIdParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind("remove_followup", "id", &params.0.id, ID_FOLLOWUP)?;
-        self.services.followups.remove(&params.0.id);
-        Ok(CallToolResult::success(vec![ContentBlock::text("removed")]))
-    }
-
     // ---------- task orchestration ----------
-
-    #[tool(description = "Bundle of thread state, tasks, and recent activity.")]
-    async fn get_thread_context(
-        &self,
-        params: Parameters<GetThreadContextParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind(
-            "get_thread_context",
-            "thread_id",
-            &params.0.thread_id,
-            ID_THREAD,
-        )?;
-        let id = parse_thread_id(&params.0.thread_id)?;
-        let thread = self
-            .services
-            .thread_store
-            .get(&id)
-            .await
-            .map_err(internal)?;
-        // Its work items, through the interface: the active list's (none:
-        // none).
-        let items = self
-            .services
-            .sql
-            .query_sql(
-                "SELECT ref, title, state, native_state, parent_ref FROM v_work_item
-                  WHERE thread_id = ?1 ORDER BY rank, created_at",
-                vec![oxplow_db::SqlCell::Int(id.value())],
-                None,
-            )
-            .await
-            .map_err(internal)?;
-        let items: Vec<serde_json::Value> = items
-            .rows
-            .into_iter()
-            .map(|r| {
-                let cell = |i: usize| serde_json::to_value(&r[i]).unwrap_or_default();
-                serde_json::json!({
-                    "ref": cell(0),
-                    "title": cell(1),
-                    "state": cell(2),
-                    "native_state": cell(3),
-                    "parent_ref": cell(4),
-                })
-            })
-            .collect();
-        let bundle = serde_json::json!({
-            "thread": thread,
-            "items": items,
-        });
-        Ok(CallToolResult::success(vec![ContentBlock::text(
-            bundle.to_string(),
-        )]))
-    }
 
     #[tool(
         description = "Unified backlinks: every page (wiki, task, commit, finding, \
@@ -2671,25 +1662,6 @@ impl OxplowMcp {
     ) -> Result<CallToolResult, McpError> {
         let caller = caller_of(&extensions);
         self.run_command_as(&caller, params.0).await
-    }
-
-    #[tool(
-        description = "The event log's dead-letter queue: events a consumer failed on, \
-                       parked with the error (`pending` by default; `all` includes retried \
-                       and discarded). Each row names the consumer, the event and the \
-                       failure; the same data is `v_event_dead_letter` in query_sql."
-    )]
-    async fn list_dead_letters(
-        &self,
-        params: Parameters<ListDeadLettersParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let letters = self
-            .services
-            .event_pump
-            .list_dead_letters(params.0.all)
-            .await
-            .map_err(internal)?;
-        json_result(&letters)
     }
 
     #[tool(
@@ -2846,26 +1818,6 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "What the language servers last reported for a file — typed \
-                       diagnostics (`severity`, `message`, `source`, `code`, `range`, \
-                       1-based). Every file's are `v_diagnostic` in query_sql."
-    )]
-    async fn code_diagnostics(
-        &self,
-        params: Parameters<CodeFileParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let stream = code_stream(&params.0.stream_id)?;
-        json_result(
-            &self
-                .services
-                .code_intel
-                .diagnostics(stream, &params.0.path)
-                .await
-                .map_err(code_err)?,
-        )
-    }
-
-    #[tool(
         description = "List the code units in a file — functions, classes, modules, and (for \
                        languages that have them, e.g. Go/Java) the package — via oxplow's \
                        built-in tree-sitter analysis. Deterministic and offline; works for the \
@@ -2956,55 +1908,26 @@ fn code_err(e: oxplow_domain::code_intel::CodeIntelError) -> McpError {
 /// one reviewable place; `read_write_split_covers_every_tool` fails if a new
 /// tool isn't classified here or in [`WRITE_TOOLS`].
 const READ_ONLY_TOOLS: &[&str] = &[
-    "ping",
     "get_skill",
     "list_collectors",
     "list_ai_roles",
     "get_open_page",
     "list_extensions",
     "list_lenses",
-    "get_lens",
     "run_lens",
     "validate_extension",
     "preview_extension",
     "query_sql",
-    "app_version",
-    "list_streams",
-    "list_dashboards",
-    "get_dashboard",
     "search",
     "git_status",
-    "vcs_log",
     "vcs_blame",
     "diff",
-    "read_at",
-    "vcs_branches",
-    "list_snapshots_for_stream",
-    "list_snapshot_ops",
-    "list_files_for_snapshot",
-    "get_file_snapshot",
-    "get_snapshot_stats",
-    "list_snapshot_change_entries",
-    "read_file_snapshot",
-    "read_file_at_snapshot",
-    "read_event_content",
-    "read_ai_call",
-    "list_code_quality_findings",
-    "list_thread_work",
-    "list_work_items",
-    "get_work_item",
-    "next_work_item",
-    "list_thread_notes",
-    "get_open_effort",
-    "list_effort_observations",
+    "read",
     "list_zones",
     "list_comments",
     "wiki_ref_drift",
-    "list_followups",
-    "get_thread_context",
     "list_backlinks",
     "list_outbound",
-    "list_dead_letters",
     "list_commands",
     "list_services",
     "code_definition",
@@ -3014,7 +1937,6 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "code_workspace_symbols",
     "list_code_units",
     "code_call_hierarchy",
-    "code_diagnostics",
     "lsp_list_servers",
 ];
 
@@ -3041,14 +1963,6 @@ const WRITE_TOOLS: &[&str] = &[
     "preview_collector",
     // Clones into .oxplow/tmp; stores nothing.
     "review_extension",
-    // A model call, recorded as the computation it was (`ai_call`).
-    "ai_decide",
-    "ai_summarize",
-    // UI selection pointers and the in-memory follow-ups — off the bus.
-    "select_thread",
-    "switch_stream",
-    "add_followup",
-    "remove_followup",
 ];
 
 /// Stamp `read_only_hint = true` on tools in [`READ_ONLY_TOOLS`], leaving any
@@ -3168,17 +2082,6 @@ fn ai_error(e: oxplow_app::ai_service::AiServiceError) -> McpError {
     match e {
         oxplow_app::ai_service::AiServiceError::Secret(_) => internal(e),
         _ => McpError::invalid_params(e.to_string(), None),
-    }
-}
-
-/// A recorded computation's failure: the model's, as [`ai_error`]; an
-/// unusable answer the agent can retry; storing it is internal.
-fn compute_error(e: oxplow_app::ai_compute::AiComputeError) -> McpError {
-    use oxplow_app::ai_compute::AiComputeError;
-    match e {
-        AiComputeError::Ai(e) => ai_error(e),
-        e @ AiComputeError::BadOutput(_) => McpError::invalid_params(e.to_string(), None),
-        e @ AiComputeError::Storage(_) => internal(e),
     }
 }
 
@@ -3334,10 +2237,6 @@ pub(crate) const ID_THREAD: IdPrefix = IdPrefix {
     prefix: "thr",
     label: "thread id (thr…)",
 };
-pub(crate) const ID_FOLLOWUP: IdPrefix = IdPrefix {
-    prefix: "fup",
-    label: "follow-up id (fup…)",
-};
 
 fn expect_id_kind(
     tool: &str,
@@ -3429,37 +2328,6 @@ impl OxplowMcp {
         json_result(&entries)
     }
 
-    /// `read_at` as `caller`: a stream the call doesn't name is the
-    /// caller's.
-    pub async fn read_at_as(
-        &self,
-        caller: &McpCaller,
-        mut p: ReadAtParams,
-    ) -> Result<CallToolResult, McpError> {
-        check_optional_stream("read_at", p.stream_id.as_deref())?;
-        p.stream_id = self.stream_or_callers(caller, p.stream_id.take()).await;
-        let revision: oxplow_domain::vcs::Revision = p
-            .revision
-            .parse()
-            .map_err(|e: String| McpError::invalid_params(e, None))?;
-        let ws = self
-            .services
-            .worktrees
-            .resolve(p.stream_id.as_deref())
-            .await
-            .into_local_path();
-        let bytes = self
-            .services
-            .trees
-            .read_at(&ws, &revision, &p.path)
-            .await
-            .map_err(|e| match e {
-                oxplow_domain::DomainError::Invalid(m) => McpError::invalid_params(m, None),
-                other => internal(other),
-            })?;
-        json_result(&bytes.map(|b| String::from_utf8_lossy(&b).into_owned()))
-    }
-
     /// `run_command` for a known caller. Refuses an anonymous connection:
     /// a write with no actor behind it is not audited to anyone.
     pub async fn run_command_as(
@@ -3533,15 +2401,6 @@ impl OxplowMcp {
             thread_id: Some(thread_id),
             stream_id: Some(thread.stream_id),
         })
-    }
-}
-
-/// A snapshot read/restore failure as the MCP error the agent can act on.
-fn snapshot_file_error(err: oxplow_app::snapshot_files::SnapshotFileError) -> McpError {
-    use oxplow_app::snapshot_files::SnapshotFileError as E;
-    match err {
-        E::Other(m) => internal(m),
-        other => McpError::invalid_params(other.to_string(), None),
     }
 }
 
@@ -3994,19 +2853,21 @@ mod tests {
             "{ids:?}"
         );
 
-        let lens: serde_json::Value = serde_json::from_str(&text_payload(
+        // A lens's definition is what `read` gives for its ref.
+        let read: serde_json::Value = serde_json::from_str(&text_payload(
             server
-                .get_lens(
+                .read(
                     rmcp::model::Extensions::new(),
-                    Parameters(LensIdParams {
-                        id: "demo/streams".into(),
-                        stream_id: None,
+                    Parameters(ReadParams {
+                        reference: "lens:demo/streams".into(),
                     }),
                 )
                 .await
                 .unwrap(),
         ))
         .unwrap();
+        let lens: serde_json::Value =
+            serde_json::from_str(read["content"].as_str().unwrap()).unwrap();
         assert!(lens["query"].as_str().unwrap().contains("v_stream"));
 
         let run = |format: Option<&str>| {
@@ -4047,16 +2908,15 @@ mod tests {
         assert_eq!(json["result"]["rows"], serde_json::json!([["primary"]]));
 
         let err = server
-            .get_lens(
+            .read(
                 rmcp::model::Extensions::new(),
-                Parameters(LensIdParams {
-                    id: "demo/nope".into(),
-                    stream_id: None,
+                Parameters(ReadParams {
+                    reference: "lens:demo/nope".into(),
                 }),
             )
             .await
             .unwrap_err();
-        assert!(err.message.contains("demo/nope"), "{err:?}");
+        assert!(err.message.contains("lens:demo/nope"), "{err:?}");
 
         let v: serde_json::Value = serde_json::from_str(&text_payload(
             server
@@ -4355,120 +3215,27 @@ mod tests {
         assert!(svc.collector_store.list_runs().await.unwrap().is_empty());
     }
 
+    /// `read` reads a work item from the active list, whichever it is: the
+    /// item while oxplow's tasks are the list, nothing with none.
     #[tokio::test]
-    async fn ping_returns_pong() {
-        let (_proj, _svc, server) = boot().await;
-        let r = server.ping().await.unwrap();
-        assert_eq!(text_payload(r), "pong");
-    }
-
-    #[tokio::test]
-    async fn app_version_returns_cargo_version() {
-        let (_proj, _svc, server) = boot().await;
-        let r = server.app_version().await.unwrap();
-        assert_eq!(text_payload(r), env!("CARGO_PKG_VERSION"));
-    }
-
-    #[tokio::test]
-    async fn list_streams_returns_primary_for_fresh_project() {
-        // Boot ensures the primary stream exists (snapshot capture is
-        // stream-scoped and must always have one), so a freshly booted
-        // services has exactly one primary stream.
-        let (_proj, _services, server) = boot().await;
-        let r = server.list_streams().await.unwrap();
-        let body = text_payload(r);
-        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
-        let arr = parsed.as_array().unwrap();
-        assert_eq!(arr.len(), 1);
-        assert_eq!(arr[0]["kind"], "primary");
-    }
-
-    #[tokio::test]
-    async fn the_backlog_lists_the_items_on_no_thread() {
-        let (_proj, services, server) = boot().await;
-        let id = file_task(&services, None, "do the thing").await;
-        let r = server
-            .list_work_items(Parameters(ListWorkItemsParams {
-                list: "backlog".into(),
-                states: None,
-            }))
-            .await
-            .unwrap();
-        let rows: serde_json::Value = serde_json::from_str(&text_payload(r)).unwrap();
-        assert_eq!(rows[0]["ref"], format!("work_item:oxplow:{id}"), "{rows}");
-        assert_eq!(rows[0]["title"], "do the thing");
-        let bad = server
-            .list_work_items(Parameters(ListWorkItemsParams {
-                list: "backlog".into(),
-                states: Some(vec!["ready".into()]),
-            }))
-            .await
-            .unwrap_err();
-        assert!(bad.message.contains("unknown state"), "{bad:?}");
-    }
-
-    async fn thread_context(server: &OxplowMcp, thread: ThreadId) -> serde_json::Value {
-        let r = server
-            .get_thread_context(Parameters(GetThreadContextParams {
-                thread_id: thread.to_string(),
-            }))
-            .await
-            .unwrap();
-        serde_json::from_str(&text_payload(r)).unwrap()
-    }
-
-    /// A thread's context carries its work items through the interface:
-    /// the active list's, and none with no list.
-    #[tokio::test]
-    async fn a_threads_context_reads_the_work_item_interface() {
-        let (_proj, services, server) = boot().await;
-        services.streams.ensure_primary().await.unwrap();
-        let thread = ThreadId::new(1);
-        file_task(&services, Some(thread), "on the thread").await;
-        let items = thread_context(&server, thread).await["items"].clone();
-        assert_eq!(items[0]["title"], "on the thread", "{items}");
-        assert!(items[0]["ref"]
-            .as_str()
-            .unwrap()
-            .starts_with("work_item:oxplow:"));
-        services
-            .config
-            .write()
-            .unwrap()
-            .personal_active_providers
-            .insert("work_items".into(), "none".into());
-        let config = oxplow_app::config_service::read_config(&services.config);
-        services
-            .capabilities
-            .publish(&config, &services.db)
-            .await
-            .unwrap();
-        assert_eq!(
-            thread_context(&server, thread).await["items"],
-            serde_json::json!([])
-        );
-    }
-
-    /// The work-item tools read the active list, whichever it is: an item
-    /// round-trips while oxplow's tasks are the list, and nothing is there
-    /// with none.
-    #[tokio::test]
-    async fn the_work_item_tools_read_the_active_list() {
+    async fn a_work_item_reads_from_the_active_list() {
         let (_proj, services, server) = boot().await;
         let id = file_task(&services, None, "round trip").await;
-        let item_ref = format!("work_item:oxplow:{id}");
-        let get = |server: &OxplowMcp| {
-            let item_ref = item_ref.clone();
+        let read = |server: &OxplowMcp| {
             let server = server.clone();
             async move {
-                let r = server
-                    .get_work_item(Parameters(WorkItemRefParams { item_ref }))
+                server
+                    .read(
+                        rmcp::model::Extensions::new(),
+                        Parameters(ReadParams {
+                            reference: format!("work_item:oxplow:{id}"),
+                        }),
+                    )
                     .await
-                    .unwrap();
-                serde_json::from_str::<serde_json::Value>(&text_payload(r)).unwrap()
+                    .map(|r| serde_json::from_str::<serde_json::Value>(&text_payload(r)).unwrap())
             }
         };
-        assert_eq!(get(&server).await["title"], "round trip");
+        assert_eq!(read(&server).await.unwrap()["row"]["title"], "round trip");
         services
             .config
             .write()
@@ -4481,7 +3248,8 @@ mod tests {
             .publish(&config, &services.db)
             .await
             .unwrap();
-        assert_eq!(get(&server).await, serde_json::Value::Null);
+        let gone = read(&server).await.unwrap_err();
+        assert!(gone.message.contains("nothing at"), "{gone:?}");
     }
 
     /// A request's parts as the control plane passes them on: the
@@ -4909,10 +3677,10 @@ mod tests {
         serde_json::from_value(out.result).unwrap()
     }
 
-    /// tsk555: `read_at` / `diff` without a `stream_id` read the calling
-    /// thread's stream, not the primary's.
+    /// `read` reads a file in the calling session's stream, not the
+    /// primary's.
     #[tokio::test]
-    async fn read_at_and_diff_default_to_the_callers_stream() {
+    async fn read_reads_files_in_the_callers_stream() {
         use oxplow_domain::stores::StreamStore as _;
         let (proj, services, server) = boot().await;
         let primary = services.stream_store.list().await.unwrap().pop().unwrap();
@@ -4927,24 +3695,17 @@ mod tests {
         other.worktree_path = elsewhere.path().to_string_lossy().into_owned();
         let other_id = services.stream_store.upsert(&other).await.unwrap();
         let thread = new_thread(&services, other_id, "t").await;
-        let caller = McpCaller {
-            session_id: None,
-            thread_id: Some(thread.id),
-            stream_id: None,
-        };
         let out = server
-            .read_at_as(
-                &caller,
-                ReadAtParams {
-                    stream_id: None,
-                    revision: "working".into(),
-                    path: "who.txt".into(),
-                },
+            .read(
+                extensions_for(parts_as(thread.id, other_id, &[])),
+                Parameters(ReadParams {
+                    reference: "file:who.txt".into(),
+                }),
             )
             .await
             .unwrap();
-        let text = out.content[0].as_text().unwrap().text.clone();
-        assert!(text.contains("mine"), "{text}");
+        let read: serde_json::Value = serde_json::from_str(&text_payload(out)).unwrap();
+        assert_eq!(read["content"], "mine");
     }
 
     /// tsk574: the extension and lens tools without a `stream_id` read
@@ -5059,142 +3820,6 @@ mod tests {
         assert!(!err.message.is_empty());
     }
 
-    /// tsk862: an effort's observations are its stored evidence rows —
-    /// the computation lives in the `effort_evidence` asset, run once.
-    #[tokio::test]
-    async fn mcp_observations_are_the_stored_rows() {
-        use oxplow_db::EffortStore as _;
-        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
-        let (_proj, services, server) = boot().await;
-        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
-        let thread = services
-            .thread_store
-            .list_for_stream(&stream.id)
-            .await
-            .unwrap()
-            .into_iter()
-            .next()
-            .unwrap();
-        let task_id = file_task(&services, Some(thread.id), "evidence").await;
-        let effort = services
-            .effort_store
-            .start(&oxplow_tasks::work_item_ref(task_id), &thread.id, None)
-            .await
-            .unwrap();
-        let row = |kind: &str, value: f64| oxplow_db::EffortObservation {
-            kind: kind.into(),
-            provenance: "observed".into(),
-            source: "post-tool-bash".into(),
-            metric_value: Some(value),
-            payload_json: Some("{}".into()),
-            local_snapshot_id: None,
-            created_at: oxplow_domain::Timestamp::from_unix_ms(1_790_000_000_000),
-        };
-        services
-            .effort_evidence_store
-            .replace(
-                effort.id.value(),
-                Vec::new(),
-                vec![row("diff-coverage", 72.5), row("test-run", 1.0)],
-                String::new(),
-            )
-            .await
-            .unwrap();
-        let read = |effort_id: Option<String>, thread_id: Option<String>| {
-            server.list_effort_observations(Parameters(ListEffortObservationsParams {
-                effort_id,
-                thread_id,
-                kind: Some("diff-coverage".into()),
-            }))
-        };
-        let by_effort: Vec<oxplow_db::EffortObservation> = serde_json::from_str(&text_payload(
-            read(Some(effort.id.to_string()), None).await.unwrap(),
-        ))
-        .unwrap();
-        assert_eq!(by_effort, vec![row("diff-coverage", 72.5)]);
-        let by_thread: Vec<oxplow_db::EffortObservation> = serde_json::from_str(&text_payload(
-            read(None, Some(thread.id.to_string())).await.unwrap(),
-        ))
-        .unwrap();
-        assert_eq!(by_thread, by_effort);
-    }
-
-    #[tokio::test]
-    async fn get_open_effort_reports_open_effort() {
-        use oxplow_db::EffortStore as _;
-        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
-        let (_proj, services, server) = boot().await;
-        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
-        let thread = services
-            .thread_store
-            .list_for_stream(&stream.id)
-            .await
-            .unwrap()
-            .into_iter()
-            .next()
-            .expect("primary stream must have a writer thread");
-        let task_id = file_task(&services, Some(thread.id), "open effort task").await;
-        let effort = services
-            .effort_store
-            .start(&oxplow_tasks::work_item_ref(task_id), &thread.id, None)
-            .await
-            .unwrap();
-
-        let r = server
-            .get_open_effort(Parameters(GetOpenEffortParams {
-                thread_id: thread.id.to_string(),
-            }))
-            .await
-            .unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&text_payload(r)).unwrap();
-        assert_eq!(parsed["open"], true);
-        assert_eq!(parsed["effortId"], effort.id.to_string());
-        // The effort's work item, as a ref: no oxplow task id.
-        assert_eq!(parsed["workItem"], oxplow_tasks::work_item_ref(task_id));
-        assert!(parsed.get("taskId").is_none());
-        assert!(parsed["startedAt"].is_string());
-        // start() with None records no start snapshot.
-        assert_eq!(parsed["hasStartSnapshot"], false);
-    }
-
-    #[tokio::test]
-    async fn get_open_effort_reports_none_when_no_open_effort() {
-        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
-        let (_proj, services, server) = boot().await;
-        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
-        let thread = services
-            .thread_store
-            .list_for_stream(&stream.id)
-            .await
-            .unwrap()
-            .into_iter()
-            .next()
-            .unwrap();
-
-        let r = server
-            .get_open_effort(Parameters(GetOpenEffortParams {
-                thread_id: thread.id.to_string(),
-            }))
-            .await
-            .unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&text_payload(r)).unwrap();
-        assert_eq!(parsed["open"], false);
-        assert!(parsed["effortId"].is_null());
-    }
-
-    #[tokio::test]
-    async fn get_open_effort_rejects_non_thread_id() {
-        let (_proj, _svc, server) = boot().await;
-        let err = server
-            .get_open_effort(Parameters(GetOpenEffortParams {
-                thread_id: "str1".into(),
-            }))
-            .await
-            .unwrap_err();
-        let msg = err.to_string();
-        assert!(msg.contains("thread_id"), "got: {msg}");
-    }
-
     /// Helper to write a wiki body to disk.
     async fn seed_wiki(project: &std::path::Path, slug: &str, body: &str) {
         let wiki_dir = project.join(".oxplow").join("wiki");
@@ -5243,13 +3868,9 @@ mod tests {
     #[test]
     fn expect_id_kind_error_names_tool_param_value_and_kinds() {
         // A stream id passed where a thread id was expected.
-        let err =
-            expect_id_kind("list_thread_notes", "thread_id", "str123", ID_THREAD).unwrap_err();
+        let err = expect_id_kind("read_at", "thread_id", "str123", ID_THREAD).unwrap_err();
         let msg = err.message.to_string();
-        assert!(
-            msg.contains("list_thread_notes"),
-            "tool name missing: {msg}"
-        );
+        assert!(msg.contains("read_at"), "tool name missing: {msg}");
         assert!(msg.contains("thread_id"), "param name missing: {msg}");
         assert!(msg.contains("str123"), "value missing: {msg}");
         assert!(msg.contains("stream id"), "actual label missing: {msg}");
@@ -5331,222 +3952,16 @@ mod tests {
         );
     }
 
-    // ---- default_limit ----
-
-    #[test]
-    fn default_limit_is_stable() {
-        // The exact value is part of the MCP contract; a regression
-        // here changes how much data clients receive by default.
-        assert_eq!(default_limit(), 20);
-    }
-
-    /// Point the in-memory services' `role` at a mock provider at `base`.
-    fn assign_mock_role(services: &Services, base: String, role: &str) {
-        use oxplow_app::ai_service::{ProviderConfig, Role, RoleBinding};
-        use oxplow_app::exec_consent::{approve_program, list, ProgramKind};
-        // The shipped providers are scripts a person approves first.
-        let project = services.layout.project_dir.clone();
-        let config = services.config.read().unwrap().clone();
-        let extensions = services.extension_catalog.get(&project);
-        for p in list(&services.approvals, &project, &config, &extensions) {
-            if p.kind == ProgramKind::AiProvider {
-                approve_program(
-                    &services.approvals,
-                    &project,
-                    &config,
-                    &extensions,
-                    p.kind,
-                    &p.name,
-                    p.version.as_deref().unwrap(),
-                )
-                .unwrap();
-            }
-        }
-        services
-            .ai
-            .save_provider(
-                ProviderConfig {
-                    id: "mock".into(),
-                    kind: "openai_compatible".into(),
-                    base_url: Some(base),
-                },
-                None,
-            )
-            .unwrap();
-        let role: Role = serde_json::from_value(serde_json::json!(role)).unwrap();
-        services
-            .ai
-            .set_role(&role, Some(RoleBinding::new("mock", "m")))
-            .unwrap();
-    }
-
-    fn risky() -> std::collections::BTreeMap<String, AiQuestionParam> {
-        std::collections::BTreeMap::from([(
-            "risky".to_string(),
-            AiQuestionParam {
-                kind: "choice".into(),
-                instructions: "Is it risky?".into(),
-                options: Some(vec!["yes".into(), "no".into()]),
-                levels: None,
-            },
-        )])
-    }
-
-    /// The model calls an agent asks for are paid with the person's key:
-    /// each is a recorded computation, recorded as the asking thread — the
-    /// same question twice is one call — on its tool's own role, with its
-    /// text capped; a connection with no thread identity asks nothing.
+    /// `list_ai_roles` shows the roles: the built-ins, then extensions'.
     #[tokio::test]
-    async fn ai_tools_list_roles_decide_and_summarize() {
-        let (_proj, services, server) = boot().await;
-        let me = as_writer(&services).await;
-        let thread = oxplow_domain::refs::build::thread_ref(caller_of(&me).thread_id.unwrap());
+    async fn ai_roles_are_listed() {
+        let (_proj, _services, server) = boot().await;
         let roles: serde_json::Value =
             serde_json::from_str(&text_payload(server.list_ai_roles().await.unwrap())).unwrap();
         // The three built-ins, then oxplow-bundled's `decisions` profile.
         assert_eq!(roles["roles"].as_array().unwrap().len(), 4);
         assert_eq!(roles["roles"][3]["role"], "oxplow-bundled/decisions");
         assert_eq!(roles["roles"][0]["binding"], serde_json::Value::Null);
-
-        // Unassigned role: a clear error, not a crash.
-        let err = server
-            .ai_summarize(
-                me.clone(),
-                Parameters(AiSummarizeParams {
-                    text: "t".into(),
-                    focus: None,
-                }),
-            )
-            .await
-            .unwrap_err();
-        assert!(err.message.contains("summarize"), "{}", err.message);
-
-        let answer = serde_json::json!({"answers": {"risky": {"type": "choice", "choice": "yes", "probabilities": {"yes": 0.7, "no": 0.3}}}});
-        let (base, seen) = oxplow_ai_fake::mock(
-            "/chat/completions",
-            200,
-            serde_json::json!({"choices": [{"message": {"content": answer.to_string()}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}),
-        )
-        .await;
-        assign_mock_role(&services, base.clone(), "decide");
-        for cached in [false, true] {
-            let out: serde_json::Value = serde_json::from_str(&text_payload(
-                server
-                    .ai_decide(
-                        me.clone(),
-                        Parameters(AiDecideParams {
-                            state: "a diff".into(),
-                            questions: risky(),
-                        }),
-                    )
-                    .await
-                    .unwrap(),
-            ))
-            .unwrap();
-            assert_eq!(out["answers"]["risky"]["choice"], "yes");
-            assert_eq!(out["cached"], cached);
-        }
-        assert_eq!(seen.lock().unwrap().len(), 1);
-        assert!(seen.lock().unwrap()[0].2["messages"]
-            .to_string()
-            .contains("Is it risky?"));
-
-        let err = server
-            .ai_decide(
-                me.clone(),
-                Parameters(AiDecideParams {
-                    state: "s".into(),
-                    questions: std::collections::BTreeMap::from([(
-                        "x".to_string(),
-                        AiQuestionParam {
-                            kind: "maybe".into(),
-                            instructions: "?".into(),
-                            options: None,
-                            levels: None,
-                        },
-                    )]),
-                }),
-            )
-            .await
-            .unwrap_err();
-        assert!(err.message.contains("maybe"), "{}", err.message);
-        let err = server
-            .ai_decide(
-                me.clone(),
-                Parameters(AiDecideParams {
-                    state: "x".repeat(AI_TEXT_MAX + 1),
-                    questions: risky(),
-                }),
-            )
-            .await
-            .unwrap_err();
-        assert!(err.message.contains("characters"), "{}", err.message);
-        let err = server
-            .ai_decide(
-                rmcp::model::Extensions::new(),
-                Parameters(AiDecideParams {
-                    state: "a diff".into(),
-                    questions: risky(),
-                }),
-            )
-            .await
-            .unwrap_err();
-        assert!(err.message.contains("thread identity"), "{}", err.message);
-
-        let (base, seen) = oxplow_ai_fake::mock(
-            "/chat/completions",
-            200,
-            serde_json::json!({"choices": [{"message": {"content": " short "}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}),
-        )
-        .await;
-        assign_mock_role(&services, base, "summarize");
-        // A recorded computation (tsk571): asking twice calls once.
-        for _ in 0..2 {
-            let out = text_payload(
-                server
-                    .ai_summarize(
-                        me.clone(),
-                        Parameters(AiSummarizeParams {
-                            text: "long".into(),
-                            focus: Some("risks".into()),
-                        }),
-                    )
-                    .await
-                    .unwrap(),
-            );
-            assert_eq!(out, "short");
-        }
-        assert_eq!(seen.lock().unwrap().len(), 1);
-        assert!(seen.lock().unwrap()[0].2["messages"]
-            .to_string()
-            .contains("risks"));
-        let callers = services
-            .sql
-            .query_sql("SELECT DISTINCT caller FROM v_ai_call", vec![], None)
-            .await
-            .unwrap();
-        assert_eq!(
-            serde_json::to_value(&callers.rows).unwrap(),
-            serde_json::json!([[thread]])
-        );
-        // What it asked and what came back are its to read.
-        let response: serde_json::Value = serde_json::from_str(&text_payload(
-            server
-                .read_ai_call(
-                    me.clone(),
-                    Parameters(ReadAiCallParams {
-                        id: 1,
-                        body: oxplow_app::ai_calls::AiCallBody::Response,
-                    }),
-                )
-                .await
-                .unwrap(),
-        ))
-        .unwrap();
-        assert!(
-            response["text"].as_str().unwrap().contains("answers"),
-            "{response}"
-        );
     }
 
     #[tokio::test]
