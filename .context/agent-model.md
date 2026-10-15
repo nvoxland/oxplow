@@ -225,7 +225,7 @@ never add MCP tools.
 | Show the person | `show_lens`, `run_lens`, `run_lens_action` |
 | What the person has | `get_open_page` (the page open in a thread, a lens re-run with their params), `list_comments` (their anchored comments, hydrated) |
 | Wiki | `wiki_ref_drift` (one stale ref's diff against its pin) |
-| Extension authoring | `validate_extension`, `preview_extension`, `preview_collector`, `review_extension`, `list_services` |
+| Extension authoring | `validate_extension`, `preview_extension`, `preview_collector`, `review_extension` |
 | oxplow's guidance | `get_skill { name, reference? }` |
 
 `READ_ONLY_TOOLS` stamps `read_only_hint` so a client can auto-approve;
@@ -233,6 +233,10 @@ never add MCP tools.
 (`run_command`, `run_lens_action`, `show_lens`, `ensure_change`,
 `preview_collector`, `review_extension`, `ai_decide`, `ai_summarize`), and
 `read_write_split_covers_every_tool` fails on a tool in neither list.
+Each tool below except `list_commands` and `run_command` is a thin call to a
+foundation command over a read scope (`oxplow.records.read`,
+`oxplow.sql.query`, …; [commands.md](./commands.md) "Scopes"), so an agent
+reaches it through `run_command` too; `v_scope` lists the scopes.
 Almost every read is a published model: an agent's thread, efforts,
 work items, commits, snapshots, dashboards, diagnostics and errors are
 `v_*` rows. A tool stays a tool only where a model can't be one: file and

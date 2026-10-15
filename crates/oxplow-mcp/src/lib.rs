@@ -8,6 +8,18 @@
 //! convention); request shapes are defined as `serde + JsonSchema`
 //! structs alongside the tool methods.
 
+use oxplow_app::commands::agent_reads::ai::{AiDecideParams, AiSummarizeParams};
+use oxplow_app::commands::agent_reads::changes::EnsureChangeParams;
+use oxplow_app::commands::agent_reads::collectors::PreviewCollectorParams;
+use oxplow_app::commands::agent_reads::extensions::{
+    CheckError, ExtensionChecks, ReviewExtensionParams, ValidateExtensionParams,
+};
+use oxplow_app::commands::agent_reads::knowledge::{ListCommentsParams, WikiRefDriftParams};
+use oxplow_app::commands::agent_reads::lsp::{
+    CodeCallHierarchyParams, CodePositionParams, CodeReferencesParams, CodeSymbolsParams,
+    CodeWorkspaceSymbolsParams,
+};
+use oxplow_app::commands::agent_reads::vcs::{BlameParams, DiffParams};
 use std::sync::Arc;
 
 use rmcp::handler::server::tool::ToolRouter;
@@ -16,36 +28,78 @@ use rmcp::{tool, tool_router, ErrorData as McpError, ServerHandler};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use oxplow_app::ref_resolver::{self, RefSummary};
 use oxplow_app::session_auth::Principal;
 use oxplow_app::Services;
-use oxplow_domain::comment::CommentThread;
-use oxplow_domain::stores::CommentStore;
-use oxplow_domain::{CommentStatus, StreamId, ThreadId};
 
 mod lenient_params;
 // Drop-in for rmcp's `Parameters` that tolerates camelCase/kebab aliases
 // of our snake_case param fields, so weak models stop tripping on
 // `-32602 missing field`. See `lenient_params` for the rationale.
 use lenient_params::Parameters;
-
-/// A comment thread plus the typed context it was anchored in, resolved
-/// for the agent. `primary` is the comment's target (the nearest region
-/// the selection sat in); `context_chain` is the ancestor regions
-/// (innermost→outermost); `referenced` are the canonical refs found
-/// inside the selection itself. Returned by `list_comments`.
-#[derive(Debug, Serialize)]
-struct EnrichedCommentThread {
-    thread: CommentThread,
-    primary: RefSummary,
-    context_chain: Vec<RefSummary>,
-    referenced: Vec<RefSummary>,
-}
+use oxplow_app::commands::agent_reads::lens::{RunLensActionInput, RunLensInput};
+use oxplow_app::commands::agent_reads::pages::OpenPageInput;
+use oxplow_app::commands::agent_reads::records::ReadInput;
+use oxplow_app::commands::agent_reads::search::SiteSearchInput;
+use oxplow_app::commands::agent_reads::sql::QuerySqlInput;
 
 #[derive(Clone)]
 pub struct OxplowMcp {
     services: Arc<Services>,
     tool_router: ToolRouter<Self>,
+}
+
+/// The extension checks `oxplow.extension.validate` and `.preview` run
+/// (`oxplow-sdk`'s, which `oxplow-app` can't link): installed on the
+/// services of every host that serves these tools. Idempotent.
+pub fn install_extension_checks(services: &Services) {
+    services.extension_checks.install(Arc::new(SdkChecks));
+}
+
+struct SdkChecks;
+
+#[async_trait::async_trait]
+impl ExtensionChecks for SdkChecks {
+    async fn validate(
+        &self,
+        svc: &Services,
+        root: &std::path::Path,
+        name: &str,
+    ) -> Result<serde_json::Value, CheckError> {
+        let report = oxplow_sdk::check(
+            root,
+            name,
+            &svc.extension_catalog,
+            Some(&svc.sql),
+            Some(svc.commands.as_ref()),
+            None,
+        )
+        .await
+        .map_err(sdk_check_error)?;
+        serde_json::to_value(report).map_err(|e| CheckError::Failed(e.to_string()))
+    }
+
+    async fn preview(
+        &self,
+        root: &std::path::Path,
+        name: &str,
+    ) -> Result<serde_json::Value, CheckError> {
+        let report = oxplow_sdk::extension_test::test_extension_in(
+            root,
+            name,
+            false,
+            Arc::new(|_: &str| None),
+        )
+        .await
+        .map_err(sdk_check_error)?;
+        serde_json::to_value(report).map_err(|e| CheckError::Failed(e.to_string()))
+    }
+}
+
+fn sdk_check_error(e: oxplow_sdk::SdkError) -> CheckError {
+    match e {
+        oxplow_sdk::SdkError::NotFound(_) => CheckError::NotFound,
+        other => CheckError::Failed(other.to_string()),
+    }
 }
 
 // ---------- caller identity ----------
@@ -109,39 +163,6 @@ const ANONYMOUS_WRITE: &str = "this MCP connection carries no thread identity (i
     through an agent session's bearer), so it may not run commands; oxplow's own harness \
     configs connect with one — reconnect through one";
 
-/// The most text an agent's model call takes (`ai_decide`'s `state`,
-/// `ai_summarize`'s `text`), in characters: each call is paid with the
-/// person's key.
-const AI_TEXT_MAX: usize = 100_000;
-
-/// What an agent's model call is recorded as: the asking thread's ref. A
-/// connection with no thread identity asks nothing — the call is paid
-/// with the person's key, and someone must have asked for it.
-fn ai_caller(extensions: &rmcp::model::Extensions) -> Result<String, McpError> {
-    caller_of(extensions)
-        .thread_id
-        .map(oxplow_domain::refs::build::thread_ref)
-        .ok_or_else(|| {
-            McpError::invalid_request(
-                "this MCP connection carries no thread identity (it didn't come through an \
-                 agent session's bearer), so it may not call a model; oxplow's own harness \
-                 configs connect with one — reconnect through one",
-                None,
-            )
-        })
-}
-
-fn check_ai_text(field: &str, text: &str) -> Result<(), McpError> {
-    let n = text.chars().count();
-    if n > AI_TEXT_MAX {
-        return Err(McpError::invalid_params(
-            format!("`{field}` is {n} characters; a model call takes at most {AI_TEXT_MAX}"),
-            None,
-        ));
-    }
-    Ok(())
-}
-
 // ---------- request shapes ----------
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -152,19 +173,6 @@ pub struct RunCommandParams {
     /// The command's input, matching its `input_schema`.
     #[serde(default)]
     pub input: serde_json::Value,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ReadParams {
-    /// What to read, by its ref: `file:src/a.rs@git:HEAD#L10-40`,
-    /// `work_item:oxplow:tsk12`, `commit:<sha>`, `event:<id>#output`,
-    /// `lens:<ext>/<slug>`.
-    #[serde(rename = "ref")]
-    pub reference: String,
-    /// The stream whose worktree a `file:` or `lens:` ref is read in
-    /// (`stream:str2`); absent, your own.
-    #[serde(default)]
-    pub stream: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -273,116 +281,10 @@ fn no_command_message(
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ThreadIdParams {
-    pub thread_id: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WorkItemRefParams {
     /// The item's ref, `work_item:<provider>:<id>`.
     #[serde(rename = "ref")]
     pub item_ref: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ListCommentsParams {
-    /// `"thread"` (id = `thr…`) or `"stream"` (id = `str…`). Optional —
-    /// when omitted it's inferred from `id`'s prefix.
-    pub scope: Option<String>,
-    /// The thread (`thr…`) or stream (`str…`) id whose comments to list.
-    pub id: Option<String>,
-    /// Filter: `"all"` (default), `"open"`, or `"needs_response"`.
-    pub status: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WikiRefDriftParams {
-    /// Wiki slug (without `.md`).
-    pub slug: String,
-    /// Repo-relative file path referenced by the page.
-    pub path: String,
-}
-
-/// A place in a stream's file (`code_*` tools). Line and column are
-/// 1-based, like editors and `v_diagnostic`.
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CodePositionParams {
-    pub stream_id: String,
-    /// Workspace-relative path (`src/lib.rs`).
-    pub path: String,
-    /// 1-based.
-    pub line: u32,
-    /// 1-based.
-    pub col: u32,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CodeReferencesParams {
-    pub stream_id: String,
-    pub path: String,
-    pub line: u32,
-    pub col: u32,
-    /// Include the declaration itself (default true).
-    #[serde(default)]
-    pub include_declaration: Option<bool>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CodeCallHierarchyParams {
-    pub stream_id: String,
-    pub path: String,
-    pub line: u32,
-    pub col: u32,
-    /// `incoming` (who calls the symbol) or `outgoing` (what it calls).
-    pub direction: oxplow_domain::code_intel::CallDirection,
-}
-
-/// Optional stream selector shared by the stream-scoped VCS read tools.
-/// Omit `stream_id` to read the caller's own stream (the primary only for
-/// a caller with no thread identity).
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct DiffParams {
-    /// The stream whose workspace to diff; the caller's when absent.
-    pub stream_id: Option<String>,
-    /// The older side: `working`, `snap:<id>` or `git:<rev>`; absent =
-    /// the empty tree (everything added).
-    pub from: Option<String>,
-    /// The newer side (e.g. `working`).
-    pub to: String,
-    /// Compare `to` against where it forked from `from` rather than
-    /// against `from` itself — a branch's own changes against `git:main`.
-    #[serde(default)]
-    pub since_fork: bool,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct BlameParams {
-    /// The stream whose workspace to blame in; the caller's when absent.
-    pub stream_id: Option<String>,
-    /// Workspace-relative file path.
-    pub path: String,
-    /// Which version: `working` (default; uncommitted lines name no
-    /// revision) or `git:<rev>`.
-    pub revision: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CodeSymbolsParams {
-    /// The stream whose workspace to read; the caller's when absent.
-    pub stream_id: Option<String>,
-    /// Workspace-relative path.
-    pub path: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CodeWorkspaceSymbolsParams {
-    /// The stream whose language server to ask; the caller's when absent.
-    pub stream_id: Option<String>,
-    /// The language server to ask (`rust`, `typescript`, `python`, …).
-    pub language: String,
-    /// Symbol name query (fuzzy, server-defined); empty lists what the
-    /// server returns.
-    pub query: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -428,152 +330,11 @@ pub struct LensIdParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RunLensParams {
-    /// Lens id: `<extension>/<slug>`.
-    pub id: String,
-    /// Param overrides by name (see the lens's `params`); the rest use
-    /// their defaults. Unknown names are rejected.
-    pub params: Option<std::collections::BTreeMap<String, serde_json::Value>>,
-    /// Stream whose worktree to read from; omit for your own.
-    pub stream_id: Option<String>,
-    /// Your thread (`thr…`): bound into a lens's `thread_id` param (and its
-    /// stream into `stream_id`) unless `params` sets them. Omit to use the
-    /// stream's selected thread — what the person sees.
-    pub thread_id: Option<String>,
-    /// `text` (default): the lens's text rendering (what it shows — a
-    /// chart's series, a grid's children) with the run's columns, row
-    /// count, params and alert, but not the rows. `json`: the full run,
-    /// rows included, for when you need to parse the values.
-    pub format: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RunLensActionParams {
-    /// Lens id: `<extension>/<slug>`.
-    pub id: String,
-    /// The action's id, as the lens declares it (see `read` of `lens:<ext>/<slug>` → `actions`).
-    pub action: String,
-    /// Param overrides by name, as for `run_lens`.
-    pub params: Option<std::collections::BTreeMap<String, serde_json::Value>>,
-    /// Stream whose worktree to read the lens from; omit for your own.
-    pub stream_id: Option<String>,
-    /// Your thread, as for `run_lens`.
-    pub thread_id: Option<String>,
-    /// For a row action (`row: true` in `read` of `lens:<ext>/<slug>` → `actions`): the row
-    /// it runs on, column → value, as `run_lens` returned it.
-    pub row: Option<std::collections::BTreeMap<String, serde_json::Value>>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct EnsureChangeParams {
-    /// `commit` (a commit vs its parent), `effort` (an effort's start →
-    /// end), or `working` (a stream's uncommitted work vs HEAD).
-    pub kind: String,
-    /// For `commit`: a sha or revspec (`HEAD`, `main~2`).
-    pub sha: Option<String>,
-    /// For `effort`: the effort id (`eff42`).
-    pub effort_id: Option<String>,
-    /// For `working` and `commit`: the stream id; your own when omitted.
-    pub stream_id: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct AiQuestionParam {
-    /// `noul` (yes/no: returns the probability of yes), `choice` (pick one
-    /// of `options`) or `score` (place it on the ordered `levels`).
-    #[serde(rename = "type")]
-    pub kind: String,
-    /// The question, e.g. "Does this change alter public behavior?".
-    pub instructions: String,
-    /// For `choice`: the options.
-    pub options: Option<Vec<String>>,
-    /// For `score`: the levels, lowest first.
-    pub levels: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct AiDecideParams {
-    /// What the questions are about: a diff, a description, some text.
-    pub state: String,
-    /// Questions by a short name you choose (e.g. `risky`).
-    pub questions: std::collections::BTreeMap<String, AiQuestionParam>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct AiSummarizeParams {
-    pub text: String,
-    /// What to focus on, e.g. "risks" or "what changed for users".
-    pub focus: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ReadAiCallParams {
     /// The call's id (`v_ai_call.id`).
     pub id: i64,
     /// Which body: `request` or `response`.
     pub body: oxplow_app::ai_calls::AiCallBody,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct PreviewCollectorParams {
-    /// The extension that declares it (its folder under `oxplow/extensions/`).
-    pub owner: String,
-    /// The collector's `id` in its `collectors:`.
-    pub id: String,
-    /// Stream whose worktree to run it from; omit for your own.
-    pub stream_id: Option<String>,
-    /// The event an `on:` collector reacts to, as a fixture writes it:
-    /// `{ type, v?, payload?, subject?, anchors? }`. The script gets it as
-    /// the event envelope, carried to the type's newest version.
-    pub event: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ReviewExtensionParams {
-    /// Git URL to review for an install (a repo whose root holds
-    /// `extension.yaml`). Pass this or `name`.
-    pub git_url: Option<String>,
-    /// Branch, tag or commit; omit for the default branch.
-    pub git_ref: Option<String>,
-    /// An installed extension's name, to review its update. Pass this or
-    /// `git_url`.
-    pub name: Option<String>,
-    /// Stream whose worktree it goes into; omit for your own.
-    pub stream_id: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ValidateExtensionParams {
-    /// Extension folder name under `oxplow/extensions/`.
-    pub name: String,
-    /// Stream whose worktree to read from; omit for your own.
-    pub stream_id: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct QuerySqlParams {
-    /// One read-only `SELECT` or `WITH` statement over the published
-    /// models (`v_model` lists them, `v_model_column` documents their
-    /// columns). Use `?1`, `?2`, … for parameters.
-    pub sql: String,
-    /// Positional parameter values for `?1`, `?2`, ….
-    pub params: Option<Vec<serde_json::Value>>,
-    /// Row cap (default 500, max 10000). `truncated: true` in the result
-    /// means more rows existed.
-    pub limit: Option<u32>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SiteSearchParams {
-    /// Free text. Tokens are matched as prefixes (stemmed); ranking is BM25.
-    pub query: String,
-    /// Scope file/stream-bound hits to one worktree (project-global hits like
-    /// wiki are always included). Omit to search every stream.
-    pub stream_id: Option<String>,
-    /// Restrict to a subset of kinds: `task | comment | note | wiki | file`.
-    pub kinds: Option<Vec<String>>,
-    /// Max hits to return (default 50).
-    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -589,6 +350,7 @@ pub struct GetSkillParams {
 #[tool_router]
 impl OxplowMcp {
     pub fn new(services: Arc<Services>) -> Self {
+        install_extension_checks(&services);
         Self {
             services,
             tool_router: Self::tool_router(),
@@ -604,37 +366,16 @@ impl OxplowMcp {
     )]
     async fn get_skill(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<GetSkillParams>,
     ) -> Result<CallToolResult, McpError> {
         let GetSkillParams { name, reference } = params.0;
-        // What's offered now: core's and the active implementations'.
-        let text = oxplow_app::capabilities::agent_text(&self.services);
-        let found = match &reference {
-            None => text.skill_body(&name),
-            Some(reference) => text.skill_reference(&name, reference),
-        };
-        match found {
-            Some(body) => Ok(CallToolResult::success(vec![ContentBlock::text(
-                body.to_string(),
-            )])),
-            None if text.skill_body(&name).is_some() => {
-                let reference = reference.unwrap_or_default();
-                Err(McpError::invalid_params(
-                    format!(
-                        "skill `{name}` has no reference `{reference}` (references: {})",
-                        text.skill_reference_names(&name).join(", ")
-                    ),
-                    None,
-                ))
-            }
-            None => {
-                let names: Vec<&str> = text.skill_index().into_iter().map(|(n, _)| n).collect();
-                Err(McpError::invalid_params(
-                    format!("no skill `{name}` (skills: {})", names.join(", ")),
-                    None,
-                ))
-            }
-        }
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.skill.read",
+            serde_json::json!({ "name": name, "reference": reference }),
+        )
+        .await
     }
 
     #[tool(
@@ -647,66 +388,15 @@ impl OxplowMcp {
     )]
     async fn get_open_page(
         &self,
-        params: Parameters<ThreadIdParams>,
+        extensions: rmcp::model::Extensions,
+        params: Parameters<OpenPageInput>,
     ) -> Result<CallToolResult, McpError> {
-        let tid = &params.0.thread_id;
-        expect_id_kind("get_open_page", "thread_id", tid, ID_THREAD)?;
-        let thread = oxplow_domain::ThreadId::try_from_str(tid)
-            .ok_or_else(|| McpError::invalid_params("expected a thread id (thr…)", None))?;
-        let Some(page) = self.services.thread_runtime.open_page(&thread) else {
-            return json_result(&serde_json::json!({ "open": null }));
-        };
-        let detail: serde_json::Value = page
-            .detail_json
-            .as_deref()
-            .and_then(|d| serde_json::from_str(d).ok())
-            .unwrap_or(serde_json::Value::Null);
-        let mut lens_text = serde_json::Value::Null;
-        if page.kind == "lens" {
-            if let Ok(lens_id) =
-                oxplow_domain::refs::build::id_of(&page.page_id, oxplow_domain::refs::kind::LENS)
-            {
-                // The app shows the main worktree's lenses, whatever the
-                // thread's stream.
-                let root = self.services.worktrees.project_dir();
-                let lens_params = detail
-                    .get("params")
-                    .and_then(|p| p.as_object())
-                    .map(|m| {
-                        m.iter()
-                            .map(|(k, v)| (k.clone(), oxplow_db::SqlCell::from(v.clone())))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let ctx =
-                    oxplow_app::extensions::lens_context(&self.services, None, Some(thread)).await;
-                let read = async {
-                    let run = oxplow_app::extensions::run_lens(
-                        &self.services.sql,
-                        &self.services.extension_catalog,
-                        root,
-                        &lens_id,
-                        lens_params,
-                        &ctx,
-                    )
-                    .await?;
-                    oxplow_app::lens_text::text_run(&self.services, root, &run, &ctx).await
-                };
-                lens_text = match read.await {
-                    Ok(text) => serde_json::to_value(text).map_err(internal)?,
-                    Err(e) => serde_json::json!({ "error": e.to_string() }),
-                };
-            }
-        }
-        json_result(&serde_json::json!({
-            "open": {
-                "pageId": page.page_id,
-                "kind": page.kind,
-                "detail": detail,
-                "reportedAt": page.reported_at,
-            },
-            "lens": lens_text,
-        }))
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.page.open",
+            serde_json::to_value(&params.0).map_err(internal)?,
+        )
+        .await
     }
 
     #[tool(
@@ -727,67 +417,12 @@ impl OxplowMcp {
         extensions: rmcp::model::Extensions,
         params: Parameters<PreviewCollectorParams>,
     ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        check_optional_stream("preview_collector", p.stream_id.as_deref())?;
-        // Omitted: the caller's own stream (tsk574).
-        let stream = self
-            .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
-            .await;
-        let root = self
-            .services
-            .worktrees
-            .resolve(stream.as_deref())
-            .await
-            .into_local_path();
-        let collectors = oxplow_app::collector_runner::Collectors::of(&self.services, &root);
-        // A fact collector (`facts:`) previews through the fact engine: the
-        // facts it would record, over that stream's latest snapshot.
-        if let Ok((_, spec)) =
-            oxplow_app::collector_runner::find_collector(&collectors, &p.owner, &p.id)
-        {
-            if !spec.facts.is_empty() {
-                let stream_id = stream
-                    .as_deref()
-                    .map(parse_stream_id)
-                    .transpose()?
-                    .map(|s| s.value());
-                let facts = self
-                    .services
-                    .metrics
-                    .preview_fact_collector_in(&p.owner, &spec, &root, stream_id, p.event.as_ref())
-                    .await
-                    .map_err(|m| McpError::invalid_params(m, None))?;
-                return json_result(&serde_json::json!({
-                    "owner": p.owner,
-                    "id": p.id,
-                    "facts": facts,
-                }));
-            }
-        }
-        let preview = oxplow_app::collector_runner::preview_collector(
-            &collectors,
-            &p.owner,
-            &p.id,
-            p.event.as_ref(),
-            None,
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.collector.preview",
+            serde_json::to_value(params.0).map_err(internal)?,
         )
         .await
-        .map_err(|e| match e {
-            oxplow_app::collector_runner::RunCollectorError::NotFound => McpError::invalid_params(
-                format!(
-                    "no collector `{}/{}` in that stream's worktree (see `v_extension`)",
-                    p.owner, p.id
-                ),
-                None,
-            ),
-            oxplow_app::collector_runner::RunCollectorError::NeedsApproval(m)
-            | oxplow_app::collector_runner::RunCollectorError::Failed(m)
-            | oxplow_app::collector_runner::RunCollectorError::Disabled(m) => {
-                McpError::invalid_params(m, None)
-            }
-            oxplow_app::collector_runner::RunCollectorError::Storage(e) => internal(e),
-        })?;
-        json_result(&preview)
     }
 
     #[tool(
@@ -806,42 +441,12 @@ impl OxplowMcp {
         extensions: rmcp::model::Extensions,
         params: Parameters<EnsureChangeParams>,
     ) -> Result<CallToolResult, McpError> {
-        use oxplow_app::change_analysis::ChangeTarget;
-        let p = params.0;
-        // Omitted: the caller's own stream (tsk574).
-        let stream = self
-            .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
-            .await;
-        let need = |v: Option<String>, name: &str| {
-            v.ok_or_else(|| {
-                McpError::invalid_params(
-                    format!("`{name}` is required for kind `{}`", p.kind),
-                    None,
-                )
-            })
-        };
-        let target = match p.kind.as_str() {
-            "commit" => ChangeTarget::Commit {
-                sha: need(p.sha.clone(), "sha")?,
-                stream_id: stream.clone(),
-            },
-            "effort" => ChangeTarget::Effort {
-                effort_id: need(p.effort_id.clone(), "effort_id")?,
-            },
-            "working" => ChangeTarget::Working {
-                stream_id: need(stream.clone(), "stream_id")?,
-            },
-            other => {
-                return Err(McpError::invalid_params(
-                    format!("kind `{other}` isn't commit, effort or working"),
-                    None,
-                ))
-            }
-        };
-        let row = oxplow_app::change_analysis::ensure_change(&self.services, target)
-            .await
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
-        json_result(&row)
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.change.ensure",
+            serde_json::to_value(params.0).map_err(internal)?,
+        )
+        .await
     }
 
     #[tool(
@@ -857,50 +462,12 @@ impl OxplowMcp {
         extensions: rmcp::model::Extensions,
         params: Parameters<AiDecideParams>,
     ) -> Result<CallToolResult, McpError> {
-        use oxplow_app::ai_service::Question;
-        let caller = ai_caller(&extensions)?;
-        let p = params.0;
-        check_ai_text("state", &p.state)?;
-        let mut questions = std::collections::BTreeMap::new();
-        for (name, q) in p.questions {
-            let bad = |m: &str| McpError::invalid_params(format!("question `{name}`: {m}"), None);
-            let question = match q.kind.as_str() {
-                "noul" => Question::Noul {
-                    instructions: q.instructions,
-                },
-                "choice" => Question::Choice {
-                    instructions: q.instructions,
-                    options: q
-                        .options
-                        .filter(|o| !o.is_empty())
-                        .ok_or_else(|| bad("a choice needs options"))?,
-                },
-                "score" => Question::Score {
-                    instructions: q.instructions,
-                    levels: q
-                        .levels
-                        .filter(|l| !l.is_empty())
-                        .ok_or_else(|| bad("a score needs levels"))?,
-                },
-                other => return Err(bad(&format!("type `{other}` isn't noul, choice or score"))),
-            };
-            questions.insert(name, question);
-        }
-        let decision = self
-            .services
-            .ai_compute
-            .decide(
-                caller.as_str(),
-                &oxplow_app::ai_service::Role::DECIDE,
-                &p.state,
-                &questions,
-            )
-            .await
-            .map_err(compute_error)?;
-        json_result(&serde_json::json!({
-            "answers": decision.value,
-            "cached": decision.cached,
-        }))
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.ai.decide",
+            serde_json::to_value(params.0).map_err(internal)?,
+        )
+        .await
     }
 
     #[tool(
@@ -914,23 +481,12 @@ impl OxplowMcp {
         extensions: rmcp::model::Extensions,
         params: Parameters<AiSummarizeParams>,
     ) -> Result<CallToolResult, McpError> {
-        let caller = ai_caller(&extensions)?;
-        let p = params.0;
-        check_ai_text("text", &p.text)?;
-        let summary = self
-            .services
-            .ai_compute
-            .summarize(
-                caller.as_str(),
-                &oxplow_app::ai_service::Role::SUMMARIZE,
-                &p.text,
-                p.focus.as_deref(),
-            )
-            .await
-            .map_err(compute_error)?;
-        Ok(CallToolResult::success(vec![ContentBlock::text(
-            summary.value,
-        )]))
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.ai.summarize",
+            serde_json::to_value(params.0).map_err(internal)?,
+        )
+        .await
     }
 
     #[tool(
@@ -948,52 +504,12 @@ impl OxplowMcp {
         extensions: rmcp::model::Extensions,
         params: Parameters<ReviewExtensionParams>,
     ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        check_optional_stream("review_extension", p.stream_id.as_deref())?;
-        // Omitted: the caller's own stream (tsk574).
-        let stream = self
-            .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
-            .await;
-        let root = self
-            .services
-            .worktrees
-            .resolve(stream.as_deref())
-            .await
-            .into_local_path();
-        let layer = self.services.sql.clone();
-        let commands = self.services.commands.as_ref();
-        let review = match (p.git_url.as_deref(), p.name.as_deref()) {
-            (Some(url), None) => {
-                oxplow_app::extensions::review_extension(
-                    &layer,
-                    &self.services.extension_catalog,
-                    &root,
-                    url,
-                    p.git_ref.as_deref(),
-                    None,
-                    commands,
-                )
-                .await
-            }
-            (None, Some(name)) => {
-                oxplow_app::extensions::review_update(
-                    &layer,
-                    &self.services.extension_catalog,
-                    &root,
-                    name,
-                    commands,
-                )
-                .await
-            }
-            _ => {
-                return Err(McpError::invalid_params(
-                    "pass either git_url (install) or name (update)",
-                    None,
-                ))
-            }
-        }
-        .map_err(extension_error)?;
-        json_result(&review)
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.extension.review",
+            serde_json::to_value(params.0).map_err(internal)?,
+        )
+        .await
     }
 
     #[tool(
@@ -1046,62 +562,14 @@ impl OxplowMcp {
     async fn run_lens(
         &self,
         extensions: rmcp::model::Extensions,
-        params: Parameters<RunLensParams>,
+        params: Parameters<RunLensInput>,
     ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        check_optional_stream("run_lens", p.stream_id.as_deref())?;
-        // Omitted: the caller's own stream (tsk574).
-        let stream = self
-            .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
-            .await;
-        let root = self
-            .services
-            .worktrees
-            .resolve(stream.as_deref())
-            .await
-            .into_local_path();
-        let overrides = p
-            .params
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(k, v)| (k, oxplow_db::SqlCell::from(v)))
-            .collect();
-        let ctx = self
-            .lens_context(stream.as_deref(), p.thread_id.as_deref())
-            .await?;
-        // Through its extension's models as that stream has them, compiled
-        // and published nowhere: a lens over a model the author hasn't
-        // published yet answers.
-        let extension = p.id.split_once('/').map_or(p.id.as_str(), |(ext, _)| ext);
-        let overlay = oxplow_app::extensions::lens_overlay(
-            &self.services.sql,
-            &self.services.extension_catalog,
-            &root,
-            extension,
-        )
-        .await;
-        let run = oxplow_app::extensions::run_lens(
-            &self.services.sql.with_overlay(overlay),
-            &self.services.extension_catalog,
-            &root,
-            &p.id,
-            overrides,
-            &ctx,
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.lens.run",
+            serde_json::to_value(&params.0).map_err(internal)?,
         )
         .await
-        .map_err(|e| lens_error(&p.id, e))?;
-        match p.format.as_deref().unwrap_or("text") {
-            "json" => json_result(&run),
-            "text" => json_result(
-                &oxplow_app::lens_text::text_run(&self.services, &root, &run, &ctx)
-                    .await
-                    .map_err(|e| lens_error(&p.id, e))?,
-            ),
-            other => Err(McpError::invalid_params(
-                format!("format `{other}` isn't text or json"),
-                None,
-            )),
-        }
     }
 
     #[tool(
@@ -1114,53 +582,16 @@ impl OxplowMcp {
     async fn run_lens_action(
         &self,
         extensions: rmcp::model::Extensions,
-        params: Parameters<RunLensActionParams>,
+        params: Parameters<RunLensActionInput>,
     ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        check_optional_stream("run_lens_action", p.stream_id.as_deref())?;
-        // Omitted: the caller's own stream (tsk574).
-        let stream = self
-            .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
-            .await;
-        let root = self
-            .services
-            .worktrees
-            .resolve(stream.as_deref())
-            .await
-            .into_local_path();
-        let overrides = p
-            .params
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(k, v)| (k, oxplow_db::SqlCell::from(v)))
-            .collect();
-        let ctx = self
-            .lens_context(stream.as_deref(), p.thread_id.as_deref())
-            .await?;
-        let on_behalf_of = self.verified_actor(&caller_of(&extensions)).await?;
-        let row = p.row.map(|r| {
-            r.into_iter()
-                .map(|(k, v)| (k, oxplow_db::SqlCell::from(v)))
-                .collect()
-        });
-        let out = oxplow_app::lens_actions::run_lens_action(
-            &self.services,
-            &root,
-            oxplow_app::lens_actions::LensActionCall {
-                lens_id: p.id.clone(),
-                action_id: p.action,
-                params: overrides,
-                row,
-                input: None,
-                on_behalf_of,
-                // An agent never confirms.
-                confirmed: false,
+        self.run_command_as(
+            &caller_of(&extensions),
+            RunCommandParams {
+                id: "oxplow.lens.run_action".into(),
+                input: serde_json::to_value(&params.0).map_err(internal)?,
             },
-            &ctx,
         )
         .await
-        .map_err(command_error)?;
-        json_result(&out)
     }
 
     #[tool(
@@ -1175,38 +606,12 @@ impl OxplowMcp {
         extensions: rmcp::model::Extensions,
         params: Parameters<ValidateExtensionParams>,
     ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        check_optional_stream("validate_extension", p.stream_id.as_deref())?;
-        // Omitted: the caller's own stream (tsk574).
-        let stream = self
-            .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
-            .await;
-        let root = self
-            .services
-            .worktrees
-            .resolve(stream.as_deref())
-            .await
-            .into_local_path();
-        let report = oxplow_sdk::check(
-            &root,
-            &p.name,
-            &self.services.extension_catalog,
-            Some(&self.services.sql),
-            Some(self.services.commands.as_ref()),
-            None,
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.extension.validate",
+            serde_json::to_value(params.0).map_err(internal)?,
         )
         .await
-        .map_err(|e| match e {
-            oxplow_sdk::SdkError::NotFound(_) => McpError::invalid_params(
-                format!(
-                    "no extension `{}` under oxplow/extensions/ in that stream",
-                    p.name
-                ),
-                None,
-            ),
-            other => internal(other),
-        })?;
-        json_result(&report)
     }
 
     #[tool(
@@ -1223,38 +628,12 @@ impl OxplowMcp {
         extensions: rmcp::model::Extensions,
         params: Parameters<ValidateExtensionParams>,
     ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        check_optional_stream("preview_extension", p.stream_id.as_deref())?;
-        // Omitted: the caller's own stream.
-        let stream = self
-            .stream_or_callers(&caller_of(&extensions), p.stream_id.clone())
-            .await;
-        let root = self
-            .services
-            .worktrees
-            .resolve(stream.as_deref())
-            .await
-            .into_local_path();
-        // An agent's preview: the extension's programs see no environment
-        // (no person's credentials), and model calls answer from the fixtures.
-        let report = oxplow_sdk::extension_test::test_extension_in(
-            &root,
-            &p.name,
-            false,
-            std::sync::Arc::new(|_: &str| None),
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.extension.preview",
+            serde_json::to_value(params.0).map_err(internal)?,
         )
         .await
-        .map_err(|e| match e {
-            oxplow_sdk::SdkError::NotFound(_) => McpError::invalid_params(
-                format!(
-                    "no extension `{}` under oxplow/extensions/ in that stream",
-                    p.name
-                ),
-                None,
-            ),
-            other => internal(other),
-        })?;
-        json_result(&report)
     }
 
     #[tool(
@@ -1273,36 +652,14 @@ impl OxplowMcp {
     async fn read(
         &self,
         extensions: rmcp::model::Extensions,
-        params: Parameters<ReadParams>,
+        params: Parameters<ReadInput>,
     ) -> Result<CallToolResult, McpError> {
-        use oxplow_app::ref_read::{read, ReadError, Reader};
-        let caller = caller_of(&extensions);
-        let reader = Reader {
-            thread: caller.thread_id,
-            stream: caller.stream_id,
-        };
-        let p = params.0;
-        let at = match p.stream.as_deref() {
-            Some(stream) => Some(
-                oxplow_domain::refs::build::id_of(stream, oxplow_domain::refs::kind::STREAM)
-                    .ok()
-                    .and_then(|id| oxplow_domain::StreamId::try_from_str(&id))
-                    .ok_or_else(|| {
-                        McpError::invalid_params(
-                            format!("`stream` is a stream's ref (`stream:str2`), not `{stream}`"),
-                            None,
-                        )
-                    })?,
-            ),
-            None => None,
-        };
-        let out = read(&self.services, &p.reference, &reader, at)
-            .await
-            .map_err(|e| match e {
-                ReadError::Storage(e) => internal(e),
-                other => McpError::invalid_params(other.to_string(), None),
-            })?;
-        json_result(&out)
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.records.read",
+            serde_json::to_value(&params.0).map_err(internal)?,
+        )
+        .await
     }
 
     #[tool(
@@ -1323,28 +680,15 @@ impl OxplowMcp {
     )]
     async fn query_sql(
         &self,
-        params: Parameters<QuerySqlParams>,
+        extensions: rmcp::model::Extensions,
+        params: Parameters<QuerySqlInput>,
     ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        let out = self
-            .services
-            .sql
-            .clone()
-            .query_sql(
-                &p.sql,
-                p.params
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(Into::into)
-                    .collect(),
-                p.limit.map(|l| l as usize),
-            )
-            .await
-            .map_err(|e| match e {
-                oxplow_domain::DomainError::Invalid(m) => McpError::invalid_params(m, None),
-                other => internal(other),
-            })?;
-        json_result(&out)
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.sql.query",
+            serde_json::to_value(&params.0).map_err(internal)?,
+        )
+        .await
     }
 
     #[tool(
@@ -1356,22 +700,15 @@ impl OxplowMcp {
     )]
     async fn search(
         &self,
-        params: Parameters<SiteSearchParams>,
+        extensions: rmcp::model::Extensions,
+        params: Parameters<SiteSearchInput>,
     ) -> Result<CallToolResult, McpError> {
-        check_optional_stream("search", params.0.stream_id.as_deref())?;
-        let kinds = params.0.kinds.unwrap_or_default();
-        let hits = self
-            .services
-            .search_store
-            .search(
-                &params.0.query,
-                params.0.stream_id.as_deref(),
-                &kinds,
-                params.0.limit.unwrap_or(50) as usize,
-            )
-            .await
-            .map_err(internal)?;
-        json_result(&hits)
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.search.find",
+            serde_json::to_value(&params.0).map_err(internal)?,
+        )
+        .await
     }
 
     // ---------- git (read) ----------
@@ -1393,17 +730,12 @@ impl OxplowMcp {
         extensions: rmcp::model::Extensions,
         params: Parameters<BlameParams>,
     ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        check_optional_stream("vcs_blame", p.stream_id.as_deref())?;
-        let sid = self
-            .stream_or_callers(&caller_of(&extensions), p.stream_id)
-            .await;
-        let revision = parse_revision(p.revision.as_deref().unwrap_or("working"))?;
-        let lines =
-            oxplow_app::vcs::reads::blame(&self.services, sid.as_deref(), &p.path, &revision)
-                .await
-                .map_err(domain_err)?;
-        json_result(&lines)
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.vcs.blame",
+            serde_json::to_value(params.0).map_err(internal)?,
+        )
+        .await
     }
 
     #[tool(
@@ -1418,7 +750,12 @@ impl OxplowMcp {
         extensions: rmcp::model::Extensions,
         params: Parameters<DiffParams>,
     ) -> Result<CallToolResult, McpError> {
-        self.diff_as(&caller_of(&extensions), params.0).await
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.vcs.diff",
+            serde_json::to_value(params.0).map_err(internal)?,
+        )
+        .await
     }
 
     // ---------- snapshots / local history (read + restore) ----------
@@ -1451,56 +788,15 @@ impl OxplowMcp {
     )]
     async fn list_comments(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<ListCommentsParams>,
     ) -> Result<CallToolResult, McpError> {
-        let threads =
-            match resolve_comment_scope(params.0.scope.as_deref(), params.0.id.as_deref())? {
-                CommentScope::Thread(id) => self
-                    .services
-                    .comment_store
-                    .list_for_thread(&id)
-                    .await
-                    .map_err(internal)?,
-                CommentScope::Stream(id) => self
-                    .services
-                    .comment_store
-                    .list_for_stream(&id)
-                    .await
-                    .map_err(internal)?,
-            };
-        let status = params.0.status.as_deref().unwrap_or("all");
-        let filtered: Vec<_> = threads
-            .into_iter()
-            .filter(|t| match status {
-                "needs_response" => t.needs_response(),
-                "open" => t.comment.status == CommentStatus::Open,
-                _ => true,
-            })
-            .collect();
-        // Hydrate the typed context the comment was anchored in so the
-        // agent sees *what the highlighted thing is* — the primary
-        // target, the nesting of regions it sat inside, and any refs
-        // inside the selection — in this one tool call.
-        let mut enriched = Vec::with_capacity(filtered.len());
-        for t in filtered {
-            let primary = ref_resolver::resolve_ref(
-                &self.services,
-                &t.comment.target_kind,
-                &t.comment.target_id,
-            )
-            .await;
-            let context_chain =
-                ref_resolver::resolve_refs(&self.services, &t.comment.context_chain).await;
-            let referenced =
-                ref_resolver::resolve_refs(&self.services, &t.comment.referenced_refs).await;
-            enriched.push(EnrichedCommentThread {
-                thread: t,
-                primary,
-                context_chain,
-                referenced,
-            });
-        }
-        json_result(&enriched)
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.knowledge.comments",
+            serde_json::to_value(params.0).map_err(internal)?,
+        )
+        .await
     }
 
     #[tool(description = "For one wiki page file ref, return the unified diff \
@@ -1517,20 +813,15 @@ impl OxplowMcp {
                        (the pin was taken by 'Track changes only', which keeps no text).")]
     async fn wiki_ref_drift(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<WikiRefDriftParams>,
     ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        let drift = oxplow_app::wiki_drift::compute_wiki_ref_drift(
-            &self.services.page_ref_store,
-            &self.services.snapshot_store,
-            &self.services.snapshot_content,
-            &self.services.layout.project_dir,
-            &p.slug,
-            &p.path,
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.knowledge.drift",
+            serde_json::to_value(params.0).map_err(internal)?,
         )
         .await
-        .map_err(internal)?;
-        json_result(&drift)
     }
 
     // ---------- task orchestration ----------
@@ -1582,16 +873,6 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "The host services an extension's Starlark script may use, each a scope \
-                       it declares in its `needs`: what it gives, the builtins it provides, \
-                       whether a person approves it (a model spends their key) and the runs \
-                       that may use it (a script that composes runs pure: no model)."
-    )]
-    async fn list_services(&self) -> Result<CallToolResult, McpError> {
-        json_result(&oxplow_domain::service::SERVICES)
-    }
-
-    #[tool(
         description = "Run a command by its id with its input (`list_commands { id }` shows its \
                        schema and an example input). Returns \
                        `{ result, audit_id, event_id, inverse? }`. Invalid input names the \
@@ -1620,22 +901,15 @@ impl OxplowMcp {
     )]
     async fn code_definition(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<CodePositionParams>,
     ) -> Result<CallToolResult, McpError> {
-        let at = code_position(
-            &params.0.stream_id,
-            &params.0.path,
-            params.0.line,
-            params.0.col,
-        )?;
-        json_result(
-            &self
-                .services
-                .code_intel
-                .definition(&at)
-                .await
-                .map_err(code_err)?,
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.code.definition",
+            serde_json::to_value(params.0).map_err(internal)?,
         )
+        .await
     }
 
     #[tool(
@@ -1645,18 +919,15 @@ impl OxplowMcp {
     )]
     async fn code_references(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<CodeReferencesParams>,
     ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        let at = code_position(&p.stream_id, &p.path, p.line, p.col)?;
-        json_result(
-            &self
-                .services
-                .code_intel
-                .references(&at, p.include_declaration.unwrap_or(true))
-                .await
-                .map_err(code_err)?,
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.code.references",
+            serde_json::to_value(params.0).map_err(internal)?,
         )
+        .await
     }
 
     #[tool(
@@ -1665,22 +936,15 @@ impl OxplowMcp {
     )]
     async fn code_hover(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<CodePositionParams>,
     ) -> Result<CallToolResult, McpError> {
-        let at = code_position(
-            &params.0.stream_id,
-            &params.0.path,
-            params.0.line,
-            params.0.col,
-        )?;
-        json_result(
-            &self
-                .services
-                .code_intel
-                .hover(&at)
-                .await
-                .map_err(code_err)?,
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.code.hover",
+            serde_json::to_value(params.0).map_err(internal)?,
         )
+        .await
     }
 
     #[tool(
@@ -1698,50 +962,12 @@ impl OxplowMcp {
         extensions: rmcp::model::Extensions,
         params: Parameters<CodeSymbolsParams>,
     ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        check_optional_stream("code_symbols", p.stream_id.as_deref())?;
-        let stream_id = self
-            .stream_or_callers_or_primary(&caller_of(&extensions), p.stream_id)
-            .await?;
-        let stream = code_stream(&stream_id)?;
-        match self
-            .services
-            .code_intel
-            .document_symbols(stream, &p.path)
-            .await
-        {
-            Ok(symbols) => {
-                json_result(&serde_json::json!({ "source": "language_server", "symbols": symbols }))
-            }
-            // No server for the language, or it isn't running: read the
-            // file as it is now.
-            Err(
-                oxplow_domain::code_intel::CodeIntelError::NoProvider(_)
-                | oxplow_domain::code_intel::CodeIntelError::NotRunning(_),
-            ) => {
-                let file = self
-                    .services
-                    .workspace_files
-                    .read(Some(stream_id.as_str()), p.path.clone())
-                    .await
-                    .map_err(|e| internal(e.to_string()))?;
-                let units: Vec<serde_json::Value> =
-                    oxplow_code_metrics::list_units(&p.path, &file.content)
-                        .iter()
-                        .map(|u| {
-                            serde_json::json!({
-                                "kind": u.kind.as_str(),
-                                "name": u.name,
-                                "containerPath": u.container_path,
-                                "startLine": u.start_line,
-                                "endLine": u.end_line,
-                            })
-                        })
-                        .collect();
-                json_result(&serde_json::json!({ "source": "tree_sitter", "symbols": units }))
-            }
-            Err(other) => Err(code_err(other)),
-        }
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.code.symbols",
+            serde_json::to_value(params.0).map_err(internal)?,
+        )
+        .await
     }
 
     #[tool(
@@ -1756,28 +982,12 @@ impl OxplowMcp {
         extensions: rmcp::model::Extensions,
         params: Parameters<CodeWorkspaceSymbolsParams>,
     ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        check_optional_stream("code_workspace_symbols", p.stream_id.as_deref())?;
-        let stream_id = self
-            .stream_or_callers_or_primary(&caller_of(&extensions), p.stream_id)
-            .await?;
-        let stream = code_stream(&stream_id)?;
-        match self
-            .services
-            .code_intel
-            .workspace_symbols(stream, &p.language, &p.query)
-            .await
-        {
-            Ok(symbols) => json_result(&symbols),
-            Err(
-                oxplow_domain::code_intel::CodeIntelError::NoProvider(m)
-                | oxplow_domain::code_intel::CodeIntelError::NotRunning(m),
-            ) => Err(McpError::invalid_params(
-                format!("{m} The stored symbols of captured files are in `v_symbol`."),
-                None,
-            )),
-            Err(other) => Err(code_err(other)),
-        }
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.code.workspace_symbols",
+            serde_json::to_value(params.0).map_err(internal)?,
+        )
+        .await
     }
 
     #[tool(
@@ -1787,56 +997,15 @@ impl OxplowMcp {
     )]
     async fn code_call_hierarchy(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<CodeCallHierarchyParams>,
     ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        let at = code_position(&p.stream_id, &p.path, p.line, p.col)?;
-        json_result(
-            &self
-                .services
-                .code_intel
-                .call_hierarchy(&at, p.direction)
-                .await
-                .map_err(code_err)?,
+        self.read_command(
+            &caller_of(&extensions),
+            "oxplow.code.call_hierarchy",
+            serde_json::to_value(params.0).map_err(internal)?,
         )
-    }
-}
-
-fn code_stream(stream_id: &str) -> Result<StreamId, McpError> {
-    expect_id_kind("code", "stream_id", stream_id, ID_STREAM)?;
-    StreamId::try_from_str(stream_id)
-        .ok_or_else(|| McpError::invalid_params(format!("`{stream_id}` is not a stream id"), None))
-}
-
-fn code_position(
-    stream_id: &str,
-    path: &str,
-    line: u32,
-    col: u32,
-) -> Result<oxplow_domain::code_intel::Position, McpError> {
-    if line == 0 || col == 0 {
-        return Err(McpError::invalid_params(
-            "line and col are 1-based".to_string(),
-            None,
-        ));
-    }
-    Ok(oxplow_domain::code_intel::Position {
-        stream: code_stream(stream_id)?,
-        path: path.to_string(),
-        line,
-        col,
-    })
-}
-
-/// A missing or stopped server is the caller's to fix (install,
-/// configure or start one); the message says how.
-fn code_err(e: oxplow_domain::code_intel::CodeIntelError) -> McpError {
-    match e {
-        oxplow_domain::code_intel::CodeIntelError::NoProvider(m)
-        | oxplow_domain::code_intel::CodeIntelError::NotRunning(m) => {
-            McpError::invalid_params(m, None)
-        }
-        other => internal(other.to_string()),
+        .await
     }
 }
 
@@ -1859,7 +1028,6 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "list_comments",
     "wiki_ref_drift",
     "list_commands",
-    "list_services",
     "code_definition",
     "code_hover",
     "code_references",
@@ -1908,26 +1076,6 @@ fn stamp_read_only_hints(tools: Vec<Tool>) -> Vec<Tool> {
             tool
         })
         .collect()
-}
-
-impl OxplowMcp {
-    /// The context a lens runs in for an agent: the given stream and
-    /// thread (checked), defaulting as [`oxplow_app::extensions::lens_context`] does.
-    async fn lens_context(
-        &self,
-        stream_id: Option<&str>,
-        thread_id: Option<&str>,
-    ) -> Result<oxplow_app::extensions::LensContext, McpError> {
-        let stream = stream_id.map(parse_stream_id).transpose()?;
-        let thread = match thread_id {
-            Some(t) => {
-                expect_id_kind("run_lens", "thread_id", t, ID_THREAD)?;
-                Some(parse_thread_id(t)?)
-            }
-            None => None,
-        };
-        Ok(oxplow_app::extensions::lens_context(&self.services, stream, thread).await)
-    }
 }
 
 impl ServerHandler for OxplowMcp {
@@ -2006,56 +1154,8 @@ pub fn registered_tool_names() -> Vec<String> {
         .collect()
 }
 
-/// AI failures the agent can act on (no model assigned, bad key, provider
-/// error) are invalid-params with the explanation; keychain trouble is internal.
-fn ai_error(e: oxplow_app::ai_service::AiServiceError) -> McpError {
-    match e {
-        oxplow_app::ai_service::AiServiceError::Secret(_) => internal(e),
-        _ => McpError::invalid_params(e.to_string(), None),
-    }
-}
-
-/// A recorded computation's failure: the model's, as [`ai_error`]; an
-/// unusable answer the agent can retry; storing it is internal.
-fn compute_error(e: oxplow_app::ai_compute::AiComputeError) -> McpError {
-    use oxplow_app::ai_compute::AiComputeError;
-    match e {
-        AiComputeError::Ai(e) => ai_error(e),
-        e @ AiComputeError::BadOutput(_) => McpError::invalid_params(e.to_string(), None),
-        e @ AiComputeError::Storage(_) => internal(e),
-    }
-}
-
 fn internal<E: std::fmt::Display>(e: E) -> McpError {
     McpError::internal_error(e.to_string(), None)
-}
-
-/// Map an extension install/update error to an MCP error.
-fn extension_error(e: oxplow_domain::DomainError) -> McpError {
-    match e {
-        oxplow_domain::DomainError::Invalid(m) => McpError::invalid_params(m, None),
-        other => internal(other),
-    }
-}
-
-/// Map a lens lookup/run error to an MCP error an agent can act on.
-fn lens_error(id: &str, e: oxplow_domain::DomainError) -> McpError {
-    match e {
-        oxplow_domain::DomainError::NotFound => McpError::invalid_params(
-            format!("no lens `{id}` (ids are `<extension>/<slug>`; see `v_lens`)"),
-            None,
-        ),
-        oxplow_domain::DomainError::Invalid(m) => McpError::invalid_params(m, None),
-        other => internal(other),
-    }
-}
-
-/// Validate an optional `stream_id`: enforce the `s-` prefix when present,
-/// and accept `None` (resolves to the current/primary worktree downstream).
-/// A `Revision` a tool was given (`working`, `snap:<id>`, `git:<rev>`).
-fn parse_revision(raw: &str) -> Result<oxplow_domain::vcs::Revision, McpError> {
-    raw.parse()
-        .map_err(|e: String| McpError::invalid_params(e, None))
 }
 
 /// A domain failure as a tool error: bad input is the caller's.
@@ -2066,228 +1166,34 @@ fn domain_err(e: oxplow_domain::DomainError) -> McpError {
     }
 }
 
-fn check_optional_stream(tool: &str, stream_id: Option<&str>) -> Result<(), McpError> {
-    match stream_id {
-        Some(id) => expect_id_kind(tool, "stream_id", id, ID_STREAM),
-        None => Ok(()),
-    }
-}
-
-/// The resolved target of a `list_comments` call — either a single
-/// thread or a whole stream (workspace).
-#[derive(Debug, PartialEq, Eq)]
-enum CommentScope {
-    Thread(ThreadId),
-    Stream(StreamId),
-}
-
-/// Resolve the `(scope, id)` pair `list_comments` was called with into a
-/// concrete [`CommentScope`].
-///
-/// `scope` is optional: when omitted it's inferred from `id`'s prefix
-/// (`thr…` → thread, `str…` → stream). This keeps weaker models from
-/// thrashing on a `missing field "scope"` transport error when the id
-/// alone already determines the scope. When `scope` *is* given it's
-/// honored and the id must match it. Every failure path returns an
-/// agent-readable [`McpError`] naming the fix rather than a raw -32602.
-fn resolve_comment_scope(scope: Option<&str>, id: Option<&str>) -> Result<CommentScope, McpError> {
-    let id = id.map(str::trim).filter(|s| !s.is_empty()).ok_or_else(|| {
-        McpError::invalid_params(
-            "list_comments: pass `id` — a thread id (`thr…`) or stream id (`str…`)",
-            None,
-        )
-    })?;
-
-    // Normalize an explicit scope up front so an unknown string is caught
-    // before we look at the id.
-    let scope = scope.map(str::trim).filter(|s| !s.is_empty());
-    let want = match scope {
-        Some("thread") => Some(ID_THREAD),
-        Some("stream") => Some(ID_STREAM),
-        Some(other) => {
-            return Err(McpError::invalid_params(
-                format!(
-                    "list_comments: `scope` must be \"thread\" or \"stream\", got `{other}` \
-                     (or omit it and I'll infer it from `id`)"
-                ),
-                None,
-            ));
-        }
-        None => None,
-    };
-
-    match want {
-        // Explicit scope: validate the id matches, then build it.
-        Some(ID_THREAD) => {
-            expect_id_kind("list_comments", "id", id, ID_THREAD)?;
-            Ok(CommentScope::Thread(parse_thread_id(id)?))
-        }
-        Some(ID_STREAM) => {
-            expect_id_kind("list_comments", "id", id, ID_STREAM)?;
-            Ok(CommentScope::Stream(parse_stream_id(id)?))
-        }
-        Some(_) => unreachable!("want is only ever ID_THREAD/ID_STREAM/None"),
-        // No scope: infer it from the id's prefix.
-        None => match id.parse::<oxplow_domain::AnyId>() {
-            Ok(any) if any.kind.prefix() == ID_THREAD.prefix => {
-                Ok(CommentScope::Thread(parse_thread_id(id)?))
-            }
-            Ok(any) if any.kind.prefix() == ID_STREAM.prefix => {
-                Ok(CommentScope::Stream(parse_stream_id(id)?))
-            }
-            _ => Err(McpError::invalid_params(
-                format!(
-                    "list_comments: couldn't infer `scope` from id `{id}` — pass scope \
-                     \"thread\" (with a `thr…` id) or \"stream\" (with a `str…` id)"
-                ),
-                None,
-            )),
-        },
-    }
-}
-
-/// Validate that a caller-supplied id string carries the expected
-/// `<prefix>-…` shape. When the prefix mismatches a known one, return
-/// an `invalid_params` error that names the tool/parameter, the value
-/// passed, the kind it was inferred to be, and the kind expected. This
-/// converts opaque downstream FK-violation errors into actionable
-/// guidance at the protocol boundary.
-fn parse_stream_id(value: &str) -> Result<StreamId, McpError> {
-    StreamId::try_from_str(value)
-        .ok_or_else(|| McpError::invalid_params(format!("invalid stream id `{value}`"), None))
-}
-fn parse_thread_id(value: &str) -> Result<ThreadId, McpError> {
-    ThreadId::try_from_str(value)
-        .ok_or_else(|| McpError::invalid_params(format!("invalid thread id `{value}`"), None))
-}
-
-/// String-id prefix validator. Every external id is now a
-/// `<3-letter-prefix><int>` string (e.g. `thr21`); this helper confirms
-/// a caller-supplied value parses to the [`EntityKind`] the tool wants.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct IdPrefix {
-    pub prefix: &'static str,
-    pub label: &'static str,
-}
-
-pub(crate) const ID_STREAM: IdPrefix = IdPrefix {
-    prefix: "str",
-    label: "stream id (str…)",
-};
-pub(crate) const ID_THREAD: IdPrefix = IdPrefix {
-    prefix: "thr",
-    label: "thread id (thr…)",
-};
-
-fn expect_id_kind(
-    tool: &str,
-    param: &str,
-    value: &str,
-    expected: IdPrefix,
-) -> Result<(), McpError> {
-    // Parse against the canonical id grammar. A value that parses to the
-    // expected kind passes; anything else gets a corrective message that
-    // names what it *looks* like so the caller can fix an "I passed a
-    // thread id where a stream id was expected" mix-up in one round-trip.
-    match value.parse::<oxplow_domain::AnyId>() {
-        Ok(any) if any.kind.prefix() == expected.prefix => Ok(()),
-        Ok(any) => Err(McpError::invalid_params(
-            format!(
-                "{tool}: `{param}` expects a {expected_label}, but got `{value}` which looks like \
-                 a {actual_label}",
-                expected_label = expected.label,
-                actual_label = any.kind.label(),
-            ),
-            None,
-        )),
-        Err(_) => Err(McpError::invalid_params(
-            format!(
-                "{tool}: `{param}` expects a {expected_label}, but got `{value}` which isn't a \
-                 valid id",
-                expected_label = expected.label,
-            ),
-            None,
-        )),
-    }
-}
-
 impl OxplowMcp {
-    /// The stream a stream-scoped read acts on when the call names none:
-    /// the caller's (its header, else its thread's stream); the primary
-    /// only for an anonymous caller.
-    /// `given`, else the caller's stream ([`Self::caller_stream`]).
-    async fn stream_or_callers(&self, caller: &McpCaller, given: Option<String>) -> Option<String> {
-        match given {
-            Some(s) => Some(s),
-            None => self.caller_stream(caller).await,
-        }
-    }
-
-    /// [`Self::stream_or_callers`], the primary stream for a caller with no
-    /// stream of its own (for a tool that needs a stream id).
-    async fn stream_or_callers_or_primary(
+    /// A read command (`oxplow.records.read`, …) as `caller`, for the tool
+    /// that is now a thin call to it: an anonymous connection reads too
+    /// (it may not write), and the command's result is the tool's — text
+    /// as is, anything else as JSON.
+    async fn read_command(
         &self,
         caller: &McpCaller,
-        given: Option<String>,
-    ) -> Result<String, McpError> {
-        if let Some(stream) = self.stream_or_callers(caller, given).await {
-            return Ok(stream);
-        }
-        self.services
-            .streams
-            .list_streams()
-            .await
-            .map_err(internal)?
-            .into_iter()
-            .find(|s| s.kind == oxplow_domain::StreamKind::Primary)
-            .map(|s| s.id.to_string())
-            .ok_or_else(|| McpError::invalid_params("this project has no stream", None))
-    }
-
-    async fn caller_stream(&self, caller: &McpCaller) -> Option<String> {
-        use oxplow_domain::stores::ThreadStore as _;
-        if let Some(s) = caller.stream_id {
-            return Some(s.to_string());
-        }
-        let thread = caller.thread_id?;
-        let t = self.services.thread_store.get(&thread).await.ok()??;
-        Some(t.stream_id.to_string())
-    }
-
-    /// `diff` as `caller`: a stream the call doesn't name is the caller's.
-    pub async fn diff_as(
-        &self,
-        caller: &McpCaller,
-        mut p: DiffParams,
+        id: &str,
+        input: serde_json::Value,
     ) -> Result<CallToolResult, McpError> {
-        check_optional_stream("diff", p.stream_id.as_deref())?;
-        p.stream_id = self.stream_or_callers(caller, p.stream_id.take()).await;
-        let to = parse_revision(&p.to)?;
-        let mut from = p.from.as_deref().map(parse_revision).transpose()?;
-        let sid = p.stream_id.as_deref();
-        if p.since_fork {
-            let Some(base) = &from else {
-                return Err(McpError::invalid_params("since_fork needs `from`", None));
-            };
-            let head = oxplow_domain::vcs::Revision::from_rev_slot(Some("git:HEAD"))
-                .map_err(|e| McpError::invalid_params(e, None))?;
-            let fork_of = if to == oxplow_domain::vcs::Revision::Working {
-                &head
-            } else {
-                &to
-            };
-            from = oxplow_app::vcs::reads::merge_base(&self.services, sid, base, fork_of)
-                .await
-                .map_err(domain_err)?;
-        }
-        let ws = self.services.worktrees.resolve(sid).await.into_local_path();
-        let entries = self
+        let actor = if caller.thread_id.is_some() {
+            self.verified_actor(caller).await?
+        } else {
+            caller.actor()
+        };
+        let outcome = self
             .services
-            .trees
-            .diff(&ws, from.as_ref(), &to)
+            .commands
+            .run(&actor, id, input, false)
             .await
-            .map_err(domain_err)?;
-        json_result(&entries)
+            .map_err(command_error)?;
+        match outcome.result {
+            serde_json::Value::String(text) => {
+                Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+            }
+            other => json_result(&other),
+        }
     }
 
     /// `run_command` for a known caller. Refuses an anonymous connection:
@@ -2435,6 +1341,7 @@ mod tests {
     )]
 
     use super::*;
+    use oxplow_app::commands::agent_reads::ai::{AiQuestionParam, AI_TEXT_MAX};
 
     /// tsk203: every registered tool must be classified read XOR write, so a new
     /// tool can't slip in un-annotated (a write mis-marked read is a safety bug;
@@ -2544,7 +1451,7 @@ mod tests {
     /// `thread`'s list, else the backlog: its id.
     async fn file_task(
         services: &Services,
-        thread: Option<ThreadId>,
+        thread: Option<oxplow_domain::ThreadId>,
         title: &str,
     ) -> oxplow_tasks::TaskId {
         let mut input = serde_json::json!({ "title": title });
@@ -2584,9 +1491,12 @@ mod tests {
 
         let none: serde_json::Value = serde_json::from_str(&text_payload(
             server
-                .get_open_page(Parameters(ThreadIdParams {
-                    thread_id: tid.clone(),
-                }))
+                .get_open_page(
+                    rmcp::model::Extensions::default(),
+                    Parameters(OpenPageInput {
+                        thread_id: tid.clone(),
+                    }),
+                )
                 .await
                 .unwrap(),
         ))
@@ -2621,7 +1531,10 @@ mod tests {
         );
         let open: serde_json::Value = serde_json::from_str(&text_payload(
             server
-                .get_open_page(Parameters(ThreadIdParams { thread_id: tid }))
+                .get_open_page(
+                    rmcp::model::Extensions::default(),
+                    Parameters(OpenPageInput { thread_id: tid }),
+                )
                 .await
                 .unwrap(),
         ))
@@ -2679,7 +1592,7 @@ mod tests {
             server
                 .read(
                     rmcp::model::Extensions::new(),
-                    Parameters(ReadParams {
+                    Parameters(ReadInput {
                         reference: "lens:demo/streams".into(),
                         stream: None,
                     }),
@@ -2700,7 +1613,7 @@ mod tests {
                     server
                         .run_lens(
                             rmcp::model::Extensions::new(),
-                            Parameters(RunLensParams {
+                            Parameters(RunLensInput {
                                 id: "demo/streams".into(),
                                 params: Some(
                                     [("kind".to_string(), serde_json::json!("primary"))]
@@ -2732,7 +1645,7 @@ mod tests {
         let err = server
             .read(
                 rmcp::model::Extensions::new(),
-                Parameters(ReadParams {
+                Parameters(ReadInput {
                     reference: "lens:demo/nope".into(),
                     stream: None,
                 }),
@@ -2765,11 +1678,14 @@ mod tests {
         let (_proj, _services, server) = boot().await;
         let out: serde_json::Value = serde_json::from_str(&text_payload(
             server
-                .query_sql(Parameters(QuerySqlParams {
-                    sql: "SELECT kind FROM v_stream WHERE kind = ?1".into(),
-                    params: Some(vec![serde_json::json!("primary")]),
-                    limit: Some(5),
-                }))
+                .query_sql(
+                    rmcp::model::Extensions::default(),
+                    Parameters(QuerySqlInput {
+                        sql: "SELECT kind FROM v_stream WHERE kind = ?1".into(),
+                        params: Some(vec![serde_json::json!("primary")]),
+                        limit: Some(5),
+                    }),
+                )
                 .await
                 .unwrap(),
         ))
@@ -2778,11 +1694,14 @@ mod tests {
         assert_eq!(out["rows"], serde_json::json!([["primary"]]));
 
         let err = server
-            .query_sql(Parameters(QuerySqlParams {
-                sql: "DELETE FROM task".into(),
-                params: None,
-                limit: None,
-            }))
+            .query_sql(
+                rmcp::model::Extensions::default(),
+                Parameters(QuerySqlInput {
+                    sql: "DELETE FROM task".into(),
+                    params: None,
+                    limit: None,
+                }),
+            )
             .await
             .unwrap_err();
         assert!(
@@ -2793,11 +1712,14 @@ mod tests {
         // The catalog is SQL too: every model's columns are documented.
         let cols: serde_json::Value = serde_json::from_str(&text_payload(
             server
-                .query_sql(Parameters(QuerySqlParams {
-                    sql: "SELECT name FROM v_model_column WHERE view = 'v_work_item'".into(),
-                    params: None,
-                    limit: None,
-                }))
+                .query_sql(
+                    rmcp::model::Extensions::default(),
+                    Parameters(QuerySqlInput {
+                        sql: "SELECT name FROM v_model_column WHERE view = 'v_work_item'".into(),
+                        params: None,
+                        limit: None,
+                    }),
+                )
                 .await
                 .unwrap(),
         ))
@@ -2840,11 +1762,14 @@ mod tests {
             .unwrap();
 
         let r = server
-            .list_comments(Parameters(ListCommentsParams {
-                scope: Some("stream".into()),
-                id: Some(stream.to_string()),
-                status: None,
-            }))
+            .list_comments(
+                rmcp::model::Extensions::new(),
+                Parameters(ListCommentsParams {
+                    scope: Some("stream".into()),
+                    id: Some(stream.to_string()),
+                    status: None,
+                }),
+            )
             .await
             .unwrap();
         let body = text_payload(r);
@@ -2871,12 +1796,15 @@ mod tests {
             .id
             .to_string();
         let err = server
-            .code_hover(Parameters(CodePositionParams {
-                stream_id,
-                path: "src/x.rs".into(),
-                line: 1,
-                col: 1,
-            }))
+            .code_hover(
+                rmcp::model::Extensions::new(),
+                Parameters(CodePositionParams {
+                    stream_id,
+                    path: "src/x.rs".into(),
+                    line: 1,
+                    col: 1,
+                }),
+            )
             .await
             .unwrap_err();
         let msg = err.to_string();
@@ -2923,18 +1851,24 @@ mod tests {
     async fn get_skill_returns_a_skill_body() {
         let (_proj, _svc, server) = boot().await;
         let r = server
-            .get_skill(Parameters(GetSkillParams {
-                name: "oxplow-extension".into(),
-                reference: None,
-            }))
+            .get_skill(
+                rmcp::model::Extensions::default(),
+                Parameters(GetSkillParams {
+                    name: "oxplow-extension".into(),
+                    reference: None,
+                }),
+            )
             .await
             .unwrap();
         assert!(text_payload(r).contains("# Building oxplow lenses"));
         let err = server
-            .get_skill(Parameters(GetSkillParams {
-                name: "nope".into(),
-                reference: None,
-            }))
+            .get_skill(
+                rmcp::model::Extensions::default(),
+                Parameters(GetSkillParams {
+                    name: "nope".into(),
+                    reference: None,
+                }),
+            )
             .await
             .unwrap_err();
         assert!(err.message.contains("oxplow-extension"), "{err:?}");
@@ -2947,18 +1881,24 @@ mod tests {
             .expect("a skill with reference files");
         let reference = &skill.references[0];
         let r = server
-            .get_skill(Parameters(GetSkillParams {
-                name: skill.name.clone(),
-                reference: Some(reference.name.clone()),
-            }))
+            .get_skill(
+                rmcp::model::Extensions::default(),
+                Parameters(GetSkillParams {
+                    name: skill.name.clone(),
+                    reference: Some(reference.name.clone()),
+                }),
+            )
             .await
             .unwrap();
         assert_eq!(text_payload(r), reference.body);
         let err = server
-            .get_skill(Parameters(GetSkillParams {
-                name: skill.name.clone(),
-                reference: Some("nope".into()),
-            }))
+            .get_skill(
+                rmcp::model::Extensions::default(),
+                Parameters(GetSkillParams {
+                    name: skill.name.clone(),
+                    reference: Some("nope".into()),
+                }),
+            )
             .await
             .unwrap_err();
         assert!(err.message.contains(&reference.name), "{err:?}");
@@ -3068,7 +2008,7 @@ mod tests {
                 server
                     .read(
                         rmcp::model::Extensions::new(),
-                        Parameters(ReadParams {
+                        Parameters(ReadInput {
                             reference: format!("work_item:oxplow:{id}"),
                             stream: None,
                         }),
@@ -3164,43 +2104,6 @@ mod tests {
         );
     }
 
-    /// The services a script may use, as the reference describes them:
-    /// each with its builtins, whether a person approves it, and the runs
-    /// that may use it.
-    #[tokio::test]
-    async fn list_services_describes_what_a_script_may_use() {
-        let (_proj, _services, server) = boot().await;
-        let listed = server.list_services().await.unwrap();
-        let text = listed.content[0].as_text().unwrap().text.clone();
-        let services: Vec<serde_json::Value> = serde_json::from_str(&text).unwrap();
-        let ai = services
-            .iter()
-            .find(|s| s["scope"] == "ai.compute")
-            .unwrap();
-        assert_eq!(ai["approval"], true);
-        assert_eq!(ai["modes"], serde_json::json!(["external"]));
-        assert!(ai["builtins"]
-            .as_array()
-            .unwrap()
-            .contains(&serde_json::json!("ai_classify")));
-        let scopes: Vec<&str> = services
-            .iter()
-            .map(|s| s["scope"].as_str().unwrap())
-            .collect();
-        assert_eq!(
-            scopes,
-            [
-                "jobs.read",
-                "extension_config.read",
-                "state.read",
-                "sql.read",
-                "tree.read",
-                "ai.compute",
-                "ai.discover"
-            ]
-        );
-    }
-
     #[tokio::test]
     async fn run_command_refuses_an_anonymous_connection_and_lists_for_agents() {
         let (_proj, _services, server) = boot().await;
@@ -3277,8 +2180,8 @@ mod tests {
             assert_eq!(keys, ["id", "summary"], "{entry}");
         }
         let size = serde_json::to_string(&index).unwrap().len();
-        // Fetched on demand, not every turn: ~3K tokens (every full spec was 164 KB).
-        assert!(size < 14_000, "the index is {size} bytes");
+        // Fetched on demand, not every turn: ~4K tokens (every full spec was 164 KB).
+        assert!(size < 17_000, "the index is {size} bytes");
         // A summary is cut at its first sentence; the command shows it whole.
         assert_eq!(
             first_sentence("Open a slot (`thread:thr1`). It starts nothing, e.g. no process."),
@@ -3540,7 +2443,7 @@ mod tests {
         let out = server
             .read(
                 extensions_for(parts_as(thread.id, other_id, &[])),
-                Parameters(ReadParams {
+                Parameters(ReadInput {
                     reference: "file:who.txt".into(),
                     stream: None,
                 }),
@@ -3553,7 +2456,7 @@ mod tests {
         let out = server
             .read(
                 extensions_for(parts_as(thread.id, other_id, &[])),
-                Parameters(ReadParams {
+                Parameters(ReadInput {
                     reference: "file:who.txt".into(),
                     stream: Some(oxplow_domain::refs::build::stream_ref(primary.id)),
                 }),
@@ -3565,7 +2468,7 @@ mod tests {
         let bad = server
             .read(
                 extensions_for(parts_as(thread.id, other_id, &[])),
-                Parameters(ReadParams {
+                Parameters(ReadInput {
                     reference: "file:who.txt".into(),
                     stream: Some("str1".into()),
                 }),
@@ -3676,10 +2579,13 @@ mod tests {
             .unwrap();
         // The file IS referenced but has no pin (no snapshot service in tests).
         let r = server
-            .wiki_ref_drift(Parameters(WikiRefDriftParams {
-                slug: "intro".into(),
-                path: "crates/foo.rs".into(),
-            }))
+            .wiki_ref_drift(
+                rmcp::model::Extensions::new(),
+                Parameters(WikiRefDriftParams {
+                    slug: "intro".into(),
+                    path: "crates/foo.rs".into(),
+                }),
+            )
             .await
             .unwrap();
         let body = text_payload(r);
@@ -3687,110 +2593,19 @@ mod tests {
         assert!(body.contains("no_pin"), "expected no_pin: {body}");
         // A path the page doesn't reference at all.
         let r2 = server
-            .wiki_ref_drift(Parameters(WikiRefDriftParams {
-                slug: "intro".into(),
-                path: "crates/zzz.rs".into(),
-            }))
+            .wiki_ref_drift(
+                rmcp::model::Extensions::new(),
+                Parameters(WikiRefDriftParams {
+                    slug: "intro".into(),
+                    path: "crates/zzz.rs".into(),
+                }),
+            )
             .await
             .unwrap();
         assert!(text_payload(r2).contains("not_a_ref"));
     }
 
     // ---- Pure helpers: parse_status / parse_priority ----
-
-    // ---- expect_id_kind ----
-
-    #[test]
-    fn expect_id_kind_accepts_matching_prefix() {
-        assert!(expect_id_kind("tool", "thread_id", "thr123", ID_THREAD).is_ok());
-    }
-
-    #[test]
-    fn expect_id_kind_error_names_tool_param_value_and_kinds() {
-        // A stream id passed where a thread id was expected.
-        let err = expect_id_kind("read_at", "thread_id", "str123", ID_THREAD).unwrap_err();
-        let msg = err.message.to_string();
-        assert!(msg.contains("read_at"), "tool name missing: {msg}");
-        assert!(msg.contains("thread_id"), "param name missing: {msg}");
-        assert!(msg.contains("str123"), "value missing: {msg}");
-        assert!(msg.contains("stream id"), "actual label missing: {msg}");
-        assert!(msg.contains("thread id"), "expected label missing: {msg}");
-    }
-
-    #[test]
-    fn expect_id_kind_unrecognised_id_shape_errors() {
-        // No `<prefix><int>` shape at all — should still be flagged.
-        let err = expect_id_kind("tool", "id", "no-prefix-shape", ID_THREAD).unwrap_err();
-        let msg = err.message.to_string();
-        assert!(msg.contains("no-prefix-shape"), "value missing: {msg}");
-    }
-
-    // ---- resolve_comment_scope ----
-
-    #[test]
-    fn resolve_comment_scope_infers_thread_from_id() {
-        let scope = resolve_comment_scope(None, Some("thr7")).unwrap();
-        assert_eq!(scope, CommentScope::Thread(ThreadId::new(7)));
-    }
-
-    #[test]
-    fn resolve_comment_scope_infers_stream_from_id() {
-        let scope = resolve_comment_scope(None, Some("str3")).unwrap();
-        assert_eq!(scope, CommentScope::Stream(StreamId::new(3)));
-    }
-
-    #[test]
-    fn resolve_comment_scope_honors_explicit_scope() {
-        assert_eq!(
-            resolve_comment_scope(Some("thread"), Some("thr1")).unwrap(),
-            CommentScope::Thread(ThreadId::new(1))
-        );
-        assert_eq!(
-            resolve_comment_scope(Some("stream"), Some("str1")).unwrap(),
-            CommentScope::Stream(StreamId::new(1))
-        );
-    }
-
-    #[test]
-    fn resolve_comment_scope_explicit_scope_rejects_mismatched_id() {
-        // scope says thread but a stream id was passed → friendly error.
-        let err = resolve_comment_scope(Some("thread"), Some("str1")).unwrap_err();
-        let msg = err.message.to_string();
-        assert!(msg.contains("list_comments"), "tool name missing: {msg}");
-        assert!(msg.contains("thread id"), "expected kind missing: {msg}");
-    }
-
-    #[test]
-    fn resolve_comment_scope_missing_id_is_friendly() {
-        let err = resolve_comment_scope(Some("thread"), None).unwrap_err();
-        let msg = err.message.to_string();
-        assert!(msg.contains("list_comments"), "tool name missing: {msg}");
-        assert!(msg.contains("`id`"), "names the missing param: {msg}");
-        // Blank/whitespace id is treated the same as missing.
-        assert!(resolve_comment_scope(None, Some("   ")).is_err());
-    }
-
-    #[test]
-    fn resolve_comment_scope_uninferable_id_is_friendly() {
-        // A valid-but-wrong-kind id (task) can't pick a scope.
-        let err = resolve_comment_scope(None, Some("tsk9")).unwrap_err();
-        let msg = err.message.to_string();
-        assert!(msg.contains("infer"), "explains it couldn't infer: {msg}");
-        assert!(msg.contains("scope"), "names scope as the fix: {msg}");
-        // A garbage id is likewise uninferable, not a transport error.
-        assert!(resolve_comment_scope(None, Some("nonsense")).is_err());
-    }
-
-    #[test]
-    fn resolve_comment_scope_unknown_scope_string_is_friendly() {
-        let err = resolve_comment_scope(Some("workspace"), Some("str1")).unwrap_err();
-        let msg = err.message.to_string();
-        assert!(msg.contains("workspace"), "echoes the bad value: {msg}");
-        assert!(
-            msg.contains("\"thread\"") && msg.contains("\"stream\""),
-            "lists valid scopes: {msg}"
-        );
-    }
 
     /// Point the in-memory services' `role` at a mock provider at `base`.
     fn assign_mock_role(services: &Services, base: String, role: &str) {

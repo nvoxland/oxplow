@@ -233,6 +233,30 @@ See [extensions.md](./extensions.md) "Private state host boundary".
 | `record` | changes oxplow's own records | yes | any thread |
 | `write` | changes files, git, processes, the configuration | yes | its stream's writer thread only |
 
+**The agent's reads are read scopes.** Every read an agent has beyond
+`query_sql`'s models is an operation of a read scope (`Access::Read`,
+`Host::Daemon`, an `External` handler over live state), in
+`crates/oxplow-app/src/commands/agent_reads/`, declared in
+`oxplow-foundation` as `oxplow.<area>.<verb>` with `invokers` agent, human
+and lens and an `example:`: `records.read/read` (`oxplow.records.read`, a
+ref's content), `sql.read/query` (`oxplow.sql.query`), `search.read/search`
+(`oxplow.search.find`), `pages.read/open` (`oxplow.page.open`),
+`agent_text.read/skill` (`oxplow.skill.read`), `lenses.read/run`
+(`oxplow.lens.run`: the lens's text, or the `LensRun` with `format: json`),
+`vcs.read/{diff,blame}`, `lsp.read/*` (`oxplow.code.*`),
+`changes.read/ensure` (`oxplow.change.ensure`: it writes only the derived
+change cache, so it stays a read), `knowledge.read/{comments,drift}`,
+`extensions.check/{validate,preview,review}` (a review clones the
+candidate into `.oxplow/tmp`; it changes no record),
+`collectors.preview/preview`, and `ai.compute/{decide,summarize}` (recorded
+calls whose caller is the asking thread). `lenses.write/run_action`
+(`oxplow.lens.run_action`) is a `record` that composes, running as the
+lens's actor. A read runs unrecorded, for any thread, and the operation
+reads the stream it names, else the actor's own
+(`agent_reads::stream_or_actors`). The `v_scope` live model lists every
+scope (id, access, host, summary). The MCP tools that carried these
+reads are thin calls to the commands (`OxplowMcp::read_command`).
+
 A command's access is the strongest among the scopes it needs
 (`strongest_access`): a `view` or a `read` runs unrecorded, a `record` or
 a `write` is audited. The access says what a run changes, not where its

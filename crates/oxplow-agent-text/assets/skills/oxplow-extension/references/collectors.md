@@ -109,7 +109,8 @@ to a read-only SQL query:
   ```
 
 **Host services.** A Starlark script reaches oxplow only through the
-services it lists in `needs:`. `list_services` (MCP) describes them:
+services it lists in `needs:` (`v_scope` lists every scope with its access
+and summary):
 
 - `sql.read`: `scope("sql.read", {sql, params?, page?})`, read-only SQL
   over the `v_*` models.

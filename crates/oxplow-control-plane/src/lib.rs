@@ -98,6 +98,8 @@ pub async fn spawn(services: Arc<Services>) -> Result<ControlPlane, ControlPlane
     };
 
     let mcp_services = services.clone();
+    // The extension checks live in the SDK; this host links it.
+    oxplow_mcp::install_extension_checks(&services);
 
     // rmcp's StreamableHttpService is a tower::Service<Request>.
     // Mount it under /mcp via `any_service`. The factory closure runs

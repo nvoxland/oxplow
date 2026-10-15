@@ -129,7 +129,7 @@ impl EffectTriggers {
 pub fn register(svc: &Arc<Services>) {
     svc.event_pump
         .register_async(Arc::new(EffectTriggers::new(Arc::downgrade(svc))));
-    svc.effect_services.fill(svc);
+    svc.services_slot.fill(svc);
 }
 
 /// The enabled extensions' effects, in the primary worktree (where, like

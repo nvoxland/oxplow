@@ -218,6 +218,26 @@ commands:
     scope: agent_sessions.write
     op: stop
     invokers: { human: true, agent: false, lens: false }
+  # agent_text.read
+  - name: skill.read
+    summary: "Read one of oxplow's skills (its SKILL.md). It says how to do a kind of oxplow work, e.g. `oxplow-extension` for building lenses. A skill sends you to `references/<name>.md` for detail: pass that `<name>` as `reference`. For agents that don't load skill files themselves; your instructions list the names."
+    scope: agent_text.read
+    op: skill
+    invokers: { human: true, agent: true, lens: true }
+    example: {"name": "oxplow-extension", "reference": "lenses"}
+  # ai.compute
+  - name: ai.decide
+    summary: "Ask a model a typed question about some text. Yes/no (`noul`, returns the probability of yes), `choice` among options, or `score` on ordered levels, each with probabilities, on the `decide` role. Good for second opinions like \"is this diff risky?\". Recorded (as the asking thread's call): the same questions on the same text are answered once (`cached`). Fails if the role has no model; the person assigns one in Settings → AI."
+    scope: ai.compute
+    op: decide
+    invokers: { human: true, agent: true, lens: true }
+    example: {"state": "<a diff>", "questions": {"risky": {"type": "noul", "instructions": "Does this change alter public behavior?"}}}
+  - name: ai.summarize
+    summary: "Summarize text with the `summarize` role. A model the person configured in Settings → AI, optionally with a focus. Useful for long logs or documents you don't need verbatim. Recorded (as the asking thread's call): the same text and focus are summarized once."
+    scope: ai.compute
+    op: summarize
+    invokers: { human: true, agent: true, lens: true }
+    example: {"text": "<a long log>", "focus": "risks"}
   # bookmarks.write — a person's navigation, not the agent's.
   - name: bookmark.set
     summary: "Bookmark a page at a scope (`thread`, `stream` or `project`), moving it there if it's bookmarked at another."
@@ -229,6 +249,20 @@ commands:
     scope: bookmarks.write
     op: remove
     invokers: { human: true, agent: false, lens: true }
+  # changes.read
+  - name: change.ensure
+    summary: "Analyze a change and return its row (`v_change`). A commit vs its parent, an effort (start → end), or a stream's uncommitted work vs HEAD. Then read the analysis with query_sql: v_change_file (files, zones), v_oxplow_bundled_change_interest (look-here-first scores, when oxplow-bundled is on), v_change_function (added/deleted/modified functions, deltas, churn), v_change_import (cross-zone imports), v_oxplow_bundled_change_co_change (files whose usual partners are missing, or that were dormant; oxplow-bundled), v_change_duplicate (copied blocks; arrives a little later). Cached: commits and closed efforts are analyzed once. It fills a derived cache and changes no record."
+    scope: changes.read
+    op: ensure
+    invokers: { human: true, agent: true, lens: true }
+    example: {"kind": "commit", "sha": "HEAD"}
+  # collectors.preview
+  - name: collector.preview
+    summary: "Dry-run a collector, storing nothing. Returns what it would store from a stream's worktree: an entity collector's rows (first 50 per entity, coerced to the declared columns), or a fact collector's (`facts:`) facts as `{ owner, id, facts: [{ measure, value, subject, … }] }`, computed over the stream's latest snapshot (a collector that reads `input` rows is previewed through an example: `oxplow extension test`). Use it to check a collector you're writing, especially in a worktree stream: oxplow.collector.sync always runs the primary's copy, and collected data is project-wide. Pass `event` (`{ type, payload, anchors? }`) to preview an `on:` collector on the event it reacts to. An exec collector still needs a person's approval of that exact version; starlark/jaq collectors run without it."
+    scope: collectors.preview
+    op: preview
+    invokers: { human: true, agent: true, lens: true }
+    example: {"owner": "work", "id": "hot"}
   # collectors.sync
   - name: collector.sync
     summary: "Run an approved collector now, refreshing what it collects (runs the collector's program or script, which the bus doesn't own). It never approves: an unapproved exec collector is refused. A project report collector (`records:`) reads its report now and records what it parses in `thread` (an agent's own): point at the report, never report numbers yourself."
@@ -430,6 +464,25 @@ commands:
     scope: jobs.manage
     op: cancel
     invokers: { human: true, agent: false, lens: true }
+  # extensions.check
+  - name: extension.preview
+    summary: "Preview a whole extension in a throwaway oxplow. What `oxplow extension test` runs, never touching this project's data. It checks the extension, activates it with the project's other extensions, and runs every intent example that has a fixture — lenses, collectors, commands, effects, events, jobs and components — with model calls answered by the fixture's replies, never a real provider. Returns `{ ok, errors, warnings, ran, … }`; run it after `oxplow.extension.validate` and before handing the extension over."
+    scope: extensions.check
+    op: preview
+    invokers: { human: true, agent: true, lens: true }
+    example: {"name": "my-extension"}
+  - name: extension.review
+    summary: "Review an extension before installing (`git_url`) or updating (`name`) it. Clones it (into .oxplow/tmp, changing no record) and report what it would bring in, installing nothing: the extension as it would load (lenses, sources with the programs they run, the hosts they reach and the credentials they read, advisories, collectors; `errors` block the install), the commit `sha`, and `problems` a dry run of its lenses found. Show the person what it declares and get their go-ahead, then pass `sha` as `reviewed_sha` to the `oxplow.extension.install` / `oxplow.extension.update` commands (a person approves them)."
+    scope: extensions.check
+    op: review
+    invokers: { human: true, agent: true, lens: true }
+    example: {"git_url": "https://github.com/acme/oxplow-pr-triage"}
+  - name: extension.validate
+    summary: "Check an extension after editing it. The same report as `oxplow extension check`: manifest and lifecycle errors with file:line, unresolved cross-references, plus a dry run of every lens and advisory (SQL errors, `columns` keys the query doesn't return). `ok: true` means it works; `warnings` are worth fixing but don't block."
+    scope: extensions.check
+    op: validate
+    invokers: { human: true, agent: true, lens: true }
+    example: {"name": "my-extension"}
   # extensions.enable
   - name: contribution.enable
     summary: "Enable a disabled extension provider, collector or effect on this machine again, clearing an automatic disable (a provider's process restarts, a system the bus doesn't own)."
@@ -478,6 +531,19 @@ commands:
     scope: hints.write
     op: dismiss
     invokers: { human: true, agent: false, lens: true }
+  # knowledge.read
+  - name: knowledge.comments
+    summary: "List comments. Threaded annotations the user anchored to a text selection in a page (wiki body, code file line, task detail). `id` is a thread (`thr…`) or stream (`str…`) id; `scope` is inferred from its prefix, so usually pass only `id`. `status` filters: \"all\" (default), \"open\", or \"needs_response\" (open follow-ups whose latest message isn't yours — what the user wants you to act on). Each result carries the anchored `quote`, the message thread, and `intent` (note vs followup). Reply with `oxplow.knowledge.reply_comment { comment, body }`; resolve with `oxplow.knowledge.update_comment { comment, status: \"resolved\" }`."
+    scope: knowledge.read
+    op: comments
+    invokers: { human: true, agent: true, lens: true }
+    example: {"id": "str1", "status": "needs_response"}
+  - name: knowledge.drift
+    summary: "What a wiki page's file ref drifted. The unified diff between the snapshot the ref was pinned to and the file's CURRENT on-disk content — so you can read just what drifted instead of re-opening the whole file. Find the drifted refs with `oxplow.sql.query` over `v_knowledge_ref` (`stale = 1`; per page, `v_knowledge_page.stale_ref_count`), then call this per ref. Returns `{ slug, path, pinned_snapshot_id, status, unified_diff, truncated }`; `status` is one of drifted | unchanged | not_a_ref | no_pin | binary | no_contents (the pin was taken by 'Track changes only', which keeps no text)."
+    scope: knowledge.read
+    op: drift
+    invokers: { human: true, agent: true, lens: true }
+    example: {"slug": "architecture", "path": "crates/oxplow-app/src/lib.rs"}
   # knowledge.write
   - name: knowledge.add_comment
     summary: "Comment on a span of a page (its `target`), with a first message. `intent`: `note` (the agent leaves it alone) or `followup` (the agent should act on it). An agent comments on its own stream, in its own thread."
@@ -545,6 +611,13 @@ commands:
     op: write_page
     invokers: { human: true, agent: true, lens: true }
     example: {"slug": "auth-flow", "title": "Auth flow", "body": "# Auth flow\n\nThe callback validates `next` before redirecting. See [[src/auth.rs]].", "verified_refs": ["src/auth.rs"]}
+  # lenses.read
+  - name: lens.run
+    summary: "Run a lens and read what the human sees on its page. By default its text rendering (a table, a chart's series, a grid's children) plus the resolved params, columns, row count and alert; `format: \"json\"` returns the raw rows instead. Override params by name; the rest use defaults."
+    scope: lenses.read
+    op: run
+    invokers: { human: true, agent: true, lens: true }
+    example: {"id": "review/waiting", "params": {"state": "todo"}}
   # lenses.show
   - name: lens.show
     summary: "Show the person an answer in their thread: an existing lens with params, or a lens of your own (title, query, viz). It renders beside the conversation, where they can keep it."
@@ -559,6 +632,12 @@ commands:
     op: keep
     invokers: { human: true, agent: true, lens: true }
     example: {"spec": {"title": "Open tasks", "query": "SELECT ref, title, state FROM v_work_item WHERE state = 'todo' ORDER BY rank", "viz": "table"}, "extension": "my-lenses"}
+  - name: lens.run_action
+    summary: "Run one of a lens's actions as the lens acting for you. Its actions are in `read` of `lens:<ext>/<slug>` → `actions`; the command it declares is run as the lens acting for you — so the same rules apply as if you ran the command yourself (a command you can't run, or one that needs a person's confirmation, is refused). A row action (`row: true`) needs the `row` it runs on. Returns the command's outcome."
+    scope: lenses.write
+    op: run_action
+    invokers: { human: true, agent: true, lens: true }
+    example: {"id": "review/waiting", "action": "finish", "params": {"item": "work_item:oxplow:tsk12"}}
   - name: lens.share
     summary: "Move a private lens into a shared extension (created shared when missing), refused unless it passes the shared checks; committing it is how the team gets it."
     scope: lenses.write
@@ -579,6 +658,43 @@ commands:
     invokers: { human: true, agent: true, lens: true }
     confirm: always
     example: {"package": "rust-analyzer"}
+  # lsp.read
+  - name: code.definition
+    summary: "Where a symbol is defined. Typed locations (`{ path, range: { start: { line, col }, end } }`, 1-based; paths workspace-relative, absolute outside it), from the file's language server. `v_lsp_server` says which languages have one."
+    scope: lsp.read
+    op: definition
+    invokers: { human: true, agent: true, lens: true }
+    example: {"stream_id": "str1", "path": "src/lib.rs", "line": 10, "col": 5}
+  - name: code.references
+    summary: "Every reference to a symbol. Typed locations (1-based) at a position, the declaration included unless `include_declaration` is false."
+    scope: lsp.read
+    op: references
+    invokers: { human: true, agent: true, lens: true }
+    example: {"stream_id": "str1", "path": "src/lib.rs", "line": 10, "col": 5}
+  - name: code.hover
+    summary: "A position's hover. The symbol's type/signature and docs, as markdown (`{ contents, range }`), or null."
+    scope: lsp.read
+    op: hover
+    invokers: { human: true, agent: true, lens: true }
+    example: {"stream_id": "str1", "path": "src/lib.rs", "line": 10, "col": 5}
+  - name: code.call_hierarchy
+    summary: "A symbol's callers or callees. The callers (`direction: incoming`) or callees (`outgoing`): each `{ symbol, at }` — the caller/callee and where the calls are. [] when the position has no call-hierarchy item."
+    scope: lsp.read
+    op: call_hierarchy
+    invokers: { human: true, agent: true, lens: true }
+    example: {"stream_id": "str1", "path": "src/lib.rs", "line": 10, "col": 5, "direction": "incoming"}
+  - name: code.symbols
+    summary: "The symbols a file declares. Functions, classes, methods, modules, …), nested ones naming their container, as `{ source, symbols }`. `source` says what answered: `language_server` (any configured language whose server runs; `{ name, kind, container, location }`) or `tree_sitter` (no server serves the file, so oxplow's own offline analysis reads the file's live content, the uncommitted edits included; `{ kind, name, containerPath, startLine, endLine }`, empty for an unsupported or unparseable file). `v_symbol` holds the stored symbols of captured files."
+    scope: lsp.read
+    op: symbols
+    invokers: { human: true, agent: true, lens: true }
+    example: {"path": "src/lib.rs"}
+  - name: code.workspace_symbols
+    summary: "Find symbols by name across the workspace. Fuzzy, server-defined, from one language's running server: typed symbols with their locations. Use to find a definition by name without a file/position. Needs a running server (`v_lsp_server`); without one, search the stored symbols in `v_symbol`."
+    scope: lsp.read
+    op: workspace_symbols
+    invokers: { human: true, agent: true, lens: true }
+    example: {"language": "rust", "query": "Services"}
   # metrics.read
   - name: metric.scaffold
     summary: "A starter for a new metric, as a private extension; writes nothing. Returns `name`, `dir` (`oxplow/extensions/<name>`) and `files`, each with its project-relative path: the extension.yaml (a measure, a Starlark fact collector, the metric), the collector script, a lens and an example with its fixture. Write them with your own tools, then check it (`validate_extension`); its collector runs only once a person approves it. `oxplow.metric.enable` turns the metric on or off in .oxplow/project.yaml."
@@ -605,6 +721,13 @@ commands:
     op: record
     invokers: { human: true, agent: true, lens: true }
     example: {"key": "complex_fns.count", "value": 12, "subject": "file:src/auth.rs"}
+  # pages.read
+  - name: page.open
+    summary: "What the human is looking at right now in a thread. The open page's id (`task:42`, `file:src/a.rs`, `lens:review/waiting`, …), its kind and page detail. When it's a lens, `lens` is that lens re-run with the human's current params, as text: exactly what is on their screen. Use it when the user says \"this\", \"what I'm looking at\" or \"this lens\". `open` is null when nothing has been reported."
+    scope: pages.read
+    op: open
+    invokers: { human: true, agent: true, lens: true }
+    example: {"thread_id": "thr3"}
   # projects.write — the app shell's; a person's.
   - name: project.create
     summary: "Pick a folder and create a project in it, opened in a new window. A folder that already is a project is refused."
@@ -632,6 +755,27 @@ commands:
     invokers: { human: true, agent: true, lens: true }
     lifecycle: experimental
     example: {"instance": "issues/issues"}
+  # records.read
+  - name: records.read
+    summary: "Read what a ref names. Its model's row (every column), what sits beside it (a work item's links and comments, a commit's or an effort's files) and, for a body no model holds, its content. `file:src/a.rs` reads the working tree; `file:src/a.rs@git:HEAD#L10-40` a revision's lines (`@snap:<id>` a local-history snapshot); `event:<id>#output` (or `#input`, `#prompt`) one of your stream's events' stored bodies; `lens:<ext>/<slug>` a lens's definition; `stream` reads a file or lens in another stream's worktree. `ai_call:<id>#request` (or `#response`) a recorded model call's bodies. Any `ref` a model's column holds reads the same way (`work_item:…`, `commit:…`, `effort:…`, `thread:…`, `wiki:…`). Content stops at 64 KB, saying so."
+    scope: records.read
+    op: read
+    invokers: { human: true, agent: true, lens: true }
+    example: {"ref": "file:src/auth.rs@git:HEAD#L10-40"}
+  # search.read
+  - name: search.find
+    summary: "Site-wide BM25 search across tasks, comments, notes, wiki pages and file contents. Tokens match as stemmed prefixes. `stream_id` scopes file/stream-bound hits to one worktree (wiki etc. always included); omit it to search everything. `kinds` optionally restricts to task|comment|note|wiki|file. Returns hits ranked best-first."
+    scope: search.read
+    op: search
+    invokers: { human: true, agent: true, lens: true }
+    example: {"query": "oauth redirect", "kinds": ["wiki", "task"], "limit": 10}
+  # sql.read
+  - name: sql.query
+    summary: "Run ONE read-only SQL statement over the published `v_*` models. It takes `SELECT`/`WITH` over the views lenses and the UI read (`v_model` lists them; physical tables are refused). Joins across views are fine. Metrics read as columns of a grid: `SELECT bucket, zone, MEASURE('<metric key>') FROM metric_grid('day'|'week'|'month'[, '<dimension>'])` (keys in v_metric_spec, dimensions in v_dimension). Positional params `?1`, `?2`, … bind from `params`. Returns `{columns, rows, truncated, reads, generation, coverage}`; rows are positional arrays; `truncated` means more rows existed than `limit`. `coverage` names the collector behind each collected model it read and how its last run stands (`current`, `stale`, `failed`, `disabled`, `needs_approval`, `never`): a complete result over a failed collector is still missing data. Writes, PRAGMA, ATTACH and multiple statements are rejected; queries time out after 5s. `v_model_column` documents every column."
+    scope: sql.read
+    op: query
+    invokers: { human: true, agent: true, lens: true }
+    example: {"sql": "SELECT ref, title, state FROM v_work_item WHERE state = ?1 LIMIT 20", "params": ["todo"]}
   # streams.write
   - name: stream.rename
     summary: "Rename a stream (`stream:str1`)."
@@ -718,6 +862,19 @@ commands:
     scope: threads.write
     op: set_prompt
     invokers: { human: true, agent: false, lens: true }
+  # vcs.read
+  - name: vcs.blame
+    summary: "Blame a file. The revision, author and time that last changed each line, at `revision` (default `working`; an uncommitted line names no revision)."
+    scope: vcs.read
+    op: blame
+    invokers: { human: true, agent: true, lens: true }
+    example: {"path": "src/lib.rs"}
+  - name: vcs.diff
+    summary: "What changed between two versions of the tree. Per file with line counts; versions are `working`, `snap:<id>` or `git:<rev>`; `from` absent diffs against the empty tree. `since_fork: true` compares `to` with where it forked from `from` — a branch's own changes against `git:main`."
+    scope: vcs.read
+    op: diff
+    invokers: { human: true, agent: true, lens: true }
+    example: {"from": "git:main", "to": "working", "since_fork": true}
   # vcs.remote
   - name: vcs.fetch
     summary: "Fetch from a remote."

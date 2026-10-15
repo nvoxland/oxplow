@@ -286,3 +286,24 @@ async fn zones_show_what_each_rule_matches_in_the_worktree() {
         "{unmatched:?}"
     );
 }
+
+/// The scopes a command can need, read from the table core ships: what
+/// each lets a run change and where it runs — the agent's way to see what
+/// `needs` can name.
+#[tokio::test]
+async fn scopes_list_what_a_command_may_need() {
+    let fx = services_with_effort().await;
+    let got = rows(
+        &fx,
+        "SELECT id, access, host FROM v_scope WHERE id IN ('records.read', 'work_items.write', 'tabs.write') ORDER BY id",
+    )
+    .await;
+    assert_eq!(
+        got,
+        [
+            vec![json!("records.read"), json!("read"), json!("daemon")],
+            vec![json!("tabs.write"), json!("view"), json!("window")],
+            vec![json!("work_items.write"), json!("record"), json!("daemon")],
+        ]
+    );
+}

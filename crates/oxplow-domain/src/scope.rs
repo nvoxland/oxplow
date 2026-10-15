@@ -103,6 +103,12 @@ pub const SCOPES: &[Scope] = &[
         summary: "Open, rename and close a thread's agent sessions. Opening one only adds the slot (the UI starts its process, and nothing types into it); closing one stops its process.",
     },
     Scope {
+        id: "agent_text.read",
+        access: Access::Read,
+        host: Host::Daemon,
+        summary: "Read oxplow's own agent text: the skills and their references, as the active implementations offer them.",
+    },
+    Scope {
         id: "ai.compute",
         access: Access::Read,
         host: Host::Daemon,
@@ -121,6 +127,18 @@ pub const SCOPES: &[Scope] = &[
         access: Access::Record,
         host: Host::Daemon,
         summary: "Star a page for a person, at a thread, stream or project, or take the star off.",
+    },
+    Scope {
+        id: "changes.read",
+        access: Access::Read,
+        host: Host::Daemon,
+        summary: "Analyze a commit's change on demand: read its per-file scopes, filling the derived change cache (it changes no record).",
+    },
+    Scope {
+        id: "collectors.preview",
+        access: Access::Read,
+        host: Host::Daemon,
+        summary: "Dry-run a collector from a stream's worktree and read what it would store, storing nothing.",
     },
     Scope {
         id: "collectors.sync",
@@ -189,6 +207,12 @@ pub const SCOPES: &[Scope] = &[
         summary: "Write an extension's private configuration through the native configuration operation.",
     },
     Scope {
+        id: "extensions.check",
+        access: Access::Read,
+        host: Host::Daemon,
+        summary: "Check an extension before it ships: validate a directory, preview what it contributes, or review a candidate (a review clones it into .oxplow/tmp; it changes no record).",
+    },
+    Scope {
         id: "extensions.enable",
         access: Access::Write,
         host: Host::Daemon,
@@ -231,10 +255,22 @@ pub const SCOPES: &[Scope] = &[
         summary: "Record intent for this extension's declared jobs or request their cancellation; execution requires its own current approval.",
     },
     Scope {
+        id: "knowledge.read",
+        access: Access::Read,
+        host: Host::Daemon,
+        summary: "Read the wiki's comments and the drift of its refs from the code they name.",
+    },
+    Scope {
         id: "knowledge.write",
         access: Access::Record,
         host: Host::Daemon,
         summary: "Write the project's wiki: pages, notes, comments and links.",
+    },
+    Scope {
+        id: "lenses.read",
+        access: Access::Read,
+        host: Host::Daemon,
+        summary: "Run a lens and read what it shows, as text or rows.",
     },
     Scope {
         id: "lenses.show",
@@ -255,6 +291,12 @@ pub const SCOPES: &[Scope] = &[
         summary: "Install or remove a language server on this machine.",
     },
     Scope {
+        id: "lsp.read",
+        access: Access::Read,
+        host: Host::Daemon,
+        summary: "Ask a stream's language servers for definitions, references, hover, call hierarchy and symbols.",
+    },
+    Scope {
         id: "metrics.read",
         access: Access::Read,
         host: Host::Daemon,
@@ -267,6 +309,12 @@ pub const SCOPES: &[Scope] = &[
         summary: "Enable, record and rebuild metrics (changes the configuration and the facts).",
     },
     Scope {
+        id: "pages.read",
+        access: Access::Read,
+        host: Host::Daemon,
+        summary: "Read the page a thread's person has open.",
+    },
+    Scope {
         id: "projects.write",
         access: Access::Write,
         host: Host::Shell,
@@ -277,6 +325,18 @@ pub const SCOPES: &[Scope] = &[
         access: Access::Record,
         host: Host::Daemon,
         summary: "Sync a provider's records into oxplow.",
+    },
+    Scope {
+        id: "records.read",
+        access: Access::Read,
+        host: Host::Daemon,
+        summary: "Read any record, file at a revision or recorded body by its ref.",
+    },
+    Scope {
+        id: "search.read",
+        access: Access::Read,
+        host: Host::Daemon,
+        summary: "Search the project: file names, symbols and text across a stream.",
     },
     Scope {
         id: "sql.read",
@@ -327,6 +387,12 @@ pub const SCOPES: &[Scope] = &[
         host: Host::Daemon,
         summary: "Read the captured tree a run is anchored to — its files, their syntax \
                   (`ast_query`), metrics and duplicate blocks — as the snapshot holds it.",
+    },
+    Scope {
+        id: "vcs.read",
+        access: Access::Read,
+        host: Host::Daemon,
+        summary: "Read the repository through its provider: diff, blame, history.",
     },
     Scope {
         id: "vcs.remote",

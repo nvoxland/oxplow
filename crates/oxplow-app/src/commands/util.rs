@@ -3,6 +3,8 @@
 //! storage error mapped so a busy database retries the run
 //! (`.context/commands.md` "`Tx` and `External`") rather than failing it.
 
+use std::sync::{Arc, OnceLock, Weak};
+
 use oxplow_domain::CommandError;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -59,6 +61,28 @@ pub fn ref_id<T: std::str::FromStr>(raw: &str, kind: &str, field: &str) -> Resul
     ref_body(raw, kind, field)?
         .parse()
         .map_err(|_| invalid(field, format!("`{raw}` isn't a {kind} ref ({kind}:<id>)")))
+}
+
+/// The services the operations that reach across them run against, filled
+/// once there is an `Arc` (`Services::fill_slot`): the operations are
+/// added while services are being built, before there is one to point at.
+#[derive(Clone, Default)]
+pub struct ServicesSlot(Arc<OnceLock<Weak<crate::Services>>>);
+
+impl ServicesSlot {
+    pub fn fill(&self, services: &Arc<crate::Services>) {
+        let _ = self.0.set(Arc::downgrade(services));
+    }
+
+    /// The services, or a refusal when they are gone (shutting down).
+    pub fn get(&self) -> Result<Arc<crate::Services>, CommandError> {
+        self.0
+            .get()
+            .and_then(Weak::upgrade)
+            .ok_or_else(|| CommandError::Failed {
+                message: "oxplow is shutting down".into(),
+            })
+    }
 }
 
 #[cfg(test)]

@@ -33,7 +33,7 @@
 //! consent. Reacting to the past exists only as `oxplow.effect.backfill`.
 
 use crate::commands::ops::Op;
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::Arc;
 
 use oxplow_db::effect_run_store::ReactionOrigin;
 use oxplow_domain::{CommandError, Confirm, DomainError, Invokers, StoredEvent};
@@ -41,7 +41,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
 
-use super::util::{invalid, parse, schema};
+use super::util::{invalid, parse, schema, ServicesSlot};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::contribution_health::ContributionHealth;
 use crate::effect_triggers::{self, run_reaction, Reacted};
@@ -370,22 +370,6 @@ pub async fn backfill(
     Ok(out)
 }
 
-/// The services the effect operations run against, filled when they
-/// start (`effect_triggers::register`): the operations are added while
-/// services are being built, before there's an `Arc` to point at.
-#[derive(Clone, Default)]
-pub struct ServicesSlot(Arc<OnceLock<Weak<Services>>>);
-
-impl ServicesSlot {
-    pub fn fill(&self, services: &Arc<Services>) {
-        let _ = self.0.set(Arc::downgrade(services));
-    }
-
-    fn get(&self) -> Option<Arc<Services>> {
-        self.0.get().and_then(Weak::upgrade)
-    }
-}
-
 /// The effect operations (`effects.run`, `effects.read`).
 pub fn ops(services: ServicesSlot) -> Vec<Op> {
     vec![
@@ -407,9 +391,7 @@ pub fn backfill_op(services: ServicesSlot) -> Op {
             Box::pin(async move {
                 let input: BackfillInput = parse(input)?;
                 let range = input.range()?;
-                let svc = services.get().ok_or_else(|| CommandError::Failed {
-                    message: "oxplow is shutting down".into(),
-                })?;
+                let svc = services.get()?;
                 let (ext, decl, _) = ready(&svc, &input.effect).await?;
                 let done = backfill(
                     &svc,
@@ -454,9 +436,7 @@ pub fn backfill_plan_op(services: ServicesSlot) -> Op {
         Handler::Tx(Arc::new(move |ctx, input| {
             let input: BackfillInput = parse(input)?;
             let range = input.range()?;
-            let svc = services.get().ok_or_else(|| CommandError::Failed {
-                message: "oxplow is shutting down".into(),
-            })?;
+            let svc = services.get()?;
             let (_, decl) = effect_triggers::find_effect(&svc, &input.effect).ok_or_else(|| {
                 invalid(
                     "/effect",
@@ -492,9 +472,7 @@ pub fn retry_op(services: ServicesSlot) -> Op {
             let services = services.clone();
             Box::pin(async move {
                 let RetryInput { effect, event } = parse(input)?;
-                let svc = services.get().ok_or_else(|| CommandError::Failed {
-                    message: "oxplow is shutting down".into(),
-                })?;
+                let svc = services.get()?;
                 let (ext, decl, health) = ready(&svc, &effect).await?;
                 let id =
                     oxplow_domain::refs::build::id_of(&event, oxplow_domain::refs::kind::EVENT)

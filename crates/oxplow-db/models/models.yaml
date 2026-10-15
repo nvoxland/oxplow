@@ -1246,6 +1246,14 @@
   description: "Up to 20 paths in the primary worktree that no zone rule matched (they read zone `other`), read live when a query names it: the sign that the table needs a rule, or that the repo grew a new area."
   columns:
     - { name: "path", type: "TEXT", doc: "Repo-relative file path." }
+- name: scope
+  version: 1
+  description: "Every scope a command may need (`needs:` in a manifest): what it lets a run change, where its handler runs, and what it lets a handler do. Read live when a query names it. A command's access is the strongest among its scopes."
+  columns:
+    - { name: "id", type: "TEXT", doc: "`<resource>.<action>` (`records.read`, `work_items.write`)." }
+    - { name: "access", type: "TEXT", doc: "`view`, `read`, `record` or `write`: what a run over the scope may change." }
+    - { name: "host", type: "TEXT", doc: "Where its handler lives: `daemon`, `window` or `shell`." }
+    - { name: "summary", type: "TEXT", doc: "What it lets a handler do." }
 - name: command_proposal
   version: 2
   description: "Commands an agent ran that need a person's confirmation: each kept with its preview and what it would have done, until a person approves (the command then runs as them) or declines it. A newer proposal with the same `key` supersedes a pending one. The Alerts panel shows the pending ones."

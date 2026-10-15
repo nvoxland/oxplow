@@ -2520,15 +2520,15 @@ uses):
   `needs` — fix: …". The router's refusals are the run-time backstop.
 - **Discovery.** `services::of_extension` lists each script's services
   (declared / implied / undeclared, used or not, approval) —
-  `CheckReport.services`, `oxplow extension check --services`; the MCP
-  `list_services` tool serves `SERVICES`; `docs/reference/extensions.md`
+  `CheckReport.services`, `oxplow extension check --services`; the live model `v_scope`
+  lists every scope (id, access, host, summary) for an agent; `docs/reference/extensions.md`
   "Services" is generated from it (`the_reference_lists_every_service`,
   sharing `test_fixtures::generated_section` with the kinds table).
 - **Where a person sees them.** Settings → Extensions shows a line per
   script under each project extension's row — "Collector triage — Read the
   captured tree · Ask a model (you approve it)" — worded from the service
   titles (`list_services`, one rpc over `SERVICES`; the surface-parity
-  manifest has it as `both`), a service its script uses without naming it
+  manifest has it as a UI read, with `v_scope` for the agent), a service its script uses without naming it
   in `needs` flagged "(not in its needs)". The row's lines come from the
   extension's check (`validate_extension` → `CheckReport.services`); the
   install and update review (`ExtensionReview.services`, listed under what

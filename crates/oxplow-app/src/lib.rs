@@ -602,9 +602,12 @@ pub struct Services {
     pub providers: Arc<providers::ProviderRegistry>,
     /// Enabled extensions' `commands:` on the bus (P6b).
     pub extension_commands: Arc<extension_commands::ExtensionCommands>,
-    /// Filled at boot (`effect_triggers::register`): the services the
-    /// effect operations run against.
-    pub effect_services: commands::effect::ServicesSlot,
+    /// Filled once services are in an `Arc`: what the operations that
+    /// reach across services (effects, the agent's reads) run against.
+    pub services_slot: commands::util::ServicesSlot,
+    /// The extension checks `oxplow-sdk` implements (the host that links it
+    /// installs them).
+    pub extension_checks: commands::agent_reads::extensions::ExtensionChecksSlot,
     /// The daemon's line to its window: the window's capabilities' calls.
     pub client_host: Arc<client_host::ClientHost>,
     /// The knowledge implementations and the active one: oxplow's wiki
@@ -1788,7 +1791,7 @@ impl Services {
         {
             commands.add_op(command).expect("core ops register");
         }
-        let effect_services = commands::effect::ServicesSlot::default();
+        let services_slot = commands::util::ServicesSlot::default();
         let client_host = Arc::new(client_host::ClientHost::new(event_bus.clone()));
         // oxplow's own commands are declared in its required extensions
         // over these operations (`commands/ops.rs`).
@@ -1807,7 +1810,8 @@ impl Services {
                     layout.project_dir.clone(),
                 ),
             ))
-            .chain(commands::effect::ops(effect_services.clone()))
+            .chain(commands::effect::ops(services_slot.clone()))
+            .chain(commands::agent_reads::ops(services_slot.clone()))
             .chain(client_host::ops(&client_host))
             .chain([commands::file::save_op(workspace_files.clone())])
         {
@@ -1906,7 +1910,8 @@ impl Services {
             extension_secrets,
             component_bundles: Arc::new(component_bundles::ComponentBundles::new()),
             extension_commands,
-            effect_services,
+            services_slot,
+            extension_checks: Default::default(),
             client_host,
             commands,
             work_items,
@@ -2098,7 +2103,9 @@ impl Services {
             lsp_request_timeout: std::time::Duration::from_secs(2),
             host_env,
         };
-        Ok(Arc::new(Self::build(layout, config, db, machine)?))
+        let services = Arc::new(Self::build(layout, config, db, machine)?);
+        services.services_slot.fill(&services);
+        Ok(services)
     }
 
     /// Reload `.oxplow/project.yaml` from disk into the in-memory config, re-apply
@@ -2263,6 +2270,19 @@ mod tests {
         assert_eq!(
             services.commands.external_commands(),
             [
+                // Agent reads of live state, each an operation of a read scope
+                // (`commands/agent_reads`): they change no record. A model call
+                // is recorded as the computation it was.
+                "oxplow.ai.decide",
+                "oxplow.ai.summarize",
+                "oxplow.change.ensure",
+                "oxplow.code.call_hierarchy",
+                "oxplow.code.definition",
+                "oxplow.code.hover",
+                "oxplow.code.references",
+                "oxplow.code.symbols",
+                "oxplow.code.workspace_symbols",
+                "oxplow.collector.preview",
                 // The collector's own program or script (P7.B3).
                 "oxplow.collector.sync",
                 // A provider's process restarts (P7.C1; was provider.enable).
@@ -2275,7 +2295,10 @@ mod tests {
                 "oxplow.effort.report",
                 // A clone into a stream's worktree, a person's call (P8.A9).
                 "oxplow.extension.install",
+                "oxplow.extension.preview",
+                "oxplow.extension.review",
                 "oxplow.extension.update",
+                "oxplow.extension.validate",
                 "oxplow.file.save",
                 "oxplow.git.cherry_pick",
                 "oxplow.git.ignore",
@@ -2283,30 +2306,43 @@ mod tests {
                 "oxplow.git.revert",
                 // The active knowledge store keeps the page (the wiki's file,
                 // a provider's service); core records what it kept.
+                "oxplow.knowledge.comments",
                 "oxplow.knowledge.delete_page",
+                "oxplow.knowledge.drift",
                 "oxplow.knowledge.link",
                 "oxplow.knowledge.write_page",
                 // Lens files on disk (P6 review, tsk597): a Tx handler may
                 // run twice, and a retried file write strands the first.
                 "oxplow.lens.keep",
+                "oxplow.lens.run",
+                "oxplow.lens.run_action",
                 "oxplow.lens.share",
                 // A download into .oxplow/lsp/, a person's call (P8.A9).
                 "oxplow.lsp.install_server",
                 "oxplow.lsp.remove_server",
                 "oxplow.metric.rebuild",
+                // The agent's reads of live state are read-scope operations
+                // (`commands/agent_reads`): they change no record.
+                "oxplow.page.open",
                 // The provider process's collectors (P7.A3).
                 "oxplow.provider.sync",
+                "oxplow.records.read",
+                "oxplow.search.find",
+                "oxplow.skill.read",
                 // Overwrites a worktree file (P8.A9).
                 "oxplow.snapshot.restore_file",
+                "oxplow.sql.query",
                 // A stream's worktree and its capture service (P8.A4).
                 "oxplow.stream.adopt_worktree",
                 "oxplow.stream.archive",
                 "oxplow.stream.create_worktree",
                 // A run's capture, through the collection service (P8.A8).
                 "oxplow.test.record_run",
+                "oxplow.vcs.blame",
                 "oxplow.vcs.checkout_branch",
                 "oxplow.vcs.commit",
                 "oxplow.vcs.delete_branch",
+                "oxplow.vcs.diff",
                 "oxplow.vcs.discard",
                 "oxplow.vcs.fetch",
                 "oxplow.vcs.merge",
@@ -2345,6 +2381,11 @@ mod tests {
             [
                 "agent_sessions.write/open",
                 "agent_sessions.write/rename",
+                "agent_text.read/skill",
+                "ai.compute/decide",
+                "ai.compute/summarize",
+                "changes.read/ensure",
+                "collectors.preview/preview",
                 "collectors.sync/sync",
                 "config.read/get",
                 "config.read/list_keys",
@@ -2373,12 +2414,17 @@ mod tests {
                 "extension_config.read/inspect",
                 "extension_config.read/snapshot",
                 "extension_config.write/compare_exchange",
+                "extensions.check/preview",
+                "extensions.check/review",
+                "extensions.check/validate",
                 "files.write/save",
                 // Intent on the extension's own declared jobs; running one
                 // needs the job's own current approval.
                 "jobs.read/snapshot",
                 "jobs.write/cancel",
                 "jobs.write/enqueue",
+                "knowledge.read/comments",
+                "knowledge.read/drift",
                 "knowledge.write/add_comment",
                 "knowledge.write/add_note",
                 "knowledge.write/link",
@@ -2387,13 +2433,25 @@ mod tests {
                 "knowledge.write/update_comment",
                 "knowledge.write/update_note",
                 "knowledge.write/write_page",
+                "lenses.read/run",
                 "lenses.show/show",
                 "lenses.write/keep",
+                "lenses.write/run_action",
+                "lsp.read/call_hierarchy",
+                "lsp.read/definition",
+                "lsp.read/hover",
+                "lsp.read/references",
+                "lsp.read/symbols",
+                "lsp.read/workspace_symbols",
                 "metrics.read/scaffold",
                 "metrics.write/enable",
                 "metrics.write/rebuild",
                 "metrics.write/record",
+                "pages.read/open",
                 "providers.sync/sync",
+                "records.read/read",
+                "search.read/search",
+                "sql.read/query",
                 "state.read/snapshot",
                 "state.write/compare_exchange",
                 "streams.write/rename",
@@ -2410,6 +2468,8 @@ mod tests {
                 "threads.write/rename",
                 "threads.write/reopen",
                 // Every work list's verbs; `delete` asks.
+                "vcs.read/blame",
+                "vcs.read/diff",
                 "work_items.write/comment",
                 "work_items.write/create",
                 "work_items.write/link",

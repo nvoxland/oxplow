@@ -278,8 +278,8 @@ collectors:
   command's script reads the semantic layer but not the tree: oxplow
   composes it inside a database transaction.
 - `oxplow extension check --services` lists what each script uses and
-  whether it declared it. Your coding agent has the same list through
-  the `list_services` MCP tool.
+  whether it declared it. Your coding agent reads the scopes from
+  `v_scope`.
 
 ### Collectors
 

@@ -31,6 +31,7 @@ pub const NAMES: &[&str] = &[
     "collector_credential",
     "zone",
     "zone_unmatched",
+    "scope",
 ];
 
 /// The columns a live model's rows have, in order.
@@ -76,6 +77,7 @@ pub fn columns(name: &str) -> &'static [&'static str] {
         "collector_credential" => &["collector", "name", "is_set"],
         "zone" => &["position", "zone", "patterns", "color", "files"],
         "zone_unmatched" => &["path"],
+        "scope" => &["id", "access", "host", "summary"],
         _ => &[],
     }
 }
@@ -186,6 +188,10 @@ impl LiveModels {
     }
 
     async fn read(&self, name: &str) -> Result<Vec<Vec<SqlCell>>, DomainError> {
+        // A table core ships: nothing to bind.
+        if name == "scope" {
+            return Ok(scopes());
+        }
         let sources = self.sources.get().ok_or_else(|| {
             DomainError::Invalid(format!(
                 "v_{name} is read live, and this query runs where nothing can read it"
@@ -204,6 +210,27 @@ impl LiveModels {
             ))),
         }
     }
+}
+
+/// `v_scope`: every scope a command may need.
+fn scopes() -> Vec<Vec<SqlCell>> {
+    fn name(value: &impl serde::Serialize) -> String {
+        serde_json::to_value(value)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default()
+    }
+    oxplow_domain::scope::SCOPES
+        .iter()
+        .map(|s| {
+            vec![
+                text(s.id),
+                text(name(&s.access)),
+                text(name(&s.host)),
+                text(s.summary),
+            ]
+        })
+        .collect()
 }
 
 impl LiveSources {
