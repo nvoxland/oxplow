@@ -78,8 +78,9 @@ type RenameTarget = { kind: "stream" | "thread"; id: string };
  *     threads beneath them.
  *   - Thread rows: two-letter glyph, weight 600, slightly indented in
  *     the overlay; in the strip they share the same column.
- *   - The active stream's writer thread renders its letter inside an
- *     accent-soft-bg pill with an accent border. Activity dot is
+ *   - The active stream's writer thread is marked with a small pencil
+ *     badge in its top-left corner (not an accent outline, which reads
+ *     as selected). Activity dot is
  *     overlaid in the top-right corner of the icon cell — same
  *     position in strip and overlay.
  *   - Selection treatment: accent-soft-bg row background + 3px accent
@@ -858,7 +859,7 @@ function RenameInput({
 
 /** The shared icon cell that appears in both strip and overlay. The
  *  letter is centered in a 22px box; for writer threads the box is
- *  filled with `--accent-soft-bg` and bordered with `--accent`. The
+ *  marked with a pencil badge. The
  *  activity dot is absolutely positioned in the top-right corner so
  *  its location is identical regardless of writer/non-writer. */
 /** Where a row sits on its stream's guide line: the stream that starts it
@@ -968,20 +969,16 @@ function IconCell({
         // Tabs next to each other are flat; only the stack's last is
         // rounded at the bottom.
         borderRadius: isLast ? "0 0 6px 0" : 0,
-        // The regular tab's tint (the centre tab strip's header), the
-        // writer's in the accent.
-        ...(isWriter
-          ? { background: "var(--accent-soft-bg)" }
-          : {
-              backgroundImage: "linear-gradient(var(--panel-header-bg), var(--panel-header-bg))",
-              backgroundColor: "var(--surface-card)",
-            }),
+        // The centre tab strip's header tint. The writer looks like any
+        // other tab (the accent outline and tint read as "selected"); a
+        // pencil badge marks it instead.
+        backgroundImage: "linear-gradient(var(--panel-header-bg), var(--panel-header-bg))",
+        backgroundColor: "var(--surface-card)",
         color: "var(--text-primary)",
-        // The writer's accent outline is whole; the rest draw their top
-        // edge, and the last also its bottom.
-        borderWidth: isWriter ? 1 : isLast ? "1px 1px 1px 0" : "1px 1px 0 0",
+        // Each tab draws its top edge, and the last also its bottom.
+        borderWidth: isLast ? "1px 1px 1px 0" : "1px 1px 0 0",
         borderStyle: "solid",
-        borderColor: isWriter ? "var(--accent)" : "var(--border-strong)",
+        borderColor: "var(--border-strong)",
         fontSize: THREAD_LETTER_FONT,
         fontWeight: 600,
       };
@@ -1028,6 +1025,23 @@ function IconCell({
       ) : (
         letter
       )}
+      {isWriter && !isStream ? (
+        <span
+          data-testid="navigator-writer-badge"
+          title="Writer: this thread can edit project files"
+          style={{
+            position: "absolute",
+            top: 1,
+            left: SELECTION_BAR + 1,
+            display: "flex",
+            color: "var(--text-muted)",
+          }}
+        >
+          <svg width="9" height="9" viewBox="0 0 16 16" aria-hidden fill="currentColor">
+            <path d="M11.9 1.3a1.5 1.5 0 0 1 2.1 0l.7.7a1.5 1.5 0 0 1 0 2.1l-8.6 8.6-3.6.9a.5.5 0 0 1-.6-.6l.9-3.6 8.6-8.6zM3.7 11.1l-.5 2.2 2.2-.5-1.7-1.7z" />
+          </svg>
+        </span>
+      ) : null}
       {/* Threads always show the agent's activity indicator. Mirrors
           the fallback the Agent tab uses (App.tsx — `agentStatuses[id]
           ?? "waiting"`) so a never-attached thread still reads as the

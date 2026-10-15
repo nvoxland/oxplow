@@ -446,9 +446,12 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
   // Flat where another tab sits next to it; the last rounds the bottom.
   expect(writer.style.borderRadius).toBe("0px");
   expect(queued.style.borderRadius).toBe("0px 0px 6px");
-  expect(writer.style.borderWidth).toBe("1px");
+  expect(writer.style.borderWidth).toBe("1px 1px 0px 0px");
   expect(queued.style.borderWidth).toBe("1px 1px 1px 0px");
-  expect(writer.style.borderColor).toBe("var(--accent)");
+  // The writer is not outlined like the selection: it carries a pencil badge.
+  expect(writer.style.borderColor).toBe("var(--border-strong)");
+  expect(writer.querySelector("[data-testid=navigator-writer-badge]")?.getAttribute("title")).toMatch(/Writer/);
+  expect(queued.querySelector("[data-testid=navigator-writer-badge]")).toBeNull();
   expect(queued.style.borderColor).toBe("var(--border-strong)");
 
   // The guide runs from the stream through its threads, ending at the last.
