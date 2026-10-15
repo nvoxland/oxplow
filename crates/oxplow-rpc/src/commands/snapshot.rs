@@ -1,6 +1,7 @@
 //! Cores for the `snapshot` command module. Populated by the
 //! oxplow-tauri-ipc -> oxplow-rpc migration; see crate docs.
 
+use oxplow_domain::{ByteSize, FileSnapshotId, SnapshotId};
 use std::path::Path;
 
 use oxplow_app::Services;
@@ -51,11 +52,11 @@ pub async fn list_file_snapshots(
 pub async fn list_snapshots_for_stream(
     svc: &Services,
     stream_id: StreamId,
-    limit: Option<usize>,
+    limit: Option<u32>,
 ) -> Result<Vec<Snapshot>, IpcError> {
     Ok(svc
         .snapshot_store
-        .list_snapshots_for_stream(stream_id, limit.unwrap_or(200))
+        .list_snapshots_for_stream(stream_id, limit.map_or(200, |n| n as usize))
         .await?)
 }
 
@@ -65,11 +66,11 @@ pub async fn list_snapshots_for_stream(
 pub async fn list_snapshot_ops(
     svc: &Services,
     stream_id: StreamId,
-    limit: Option<usize>,
+    limit: Option<u32>,
 ) -> Result<Vec<oxplow_db::SnapshotOp>, IpcError> {
     Ok(svc
         .snapshot_store
-        .list_ops(stream_id, limit.unwrap_or(200))
+        .list_ops(stream_id, limit.map_or(200, |n| n as usize))
         .await?)
 }
 
@@ -77,20 +78,23 @@ pub async fn list_snapshot_ops(
 /// History dashboard's per-snapshot stats column.
 pub async fn get_snapshot_stats(
     svc: &Services,
-    snapshot_id: i64,
+    snapshot_id: SnapshotId,
 ) -> Result<SnapshotStats, IpcError> {
-    Ok(svc.snapshot_store.stats_for_snapshot(snapshot_id).await?)
+    Ok(svc
+        .snapshot_store
+        .stats_for_snapshot(snapshot_id.value())
+        .await?)
 }
 
 /// Total on-disk size of every blob in the content-addressed store.
 /// Used by the Local History dashboard's Storage card.
-pub async fn get_blob_storage_bytes(svc: &Services) -> Result<i64, IpcError> {
+pub async fn get_blob_storage_bytes(svc: &Services) -> Result<ByteSize, IpcError> {
     let blobs = svc.blobs.clone();
     let total = tokio::task::spawn_blocking(move || blobs.total_bytes())
         .await
         .map_err(|e| IpcError::internal(e.to_string()))?
         .map_err(|e| IpcError::internal(e.to_string()))?;
-    Ok(total as i64)
+    Ok(ByteSize::new(total))
 }
 
 /// For each snapshot id in the input list, the wiki slugs whose
@@ -99,24 +103,28 @@ pub async fn get_blob_storage_bytes(svc: &Services) -> Result<i64, IpcError> {
 /// `file_snapshot` rows per snapshot.
 pub async fn list_wiki_slugs_for_snapshots(
     svc: &Services,
-    snapshot_ids: Vec<i64>,
-) -> Result<Vec<(i64, String)>, IpcError> {
-    Ok(svc
+    snapshot_ids: Vec<SnapshotId>,
+) -> Result<Vec<(SnapshotId, String)>, IpcError> {
+    let rows = svc
         .snapshot_store
-        .list_wiki_slugs_for_snapshots(snapshot_ids)
-        .await?)
+        .list_wiki_slugs_for_snapshots(snapshot_ids.into_iter().map(SnapshotId::value).collect())
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, slug)| (SnapshotId::new(id), slug))
+        .collect())
 }
 
 /// Every `file_snapshot` row captured under a single parent
 /// snapshot id (i.e. one batch of `request_snapshot()`).
 pub async fn list_files_for_snapshot(
     svc: &Services,
-    snapshot_id: i64,
+    snapshot_id: SnapshotId,
 ) -> Result<Vec<FileSnapshot>, IpcError> {
     let filter = current_filter(svc);
     let rows = svc
         .snapshot_store
-        .list_files_for_snapshot(snapshot_id)
+        .list_files_for_snapshot(snapshot_id.value())
         .await?;
     Ok(rows
         .into_iter()
@@ -127,9 +135,9 @@ pub async fn list_files_for_snapshot(
 /// One captured file row by its `file_snapshot` id.
 pub async fn get_file_snapshot(
     svc: &Services,
-    file_snapshot_id: i64,
+    file_snapshot_id: FileSnapshotId,
 ) -> Result<Option<FileSnapshot>, IpcError> {
-    Ok(svc.snapshot_store.get(file_snapshot_id).await?)
+    Ok(svc.snapshot_store.get(file_snapshot_id.value()).await?)
 }
 
 #[cfg(test)]

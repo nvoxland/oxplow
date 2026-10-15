@@ -56,7 +56,9 @@ pub struct Effort {
     pub thread_id: ThreadId,
     pub started_at: Timestamp,
     pub ended_at: Option<Timestamp>,
+    #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub start_snapshot_id: Option<i64>,
+    #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub end_snapshot_id: Option<i64>,
     /// The effort's summary prose — the canonical text.
     pub summary: Option<String>,
@@ -68,6 +70,7 @@ pub struct EffortFile {
     pub path: String,
     pub change: EffortFileChange,
     /// The snapshot the file ref was captured at.
+    #[specta(type = oxplow_domain::JsNumber)]
     pub local_snapshot_id: i64,
     /// Closest known git commit at capture time. See V20 column
     /// docs. NULL when no git information is available (no commits
@@ -136,6 +139,7 @@ impl OwnedFileRefVersion {
 /// every other row is "in flight at this snapshot."
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct EffortAtSnapshot {
+    #[specta(type = oxplow_domain::JsNumber)]
     pub snapshot_id: i64,
     pub effort: Effort,
 }

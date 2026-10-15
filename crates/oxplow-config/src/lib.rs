@@ -552,9 +552,11 @@ pub struct TestingConfig {
 pub struct ScriptsConfig {
     /// Workers running at once; a run past it waits for a slot. Default
     /// `min(4, available parallelism)`, minimum 1.
+    #[specta(type = oxplow_domain::JsNumber)]
     pub max_concurrent: usize,
     /// A worker's memory cap in bytes (`memoryMb` in the file). Default
     /// 512 MiB, minimum 64 MiB.
+    #[specta(type = oxplow_domain::JsNumber)]
     pub memory_bytes: u64,
 }
 
@@ -674,11 +676,13 @@ pub struct OxplowConfig {
     /// Maximum blob size for content-addressed snapshotting; larger
     /// files get a stat-only entry. Default 5 MiB.
     #[serde(rename = "snapshotMaxFileBytes")]
+    #[specta(type = oxplow_domain::JsNumber)]
     pub snapshot_max_file_bytes: u64,
     /// How long the Stop hook waits for the turn-end snapshot, in ms.
     /// A take that runs longer keeps going in the background and is
     /// recorded as over budget. Default 2000.
     #[serde(rename = "snapshotTurnBudgetMs")]
+    #[specta(type = oxplow_domain::JsNumber)]
     pub snapshot_turn_budget_ms: u64,
     /// When true, the UserPromptSubmit hook injects a session-context
     /// block into every agent prompt.

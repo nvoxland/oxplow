@@ -7,6 +7,7 @@
 
 use oxplow_app::Services;
 use oxplow_db::DeadLetter;
+use oxplow_domain::DeadLetterId;
 
 use crate::error::IpcError;
 
@@ -25,13 +26,13 @@ pub async fn list_dead_letters(
 /// Run the parked event through its consumer again, now. The letter
 /// becomes `retried` on success; on failure it stays `pending` with the
 /// new error and one more attempt. Returns the letter's new state.
-pub async fn retry_dead_letter(svc: &Services, id: i64) -> Result<DeadLetter, IpcError> {
-    Ok(svc.event_pump.retry_dead_letter(id).await?)
+pub async fn retry_dead_letter(svc: &Services, id: DeadLetterId) -> Result<DeadLetter, IpcError> {
+    Ok(svc.event_pump.retry_dead_letter(id.value()).await?)
 }
 
 /// Give up on the parked event. It stays visible as `discarded`.
-pub async fn discard_dead_letter(svc: &Services, id: i64) -> Result<DeadLetter, IpcError> {
-    Ok(svc.event_pump.discard_dead_letter(id).await?)
+pub async fn discard_dead_letter(svc: &Services, id: DeadLetterId) -> Result<DeadLetter, IpcError> {
+    Ok(svc.event_pump.discard_dead_letter(id.value()).await?)
 }
 
 #[cfg(test)]

@@ -72,7 +72,9 @@ pub enum ItemBody {
 #[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TranscriptItem {
+    #[specta(type = oxplow_domain::JsNumber)]
     pub id: u64,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub seq: u64,
     #[serde(flatten)]
     pub body: ItemBody,

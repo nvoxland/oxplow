@@ -39,10 +39,12 @@ pub struct AcpSnapshot {
     pub agent: String,
     /// The session's generation: a new one (a Restart) replaces the
     /// client's transcript instead of merging into it.
+    #[specta(type = oxplow_domain::JsNumber)]
     pub generation: u64,
     pub status: AcpStatus,
     pub usage: Option<ContextUsage>,
     /// The highest `seq` in the transcript; ask `since` this next time.
+    #[specta(type = oxplow_domain::JsNumber)]
     pub head_seq: u64,
     pub items: Vec<TranscriptItem>,
     pub stderr_tail: Vec<String>,

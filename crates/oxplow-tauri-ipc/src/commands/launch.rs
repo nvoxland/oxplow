@@ -23,6 +23,7 @@ use crate::windows::ShellWindows;
 pub struct RecentProjectView {
     pub path: String,
     pub title: String,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub last_opened_at: i64,
     /// Whether the directory still exists on disk (drives the
     /// launcher's "missing" badge).

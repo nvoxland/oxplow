@@ -798,6 +798,7 @@ pub struct CommandOutcome {
     #[specta(type = crate::Json)]
     pub result: Value,
     /// The `command_audit` row; `None` for a `Read` command.
+    #[specta(type = Option<crate::JsNumber>)]
     pub audit_id: Option<i64>,
     /// The `command.executed` event; `None` for a `Read` command.
     pub event_id: Option<EventId>,

@@ -1,6 +1,7 @@
 //! Cores for the `effort` command module. Populated by the
 //! oxplow-tauri-ipc -> oxplow-rpc migration; see crate docs.
 
+use oxplow_domain::SnapshotId;
 use std::path::Path;
 
 use oxplow_app::Services;
@@ -59,11 +60,11 @@ pub async fn get_effort(svc: &Services, effort_id: EffortId) -> Result<Option<Ef
 
 pub async fn list_efforts_at_snapshots(
     svc: &Services,
-    snapshot_ids: Vec<i64>,
+    snapshot_ids: Vec<SnapshotId>,
 ) -> Result<Vec<EffortAtSnapshot>, IpcError> {
     Ok(svc
         .effort_store
-        .list_efforts_at_snapshots(snapshot_ids)
+        .list_efforts_at_snapshots(snapshot_ids.into_iter().map(SnapshotId::value).collect())
         .await?)
 }
 
@@ -73,12 +74,12 @@ pub async fn list_efforts_at_snapshots(
 /// view's "other efforts that overlapped this range" roster.
 pub async fn list_efforts_overlapping_range(
     svc: &Services,
-    range_start: i64,
-    range_end: i64,
+    range_start: SnapshotId,
+    range_end: SnapshotId,
 ) -> Result<Vec<Effort>, IpcError> {
     Ok(svc
         .effort_store
-        .list_efforts_overlapping_range(range_start, range_end)
+        .list_efforts_overlapping_range(range_start.value(), range_end.value())
         .await?)
 }
 

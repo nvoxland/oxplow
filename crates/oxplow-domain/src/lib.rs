@@ -29,6 +29,7 @@ pub mod knowledge;
 pub mod ordering;
 pub mod refs;
 pub mod replaceable;
+pub mod row_ids;
 pub mod run;
 pub mod scope;
 pub mod service;
@@ -61,7 +62,10 @@ pub use ids::{
     AgentSessionId, AgentTurnId, AnyId, CommentId, CommentMessageId, DashboardId, DashboardItemId,
     EffortId, EntityKind, IdParseError, NoteId, PageVisitId, StreamId, ThreadId, UsageEventId,
 };
-pub use json::Json;
+pub use json::{JsNumber, Json};
+pub use row_ids::{
+    AiCallId, AuditId, ByteSize, DeadLetterId, FileSnapshotId, ProposalId, SnapshotId,
+};
 pub use stream::{HostId, Stream, StreamKind};
 pub use thread::{Thread, ThreadNote, ThreadStatus};
 pub use time::Timestamp;

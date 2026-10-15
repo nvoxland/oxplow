@@ -71,6 +71,7 @@ pub struct AcpEvent {
     /// Which run of the session: each open is a new generation whose
     /// ids and seqs start over, so a client resets rather than merging it
     /// with the last one's transcript.
+    #[specta(type = oxplow_domain::JsNumber)]
     pub generation: u64,
     #[serde(flatten)]
     pub body: AcpEventBody,

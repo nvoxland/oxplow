@@ -36,14 +36,14 @@ pub async fn search_workspace_text(
     svc: &Services,
     stream_id: Option<String>,
     query: String,
-    limit: Option<usize>,
+    limit: Option<u32>,
 ) -> Result<Vec<oxplow_app::workspace_files::TextSearchHit>, IpcError> {
     svc.workspace_files
         .search_text(
             stream_id.as_deref(),
             &generated(svc),
             query,
-            limit.unwrap_or(200).clamp(1, 1000),
+            limit.map_or(200, |n| n as usize).clamp(1, 1000),
         )
         .await
         .map_err(|e| IpcError::internal(e.to_string()))

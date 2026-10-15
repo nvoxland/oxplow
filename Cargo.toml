@@ -74,13 +74,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_path_to_error = "0.1"
 serde_yaml = "0.9"
-# HELD at rc.24 (tsk274). The three specta crates are version-locked to each
-# other, and specta-typescript 0.0.12 forbids exporting BigInt-style ints
-# (i64/u64/usize/...) outright — it removed the global escape hatch that used
-# to render them as `number`. Ten domain fields (sort_index, timestamps,
-# counts) trip it, so moving the trio needs a decision on which migration
-# path oxplow takes, not just a version bump. Move all three together.
-specta = { version = "=2.0.0-rc.24", features = ["derive", "time", "serde_json"] }
+# The three specta crates are version-locked to each other: move them together.
+specta = { version = "=2.0.0-rc.25", features = ["derive", "time", "serde_json"] }
 quick-xml = "0.42"
 regex = "1.13"
 # XPath over report XML, exposed to collection plugins. Pure Rust.
@@ -145,8 +140,8 @@ rmcp = { version = "3.4", features = ["server", "transport-io", "macros"] }
 # Tauri
 tauri = { version = "2", features = [] }
 tauri-build = "2"
-tauri-specta = { version = "2.0.0-rc.24", features = ["derive", "typescript"] }
-specta-typescript = "0.0.11"
+tauri-specta = { version = "2.0.0-rc.25", features = ["derive", "typescript"] }
+specta-typescript = "0.0.12"
 tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-shell = "2"

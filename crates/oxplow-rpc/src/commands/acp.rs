@@ -212,9 +212,9 @@ pub async fn acp_respond_permission(
 pub async fn acp_transcript(
     svc: &Services,
     session_id: AgentSessionId,
-    since_seq: u64,
+    since_seq: u32,
 ) -> Result<Option<AcpSnapshot>, IpcError> {
-    Ok(svc.acp.transcript(&session_id, since_seq))
+    Ok(svc.acp.transcript(&session_id, u64::from(since_seq)))
 }
 
 /// Stop the session's agent process (the session itself stays open: its

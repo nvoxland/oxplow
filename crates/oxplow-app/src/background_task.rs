@@ -54,7 +54,9 @@ pub struct BackgroundTask {
     /// 0..=1 for determinate, `None` for indeterminate.
     pub progress: Option<f64>,
     pub status: BackgroundTaskStatus,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub started_at: i64,
+    #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub ended_at: Option<i64>,
     pub error: Option<String>,
     /// Producer-supplied opaque JSON attached at complete/fail.

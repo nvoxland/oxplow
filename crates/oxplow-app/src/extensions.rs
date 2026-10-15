@@ -110,6 +110,7 @@ pub struct LensCustom {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LensAlert {
+    #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub min_rows: Option<i64>,
     pub column: Option<String>,
     pub above: Option<f64>,
@@ -158,6 +159,7 @@ impl AlertFile {
 pub struct AlertState {
     pub firing: bool,
     /// Rows the run returned.
+    #[specta(type = oxplow_domain::JsNumber)]
     pub count: i64,
     /// The watched column's value, for a threshold alert.
     pub value: Option<f64>,

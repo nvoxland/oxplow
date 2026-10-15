@@ -50,6 +50,7 @@ pub struct Thread {
     pub stream_id: StreamId,
     pub title: String,
     pub status: ThreadStatus,
+    #[specta(type = crate::JsNumber)]
     pub sort_index: i64,
     pub summary: String,
     pub summary_updated_at: Option<Timestamp>,

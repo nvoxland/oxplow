@@ -37,6 +37,7 @@ pub struct PageVisit {
     /// renderer falls back to page_id).
     pub label: Option<String>,
     pub visited_at: Timestamp,
+    #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub duration_ms: Option<i64>,
     pub thread_id: Option<String>,
 }
@@ -871,9 +872,13 @@ fn row_to_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileSnapshot> {
 /// per-snapshot stats column.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default)]
 pub struct SnapshotStats {
+    #[specta(type = oxplow_domain::JsNumber)]
     pub created: i64,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub modified: i64,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub deleted: i64,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub total: i64,
 }
 
@@ -900,9 +905,11 @@ pub struct SnapshotChangeEntry {
 /// batch. See [[crates/oxplow-db/migrations/V13__snapshot.sql]].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct Snapshot {
+    #[specta(type = oxplow_domain::JsNumber)]
     pub id: i64,
     pub stream_id: StreamId,
     pub created_at: Timestamp,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub file_count: i64,
     /// The VCS revision this snapshot's tree equals (`git:<sha>`).
     /// Populated only when the workspace was clean at the head at
@@ -925,6 +932,7 @@ pub struct Snapshot {
     /// a single-snapshot diff starts at — why it was taken, and whether
     /// it ran over its budget. `parent_snapshot_id` is `None` for a stream's
     /// first snapshot.
+    #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub parent_snapshot_id: Option<i64>,
     pub trigger: SnapshotTrigger,
     pub over_budget: bool,
@@ -946,6 +954,7 @@ pub struct LatestStat {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FileSnapshot {
+    #[specta(type = oxplow_domain::JsNumber)]
     pub id: i64,
     pub stream_id: StreamId,
     pub path: String,
@@ -953,6 +962,7 @@ pub struct FileSnapshot {
     /// (storage = git); NULL for oversize / deleted rows. Compare
     /// [`Self::content_hash`], not this.
     pub blob_hash: Option<String>,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub size_bytes: i64,
     pub captured_at: Timestamp,
     /// Where the bytes live — see [`SnapshotStorage`]. Replaces the old
@@ -961,12 +971,14 @@ pub struct FileSnapshot {
     pub storage: SnapshotStorage,
     /// `snapshot.id` this row was captured under, or `None` for a row not
     /// captured under a snapshot.
+    #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub snapshot_id: Option<i64>,
     /// File mtime in unix milliseconds at capture time. NULL for
     /// oversize and tombstone rows. The startup sweep
     /// uses `(size_bytes, mtime_ms)` as a fast equality check: if
     /// both match the current stat, the file is presumed unchanged
     /// and the bytes aren't re-read or re-hashed.
+    #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub mtime_ms: Option<i64>,
     /// The content identity: xxh3-128 of the bytes, whatever the
     /// storage class. `blob_hash` is only the address. [`capture_batch`]
@@ -1471,18 +1483,25 @@ pub struct TakeOutcome {
 /// One row of the operation log (`snapshot_op`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct SnapshotOp {
+    #[specta(type = oxplow_domain::JsNumber)]
     pub seq: i64,
     pub stream_id: StreamId,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub snapshot_id: i64,
+    #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub parent_snapshot_id: Option<i64>,
     pub trigger: SnapshotTrigger,
     pub thread_id: Option<ThreadId>,
+    #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub turn_id: Option<i64>,
     pub effort_id: Option<EffortId>,
     pub at: Timestamp,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub elapsed_ms: i64,
+    #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub budget_ms: Option<i64>,
     pub over_budget: bool,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub file_count: i64,
     /// What took it; `None` for a take by core's capture pipeline.
     pub provider: Option<String>,

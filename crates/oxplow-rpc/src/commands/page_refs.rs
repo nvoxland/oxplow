@@ -45,11 +45,11 @@ pub async fn list_backlinks(
     svc: &Services,
     target_kind: String,
     target_id: String,
-    limit: Option<i64>,
+    limit: Option<u32>,
 ) -> Result<Vec<BacklinkEdge>, IpcError> {
     let edges = svc
         .page_ref_store
-        .list_backlinks(&target_kind, &target_id, limit)
+        .list_backlinks(&target_kind, &target_id, limit.map(i64::from))
         .await?;
     Ok(decorate_with_labels(svc, edges).await)
 }
@@ -58,11 +58,11 @@ pub async fn list_outbound(
     svc: &Services,
     source_kind: String,
     source_id: String,
-    limit: Option<i64>,
+    limit: Option<u32>,
 ) -> Result<Vec<BacklinkEdge>, IpcError> {
     let edges = svc
         .page_ref_store
-        .list_outbound(&source_kind, &source_id, limit)
+        .list_outbound(&source_kind, &source_id, limit.map(i64::from))
         .await?;
     // For outbound, the "label" we want is for the *target*. We
     // keep the same struct shape, but populate `source_label` with

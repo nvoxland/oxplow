@@ -111,7 +111,7 @@ async fn list_file_snapshots_empty_for_unknown_path() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn get_file_snapshot_missing_returns_none() {
     let app = TestApp::build().await;
-    let v = commands::generated::get_file_snapshot(app.state(), 99999)
+    let v = commands::generated::get_file_snapshot(app.state(), 99999.into())
         .await
         .unwrap();
     assert!(v.is_none());
@@ -462,13 +462,13 @@ async fn snapshot_reads_empty_for_fresh_project() {
             .is_empty()
     );
     assert!(
-        commands::generated::list_files_for_snapshot(app.state(), 999)
+        commands::generated::list_files_for_snapshot(app.state(), 999.into())
             .await
             .unwrap()
             .is_empty()
     );
     assert!(
-        commands::generated::list_wiki_slugs_for_snapshots(app.state(), vec![999])
+        commands::generated::list_wiki_slugs_for_snapshots(app.state(), vec![999.into()])
             .await
             .unwrap()
             .is_empty()
@@ -476,7 +476,7 @@ async fn snapshot_reads_empty_for_fresh_project() {
     let _ = commands::generated::get_blob_storage_bytes(app.state())
         .await
         .unwrap();
-    let _ = commands::generated::get_snapshot_stats(app.state(), 999).await;
+    let _ = commands::generated::get_snapshot_stats(app.state(), 999.into()).await;
 }
 
 // ---- workspace reads + file round-trip ----

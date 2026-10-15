@@ -15,7 +15,9 @@ use crate::Database;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangeRow {
+    #[specta(type = oxplow_domain::JsNumber)]
     pub id: i64,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub stream_id: i64,
     pub kind: String,
     pub target: String,
@@ -28,8 +30,10 @@ pub struct ChangeRow {
     pub error: Option<String>,
     pub computed_at: Option<String>,
     /// The stream's snapshot the analysis was computed against.
+    #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub snapshot_id: Option<i64>,
     /// The event log's highest seq when the analysis began.
+    #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub events_to: Option<i64>,
     /// What the analysis was computed from (the build, its trees, an
     /// effort's own files); a rerun from the same needn't recompute.

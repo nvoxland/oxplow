@@ -40,7 +40,7 @@ export const commands = {
 	talking_pane: string,
 	working_session_id: string,
 	talking_session_id: string,
-	// The host its worktree is on.
+	/**  The host its worktree is on. */
 	host: HostId,
 	/**
 	 *  Standing instructions appended to every agent system prompt
@@ -74,7 +74,7 @@ export const commands = {
 	talking_pane: string,
 	working_session_id: string,
 	talking_session_id: string,
-	// The host its worktree is on.
+	/**  The host its worktree is on. */
 	host: HostId,
 	/**
 	 *  Standing instructions appended to every agent system prompt
@@ -424,7 +424,7 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	setAiRole: (role: string, binding: {
-	// A provider `id`.
+	/**  A provider `id`. */
 	provider: string,
 	model: string,
 	/**
@@ -443,7 +443,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	readAiCall: (id: number, body: AiCallBody) => typedError<{
+	readAiCall: (id: AiCallId, body: AiCallBody) => typedError<{
 	text: string,
 	size: number,
 	truncated: boolean,
@@ -472,12 +472,12 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	retryDeadLetter: (id: number) => typedError<DeadLetter, IpcError>(__TAURI_INVOKE("retry_dead_letter", { id })),
+	retryDeadLetter: (id: DeadLetterId) => typedError<DeadLetter, IpcError>(__TAURI_INVOKE("retry_dead_letter", { id })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	discardDeadLetter: (id: number) => typedError<DeadLetter, IpcError>(__TAURI_INVOKE("discard_dead_letter", { id })),
+	discardDeadLetter: (id: DeadLetterId) => typedError<DeadLetter, IpcError>(__TAURI_INVOKE("discard_dead_letter", { id })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -537,17 +537,17 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listFilesForSnapshot: (snapshotId: number) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_files_for_snapshot", { snapshotId })),
+	listFilesForSnapshot: (snapshotId: SnapshotId) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_files_for_snapshot", { snapshotId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listWikiSlugsForSnapshots: (snapshotIds: number[]) => typedError<([number, string])[], IpcError>(__TAURI_INVOKE("list_wiki_slugs_for_snapshots", { snapshotIds })),
+	listWikiSlugsForSnapshots: (snapshotIds: SnapshotId[]) => typedError<([SnapshotId, string])[], IpcError>(__TAURI_INVOKE("list_wiki_slugs_for_snapshots", { snapshotIds })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getFileSnapshot: (fileSnapshotId: number) => typedError<{
+	getFileSnapshot: (fileSnapshotId: FileSnapshotId) => typedError<{
 	id: number,
 	stream_id: StreamId,
 	path: string,
@@ -607,12 +607,12 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getSnapshotStats: (snapshotId: number) => typedError<SnapshotStats, IpcError>(__TAURI_INVOKE("get_snapshot_stats", { snapshotId })),
+	getSnapshotStats: (snapshotId: SnapshotId) => typedError<SnapshotStats, IpcError>(__TAURI_INVOKE("get_snapshot_stats", { snapshotId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getBlobStorageBytes: () => typedError<number, IpcError>(__TAURI_INVOKE("get_blob_storage_bytes")),
+	getBlobStorageBytes: () => typedError<ByteSize, IpcError>(__TAURI_INVOKE("get_blob_storage_bytes")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -696,7 +696,7 @@ export const commands = {
 	agent_session_id: AgentSessionId | null,
 	prompt: string,
 	answer: string | null,
-	// The harness's own session id, when it reported one.
+	/**  The harness's own session id, when it reported one. */
 	session_id: string | null,
 	started_at: Timestamp,
 	ended_at: Timestamp | null,
@@ -763,26 +763,26 @@ export const commands = {
 	 *  (`v_effort.title`).
 	 */
 	title: string | null,
-	// What closed it (`commit`, `switch`, `person`, `agent`, `system`).
+	/**  What closed it (`commit`, `switch`, `person`, `agent`, `system`). */
 	closed_by: string | null,
 	thread_id: ThreadId,
 	started_at: Timestamp,
 	ended_at: Timestamp | null,
 	start_snapshot_id: number | null,
 	end_snapshot_id: number | null,
-	// The effort's summary prose — the canonical text.
+	/**  The effort's summary prose — the canonical text. */
 	summary: string | null,
 } | null, IpcError>(__TAURI_INVOKE("get_effort", { effortId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listEffortsAtSnapshots: (snapshotIds: number[]) => typedError<EffortAtSnapshot[], IpcError>(__TAURI_INVOKE("list_efforts_at_snapshots", { snapshotIds })),
+	listEffortsAtSnapshots: (snapshotIds: SnapshotId[]) => typedError<EffortAtSnapshot[], IpcError>(__TAURI_INVOKE("list_efforts_at_snapshots", { snapshotIds })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listEffortsOverlappingRange: (rangeStart: number, rangeEnd: number) => typedError<Effort[], IpcError>(__TAURI_INVOKE("list_efforts_overlapping_range", { rangeStart, rangeEnd })),
+	listEffortsOverlappingRange: (rangeStart: SnapshotId, rangeEnd: SnapshotId) => typedError<Effort[], IpcError>(__TAURI_INVOKE("list_efforts_overlapping_range", { rangeStart, rangeEnd })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -837,16 +837,16 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	undoCommand: (auditId: number, confirmed: boolean) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("undo_command", { auditId, confirmed })),
+	undoCommand: (auditId: AuditId, confirmed: boolean) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("undo_command", { auditId, confirmed })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	decideProposal: (proposal: number, approve: boolean) => typedError<{
+	decideProposal: (proposal: ProposalId, approve: boolean) => typedError<{
 	result: unknown,
-	// The `command_audit` row; `None` for a `Read` command.
+	/**  The `command_audit` row; `None` for a `Read` command. */
 	audit_id: number | null,
-	// The `command.executed` event; `None` for a `Read` command.
+	/**  The `command.executed` event; `None` for a `Read` command. */
 	event_id: EventId | null,
 	/**
 	 *  Present when the command is undoable: `commands.undo(audit_id)`
@@ -972,7 +972,7 @@ export const commands = {
 	kind: BackgroundTaskKind,
 	label: string,
 	detail: string | null,
-	// 0..=1 for determinate, `None` for indeterminate.
+	/**  0..=1 for determinate, `None` for indeterminate. */
 	progress: number | null,
 	status: BackgroundTaskStatus,
 	started_at: number,
@@ -1087,7 +1087,7 @@ export const commands = {
 	generation: number,
 	status: AcpStatus,
 	usage: ContextUsage | null,
-	// The highest `seq` in the transcript; ask `since` this next time.
+	/**  The highest `seq` in the transcript; ask `since` this next time. */
 	headSeq: number,
 	items: TranscriptItem[],
 	stderrTail: string[],
@@ -1137,7 +1137,7 @@ export const commands = {
 	 *  whether its directory still exists.
 	 */
 	listRecentProjects: () => typedError<RecentProjectView[], IpcError>(__TAURI_INVOKE("list_recent_projects")),
-	// Forget a recent project (exact match on the stored path).
+	/**  Forget a recent project (exact match on the stored path). */
 	removeRecentProject: (path: string) => typedError<null, IpcError>(__TAURI_INVOKE("remove_recent_project", { path })),
 	/**
 	 *  Open `path` as an existing project: start its daemon and put a
@@ -1163,7 +1163,7 @@ export const commands = {
 	 *  replacing this setup window.
 	 */
 	setupProject: (path: string) => typedError<null, IpcError>(__TAURI_INVOKE("setup_project", { path })),
-	// Decline first-run setup: close this window.
+	/**  Decline first-run setup: close this window. */
 	abortSetup: () => typedError<null, IpcError>(__TAURI_INVOKE("abort_setup")),
 };
 
@@ -1183,9 +1183,9 @@ export type AcceptedValues = {
  *  in its own).
  */
 export type Access = 
-// Changes only what the person sees (open a page, find in a file).
+/**  Changes only what the person sees (open a page, find in a file). */
 "view" | 
-// Reads, changes nothing (`sql.read`).
+/**  Reads, changes nothing (`sql.read`). */
 "read" | 
 /**
  *  Changes oxplow's own records (filing and editing tasks): audited,
@@ -1208,16 +1208,16 @@ export type Access =
  *  (see `exec_consent`).
  */
 export type AcpAgentConfig = {
-	// Short name a thread picks it by (`claude`, `gemini`, `my-agent`).
+	/**  Short name a thread picks it by (`claude`, `gemini`, `my-agent`). */
 	name: string,
-	// The program: a name on PATH or a path.
+	/**  The program: a name on PATH or a path. */
 	command: string,
 	args?: string[],
-	// Extra environment for the program.
+	/**  Extra environment for the program. */
 	env?: { [key in string]: string },
 };
 
-// One ACP agent, as the thread picker and Settings see it.
+/**  One ACP agent, as the thread picker and Settings see it. */
 export type AcpAgentListing = {
 	name: string,
 	command: string,
@@ -1228,22 +1228,22 @@ export type AcpAgentListing = {
 	 *  project entry.
 	 */
 	approved: boolean,
-	// The command's absolute path, or `None` when it isn't installed.
+	/**  The command's absolute path, or `None` when it isn't installed. */
 	resolvedPath: string | null,
 };
 
-// Where an ACP agent definition came from.
+/**  Where an ACP agent definition came from. */
 export type AcpAgentSource = 
-// An adapter an extension declares; runs without approval.
+/**  An adapter an extension declares; runs without approval. */
 "declared" | 
-// The project's `acpAgents:`; needs a person's approval to run.
+/**  The project's `acpAgents:`; needs a person's approval to run. */
 "project";
 
-// A change to one agent session's ACP agent, pushed to the UI.
+/**  A change to one agent session's ACP agent, pushed to the UI. */
 export type AcpEvent = {
-	// The agent session (`ses3`) it is about.
+	/**  The agent session (`ses3`) it is about. */
 	agentSessionId: string,
-	// Its thread, for a client that filters by thread.
+	/**  Its thread, for a client that filters by thread. */
 	threadId: string,
 	/**
 	 *  Which run of the session: each open is a new generation whose
@@ -1251,11 +1251,11 @@ export type AcpEvent = {
 	 *  with the last one's transcript.
 	 */
 	generation: number,
-} & (AcpEventBody);
+} & AcpEventBody;
 
 export type AcpEventBody = { type: "item"; item: TranscriptItem } | { type: "status"; status: AcpStatus } | { type: "usage"; usage: ContextUsage } | { type: "closed"; reason: string | null };
 
-// A session as the UI reads it.
+/**  A session as the UI reads it. */
 export type AcpSnapshot = {
 	agent: string,
 	/**
@@ -1265,7 +1265,7 @@ export type AcpSnapshot = {
 	generation: number,
 	status: AcpStatus,
 	usage: ContextUsage | null,
-	// The highest `seq` in the transcript; ask `since` this next time.
+	/**  The highest `seq` in the transcript; ask `since` this next time. */
 	headSeq: number,
 	items: TranscriptItem[],
 	stderrTail: string[],
@@ -1280,9 +1280,9 @@ export type AcpStatus = "starting" | "idle" | "running" | "awaiting_permission" 
  */
 export type AdapterSpec = {
 	mcp: McpServer,
-	// The Starlark mapping (`transform(x)`), relative to the folder.
+	/**  The Starlark mapping (`transform(x)`), relative to the folder. */
 	mapping: string,
-	// The pinned tools (`[{ name, description, inputSchema }]`, JSON).
+	/**  The pinned tools (`[{ name, description, inputSchema }]`, JSON). */
 	tools: string,
 };
 
@@ -1298,7 +1298,7 @@ export type Advisory = {
 	on: AdvisoryOn,
 	query: string,
 	oncePer: AdvisoryOncePer,
-	// Line put above the messages (e.g. `# Metric deltas (this effort)`).
+	/**  Line put above the messages (e.g. `# Metric deltas (this effort)`). */
 	heading: string | null,
 	audience: AdvisoryAudience,
 	/**
@@ -1308,21 +1308,21 @@ export type Advisory = {
 	needs: string[],
 };
 
-// Who a hint is for.
+/**  Who a hint is for. */
 export type AdvisoryAudience = 
-// The coding agent: delivered on its next prompt or tool call.
+/**  The coding agent: delivered on its next prompt or tool call. */
 "agent" | 
-// A person: raised in Alerts until they dismiss it.
+/**  A person: raised in Alerts until they dismiss it. */
 "person";
 
-// When core runs an advisory.
+/**  When core runs an advisory. */
 export type AdvisoryOn = 
 /**
  *  After each agent tool call; results go to the agent as that call's
  *  context and are recorded as nudges.
  */
 "post-tool-use" | 
-// On each prompt the human sends; results join the prompt's context.
+/**  On each prompt the human sends; results join the prompt's context. */
 "prompt" | 
 /**
  *  When a turn ends (its `thread.checkpoint`): what the turn left
@@ -1331,29 +1331,29 @@ export type AdvisoryOn =
  */
 "turn-end";
 
-// How often the same advisory may reach the agent.
+/**  How often the same advisory may reach the agent. */
 export type AdvisoryOncePer = 
-// Once per effort, the first time the query returns rows.
+/**  Once per effort, the first time the query returns rows. */
 "effort" | 
 /**
  *  Once per thread per `key` value: each row's `key` column fires
  *  once (put `:effort_id` in the key for once per effort per row).
  */
 "row" | 
-// Every time, whenever the query returns rows.
+/**  Every time, whenever the query returns rows. */
 "turn" | 
-// Once per thread, the first time the query returns rows.
+/**  Once per thread, the first time the query returns rows. */
 "thread" | 
-// Once per agent session on the thread (the harness's session id).
+/**  Once per agent session on the thread (the harness's session id). */
 "session" | 
-// Once per thread per day (UTC).
+/**  Once per thread per day (UTC). */
 "day";
 
 export type AgentSessionId = string;
 
 export type AgentStatus = {
 	thread_id: ThreadId,
-	// The thread's stream.
+	/**  The thread's stream. */
 	stream_id: StreamId,
 	/**
 	 *  The agent session it is the status of; `None` for activity no
@@ -1389,7 +1389,7 @@ export type AgentTurn = {
 	agent_session_id: AgentSessionId | null,
 	prompt: string,
 	answer: string | null,
-	// The harness's own session id, when it reported one.
+	/**  The harness's own session id, when it reported one. */
 	session_id: string | null,
 	started_at: Timestamp,
 	ended_at: Timestamp | null,
@@ -1408,38 +1408,41 @@ export type AgentTurn = {
 
 export type AgentTurnId = string;
 
-// Which body of the call.
+/**  Which body of the call. */
 export type AiCallBody = 
 /**
  *  What the model was asked: `{ system, prompt, json }` or `{ state,
  *  questions }`.
  */
 "request" | 
-// What it answered: `{ text }` or `{ answers }`.
+/**  What it answered: `{ text }` or `{ answers }`. */
 "response";
 
-// A named model need of one extension.
+/**  An `ai_call` row. */
+export type AiCallId = number;
+
+/**  A named model need of one extension. */
 export type AiProfileDecl = {
 	id: string,
 	description: string,
-	// The built-in role whose model serves it until the person binds one.
+	/**  The built-in role whose model serves it until the person binds one. */
 	fallback: BuiltinRole,
-	// What the bound model must support.
+	/**  What the bound model must support. */
 	features: ModelFeature[],
 };
 
-// One thing a binding may be restricted from.
+/**  One thing a binding may be restricted from. */
 export type AiRestriction = 
-// Any tool: a request offering the model tools to call.
+/**  Any tool: a request offering the model tools to call. */
 "tools" | 
-// The `query_sql` tool: reading oxplow's models through SQL.
+/**  The `query_sql` tool: reading oxplow's models through SQL. */
 "sql" | 
-// A streamed reply.
+/**  A streamed reply. */
 "streaming" | 
-// Image input.
+/**  Image input. */
 "images";
 
-// One `ai.roles` entry.
+/**  One `ai.roles` entry. */
 export type AiRoleOverride = {
 	provider: string,
 	model: string,
@@ -1457,18 +1460,18 @@ export type AiSettings = {
 	 *  extensions' AI profiles, then bindings for profiles nothing declares.
 	 */
 	roles: RoleStatus[],
-	// The kinds a provider can be: the registered model providers.
+	/**  The kinds a provider can be: the registered model providers. */
 	kinds: ProviderKindInfo[],
 };
 
-// A lens's alert, evaluated on one run.
+/**  A lens's alert, evaluated on one run. */
 export type AlertState = {
 	firing: boolean,
-	// Rows the run returned.
+	/**  Rows the run returned. */
 	count: number,
-	// The watched column's value, for a threshold alert.
+	/**  The watched column's value, for a threshold alert. */
 	value: number | null,
-	// What the badge says, e.g. `3 rows` or `Coverage low: 72`.
+	/**  What the badge says, e.g. `3 rows` or `Coverage low: 72`. */
 	message: string,
 };
 
@@ -1481,14 +1484,14 @@ export type Anchors = {
 	stream_id: StreamId | null,
 	thread_id: ThreadId | null,
 	effort_id: EffortId | null,
-	// `agent_turn.id`.
+	/**  `agent_turn.id`. */
 	turn_id: number | null,
 	/**
 	 *  The agent session it happened in (`agent_session.id`) — not the
 	 *  harness's own session id, which `agent_turn.session_id` holds.
 	 */
 	agent_session_id: AgentSessionId | null,
-	// `snapshot.id`.
+	/**  `snapshot.id`. */
 	snapshot_id: number | null,
 };
 
@@ -1523,12 +1526,15 @@ export type AttachResult = {
 	launch: LaunchKind,
 };
 
+/**  A `command_audit` row. */
+export type AuditId = number;
+
 export type BackgroundTask = {
 	id: string,
 	kind: BackgroundTaskKind,
 	label: string,
 	detail: string | null,
-	// 0..=1 for determinate, `None` for indeterminate.
+	/**  0..=1 for determinate, `None` for indeterminate. */
 	progress: number | null,
 	status: BackgroundTaskStatus,
 	started_at: number,
@@ -1549,12 +1555,12 @@ export type BackgroundTaskKind = "vcs" | "code-quality" | "lsp" | "notes-resync"
  *  has no answer.
  */
 "metrics" | 
-// A command a person ran in the background (its `CommandUi.background`).
+/**  A command a person ran in the background (its `CommandUi.background`). */
 "command";
 
 export type BackgroundTaskStatus = "running" | "done" | "failed";
 
-// Edge plus a best-effort renderer label for the source.
+/**  Edge plus a best-effort renderer label for the source. */
 export type BacklinkEdge = {
 	source_kind: string,
 	source_id: string,
@@ -1577,15 +1583,15 @@ export type BacklinkEdge = {
 	resolved: boolean,
 };
 
-// A sign-in begun: the page the person signs in on, and its number.
+/**  A sign-in begun: the page the person signs in on, and its number. */
 export type BegunSignIn = {
 	url: string,
 	signIn: number,
 };
 
-// Who last changed one line.
+/**  Who last changed one line. */
 export type BlameLine = {
-	// 1-based.
+	/**  1-based. */
 	line: number,
 	/**
 	 *  The revision that last changed the line; `None` for a line not
@@ -1598,14 +1604,14 @@ export type BlameLine = {
 	summary: string,
 };
 
-// A branch.
+/**  A branch. */
 export type Branch = {
 	name: string,
-	// The remote it tracks a copy of; `None` for a local branch.
+	/**  The remote it tracks a copy of; `None` for a local branch. */
 	remote: string | null,
-	// The revision it points at, when it resolves.
+	/**  The revision it points at, when it resolves. */
 	head: string | null,
-	// The repository's default branch (`main`).
+	/**  The repository's default branch (`main`). */
 	is_default: boolean,
 };
 
@@ -1623,20 +1629,23 @@ export type BranchChangeEntry = {
  */
 export type BuiltinRole = "main" | "summarize" | "decide";
 
-// One question the person can ask, with where it comes from.
+/**  A size in bytes (the blob store's total, say). */
+export type ByteSize = number;
+
+/**  One question the person can ask, with where it comes from. */
 export type CatalogPrompt = {
 	prompt: string,
-	// A ref kind (`file`, `commit`, `effort`): a page for one offers it.
+	/**  A ref kind (`file`, `commit`, `effort`): a page for one offers it. */
 	about: string | null,
 	source: PromptSource,
 };
 
-// How one thing differs between the installed version and the candidate.
+/**  How one thing differs between the installed version and the candidate. */
 export type Change = "added" | "removed" | "changed" | "unchanged";
 
 export type ChangeKind = "added" | "modified" | "deleted" | "renamed" | "copied" | "untracked";
 
-// A change's identity and state.
+/**  A change's identity and state. */
 export type ChangeRow = {
 	id: number,
 	streamId: number,
@@ -1647,14 +1656,14 @@ export type ChangeRow = {
 	 *  root commit.
 	 */
 	baseRevision: string | null,
-	// The newer side.
+	/**  The newer side. */
 	headRevision: string | null,
 	status: string,
 	error: string | null,
 	computedAt: string | null,
-	// The stream's snapshot the analysis was computed against.
+	/**  The stream's snapshot the analysis was computed against. */
 	snapshotId: number | null,
-	// The event log's highest seq when the analysis began.
+	/**  The event log's highest seq when the analysis began. */
 	eventsTo: number | null,
 	/**
 	 *  What the analysis was computed from (the build, its trees, an
@@ -1691,7 +1700,7 @@ export type ChangeScopes = {
  *  What to analyze.
  */
 export type ChangeTarget = 
-// The stream's uncommitted work: HEAD → the working tree.
+/**  The stream's uncommitted work: HEAD → the working tree. */
 { kind: "working"; streamId: string } | 
 /**
  *  One commit against its first parent. `stream_id` picks the repo
@@ -1715,22 +1724,22 @@ export type ChangeTarget =
  */
 export type ChangedPath = {
 	path: string,
-	// `added`, `modified` or `deleted`.
+	/**  `added`, `modified` or `deleted`. */
 	status: FileStatus,
 };
 
-// What `check` found.
+/**  What `check` found. */
 export type CheckReport = CheckReport_Serialize | CheckReport_Deserialize;
 
-// What `check` found.
+/**  What `check` found. */
 export type CheckReport_Deserialize = {
 	name: string,
-	// No errors (warnings don't fail a check).
+	/**  No errors (warnings don't fail a check). */
 	ok: boolean,
-	// `file:line: what — fix` lines.
+	/**  `file:line: what — fix` lines. */
 	errors: string[],
 	warnings: string[],
-	// What its SQL was dry-run against.
+	/**  What its SQL was dry-run against. */
 	dryRun: DryRun,
 	extension: Extension_Deserialize,
 	/**
@@ -1738,26 +1747,26 @@ export type CheckReport_Deserialize = {
 	 *  tree changes; `null` without it.
 	 */
 	impact: ImpactReport | null,
-	// The revision `impact` compares the working tree with.
+	/**  The revision `impact` compares the working tree with. */
 	against: string | null,
 	/**
 	 *  The services each of its Starlark scripts uses or declares
 	 *  (`--services` prints them).
 	 */
 	services: ScriptServices[],
-	// What serves each of its `ai_profiles:` here ([`profile_lines`]).
+	/**  What serves each of its `ai_profiles:` here ([`profile_lines`]). */
 	profiles: string[],
 };
 
-// What `check` found.
+/**  What `check` found. */
 export type CheckReport_Serialize = {
 	name: string,
-	// No errors (warnings don't fail a check).
+	/**  No errors (warnings don't fail a check). */
 	ok: boolean,
-	// `file:line: what — fix` lines.
+	/**  `file:line: what — fix` lines. */
 	errors: string[],
 	warnings: string[],
-	// What its SQL was dry-run against.
+	/**  What its SQL was dry-run against. */
 	dryRun: DryRun,
 	extension: Extension_Serialize,
 	/**
@@ -1765,18 +1774,18 @@ export type CheckReport_Serialize = {
 	 *  tree changes; `null` without it.
 	 */
 	impact: ImpactReport | null,
-	// The revision `impact` compares the working tree with.
+	/**  The revision `impact` compares the working tree with. */
 	against: string | null,
 	/**
 	 *  The services each of its Starlark scripts uses or declares
 	 *  (`--services` prints them).
 	 */
 	services: ScriptServices[],
-	// What serves each of its `ai_profiles:` here ([`profile_lines`]).
+	/**  What serves each of its `ai_profiles:` here ([`profile_lines`]). */
 	profiles: string[],
 };
 
-// How a client authenticates to a token endpoint.
+/**  How a client authenticates to a token endpoint. */
 export type ClientAuth = "basic" | "post";
 
 export type CollectorImpact = {
@@ -1784,7 +1793,7 @@ export type CollectorImpact = {
 	change: Change,
 	before: Grants | null,
 	after: Grants | null,
-	// The views it fills.
+	/**  The views it fills. */
 	entities: string[],
 	/**
 	 *  What each version makes of the same inputs — its fixtures
@@ -1797,7 +1806,7 @@ export type CollectorImpact = {
 	 *  review never does, approved or not.
 	 */
 	notRun: string | null,
-	// Its entry's text changed though its declaration didn't (tsk783).
+	/**  Its entry's text changed though its declaration didn't (tsk783). */
 	scriptChanged: boolean,
 };
 
@@ -1815,9 +1824,9 @@ export type CollectorInput = {
 	limit: number | null,
 };
 
-// A declared collector with its last run and consent status.
+/**  A declared collector with its last run and consent status. */
 export type CollectorListing = {
-	// The extension that declares it.
+	/**  The extension that declares it. */
 	owner: string,
 	spec: CollectorSpec,
 	run: CollectorRun | null,
@@ -1826,9 +1835,9 @@ export type CollectorListing = {
 	 *  it is now.
 	 */
 	approved: boolean,
-	// Whether this OS enforces the collector's `network` list.
+	/**  Whether this OS enforces the collector's `network` list. */
 	networkEnforced: boolean,
-	// Each declared credential and whether it has a value (never the value).
+	/**  Each declared credential and whether it has a value (never the value). */
 	credentials: CredentialStatus[],
 	/**
 	 *  Its approval hash as it is now: the person's Approve & Run sends
@@ -1836,33 +1845,33 @@ export type CollectorListing = {
 	 *  collectors and unreadable entries.
 	 */
 	version: string | null,
-	// Why failures disabled it on this machine, when they did (P7.C2).
+	/**  Why failures disabled it on this machine, when they did (P7.C2). */
 	disabled: string | null,
 };
 
-// One input, run on each version.
+/**  One input, run on each version. */
 export type CollectorOutput = {
-	// `fixture <name>`, `event #<seq>` or `input query`.
+	/**  `fixture <name>`, `event #<seq>` or `input query`. */
 	input: string,
 	change: Change,
 	before: Ran | null,
 	after: Ran | null,
 };
 
-// Last run of one collector (`collector_run`).
+/**  Last run of one collector (`collector_run`). */
 export type CollectorRun = {
-	// The declaring extension, or `project`.
+	/**  The declaring extension, or `project`. */
 	owner: string,
 	id: string,
-	// `ok`, `error`, `needs_approval` or `skipped` (the loop guard).
+	/**  `ok`, `error`, `needs_approval` or `skipped` (the loop guard). */
 	status: string,
 	lastRunAt: string,
 	error: string | null,
-	// Row counts per entity from the last successful run.
+	/**  Row counts per entity from the last successful run. */
 	rowCounts: { [key in string]: number },
-	// The checkpoint the last successful run returned (opaque).
+	/**  The checkpoint the last successful run returned (opaque). */
 	cursor: unknown | null,
-	// The seq of the last trigger event it ran for.
+	/**  The seq of the last trigger event it ran for. */
 	lastEventId: number | null,
 	/**
 	 *  The last run (`extension_run.run_id`); `None` for one before runs
@@ -1871,17 +1880,17 @@ export type CollectorRun = {
 	runId?: string | null,
 };
 
-// Outcome of one run, as reported to the UI / agent.
+/**  Outcome of one run, as reported to the UI / agent. */
 export type CollectorRunReport = {
 	owner: string,
 	id: string,
-	// An entity collector's rows per entity after the run.
+	/**  An entity collector's rows per entity after the run. */
 	rowCounts: { [key in string]: number },
-	// A fact collector's facts recorded.
+	/**  A fact collector's facts recorded. */
 	facts: number,
 };
 
-// What runs a collector.
+/**  What runs a collector. */
 export type CollectorRuntime = 
 /**
  *  A program: can reach the network and credentials, so it needs a
@@ -1893,7 +1902,7 @@ export type CollectorRuntime =
  *  calls a model (`ai_*`), which spends the person's key.
  */
 "starlark" | 
-// A sandboxed jq program: no I/O, so no approval.
+/**  A sandboxed jq program: no I/O, so no approval. */
 "jaq" | 
 /**
  *  A provider instance's collector (`oxplow.provider.sync`): its records
@@ -1901,9 +1910,9 @@ export type CollectorRuntime =
  */
 "read";
 
-// One declared collector.
+/**  One declared collector. */
 export type CollectorSpec = {
-	// Unique in its owner; a dotted id (`repo.scan_clone`) is fine.
+	/**  Unique in its owner; a dotted id (`repo.scan_clone`) is fine. */
 	id: string,
 	doc: string,
 	runtime: CollectorRuntime,
@@ -1912,7 +1921,7 @@ export type CollectorSpec = {
 	 *  extension's, or the project's); absent for `read`.
 	 */
 	entry: string | null,
-	// For `read`: the provider collector it runs.
+	/**  For `read`: the provider collector it runs. */
 	provider: ProviderRead | null,
 	trigger: Trigger,
 	/**
@@ -1929,14 +1938,14 @@ export type CollectorSpec = {
 	 *  otherwise).
 	 */
 	input: CollectorInput | null,
-	// A report file handed over as `input.report`.
+	/**  A report file handed over as `input.report`. */
 	report: ReportInput | null,
 	sync: CollectorSync,
-	// Host environment variables an exec collector gets.
+	/**  Host environment variables an exec collector gets. */
 	env: string[],
-	// Hosts an exec collector may reach; part of what a person approves.
+	/**  Hosts an exec collector may reach; part of what a person approves. */
 	network: string[],
-	// Keychain secrets an exec collector gets as environment variables.
+	/**  Keychain secrets an exec collector gets as environment variables. */
 	credentials: string[],
 	/**
 	 *  The services a Starlark collector's script uses beyond what its kind
@@ -1962,9 +1971,9 @@ export type CollectorSpec = {
 	records: Records | null,
 };
 
-// How a run's entities land.
+/**  How a run's entities land. */
 export type CollectorSync = 
-// Each run restates every entity (one it doesn't mention is emptied).
+/**  Each run restates every entity (one it doesn't mention is emptied). */
 "replace" | 
 /**
  *  Each run adds or updates rows by key, and removes the keys it lists
@@ -1972,20 +1981,20 @@ export type CollectorSync =
  */
 "upsert";
 
-// A provider's collector as Settings → Integrations shows it.
+/**  A provider's collector as Settings → Integrations shows it. */
 export type CollectorView = {
 	name: string,
 	entity: string,
-	// `never`, `reading`, `ok` or `error`.
+	/**  `never`, `reading`, `ok` or `error`. */
 	status: string,
 	error: string | null,
-	// RFC 3339.
+	/**  RFC 3339. */
 	lastReadAt: string | null,
-	// Records its reads have delivered.
+	/**  Records its reads have delivered. */
 	records: number,
 };
 
-// One promised column.
+/**  One promised column. */
 export type ColumnDecl = {
 	name: string,
 	/**
@@ -1996,9 +2005,9 @@ export type ColumnDecl = {
 	doc: string,
 };
 
-// Declared type of an entity column.
+/**  Declared type of an entity column. */
 export type ColumnType = "text" | "int" | "real" | "bool" | 
-// An RFC 3339 timestamp, stored as text.
+/**  An RFC 3339 timestamp, stored as text. */
 "time";
 
 /**
@@ -2010,7 +2019,7 @@ export type CommandCall = {
 	input: unknown,
 };
 
-// One of a provider's declared commands, or of its pinned MCP tools.
+/**  One of a provider's declared commands, or of its pinned MCP tools. */
 export type CommandChange = {
 	name: string,
 	change: Change,
@@ -2033,15 +2042,15 @@ export type CommandExample = {
 	 */
 	answers: { [key in string]: unknown[] },
 	expectCommands: string[],
-	// A part of the reason the script should refuse with.
+	/**  A part of the reason the script should refuse with. */
 	refuses: string | null,
 };
 
-// What runs an extension's command.
+/**  What runs an extension's command. */
 export type CommandHandler = 
-// A Starlark script composing commands (`entry:`).
+/**  A Starlark script composing commands (`entry:`). */
 { kind: "script"; 
-// The script, relative to the extension folder.
+/**  The script, relative to the extension folder. */
 entry: string } | 
 /**
  *  One operation of a scope (`scope:` + `op:`,
@@ -2054,15 +2063,15 @@ entry: string } |
  *  (`commands::ProviderRouter`).
  */
 { kind: "provider"; provider: string; op: string; 
-// It returns an inverse (its declarations say).
+/**  It returns an inverse (its declarations say). */
 undoable: boolean };
 
-// A completed run.
+/**  A completed run. */
 export type CommandOutcome = {
 	result: unknown,
-	// The `command_audit` row; `None` for a `Read` command.
+	/**  The `command_audit` row; `None` for a `Read` command. */
 	audit_id: number | null,
-	// The `command.executed` event; `None` for a `Read` command.
+	/**  The `command.executed` event; `None` for a `Read` command. */
 	event_id: EventId | null,
 	/**
 	 *  Present when the command is undoable: `commands.undo(audit_id)`
@@ -2071,7 +2080,7 @@ export type CommandOutcome = {
 	inverse: CommandCall | null,
 };
 
-// What a command declares about itself.
+/**  What a command declares about itself. */
 export type CommandSpec = {
 	/**
 	 *  The command id: `<namespace>.<area>.<verb>`, snake_case —
@@ -2082,13 +2091,13 @@ export type CommandSpec = {
 	 *  id.)
 	 */
 	id: string,
-	// One sentence for `list_commands` and the launcher.
+	/**  One sentence for `list_commands` and the launcher. */
 	summary: string,
-	// JSON Schema for the input.
+	/**  JSON Schema for the input. */
 	input_schema: unknown,
 	invokers: Invokers,
 	confirm: Confirm,
-	// The handler returns an inverse, so `commands.undo` can apply it.
+	/**  The handler returns an inverse, so `commands.undo` can apply it. */
 	undoable: boolean,
 	lifecycle: Lifecycle,
 	atomicity: Atomicity,
@@ -2124,11 +2133,11 @@ export type CommandSpec = {
  *  command to a person"). Agents ignore it.
  */
 export type CommandUi = {
-	// What a person reads: `Pull Changes`, `New Task…`.
+	/**  What a person reads: `Pull Changes`, `New Task…`. */
 	label: string,
-	// What search lists it under: `Git`, `Tasks`.
+	/**  What search lists it under: `Git`, `Tasks`. */
 	group?: string | null,
-	// More words search matches it by.
+	/**  More words search matches it by. */
 	keywords?: string[],
 	/**
 	 *  The ref kind it acts on (`work_item`, `effort`): offered on that
@@ -2167,7 +2176,7 @@ export type CommandUi = {
 	 *  Find); otherwise typing keeps it.
 	 */
 	while_typing?: boolean,
-	// Where the menu bar shows it.
+	/**  Where the menu bar shows it. */
 	menu?: MenuPlace | null,
 	/**
 	 *  When it's offered — in search, the menu bar and by its shortcut —
@@ -2197,14 +2206,14 @@ export type Comment = {
 	target_kind: string,
 	target_id: string,
 	quote: string,
-	// W3C selectors array (opaque to the store; the renderer parses it).
+	/**  W3C selectors array (opaque to the store; the renderer parses it). */
 	selectors_json: string,
 	/**
 	 *  Ancestor regions the selection sat inside, innermost→outermost,
 	 *  EXCLUDING the primary target. Empty for a top-level selection.
 	 */
 	context_chain: CommentTarget[],
-	// Canonical refs found inside the selection (links + mentions).
+	/**  Canonical refs found inside the selection (links + mentions). */
 	referenced_refs: CommentTarget[],
 	intent: CommentIntent,
 	status: CommentStatus,
@@ -2224,18 +2233,18 @@ export type Comment = {
 
 export type CommentId = string;
 
-// Why the comment exists — drives what the agent acts on.
+/**  Why the comment exists — drives what the agent acts on. */
 export type CommentIntent = 
-// A private thinking note; the agent leaves it alone unless asked.
+/**  A private thinking note; the agent leaves it alone unless asked. */
 "note" | 
-// The user wants the agent to do something about this.
+/**  The user wants the agent to do something about this. */
 "followup";
 
-// One message in a comment thread (the first message included).
+/**  One message in a comment thread (the first message included). */
 export type CommentMessage = {
 	id: CommentMessageId,
 	comment_id: CommentId,
-	// Free-form, e.g. `"user"` or `"agent"`.
+	/**  Free-form, e.g. `"user"` or `"agent"`. */
 	author: string,
 	body: string,
 	created_at: Timestamp,
@@ -2243,7 +2252,7 @@ export type CommentMessage = {
 
 export type CommentMessageId = string;
 
-// Lifecycle of a comment thread.
+/**  Lifecycle of a comment thread. */
 export type CommentStatus = "open" | "resolved";
 
 /**
@@ -2262,7 +2271,7 @@ export type CommentTarget = {
 	id: string,
 };
 
-// A comment plus its full message thread, oldest-first.
+/**  A comment plus its full message thread, oldest-first. */
 export type CommentThread = {
 	comment: Comment,
 	messages: CommentMessage[],
@@ -2275,13 +2284,13 @@ export type CommitRefLabel = {
 
 export type CommitRefLabelKind = "branch" | "tag";
 
-// What one version's effect makes of an event.
+/**  What one version's effect makes of an event. */
 export type Composes = {
-	// The commands it runs, by name.
+	/**  The commands it runs, by name. */
 	commands: string[],
-	// Why it skips.
+	/**  Why it skips. */
 	skip: string | null,
-	// Why it fails.
+	/**  Why it fails. */
 	error: string | null,
 };
 
@@ -2296,14 +2305,14 @@ export type ConfigMigration = {
 	entry: string,
 };
 
-// Where a setting's value comes from.
+/**  Where a setting's value comes from. */
 export type ConfigOrigin = "default" | "global" | "project" | 
-// A person's own layer (`.oxplow/personal.yaml`).
+/**  A person's own layer (`.oxplow/personal.yaml`). */
 "personal" | "extension";
 
-// A config problem `check` reported.
+/**  A config problem `check` reported. */
 export type ConfigProblem = {
-	// A JSON pointer into the config (`/team`), `""` for the whole.
+	/**  A JSON pointer into the config (`/team`), `""` for the whole. */
 	path: string,
 	message: string,
 };
@@ -2330,7 +2339,7 @@ export type ConfigurationFile = {
  *  ask more than its operation's `confirm_at_least`, never less.
  */
 export type Confirm = "never" | "always" | 
-// Irreversible; presented as destructive and always confirmed.
+/**  Irreversible; presented as destructive and always confirmed. */
 "destructive";
 
 /**
@@ -2365,11 +2374,11 @@ export type ContributionId = {
  */
 export type ContributionImpact = {
 	kind: ContributionKind,
-	// The kind as a person names it (`Event type`).
+	/**  The kind as a person names it (`Event type`). */
 	title: string,
-	// its ref (`<kind>:<extension>/<id>`, `command:<bus id>`).
+	/**  its ref (`<kind>:<extension>/<id>`, `command:<bus id>`). */
 	id: string,
-	// The part of the id after the kind: what a row is called.
+	/**  The part of the id after the kind: what a row is called. */
 	local: string,
 	change: Change,
 	/**
@@ -2379,19 +2388,19 @@ export type ContributionImpact = {
 	differs: string[],
 };
 
-// Every kind of contribution a manifest can declare.
+/**  Every kind of contribution a manifest can declare. */
 export type ContributionKind = "model" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "ref_kind" | "command" | "job" | "ai_profile" | "effect" | "advisory" | "skill" | "implementation" | "provider" | "lens" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
 
-// One credential a provider declares.
+/**  One credential a provider declares. */
 export type CredentialDecl = {
 	/**
 	 *  Its name: the environment variable the provider reads it from, and
 	 *  what its keychain account is named for.
 	 */
 	name: string,
-	// Obtained by signing in rather than pasted (P9.B3).
+	/**  Obtained by signing in rather than pasted (P9.B3). */
 	oauth: OAuthDecl | null,
-	// An inert host-owned secret identity, usable only as a remote MCP bearer.
+	/**  An inert host-owned secret identity, usable only as a remote MCP bearer. */
 	secretRef: SecretRef | null,
 };
 
@@ -2412,11 +2421,11 @@ export type CustomComponent = {
 	id: string,
 	extension: string,
 	title: string | null,
-	// The bundle's folder inside the extension, holding `index.html`.
+	/**  The bundle's folder inside the extension, holding `index.html`. */
 	bundle: string,
-	// Lens ids (`<extension>/<slug>`) the component may query.
+	/**  Lens ids (`<extension>/<slug>`) the component may query. */
 	assets: string[],
-	// Commands the component may invoke.
+	/**  Commands the component may invoke. */
 	commands: string[],
 };
 
@@ -2457,17 +2466,17 @@ export type DashboardItem = {
 
 export type DashboardItemId = string;
 
-// A dashboard plus its tiles, in display order — the `get_dashboard` read shape.
+/**  A dashboard plus its tiles, in display order — the `get_dashboard` read shape. */
 export type DashboardWithItems = {
 	dashboard: Dashboard,
 	items: DashboardItem[],
 };
 
-// One row of Settings → Data.
+/**  One row of Settings → Data. */
 export type DataEntity = {
-	// The view to query (`v_work_item`, `v_my_gh_pr`).
+	/**  The view to query (`v_work_item`, `v_my_gh_pr`). */
 	name: string,
-	// `core`, or the extension that provides it.
+	/**  `core`, or the extension that provides it. */
 	owner: string,
 	/**
 	 *  `sql` (a model file), `entity` (an extension's synced data), or
@@ -2477,7 +2486,7 @@ export type DataEntity = {
 	description: string,
 };
 
-// A parked event: the consumer that failed on it, why, and how often.
+/**  A parked event: the consumer that failed on it, why, and how often. */
 export type DeadLetter = {
 	id: number,
 	consumer: string,
@@ -2486,24 +2495,27 @@ export type DeadLetter = {
 	attempts: number,
 	first_failed_at: Timestamp,
 	last_failed_at: Timestamp,
-	// `pending` | `retried` | `discarded`.
+	/**  `pending` | `retried` | `discarded`. */
 	state: string,
 };
 
+/**  A parked event's `dead_letter` row. */
+export type DeadLetterId = number;
+
 export type Declared = "declared" | "implied" | "undeclared";
 
-// Where in the manifest it was declared.
+/**  Where in the manifest it was declared. */
 export type DeclaredAt = {
 	file: string,
-	// 1-based; `None` when the kind doesn't track lines.
+	/**  1-based; `None` when the kind doesn't track lines. */
 	line: number | null,
 };
 
-// Where a decoration shows.
+/**  Where a decoration shows. */
 export type DecoratorPlacement = 
-// A chip in the header of a page whose ref the model lists.
+/**  A chip in the header of a page whose ref the model lists. */
 "ref-chip" | 
-// A badge after a lens cell that links to a listed ref.
+/**  A badge after a lens cell that links to a listed ref. */
 "row-badge";
 
 /**
@@ -2517,7 +2529,7 @@ export type Deprecated = {
 	until: string,
 };
 
-// Everything a contribution is, as core knows it.
+/**  Everything a contribution is, as core knows it. */
 export type Descriptor = {
 	id: ContributionId,
 	owner: Owner,
@@ -2560,7 +2572,7 @@ export type Descriptor = {
  */
 export type DiffEntry = {
 	path: string,
-	// `added`, `modified` or `deleted`.
+	/**  `added`, `modified` or `deleted`. */
 	status: FileStatus,
 	additions: number,
 	deletions: number,
@@ -2577,7 +2589,7 @@ export type DiffEntry = {
  *  (catalog teeth).
  */
 export type DimensionEntry = {
-	// The new dimension's namespaced key (`<vendor>.<id>`). Required.
+	/**  The new dimension's namespaced key (`<vendor>.<id>`). Required. */
 	key?: string | null,
 	label?: string | null,
 	/**
@@ -2585,9 +2597,9 @@ export type DimensionEntry = {
 	 *  `categorical`).
 	 */
 	valueType?: string | null,
-	// For `entity-ref` dims — the subject kind the value points at.
+	/**  For `entity-ref` dims — the subject kind the value points at. */
 	subjectKind?: string | null,
-	// Optional controlled vocabulary (the allowed value set).
+	/**  Optional controlled vocabulary (the allowed value set). */
 	vocabulary?: string[],
 	/**
 	 *  Request a generated column + expression index on `fact` for this dim
@@ -2600,7 +2612,7 @@ export type DimensionEntry = {
 	 *  metrics over the same view.
 	 */
 	entity?: string | null,
-	// Entity dimension: the SQL expression (over the view, aliased `e`).
+	/**  Entity dimension: the SQL expression (over the view, aliased `e`). */
 	expr?: string | null,
 	/**
 	 *  Entity dimension: an optional join, e.g.
@@ -2609,11 +2621,11 @@ export type DimensionEntry = {
 	join?: string | null,
 };
 
-// How far `head` and `base` have diverged.
+/**  How far `head` and `base` have diverged. */
 export type Divergence = {
 	ahead: number,
 	behind: number,
-	// Files changed on both sides since they split, sorted.
+	/**  Files changed on both sides since they split, sorted. */
 	overlapping_files: string[],
 	readiness: MergeReadiness,
 };
@@ -2623,9 +2635,9 @@ export type Divergence = {
  *  (P7.C6): what it declares but hasn't published stands in either way.
  */
 export type DryRun = 
-// The project's own (its synced data, read-only).
+/**  The project's own (its synced data, read-only). */
 "project" | 
-// A fresh, empty one: no usable project database.
+/**  A fresh, empty one: no usable project database. */
 "emptyDatabase";
 
 /**
@@ -2636,7 +2648,7 @@ export type EffectDecl = {
 	id: string,
 	extension: string,
 	summary: string,
-	// The event types it reacts to.
+	/**  The event types it reacts to. */
 	on: string[],
 	/**
 	 *  Payload fields that must equal these values (the collectors'
@@ -2648,20 +2660,20 @@ export type EffectDecl = {
 	 *  `.context/commands.md` "Scopes"): `sql.read`.
 	 */
 	needs: string[],
-	// The script's path in the folder.
+	/**  The script's path in the folder. */
 	entry: string,
-	// Its source.
+	/**  Its source. */
 	script: string,
 	/**
 	 *  What it runs after on one event, as written (resolved to refs on
 	 *  its descriptor; `extensions.md` "Ordering").
 	 */
 	after: string[],
-	// `file:line` of the declaration.
+	/**  `file:line` of the declaration. */
 	declaredAt: string,
 };
 
-// An effect before and after: when it reacts, and what it composes.
+/**  An effect before and after: when it reacts, and what it composes. */
 export type EffectImpact = {
 	id: string,
 	change: Change,
@@ -2675,25 +2687,25 @@ export type EffectImpact = {
 	outputs: EffectOutput[],
 };
 
-// One input, composed by each version.
+/**  One input, composed by each version. */
 export type EffectOutput = {
-	// `fixture <name>` or `event #<seq>`.
+	/**  `fixture <name>` or `event #<seq>`. */
 	input: string,
 	change: Change,
 	before: Composes | null,
 	after: Composes | null,
 };
 
-// When an effect reacts, and what it reads.
+/**  When an effect reacts, and what it reads. */
 export type EffectTrigger = {
 	on: string[],
-	// Its `where`.
+	/**  Its `where`. */
 	filter: { [key in string]: string },
-	// The scopes its script calls.
+	/**  The scopes its script calls. */
 	needs: string[],
 };
 
-// One setting as the Settings view shows it.
+/**  One setting as the Settings view shows it. */
 export type EffectiveSetting = {
 	/**
 	 *  A project key (`snapshotRetentionDays`), or a scoped name
@@ -2703,11 +2715,11 @@ export type EffectiveSetting = {
 	doc: string,
 	value: unknown,
 	origin: ConfigOrigin,
-	// The extension a value comes from (`origin: extension`).
+	/**  The extension a value comes from (`origin: extension`). */
 	extension: string | null,
-	// Only a person may set it; an agent's change asks them.
+	/**  Only a person may set it; an agent's change asks them. */
 	humanOnly: boolean,
-	// A project key's value schema; null for the rest.
+	/**  A project key's value schema; null for the rest. */
 	schema: unknown,
 };
 
@@ -2723,14 +2735,14 @@ export type Effort = {
 	 *  (`v_effort.title`).
 	 */
 	title: string | null,
-	// What closed it (`commit`, `switch`, `person`, `agent`, `system`).
+	/**  What closed it (`commit`, `switch`, `person`, `agent`, `system`). */
 	closed_by: string | null,
 	thread_id: ThreadId,
 	started_at: Timestamp,
 	ended_at: Timestamp | null,
 	start_snapshot_id: number | null,
 	end_snapshot_id: number | null,
-	// The effort's summary prose — the canonical text.
+	/**  The effort's summary prose — the canonical text. */
 	summary: string | null,
 };
 
@@ -2749,7 +2761,7 @@ export type EffortFile = {
 	effort_id: EffortId,
 	path: string,
 	change: EffortFileChange,
-	// The snapshot the file ref was captured at.
+	/**  The snapshot the file ref was captured at. */
 	local_snapshot_id: number,
 	/**
 	 *  Closest known git commit at capture time. See V20 column
@@ -2777,15 +2789,15 @@ export type EntityColumn = {
 	doc: string,
 };
 
-// An entity a collector writes: its rows, published as a view.
+/**  An entity a collector writes: its rows, published as a view. */
 export type EntityDecl = {
 	name: string,
 	doc: string,
-	// Column that uniquely identifies a row.
+	/**  Column that uniquely identifies a row. */
 	key: string,
 	columns: EntityColumn[],
 	relations: EntityRelation[],
-	// SQL name lenses and agents query: `v_<owner>_<entity>`.
+	/**  SQL name lenses and agents query: `v_<owner>_<entity>`. */
 	view: string,
 };
 
@@ -2794,13 +2806,13 @@ export type EntityDecl = {
  *  tells agents and lens authors how the data connects.
  */
 export type EntityRelation = {
-	// The view it joins to, e.g. `v_work_item` or `v_github_review`.
+	/**  The view it joins to, e.g. `v_work_item` or `v_github_review`. */
 	to: string,
-	// The SQL join condition, e.g. `v_github_pr.head_branch = v_stream.branch`.
+	/**  The SQL join condition, e.g. `v_github_pr.head_branch = v_stream.branch`. */
 	on: string,
 };
 
-// One event as written to the log.
+/**  One event as written to the log. */
 export type Envelope = {
 	id: EventId,
 	/**
@@ -2814,10 +2826,10 @@ export type Envelope = {
 	 */
 	v: number,
 	at: Timestamp,
-	// What emitted it: `agent:thr3`, `human`, `system:snapshot_capture`.
+	/**  What emitted it: `agent:thr3`, `human`, `system:snapshot_capture`. */
 	source: string,
 	anchors: Anchors,
-	// The canonical refs (`.context/refs.md`) the event is about.
+	/**  The canonical refs (`.context/refs.md`) the event is about. */
 	subject: string[],
 	/**
 	 *  Validated against the type's JSON Schema on append (P1.5). Large or
@@ -2826,7 +2838,7 @@ export type Envelope = {
 	 */
 	payload: unknown,
 	payload_hash: string | null,
-	// The event that caused this one.
+	/**  The event that caused this one. */
 	cause: EventId | null,
 	/**
 	 *  A stable key the emitter derives from the action (`work_item:tsk4:
@@ -2846,9 +2858,9 @@ export type EventBody = {
 	truncated: boolean,
 };
 
-// Which body of the event.
+/**  Which body of the event. */
 export type EventBodyKey = "input" | "output" | 
-// An `agent.prompt.submitted`'s text.
+/**  An `agent.prompt.submitted`'s text. */
 "prompt";
 
 /**
@@ -2858,7 +2870,7 @@ export type EventBodyKey = "input" | "output" |
  */
 export type EventId = string;
 
-// How long its events' payloads and large content are kept, in days.
+/**  How long its events' payloads and large content are kept, in days. */
 export type EventRetention = {
 	payloadDays: number,
 	contentDays: number,
@@ -2871,12 +2883,12 @@ export type EventRetention = {
 export type EventTypeDecl = {
 	eventType: string,
 	v: number,
-	// The payload's JSON Schema (from the declared file).
+	/**  The payload's JSON Schema (from the declared file). */
 	schema: unknown,
 	summary: string,
-	// The upcast script's path in the folder, required past v1.
+	/**  The upcast script's path in the folder, required past v1. */
 	upcast: string | null,
-	// Its source.
+	/**  Its source. */
 	upcastSource: string | null,
 	/**
 	 *  `file:line` of the declaration, for what's wrong with it later (a
@@ -2905,7 +2917,7 @@ export type ExportDeclaration = {
 	source: DeclaredAt,
 };
 
-// A loaded extension and anything wrong with it.
+/**  A loaded extension and anything wrong with it. */
 export type Extension = Extension_Serialize | Extension_Deserialize;
 
 /**
@@ -2914,11 +2926,11 @@ export type Extension = Extension_Serialize | Extension_Deserialize;
  */
 export type ExtensionChange = {
 	name: string,
-	// `added`, `removed` or `changed`.
+	/**  `added`, `removed` or `changed`. */
 	change: Change,
-	// What the change does; `None` for a removed extension.
+	/**  What the change does; `None` for a removed extension. */
 	impact: ImpactReport | null,
-	// What's wrong with the later version.
+	/**  What's wrong with the later version. */
 	errors: string[],
 };
 
@@ -2927,7 +2939,7 @@ export type ExtensionChange = {
  *  extension's `errors`).
  */
 export type ExtensionCommand = {
-	// Its name on the bus: `<namespace>.<name>`.
+	/**  Its name on the bus: `<namespace>.<name>`. */
 	name: string,
 	summary: string,
 	/**
@@ -2935,7 +2947,7 @@ export type ExtensionCommand = {
 	 *  operation (the operation's).
 	 */
 	inputSchema: unknown | null,
-	// What runs it.
+	/**  What runs it. */
 	handler: CommandHandler,
 	confirm: Confirm,
 	access: Access,
@@ -2946,7 +2958,7 @@ export type ExtensionCommand = {
 	 *  (`oxplow_domain::capability::check_need`).
 	 */
 	needs: string[],
-	// How a person meets it (label, group, …), as core's commands do.
+	/**  How a person meets it (label, group, …), as core's commands do. */
 	ui: CommandUi | null,
 	/**
 	 *  Stable: a shared extension's commands are; a private one's are
@@ -2967,11 +2979,11 @@ export type ExtensionCommand = {
 	tool: string | null,
 };
 
-// One instance of an extension's provider (`extensionInstances`).
+/**  One instance of an extension's provider (`extensionInstances`). */
 export type ExtensionInstanceConfig = {
-	// Run it (once this machine approved the provider).
+	/**  Run it (once this machine approved the provider). */
 	enabled?: boolean,
-	// The instance's config, as the provider's `config_schema` describes.
+	/**  The instance's config, as the provider's `config_schema` describes. */
 	config?: unknown,
 	/**
 	 *  How often its collectors are read, in minutes (absent:
@@ -2996,12 +3008,12 @@ export type ExtensionInstanceConfig = {
 export type ExtensionPage = {
 	id: string,
 	extension: string,
-	// Its tab id: `page:<extension>/<id>`.
+	/**  Its tab id: `page:<extension>/<id>`. */
 	pageRef: string,
 	title: string,
 	icon: string | null,
 	category: LauncherCategory,
-	// The lens it shows (`<extension>/<slug>`).
+	/**  The lens it shows (`<extension>/<slug>`). */
 	lens: string,
 };
 
@@ -3011,15 +3023,15 @@ export type ExtensionPage = {
  *  the count shown on the panel and in the Alerts panel.
  */
 export type ExtensionPanel = {
-	// `<extension>/<panel>`.
+	/**  `<extension>/<panel>`. */
 	id: string,
 	extension: string,
 	title: string,
 	icon: string | null,
 	scope: PanelScope,
-	// The body lens (`<extension>/<slug>`).
+	/**  The body lens (`<extension>/<slug>`). */
 	body: string,
-	// The badge lens, which declares an `alert`.
+	/**  The badge lens, which declares an `alert`. */
 	badge: string | null,
 	/**
 	 *  The page its header opens (`page:<kind>`, a canonical ref): a core
@@ -3064,7 +3076,7 @@ export type ExtensionReview_Deserialize = {
 	extension: Extension_Deserialize,
 	git: string,
 	gitRef: string | null,
-	// The commit reviewed; pass it back to install exactly this.
+	/**  The commit reviewed; pass it back to install exactly this. */
 	sha: string,
 	problems: string[],
 	/**
@@ -3094,7 +3106,7 @@ export type ExtensionReview_Serialize = {
 	extension: Extension_Serialize,
 	git: string,
 	gitRef: string | null,
-	// The commit reviewed; pass it back to install exactly this.
+	/**  The commit reviewed; pass it back to install exactly this. */
 	sha: string,
 	problems: string[],
 	/**
@@ -3111,21 +3123,21 @@ export type ExtensionReview_Serialize = {
 	services: ScriptServices[],
 };
 
-// Provenance of an installed extension, kept in its `source.yaml`.
+/**  Provenance of an installed extension, kept in its `source.yaml`. */
 export type ExtensionSource = {
-	// The git URL it was cloned from.
+	/**  The git URL it was cloned from. */
 	git: string,
-	// The branch, tag or commit asked for; `None` = the remote's default branch.
+	/**  The branch, tag or commit asked for; `None` = the remote's default branch. */
 	gitRef: string | null,
-	// The commit actually installed.
+	/**  The commit actually installed. */
 	sha: string,
 };
 
-// What an extension adds to the core UI (`ui:` in its manifest).
+/**  What an extension adds to the core UI (`ui:` in its manifest). */
 export type ExtensionUi = {
-	// Lenses mounted into core pages (valid ones).
+	/**  Lenses mounted into core pages (valid ones). */
 	slots: LensSlot[],
-	// Labels from its models on core refs (valid ones).
+	/**  Labels from its models on core refs (valid ones). */
 	decorators: UiDecorator[],
 	/**
 	 *  Lenses that take the place of a core sub-component while its
@@ -3134,7 +3146,7 @@ export type ExtensionUi = {
 	replacements: UiReplacement[],
 };
 
-// A loaded extension and anything wrong with it.
+/**  A loaded extension and anything wrong with it. */
 export type Extension_Deserialize = {
 	name: string,
 	/**
@@ -3143,7 +3155,7 @@ export type Extension_Deserialize = {
 	 */
 	namespace: string,
 	description: string,
-	// Repo-relative path of the extension folder.
+	/**  Repo-relative path of the extension folder. */
 	path: string,
 	/**
 	 *  Problems found while loading; empty when healthy. A lens that
@@ -3155,10 +3167,10 @@ export type Extension_Deserialize = {
 	 *  examples.
 	 */
 	warnings: string[],
-	// The manifest version it was read as (`manifest:`).
+	/**  The manifest version it was read as (`manifest:`). */
 	manifestVersion: number,
 	sharing: Sharing,
-	// Why it exists (required; `None` only when the manifest didn't load).
+	/**  Why it exists (required; `None` only when the manifest didn't load). */
 	intent: Intent | null,
 	lenses: Lens_Deserialize[],
 	/**
@@ -3166,11 +3178,11 @@ export type Extension_Deserialize = {
 	 *  `install_extension`; `None` for ones written in this repo.
 	 */
 	source: ExtensionSource | null,
-	// Declared collectors (valid ones; invalid ones are in `errors`).
+	/**  Declared collectors (valid ones; invalid ones are in `errors`). */
 	collectors: CollectorSpec[],
-	// Declared providers (valid ones — invalid ones are in `errors`).
+	/**  Declared providers (valid ones — invalid ones are in `errors`). */
 	providers: ProviderSpec[],
-	// Web components its `custom` lenses render, sandboxed (valid ones).
+	/**  Web components its `custom` lenses render, sandboxed (valid ones). */
 	customComponents: CustomComponent[],
 	/**
 	 *  Event types it declares (valid ones — the vocabulary registers
@@ -3208,14 +3220,14 @@ export type Extension_Deserialize = {
 	 *  read-only).
 	 */
 	origin: string,
-	// What it adds to the core UI (`ui:`).
+	/**  What it adds to the core UI (`ui:`). */
 	ui: ExtensionUi,
 	/**
 	 *  False when configuration disables it or public contracts block it;
 	 *  an inactive extension contributes nothing to the runtime catalog.
 	 */
 	enabled: boolean,
-	// Guidance for the coding agent (valid ones; invalid ones are in `errors`).
+	/**  Guidance for the coding agent (valid ones; invalid ones are in `errors`). */
 	advisories: Advisory[],
 	/**
 	 *  Measures and metrics it contributes to the metric catalog (the
@@ -3241,25 +3253,25 @@ export type Extension_Deserialize = {
 	 *  `errors`).
 	 */
 	panels: ExtensionPanel[],
-	// Full pages it contributes (valid ones; invalid ones are in `errors`).
+	/**  Full pages it contributes (valid ones; invalid ones are in `errors`). */
 	pages: ExtensionPage[],
 	/**
 	 *  Commands it registers on the bus, each a Starlark script composing
 	 *  core commands (P6b; valid ones — invalid ones are in `errors`).
 	 */
 	commands: ExtensionCommand[],
-	// Durable host operations declared by this extension.
+	/**  Durable host operations declared by this extension. */
 	jobs: JobDecl[],
-	// Named model needs this extension declares.
+	/**  Named model needs this extension declares. */
 	aiProfiles: AiProfileDecl[],
-	// Its `version:` (semver), when it declares one; required to share.
+	/**  Its `version:` (semver), when it declares one; required to share. */
 	version: string | null,
 	/**
 	 *  Its contributions as descriptors (`extensions::descriptors`): the
 	 *  kinds that have moved onto them so far.
 	 */
 	contributions: Descriptor[],
-	// Validated non-secret settings declaration, not resolved values or grants.
+	/**  Validated non-secret settings declaration, not resolved values or grants. */
 	configuration?: ConfigurationFile | null,
 	/**
 	 *  The sources of its configuration migration steps, by `entry`: read
@@ -3269,7 +3281,7 @@ export type Extension_Deserialize = {
 	publicContracts?: PublicContracts,
 };
 
-// A loaded extension and anything wrong with it.
+/**  A loaded extension and anything wrong with it. */
 export type Extension_Serialize = {
 	name: string,
 	/**
@@ -3278,7 +3290,7 @@ export type Extension_Serialize = {
 	 */
 	namespace: string,
 	description: string,
-	// Repo-relative path of the extension folder.
+	/**  Repo-relative path of the extension folder. */
 	path: string,
 	/**
 	 *  Problems found while loading; empty when healthy. A lens that
@@ -3290,10 +3302,10 @@ export type Extension_Serialize = {
 	 *  examples.
 	 */
 	warnings: string[],
-	// The manifest version it was read as (`manifest:`).
+	/**  The manifest version it was read as (`manifest:`). */
 	manifestVersion: number,
 	sharing: Sharing,
-	// Why it exists (required; `None` only when the manifest didn't load).
+	/**  Why it exists (required; `None` only when the manifest didn't load). */
 	intent: Intent | null,
 	lenses: Lens_Serialize[],
 	/**
@@ -3301,11 +3313,11 @@ export type Extension_Serialize = {
 	 *  `install_extension`; `None` for ones written in this repo.
 	 */
 	source: ExtensionSource | null,
-	// Declared collectors (valid ones; invalid ones are in `errors`).
+	/**  Declared collectors (valid ones; invalid ones are in `errors`). */
 	collectors: CollectorSpec[],
-	// Declared providers (valid ones — invalid ones are in `errors`).
+	/**  Declared providers (valid ones — invalid ones are in `errors`). */
 	providers: ProviderSpec[],
-	// Web components its `custom` lenses render, sandboxed (valid ones).
+	/**  Web components its `custom` lenses render, sandboxed (valid ones). */
 	customComponents: CustomComponent[],
 	/**
 	 *  Event types it declares (valid ones — the vocabulary registers
@@ -3343,14 +3355,14 @@ export type Extension_Serialize = {
 	 *  read-only).
 	 */
 	origin: string,
-	// What it adds to the core UI (`ui:`).
+	/**  What it adds to the core UI (`ui:`). */
 	ui: ExtensionUi,
 	/**
 	 *  False when configuration disables it or public contracts block it;
 	 *  an inactive extension contributes nothing to the runtime catalog.
 	 */
 	enabled: boolean,
-	// Guidance for the coding agent (valid ones; invalid ones are in `errors`).
+	/**  Guidance for the coding agent (valid ones; invalid ones are in `errors`). */
 	advisories: Advisory[],
 	/**
 	 *  Measures and metrics it contributes to the metric catalog (the
@@ -3376,25 +3388,25 @@ export type Extension_Serialize = {
 	 *  `errors`).
 	 */
 	panels: ExtensionPanel[],
-	// Full pages it contributes (valid ones; invalid ones are in `errors`).
+	/**  Full pages it contributes (valid ones; invalid ones are in `errors`). */
 	pages: ExtensionPage[],
 	/**
 	 *  Commands it registers on the bus, each a Starlark script composing
 	 *  core commands (P6b; valid ones — invalid ones are in `errors`).
 	 */
 	commands: ExtensionCommand[],
-	// Durable host operations declared by this extension.
+	/**  Durable host operations declared by this extension. */
 	jobs: JobDecl[],
-	// Named model needs this extension declares.
+	/**  Named model needs this extension declares. */
 	aiProfiles: AiProfileDecl[],
-	// Its `version:` (semver), when it declares one; required to share.
+	/**  Its `version:` (semver), when it declares one; required to share. */
 	version: string | null,
 	/**
 	 *  Its contributions as descriptors (`extensions::descriptors`): the
 	 *  kinds that have moved onto them so far.
 	 */
 	contributions: Descriptor[],
-	// Validated non-secret settings declaration, not resolved values or grants.
+	/**  Validated non-secret settings declaration, not resolved values or grants. */
 	configuration: ConfigurationFile | null,
 	publicContracts: PublicContracts,
 };
@@ -3405,9 +3417,9 @@ export type Extension_Serialize = {
  *  list is active.
  */
 export type FieldDecl = {
-	// Its key in `native` (snake_case).
+	/**  Its key in `native` (snake_case). */
 	name: string,
-	// How a person names it.
+	/**  How a person names it. */
 	title: string,
 	kind: FieldKind,
 	/**
@@ -3422,9 +3434,9 @@ export type FieldDecl = {
 	read_only?: boolean,
 };
 
-// What kind of value a declared field holds.
+/**  What kind of value a declared field holds. */
 export type FieldKind = 
-// One of `values`.
+/**  One of `values`. */
 "enum" | "text" | "number";
 
 export type FileSnapshot = {
@@ -3469,9 +3481,12 @@ export type FileSnapshot = {
 	content_hash: string | null,
 };
 
-// How an effort came to own a file.
+/**  A `file_snapshot` row: one captured file under a snapshot. */
+export type FileSnapshotId = number;
+
+/**  How an effort came to own a file. */
 export type FileSource = 
-// An edit tool named it.
+/**  An edit tool named it. */
 "claimed" | 
 /**
  *  It changed during one of the thread's turns and no other thread
@@ -3479,7 +3494,7 @@ export type FileSource =
  */
 "observed";
 
-// How a path differs from the head, or how a revision changed it.
+/**  How a path differs from the head, or how a revision changed it. */
 export type FileStatus = "added" | "modified" | "deleted" | "renamed" | "untracked" | "conflicted";
 
 /**
@@ -3490,13 +3505,13 @@ export type FileStatus = "added" | "modified" | "deleted" | "renamed" | "untrack
  *  for a conformed-dimension slice (`[oxplow.rule, unsafe_block]`).
  */
 export type FilterConfig = {
-	// Keep facts with `value >= minValue`.
+	/**  Keep facts with `value >= minValue`. */
 	minValue?: number | null,
-	// Keep facts with `value <= maxValue` (`0`: the untested files).
+	/**  Keep facts with `value <= maxValue` (`0`: the untested files). */
 	maxValue?: number | null,
-	// Keep facts whose reported severity equals this (e.g. `error`).
+	/**  Keep facts whose reported severity equals this (e.g. `error`). */
 	severity?: string | null,
-	// Keep facts whose dimension `[key]` equals `[value]` — a 2-element list.
+	/**  Keep facts whose dimension `[key]` equals `[value]` — a 2-element list. */
 	dimEq?: string[] | null,
 };
 
@@ -3507,10 +3522,10 @@ export type FilterConfig = {
  *  none: it resolves when an enabled extension registers the type.
  */
 export type ForeignSubscription = {
-	// What reacts: "effect `note`", "collector `pull`".
+	/**  What reacts: "effect `note`", "collector `pull`". */
 	by: string,
 	eventType: string,
-	// `file:line` of the declaration.
+	/**  `file:line` of the declaration. */
 	declaredAt: string,
 };
 
@@ -3533,11 +3548,11 @@ export type FormStart = {
  *  (`div` is the ratio primitive: bugs-per-KLOC, cost-per-token).
  */
 export type FormulaConfig = {
-	// `add` | `sub` | `mul` | `div`.
+	/**  `add` | `sub` | `mul` | `div`. */
 	op: string,
-	// The left operand metric key.
+	/**  The left operand metric key. */
 	left: string,
-	// The right operand metric key.
+	/**  The right operand metric key. */
 	right: string,
 };
 
@@ -3559,7 +3574,7 @@ export type GeneratedConfig = {
 	include?: string[],
 };
 
-// What a program may reach: what a person approves.
+/**  What a program may reach: what a person approves. */
 export type Grants = {
 	entry: string,
 	runtime: CollectorRuntime,
@@ -3567,7 +3582,7 @@ export type Grants = {
 	hosts: string[],
 	credentials: string[],
 	env: string[],
-	// The scopes it may call (a provider's `needs`).
+	/**  The scopes it may call (a provider's `needs`). */
 	scopes: string[],
 	/**
 	 *  What approving it grants that this machine can't hold it to
@@ -3576,9 +3591,9 @@ export type Grants = {
 	unenforced: string[],
 };
 
-// One registered harness, as the session picker and Settings see it.
+/**  One registered harness, as the session picker and Settings see it. */
 export type HarnessListing = {
-	// Its key (what `agents:` and a session's `harness` name).
+	/**  Its key (what `agents:` and a session's `harness` name). */
 	id: string,
 	title: string,
 	/**
@@ -3586,13 +3601,13 @@ export type HarnessListing = {
 	 *  session of it names one.
 	 */
 	chat: boolean,
-	// The project enables it (`agents:` names it, or names none).
+	/**  The project enables it (`agents:` names it, or names none). */
 	enabled: boolean,
-	// The settings it reads from its `agentConfig` entry.
+	/**  The settings it reads from its `agentConfig` entry. */
 	settings: HarnessSettingListing[],
 };
 
-// A harness setting, as Settings → Agents shows it.
+/**  A harness setting, as Settings → Agents shows it. */
 export type HarnessSettingListing = {
 	key: string,
 	title: string,
@@ -3600,11 +3615,11 @@ export type HarnessSettingListing = {
 	placeholder: string,
 };
 
-// Where a stream's workspace is.
+/**  Where a stream's workspace is. */
 export type HeadInfo = {
-	// The head revision; `None` before the first commit.
+	/**  The head revision; `None` before the first commit. */
 	revision: string | null,
-	// The branch checked out; `None` when detached.
+	/**  The branch checked out; `None` when detached. */
 	branch: string | null,
 };
 
@@ -3624,7 +3639,7 @@ export type HookEnvelope = {
 	 *  the UI's interrupt), when the sender knows it.
 	 */
 	agent_session_id?: AgentSessionId | null,
-	// The harness's own session id.
+	/**  The harness's own session id. */
 	session_id: string | null,
 	payload_json: string,
 	/**
@@ -3633,7 +3648,7 @@ export type HookEnvelope = {
 	 *  turn it opens.
 	 */
 	prompt: string | null,
-	// PreToolUse only: the policy's verdict (`None` reads as allowed).
+	/**  PreToolUse only: the policy's verdict (`None` reads as allowed). */
 	decision?: ToolDecision | null,
 };
 
@@ -3642,9 +3657,9 @@ export type HookEnvelope = {
  *  `Interrupt`, which oxplow synthesizes.
  */
 export type HookKind = 
-// Renderer/agent paste, run-command, etc.
+/**  Renderer/agent paste, run-command, etc. */
 "user_prompt_submit" | "pre_tool_use" | "post_tool_use" | "stop" | 
-// Synthesized by oxplow when the user hits Ctrl-C / Esc in a pane.
+/**  Synthesized by oxplow when the user hits Ctrl-C / Esc in a pane. */
 "interrupt" | 
 /**
  *  A harness process started or resumed a session (Claude's command
@@ -3652,14 +3667,14 @@ export type HookKind =
  *  compaction inside a running session, not a start.
  */
 "session_start" | 
-// A harness session ended — `reason: "clear"` for `/clear`.
+/**  A harness session ended — `reason: "clear"` for `/clear`. */
 "session_end" | 
 /**
  *  The harness told the person something (Claude's `Notification`):
  *  a permission prompt waits on them.
  */
 "notification" | 
-// A subagent of the session started (Claude's `SubagentStart`).
+/**  A subagent of the session started (Claude's `SubagentStart`). */
 "subagent_start" | 
 /**
  *  A subagent of the session finished (Claude's `SubagentStop`, or a
@@ -3674,7 +3689,7 @@ export type HookKind =
  */
 export type HostId = string;
 
-// Everything installing or updating an extension would change.
+/**  Everything installing or updating an extension would change. */
 export type ImpactReport = {
 	lenses: LensImpact[],
 	models: ModelImpact[],
@@ -3703,12 +3718,12 @@ export type ImpactReport = {
 	lines: string[],
 };
 
-// One implementation as the extension declares it.
+/**  One implementation as the extension declares it. */
 export type ImplementationDecl = {
 	capability: string,
-	// What `activeProviders` names.
+	/**  What `activeProviders` names. */
 	id: string,
-	// How a person names it; the built-in's own title when absent.
+	/**  How a person names it; the built-in's own title when absent. */
 	title: string | null,
 	/**
 	 *  The built-in it is (`oxplow:tasks`); its features are core's to
@@ -3746,7 +3761,7 @@ export type ImportGuard = {
 	source: DeclaredAt,
 };
 
-// An operation paused mid-way, waiting on its conflicts.
+/**  An operation paused mid-way, waiting on its conflicts. */
 export type InProgressOp = "merge" | "rebase" | "cherry_pick" | "revert";
 
 export type InstalledLspPackage = {
@@ -3756,10 +3771,10 @@ export type InstalledLspPackage = {
 	binary: string,
 };
 
-// One of an instance's credentials, as Settings → Integrations shows it.
+/**  One of an instance's credentials, as Settings → Integrations shows it. */
 export type InstanceCredential = {
 	name: string,
-	// This machine has a value for it (a signed-in one: a token).
+	/**  This machine has a value for it (a signed-in one: a token). */
 	set: boolean,
 	/**
 	 *  For one the person signs in for, where that stands; none, its
@@ -3776,11 +3791,11 @@ export type InstanceCredential = {
 
 export type InstanceHealth = {
 	state: InstanceState,
-	// Its failures in a row (`contribution_health`'s count, shown here).
+	/**  Its failures in a row (`contribution_health`'s count, shown here). */
 	consecutiveFailures: number,
-	// RFC 3339.
+	/**  RFC 3339. */
 	lastOkAt: string | null,
-	// A moving average of its successful calls.
+	/**  A moving average of its successful calls. */
 	meanInvokeMs: number | null,
 	/**
 	 *  The provider's service said to wait until then (RFC 3339): a rate
@@ -3795,9 +3810,9 @@ export type InstanceHealth = {
 	activity: string | null,
 };
 
-// Where an instance stands on this machine.
+/**  Where an instance stands on this machine. */
 export type InstanceState = 
-// Not enabled in the project's config.
+/**  Not enabled in the project's config. */
 { state: "off" } | 
 /**
  *  Configured, but it names no provider an enabled extension
@@ -3811,13 +3826,13 @@ export type InstanceState =
  *  `reason` says which (tsk840).
  */
 { state: "refused"; reason: string } | 
-// Enabled, but this machine hasn't approved this version of it.
+/**  Enabled, but this machine hasn't approved this version of it. */
 { state: "unapproved" } | 
-// Enabled, but its `check` found problems with its config.
+/**  Enabled, but its `check` found problems with its config. */
 { state: "unconfigured"; problems: ConfigProblem[] } | 
-// Being checked or started.
+/**  Being checked or started. */
 { state: "checking" } | { state: "ready" } | 
-// Its last start or call failed; it restarts with backoff.
+/**  Its last start or call failed; it restarts with backoff. */
 { state: "failing"; errors: string[] } | 
 /**
  *  Stopped after repeated failures (or a handshake that didn't match
@@ -3830,9 +3845,9 @@ export type InstanceState =
  *  reviewable against what it was for.
  */
 export type Intent = {
-	// The question it answers, or the job it does.
+	/**  The question it answers, or the job it does. */
 	purpose: string,
-	// The thread or effort ref that created it (`effort:eff42`), when known.
+	/**  The thread or effort ref that created it (`effort:eff42`), when known. */
 	origin?: string | null,
 	examples?: IntentExample[],
 	/**
@@ -3899,16 +3914,16 @@ export type ItemBody =
  *  shown behind a disclosure.
  */
 { type: "user"; text: string; context: string | null } | { type: "agent"; text: string } | { type: "thought"; text: string } | { type: "tool"; call: ToolCall } | { type: "plan"; entries: PlanEntry[] } | 
-// A permission request waiting on (or answered by) the human.
+/**  A permission request waiting on (or answered by) the human. */
 { type: "permission"; requestId: string; toolCallId: string; title: string; options: PermissionOption[]; answer: PermissionAnswer | null } | 
-// oxplow's policy rejected the call without asking the human.
+/**  oxplow's policy rejected the call without asking the human. */
 { type: "policy_denied"; toolCallId: string; label: string; reason: string } | 
-// A write the policy would deny ran without asking first.
+/**  A write the policy would deny ran without asking first. */
 { type: "bypass"; toolCallId: string; label: string; reason: string } | 
-// Something failed: the prompt, the agent process, the protocol.
+/**  Something failed: the prompt, the agent process, the protocol. */
 { type: "error"; message: string };
 
-// A host-recognized operation owned by one extension contribution.
+/**  A host-recognized operation owned by one extension contribution. */
 export type JobDecl = {
 	id: string,
 	description: string,
@@ -3916,10 +3931,10 @@ export type JobDecl = {
 	operation: JobOperationKind,
 	needs: string[],
 	replay: JobReplay,
-	// The extension's commands its model may call, as the model sees them.
+	/**  The extension's commands its model may call, as the model sees them. */
 	tools: JobTool[],
 	max_tool_rounds: number,
-	// Seconds it may run before it fails.
+	/**  Seconds it may run before it fails. */
 	timeout: number,
 };
 
@@ -3957,17 +3972,17 @@ export type KeyedDiff = {
 	added: number,
 	removed: number,
 	changed: number,
-	// Up to [`ROW_DIFF_SAMPLES`] of them, in key order.
+	/**  Up to [`ROW_DIFF_SAMPLES`] of them, in key order. */
 	samples: RowSample[],
 };
 
-// What an attach did about the process behind the pane.
+/**  What an attach did about the process behind the pane. */
 export type LaunchKind = 
-// A live process was already running; the pane joined it.
+/**  A live process was already running; the pane joined it. */
 "reattached" | 
-// A process was started for a conversation with nothing saved.
+/**  A process was started for a conversation with nothing saved. */
 "started" | 
-// A process was started resuming the saved conversation.
+/**  A process was started resuming the saved conversation. */
 "resumed";
 
 /**
@@ -3976,7 +3991,7 @@ export type LaunchKind =
  */
 export type LauncherCategory = "Work" | "Code" | "Git" | "Activity" | "Knowledge" | "Data" | "Lenses" | "System";
 
-// A loaded lens.
+/**  A loaded lens. */
 export type Lens = Lens_Serialize | Lens_Deserialize;
 
 /**
@@ -3988,10 +4003,10 @@ export type Lens = Lens_Serialize | Lens_Deserialize;
  *  agent are on every lens, not declared.
  */
 export type LensAction = {
-	// Unique within the lens; `oxplow_run_lens_action` names it.
+	/**  Unique within the lens; `oxplow_run_lens_action` names it. */
 	id: string,
 	label: string,
-	// The command it runs (`oxplow.work_item.transition`).
+	/**  The command it runs (`oxplow.work_item.transition`). */
 	command: string,
 	/**
 	 *  The command's input. A string that is exactly `{{param.<name>}}`
@@ -4032,11 +4047,11 @@ export type LensAlert = {
 	column: string | null,
 	above: number | null,
 	below: number | null,
-	// Badge text; else the row count or the column's name.
+	/**  Badge text; else the row count or the column's name. */
 	label: string | null,
 };
 
-// Which result columns a chart viz draws from.
+/**  Which result columns a chart viz draws from. */
 export type LensChart = {
 	x?: string | null,
 	y?: string | null,
@@ -4046,11 +4061,11 @@ export type LensChart = {
 	group?: string | null,
 };
 
-// How one result column is shown.
+/**  How one result column is shown. */
 export type LensColumn = {
-	// Result column name.
+	/**  Result column name. */
 	key: string,
-	// Header text; defaults to `key`.
+	/**  Header text; defaults to `key`. */
 	label?: string | null,
 	link?: LensLink | null,
 	/**
@@ -4071,32 +4086,32 @@ export type LensColumn = {
 	tone?: string | null,
 };
 
-// A `custom` lens's component and the props it starts with.
+/**  A `custom` lens's component and the props it starts with. */
 export type LensCustom = LensCustom_Serialize | LensCustom_Deserialize;
 
-// A `custom` lens's component and the props it starts with.
+/**  A `custom` lens's component and the props it starts with. */
 export type LensCustom_Deserialize = {
-	// One of the extension's `custom_components` ids.
+	/**  One of the extension's `custom_components` ids. */
 	component: string | null,
-	// Handed to the component as is.
+	/**  Handed to the component as is. */
 	props?: unknown | null,
 };
 
-// A `custom` lens's component and the props it starts with.
+/**  A `custom` lens's component and the props it starts with. */
 export type LensCustom_Serialize = {
-	// One of the extension's `custom_components` ids.
+	/**  One of the extension's `custom_components` ids. */
 	component: string | null,
-	// Handed to the component as is.
+	/**  Handed to the component as is. */
 	props: unknown | null,
 };
 
-// `form` viz: the command it submits and the values it starts from.
+/**  `form` viz: the command it submits and the values it starts from. */
 export type LensForm = LensForm_Serialize | LensForm_Deserialize;
 
-// `form` viz: the command it submits and the values it starts from.
+/**  `form` viz: the command it submits and the values it starts from. */
 export type LensForm_Deserialize = {
 	command: string | null,
-	// Input values the form starts with (`{{param.x}}` placeholders bound).
+	/**  Input values the form starts with (`{{param.x}}` placeholders bound). */
 	defaults?: unknown | null,
 	/**
 	 *  Fields shown but not editable: their values are `defaults`', imposed
@@ -4110,10 +4125,10 @@ export type LensForm_Deserialize = {
 	fields?: string[] | null,
 };
 
-// `form` viz: the command it submits and the values it starts from.
+/**  `form` viz: the command it submits and the values it starts from. */
 export type LensForm_Serialize = {
 	command: string | null,
-	// Input values the form starts with (`{{param.x}}` placeholders bound).
+	/**  Input values the form starts with (`{{param.x}}` placeholders bound). */
 	defaults: unknown | null,
 	/**
 	 *  Fields shown but not editable: their values are `defaults`', imposed
@@ -4133,61 +4148,61 @@ export type LensForm_Serialize = {
  *  heading a link, read from the group's first row.
  */
 export type LensGroup = {
-	// The column whose value groups the rows (not shown as a cell).
+	/**  The column whose value groups the rows (not shown as a cell). */
 	by: string,
-	// The heading's link; `from` defaults to `by`.
+	/**  The heading's link; `from` defaults to `by`. */
 	link?: LensLink | null,
 };
 
-// `hunks` viz: the file and the two revisions each row diffs.
+/**  `hunks` viz: the file and the two revisions each row diffs. */
 export type LensHunks = {
 	path: string | null,
 	from: string | null,
 	to: string | null,
 };
 
-// A lens, by its rendered text before and after.
+/**  A lens, by its rendered text before and after. */
 export type LensImpact = {
 	id: string,
 	change: Change,
 	before: string | null,
 	after: string | null,
-	// Why a side couldn't render (its query failed).
+	/**  Why a side couldn't render (its query failed). */
 	error: string | null,
 };
 
-// A lens that didn't run for want of a capability.
+/**  A lens that didn't run for want of a capability. */
 export type LensInactive = {
-	// The needs that aren't met (`work_items`, `snapshots.contents`).
+	/**  The needs that aren't met (`work_items`, `snapshots.contents`). */
 	needs: string[],
-	// What a person reads.
+	/**  What a person reads. */
 	message: string,
 };
 
-// Makes a column's cells link to a page.
+/**  Makes a column's cells link to a page. */
 export type LensLink = {
 	kind: LensLinkKind,
-	// Result column holding the target id. Defaults to the column itself.
+	/**  Result column holding the target id. Defaults to the column itself. */
 	from?: string | null,
-	// For `file` / `diff-at`: result column holding a line number to open at.
+	/**  For `file` / `diff-at`: result column holding a line number to open at. */
 	line?: string | null,
-	// For `diff-at`: column holding the older side's label.
+	/**  For `diff-at`: column holding the older side's label. */
 	base?: string | null,
-	// For `diff-at` / `compare`: column holding the newer side's label.
+	/**  For `diff-at` / `compare`: column holding the newer side's label. */
 	head?: string | null,
 };
 
-// A page a column value can link to.
+/**  A page a column value can link to. */
 export type LensLinkKind = 
-// `file:<path>`; the value is a repo-relative path.
+/**  `file:<path>`; the value is a repo-relative path. */
 "file" | 
-// `wiki:<slug>`.
+/**  `wiki:<slug>`. */
 "wiki" | 
-// The effort's diff view; the value is an effort id.
+/**  The effort's diff view; the value is an effort id. */
 "effort-diff" | 
-// A git commit; the value is a sha.
+/**  A git commit; the value is a sha. */
 "commit" | 
-// A metric's page; the value is a metric key.
+/**  A metric's page; the value is a metric key. */
 "metric" | 
 /**
  *  Any oxplow page by its tab id (`work_item:oxplow:<id>`,
@@ -4216,7 +4231,7 @@ export type LensLinkKind =
 export type LensParam = {
 	name: string,
 	label?: string | null,
-	// Used when the caller doesn't supply the param.
+	/**  Used when the caller doesn't supply the param. */
 	default?: SqlCell | null,
 	/**
 	 *  The values it takes, when it's a choice: a panel shows
@@ -4226,7 +4241,7 @@ export type LensParam = {
 	options?: LensParamOption[],
 };
 
-// One value a choice param takes, and what the viewer sees for it.
+/**  One value a choice param takes, and what the viewer sees for it. */
 export type LensParamOption = {
 	value: string,
 	label: string,
@@ -4245,16 +4260,16 @@ export type LensPress = {
 	input?: unknown | null,
 };
 
-// The result of running a lens.
+/**  The result of running a lens. */
 export type LensRun = LensRun_Serialize | LensRun_Deserialize;
 
-// The result of running a lens.
+/**  The result of running a lens. */
 export type LensRun_Deserialize = {
 	lens: Lens_Deserialize,
-	// The parameter values actually used (supplied or default).
+	/**  The parameter values actually used (supplied or default). */
 	params: { [key in string]: SqlCell },
 	result: SqlQueryResult,
-	// The lens's alert on this result, if it declares one.
+	/**  The lens's alert on this result, if it declares one. */
 	alert: AlertState | null,
 	/**
 	 *  What's worth knowing about its data: a view it read comes from a
@@ -4268,13 +4283,13 @@ export type LensRun_Deserialize = {
 	inactive: LensInactive | null,
 };
 
-// The result of running a lens.
+/**  The result of running a lens. */
 export type LensRun_Serialize = {
 	lens: Lens_Serialize,
-	// The parameter values actually used (supplied or default).
+	/**  The parameter values actually used (supplied or default). */
 	params: { [key in string]: SqlCell },
 	result: SqlQueryResult,
-	// The lens's alert on this result, if it declares one.
+	/**  The lens's alert on this result, if it declares one. */
 	alert: AlertState | null,
 	/**
 	 *  What's worth knowing about its data: a view it read comes from a
@@ -4288,7 +4303,7 @@ export type LensRun_Serialize = {
 	inactive: LensInactive | null,
 };
 
-// A lens an extension mounts into a core page.
+/**  A lens an extension mounts into a core page. */
 export type LensSlot = {
 	/**
 	 *  Which page region, from [`SLOTS`] (`effort.review.details`,
@@ -4367,41 +4382,41 @@ export type LensSpec_Serialize = {
 	depth: string | null,
 };
 
-// `steps` viz: each step's text and status.
+/**  `steps` viz: each step's text and status. */
 export type LensSteps = {
 	label: string | null,
 	status: string | null,
 };
 
-// `timeline` viz: when each row happened and what it says.
+/**  `timeline` viz: when each row happened and what it says. */
 export type LensTimeline = {
 	at: string | null,
 	label: string | null,
-	// A column holding a canonical ref each entry links to.
+	/**  A column holding a canonical ref each entry links to. */
 	ref: string | null,
 };
 
-// `tree` viz: which columns nest the rows.
+/**  `tree` viz: which columns nest the rows. */
 export type LensTree = {
 	id: string | null,
 	parent: string | null,
 	label: string | null,
 };
 
-// How a lens renders its rows.
+/**  How a lens renders its rows. */
 export type LensViz = 
-// Rows and columns.
+/**  Rows and columns. */
 "table" | 
 /**
  *  One line per row: the first column (or the first `columns` entry)
  *  is the headline, the rest are secondary.
  */
 "list" | 
-// A single value: the first column of the first row.
+/**  A single value: the first column of the first row. */
 "number" | 
-// The first column of the first row, rendered as markdown.
+/**  The first column of the first row, rendered as markdown. */
 "markdown" | 
-// Bars: `chart.x` labels, `chart.y` values.
+/**  Bars: `chart.x` labels, `chart.y` values. */
 "bar" | 
 /**
  *  A line over `chart.x` (a time or number), `chart.y` values, one
@@ -4429,7 +4444,7 @@ export type LensViz =
  *  `timeline.label`, linked through `timeline.ref` when set.
  */
 "timeline" | 
-// The first row as label/value pairs (the displayed columns).
+/**  The first row as label/value pairs (the displayed columns). */
 "detail" | 
 /**
  *  An ordered checklist: `steps.label`, with `steps.status` (`done`,
@@ -4456,7 +4471,7 @@ export type LensViz =
  */
 "custom";
 
-// A loaded lens.
+/**  A loaded lens. */
 export type Lens_Deserialize = {
 	/**
 	 *  `<extension>/<slug>`: the stable id used by `lens:` page refs,
@@ -4472,40 +4487,40 @@ export type Lens_Deserialize = {
 	params: LensParam[],
 	columns: LensColumn[],
 	empty: string | null,
-	// Columns a chart viz draws from.
+	/**  Columns a chart viz draws from. */
 	chart: LensChart | null,
 	tree: LensTree | null,
 	timeline: LensTimeline | null,
 	steps: LensSteps | null,
 	hunks: LensHunks | null,
 	form: LensForm_Deserialize | null,
-	// For `custom`: the component and its props.
+	/**  For `custom`: the component and its props. */
 	custom: LensCustom_Deserialize | null,
-	// For `list` / `table`: rows under a heading per value.
+	/**  For `list` / `table`: rows under a heading per value. */
 	group: LensGroup | null,
 	/**
 	 *  For `list` / `table` / `tree`: a column whose truthy value
 	 *  highlights the row.
 	 */
 	emphasis: string | null,
-	// For `list` / `table`: a column whose integer value indents the row.
+	/**  For `list` / `table`: a column whose integer value indents the row. */
 	depth: string | null,
-	// For `grid`: child lens ids.
+	/**  For `grid`: child lens ids. */
 	children: string[],
-	// Launcher section; `None` = "Lenses".
+	/**  Launcher section; `None` = "Lenses". */
 	launcherCategory: LauncherCategory | null,
-	// Not listed in the launcher.
+	/**  Not listed in the launcher. */
 	hidden: boolean,
-	// Commands the lens offers, as buttons or row actions (P6.B1).
+	/**  Commands the lens offers, as buttons or row actions (P6.B1). */
 	actions: LensAction[],
-	// When the lens needs attention (its panel's badge).
+	/**  When the lens needs attention (its panel's badge). */
 	alert: LensAlert | null,
 	/**
 	 *  The capabilities (or their features) it needs (`needs:
 	 *  [work_items]`): without them its run says so instead of running.
 	 */
 	needs: string[],
-	// Repo-relative path of the lens file.
+	/**  Repo-relative path of the lens file. */
 	path: string,
 	/**
 	 *  The MCP tool it is also offered as (`tool:`), prefixed with its
@@ -4515,7 +4530,7 @@ export type Lens_Deserialize = {
 	tool: string | null,
 };
 
-// A loaded lens.
+/**  A loaded lens. */
 export type Lens_Serialize = {
 	/**
 	 *  `<extension>/<slug>`: the stable id used by `lens:` page refs,
@@ -4531,40 +4546,40 @@ export type Lens_Serialize = {
 	params: LensParam[],
 	columns: LensColumn[],
 	empty: string | null,
-	// Columns a chart viz draws from.
+	/**  Columns a chart viz draws from. */
 	chart: LensChart | null,
 	tree: LensTree | null,
 	timeline: LensTimeline | null,
 	steps: LensSteps | null,
 	hunks: LensHunks | null,
 	form: LensForm_Serialize | null,
-	// For `custom`: the component and its props.
+	/**  For `custom`: the component and its props. */
 	custom: LensCustom_Serialize | null,
-	// For `list` / `table`: rows under a heading per value.
+	/**  For `list` / `table`: rows under a heading per value. */
 	group: LensGroup | null,
 	/**
 	 *  For `list` / `table` / `tree`: a column whose truthy value
 	 *  highlights the row.
 	 */
 	emphasis: string | null,
-	// For `list` / `table`: a column whose integer value indents the row.
+	/**  For `list` / `table`: a column whose integer value indents the row. */
 	depth: string | null,
-	// For `grid`: child lens ids.
+	/**  For `grid`: child lens ids. */
 	children: string[],
-	// Launcher section; `None` = "Lenses".
+	/**  Launcher section; `None` = "Lenses". */
 	launcherCategory: LauncherCategory | null,
-	// Not listed in the launcher.
+	/**  Not listed in the launcher. */
 	hidden: boolean,
-	// Commands the lens offers, as buttons or row actions (P6.B1).
+	/**  Commands the lens offers, as buttons or row actions (P6.B1). */
 	actions: LensAction[],
-	// When the lens needs attention (its panel's badge).
+	/**  When the lens needs attention (its panel's badge). */
 	alert: LensAlert | null,
 	/**
 	 *  The capabilities (or their features) it needs (`needs:
 	 *  [work_items]`): without them its run says so instead of running.
 	 */
 	needs: string[],
-	// Repo-relative path of the lens file.
+	/**  Repo-relative path of the lens file. */
 	path: string,
 	/**
 	 *  The MCP tool it is also offered as (`tool:`), prefixed with its
@@ -4593,12 +4608,12 @@ export type LspServerListing = {
 	command: string,
 	args: string[],
 	source: LspServerSource,
-	// Mason package name when `source == Installed`.
+	/**  Mason package name when `source == Installed`. */
 	packageName: string | null,
-	// Installed package version when `source == Installed`.
+	/**  Installed package version when `source == Installed`. */
 	version: string | null,
 	binaryExists: boolean,
-	// Stream ids with a live session for this language.
+	/**  Stream ids with a live session for this language. */
 	runningStreams: string[],
 	/**
 	 *  `completionProvider.triggerCharacters` from a running session's
@@ -4607,7 +4622,7 @@ export type LspServerListing = {
 	completionTriggerCharacters: string[] | null,
 };
 
-// Where a server config came from, for the settings UI.
+/**  Where a server config came from, for the settings UI. */
 export type LspServerSource = "yaml" | "installed";
 
 /**
@@ -4615,7 +4630,7 @@ export type LspServerSource = "yaml" | "installed";
  *  `on_change`, or `{ every: 1h }`.
  */
 export type Materialize = 
-// A named policy: `on_change`.
+/**  A named policy: `on_change`. */
 MaterializePolicy | 
 /**
  *  Stored and recomputed, whole, on a clock — `{ every: 1h }` (the
@@ -4631,14 +4646,14 @@ MaterializePolicy |
  */
 ({ incremental: string }) & { every?: never };
 
-// The named materialization policies.
+/**  The named materialization policies. */
 export type MaterializePolicy = 
-// Stored in its table and recomputed, whole, when an input changes.
+/**  Stored in its table and recomputed, whole, when an input changes. */
 "on_change";
 
-// How the adapter reaches the MCP server: exactly one of the two.
+/**  How the adapter reaches the MCP server: exactly one of the two. */
 export type McpServer = 
-// A program in the folder, spoken to over its stdio.
+/**  A program in the folder, spoken to over its stdio. */
 ({ command: string[] }) & { auth?: never; url?: never } | 
 /**
  *  A server reached over streamable HTTP. `auth` names the
@@ -4657,11 +4672,11 @@ export type McpServer =
  *  [`resolve_measures`] and seeded into the `measure` table at boot.
  */
 export type MeasureEntry = {
-	// The new measure's namespaced key (`<vendor>.<id>`). Required.
+	/**  The new measure's namespaced key (`<vendor>.<id>`). Required. */
 	key?: string | null,
 	title?: string | null,
 	unit?: string | null,
-	// The grain's subject kind (`symbol` | `file` | `test` | `model` | …).
+	/**  The grain's subject kind (`symbol` | `file` | `test` | `model` | …). */
 	subjectKind?: string | null,
 	/**
 	 *  `additive` | `semi-additive` | `non-additive` — additivity OVER TIME
@@ -4708,20 +4723,20 @@ export type MenuItemSnapshot = {
  *  and where in the group (lowest first).
  */
 export type MenuPlace = {
-	// `file` or `edit`.
+	/**  `file` or `edit`. */
 	bar: string,
-	// Its group (`1_project`, `2_save`); absent, the menu's first.
+	/**  Its group (`1_project`, `2_save`); absent, the menu's first. */
 	group?: string | null,
 	order: number,
 };
 
-// Whether `head` would merge into `base` cleanly.
+/**  Whether `head` would merge into `base` cleanly. */
 export type MergeReadiness = 
-// `head` has nothing `base` lacks.
+/**  `head` has nothing `base` lacks. */
 "already_integrated" | 
-// `head` is ahead and no file changed on both sides.
+/**  `head` is ahead and no file changed on both sides. */
 "clean" | 
-// `head` is ahead and some file changed on both sides.
+/**  `head` is ahead and some file changed on both sides. */
 "conflict";
 
 /**
@@ -4745,9 +4760,9 @@ export type MetricDefault = "on" | "off";
  *  per-form rules.
  */
 export type MetricEntry = {
-	// `use:` form — the catalog key to enable.
+	/**  `use:` form — the catalog key to enable. */
 	use?: string | null,
-	// `key:` form — the new metric's namespaced key.
+	/**  `key:` form — the new metric's namespaced key. */
 	key?: string | null,
 	/**
 	 *  Active flag. `None`/`Some(true)` = active (a bare `use:`/`key:` entry is
@@ -4781,7 +4796,7 @@ export type MetricEntry = {
 	 *  source measure's `temporalSemantics`.
 	 */
 	aggregation?: string | null,
-	// Fact predicate applied before aggregation (`minValue` / `severity` / `dimEq`).
+	/**  Fact predicate applied before aggregation (`minValue` / `severity` / `dimEq`). */
 	filter?: FilterConfig | null,
 	/**
 	 *  Derived-metric formula over other metric keys (mutually exclusive with
@@ -4789,23 +4804,23 @@ export type MetricEntry = {
 	 */
 	formula?: FormulaConfig | null,
 	unit?: string | null,
-	// `higher-better` | `lower-better` | `neutral` (default `neutral`).
+	/**  `higher-better` | `lower-better` | `neutral` (default `neutral`). */
 	direction?: string | null,
 	/**
 	 *  Read-time presentation: `gauge` | `findings` | `test` | `coverage` |
 	 *  `event` (default `gauge`).
 	 */
 	displayKind?: string | null,
-	// Catalog grouping: `operational` | `testing` | `coverage` | `static-quality` | `custom`.
+	/**  Catalog grouping: `operational` | `testing` | `coverage` | `static-quality` | `custom`. */
 	category?: string | null,
-	// Language this metric measures (e.g. `rust`), for the catalog filter.
+	/**  Language this metric measures (e.g. `rust`), for the catalog filter. */
 	language?: string | null,
 	/**
 	 *  One-line human description (shown atop the Metric Detail page). Inherent to
 	 *  the definition — a `use:` can't override.
 	 */
 	description?: string | null,
-	// Conformed-dimension keys this metric can be sliced by (drill-across).
+	/**  Conformed-dimension keys this metric can be sliced by (drill-across). */
 	sliceableDims?: string[],
 	target?: number | null,
 	warnAt?: number | null,
@@ -4815,7 +4830,7 @@ export type MetricEntry = {
 	 *  measure's facts. Fragments below are SQL over that view, aliased `e`.
 	 */
 	entity?: string | null,
-	// Entity metric: which rows count (a SQL condition).
+	/**  Entity metric: which rows count (a SQL condition). */
 	where?: string | null,
 	/**
 	 *  Entity metric: the timestamp column/expression that makes it an EVENT
@@ -4823,16 +4838,16 @@ export type MetricEntry = {
 	 *  a STATE metric: its current value, captured over time.
 	 */
 	time?: string | null,
-	// Entity metric: the value expression aggregated (not needed for `count`).
+	/**  Entity metric: the value expression aggregated (not needed for `count`). */
 	value?: string | null,
 };
 
-// One model as its owner declares it (an entry of `models.yaml`).
+/**  One model as its owner declares it (an entry of `models.yaml`). */
 export type ModelDecl = {
 	name: string,
 	version: number,
 	description: string,
-	// The contract: the view's columns, in order.
+	/**  The contract: the view's columns, in order. */
 	columns: ColumnDecl[],
 	/**
 	 *  The columns whose values name one row: declared columns,
@@ -4855,13 +4870,13 @@ export type ModelDecl = {
 	materialize?: Materialize | null,
 };
 
-// Features callers may discover before requesting a model operation.
+/**  Features callers may discover before requesting a model operation. */
 export type ModelFeature = "text" | "image" | "toolCalling" | "streaming";
 
-// When one model last changed.
+/**  When one model last changed. */
 export type ModelFreshness = {
 	model: string,
-	// RFC 3339.
+	/**  RFC 3339. */
 	changedAt: string,
 };
 
@@ -4875,9 +4890,9 @@ export type ModelImpact = {
 	changed: string[],
 	beforeColumns: string[],
 	afterColumns: string[],
-	// The first difference in its contract (columns, types, docs).
+	/**  The first difference in its contract (columns, types, docs). */
 	contractChange: string | null,
-	// Models that read it, which a contract change can break.
+	/**  Models that read it, which a contract change can break. */
 	downstream: string[],
 	/**
 	 *  What its rows would become, each side read through its own
@@ -4886,10 +4901,10 @@ export type ModelImpact = {
 	rows: RowDiff | null,
 };
 
-// A model's declaration and its SQL file.
+/**  A model's declaration and its SQL file. */
 export type ModelSource = {
 	decl: ModelDecl,
-	// Where the SQL came from, for error locations (`models/work_item.sql`).
+	/**  Where the SQL came from, for error locations (`models/work_item.sql`). */
 	file: string,
 	sql: string,
 	/**
@@ -4908,9 +4923,9 @@ export type NoteId = string;
  *  ever sees the access token.
  */
 export type OAuthDecl = {
-	// Where the person signs in.
+	/**  Where the person signs in. */
 	authorize_url: string,
-	// Where a code, or a refresh token, is exchanged for an access token.
+	/**  Where a code, or a refresh token, is exchanged for an access token. */
 	token_url: string,
 	client_id: string,
 	scopes?: string[],
@@ -4949,24 +4964,24 @@ export type OAuthListener = {
 export type OpOutcome = {
 	success: boolean,
 	log: string,
-	// Paths still conflicted after the operation.
+	/**  Paths still conflicted after the operation. */
 	conflicts: string[],
-	// Conflicts oxplow's smart merge resolved on its own.
+	/**  Conflicts oxplow's smart merge resolved on its own. */
 	auto_resolved: number,
 };
 
-// An operation of a scope (`scope: tabs.write`, `op: open`).
+/**  An operation of a scope (`scope: tabs.write`, `op: open`). */
 export type OpRef = {
 	scope: string,
 	op: string,
 };
 
-// Who contributed it.
+/**  Who contributed it. */
 export type Owner = {
 	extension: string,
-	// `project` or `bundled`.
+	/**  `project` or `bundled`. */
 	origin: string,
-	// The extension's `version:`, when it declares one.
+	/**  The extension's `version:`, when it declares one. */
 	version: string | null,
 };
 
@@ -4983,11 +4998,11 @@ export type OxplowConfig = {
 	 *  project dir when not set in .oxplow/project.yaml.
 	 */
 	projectName: string,
-	// Extra language servers registered on top of the built-ins.
+	/**  Extra language servers registered on top of the built-ins. */
 	lspServers: LspServerConfig[],
-	// User-supplied text appended verbatim to every agent's system prompt.
+	/**  User-supplied text appended verbatim to every agent's system prompt. */
 	agentPromptAppend: string,
-	// File-snapshot retention window in days. 0 disables pruning.
+	/**  File-snapshot retention window in days. 0 disables pruning. */
 	snapshotRetentionDays: number,
 	/**
 	 *  Metric-capture retention window in days: captures older than the
@@ -5054,9 +5069,9 @@ export type OxplowConfig = {
 	 *  hand rather than through this derive.
 	 */
 	iconTint: string | null,
-	// How the project's tests run (the `testing:` block).
+	/**  How the project's tests run (the `testing:` block). */
 	testing: TestingConfig,
-	// Limits on script workers (the `scripts:` block).
+	/**  Limits on script workers (the `scripts:` block). */
 	scripts: ScriptsConfig,
 	/**
 	 *  Which metrics are on in this project (the `metrics:` block): a `use:`
@@ -5141,7 +5156,7 @@ export type OxplowConfig = {
  *  reconcile diffs from the payload.
  */
 export type OxplowEvent = 
-// Background task progress.
+/**  Background task progress. */
 { kind: "backgroundTasksChanged" } | 
 /**
  *  The set of known language servers changed (Mason package
@@ -5224,7 +5239,7 @@ detail: string | null } |
  *  one does it and answers.
  */
 client: string; threadId: ThreadId | null; 
-// Who ran the command (`agent:thr3`, `human`).
+/**  Who ran the command (`agent:thr3`, `human`). */
 actor: string; scope: string; op: string; input: unknown } | 
 /**
  *  A person approved a program on this machine (a provider, collector,
@@ -5310,7 +5325,7 @@ export type PageVisit = {
 	thread_id: string | null,
 };
 
-// One panel's place in the layout.
+/**  One panel's place in the layout. */
 export type PanelPlacement = {
 	panel: string,
 	hidden: boolean,
@@ -5323,7 +5338,7 @@ export type PanelPlacement = {
  */
 export type PanelScope = "project" | "stream" | "thread";
 
-// How a permission request was answered.
+/**  How a permission request was answered. */
 export type PermissionAnswer = { type: "selected"; optionId: string } | { type: "cancelled" };
 
 export type PermissionKind = "allow_once" | "allow_always" | "reject_once" | "reject_always";
@@ -5341,9 +5356,9 @@ export type PlanEntry = {
 
 export type PlanStatus = "pending" | "in_progress" | "completed";
 
-// What kind of project program it is.
+/**  What kind of project program it is. */
 export type ProgramKind = 
-// An agent spoken to over ACP (`acpAgents`, tsk335).
+/**  An agent spoken to over ACP (`acpAgents`, tsk335). */
 "acp-agent" | 
 /**
  *  A shared extension's advisories: SQL whose results go into the
@@ -5381,10 +5396,10 @@ export type ProgramKind =
  *  `needs` says what it reads).
  */
 "effort-policy" | 
-// A declared durable operation; approval covers its declaration and AI use.
+/**  A declared durable operation; approval covers its declaration and AI use. */
 "job";
 
-// A program the project's config would run.
+/**  A program the project's config would run. */
 export type ProjectProgram = {
 	kind: ProgramKind,
 	/**
@@ -5392,9 +5407,9 @@ export type ProjectProgram = {
 	 *  it do (an agent harness launches the person's agent sessions).
 	 */
 	capability: string | null,
-	// The collector, agent, extension or component it belongs to.
+	/**  The collector, agent, extension or component it belongs to. */
 	name: string,
-	// Project-relative path of the program.
+	/**  Project-relative path of the program. */
 	program: string,
 	args: string[],
 	/**
@@ -5402,13 +5417,13 @@ export type ProjectProgram = {
 	 *  the host variables it gets by name (a provider).
 	 */
 	env: string[],
-	// Keychain credentials it gets, by name (a provider).
+	/**  Keychain credentials it gets, by name (a provider). */
 	credentials: string[],
-	// Hosts it may reach (a provider).
+	/**  Hosts it may reach (a provider). */
 	network: string[],
-	// The commands it may run with the viewer's rights (a component).
+	/**  The commands it may run with the viewer's rights (a component). */
 	commands: string[],
-	// The scopes it may call (a provider's `needs`).
+	/**  The scopes it may call (a provider's `needs`). */
 	scopes: string[],
 	/**
 	 *  The project-relative folder whose every file the approval covers
@@ -5421,7 +5436,7 @@ export type ProjectProgram = {
 	 *  the server is isn't in it.
 	 */
 	remote: boolean,
-	// This machine approved it as it is now.
+	/**  This machine approved it as it is now. */
 	approved: boolean,
 	/**
 	 *  Its approval hash as it is now (`None` when it can't be read). The
@@ -5433,21 +5448,24 @@ export type ProjectProgram = {
 	 *  (`grants::gaps`): files a program touches, network off macOS.
 	 */
 	unenforced?: string[],
-	// When this machine approved it, while it is (RFC 3339).
+	/**  When this machine approved it, while it is (RFC 3339). */
 	grantedAt?: string | null,
-	// When a person revoked it, if they did and haven't approved it since.
+	/**  When a person revoked it, if they did and haven't approved it since. */
 	revokedAt?: string | null,
 };
 
-// Who offers a prompt.
+/**  Who offers a prompt. */
 export type PromptSource = 
 /**
  *  One of core's areas (`vcs`, `work_items`, `knowledge`,
  *  `code_intel`, `extensions`).
  */
 { kind: "area"; name: string } | 
-// An extension.
+/**  An extension. */
 { kind: "extension"; name: string };
+
+/**  A `command_proposal` row: an agent's run waiting on a person. */
+export type ProposalId = number;
 
 export type ProviderConfig = {
 	/**
@@ -5474,7 +5492,7 @@ export type ProviderImpact = {
 	before: Grants | null,
 	after: Grants | null,
 	commands: CommandChange[],
-	// Behind the MCP adapter: each pinned tool of its server.
+	/**  Behind the MCP adapter: each pinned tool of its server. */
 	tools: CommandChange[],
 	featuresBefore: unknown | null,
 	featuresAfter: unknown | null,
@@ -5491,9 +5509,9 @@ export type ProviderImpact = {
 	lines: string[],
 };
 
-// An instance as Settings → Integrations shows it.
+/**  An instance as Settings → Integrations shows it. */
 export type ProviderInstanceView = {
-	// `<extension>/<instance id>`.
+	/**  `<extension>/<instance id>`. */
 	instance: string,
 	/**
 	 *  The project's, or the person's on this machine (every project).
@@ -5507,7 +5525,7 @@ export type ProviderInstanceView = {
 	 */
 	overridden: boolean,
 	extension: string,
-	// The provider (its program) this is an instance of.
+	/**  The provider (its program) this is an instance of. */
 	provider: string,
 	/**
 	 *  Its id: its refs' segment, its commands' namespace, what
@@ -5516,30 +5534,30 @@ export type ProviderInstanceView = {
 	 */
 	instanceId: string,
 	capability: string,
-	// The project's config enables it.
+	/**  The project's config enables it. */
 	enabled: boolean,
 	config: unknown,
-	// JSON Schema of `config`, from its declarations.
+	/**  JSON Schema of `config`, from its declarations. */
 	configSchema: unknown,
-	// This machine approved it as it is now.
+	/**  This machine approved it as it is now. */
 	approved: boolean,
-	// Each credential it declares and where it stands on this machine.
+	/**  Each credential it declares and where it stands on this machine. */
 	credentials: InstanceCredential[],
 	health: InstanceHealth,
-	// Each collector it declares and where its reads stand (P7.A3).
+	/**  Each collector it declares and where its reads stand (P7.A3). */
 	collectors: CollectorView[],
 };
 
-// A kind of provider, as the Settings form offers it.
+/**  A kind of provider, as the Settings form offers it. */
 export type ProviderKindInfo = {
-	// What a provider's `kind:` names.
+	/**  What a provider's `kind:` names. */
 	kind: string,
 	title: string,
-	// Its API base when a provider names none; `None` when one must.
+	/**  Its API base when a provider names none; `None` when one must. */
 	defaultBaseUrl: string | null,
 };
 
-// A provider's collector a `read` collector runs.
+/**  A provider's collector a `read` collector runs. */
 export type ProviderRead = {
 	/**
 	 *  The instance, `<extension>/<instance id>` (a provider's default
@@ -5549,7 +5567,7 @@ export type ProviderRead = {
 	collector: string,
 };
 
-// One declared provider.
+/**  One declared provider. */
 export type ProviderSpec = {
 	/**
 	 *  The provider's id: its program's approval (`<extension>/<id>`) and
@@ -5559,12 +5577,12 @@ export type ProviderSpec = {
 	 */
 	id: string,
 	capability: string,
-	// The program, relative to the extension folder — or `adapter`.
+	/**  The program, relative to the extension folder — or `adapter`. */
 	entry?: string | null,
 	args?: string[],
-	// An MCP server run through oxplow's adapter, instead of an `entry`.
+	/**  An MCP server run through oxplow's adapter, instead of an `entry`. */
 	adapter?: AdapterSpec | null,
-	// Host environment variables passed through by name.
+	/**  Host environment variables passed through by name. */
 	env?: string[],
 	/**
 	 *  Credentials it gets from the keychain, as environment variables:
@@ -5572,9 +5590,9 @@ export type ProviderSpec = {
 	 *  they sign in for; the variable holds the access token).
 	 */
 	credentials?: CredentialDecl[],
-	// Hosts it may reach (enforced where the OS can).
+	/**  Hosts it may reach (enforced where the OS can). */
 	network?: string[],
-	// The checked-in `InitializeResult` (JSON), relative to the folder.
+	/**  The checked-in `InitializeResult` (JSON), relative to the folder. */
 	declarations: string,
 	/**
 	 *  What a work list's own ids look like (a regex matched whole:
@@ -5596,7 +5614,7 @@ export type ProviderSpec = {
 	needs?: string[],
 };
 
-// A provider as the UI and agents see it: never its key.
+/**  A provider as the UI and agents see it: never its key. */
 export type ProviderStatus = {
 	id: string,
 	kind: string,
@@ -5628,18 +5646,18 @@ export type PublicContracts = {
 	withheld?: Withheld[],
 };
 
-// What one version's collector made of an input.
+/**  What one version's collector made of an input. */
 export type Ran = {
-	// Rows per entity.
+	/**  Rows per entity. */
 	counts: { [key in string]: number },
-	// The rows per entity (the first 20).
+	/**  The rows per entity (the first 20). */
 	rows: unknown,
 	/**
 	 *  The events it would log, counted per type — as the script
 	 *  returned them: whether it may emit them is checked when it runs.
 	 */
 	events: { [key in string]: number },
-	// Why it failed (a model call it tried was refused, say).
+	/**  Why it failed (a model call it tried was refused, say). */
 	error: string | null,
 };
 
@@ -5648,7 +5666,7 @@ export type Ran = {
  *  it (P4.1).
  */
 export type Reads = {
-	// Views read, directly or through another view; sorted, distinct.
+	/**  Views read, directly or through another view; sorted, distinct. */
 	models: string[],
 	/**
 	 *  Tables the query's own SQL read — not through a view (a temp table
@@ -5663,7 +5681,7 @@ export type Reads = {
 	measures: string[],
 };
 
-// A recent-projects row plus a freshness flag for the UI.
+/**  A recent-projects row plus a freshness flag for the UI. */
 export type RecentProjectView = {
 	path: string,
 	title: string,
@@ -5680,11 +5698,11 @@ export type RecentProjectView = {
  *  into the run (`.context/collection.md`).
  */
 export type Records = 
-// A suite/case tree of test outcomes (a `test-run`).
+/**  A suite/case tree of test outcomes (a `test-run`). */
 "tests" | 
-// Per-file instrumented/covered lines (a coverage capture).
+/**  Per-file instrumented/covered lines (a coverage capture). */
 "coverage" | 
-// Linter/analyzer findings (a `static-analysis` capture).
+/**  Linter/analyzer findings (a `static-analysis` capture). */
 "analysis";
 
 /**
@@ -5695,9 +5713,9 @@ export type RefKindDecl = {
 	kind: string,
 	extension: string,
 	label: string,
-	// The anchored regex its ids match.
+	/**  The anchored regex its ids match. */
 	idPattern: string,
-	// The view whose `title` names one (`v_<extension>_<model>`, by `ref`).
+	/**  The view whose `title` names one (`v_<extension>_<model>`, by `ref`). */
 	resolve: string,
 	/**
 	 *  The page that opens one: `page:<extension>/<page>`, given
@@ -5711,13 +5729,13 @@ export type RefKindDecl = {
 	 */
 	searchable: string | null,
 	icon: string,
-	// `file:line` of the declaration.
+	/**  `file:line` of the declaration. */
 	declaredAt: string,
 };
 
 export type Relationship = {
 	column: string,
-	// The model the column points into.
+	/**  The model the column points into. */
 	to: string,
 	field: string,
 };
@@ -5734,7 +5752,7 @@ export type RemoteBranchEntry = {
  *  (`input.report`): a tool's output in the worktree.
  */
 export type ReportInput = {
-	// Relative to the project (`target/type-coverage.json`).
+	/**  Relative to the project (`target/type-coverage.json`). */
 	path: string,
 	/**
 	 *  How it's parsed before the script sees it: `text` (the default),
@@ -5743,22 +5761,22 @@ export type ReportInput = {
 	format?: string,
 };
 
-// How long a namespace's event payloads and large content are kept.
+/**  How long a namespace's event payloads and large content are kept. */
 export type RetentionWindow = {
-	// Days an event's payload is kept; after it, `{}`.
+	/**  Days an event's payload is kept; after it, `{}`. */
 	payloadDays: number,
-	// Days its large content (tool input and output) is kept.
+	/**  Days its large content (tool input and output) is kept. */
 	contentDays: number,
 };
 
-// One revision in full: its message and the files it changed.
+/**  One revision in full: its message and the files it changed. */
 export type RevisionDetail = {
 	info: RevisionInfo,
 	body: string,
 	files: RevisionFile[],
 };
 
-// A file a revision changed, against its first parent.
+/**  A file a revision changed, against its first parent. */
 export type RevisionFile = {
 	path: string,
 	status: FileStatus,
@@ -5766,20 +5784,20 @@ export type RevisionFile = {
 	deletions: number,
 };
 
-// One revision, as a list shows it.
+/**  One revision, as a list shows it. */
 export type RevisionInfo = {
 	id: string,
 	short_id: string,
 	author: string,
 	email: string,
-	// Seconds since the Unix epoch.
+	/**  Seconds since the Unix epoch. */
 	time: number,
 	subject: string,
 	parents: string[],
 };
 
 export type RoleBinding = {
-	// A provider `id`.
+	/**  A provider `id`. */
 	provider: string,
 	model: string,
 	/**
@@ -5797,15 +5815,15 @@ export type RoleStatus = {
 	 *  extension's for a profile.
 	 */
 	description: string,
-	// The extension declaring a profile; `None` for a built-in.
+	/**  The extension declaring a profile; `None` for a built-in. */
 	extension: string | null,
-	// The built-in role an unbound profile uses.
+	/**  The built-in role an unbound profile uses. */
 	fallback: BuiltinRole | null,
-	// Its own binding; `None` when it has none.
+	/**  Its own binding; `None` when it has none. */
 	binding: RoleBinding | null,
-	// What a call would use now: its binding, else its fallback's.
+	/**  What a call would use now: its binding, else its fallback's. */
 	effective: RoleBinding | null,
-	// The binding comes from the project, not the global `ai.yaml`.
+	/**  The binding comes from the project, not the global `ai.yaml`. */
 	overridden: boolean,
 	/**
 	 *  Why a call on it would be refused, when it would be: a profile no
@@ -5814,48 +5832,48 @@ export type RoleStatus = {
 	problem: string | null,
 };
 
-// A model's rows before and after.
+/**  A model's rows before and after. */
 export type RowDiff = {
-	// Rows on each side (`None`: it isn't on that side).
+	/**  Rows on each side (`None`: it isn't on that side). */
 	before: number | null,
 	after: number | null,
-	// Row by row, when both sides declare the same key.
+	/**  Row by row, when both sides declare the same key. */
 	keyed: KeyedDiff | null,
-	// Why the diff is only counts, or that a side's query failed.
+	/**  Why the diff is only counts, or that a side's query failed. */
 	note: string | null,
 };
 
 export type RowSample = {
 	change: Change,
-	// The row's key, column → value.
+	/**  The row's key, column → value. */
 	key: unknown,
 	before: unknown | null,
 	after: unknown | null,
 };
 
-// The kind of run a report collector reads after.
+/**  The kind of run a report collector reads after. */
 export type RunKind = "test" | "analysis";
 
-// How a contribution comes to run.
+/**  How a contribution comes to run. */
 export type RunsOn = 
-// Logged events of these types.
+/**  Logged events of these types. */
 { on: "events"; types: string[] } | 
-// A schedule (`every`, a cron).
+/**  A schedule (`every`, a cron). */
 { on: "schedule"; every: string } | 
-// A run's reports (a report collector).
+/**  A run's reports (a report collector). */
 { on: "run" } | 
-// Called by name: a command, an implementation's verbs.
+/**  Called by name: a command, an implementation's verbs. */
 { on: "call" } | 
-// Read by a query: a model, a measure, a metric, a dimension.
+/**  Read by a query: a model, a measure, a metric, a dimension. */
 { on: "query" } | 
-// Shown where it's mounted: a lens, a page, a slot.
+/**  Shown where it's mounted: a lens, a page, a slot. */
 { on: "mount" } | 
-// Read by an agent: a skill, an advisory.
+/**  Read by an agent: a skill, an advisory. */
 { on: "agent" } | 
-// Nothing invokes it: a vocabulary entry (an event type, a ref kind).
+/**  Nothing invokes it: a vocabulary entry (an event type, a ref kind). */
 { on: "declared" };
 
-// Whose an instance is (P9.B2).
+/**  Whose an instance is (P9.B2). */
 export type Scope = 
 /**
  *  The project's: in its `extensionInstances`, shared with the team;
@@ -5873,9 +5891,9 @@ export type Scope =
  *  what `oxplow extension check --services` prints.
  */
 export type ScriptServices = {
-	// What runs it: `collector \`paths\``, `command \`note.sum\``.
+	/**  What runs it: `collector \`paths\``, `command \`note.sum\``. */
 	script: string,
-	// Its file, in the extension folder.
+	/**  Its file, in the extension folder. */
 	entry: string,
 	services: ServiceUse[],
 };
@@ -5908,7 +5926,7 @@ export type SearchHit = {
 	stream_id: string | null,
 	title: string,
 	snippet: string,
-	score: number,
+	score: number | null,
 };
 
 /**
@@ -5930,23 +5948,23 @@ export type SelectThreadRequest = {
  *  (`oxplow_domain::service::SERVICES`, the table every reader uses).
  */
 export type ServiceListing = {
-	// What a script's `needs` names (`tree.read`).
+	/**  What a script's `needs` names (`tree.read`). */
 	scope: string,
-	// "Read the captured tree".
+	/**  "Read the captured tree". */
 	title: string,
 	summary: string,
-	// A person approves a script that uses it.
+	/**  A person approves a script that uses it. */
 	approval: boolean,
 };
 
-// One service of a script.
+/**  One service of a script. */
 export type ServiceUse = {
 	scope: string,
-	// `declared` in its `needs`, `implied` by its kind, or `undeclared`.
+	/**  `declared` in its `needs`, `implied` by its kind, or `undeclared`. */
 	declared: Declared,
-	// Its script names one of the service's builtins.
+	/**  Its script names one of the service's builtins. */
 	used: boolean,
-	// A person approves a script that uses it.
+	/**  A person approves a script that uses it. */
 	approval: boolean,
 };
 
@@ -5957,9 +5975,9 @@ export type ServiceUse = {
  */
 export type Sharing = "private" | "shared";
 
-// How handing a redirect to a sign-in went (`complete_oauth_sign_in`).
+/**  How handing a redirect to a sign-in went (`complete_oauth_sign_in`). */
 export type SignInCompletion = 
-// Signed in: the token is kept and the instance restarts on it.
+/**  Signed in: the token is kept and the instance restarts on it. */
 { outcome: "signed_in" } | 
 /**
  *  The sign-in ended without a token: why (what `CredentialChanged`
@@ -5972,31 +5990,31 @@ export type SignInCompletion =
  */
 { outcome: "not_this_sign_in"; reason: string };
 
-// Where a signed-in credential stands on this machine.
+/**  Where a signed-in credential stands on this machine. */
 export type SignInState = { state: "not_signed_in" } | 
 /**
  *  `until` (RFC 3339): when it lapses, for one that can't renew
  *  itself; none, it lasts until the service refuses it.
  */
 { state: "signed_in"; until: string | null } | 
-// Its token lapsed or was revoked, and it can't renew itself.
+/**  Its token lapsed or was revoked, and it can't renew itself. */
 { state: "sign_in_again" };
 
-// One skill or command as the extension declares it.
+/**  One skill or command as the extension declares it. */
 export type SkillDecl = {
 	name: string,
 	kind: SkillKind,
-	// Its markdown, inside the extension.
+	/**  Its markdown, inside the extension. */
 	file: string,
-	// What it needs active (`work_items`, `work_items.comments`).
+	/**  What it needs active (`work_items`, `work_items.comments`). */
 	needs: string[],
 };
 
-// What the agent's runtime makes of it.
+/**  What the agent's runtime makes of it. */
 export type SkillKind = 
-// A skill the agent loads when it's relevant: `<name>/SKILL.md`.
+/**  A skill the agent loads when it's relevant: `<name>/SKILL.md`. */
 "skill" | 
-// A slash command the person runs: `/oxplow:<name>`.
+/**  A slash command the person runs: `/oxplow:<name>`. */
 "command";
 
 /**
@@ -6042,7 +6060,10 @@ export type Snapshot = {
 	over_budget: boolean,
 };
 
-// One row of the operation log (`snapshot_op`).
+/**  A `snapshot` row. */
+export type SnapshotId = number;
+
+/**  One row of the operation log (`snapshot_op`). */
 export type SnapshotOp = {
 	seq: number,
 	stream_id: StreamId,
@@ -6057,9 +6078,9 @@ export type SnapshotOp = {
 	budget_ms: number | null,
 	over_budget: boolean,
 	file_count: number,
-	// What took it; `None` for a take by core's capture pipeline.
+	/**  What took it; `None` for a take by core's capture pipeline. */
 	provider: string | null,
-	// Whether the take kept file contents (`false`: hashes only).
+	/**  Whether the take kept file contents (`false`: hashes only). */
 	contents: boolean,
 	/**
 	 *  The provider's name for the state it marked; `None` for a take
@@ -6105,22 +6126,22 @@ export type SnapshotStorage = "oxplow" | "git" | "oversize" | "deleted";
  *  (`snapshot_op.trigger`) and the `trigger` of `snapshot.taken`.
  */
 export type SnapshotTrigger = 
-// An agent turn ended (Stop / interrupt).
+/**  An agent turn ended (Stop / interrupt). */
 "turn_end" | 
-// The worktree went quiet with no turn open (human edits).
+/**  The worktree went quiet with no turn open (human edits). */
 "quiet" | 
-// An effort opened (its start bracket).
+/**  An effort opened (its start bracket). */
 "effort_start" | 
 /**
  *  An effort closed (its end bracket), including a restart closing
  *  an orphaned effort.
  */
 "effort_end" | 
-// The boot sweep.
+/**  The boot sweep. */
 "startup" | 
-// An explicit request (metric baseline rebuild, tests).
+/**  An explicit request (metric baseline rebuild, tests). */
 "manual" | 
-// HEAD or a ref moved; the take drains whatever was dirty.
+/**  HEAD or a ref moved; the take drains whatever was dirty. */
 "git_refs" | 
 /**
  *  HEAD moved on a clean tree: the latest snapshot now also is the
@@ -6133,20 +6154,20 @@ export type SnapshotTrigger =
  */
 "run_measured";
 
-// How one collector feeding a model a query read stands.
+/**  How one collector feeding a model a query read stands. */
 export type SourceCoverage = {
-	// The model it feeds (`v_acme_pull_request`).
+	/**  The model it feeds (`v_acme_pull_request`). */
 	model: string,
-	// `collector:<owner>/<id>`.
+	/**  `collector:<owner>/<id>`. */
 	source: string,
 	/**
 	 *  `current`, `stale` (past its next due run), `failed` (its last run
 	 *  errored), `disabled`, `needs_approval` or `never` (it hasn't run).
 	 */
 	status: string,
-	// Its last run (RFC 3339), when it has one.
+	/**  Its last run (RFC 3339), when it has one. */
 	at: string | null,
-	// Why it failed or was disabled.
+	/**  Why it failed or was disabled. */
 	error: string | null,
 };
 
@@ -6155,7 +6176,7 @@ export type SourceCoverage = {
  *  number or string) so the TS binding is `null | boolean | number |
  *  string` rather than serde_json's tagged-enum shape.
  */
-export type SqlCell = null | boolean | number | string;
+export type SqlCell = null | boolean | number | number | null | string;
 
 /**
  *  Result of a read-only SQL query. `rows` are positional, aligned with
@@ -6165,7 +6186,7 @@ export type SqlQueryResult = {
 	columns: string[],
 	rows: SqlCell[][],
 	truncated: boolean,
-	// What the query read — what a caller subscribes to (P4.6).
+	/**  What the query read — what a caller subscribes to (P4.6). */
 	reads: Reads,
 	/**
 	 *  When each model it read last changed since the app started (the
@@ -6187,15 +6208,15 @@ export type SqlQueryResult = {
 	coverage?: SourceCoverage[],
 };
 
-// One changed path in a workspace.
+/**  One changed path in a workspace. */
 export type StatusEntry = {
 	path: string,
 	status: FileStatus,
 };
 
-// An envelope as read back from the log, with its position.
+/**  An envelope as read back from the log, with its position. */
 export type StoredEvent = {
-	// Global insert order; the delivery order and what checkpoints hold.
+	/**  Global insert order; the delivery order and what checkpoints hold. */
 	seq: number,
 	/**
 	 *  When retention replaced the payload with `{}` (the envelope stays).
@@ -6203,7 +6224,7 @@ export type StoredEvent = {
 	 *  derives state from it.
 	 */
 	payload_expired_at: Timestamp | null,
-} & (Envelope);
+} & Envelope;
 
 export type Stream = {
 	id: StreamId,
@@ -6217,7 +6238,7 @@ export type Stream = {
 	talking_pane: string,
 	working_session_id: string,
 	talking_session_id: string,
-	// The host its worktree is on.
+	/**  The host its worktree is on. */
 	host: HostId,
 	/**
 	 *  Standing instructions appended to every agent system prompt
@@ -6238,7 +6259,7 @@ export type Stream = {
 
 export type StreamId = string;
 
-// Whether a stream is the project's primary stream or a worktree.
+/**  Whether a stream is the project's primary stream or a worktree. */
 export type StreamKind = "primary" | "worktree";
 
 /**
@@ -6323,12 +6344,12 @@ export type TestingConfig = {
 	agentHint: string | null,
 };
 
-// A line of a workspace file that matched a text search.
+/**  A line of a workspace file that matched a text search. */
 export type TextSearchHit = {
 	path: string,
-	// 1-based.
+	/**  1-based. */
 	line: number,
-	// The line, cut at 400 bytes.
+	/**  The line, cut at 400 bytes. */
 	snippet: string,
 };
 
@@ -6390,7 +6411,7 @@ export type ThreadState = {
  */
 export type ThreadStatus = "active" | "queued" | "closed";
 
-// Wall-clock UTC timestamp serialized as a fixed-width RFC 3339 string.
+/**  Wall-clock UTC timestamp serialized as a fixed-width RFC 3339 string. */
 export type Timestamp = string;
 
 /**
@@ -6400,17 +6421,17 @@ export type Timestamp = string;
 export type ToolCall = {
 	id: string,
 	title: string,
-	// The agent's programmatic tool name, when it sends one.
+	/**  The agent's programmatic tool name, when it sends one. */
 	name: string | null,
 	kind: ToolKind,
 	status: ToolStatus,
-	// Paths from `locations` (absolute, per the protocol).
+	/**  Paths from `locations` (absolute, per the protocol). */
 	locations: string[],
-	// The agent's own JSON for the call; `unknown` to the renderer.
+	/**  The agent's own JSON for the call; `unknown` to the renderer. */
 	rawInput: unknown | null,
 	rawOutput: unknown | null,
 	diffs: ToolDiff[],
-	// Text content blocks (command output, messages).
+	/**  Text content blocks (command output, messages). */
 	text: string[],
 };
 
@@ -6423,14 +6444,14 @@ export type ToolDecision = {
 	reason: string | null,
 };
 
-// One file change a tool call reports. `old_text: None` means a new file.
+/**  One file change a tool call reports. `old_text: None` means a new file. */
 export type ToolDiff = {
 	path: string,
 	oldText: string | null,
 	newText: string,
 };
 
-// The ACP tool categories, mirrored so the SDK's enum stays in `wire.rs`.
+/**  The ACP tool categories, mirrored so the SDK's enum stays in `wire.rs`. */
 export type ToolKind = "read" | "edit" | "delete" | "move" | "search" | "execute" | "think" | "fetch" | "switch_mode" | "other";
 
 export type ToolStatus = "pending" | "in_progress" | "completed" | "failed";
@@ -6438,13 +6459,13 @@ export type ToolStatus = "pending" | "in_progress" | "completed" | "failed";
 export type TranscriptItem = {
 	id: number,
 	seq: number,
-} & (ItemBody);
+} & ItemBody;
 
-// When a collector runs by itself.
+/**  When a collector runs by itself. */
 export type Trigger = 
-// Only when someone runs it (`oxplow.collector.sync`).
+/**  Only when someone runs it (`oxplow.collector.sync`). */
 { kind: "manual" } | 
-// Every `minutes` minutes (an exec collector once approved).
+/**  Every `minutes` minutes (an exec collector once approved). */
 { kind: "every"; minutes: number } | 
 /**
  *  When an event of one of these types is logged and its payload has
@@ -6464,26 +6485,26 @@ pacing?: Pacing } |
  */
 { kind: "onRun"; run: RunKind };
 
-// What a kept earlier version is a version of.
+/**  What a kept earlier version is a version of. */
 export type Twin = {
-	// The model's name.
+	/**  The model's name. */
 	of: string,
 	until: string,
 };
 
-// A decorator (valid ones; invalid ones are in the extension's `errors`).
+/**  A decorator (valid ones; invalid ones are in the extension's `errors`). */
 export type UiDecorator = {
-	// `<extension>/<n>`.
+	/**  `<extension>/<n>`. */
 	id: string,
 	extension: string,
-	// The model's view (`v_<extension>_<model>`), which has a `ref` column.
+	/**  The model's view (`v_<extension>_<model>`), which has a `ref` column. */
 	view: string,
-	// The ref kind it decorates (`work_item`).
+	/**  The ref kind it decorates (`work_item`). */
 	kind: string,
 	placement: DecoratorPlacement,
-	// The view's column holding the text shown.
+	/**  The view's column holding the text shown. */
 	label: string,
-	// The view's column holding a color (`#rrggbb` or a CSS color name).
+	/**  The view's column holding a color (`#rrggbb` or a CSS color name). */
 	color: string | null,
 };
 
@@ -6504,23 +6525,23 @@ export type UiLogEntry = {
  *  `errors`).
  */
 export type UiReplacement = {
-	// `<extension>/<target>`.
+	/**  `<extension>/<target>`. */
 	id: string,
 	extension: string,
-	// The core sub-component it replaces (`work_item.board`).
+	/**  The core sub-component it replaces (`work_item.board`). */
 	target: string,
-	// The capability the target belongs to.
+	/**  The capability the target belongs to. */
 	capability: string,
 	/**
 	 *  Only while this extension's provider is the deciding one does it
 	 *  render; otherwise the person's choice among candidates decides.
 	 */
 	boundToProvider: boolean,
-	// The lens that renders instead, given the target's props.
+	/**  The lens that renders instead, given the target's props. */
 	lensId: string,
-	// The contract's version it was written against (the table's).
+	/**  The contract's version it was written against (the table's). */
 	version: number,
-	// What a person calls the target (`board`), from its table.
+	/**  What a person calls the target (`board`), from its table. */
 	label: string,
 };
 
@@ -6546,12 +6567,12 @@ export type UsageRollup = {
 	count: number,
 };
 
-// One working copy of the repository (feature `isolated_workspaces`).
+/**  One working copy of the repository (feature `isolated_workspaces`). */
 export type VcsWorkspace = {
 	path: string,
 	branch: string | null,
 	head: string | null,
-	// The repository's primary working copy.
+	/**  The repository's primary working copy. */
 	is_main: boolean,
 };
 
@@ -6565,17 +6586,17 @@ export type VisitedPage = {
 
 export type Withheld = {
 	contribution: ContributionId,
-	// The bindings (`imports[*].id`) whose unavailability withheld it.
+	/**  The bindings (`imports[*].id`) whose unavailability withheld it. */
 	imports: string[],
 };
 
-// What a provider supports beyond create, update and transition.
+/**  What a provider supports beyond create, update and transition. */
 export type WorkItemsFeatures = {
-	// Items nest (a parent ref).
+	/**  Items nest (a parent ref). */
 	hierarchy: boolean,
 	comments: boolean,
 	links: boolean,
-	// Items can be deleted (`oxplow.work_item.delete`).
+	/**  Items can be deleted (`oxplow.work_item.delete`). */
 	delete?: boolean,
 	/**
 	 *  A write sent twice with one idempotency key is done once, the
@@ -6629,11 +6650,11 @@ export type WorkspaceIndexedFile = {
 	status: FileStatus | null,
 };
 
-// A workspace's changes against its head.
+/**  A workspace's changes against its head. */
 export type WorkspaceStatus = {
-	// Changed paths, sorted.
+	/**  Changed paths, sorted. */
 	entries: StatusEntry[],
-	// The operation in progress, if one is.
+	/**  The operation in progress, if one is. */
 	in_progress: InProgressOp | null,
 };
 
@@ -6656,7 +6677,7 @@ export type ZoneRuleConfig = {
 	 *  `/` — `**` is the only way to span directories.
 	 */
 	match: string[],
-	// The zone label. Free-form; `other` and `external` are reserved.
+	/**  The zone label. Free-form; `other` and `external` are reserved. */
 	zone: string,
 	/**
 	 *  Optional display colour (`#rrggbb` or `#rgb`). The first rule to

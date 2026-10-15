@@ -53,11 +53,13 @@ pub struct Anchors {
     pub thread_id: Option<ThreadId>,
     pub effort_id: Option<EffortId>,
     /// `agent_turn.id`.
+    #[specta(type = Option<crate::JsNumber>)]
     pub turn_id: Option<i64>,
     /// The agent session it happened in (`agent_session.id`) — not the
     /// harness's own session id, which `agent_turn.session_id` holds.
     pub agent_session_id: Option<AgentSessionId>,
     /// `snapshot.id`.
+    #[specta(type = Option<crate::JsNumber>)]
     pub snapshot_id: Option<i64>,
 }
 
@@ -154,6 +156,7 @@ impl Envelope {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct StoredEvent {
     /// Global insert order; the delivery order and what checkpoints hold.
+    #[specta(type = crate::JsNumber)]
     pub seq: i64,
     #[serde(flatten)]
     pub envelope: Envelope,

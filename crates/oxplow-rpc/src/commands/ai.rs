@@ -6,6 +6,7 @@
 
 use oxplow_app::ai_service::{AiServiceError, AiSettings, ProviderConfig, Role, RoleBinding};
 use oxplow_app::Services;
+use oxplow_domain::AiCallId;
 
 use crate::error::IpcError;
 
@@ -64,14 +65,16 @@ pub async fn test_ai_provider(
 /// no such body or retention removed it. The person's read: any call.
 pub async fn read_ai_call(
     svc: &Services,
-    id: i64,
+    id: AiCallId,
     body: oxplow_app::ai_calls::AiCallBody,
 ) -> Result<Option<oxplow_app::event_bodies::EventBody>, IpcError> {
     use oxplow_app::ai_calls::{read, AiCallBodyError};
-    read(svc, id, body, None).await.map_err(|e| match e {
-        AiCallBodyError::Storage(e) => e.into(),
-        other => IpcError::invalid(other.to_string()),
-    })
+    read(svc, id.value(), body, None)
+        .await
+        .map_err(|e| match e {
+            AiCallBodyError::Storage(e) => e.into(),
+            other => IpcError::invalid(other.to_string()),
+        })
 }
 
 #[cfg(test)]

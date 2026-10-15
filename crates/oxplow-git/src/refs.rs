@@ -198,6 +198,7 @@ pub fn list_recent_remote_branches(repo_path: &Path, limit: usize) -> Vec<Remote
 pub struct RemoteBranchEntry {
     pub ref_name: String,
     pub short_name: String,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub last_commit_at: i64,
     pub last_commit_subject: String,
 }

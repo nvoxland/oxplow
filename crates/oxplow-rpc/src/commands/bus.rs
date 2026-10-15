@@ -6,6 +6,7 @@
 
 use oxplow_app::Services;
 use oxplow_domain::{Actor, CommandOutcome, CommandSpec, Json};
+use oxplow_domain::{AuditId, ProposalId};
 
 use crate::error::IpcError;
 
@@ -136,12 +137,12 @@ pub async fn get_command(svc: &Services, name: String) -> Result<CommandSpec, Ip
 /// through the same pipeline.
 pub async fn undo_command(
     svc: &Services,
-    audit_id: i64,
+    audit_id: AuditId,
     confirmed: bool,
 ) -> Result<CommandOutcome, IpcError> {
     let outcome = svc
         .commands
-        .undo(&Actor::Human, audit_id, confirmed)
+        .undo(&Actor::Human, audit_id.value(), confirmed)
         .await?;
     if outcome.audit_id.is_some() {
         svc.efforts.settle_lifecycle().await;
@@ -155,14 +156,19 @@ pub async fn undo_command(
 /// (`None`).
 pub async fn decide_proposal(
     svc: &Services,
-    proposal: i64,
+    proposal: ProposalId,
     approve: bool,
 ) -> Result<Option<CommandOutcome>, IpcError> {
     if !approve {
-        svc.commands.decline(&Actor::Human, proposal).await?;
+        svc.commands
+            .decline(&Actor::Human, proposal.value())
+            .await?;
         return Ok(None);
     }
-    let outcome = svc.commands.approve(&Actor::Human, proposal).await?;
+    let outcome = svc
+        .commands
+        .approve(&Actor::Human, proposal.value())
+        .await?;
     if outcome.audit_id.is_some() {
         svc.efforts.settle_lifecycle().await;
     }

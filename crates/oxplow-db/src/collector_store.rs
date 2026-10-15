@@ -80,11 +80,13 @@ pub struct CollectorRun {
     pub last_run_at: String,
     pub error: Option<String>,
     /// Row counts per entity from the last successful run.
+    #[specta(type = std::collections::BTreeMap<String, oxplow_domain::JsNumber>)]
     pub row_counts: std::collections::BTreeMap<String, i64>,
     /// The checkpoint the last successful run returned (opaque).
     #[specta(type = Option<oxplow_domain::Json>)]
     pub cursor: Option<serde_json::Value>,
     /// The seq of the last trigger event it ran for.
+    #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub last_event_id: Option<i64>,
     /// The last run (`extension_run.run_id`); `None` for one before runs
     /// were recorded.

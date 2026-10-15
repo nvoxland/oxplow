@@ -29,7 +29,7 @@ pub async fn list_agent_events(
     svc: &Services,
     thread_id: Option<ThreadId>,
     stream_id: Option<oxplow_domain::StreamId>,
-    limit: Option<usize>,
+    limit: Option<u32>,
 ) -> Result<Vec<StoredEvent>, IpcError> {
     Ok(svc
         .event_log_store
@@ -37,7 +37,7 @@ pub async fn list_agent_events(
             "agent",
             thread_id,
             stream_id,
-            limit.unwrap_or(200).min(MAX_AGENT_EVENTS),
+            limit.map_or(200, |n| n as usize).min(MAX_AGENT_EVENTS),
         )
         .await?)
 }

@@ -205,7 +205,7 @@ macro_rules! oxplow_command_table {
                 acp_prompt => $crate::commands::acp::acp_prompt { session_id: ::oxplow_domain::AgentSessionId, text: String } -> (),
                 acp_cancel => $crate::commands::acp::acp_cancel { session_id: ::oxplow_domain::AgentSessionId } -> (),
                 acp_respond_permission => $crate::commands::acp::acp_respond_permission { session_id: ::oxplow_domain::AgentSessionId, request_id: String, option_id: Option<String> } -> (),
-                acp_transcript => $crate::commands::acp::acp_transcript { session_id: ::oxplow_domain::AgentSessionId, since_seq: u64 } -> Option<::oxplow_app::acp::manager::AcpSnapshot>,
+                acp_transcript => $crate::commands::acp::acp_transcript { session_id: ::oxplow_domain::AgentSessionId, since_seq: u32 } -> Option<::oxplow_app::acp::manager::AcpSnapshot>,
                 acp_close_session => $crate::commands::acp::acp_close_session { session_id: ::oxplow_domain::AgentSessionId } -> (),
                 list_closed_threads => $crate::commands::threads::list_closed_threads { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::Thread>,
                 get_thread_state => $crate::commands::threads::get_thread_state { stream_id: ::oxplow_domain::StreamId } -> $crate::commands::threads::ThreadState,
@@ -221,8 +221,8 @@ macro_rules! oxplow_command_table {
                 list_efforts_in_window => $crate::commands::effort::list_efforts_in_window { window_start: ::oxplow_domain::Timestamp, window_end: ::oxplow_domain::Timestamp } -> Vec<::oxplow_db::Effort>,
                 get_effort_files => $crate::commands::effort::get_effort_files { effort_id: ::oxplow_domain::EffortId } -> Vec<::oxplow_db::EffortFile>,
                 get_effort => $crate::commands::effort::get_effort { effort_id: ::oxplow_domain::EffortId } -> Option<::oxplow_db::Effort>,
-                list_efforts_at_snapshots => $crate::commands::effort::list_efforts_at_snapshots { snapshot_ids: Vec<i64> } -> Vec<::oxplow_db::EffortAtSnapshot>,
-                list_efforts_overlapping_range => $crate::commands::effort::list_efforts_overlapping_range { range_start: i64, range_end: i64 } -> Vec<::oxplow_db::Effort>,
+                list_efforts_at_snapshots => $crate::commands::effort::list_efforts_at_snapshots { snapshot_ids: Vec<::oxplow_domain::SnapshotId> } -> Vec<::oxplow_db::EffortAtSnapshot>,
+                list_efforts_overlapping_range => $crate::commands::effort::list_efforts_overlapping_range { range_start: ::oxplow_domain::SnapshotId, range_end: ::oxplow_domain::SnapshotId } -> Vec<::oxplow_db::Effort>,
                 // metrics: reads are SQL (`metric_grid()`, `v_metric_catalog`); this
                 // switches them, through the `oxplow.metric.enable` command (P4.7)
                 enable_metrics => $crate::commands::metrics::enable_metrics { keys: Vec<String>, enabled: bool } -> (),
@@ -235,11 +235,11 @@ macro_rules! oxplow_command_table {
                 run_command_for_call => $crate::commands::bus::run_command_for_call { client: String, call: String, id: String, input: ::oxplow_domain::Json } -> ::oxplow_domain::CommandOutcome,
                 run_command => $crate::commands::bus::run_command { id: String, input: ::oxplow_domain::Json, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 command_open_after => $crate::commands::bus::command_open_after { id: String, result: ::oxplow_domain::Json } -> Option<String>,
-                undo_command => $crate::commands::bus::undo_command { audit_id: i64, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
-                decide_proposal => $crate::commands::bus::decide_proposal { proposal: i64, approve: bool } -> Option<::oxplow_domain::CommandOutcome>,
+                undo_command => $crate::commands::bus::undo_command { audit_id: ::oxplow_domain::AuditId, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
+                decide_proposal => $crate::commands::bus::decide_proposal { proposal: ::oxplow_domain::ProposalId, approve: bool } -> Option<::oxplow_domain::CommandOutcome>,
                 // hooks
                 ingest_hook_event => $crate::commands::hooks::ingest_hook_event { envelope: ::oxplow_app::HookEnvelope } -> (),
-                list_agent_events => $crate::commands::hooks::list_agent_events { thread_id: Option<::oxplow_domain::ThreadId>, stream_id: Option<::oxplow_domain::StreamId>, limit: Option<usize> } -> Vec<::oxplow_domain::StoredEvent>,
+                list_agent_events => $crate::commands::hooks::list_agent_events { thread_id: Option<::oxplow_domain::ThreadId>, stream_id: Option<::oxplow_domain::StreamId>, limit: Option<u32> } -> Vec<::oxplow_domain::StoredEvent>,
                 read_event_content => $crate::commands::hooks::read_event_content { event_id: String, body: oxplow_app::event_bodies::EventBodyKey } -> Option<oxplow_app::event_bodies::EventBody>,
                 list_agent_statuses => $crate::commands::hooks::list_agent_statuses {} -> Vec<::oxplow_domain::AgentStatus>,
                 list_open_agent_turns => $crate::commands::hooks::list_open_agent_turns { thread_id: ::oxplow_domain::ThreadId } -> Vec<::oxplow_domain::AgentTurn>,
@@ -247,11 +247,11 @@ macro_rules! oxplow_command_table {
                 // wiki
                 // events (the log's dead-letter queue)
                 list_dead_letters => $crate::commands::events::list_dead_letters { all: Option<bool> } -> Vec<::oxplow_db::DeadLetter>,
-                retry_dead_letter => $crate::commands::events::retry_dead_letter { id: i64 } -> ::oxplow_db::DeadLetter,
-                discard_dead_letter => $crate::commands::events::discard_dead_letter { id: i64 } -> ::oxplow_db::DeadLetter,
+                retry_dead_letter => $crate::commands::events::retry_dead_letter { id: ::oxplow_domain::DeadLetterId } -> ::oxplow_db::DeadLetter,
+                discard_dead_letter => $crate::commands::events::discard_dead_letter { id: ::oxplow_domain::DeadLetterId } -> ::oxplow_db::DeadLetter,
                 // page_refs
-                list_backlinks => $crate::commands::page_refs::list_backlinks { target_kind: String, target_id: String, limit: Option<i64> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,
-                list_outbound => $crate::commands::page_refs::list_outbound { source_kind: String, source_id: String, limit: Option<i64> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,
+                list_backlinks => $crate::commands::page_refs::list_backlinks { target_kind: String, target_id: String, limit: Option<u32> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,
+                list_outbound => $crate::commands::page_refs::list_outbound { source_kind: String, source_id: String, limit: Option<u32> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,
                 // wiki_freshness
                 // search
                 search => $crate::commands::search::search { query: String, stream_id: Option<String>, kinds: Option<Vec<String>>, limit: Option<u32> } -> Vec<::oxplow_db::SearchHit>,
@@ -288,7 +288,7 @@ macro_rules! oxplow_command_table {
                 remove_ai_provider => $crate::commands::ai::remove_ai_provider { id: String } -> ::oxplow_app::ai_service::AiSettings,
                 set_ai_role => $crate::commands::ai::set_ai_role { role: ::oxplow_app::ai_service::Role, binding: Option<::oxplow_app::ai_service::RoleBinding> } -> ::oxplow_app::ai_service::AiSettings,
                 test_ai_provider => $crate::commands::ai::test_ai_provider { id: String, model: String } -> String,
-                read_ai_call => $crate::commands::ai::read_ai_call { id: i64, body: ::oxplow_app::ai_calls::AiCallBody } -> Option<::oxplow_app::event_bodies::EventBody>,
+                read_ai_call => $crate::commands::ai::read_ai_call { id: ::oxplow_domain::AiCallId, body: ::oxplow_app::ai_calls::AiCallBody } -> Option<::oxplow_app::event_bodies::EventBody>,
                 approve_collector => $crate::commands::collectors::approve_collector { owner: String, id: String, version: String } -> (),
                 revoke_collector => $crate::commands::collectors::revoke_collector { owner: String, id: String } -> (),
                 set_credential => $crate::commands::collectors::set_credential { extension: String, name: String, value: Option<String> } -> (),
@@ -313,7 +313,7 @@ macro_rules! oxplow_command_table {
                 list_comments_for_target => $crate::commands::comments::list_comments_for_target { target_kind: String, target_id: String } -> Vec<::oxplow_domain::CommentThread>,
                 list_comments_for_stream => $crate::commands::comments::list_comments_for_stream { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::CommentThread>,
                 // page_visit
-                record_page_visit => $crate::commands::page_visit::record_page_visit { page_kind: String, page_id: String, label: Option<String>, duration_ms: Option<i64>, thread_id: Option<String> } -> ::oxplow_db::PageVisit,
+                record_page_visit => $crate::commands::page_visit::record_page_visit { page_kind: String, page_id: String, label: Option<String>, duration_ms: Option<u32>, thread_id: Option<String> } -> ::oxplow_db::PageVisit,
                 list_recent_page_visits => $crate::commands::page_visit::list_recent_page_visits { limit: u32, thread_id: Option<String> } -> Vec<::oxplow_db::PageVisit>,
                 top_visited_pages => $crate::commands::page_visit::top_visited_pages { limit: u32, thread_id: Option<String> } -> Vec<$crate::commands::page_visit::VisitedPage>,
                 forget_page => $crate::commands::page_visit::forget_page { page_kind: String, page_id: String } -> (),
@@ -322,9 +322,9 @@ macro_rules! oxplow_command_table {
                 list_recent_usage_rollup => $crate::commands::usage::list_recent_usage_rollup { kind: String, stream_id: Option<String>, limit: u32 } -> Vec<::oxplow_db::UsageRollup>,
                 // git
                 git_resolve_commit_ref_labels => $crate::commands::git::git_resolve_commit_ref_labels { shas: Vec<String> } -> ::std::collections::HashMap<String, Vec<::oxplow_app::vcs::CommitRefLabel>>,
-                git_list_recent_remote_branches => $crate::commands::git::git_list_recent_remote_branches { limit: Option<usize> } -> Vec<::oxplow_app::vcs::RemoteBranchEntry>,
+                git_list_recent_remote_branches => $crate::commands::git::git_list_recent_remote_branches { limit: Option<u32> } -> Vec<::oxplow_app::vcs::RemoteBranchEntry>,
                 git_change_scopes => $crate::commands::git::git_change_scopes { stream_id: Option<String> } -> ::oxplow_app::vcs::ChangeScopes,
-                search_workspace_text => $crate::commands::workspace::search_workspace_text { stream_id: Option<String>, query: String, limit: Option<usize> } -> Vec<::oxplow_app::workspace_files::TextSearchHit>,
+                search_workspace_text => $crate::commands::workspace::search_workspace_text { stream_id: Option<String>, query: String, limit: Option<u32> } -> Vec<::oxplow_app::workspace_files::TextSearchHit>,
                 read_at => $crate::commands::trees::read_at { stream_id: Option<String>, path: String, revision: ::oxplow_domain::vcs::Revision } -> Option<String>,
                 // workspace
                 resolve_symbol => $crate::commands::trees::resolve_symbol { stream_id: String, symbol: String } -> Option<::oxplow_app::symbol_resolve::SymbolLocation>,
@@ -371,13 +371,13 @@ macro_rules! oxplow_command_table {
                 lookup_terminal_session => $crate::commands::terminal::lookup_terminal_session { session_id: ::oxplow_domain::AgentSessionId } -> Option<String>,
                 // snapshot
                 list_file_snapshots => $crate::commands::snapshot::list_file_snapshots { path: String } -> Vec<::oxplow_db::FileSnapshot>,
-                list_snapshots_for_stream => $crate::commands::snapshot::list_snapshots_for_stream { stream_id: ::oxplow_domain::StreamId, limit: Option<usize> } -> Vec<::oxplow_db::Snapshot>,
-                list_snapshot_ops => $crate::commands::snapshot::list_snapshot_ops { stream_id: ::oxplow_domain::StreamId, limit: Option<usize> } -> Vec<::oxplow_db::SnapshotOp>,
-                get_snapshot_stats => $crate::commands::snapshot::get_snapshot_stats { snapshot_id: i64 } -> ::oxplow_db::SnapshotStats,
-                get_blob_storage_bytes => $crate::commands::snapshot::get_blob_storage_bytes {} -> i64,
-                list_wiki_slugs_for_snapshots => $crate::commands::snapshot::list_wiki_slugs_for_snapshots { snapshot_ids: Vec<i64> } -> Vec<(i64, String)>,
-                list_files_for_snapshot => $crate::commands::snapshot::list_files_for_snapshot { snapshot_id: i64 } -> Vec<::oxplow_db::FileSnapshot>,
-                get_file_snapshot => $crate::commands::snapshot::get_file_snapshot { file_snapshot_id: i64 } -> Option<::oxplow_db::FileSnapshot>,
+                list_snapshots_for_stream => $crate::commands::snapshot::list_snapshots_for_stream { stream_id: ::oxplow_domain::StreamId, limit: Option<u32> } -> Vec<::oxplow_db::Snapshot>,
+                list_snapshot_ops => $crate::commands::snapshot::list_snapshot_ops { stream_id: ::oxplow_domain::StreamId, limit: Option<u32> } -> Vec<::oxplow_db::SnapshotOp>,
+                get_snapshot_stats => $crate::commands::snapshot::get_snapshot_stats { snapshot_id: ::oxplow_domain::SnapshotId } -> ::oxplow_db::SnapshotStats,
+                get_blob_storage_bytes => $crate::commands::snapshot::get_blob_storage_bytes {} -> ::oxplow_domain::ByteSize,
+                list_wiki_slugs_for_snapshots => $crate::commands::snapshot::list_wiki_slugs_for_snapshots { snapshot_ids: Vec<::oxplow_domain::SnapshotId> } -> Vec<(::oxplow_domain::SnapshotId, String)>,
+                list_files_for_snapshot => $crate::commands::snapshot::list_files_for_snapshot { snapshot_id: ::oxplow_domain::SnapshotId } -> Vec<::oxplow_db::FileSnapshot>,
+                get_file_snapshot => $crate::commands::snapshot::get_file_snapshot { file_snapshot_id: ::oxplow_domain::FileSnapshotId } -> Option<::oxplow_db::FileSnapshot>,
                 changed_paths => $crate::commands::trees::changed_paths { stream_id: Option<String>, from: Option<::oxplow_domain::vcs::Revision>, to: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_app::trees::ChangedPath>,
                 diff => $crate::commands::trees::diff { stream_id: Option<String>, from: Option<::oxplow_domain::vcs::Revision>, to: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_app::trees::DiffEntry>,
                 extension_impact_between => $crate::commands::trees::extension_impact_between { stream_id: Option<String>, start: Option<::oxplow_domain::vcs::Revision>, end: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_app::extensions::ExtensionChange>,

@@ -20,6 +20,7 @@ pub struct BlameLine {
     pub sha: String,
     pub author: String,
     pub author_mail: String,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub author_time: i64,
     pub summary: String,
 }

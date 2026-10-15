@@ -275,10 +275,13 @@ pub fn set_checkpoint_tx(conn: &Connection, consumer: &str, seq: i64) -> Result<
 /// A parked event: the consumer that failed on it, why, and how often.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct DeadLetter {
+    #[specta(type = oxplow_domain::JsNumber)]
     pub id: i64,
     pub consumer: String,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub event_seq: i64,
     pub error: String,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub attempts: i64,
     pub first_failed_at: Timestamp,
     pub last_failed_at: Timestamp,

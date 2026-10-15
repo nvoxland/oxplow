@@ -333,6 +333,7 @@ pub struct CollectorInput {
     /// A bound taken on purpose: at most this many rows, with
     /// `input.complete` saying whether they were all of them. Absent, the
     /// input is every row or the run fails.
+    #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub limit: Option<usize>,
 }
 

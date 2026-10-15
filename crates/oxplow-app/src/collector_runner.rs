@@ -56,8 +56,10 @@ pub struct CollectorRunReport {
     pub owner: String,
     pub id: String,
     /// An entity collector's rows per entity after the run.
+    #[specta(type = BTreeMap<String, oxplow_domain::JsNumber>)]
     pub row_counts: BTreeMap<String, i64>,
     /// A fact collector's facts recorded.
+    #[specta(type = oxplow_domain::JsNumber)]
     pub facts: i64,
 }
 

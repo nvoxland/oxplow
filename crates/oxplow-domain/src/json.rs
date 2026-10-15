@@ -25,3 +25,17 @@ impl From<Json> for Value {
         j.0
     }
 }
+
+/// A 64-bit integer the exporter would refuse (`i64`, `u64`, `usize`) that
+/// is a row id, count, size or timestamp, far inside JavaScript's exact
+/// integers: exported as `number`. Name it on a field with
+/// `#[specta(type = oxplow_domain::JsNumber)]` (`Option<JsNumber>` for an
+/// option). A marker for the exporter only; it is never constructed.
+/// (`f64` would export as `number | null`, `NaN` being null in JSON.)
+pub struct JsNumber;
+
+impl specta::Type for JsNumber {
+    fn definition(_types: &mut specta::Types) -> specta::datatype::DataType {
+        specta::datatype::DataType::Reference(specta_typescript::define("number"))
+    }
+}

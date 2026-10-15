@@ -68,6 +68,7 @@ pub struct RevisionInfo {
     pub author: String,
     pub email: String,
     /// Seconds since the Unix epoch.
+    #[specta(type = crate::JsNumber)]
     pub time: i64,
     pub subject: String,
     pub parents: Vec<String>,
@@ -193,6 +194,7 @@ pub struct BlameLine {
     pub revision: Option<String>,
     pub author: String,
     pub email: String,
+    #[specta(type = crate::JsNumber)]
     pub time: i64,
     pub summary: String,
 }

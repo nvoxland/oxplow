@@ -212,7 +212,7 @@ impl SqlQuery {
 pub enum SqlCell {
     Null(()),
     Bool(bool),
-    Int(i64),
+    Int(#[specta(type = oxplow_domain::JsNumber)] i64),
     Real(f64),
     Text(String),
 }

@@ -23,6 +23,7 @@ use crate::database::{string_to_ts, ts_to_string};
 pub struct Dashboard {
     pub id: DashboardId,
     pub title: String,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub sort_index: i64,
     pub settings_json: Option<String>,
     pub created_at: Timestamp,
@@ -37,6 +38,7 @@ pub struct Dashboard {
 pub struct DashboardItem {
     pub id: DashboardItemId,
     pub dashboard_id: DashboardId,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub sort_index: i64,
     pub kind: String,
     pub options_json: Option<String>,

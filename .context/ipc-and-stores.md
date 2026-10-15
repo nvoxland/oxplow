@@ -545,6 +545,26 @@ now" signal, use the `task` rows themselves plus
 renderer rolls a thread's sessions up, agent-model.md "Agent status") for
 the colored-dot working/waiting/idle state.
 
+## Integers at the IPC boundary
+
+The TypeScript exporter (specta-typescript 0.0.12) refuses a bare `i64`,
+`u64` or `usize` anywhere it reaches: JSON past 2^53 loses precision. Ours
+are row ids, counts, sizes and timestamps, far inside that. How each
+reaches the frontend as `number`:
+
+- **A struct field** (a row's `id`, a count): `#[specta(type =
+  oxplow_domain::JsNumber)]` — `Option<oxplow_domain::JsNumber>` for an
+  option, `BTreeMap<String, oxplow_domain::JsNumber>` for a map. Not `f64`:
+  that exports as `number | null` (JSON's `NaN`). A new `i64` field in an
+  exported type fails `export_ts_bindings` until it has one; the error
+  names the field.
+- **A command's argument or result** (the command table in `oxplow-rpc`):
+  no attribute reaches it, so it has a type. The entity ids in `ids.rs`
+  travel as `"thr1"` strings; the plain-number rows have their own
+  newtypes in `row_ids.rs` (`SnapshotId`, `FileSnapshotId`, `AuditId`,
+  `ProposalId`, `DeadLetterId`, `AiCallId`, `ByteSize`), serialized as the
+  number. A limit or small count is `u32`.
+
 ## Thread and stream order
 
 - Threads list by `sort_index`, then `created_at`; the index is the stable

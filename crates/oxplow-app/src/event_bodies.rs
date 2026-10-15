@@ -39,6 +39,7 @@ impl EventBodyKey {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct EventBody {
     pub text: String,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub size: u64,
     pub truncated: bool,
 }

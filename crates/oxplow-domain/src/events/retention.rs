@@ -17,8 +17,10 @@ use super::schema::CORE_NAMESPACES;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RetentionWindow {
     /// Days an event's payload is kept; after it, `{}`.
+    #[specta(type = crate::JsNumber)]
     pub payload_days: i64,
     /// Days its large content (tool input and output) is kept.
+    #[specta(type = crate::JsNumber)]
     pub content_days: i64,
 }
 

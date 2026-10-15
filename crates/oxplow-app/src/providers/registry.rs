@@ -324,6 +324,7 @@ pub struct CollectorView {
     /// RFC 3339.
     pub last_read_at: Option<String>,
     /// Records its reads have delivered.
+    #[specta(type = oxplow_domain::JsNumber)]
     pub records: i64,
 }
 

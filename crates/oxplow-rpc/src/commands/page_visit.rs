@@ -13,6 +13,7 @@ use crate::error::IpcError;
 pub struct VisitedPage {
     pub page_kind: String,
     pub page_id: String,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub visit_count: i64,
 }
 
@@ -21,7 +22,7 @@ pub async fn record_page_visit(
     page_kind: String,
     page_id: String,
     label: Option<String>,
-    duration_ms: Option<i64>,
+    duration_ms: Option<u32>,
     thread_id: Option<String>,
 ) -> Result<PageVisit, IpcError> {
     #[expect(clippy::disallowed_methods, reason = "off the bus: page visits")]
@@ -31,7 +32,7 @@ pub async fn record_page_visit(
             &page_kind,
             &page_id,
             label.as_deref(),
-            duration_ms,
+            duration_ms.map(i64::from),
             thread_id.as_deref(),
         )
         .await?;

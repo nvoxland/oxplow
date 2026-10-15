@@ -140,7 +140,9 @@ pub struct PlanEntry {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ContextUsage {
+    #[specta(type = oxplow_domain::JsNumber)]
     pub used: u64,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub size: u64,
     pub cost_amount: Option<f64>,
     pub cost_currency: Option<String>,

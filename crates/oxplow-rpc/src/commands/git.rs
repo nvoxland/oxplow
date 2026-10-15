@@ -25,10 +25,10 @@ pub async fn git_resolve_commit_ref_labels(
 
 pub async fn git_list_recent_remote_branches(
     svc: &Services,
-    limit: Option<usize>,
+    limit: Option<u32>,
 ) -> Result<Vec<RemoteBranchEntry>, IpcError> {
     svc.git
-        .recent_remote_branches(&svc.layout.project_dir, limit.unwrap_or(50))
+        .recent_remote_branches(&svc.layout.project_dir, limit.map_or(50, |n| n as usize))
         .await
         .map_err(|e| DomainError::from(e).into())
 }

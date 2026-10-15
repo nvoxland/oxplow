@@ -107,7 +107,9 @@ pub const ROW_DIFF_SAMPLES: usize = 20;
 #[serde(rename_all = "camelCase")]
 pub struct RowDiff {
     /// Rows on each side (`None`: it isn't on that side).
+    #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub before: Option<i64>,
+    #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub after: Option<i64>,
     /// Row by row, when both sides declare the same key.
     pub keyed: Option<KeyedDiff>,
@@ -119,8 +121,11 @@ pub struct RowDiff {
 #[serde(rename_all = "camelCase")]
 pub struct KeyedDiff {
     pub key: Vec<String>,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub added: i64,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub removed: i64,
+    #[specta(type = oxplow_domain::JsNumber)]
     pub changed: i64,
     /// Up to [`ROW_DIFF_SAMPLES`] of them, in key order.
     pub samples: Vec<RowSample>,
@@ -619,12 +624,14 @@ pub struct CollectorOutput {
 #[serde(rename_all = "camelCase")]
 pub struct Ran {
     /// Rows per entity.
+    #[specta(type = BTreeMap<String, oxplow_domain::JsNumber>)]
     pub counts: BTreeMap<String, i64>,
     /// The rows per entity (the first 20).
     #[specta(type = oxplow_domain::Json)]
     pub rows: Value,
     /// The events it would log, counted per type — as the script
     /// returned them: whether it may emit them is checked when it runs.
+    #[specta(type = BTreeMap<String, oxplow_domain::JsNumber>)]
     pub events: BTreeMap<String, i64>,
     /// Why it failed (a model call it tried was refused, say).
     pub error: Option<String>,

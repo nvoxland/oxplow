@@ -101,10 +101,12 @@ pub enum OxplowEvent {
     /// event in the log; this is the UI / reactor wake-up.
     SnapshotTaken {
         stream_id: StreamId,
+        #[specta(type = oxplow_domain::JsNumber)]
         snapshot_id: i64,
         file_count: u32,
         trigger: oxplow_domain::snapshot::SnapshotTrigger,
         thread_id: Option<ThreadId>,
+        #[specta(type = Option<oxplow_domain::JsNumber>)]
         turn_id: Option<i64>,
         effort_id: Option<oxplow_domain::EffortId>,
     },
