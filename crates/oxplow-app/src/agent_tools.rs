@@ -119,13 +119,11 @@ pub fn tools_of(
 }
 
 /// Whether a run of `spec` spends the person's money: it needs a scope
-/// that does, or is an operation of one. Such a tool asks before it runs,
-/// though it changes no record.
+/// that does (an operation's own scope is among its needs). Such a tool
+/// asks before it runs, though it changes no record.
 fn spends(spec: &oxplow_domain::CommandSpec) -> bool {
     spec.needs
         .iter()
-        .map(String::as_str)
-        .chain(spec.op.as_ref().map(|op| op.scope.as_str()))
         .any(|id| oxplow_domain::scope::scope(id).is_some_and(|scope| scope.spends))
 }
 
