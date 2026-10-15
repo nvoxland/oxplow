@@ -18,6 +18,9 @@ pub struct PreparedExtensionDatabase {
     models: Vec<ExtensionModels>,
     vocabulary: PreparedVocabulary,
     contributions: Vec<oxplow_domain::contribution::Descriptor>,
+    /// The enabled extensions' lenses and every loaded extension, listed.
+    lenses: Vec<oxplow_db::catalog_listing_store::LensRow>,
+    listed: Vec<oxplow_db::catalog_listing_store::ExtensionRow>,
     capabilities: Option<PreparedCapabilities>,
     /// The declarations of the extensions whose models read their own
     /// configuration (`config()`): their effective values are resolved in the
@@ -113,6 +116,13 @@ impl PreparedExtensionDatabase {
             .filter(|extension| extension.enabled)
             .flat_map(|extension| extension.contributions.iter().cloned())
             .collect();
+        let lenses = snapshot
+            .extensions()
+            .iter()
+            .filter(|extension| extension.enabled)
+            .flat_map(|extension| extension.lenses.iter().map(lens_row))
+            .collect();
+        let listed = snapshot.extensions().iter().map(extension_row).collect();
         let configurations = snapshot
             .extensions()
             .iter()
@@ -127,6 +137,8 @@ impl PreparedExtensionDatabase {
             models,
             vocabulary,
             contributions,
+            lenses,
+            listed,
             capabilities,
         }
     }
@@ -173,6 +185,7 @@ impl PreparedExtensionDatabase {
             models::replace_extensions(tx, &candidate)?;
             let vocabulary = self.vocabulary.replace_tx(tx, now)?;
             oxplow_db::contribution_store::reset_tx(tx, &self.contributions)?;
+            oxplow_db::catalog_listing_store::reset_tx(tx, &self.lenses, &self.listed)?;
             if let Some(capabilities) = &self.capabilities {
                 capabilities.restate_tx(tx, &vocabulary)?;
             }
@@ -189,6 +202,57 @@ impl PreparedExtensionDatabase {
                 Err(error)
             }
         }
+    }
+}
+
+fn json_text(value: &impl serde::Serialize) -> String {
+    serde_json::to_string(value).expect("a listed field serializes")
+}
+
+/// A serde unit variant's name (`table`, `data`): the lowercase word.
+fn variant_name(value: &impl serde::Serialize) -> String {
+    match serde_json::to_value(value) {
+        Ok(serde_json::Value::String(name)) => name,
+        _ => String::new(),
+    }
+}
+
+fn lens_row(lens: &crate::extensions::Lens) -> oxplow_db::catalog_listing_store::LensRow {
+    oxplow_db::catalog_listing_store::LensRow {
+        id: lens.id.clone(),
+        extension: lens.extension.clone(),
+        slug: lens.slug.clone(),
+        title: lens.title.clone(),
+        description: lens.description.clone(),
+        viz: variant_name(&lens.viz),
+        params_json: json_text(&lens.params),
+        hidden: lens.hidden,
+        launcher_category: lens.launcher_category.as_ref().map(variant_name),
+        needs_json: json_text(&lens.needs),
+        path: lens.path.clone(),
+    }
+}
+
+fn extension_row(
+    extension: &crate::extensions::Extension,
+) -> oxplow_db::catalog_listing_store::ExtensionRow {
+    oxplow_db::catalog_listing_store::ExtensionRow {
+        name: extension.name.clone(),
+        namespace: extension.namespace.clone(),
+        description: extension.description.clone(),
+        path: extension.path.clone(),
+        origin: extension.origin.clone(),
+        version: extension.version.clone(),
+        enabled: extension.enabled,
+        sharing: variant_name(&extension.sharing),
+        purpose: extension
+            .intent
+            .as_ref()
+            .map(|intent| intent.purpose.clone()),
+        source_git: extension.source.as_ref().map(|source| source.git.clone()),
+        source_sha: extension.source.as_ref().map(|source| source.sha.clone()),
+        errors_json: json_text(&extension.errors),
+        warnings_json: json_text(&extension.warnings),
     }
 }
 

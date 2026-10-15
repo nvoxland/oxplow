@@ -28,6 +28,8 @@ pub mod boot;
 pub mod branch_reconciler;
 pub mod bundled_extensions;
 pub mod capabilities;
+#[cfg(test)]
+mod catalog_models_tests;
 pub mod change_analysis;
 pub mod change_reactor;
 pub mod churn;

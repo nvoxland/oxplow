@@ -44,6 +44,8 @@ pub const REF_MODELS: &[RefModel] = &[
     owner(k::DECISION, "v_decision", "question"),
     owner(k::COLLECTOR, "v_collector_run", "id"),
     owner(k::JOB_RUN, "v_job_run", "intent_key"),
+    owner(k::LENS, "v_lens", "title"),
+    owner(k::EXTENSION, "v_extension", "name"),
 ];
 
 /// The owning model of `kind`, when a core model owns it.

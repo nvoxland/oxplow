@@ -517,8 +517,13 @@ ordinary project files, so they go through the normal task/effort flow
 
 ## Working with the user's lenses
 
-- `list_lenses` / `read { ref: "lens:<ext>/<slug>" }` show what already exists. Prefer improving an
-  existing lens over adding a near-duplicate.
+- `v_lens` (`ref`, `extension`, `title`, `description`, `viz`, `hidden`) lists
+  what already exists, `v_extension` the extensions that loaded (`enabled`,
+  `errors`, `warnings`) and `v_contribution` what each contributes (count it
+  by `extension` and `kind`); `read { ref: "lens:<ext>/<slug>" }` gives one
+  lens's definition. Prefer improving an existing lens over adding a
+  near-duplicate. An extension that fails to load isn't in `v_extension`:
+  `validate_extension` says why.
 - When the user says "this lens", "what I'm looking at" or pastes
   `[oxplow lens <id>]`:
   1. Call `get_open_page(thread_id)`. Its `lens` is what is on their

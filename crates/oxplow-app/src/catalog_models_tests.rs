@@ -1,0 +1,178 @@
+//! The models that restate what the catalog and the page-ref graph hold, so
+//! an agent reads them with `query_sql` instead of a tool: `v_lens`,
+//! `v_extension` and `v_page_ref`.
+
+use serde_json::{json, Value};
+
+use crate::test_fixtures::{services_with_effort, EffortFixture};
+
+const MANIFEST: &str =
+    "manifest: 2\nname: acme\nversion: 2.1.0\nintent:\n  purpose: Count things.\n";
+const LENS: &str = "title: Acme counts\ndescription: Counts acme things.\nparams: [{ name: kind }]\nquery: SELECT 1 AS n\nviz: table\nlauncher: { category: Data }\n";
+const HIDDEN: &str = "title: Detail\nquery: SELECT 1 AS n\nviz: table\nhidden: true\n";
+
+async fn rows(fx: &EffortFixture, sql: &str) -> Vec<Vec<Value>> {
+    let out = fx.svc.sql.query_sql(sql, vec![], None).await.unwrap();
+    serde_json::to_value(&out.rows)
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r.as_array().unwrap().clone())
+        .collect()
+}
+
+fn write(root: &std::path::Path, rel: &str, body: &str) {
+    let path = root.join("oxplow/extensions/acme").join(rel);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, body).unwrap();
+}
+
+/// A project extension's lenses and itself are rows once it activates, and
+/// the rows follow it away when it's deleted.
+#[tokio::test]
+async fn lenses_and_extensions_are_models_that_follow_the_catalog() {
+    let fx = services_with_effort().await;
+    let root = fx.svc.layout.project_dir.clone();
+    write(&root, "extension.yaml", MANIFEST);
+    write(&root, "lenses/counts.yaml", LENS);
+    write(&root, "lenses/detail.yaml", HIDDEN);
+    crate::test_fixtures::activate(&fx.svc).await;
+
+    assert_eq!(
+        rows(
+            &fx,
+            "SELECT ref, extension, slug, title, description, viz, hidden, launcher_category, params
+             FROM v_lens WHERE extension = 'acme' ORDER BY slug"
+        )
+        .await,
+        vec![
+            vec![
+                json!("lens:acme/counts"),
+                json!("acme"),
+                json!("counts"),
+                json!("Acme counts"),
+                json!("Counts acme things."),
+                json!("table"),
+                json!(0),
+                json!("Data"),
+                json!(r#"[{"name":"kind","label":null,"default":null,"options":[]}]"#)
+            ],
+            vec![
+                json!("lens:acme/detail"),
+                json!("acme"),
+                json!("detail"),
+                json!("Detail"),
+                json!(""),
+                json!("table"),
+                json!(1),
+                Value::Null,
+                json!("[]")
+            ],
+        ]
+    );
+    assert_eq!(
+        rows(
+            &fx,
+            "SELECT ref, name, version, origin, enabled, purpose, errors
+             FROM v_extension WHERE name = 'acme'"
+        )
+        .await,
+        vec![vec![
+            json!("extension:acme"),
+            json!("acme"),
+            json!("2.1.0"),
+            json!("project"),
+            json!(1),
+            json!("Count things."),
+            json!("[]")
+        ]]
+    );
+    assert_eq!(
+        rows(
+            &fx,
+            "SELECT origin FROM v_extension WHERE name = 'oxplow-bundled'"
+        )
+        .await,
+        vec![vec![json!("bundled")]]
+    );
+
+    std::fs::remove_dir_all(root.join("oxplow/extensions/acme")).unwrap();
+    crate::test_fixtures::activate(&fx.svc).await;
+    assert!(rows(&fx, "SELECT 1 FROM v_lens WHERE extension = 'acme'")
+        .await
+        .is_empty());
+    assert!(rows(&fx, "SELECT 1 FROM v_extension WHERE name = 'acme'")
+        .await
+        .is_empty());
+}
+
+/// What a loaded extension warns about is on its row; one that fails to
+/// load blocks the generation, so it is not a row (`validate_extension`
+/// says why).
+#[tokio::test]
+async fn an_extensions_warnings_are_on_its_row() {
+    let fx = services_with_effort().await;
+    let root = fx.svc.layout.project_dir.clone();
+    write(&root, "extension.yaml", MANIFEST);
+    crate::test_fixtures::activate(&fx.svc).await;
+    assert_eq!(
+        rows(
+            &fx,
+            "SELECT json_array_length(warnings) > 0 FROM v_extension WHERE name = 'acme'"
+        )
+        .await,
+        vec![vec![json!(1)]]
+    );
+
+    write(&root, "lenses/bad.yaml", "title: Bad\nviz: nonsense\n");
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
+    assert!(
+        rows(&fx, "SELECT 1 FROM v_lens WHERE slug = 'bad'")
+            .await
+            .is_empty(),
+        "a lens that doesn't load is no row"
+    );
+}
+
+/// `v_page_ref` is the edge list the backlinks tools returned, both ways.
+#[tokio::test]
+async fn page_ref_edges_are_a_model_in_both_directions() {
+    let fx = services_with_effort().await;
+    fx.svc
+        .db
+        .transaction(|tx| {
+            tx.execute(
+                "INSERT INTO page_ref (source_kind, source_id, target_kind, target_id, ref_type)
+                 VALUES ('wiki', 'intro', 'file', 'src/app.rs', 'mention'),
+                        ('wiki', 'intro', 'wiki', 'other', 'link'),
+                        ('commit', 'abc1234', 'file', 'src/app.rs', 'touches')",
+                [],
+            )
+            .map_err(oxplow_db::map_sql_err)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    // What points at a file.
+    assert_eq!(
+        rows(
+            &fx,
+            "SELECT source_ref, ref_type FROM v_page_ref WHERE target_ref = 'file:src/app.rs' ORDER BY source_ref"
+        )
+        .await,
+        vec![
+            vec![json!("commit:abc1234"), json!("touches")],
+            vec![json!("wiki:intro"), json!("mention")],
+        ]
+    );
+    // What a page points at.
+    assert_eq!(
+        rows(
+            &fx,
+            "SELECT target_ref FROM v_page_ref WHERE source_ref = 'wiki:intro' ORDER BY target_ref"
+        )
+        .await,
+        vec![vec![json!("file:src/app.rs")], vec![json!("wiki:other")]]
+    );
+}

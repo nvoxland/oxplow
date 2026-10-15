@@ -15,3 +15,18 @@
   reaches:
     command: oxplow.knowledge.write_page
     input: { slug: auth-flow, body: "# Auth flow\n\nHow a login becomes a session." }
+- question: What points at this file — pages, commits, work items?
+  about: file
+  skill: oxplow-wiki-capture
+  reaches:
+    sql: >-
+      SELECT source_ref, ref_type FROM v_page_ref
+      WHERE target_ref = 'file:src/lib.rs' ORDER BY source_ref
+  shape: { columns: [source_ref, ref_type] }
+- question: What does this wiki page point at?
+  skill: oxplow-wiki-capture
+  reaches:
+    sql: >-
+      SELECT target_ref, ref_type FROM v_page_ref
+      WHERE source_ref = 'wiki:auth-flow' ORDER BY target_ref
+  shape: { columns: [target_ref, ref_type] }

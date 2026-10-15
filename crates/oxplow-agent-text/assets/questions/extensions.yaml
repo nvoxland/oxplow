@@ -32,3 +32,20 @@
   reaches:
     command: oxplow.collector.sync
     input: { collector: "collector:tracker/issues" }
+- question: Which lenses exist, and which extension declares each?
+  skill: oxplow-extension
+  reaches:
+    sql: SELECT ref, extension, title, viz, hidden FROM v_lens ORDER BY extension, slug
+  shape: { columns: [ref, extension, title, viz, hidden] }
+- question: Which extensions are loaded, are they enabled, and did they load cleanly?
+  skill: oxplow-extension
+  reaches:
+    sql: SELECT name, version, origin, enabled, errors, warnings FROM v_extension
+  shape: { columns: [name, version, origin, enabled, errors, warnings] }
+- question: What does this extension contribute?
+  skill: oxplow-extension
+  reaches:
+    sql: >-
+      SELECT kind, count(*) AS n FROM v_contribution
+      WHERE extension = 'oxplow-bundled' GROUP BY kind
+  shape: { columns: [kind, n] }

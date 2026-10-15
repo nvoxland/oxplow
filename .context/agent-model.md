@@ -1407,7 +1407,7 @@ is `{ to: done|canceled, native_state: archived }`.
     `list_comments_for_target` stays raw — the renderer already has the
     page, so only the MCP surface pays the resolution cost. The same
     resolver is the single source of truth for backlink labels:
-    `list_backlinks`/`list_outbound`'s `source_label` is just
+    `v_page_ref`'s `source_label` is just
     `resolve_ref(...).title`.
 
 **Code tools** (`crates/oxplow-mcp/src/lib.rs`): `code_definition`,
@@ -1425,18 +1425,15 @@ call (P8.A9) — and
 `lsp.servers` entry to `.oxplow/project.yaml` is the manual alternative for
 servers not in Mason.
 
-**Unified backlinks graph (`list_backlinks` / `list_outbound`).** Every
-page kind — wiki, task, file, commit, finding, directory — lives
-in one persisted edge table (`page_ref`; see
-[data-model.md](./data-model.md)). The two MCP tools query both
-directions of any edge:
+**Unified backlinks graph (`v_page_ref`).** Every page kind — wiki, task,
+file, commit, finding, directory — lives in one persisted edge table
+(`page_ref`; see [data-model.md](./data-model.md)), published as
+`v_page_ref`. Query both directions with `query_sql`:
 
-- `list_backlinks({ kind, id, limit? })` — pages pointing AT
-  `(kind, id)`. Use this for cross-kind backlinks of any sort:
-  "what tasks / commits / wiki pages reference src/foo.rs?",
-  "who links to task:42?", "what mentions finding:fnd-1?".
-- `list_outbound({ kind, id, limit? })` — what `(kind, id)` itself
-  points at.
+- pages pointing AT `(kind, id)`: `WHERE target_ref = '<ref>'` — "what
+  tasks / commits / wiki pages reference src/foo.rs?", "who links to
+  task:42?".
+- what `(kind, id)` itself points at: `WHERE source_ref = '<ref>'`.
 
 Canonical id shapes (`.context/refs.md`): `wiki` the slug;
 `work_item` `oxplow:tsk<n>`; `file` the bare repo-relative path; `dir`
@@ -1459,8 +1456,8 @@ the file's current on-disk content (`compute_wiki_ref_drift` in
 only the changed hunks instead of re-opening the file. `status` is
 drifted | unchanged | not_a_ref | no_pin | binary; the diff is capped
 (`truncated` flags it). The wiki-only
-`find_wiki_pages_for_file` was removed in favour of `list_backlinks`
-(below) — every cross-kind backlinks question goes through one tool
+`find_wiki_pages_for_file` was removed in favour of `v_page_ref`
+(below) — every cross-kind backlinks question goes through one model
 now. **Writes are commands** — `run_command knowledge.write_page` /
 `delete_page` / `link` / `resync` ([knowledge.md](./knowledge.md)); the
 write guard refuses an agent's Write/Edit into `.oxplow/wiki/`.

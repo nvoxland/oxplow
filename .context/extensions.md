@@ -92,6 +92,8 @@ invalid-named folder, which still loads).
 **Discovery.** Each generation (boot and every catalog change)
 restates the `contribution` table (V47, `oxplow_db::contribution_store`)
 from every enabled extension's descriptors, read as `v_contribution`.
+The same transaction restates `lens` and `extension_listing` (V74,
+`oxplow_db::catalog_listing_store`), read as `v_lens` and `v_extension`.
 The reference's "What it can declare" table is generated from
 `contribution::KINDS` (each kind's `summary`) between markers in
 `docs/reference/extensions.md`;
@@ -535,20 +537,19 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   reports SQL errors, and `columns` / `link.from` keys that the query
   doesn't return.
 - **Surfaces.**
-  - IPC and MCP: `list_extensions`, `run_lens`, `validate_extension`;
-    `get_lens` is IPC only, an agent reads a definition with `read`
-    (`lens:<ext>/<slug>`).
-  - MCP only: `list_lenses`. MCP's `list_extensions` is a summary
-    (each extension's own fields, errors and warnings, and a count of
-    each list it contributes); `name` gives one extension's whole
-    listing — the full list ran to 124k characters with the bundled
-    extension in it.
+  - IPC and MCP: `run_lens`, `validate_extension`; `get_lens` is IPC
+    only, an agent reads a definition with `read` (`lens:<ext>/<slug>`).
+  - An agent lists lenses, extensions and what each contributes with
+    models, not tools: `v_lens`, `v_extension` and `v_contribution`
+    (restated with each extension generation from the active catalog, the
+    main worktree's; an extension that fails to load holds its generation
+    back, so it is not a row — `validate_extension` says why). The UI's
+    `list_extensions` stays IPC.
   - **Over MCP these are the authoring tools** and read the caller's
     **working copy**: an omitted `stream_id` is the caller's own stream
     (its header, else its thread's; the primary only for an anonymous
     caller), so an agent in a worktree can check the extension it just
-    wrote before it's merged — the same for `list_lenses`,
-    `preview_collector`, `review_extension`, `oxplow.extension.install`,
+    wrote before it's merged — the same for `preview_collector`, `review_extension`, `oxplow.extension.install`,
     `oxplow.extension.update`, `run_lens_action` and `ensure_change`.
     `site_search` is the exception by design: omitted, it searches every
     stream.
@@ -3918,8 +3919,9 @@ tool list stable no matter how many extensions are installed.
 
 **Working with lenses**
 
-- `list_lenses`: every lens (`<ext>/<slug>` id, title, description, viz,
-  params).
+- `v_lens`: every lens (`ref`, `extension`, `title`, `description`, `viz`,
+  `params`, `hidden`); `v_extension` and `v_contribution` for the
+  extensions and what they contribute.
 - `read { ref: "lens:<id>" }`: the lens definition (in `content`): query, params with defaults, viz,
   columns/links and the file it lives in.
 - `run_lens(id, params?, format?)`: **what the UI shows** for those
@@ -3999,7 +4001,7 @@ tool list stable no matter how many extensions are installed.
   the agent to write itself.
 - `validate_extension(name)` returns load errors, schema errors and a dry
   run of every lens query, so the agent can check its work without the UI.
-- `list_extensions`, `list_collectors`, `run_collector(owner, id)`
+- `v_extension`, `list_collectors`, `run_collector(owner, id)`
   (never approves).
 - **Worktree streams: preview, don't run (tsk377).** Collected data is
   project-wide (one `ext__<ext>__<entity>` table), so a run (the

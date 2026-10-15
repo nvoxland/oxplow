@@ -630,6 +630,6 @@ The cleanliness check and the head read go through the VCS capability
 - [vcs.md](./vcs.md) — the VCS capability core reads git through.
 - [data-model.md](./data-model.md) — schema overview, including the
   `page_ref` table the commit indexer writes into.
-- [agent-model.md](./agent-model.md) — commits are user-driven; the `list_backlinks` /
-  `list_outbound` MCP tools that read the commit indexer's output.
+- [agent-model.md](./agent-model.md) — commits are user-driven; the `v_page_ref`
+  model that reads the commit indexer's output.
 - [editor-and-monaco.md](./editor-and-monaco.md) — blame overlay UI.

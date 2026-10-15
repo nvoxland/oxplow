@@ -1308,7 +1308,8 @@ Reader: `SqlitePageRefStore::list_backlinks(target_kind, target_id,
 limit)` and `list_outbound(source_kind, source_id, limit)`. Both
 are exposed as Tauri commands (`list_backlinks` / `list_outbound`,
 which decorate each row with a best-effort `source_label` from
-the source store) and as MCP tools of the same names.
+the source store). An agent reads the same edges as the `v_page_ref` model
+(`source_ref`, `target_ref`, `ref_type`) with `query_sql`; there is no MCP tool.
 
 Boot-time restate: `oxplow_app::page_ref_backfill::run(...)` re-
 projects every work item (`work_item_refs::all_refs_tx`, deleted ones

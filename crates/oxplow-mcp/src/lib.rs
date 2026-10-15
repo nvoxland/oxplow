@@ -266,23 +266,6 @@ pub struct WikiRefDriftParams {
     pub path: String,
 }
 
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct PageRefParams {
-    /// Ref kind: `wiki`, `work_item`, `file`, `dir`, `commit`,
-    /// `finding`, `thread_note` (see .context/refs.md).
-    pub kind: String,
-    /// The ref's id within the kind: a repo-relative path for files and
-    /// dirs, `oxplow:tsk42` for a task, the sha for a commit, the slug
-    /// for a wiki page.
-    pub id: String,
-    #[serde(default = "default_page_ref_limit")]
-    pub limit: u32,
-}
-
-fn default_page_ref_limit() -> u32 {
-    100
-}
-
 /// A place in a stream's file (`code_*` tools). Line and column are
 /// 1-based, like editors and `v_diagnostic`.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -395,20 +378,8 @@ pub struct StreamScopeParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ListExtensionsParams {
-    /// Stream whose worktree to read `oxplow/extensions/` from. Omit for
-    /// your own stream (the calling thread's; the primary when the call
-    /// carries no thread).
-    pub stream_id: Option<String>,
-    /// One extension's name: its whole listing (every lens, collector,
-    /// effect, …) instead of the summary of each.
-    #[serde(default)]
-    pub name: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ShowLensParams {
-    /// An existing lens to show (`<extension>/<slug>`, see `list_lenses`).
+    /// An existing lens to show (`<extension>/<slug>`, see `v_lens`).
     /// Give this or `spec`.
     pub lens: Option<String>,
     /// A lens of your own: `title`, `query` (read-only SQL over the `v_*`
@@ -423,7 +394,7 @@ pub struct ShowLensParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct LensIdParams {
-    /// Lens id: `<extension>/<slug>` (see `list_lenses`).
+    /// Lens id: `<extension>/<slug>` (see `v_lens`).
     pub id: String,
     /// Stream whose worktree to read from; omit for your own.
     pub stream_id: Option<String>,
@@ -784,7 +755,7 @@ impl OxplowMcp {
         .map_err(|e| match e {
             oxplow_app::collector_runner::RunCollectorError::NotFound => McpError::invalid_params(
                 format!(
-                    "no collector `{}/{}` in that stream's worktree (see list_extensions)",
+                    "no collector `{}/{}` in that stream's worktree (see `v_extension`)",
                     p.owner, p.id
                 ),
                 None,
@@ -925,80 +896,6 @@ impl OxplowMcp {
         }
         .map_err(extension_error)?;
         json_result(&review)
-    }
-
-    #[tool(
-        description = "List the project's extensions (folders under `oxplow/extensions/` in a \
-                       stream's worktree): each one's name, whether it's enabled, any load \
-                       errors and warnings, and how many lenses, collectors, effects, … it \
-                       contributes. Pass `name` for one extension's whole listing. A lens is a \
-                       saved query over the semantic layer plus how to show it; the human sees \
-                       each one as a page (`list_lenses` lists them all). To build one, write \
-                       `oxplow/extensions/<name>/extension.yaml` and `lenses/<slug>.yaml` with \
-                       your normal file tools (see the oxplow-extension skill), then call \
-                       `validate_extension`."
-    )]
-    async fn list_extensions(
-        &self,
-        extensions: rmcp::model::Extensions,
-        params: Parameters<ListExtensionsParams>,
-    ) -> Result<CallToolResult, McpError> {
-        check_optional_stream("list_extensions", params.0.stream_id.as_deref())?;
-        // Omitted: the caller's own stream (tsk574).
-        let stream = self
-            .stream_or_callers(&caller_of(&extensions), params.0.stream_id.clone())
-            .await;
-        let root = self
-            .services
-            .worktrees
-            .resolve(stream.as_deref())
-            .await
-            .into_local_path();
-        let listed = self.services.listed_extensions(&root).await;
-        match &params.0.name {
-            Some(name) => {
-                let one: Vec<_> = listed.into_iter().filter(|e| &e.name == name).collect();
-                if one.is_empty() {
-                    return Err(McpError::invalid_params(
-                        format!("no extension named `{name}`"),
-                        None,
-                    ));
-                }
-                json_result(&one)
-            }
-            None => json_result(&listed.iter().map(extension_summary).collect::<Vec<_>>()),
-        }
-    }
-
-    #[tool(
-        description = "List every lens across the project's extensions (id `<extension>/<slug>`, \
-                       title, description, viz, params). Use `run_lens` to see exactly the rows \
-                       the human sees on that lens's page."
-    )]
-    async fn list_lenses(
-        &self,
-        extensions: rmcp::model::Extensions,
-        params: Parameters<StreamScopeParams>,
-    ) -> Result<CallToolResult, McpError> {
-        check_optional_stream("list_lenses", params.0.stream_id.as_deref())?;
-        // Omitted: the caller's own stream (tsk574).
-        let stream = self
-            .stream_or_callers(&caller_of(&extensions), params.0.stream_id.clone())
-            .await;
-        let root = self
-            .services
-            .worktrees
-            .resolve(stream.as_deref())
-            .await
-            .into_local_path();
-        let lenses: Vec<oxplow_app::extensions::Lens> = self
-            .services
-            .extension_catalog
-            .get(&root)
-            .iter()
-            .flat_map(|e| e.lenses.clone())
-            .collect();
-        json_result(&lenses)
     }
 
     #[tool(
@@ -1565,29 +1462,6 @@ impl OxplowMcp {
     // ---------- task orchestration ----------
 
     #[tool(
-        description = "Unified backlinks: every page (wiki, task, commit, finding, \
-                       …) that points AT the given target page. The target is identified \
-                       by its ref `kind` (\"file\", \"wiki\", \"work_item\", \"commit\", \
-                       \"finding\", \"dir\") and `id` (path / slug / oxplow:tsk… / sha). \
-                       Returns one row per inbound edge, including ref_type so the caller \
-                       can distinguish e.g. a commit's touched_file edge from a wiki body \
-                       mention."
-    )]
-    async fn list_backlinks(
-        &self,
-        params: Parameters<PageRefParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        let edges = self
-            .services
-            .page_ref_store
-            .list_backlinks(&p.kind, &p.id, Some(p.limit as i64))
-            .await
-            .map_err(internal)?;
-        json_result(&edges)
-    }
-
-    #[tool(
         description = "The commands this agent may run through `run_command`. With no \
                        arguments: every command's `id` and one-line `summary`. With `id` (one \
                        command) or `prefix` (an area, `oxplow.work_item.`): each with its \
@@ -1662,25 +1536,6 @@ impl OxplowMcp {
     ) -> Result<CallToolResult, McpError> {
         let caller = caller_of(&extensions);
         self.run_command_as(&caller, params.0).await
-    }
-
-    #[tool(
-        description = "Unified outbound: every page the given source page points AT. \
-                       Inverse of `list_backlinks` — ask \"what does THIS page reference?\". \
-                       Same `kind`/`id` shape as list_backlinks."
-    )]
-    async fn list_outbound(
-        &self,
-        params: Parameters<PageRefParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        let edges = self
-            .services
-            .page_ref_store
-            .list_outbound(&p.kind, &p.id, Some(p.limit as i64))
-            .await
-            .map_err(internal)?;
-        json_result(&edges)
     }
 
     #[tool(
@@ -1912,8 +1767,6 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "list_collectors",
     "list_ai_roles",
     "get_open_page",
-    "list_extensions",
-    "list_lenses",
     "run_lens",
     "validate_extension",
     "preview_extension",
@@ -1926,8 +1779,6 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "list_zones",
     "list_comments",
     "wiki_ref_drift",
-    "list_backlinks",
-    "list_outbound",
     "list_commands",
     "list_services",
     "code_definition",
@@ -2101,7 +1952,7 @@ fn extension_error(e: oxplow_domain::DomainError) -> McpError {
 fn lens_error(id: &str, e: oxplow_domain::DomainError) -> McpError {
     match e {
         oxplow_domain::DomainError::NotFound => McpError::invalid_params(
-            format!("no lens `{id}` (ids are `<extension>/<slug>`; see list_lenses)"),
+            format!("no lens `{id}` (ids are `<extension>/<slug>`; see `v_lens`)"),
             None,
         ),
         oxplow_domain::DomainError::Invalid(m) => McpError::invalid_params(m, None),
@@ -2450,40 +2301,6 @@ fn proposed_message(command: &str, proposal: &str, supersedes: &[String]) -> Str
     )
 }
 
-/// An extension in `list_extensions`'s summary: its scalar fields and
-/// load errors/warnings as they are, every list it contributes counted.
-/// The full listing (the bundled extension's ran to 124k characters) is a
-/// `name` away.
-/// An extension as `list_extensions` summarizes it: its own fields, its
-/// errors and warnings, and how many of each kind it contributes, counted
-/// from its contributions' descriptors and keyed by the manifest key
-/// (`lenses`, `ui.slots`, `event_types`).
-fn extension_summary(ext: &oxplow_app::extensions::Extension) -> serde_json::Value {
-    let Ok(serde_json::Value::Object(fields)) = serde_json::to_value(ext) else {
-        return serde_json::Value::Null;
-    };
-    let mut out = serde_json::Map::new();
-    for (key, value) in fields {
-        match value {
-            serde_json::Value::Array(items) if key == "errors" || key == "warnings" => {
-                out.insert(key, serde_json::Value::Array(items));
-            }
-            serde_json::Value::Array(_) | serde_json::Value::Object(_) => {}
-            scalar => {
-                out.insert(key, scalar);
-            }
-        }
-    }
-    let mut contributes = serde_json::Map::new();
-    for d in &ext.contributions {
-        let key = d.id.kind.spec().key;
-        let n = contributes.get(key).and_then(|v| v.as_u64()).unwrap_or(0);
-        contributes.insert(key.into(), (n + 1).into());
-    }
-    out.insert("contributes".into(), serde_json::Value::Object(contributes));
-    serde_json::Value::Object(out)
-}
-
 fn json_result<T: serde::Serialize>(value: &T) -> Result<CallToolResult, McpError> {
     let json = serde_json::to_string_pretty(value).map_err(internal)?;
     Ok(CallToolResult::success(vec![ContentBlock::text(json)]))
@@ -2786,72 +2603,6 @@ mod tests {
             .activate(services.clone())
             .await
             .unwrap();
-
-        let list = |name: Option<&str>| {
-            let server = &server;
-            let name = name.map(str::to_string);
-            async move {
-                serde_json::from_str::<serde_json::Value>(&text_payload(
-                    server
-                        .list_extensions(
-                            rmcp::model::Extensions::new(),
-                            Parameters(ListExtensionsParams {
-                                stream_id: None,
-                                name,
-                            }),
-                        )
-                        .await
-                        .unwrap(),
-                ))
-                .unwrap()
-            }
-        };
-        // The list is a summary: what each extension contributes, counted,
-        // and its errors — not every lens's query.
-        let all = list(None).await;
-        let exts: Vec<_> = all
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|e| e["name"] == "demo")
-            .collect();
-        let exts = serde_json::json!(exts);
-        assert_eq!(exts[0]["name"], "demo");
-        assert_eq!(exts[0]["contributes"]["lenses"], 3, "{exts}");
-        // Every kind counts, the nested ones too (a slot mount under `ui`).
-        assert_eq!(exts[0]["contributes"]["ui.slots"], 1, "{exts}");
-        assert!(exts[0].get("contributions").is_none(), "{exts}");
-        assert!(!exts.to_string().contains("v_stream"), "{exts}");
-        // One extension by name: all of it.
-        let demo = list(Some("demo")).await;
-        assert!(demo.to_string().contains("v_stream"), "{demo}");
-        assert_eq!(demo.as_array().map(Vec::len), Some(1), "{demo}");
-
-        let lenses: serde_json::Value = serde_json::from_str(&text_payload(
-            server
-                .list_lenses(
-                    rmcp::model::Extensions::new(),
-                    Parameters(StreamScopeParams { stream_id: None }),
-                )
-                .await
-                .unwrap(),
-        ))
-        .unwrap();
-        let ids: Vec<&str> = lenses
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|l| l["id"].as_str().unwrap())
-            .collect();
-        // Project lenses, plus the bundled ones.
-        assert!(
-            ids.contains(&"demo/broken") && ids.contains(&"demo/streams"),
-            "{ids:?}"
-        );
-        assert!(
-            ids.iter().any(|i| i.starts_with("oxplow-bundled/")),
-            "{ids:?}"
-        );
 
         // A lens's definition is what `read` gives for its ref.
         let read: serde_json::Value = serde_json::from_str(&text_payload(
@@ -3712,7 +3463,7 @@ mod tests {
     /// the calling thread's stream — an agent in a worktree sees the
     /// extension it just wrote there, not the primary's.
     #[tokio::test]
-    async fn extension_tools_default_to_the_callers_stream() {
+    async fn validate_extension_defaults_to_the_callers_stream() {
         use oxplow_domain::stores::StreamStore as _;
         let (_proj, services, server) = boot().await;
         let primary = services.stream_store.list().await.unwrap().pop().unwrap();
@@ -3733,33 +3484,6 @@ mod tests {
         let other_id = services.stream_store.upsert(&other).await.unwrap();
         let thread = new_thread(&services, other_id, "t").await;
         let caller = || extensions_for(parts_as(thread.id, other_id, &[]));
-        let listed = text_payload(
-            server
-                .list_extensions(
-                    caller(),
-                    Parameters(ListExtensionsParams {
-                        stream_id: None,
-                        name: None,
-                    }),
-                )
-                .await
-                .unwrap(),
-        );
-        assert!(listed.contains("\"mine\""), "{listed}");
-        // Without a caller, still the primary's.
-        let primary_list = text_payload(
-            server
-                .list_extensions(
-                    rmcp::model::Extensions::new(),
-                    Parameters(ListExtensionsParams {
-                        stream_id: None,
-                        name: None,
-                    }),
-                )
-                .await
-                .unwrap(),
-        );
-        assert!(!primary_list.contains("\"mine\""), "{primary_list}");
         server
             .validate_extension(
                 caller(),

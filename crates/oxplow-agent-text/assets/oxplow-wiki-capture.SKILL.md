@@ -56,11 +56,12 @@ Before writing, search for an existing topic note. Don't fragment.
    title LIKE '%hook%'`).
 2. `search` with `kinds: ["wiki"]` — full-text over page
    bodies; catches pages that discuss the topic but aren't named after it.
-3. `list_backlinks` with `kind: "file"`, `id: <path>` —
-   for each non-trivial file you read this turn, check whether an
-   existing wiki page (or any other source) already references it.
-   Filter the result to `source_kind == "wiki"` if you only want
-   wiki backlinks.
+3. `query_sql` over `v_page_ref` — the edges between pages and records
+   (`source_ref`, `target_ref`, `ref_type`). For each non-trivial file you
+   read this turn, check whether an existing wiki page (or any other source)
+   already references it: `WHERE target_ref = 'file:<path>'`, and add
+   `AND source_kind = 'wiki'` for wiki pages only. What a page points at is
+   `WHERE source_ref = 'wiki:<slug>'`.
 
 If a clearly-relevant note exists, **append a new dated section** to
 it. Only create a new note if no existing note fits.

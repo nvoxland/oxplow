@@ -154,8 +154,8 @@ pub const MANIFEST: &[Capability] = &[
         "remove_followup",
         "a person's reminder in the plan pane; an agent files a work item or a thread note",
     ),
-    both("list_backlinks"),
-    both("list_outbound"),
+    model("list_backlinks", &["v_page_ref"]),
+    model("list_outbound", &["v_page_ref"]),
     // ---- the command bus (agent side; the UI reaches commands through
     // lenses, the launcher and menus) ----
     agent("list_commands"),
@@ -226,7 +226,7 @@ pub const MANIFEST: &[Capability] = &[
     ),
     ui("get_panel_layout", "the person's left-nav layout (P6.G1)"),
     ui("set_panel_layout", "the person's left-nav layout (P6.G1)"),
-    both("list_extensions"),
+    model("list_extensions", &["v_extension", "v_contribution"]),
     ui("get_lens", "the lens page's definition; an agent reads the lens's ref with `read`"),
     both("run_lens"),
     // A lens's actions: commands run as the lens, for whoever pressed.
@@ -396,7 +396,6 @@ pub const MANIFEST: &[Capability] = &[
     ),
     ui("read_ai_call", "a person's look at a recorded model call; an agent asks no model through oxplow"),
     agent("get_open_page"),
-    agent("list_lenses"),
     // ---- both (names diverge across surfaces) ----
     model("list_threads", &["v_thread"]),
     both_named("comment.list", "list_comments_for_stream", "list_comments"),

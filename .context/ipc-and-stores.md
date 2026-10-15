@@ -868,8 +868,8 @@ stream purges its file rows (`purge_stream_files`). See
   the `page_ref` graph and its column conventions; plus the global
   `recent-projects.json` / `instance.lock` state.
 - [agent-model.md](./agent-model.md) — how the agent calls into MCP
-  tools that wrap these stores, including `list_backlinks` /
-  `list_outbound`.
+  tools that wrap these stores; the page-ref graph is read with
+  `query_sql` over `v_page_ref`.
 
 ## Component query version
 

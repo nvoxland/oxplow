@@ -288,7 +288,7 @@ After publishing, each extension model's declared tests run
 (`run_tests`, results in `model_test` / `v_model_test`; a relationship's
 `to` resolves like a `ref()`); a failing or erroring test is reported for
 its extension, and the view stays published. The errors are the
-extension's health: `list_extensions` (IPC and MCP) merges them into
+extension's health: `list_extensions` (IPC) merges them into
 `errors`; nothing fails boot. `drop_all` removes the
 extension models' registry rows with their views, so between an open and
 the first pass the registry lists none.

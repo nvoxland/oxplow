@@ -12,6 +12,7 @@ pub mod ai_result_store;
 pub mod analytics_stores;
 pub mod bookmark_store;
 pub mod capability_store;
+pub mod catalog_listing_store;
 pub mod change_store;
 pub mod changes;
 pub mod collector_store;
