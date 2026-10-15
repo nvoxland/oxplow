@@ -1,0 +1,21 @@
+title: Command Errors
+description: The most common errors one command gave agents in the last 30 days, with the same text counted together however its choices were listed.
+params: [{ name: command }]
+query: |
+  SELECT outcome,
+         substr(error, 1, coalesce(nullif(instr(error, '. Expected'), 0) - 1, length(error))) AS error,
+         count(*) AS runs,
+         max(at) AS last_at
+  FROM v_command_audit
+  WHERE actor_kind = 'agent' AND command = :command AND outcome <> 'ok' AND error IS NOT NULL
+    AND at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 days')
+  GROUP BY outcome, 2
+  ORDER BY runs DESC, last_at DESC
+viz: table
+columns:
+  - { key: outcome, label: Outcome }
+  - { key: error, label: Error }
+  - { key: runs, label: Runs }
+  - { key: last_at, label: Last }
+empty: This command gave agents no errors in the last 30 days.
+hidden: true

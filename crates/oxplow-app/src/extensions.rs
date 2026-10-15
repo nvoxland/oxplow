@@ -6663,7 +6663,8 @@ commands:
                 "large-uncommitted",
                 "landed-in-progress",
                 "metric-deltas",
-                "threshold-crossed"
+                "threshold-crossed",
+                "hint-never-fires"
             ]
         );
         let mut models: Vec<&str> = b.models.iter().map(|m| m.decl.name.as_str()).collect();

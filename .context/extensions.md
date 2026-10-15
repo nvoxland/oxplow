@@ -2424,6 +2424,17 @@ its scope trace.
   contribution, version, generation (blank for a run that holds none),
   actor, causing event, outcome, error, wall and CPU time, model calls — the
   small inspector, with no log or secret to read.
+- **How agents use oxplow's interface.** The bundled `agent-interface` page
+  (launcher, Activity) is a grid of three lenses over the last 30 days:
+  `interface-tool-calls` (oxplow's MCP tools by tool and harness, from
+  `v_tool_call` joined to `v_agent_session`; a call whose session oxplow has
+  no record of reads harness `unknown`), `interface-commands` (agents' runs by
+  command from `v_command_audit`: runs, invalid, denied, failed and the share
+  not ok; opening a command shows the hidden `interface-command-errors` lens,
+  its most common error texts counted together up to the "Expected one of"
+  list) and `interface-hints` (`v_hint_stat` per hint, those that never fired
+  first). The bundled `hint-never-fires` advisory tells the person, once per
+  hint, about a hint evaluated 100 or more times that never fired.
 - **Failure, retry and freshness are the same everywhere it matters.** A run
   that ends `failed` counts toward the contribution's failure policy (three in
   a row disable it; `v_contribution_health`); one that ends `cancelled` — a

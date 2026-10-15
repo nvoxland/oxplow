@@ -195,6 +195,22 @@ advisories:
       WHERE effort_id = :effort_id AND crossing IS NOT NULL AND kind <> 'event'
         AND key NOT LIKE 'agent.%' AND key NOT LIKE 'effort.%' AND key NOT LIKE 'task.%'
       ORDER BY key
+  # A hint that ran a hundred times and never once spoke is dead weight, or
+  # watching for something that can't happen here. Once per hint; this one
+  # is left out of its own count.
+  - id: hint-never-fires
+    on: turn-end
+    audience: person
+    once_per: row
+    query: |
+      SELECT hint AS key,
+             'The hint ' || hint || ' has been evaluated ' || sum(evaluated)
+             || ' times and has never fired. Its condition may be one this project never meets; '
+             || 'see Agent Interface → Hints.' AS message
+      FROM v_hint_stat
+      WHERE hint <> 'oxplow-bundled/hint-never-fires'
+      GROUP BY hint
+      HAVING sum(evaluated) >= 100 AND sum(fired) = 0
 measures:
   - key: oxplow_bundled.effort_churn_lines
     unit: lines

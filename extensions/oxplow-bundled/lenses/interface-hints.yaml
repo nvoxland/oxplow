@@ -1,0 +1,24 @@
+title: Hints
+description: How each hint did — how often it was evaluated, fired, reached its audience, is waiting, and was muted for firing on after it was heard. The ones that never fired come first.
+query: |
+  SELECT hint,
+         sum(evaluated) AS evaluated,
+         sum(fired) AS fired,
+         sum(delivered) AS delivered,
+         sum(held) AS held,
+         sum(muted) AS muted,
+         max(last_evaluated_at) AS last_evaluated_at
+  FROM v_hint_stat
+  GROUP BY hint
+  ORDER BY fired = 0 DESC, evaluated DESC, hint
+viz: table
+columns:
+  - { key: hint, label: Hint }
+  - { key: evaluated, label: Evaluated }
+  - { key: fired, label: Fired }
+  - { key: delivered, label: Delivered }
+  - { key: held, label: Waiting }
+  - { key: muted, label: Muted }
+  - { key: last_evaluated_at, label: Last evaluated }
+empty: No hint has been evaluated yet.
+hidden: true

@@ -488,6 +488,13 @@ at it, so the daily retention sweep deletes those older than
 Runs that did something (`ok`, `error`) stay — undo, approvals, effect
 runs and `command.executed` name them.
 
+**Reading it.** `v_command_audit` (command, actor kind and id, outcome,
+error, time, thread, session) is the agent-facing read of the audit. The
+bundled Agent Interface page (Activity) counts the agents' runs by
+command with the share invalid, denied or failed, and opens a command for
+its most common errors, so a command an agent keeps getting wrong shows.
+The refused rows' 30-day retention is why that page looks back 30 days.
+
 A command that only reads (`View` / `Read`) stops after step 4: its handler runs in
 `Database::read` — a snapshot that is always rolled back, so a write it
 makes never lands (nothing would audit it; tsk513) — and the outcome has

@@ -1421,6 +1421,58 @@ mod tests {
         assert_eq!(hits[0].id, "oxplow-bundled/metric-deltas");
     }
 
+    /// `hint-never-fires` tells the person once about a hint evaluated 100
+    /// or more times that never fired, and not about one that spoke, one
+    /// evaluated fewer times, or itself.
+    #[tokio::test]
+    async fn bundled_never_fires_hint_names_the_dead_hint_once() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let thread = f.thread.value();
+        f.svc
+            .db
+            .transaction(move |tx| {
+                for (hint, evaluated) in [
+                    ("x/dead", 100),
+                    ("x/young", 99),
+                    ("x/spoke", 400),
+                    ("oxplow-bundled/hint-never-fires", 500),
+                ] {
+                    tx.execute(
+                        "INSERT INTO hint_stat (thread_id, hint, evaluated, last_evaluated_at)
+                         VALUES (?1, ?2, ?3, 'n')",
+                        rusqlite::params![thread, hint, evaluated],
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                }
+                tx.execute(
+                    "INSERT INTO agent_nudge (thread_id, kind, message, created_at)
+                     VALUES (?1, 'x/spoke', 'm', 'n')",
+                    rusqlite::params![thread],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let id = "oxplow-bundled/hint-never-fires";
+        let first = bundled_hits(&f, id, AdvisoryOn::TurnEnd, None).await;
+        assert_eq!(first.len(), 1, "{first:?}");
+        assert_eq!(first[0].audience, AdvisoryAudience::Person);
+        assert!(
+            first[0]
+                .text
+                .contains("x/dead has been evaluated 100 times"),
+            "{}",
+            first[0].text
+        );
+        assert!(
+            bundled_hits(&f, id, AdvisoryOn::TurnEnd, None)
+                .await
+                .is_empty(),
+            "once per hint"
+        );
+    }
+
     /// Every hint oxplow-bundled ships has a fixture above that makes it
     /// fire; a new one is added to this list with its own.
     #[test]
@@ -1433,6 +1485,7 @@ mod tests {
         assert_eq!(
             shipped,
             [
+                "hint-never-fires",
                 "landed-in-progress",
                 "large-uncommitted",
                 "metric-deltas",

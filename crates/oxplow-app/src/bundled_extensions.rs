@@ -127,6 +127,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-bundled", "handlers/clear_finished.star"),
             ext_file!("oxplow-bundled", "handlers/infer_decisions.star"),
             ext_file!("oxplow-bundled", "handlers/request_changes.star"),
+            ext_file!("oxplow-bundled", "lenses/agent-interface.yaml"),
             ext_file!("oxplow-bundled", "lenses/backlog-tasks.yaml"),
             ext_file!("oxplow-bundled", "lenses/change-co-change.yaml"),
             ext_file!("oxplow-bundled", "lenses/change-cross-zone-imports.yaml"),
@@ -156,6 +157,10 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-bundled", "lenses/go-to.yaml"),
             ext_file!("oxplow-bundled", "lenses/history-graph.yaml"),
             ext_file!("oxplow-bundled", "lenses/inferred-decisions.yaml"),
+            ext_file!("oxplow-bundled", "lenses/interface-command-errors.yaml"),
+            ext_file!("oxplow-bundled", "lenses/interface-commands.yaml"),
+            ext_file!("oxplow-bundled", "lenses/interface-hints.yaml"),
+            ext_file!("oxplow-bundled", "lenses/interface-tool-calls.yaml"),
             ext_file!("oxplow-bundled", "lenses/job-run-output.yaml"),
             ext_file!("oxplow-bundled", "lenses/job-runs.yaml"),
             ext_file!("oxplow-bundled", "lenses/page-visits-by-day.yaml"),
@@ -846,6 +851,195 @@ mod tests {
                 (
                     serde_json::json!("collector:acme/pull"),
                     serde_json::json!("denied")
+                ),
+            ]
+        );
+    }
+
+    /// The agent-interface lenses over recorded usage: tool calls by tool
+    /// and harness, an agent's command runs with the share refused and the
+    /// most common errors, and the hints' counts.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_agent_interface_lenses_count_tools_commands_and_hints() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let thread = f.thread.value();
+        f.svc
+            .db
+            .transaction(move |tx| {
+                let run = |sql: &str, params: &[&dyn rusqlite::ToSql]| {
+                    tx.execute(sql, params).map_err(oxplow_db::map_sql_err)
+                };
+                for (id, harness) in [(11, "claude"), (12, "codex")] {
+                    run(
+                        "INSERT INTO agent_session (id, thread_id, kind, harness, opened_at, updated_at)
+                         VALUES (?1, ?2, 'terminal', ?3, 'n', 'n')",
+                        &[&id, &thread, &harness],
+                    )?;
+                }
+                // (tool, kind, session, ok, days ago)
+                let calls: [(&str, &str, Option<i64>, i64, i64); 7] = [
+                    ("mcp__oxplow__run_command", "mcp", Some(11), 1, 1),
+                    ("mcp__oxplow__run_command", "mcp", Some(11), 0, 2),
+                    ("mcp__oxplow__run_command", "mcp", Some(12), 1, 2),
+                    ("mcp__oxplow__query_sql", "mcp", None, 1, 3),
+                    ("mcp__oxplow__query_sql", "mcp", Some(11), 1, 40), // out of the window
+                    ("Bash", "shell", Some(11), 1, 1),                  // not an oxplow tool
+                    ("mcp__other__thing", "mcp", Some(12), 1, 1),
+                ];
+                for (tool, kind, session, ok, days) in calls {
+                    run(
+                        "INSERT INTO agent_tool_call (thread_id, tool, kind, agent_session_id, ok, at)
+                         VALUES (?1, ?2, ?3, ?4, ?5,
+                                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || ?6 || ' days'))",
+                        &[&thread, &tool, &kind, &session, &ok, &days],
+                    )?;
+                }
+                // (command, actor, outcome, error)
+                let audits: [(&str, &str, &str, Option<&str>); 8] = [
+                    ("oxplow.work_item.create", "agent", "ok", None),
+                    ("oxplow.work_item.transition", "agent", "ok", None),
+                    (
+                        "oxplow.work_item.transition",
+                        "agent",
+                        "invalid",
+                        Some("invalid input at `/state`: \"ready\" is not valid under any of the schemas listed in the 'anyOf' keyword. Expected one of: \"todo\", \"done\""),
+                    ),
+                    (
+                        "oxplow.work_item.transition",
+                        "agent",
+                        "invalid",
+                        Some("invalid input at `/state`: \"ready\" is not valid under any of the schemas listed in the 'anyOf' keyword"),
+                    ),
+                    ("oxplow.work_item.transition", "agent", "denied", Some("not allowed")),
+                    ("oxplow.work_item.create", "agent", "error", Some("boom")),
+                    ("oxplow.work_item.create", "human", "invalid", Some("a person's, not counted")),
+                    ("oxplow.lens.keep", "agent", "ok", None),
+                ];
+                for (command, actor, outcome, error) in audits {
+                    run(
+                        "INSERT INTO command_audit (at, command, actor_kind, input_json, outcome, error)
+                         VALUES (strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 days'), ?1, ?2, '{}', ?3, ?4)",
+                        &[&command, &actor, &outcome, &error],
+                    )?;
+                }
+                // hint x/never ran 120 times and never spoke; x/spoke spoke once.
+                for (hint, evaluated) in [("x/never", 120), ("x/spoke", 40)] {
+                    run(
+                        "INSERT INTO hint_stat (thread_id, hint, evaluated, last_evaluated_at)
+                         VALUES (?1, ?2, ?3, 'n')",
+                        &[&thread, &hint, &evaluated],
+                    )?;
+                }
+                run(
+                    "INSERT INTO agent_nudge (thread_id, kind, message, created_at, delivered_at)
+                     VALUES (?1, 'x/spoke', 'm', 'n', 'n')",
+                    &[&thread],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        let tools = run_bundled_lens(&f, "oxplow-bundled/interface-tool-calls", &[]).await;
+        assert_eq!(
+            tools,
+            serde_json::json!([
+                ["run_command", "claude", 2, 1],
+                ["query_sql", "unknown", 1, 0],
+                ["run_command", "codex", 1, 0],
+            ])
+        );
+
+        let commands = run_bundled_lens(&f, "oxplow-bundled/interface-commands", &[]).await;
+        let errors_of =
+            |c: &str| format!("lens:oxplow-bundled/interface-command-errors?command={c}");
+        assert_eq!(
+            commands,
+            serde_json::json!([
+                [
+                    "oxplow.work_item.transition",
+                    errors_of("oxplow.work_item.transition"),
+                    4,
+                    2,
+                    1,
+                    0,
+                    75.0
+                ],
+                [
+                    "oxplow.work_item.create",
+                    errors_of("oxplow.work_item.create"),
+                    2,
+                    0,
+                    0,
+                    1,
+                    50.0
+                ],
+                [
+                    "oxplow.lens.keep",
+                    errors_of("oxplow.lens.keep"),
+                    1,
+                    0,
+                    0,
+                    0,
+                    0.0
+                ],
+            ])
+        );
+
+        // The same text counts together however the choices were listed.
+        let errors = run_bundled_lens_with(
+            &f,
+            "oxplow-bundled/interface-command-errors",
+            &[(
+                "command",
+                oxplow_db::SqlCell::Text("oxplow.work_item.transition".into()),
+            )],
+        )
+        .await;
+        let top: Vec<_> = errors
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| (r[0].clone(), r[1].clone(), r[2].clone()))
+            .collect();
+        assert_eq!(
+            top,
+            vec![
+                (
+                    serde_json::json!("invalid"),
+                    serde_json::json!("invalid input at `/state`: \"ready\" is not valid under any of the schemas listed in the 'anyOf' keyword"),
+                    serde_json::json!(2)
+                ),
+                (
+                    serde_json::json!("denied"),
+                    serde_json::json!("not allowed"),
+                    serde_json::json!(1)
+                ),
+            ]
+        );
+
+        // A hint that never spoke leads the list.
+        let hints = run_bundled_lens(&f, "oxplow-bundled/interface-hints", &[]).await;
+        let counts: Vec<_> = hints
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| (r[0].clone(), r[1].clone(), r[2].clone(), r[3].clone()))
+            .collect();
+        assert_eq!(
+            counts,
+            vec![
+                (
+                    serde_json::json!("x/never"),
+                    serde_json::json!(120),
+                    serde_json::json!(0),
+                    serde_json::json!(0)
+                ),
+                (
+                    serde_json::json!("x/spoke"),
+                    serde_json::json!(40),
+                    serde_json::json!(1),
+                    serde_json::json!(1)
                 ),
             ]
         );
