@@ -1051,6 +1051,8 @@ fn write_template(path: &std::path::Path) -> Result<(), DbInitError> {
 }
 
 pub(crate) fn migrate_and_compile(conn: &mut Connection) -> Result<(), DbInitError> {
+    // A model's SQL may call the shared functions (`lens_ref`).
+    crate::sql_functions::register(conn).map_err(DbInitError::Sqlite)?;
     crate::models::drop_all(conn).map_err(|e| DbInitError::Models(e.to_string()))?;
     with_foreign_keys_off(conn, |conn| {
         embedded::migrations::runner()

@@ -326,6 +326,71 @@
         }
       ],
       "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Turn id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread the turn ran in."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session it ran in (v_agent_session.id); NULL for a turn no session claims (a hook from an agent oxplow didn't start)."
+        },
+        {
+          "name": "prompt",
+          "type": "TEXT",
+          "doc": "What the human typed."
+        },
+        {
+          "name": "answer",
+          "type": "TEXT",
+          "doc": "The agent's final answer, once the turn ended."
+        },
+        {
+          "name": "session_id",
+          "type": "TEXT",
+          "doc": "The harness session id, when it reported one."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "ended_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp; NULL while running."
+        },
+        {
+          "name": "start_snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot the worktree was at when the turn opened (v_snapshot.id); NULL if the stream had none yet."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot the worktree was at when the turn ended (v_snapshot.id); NULL while running."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`turn:trn<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
+        },
+        {
+          "name": "transcript_page",
+          "type": "TEXT",
+          "doc": "The session's transcript lens opened at this turn (`lens:oxplow-foundation/session-transcript?session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)"
+        }
+      ],
+      "key": []
     }
   },
   "ai_call": {
@@ -12804,6 +12869,78 @@
           "name": "session_ref",
           "type": "TEXT",
           "doc": "The slot's ref (`agent_session:ses<n>`)."
+        }
+      ],
+      "key": []
+    }
+  },
+  "subagent": {
+    "1": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "The harness's id for it, or the id of the call that started it."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "What kind of subagent the harness says it is (Claude's `agent_type`); NULL when it says nothing."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The session it acted in (v_agent_session.id)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The session's thread."
+        },
+        {
+          "name": "turn_id",
+          "type": "",
+          "doc": "The turn it started in, else the turn of its first call; NULL when neither says."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "When its `agent.subagent.started` was logged; NULL for an `unknown` one."
+        },
+        {
+          "name": "finished_at",
+          "type": "TEXT",
+          "doc": "When it stopped or handed its report back; NULL while running or unknown."
+        },
+        {
+          "name": "calls",
+          "type": "",
+          "doc": "Tool calls made as it (v_tool_call.subagent_id)."
+        },
+        {
+          "name": "last_activity_at",
+          "type": "TEXT",
+          "doc": "The newest of its start, its calls and its finish."
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "`running` (started, not finished), `finished`, or `unknown` (only tool calls name it)."
+        },
+        {
+          "name": "finished_event_id",
+          "type": "TEXT",
+          "doc": "The event that finished it; its `result` body is the subagent's last message, read as `subagent:<id>#result`."
+        },
+        {
+          "name": "session_ref",
+          "type": "TEXT",
+          "doc": "Its session's ref (`agent_session:ses3`): where it opens."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`subagent:ses<n>/<id>`: its ref, the one place SQL spells it — select and join on this."
         }
       ],
       "key": []

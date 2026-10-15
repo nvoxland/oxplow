@@ -2866,7 +2866,9 @@ export type EventBody = {
 /**  Which body of the event. */
 export type EventBodyKey = "input" | "output" | 
 /**  An `agent.prompt.submitted`'s text. */
-"prompt";
+"prompt" | 
+/**  An `agent.subagent.finished`'s last message. */
+"result";
 
 /**
  *  An event's public identity: a UUIDv7 in its canonical text form, so

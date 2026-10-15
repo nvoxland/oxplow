@@ -1,0 +1,54 @@
+title: Session transcript
+description: What happened in an agent session, oldest first, 50 a page — each turn's prompt and answer, how many tool calls it made and whether it was a subagent's hand-back, with the thread's notes where they fall. Resume the session's conversation in a new session from here.
+params:
+  - { name: session, label: Session (`agent_session:ses3`) }
+  - { name: turn, label: Start at turn (`turn:trn7`), default: "" }
+  - { name: page, label: Page, default: 1 }
+query: |
+  WITH s AS (SELECT * FROM v_agent_session WHERE ref = :session),
+  items AS (
+    SELECT t.ref AS ref,
+           t.started_at AS at,
+           CASE WHEN trim(t.prompt) = '' THEN 'hand-back' ELSE 'turn' END AS kind,
+           t.ended_at AS ended_at,
+           t.prompt AS prompt,
+           coalesce(t.answer, '') AS answer,
+           (SELECT count(*) FROM v_tool_call c WHERE c.turn_id = t.id) AS tool_calls
+    FROM v_agent_turn t
+    WHERE t.agent_session_id = (SELECT id FROM s)
+    UNION ALL
+    SELECT n.ref, n.created_at, 'note', NULL, n.body, '', 0
+    FROM v_thread_note n, s
+    WHERE n.thread_id = s.thread_id
+      AND n.created_at >= s.opened_at
+      AND n.created_at <= coalesce(s.closed_at, '9999')
+    UNION ALL
+    SELECT s.ref, s.opened_at, 'note', NULL,
+           'This agent''s transcript isn''t stored here: it keeps it.', '', 0
+    FROM s
+    WHERE s.harness = 'acp'
+      AND NOT EXISTS (SELECT 1 FROM v_agent_turn t WHERE t.agent_session_id = s.id)
+  )
+  SELECT i.ref, i.at, i.kind, i.ended_at, i.prompt, i.answer, i.tool_calls,
+         s.thread_id AS thread_id, s.harness AS harness, s.resume_session_id AS conversation,
+         (SELECT th.ref FROM v_thread th WHERE th.id = s.thread_id) AS thread_ref
+  FROM items i, s
+  WHERE :turn = '' OR i.at >= coalesce((SELECT started_at FROM v_agent_turn WHERE ref = :turn), '')
+  ORDER BY i.at, i.ref
+  LIMIT 50 OFFSET (max(CAST(:page AS INTEGER), 1) - 1) * 50
+columns:
+  - { key: at, label: Started }
+  - { key: kind, label: What }
+  - { key: ended_at, label: Ended }
+  - { key: prompt, label: Prompt }
+  - { key: answer, label: Answer }
+  - { key: tool_calls, label: Tool calls }
+actions:
+  - id: resume
+    label: Resume in a new session
+    command: oxplow.agent_session.open
+    row: true
+    input: { thread: "{{row.thread_ref}}", harness: "{{row.harness}}", resume: "{{row.conversation}}" }
+empty: No turns are recorded for this session.
+hidden: true
+tool: session_transcript

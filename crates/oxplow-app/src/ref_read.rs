@@ -10,7 +10,7 @@
 //! - its **content**, for the kinds whose body no model holds: a file at a
 //!   revision (`file:src/a.rs@git:HEAD#L10-40`; the working tree when it
 //!   names none, in the stream asked for else the caller's), an event's
-//!   stored body (`event:<id>#input`, `#output` or `#prompt`; the caller's
+//!   stored body (`event:<id>#input`, `#output`, `#prompt` or `#result`; the caller's
 //!   own stream's only), a model call's (`ai_call:<id>#request` or
 //!   `#response`; not one another agent's thread asked for), a lens's
 //!   definition.
@@ -166,6 +166,11 @@ pub async fn read(
             match (parsed.kind.as_str(), parsed.frag.as_deref()) {
                 (kind::EVENT, Some(frag)) => {
                     out.set_content(event_body(svc, &parsed.id, frag, reader.stream).await?);
+                }
+                (kind::SUBAGENT, Some(frag)) => {
+                    out.set_content(
+                        subagent_result(svc, out.row.as_ref(), frag, reader.stream).await?,
+                    );
                 }
                 (kind::AI_CALL, Some(frag)) => {
                     out.set_content(ai_call_body(svc, &parsed.id, frag, reader.thread).await?);
@@ -337,9 +342,10 @@ async fn event_body(
         "input" => EventBodyKey::Input,
         "output" => EventBodyKey::Output,
         "prompt" => EventBodyKey::Prompt,
+        "result" => EventBodyKey::Result,
         other => {
             return Err(ReadError::Invalid(format!(
-                "an event's body is `#input`, `#output` or `#prompt`; not `#{other}`"
+                "an event's body is `#input`, `#output`, `#prompt` or `#result`; not `#{other}`"
             )))
         }
     };
@@ -359,6 +365,28 @@ async fn event_body(
         ReadError::NotFound(format!("{named} (no body, or it expired)"))
     })?;
     serde_json::to_string_pretty(&body).map_err(|e| ReadError::Invalid(e.to_string()))
+}
+
+/// A subagent's last message (`#result`): the body of the event that
+/// finished it, read like any event's.
+async fn subagent_result(
+    svc: &Services,
+    row: Option<&Map<String, Value>>,
+    part: &str,
+    stream: Option<StreamId>,
+) -> Result<String, ReadError> {
+    if part != "result" {
+        return Err(ReadError::Invalid(format!(
+            "a subagent's body is `#result`; not `#{part}`"
+        )));
+    }
+    let finished = row
+        .and_then(|r| r.get("finished_event_id"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            ReadError::NotFound("a subagent that has not finished has no result".into())
+        })?;
+    event_body(svc, finished, "result", stream).await
 }
 
 /// A model call's stored body (`request` or `response`). An agent reads

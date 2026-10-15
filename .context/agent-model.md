@@ -229,7 +229,7 @@ Every tool foundation declares is named below
 | Write | `run_command`, after `list_commands` |
 | Ask a model | `oxplow_ai_decide` (typed questions about some text, on the `decide` role), `oxplow_ai_summarize` (on `summarize`): recorded computations paid with the person's key, as the asking thread ([ai-providers.md](./ai-providers.md)) |
 | Show the person | `oxplow_show_lens`, `oxplow_run_lens`, `oxplow_run_lens_action`, `oxplow_navigate` (takes them to any ref's page, switching stream when needed) |
-| Common questions, typed | foundation lenses with `tool:`: `oxplow_thread_work`, `oxplow_work_next`, `oxplow_effort_files`, `oxplow_effort_summary`, `oxplow_file_history`, `oxplow_recent_commits`, `oxplow_snapshots`, `oxplow_thread_notes` — each returns what its lens shows, for a model that shouldn't have to write SQL for them |
+| Common questions, typed | foundation lenses with `tool:`: `oxplow_thread_work`, `oxplow_work_next`, `oxplow_effort_files`, `oxplow_effort_summary`, `oxplow_file_history`, `oxplow_recent_commits`, `oxplow_snapshots`, `oxplow_thread_notes`, `oxplow_thread_sessions` (a thread's sessions with their subagents beneath), `oxplow_session_transcript` (a session's turns and notes oldest first, 50 a page, optionally from a turn) — each returns what its lens shows, for a model that shouldn't have to write SQL for them |
 | What the person has | `oxplow_list_tabs` (the tabs each of their windows shows, per thread, stream or project: selected, on screen, stale), `oxplow_get_open_page` (the page open in a thread in the window they were in last, the others' beside it, or one listed tab; a lens re-run with their params), `oxplow_list_comments` (their anchored comments, hydrated) |
 | Wiki | `oxplow_wiki_ref_drift` (one stale ref's diff against its pin) |
 | Extension authoring | `oxplow_validate_extension`, `oxplow_preview_extension`, `oxplow_preview_collector`, `oxplow_review_extension` |
@@ -1073,7 +1073,7 @@ Codex's `agent_id` / `agent_type`, `shared::subagent_of`); else the ingest
 **brackets** it: a call landing while the session's open turn has a
 `subagent` call requested and not finished is that call's subagent.
 `SubagentStart` / `SubagentStop` log `agent.subagent.started@1` /
-`.finished@1` (dedupe `subagent:<session>:<id>:<phase>`), read by
+`.finished@1` (dedupe `subagent-event/<session>/<id>/<phase>`), read by
 `AgentHarness::subagent`. A Claude Code **background** subagent outlives
 its parent's turn — its calls arrive after the parent's Stop — and hands
 its report back as a prompt (`<agent-message from="<id>">…`), which
@@ -1082,6 +1082,32 @@ session working while a subagent it started runs. A provider harness
 answers both as its `prompt` and `subagent` verbs (feature `subagents`).
 Recorded in `fixtures/claude/subagent.jsonl` and replayed
 (`a_recorded_claude_code_subagent_is_attributed`).
+
+**`v_subagent`** (`subagent:ses<n>/<id>`, `refs::kind::SUBAGENT`; its
+page is its session's tab for now) pairs the two events per `(session,
+subagent id)` and counts `v_tool_call.subagent_id` calls: `state` is
+`running` (started, not finished), `finished`, or `unknown` — only tool
+calls name it. That last one is what **Codex and opencode children
+give**: they bracket nothing, so they never leave `unknown`. Claude's
+`SubagentStop` carries `last_assistant_message`; it is stored as event
+content on `agent.subagent.finished` (`result`) and read back as
+`oxplow_read subagent:ses3/<id>#result`. A background subagent's
+hand-back finishes it before its `SubagentStop`, so that one has no
+result (the dedupe keeps the first). The foundation lens
+`thread-sessions` (`oxplow_thread_sessions`) lists a thread's sessions
+with their subagents beneath each.
+
+**A session's transcript** is the foundation lens `session-transcript`
+(`oxplow_session_transcript { session, turn?, page? }`): the session's
+turns from `v_agent_turn` oldest first with the thread's notes where
+they fall, a subagent's hand-back marked (a turn with no prompt), each
+row a turn ref. A turn ref opens it at that turn (`v_agent_turn
+.transcript_page`, built with `lens_ref`); an ACP chat's turns aren't
+stored, and the lens says so. Its action **Resume in a new session**
+runs `oxplow.agent_session.open` with `resume`: a saved conversation of
+the harness, bound `chosen` in the same transaction, refused when it is
+open in another session. A person's: an agent may open a session but not
+choose its conversation.
 
 Subagent tool calls reach the hooks like any other, so their edits and
 test runs land in the thread's effort with nothing from them: there is

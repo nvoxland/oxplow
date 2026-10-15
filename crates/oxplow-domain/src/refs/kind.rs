@@ -221,6 +221,8 @@ pub const THREAD_NOTE: &str = "thread_note";
 pub const AGENT_SESSION: &str = "agent_session";
 /// A user-created dashboard (`dashboard.id`).
 pub const DASHBOARD: &str = "dashboard";
+/// A subagent of an agent session: `ses<n>/<the harness's id for it>`.
+pub const SUBAGENT: &str = "subagent";
 pub const RUN: &str = "run";
 pub const PROPOSAL: &str = "proposal";
 pub const CLAIM: &str = "claim";
@@ -276,6 +278,8 @@ pub fn core_kinds() -> KindRegistry {
         KindSpec::new(AGENT_SESSION, &prefixed("ses")),
         // A user-created dashboard (`dashboard.id`).
         KindSpec::new(DASHBOARD, &prefixed("dsh")),
+        // A subagent of an agent session (`ses3/agent-7f`).
+        KindSpec::new(SUBAGENT, r"^ses[0-9]+/[^\s/]+$"),
         KindSpec::new(RUN, r"^\d+$"),
         // A command waiting for a person's decision (`command_proposal.id`, P6b).
         KindSpec::new(PROPOSAL, r"^[0-9]+$"),

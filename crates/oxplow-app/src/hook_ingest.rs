@@ -552,14 +552,24 @@ fn record_tx(
                 applied.opened_turn = true;
             }
             if let Some(subagent) = &env.subagent {
-                log_subagent_tx(conn, ev, thread, slot, session, subagent, false)?;
+                log_subagent_tx(conn, ev, thread, slot, session, subagent, None)?;
             }
             status = Some((AgentStatusState::Running, None));
         }
         HookKind::SubagentStart | HookKind::SubagentStop => {
             if let Some(subagent) = &env.subagent {
-                let started = env.kind == HookKind::SubagentStart;
-                log_subagent_tx(conn, ev, thread, slot, session, subagent, started)?;
+                // What a stopping subagent said last (Claude's
+                // `SubagentStop`); a start has nothing to say.
+                let phase = if env.kind == HookKind::SubagentStart {
+                    SubagentPhase::Started
+                } else {
+                    SubagentPhase::Finished(
+                        body.get(LAST_ASSISTANT_MESSAGE)
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.trim().is_empty()),
+                    )
+                };
+                log_subagent_tx(conn, ev, thread, slot, session, subagent, Some(phase))?;
             }
         }
         HookKind::UserPromptSubmit => {
@@ -882,9 +892,16 @@ fn end_session_tx(
 
 /// `agent.tool.requested` / `agent.tool.finished` for a tool hook, with
 /// the input (and output) stored by hash.
+/// Which end of a subagent's life is logged, and for a finish what it said.
+#[derive(Clone, Copy)]
+enum SubagentPhase<'a> {
+    Started,
+    Finished(Option<&'a str>),
+}
+
 /// `agent.subagent.started` / `.finished` for `subagent` of the session:
 /// one each per subagent (a hand-back and its `SubagentStop` are one
-/// finish).
+/// finish; a hand-back, `phase` `None`, says nothing of its own).
 fn log_subagent_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,
@@ -892,9 +909,14 @@ fn log_subagent_tx(
     slot: Option<oxplow_domain::AgentSessionId>,
     session: Option<&str>,
     subagent: &Subagent,
-    started: bool,
+    phase: Option<SubagentPhase<'_>>,
 ) -> Result<(), DomainError> {
     let anchors = activity_anchors_tx(conn, thread, slot)?;
+    let started = matches!(phase, Some(SubagentPhase::Started));
+    let said = match phase {
+        Some(SubagentPhase::Finished(said)) => said,
+        _ => None,
+    };
     let turn = anchors.turn_id.map(|t| turn_ref(AgentTurnId::new(t)));
     let subagent_ref = subagent_ref(subagent);
     let phase = if started { "started" } else { "finished" };
@@ -909,6 +931,9 @@ fn log_subagent_tx(
             thread: thread_ref(thread),
             turn: turn.clone(),
             subagent: subagent_ref,
+            result: said
+                .map(|text| event_content_store::put_text_tx(conn, "agent", text))
+                .transpose()?,
         })
     };
     let envelope = envelope
@@ -930,7 +955,7 @@ fn subagent_key(
         .map(|s| s.to_string())
         .or_else(|| session.map(str::to_string))
         .unwrap_or_else(|| "-".into());
-    format!("subagent:{who}:{id}:{phase}")
+    format!("subagent-event/{who}/{id}/{phase}")
 }
 
 fn subagent_ref(s: &Subagent) -> SubagentRef {

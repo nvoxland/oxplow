@@ -46,8 +46,10 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-foundation", "lenses/effort-summary.yaml"),
             ext_file!("oxplow-foundation", "lenses/file-history.yaml"),
             ext_file!("oxplow-foundation", "lenses/recent-commits.yaml"),
+            ext_file!("oxplow-foundation", "lenses/session-transcript.yaml"),
             ext_file!("oxplow-foundation", "lenses/snapshots.yaml"),
             ext_file!("oxplow-foundation", "lenses/thread-notes.yaml"),
+            ext_file!("oxplow-foundation", "lenses/thread-sessions.yaml"),
             ext_file!("oxplow-foundation", "lenses/thread-work.yaml"),
             ext_file!("oxplow-foundation", "lenses/work-next.yaml"),
             ext_file!("oxplow-foundation", "collectors/clojure/defn_count.star"),
@@ -1958,6 +1960,234 @@ mod tests {
         .await;
         assert_eq!(col(&rows, 1), ["ship it"], "{rows}");
         assert_eq!(col(&rows, 2), ["todo"]);
+    }
+
+    /// The thread-sessions lens lists a thread's sessions with their
+    /// status and origin, and beneath each its subagents — a bracketed one
+    /// by its state, one only its calls name as `unknown`.
+    #[tokio::test]
+    async fn thread_sessions_lists_sessions_with_their_subagents_beneath() {
+        use oxplow_db::SqlCell::Text;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let (thread, session) = (f.thread.value(), f.session.value());
+        f.svc
+            .db
+            .transaction(move |tx| {
+                tx.execute(
+                    "INSERT INTO event_log (id, type, v, at, source, thread_id, agent_session_id, subject, payload, payload_hash)
+                     VALUES ('e1', 'agent.subagent.started', 1, '2026-10-01T00:00:00.000000Z', 'test', ?1, ?2, '[]',
+                             '{\"thread\":\"thread:thr1\",\"subagent\":{\"id\":\"a1\",\"kind\":\"Explore\"}}', 'h1')",
+                    rusqlite::params![thread, session],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                tx.execute(
+                    "INSERT INTO agent_tool_call (thread_id, tool, kind, at, agent_session_id, subagent_id)
+                     VALUES (?1, 'Read', 'read', '2026-10-01T00:01:00.000000Z', ?2, 'child-9')",
+                    rusqlite::params![thread, session],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let rows = run_bundled_lens_with(
+            &f,
+            "oxplow-foundation/thread-sessions",
+            &[(
+                "thread",
+                Text(oxplow_domain::refs::build::thread_ref(f.thread)),
+            )],
+        )
+        .await;
+        let col = |rows: &serde_json::Value, i: usize| -> Vec<String> {
+            rows.as_array()
+                .unwrap()
+                .iter()
+                .map(|r| {
+                    r[i].as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| r[i].to_string())
+                })
+                .collect()
+        };
+        let names = col(&rows, 4);
+        assert_eq!(names.len(), 3, "{rows}");
+        assert!(
+            names[0].starts_with("claude "),
+            "the session first: {names:?}"
+        );
+        assert!(names[1].trim_start().starts_with("Explore a1"), "{names:?}");
+        assert!(
+            names[2].trim_start().starts_with("subagent child-9"),
+            "{names:?}"
+        );
+        assert_eq!(col(&rows, 7), ["idle", "running", "unknown"], "{rows}");
+        assert_eq!(col(&rows, 5), ["claude", "subagent", "subagent"]);
+    }
+
+    /// The transcript lens lists a session's turns oldest first with the
+    /// thread's notes where they fall, marks a subagent's hand-back, counts
+    /// each turn's tool calls, starts at a turn, pages by 50, and says an
+    /// ACP chat's transcript isn't stored. A turn opens it.
+    #[tokio::test]
+    async fn session_transcript_lists_turns_notes_and_handbacks() {
+        use oxplow_db::SqlCell::{Int, Text};
+        let f = crate::test_fixtures::services_with_effort().await;
+        let (thread, session) = (f.thread.value(), f.session.value());
+        f.svc
+            .db
+            .transaction(move |tx| {
+                for (i, (prompt, answer)) in [("first ask", "one"), ("", "report"), ("third ask", "three")]
+                    .into_iter()
+                    .enumerate()
+                {
+                    tx.execute(
+                        "INSERT INTO agent_turn (thread_id, agent_session_id, prompt, answer, started_at, ended_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        rusqlite::params![
+                            thread,
+                            session,
+                            prompt,
+                            answer,
+                            format!("2999-01-0{}T10:00:00.000000Z", i + 1),
+                            format!("2999-01-0{}T10:05:00.000000Z", i + 1),
+                        ],
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                }
+                tx.execute(
+                    "INSERT INTO agent_tool_call (thread_id, tool, kind, at, agent_session_id, turn_id)
+                     VALUES (?1, 'Read', 'read', '2999-01-01T10:01:00.000000Z', ?2, 1),
+                            (?1, 'Read', 'read', '2999-01-01T10:02:00.000000Z', ?2, 1)",
+                    rusqlite::params![thread, session],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                tx.execute(
+                    "INSERT INTO thread_note (thread_id, body, author, created_at)
+                     VALUES (?1, 'a finding in between', 'agent', '2999-01-01T12:00:00.000000Z')",
+                    [thread],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                // The session's window has to cover them.
+                tx.execute("UPDATE agent_session SET opened_at = '2998-12-31T00:00:00.000000Z'", [])
+                    .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let session_ref = Text(oxplow_domain::refs::build::agent_session_ref(f.session));
+        let col = |rows: &serde_json::Value, i: usize| -> Vec<String> {
+            rows.as_array()
+                .unwrap()
+                .iter()
+                .map(|r| {
+                    r[i].as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| r[i].to_string())
+                })
+                .collect()
+        };
+        let params = |turn: &str, page: i64| {
+            vec![
+                ("session", session_ref.clone()),
+                ("turn", Text(turn.into())),
+                ("page", Int(page)),
+            ]
+        };
+        let rows =
+            run_bundled_lens_with(&f, "oxplow-foundation/session-transcript", &params("", 1)).await;
+        // ref, at, kind, ended_at, prompt, answer, tool_calls, …
+        assert_eq!(
+            col(&rows, 2),
+            ["turn", "note", "hand-back", "turn"],
+            "{rows}"
+        );
+        assert_eq!(col(&rows, 4)[1], "a finding in between");
+        assert_eq!(col(&rows, 6), ["2", "0", "0", "0"]);
+
+        // Starting at the hand-back's turn leaves it and what follows.
+        let handback = col(&rows, 0)[2].clone();
+        let rows = run_bundled_lens_with(
+            &f,
+            "oxplow-foundation/session-transcript",
+            &params(&handback, 1),
+        )
+        .await;
+        assert_eq!(col(&rows, 2), ["hand-back", "turn"], "{rows}");
+        // A second page of 50 is past them.
+        let rows =
+            run_bundled_lens_with(&f, "oxplow-foundation/session-transcript", &params("", 2)).await;
+        assert_eq!(col(&rows, 2), Vec::<String>::new(), "{rows}");
+
+        // An ACP chat with no turns says its transcript isn't stored.
+        f.svc
+            .db
+            .transaction(move |tx| {
+                tx.execute("DELETE FROM agent_turn", [])
+                    .map_err(oxplow_db::map_sql_err)?;
+                tx.execute("UPDATE agent_session SET harness = 'acp'", [])
+                    .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let rows =
+            run_bundled_lens_with(&f, "oxplow-foundation/session-transcript", &params("", 1)).await;
+        assert!(
+            col(&rows, 4)
+                .iter()
+                .any(|p| p.contains("transcript isn't stored")),
+            "{rows}"
+        );
+    }
+
+    /// A turn opens its session's transcript at it: the page is the lens
+    /// ref built in SQL, with no prefix spelled outside the owners.
+    #[tokio::test]
+    async fn a_turn_opens_its_sessions_transcript_at_it() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let (thread, session) = (f.thread.value(), f.session.value());
+        f.svc
+            .db
+            .transaction(move |tx| {
+                tx.execute(
+                    "INSERT INTO agent_turn (thread_id, agent_session_id, prompt, started_at)
+                     VALUES (?1, ?2, 'ask', '2999-01-01T10:00:00.000000Z')",
+                    rusqlite::params![thread, session],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                tx.execute(
+                    "INSERT INTO agent_turn (thread_id, prompt, started_at)
+                     VALUES (?1, 'unclaimed', '2999-01-02T10:00:00.000000Z')",
+                    [thread],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let rows = f
+            .svc
+            .sql
+            .query_sql(
+                "SELECT ref, transcript_page FROM v_agent_turn ORDER BY id",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap()
+            .rows;
+        let page = match &rows[0][1] {
+            oxplow_db::SqlCell::Text(t) => t.clone(),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            page,
+            format!(
+                "lens:oxplow-foundation/session-transcript?session=agent_session:ses{session}&turn=turn:trn1"
+            )
+        );
+        assert_eq!(rows[1][1], oxplow_db::SqlCell::Null(()));
     }
 
     /// Finished items come newest first by when they closed, even within

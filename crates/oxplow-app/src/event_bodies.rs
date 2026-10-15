@@ -22,6 +22,8 @@ pub enum EventBodyKey {
     Output,
     /// An `agent.prompt.submitted`'s text.
     Prompt,
+    /// An `agent.subagent.finished`'s last message.
+    Result,
 }
 
 impl EventBodyKey {
@@ -30,6 +32,7 @@ impl EventBodyKey {
             EventBodyKey::Input => "input",
             EventBodyKey::Output => "output",
             EventBodyKey::Prompt => "prompt",
+            EventBodyKey::Result => "result",
         }
     }
 }

@@ -68,7 +68,7 @@
     - { unique: id }
     - { relationships: { column: agent_session_id, to: agent_session, field: id } }
 - name: agent_turn
-  version: 3
+  version: 4
   description: "Agent turns: each human prompt and the agent's answer, per thread and agent session. start_snapshot_id → snapshot_id is what the turn changed (the snapshot the worktree was at when it opened and when it ended)."
   columns:
     - { name: "id", type: "INTEGER", doc: "Turn id." }
@@ -82,6 +82,7 @@
     - { name: "start_snapshot_id", type: "INTEGER", doc: "Snapshot the worktree was at when the turn opened (v_snapshot.id); NULL if the stream had none yet." }
     - { name: "snapshot_id", type: "INTEGER", doc: "Snapshot the worktree was at when the turn ended (v_snapshot.id); NULL while running." }
     - { name: "ref", type: "TEXT", doc: "`turn:trn<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)" }
+    - { name: "transcript_page", type: "TEXT", doc: "The session's transcript lens opened at this turn (`lens:oxplow-foundation/session-transcript?session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)" }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -1050,6 +1051,26 @@
   tests:
     - { not_null: id }
     - { unique: id }
+- name: subagent
+  version: 1
+  description: "Subagents of an agent session: who in a session acted, from the `agent.subagent.started` / `.finished` events that bracket one and the tool calls that name it. A subagent is not a session; it has no process oxplow knows. Claude Code brackets its subagents, so they are `running` or `finished`; Codex and opencode children appear only in tool calls, so they are `unknown` (calls but no bracket)."
+  columns:
+    - { name: "id", type: "TEXT", doc: "The harness's id for it, or the id of the call that started it." }
+    - { name: "kind", type: "TEXT", doc: "What kind of subagent the harness says it is (Claude's `agent_type`); NULL when it says nothing." }
+    - { name: "agent_session_id", type: "INTEGER", doc: "The session it acted in (v_agent_session.id)." }
+    - { name: "thread_id", type: "INTEGER", doc: "The session's thread." }
+    - { name: "turn_id", type: "", doc: "The turn it started in, else the turn of its first call; NULL when neither says." }
+    - { name: "started_at", type: "TEXT", doc: "When its `agent.subagent.started` was logged; NULL for an `unknown` one." }
+    - { name: "finished_at", type: "TEXT", doc: "When it stopped or handed its report back; NULL while running or unknown." }
+    - { name: "calls", type: "", doc: "Tool calls made as it (v_tool_call.subagent_id)." }
+    - { name: "last_activity_at", type: "TEXT", doc: "The newest of its start, its calls and its finish." }
+    - { name: "state", type: "TEXT", doc: "`running` (started, not finished), `finished`, or `unknown` (only tool calls name it)." }
+    - { name: "finished_event_id", type: "TEXT", doc: "The event that finished it; its `result` body is the subagent's last message, read as `subagent:<id>#result`." }
+    - { name: "session_ref", type: "TEXT", doc: "Its session's ref (`agent_session:ses3`): where it opens." }
+    - { name: "ref", type: "TEXT", doc: "`subagent:ses<n>/<id>`: its ref, the one place SQL spells it — select and join on this." }
+  tests:
+    - { not_null: ref }
+    - { unique: ref }
 - name: symbol
   version: 2
   description: "What each stream's files define — functions, methods, types, fields, constants, modules — as oxplow's own tree-sitter extraction reads them (every supported language, no language server needed): the current tree, restated per changed file at each snapshot. `v_symbol_capture` says what each snapshot's collection covered."

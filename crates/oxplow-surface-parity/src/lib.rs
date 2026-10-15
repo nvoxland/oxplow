@@ -414,7 +414,9 @@ pub const MANIFEST: &[Capability] = &[
     agent("oxplow_file_history"),
     agent("oxplow_recent_commits"),
     agent("oxplow_snapshots"),
+    agent("oxplow_session_transcript"),
     agent("oxplow_thread_notes"),
+    agent("oxplow_thread_sessions"),
     // ---- git ----
     both_named("git.status", "git_change_scopes", "oxplow_vcs_status"),
     both_named("diff", "diff", "oxplow_diff"),

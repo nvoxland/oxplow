@@ -53,3 +53,14 @@
   reaches:
     tool: oxplow_effort_files
     input: { effort: "effort:eff1" }
+- question: Which agent sessions are on this thread, and what are their subagents doing?
+  about: thread
+  skill: oxplow-runtime
+  reaches:
+    tool: oxplow_thread_sessions
+    input: { thread: "thread:thr1" }
+- question: What happened in this agent session, turn by turn?
+  skill: oxplow-runtime
+  reaches:
+    tool: oxplow_session_transcript
+    input: { session: "agent_session:ses1" }

@@ -29,3 +29,13 @@ Efforts are `v_effort` (`id`, `work_item`, `thread_id`, `title`,
 `v_effort_file`. For one effort, `oxplow_effort_files { effort }` lists its
 files and `oxplow_effort_summary { effort }` gives its title, item, files,
 runs, claims and decisions in one call.
+
+## Sessions and what they did
+
+- `oxplow_thread_sessions { thread? }` — a thread's agent sessions (every open
+  thread's when none is named): name, harness, status, how its conversation was
+  bound, last activity, the efforts it worked in, and its subagents beneath.
+- `oxplow_session_transcript { session, turn?, page? }` — a session's turns
+  oldest first, 50 a page, with the thread's notes where they fall and a
+  subagent's hand-back marked; each row is a turn ref. A subagent's last
+  message is `oxplow_read { ref: "subagent:ses3/<id>#result" }`.

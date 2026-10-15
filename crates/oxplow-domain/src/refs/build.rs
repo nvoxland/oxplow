@@ -275,6 +275,11 @@ pub fn agent_session_ref(id: AgentSessionId) -> String {
     of(k::AGENT_SESSION, &id.to_string())
 }
 
+/// A subagent of an agent session, by the harness's id for it.
+pub fn subagent_ref(session: AgentSessionId, id: &str) -> String {
+    of(k::SUBAGENT, &format!("{session}/{id}"))
+}
+
 /// A user-created dashboard (`dashboard.id`).
 pub fn dashboard_ref(id: crate::DashboardId) -> String {
     of(k::DASHBOARD, &id.to_string())
@@ -452,6 +457,7 @@ mod tests {
             thread_note_ref(NoteId::new(5)),
             agent_session_ref(AgentSessionId::new(2)),
             dashboard_ref(crate::DashboardId::new(3)),
+            subagent_ref(AgentSessionId::new(3), "agent-7f"),
             run_ref(9),
             claim_ref(1),
             decision_ref(2),
@@ -511,6 +517,7 @@ mod tests {
             thread_note_ref(NoteId::new(1)),
             agent_session_ref(AgentSessionId::new(1)),
             dashboard_ref(crate::DashboardId::new(1)),
+            subagent_ref(AgentSessionId::new(1), "a"),
             run_ref(1),
             proposal_ref(1),
             claim_ref(1),

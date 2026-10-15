@@ -64,6 +64,11 @@ pub struct OpenInput {
     /// What to call it.
     #[serde(default)]
     pub title: Option<String>,
+    /// A saved conversation of its harness (its native id) to start on,
+    /// bound `chosen`. A person's choice: an agent may open a session but
+    /// not pick the conversation it resumes.
+    #[serde(default)]
+    pub resume: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -237,6 +242,14 @@ pub fn open_op(
             in_own_stream(ctx, thread)?;
             let config = crate::config_service::read_config(&config);
             let (harness, kind, acp_agent) = choose_agent(&config, &harnesses, &adapters, &input)?;
+            if input.resume.is_some() && ctx.actor().is_agent_driven() {
+                return Err(CommandError::Denied {
+                    reason:
+                        "an agent may open a session but not choose the conversation it resumes"
+                            .into(),
+                });
+            }
+            let now = Timestamp::now();
             let session = insert_tx(
                 ctx.conn,
                 &NewAgentSession {
@@ -246,8 +259,26 @@ pub fn open_op(
                     acp_agent,
                     title: input.title.unwrap_or_default(),
                 },
-                Timestamp::now(),
+                now,
             )?;
+            let session = match input.resume.as_deref() {
+                None => session,
+                Some(conversation) => {
+                    free_conversation(ctx, &session, conversation).map_err(|e| match e {
+                        CommandError::Invalid { message, .. } => invalid("/resume", message),
+                        other => other,
+                    })?;
+                    bind_tx(
+                        ctx.conn,
+                        session.id,
+                        conversation,
+                        BindingOrigin::Chosen,
+                        now,
+                    )?;
+                    get_tx(ctx.conn, session.id)?
+                        .ok_or_else(|| invalid("/resume", "the session vanished"))?
+                }
+            };
             Ok(HandlerOutput {
                 inverse: call(CLOSE, json!({ "session": agent_session_ref(session.id) })),
                 ..result(&session)
@@ -781,6 +812,95 @@ mod tests {
                 "{name}: {err:?}"
             );
         }
+    }
+
+    /// A person opens a session on a saved conversation: it is bound
+    /// `chosen` in the same transaction (undo closes the slot). One open in
+    /// another session is refused, naming it. An agent may open a session
+    /// but not pick the conversation for it.
+    #[tokio::test]
+    async fn a_person_opens_a_session_on_a_chosen_conversation() {
+        let fx = services_with_effort().await;
+        let (session, now) = (fx.session, Timestamp::now());
+        fx.svc
+            .db
+            .transaction(move |tx| bind_tx(tx, session, "taken", BindingOrigin::Started, now))
+            .await
+            .unwrap();
+        let thread = thread_ref(fx.thread);
+        let opened = open(
+            &fx,
+            &Actor::Human,
+            json!({ "thread": thread, "harness": "claude", "resume": "c9" }),
+        )
+        .await;
+        let row = get(&fx, opened.id).await;
+        assert_eq!(row.resume_session_id, "c9");
+        let origin: String = fx
+            .svc
+            .db
+            .read(move |c| {
+                c.query_row(
+                    "SELECT origin FROM agent_session_binding WHERE agent_session_id = ?1 AND unbound_at IS NULL",
+                    [opened.id.value()],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(origin, "chosen");
+
+        let err = run(
+            &fx,
+            &Actor::Human,
+            OPEN,
+            json!({ "thread": thread, "harness": "claude", "resume": "taken" }),
+            false,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { field: Some(f), message } if f == "/resume" && message.contains(&agent_session_ref(fx.session))),
+            "{err:?}"
+        );
+        // Nothing was left behind by the refusal.
+        assert_eq!(
+            fx.svc
+                .agent_session_store
+                .list_open_for_thread(&fx.thread)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+
+        // An agent may open a session, not choose its conversation.
+        let err = run(
+            &fx,
+            &agent(&fx),
+            OPEN,
+            json!({ "thread": thread, "harness": "claude", "resume": "c2" }),
+            true,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                CommandError::Denied { .. } | CommandError::Invalid { .. }
+            ),
+            "{err:?}"
+        );
+        run(
+            &fx,
+            &agent(&fx),
+            OPEN,
+            json!({ "thread": thread, "harness": "claude" }),
+            true,
+        )
+        .await
+        .unwrap();
     }
 
     /// A fork marks the next launch to fork the conversation the session

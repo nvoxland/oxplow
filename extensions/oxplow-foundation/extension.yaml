@@ -154,7 +154,7 @@ commands:
     invokers: { human: true, agent: true, lens: true }
     example: {"session": "agent_session:ses3"}
   - name: agent_session.open
-    summary: "Open an agent session on a thread (`thread:thr1`): a slot the person's UI starts an agent in. It only adds the slot — nothing is started or typed for it. `harness` (default: the project's first enabled agent), `acp_agent` for an ACP one, `title`. An agent opens one only in its own stream."
+    summary: "Open an agent session on a thread (`thread:thr1`): a slot the person's UI starts an agent in. It only adds the slot — nothing is started or typed for it. `harness` (default: the project's first enabled agent), `acp_agent` for an ACP one, `title`, and a person's `resume`: a saved conversation of the harness to start on (refused when it is open in another session; an agent may not choose one). An agent opens one only in its own stream."
     scope: agent_sessions.write
     op: open
     invokers: { human: true, agent: true, lens: true }

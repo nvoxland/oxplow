@@ -195,6 +195,8 @@ mod source_guards;
 pub mod sql_gateway;
 #[cfg(test)]
 mod stream_service_tests;
+#[cfg(test)]
+mod subagent_tests;
 pub mod symbol_collector;
 pub mod symbol_resolve;
 pub mod terminal_sessions;

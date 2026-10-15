@@ -101,9 +101,10 @@ pub const CORE_KINDS: &[CoreKind] = &[
         .owned("v_effort", "title")
         .opens()
         .searched("v_search_effort"),
+    // A turn opens its session's transcript at it, else (no session) its diff.
     kind(k::TURN)
         .owned("v_agent_turn", "prompt")
-        .opens()
+        .page(Page::Column(&["transcript_page", "ref"]))
         .searched("v_search_turn"),
     kind(k::SNAPSHOT).owned("v_snapshot", "created_at").opens(),
     kind(k::COMMIT)
@@ -149,6 +150,10 @@ pub const CORE_KINDS: &[CoreKind] = &[
         .owned("v_dashboard", "title")
         .opens()
         .searched("v_search_dashboard"),
+    // A subagent opens its session for now.
+    kind(k::SUBAGENT)
+        .owned("v_subagent", "id")
+        .page(Page::Column(&["session_ref"])),
     kind(k::LENS)
         .owned("v_lens", "title")
         .opens()

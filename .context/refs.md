@@ -127,6 +127,8 @@ edges). Only
 `issues:ENG-12`); `wiki`, `commit` and `symbol` keep bare ids and use the
 capability's active provider.
 
+`subagent` (`subagent:ses3/<the harness's id for it>`, `build::subagent_ref`) is a subagent of an agent session, owned by `v_subagent.ref`; it opens its session's tab, and `oxplow_read subagent:ses3/<id>#result` is its last message (`.context/agent-model.md` "Subagents").
+
 `dashboard` (`dashboard:dsh3`, `build::dashboard_ref`) is a user-created
 dashboard, owned by `v_dashboard.ref`, opening as itself (the desktop maps
 it to its dashboard page) and searched through `v_search_dashboard`.
@@ -433,7 +435,10 @@ list. Its kept list is empty: use a builder.
 `effort` / `turn`, built by `snapshotRef` / `effortDiffRef` / `turnRef`
 in `tabs/pageRefs.ts`), each rendering its diff in `DiffViewPage`
 (`DiffViewPayload.mode`). Only an ad-hoc pair of endpoints stays a
-route (`page:diff-view?start=…&end=…`). A lens `effort-diff` link
+route (`page:diff-view?start=…&end=…`). A turn's ref *opens* the
+session's transcript at that turn (`v_agent_turn.transcript_page`, the
+`session-transcript` lens ref built by `lens_ref`; the diff when no session
+claims it), the transcript's rows linking back to each turn's ref. A lens `effort-diff` link
 takes the effort's ref (`v_effort.ref`, `effort:eff7`). Tab ids are always built
 through the ref helpers (`fileRef(path).id`, never `` `file:${path}` ``):
 `escapeId` percent-encodes a path's `@` / `#` / `%`, which a hand-built

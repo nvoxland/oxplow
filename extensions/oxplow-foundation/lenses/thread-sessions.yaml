@@ -1,0 +1,48 @@
+title: Thread sessions
+description: The agent sessions of a thread (every open thread's open sessions when none is named), each with its name, harness, status, how its conversation was bound, when it was last active, the efforts it worked in and its stream — and beneath each, the subagents that acted in it.
+params:
+  - { name: thread, label: Thread (`thread:thr3`), default: "" }
+query: |
+  WITH ss AS (
+    SELECT s.*, th.stream_id, th.ref AS thread_ref
+    FROM v_agent_session s
+    JOIN v_thread th ON th.id = s.thread_id
+    WHERE CASE WHEN :thread = ''
+               THEN s.closed_at IS NULL AND th.closed_at IS NULL AND th.archived_at IS NULL
+               ELSE th.ref = :thread END
+  )
+  SELECT ss.ref AS ref, ss.id AS sid, 0 AS sub, '' AS at_key,
+         ss.display_name AS name, ss.harness AS harness, ss.kind AS kind,
+         coalesce(st.state, CASE WHEN ss.closed_at IS NOT NULL THEN 'closed' ELSE 'idle' END) AS status,
+         coalesce(ss.bound_origin, '') AS origin,
+         max(coalesce(ss.last_seen_at, ''),
+             coalesce((SELECT max(coalesce(t.ended_at, t.started_at)) FROM v_agent_turn t
+                        WHERE t.agent_session_id = ss.id), '')) AS last_activity,
+         coalesce((SELECT group_concat(e.title, '; ')
+                     FROM (SELECT DISTINCT title FROM v_effort
+                            WHERE thread_id = ss.thread_id
+                              AND started_at <= coalesce(ss.closed_at, '9999')
+                              AND coalesce(ended_at, '9999') >= ss.opened_at
+                            ORDER BY started_at) e), '') AS efforts,
+         coalesce((SELECT title FROM v_stream WHERE id = ss.stream_id), '') AS stream
+  FROM ss
+  LEFT JOIN v_agent_session_status st ON st.agent_session_id = ss.id
+  UNION ALL
+  SELECT sa.ref, sa.agent_session_id, 1, coalesce(sa.started_at, sa.last_activity_at),
+         '    ' || coalesce(sa.kind, 'subagent') || ' ' || sa.id, 'subagent', '',
+         sa.state, '', sa.last_activity_at, sa.calls || ' tool calls', ''
+  FROM v_subagent sa
+  JOIN ss ON ss.id = sa.agent_session_id
+  ORDER BY 2, 3, 4
+columns:
+  - { key: name, label: Session }
+  - { key: harness, label: Harness }
+  - { key: kind, label: Kind }
+  - { key: status, label: Status }
+  - { key: origin, label: Conversation }
+  - { key: last_activity, label: Last active }
+  - { key: efforts, label: Efforts }
+  - { key: stream, label: Stream }
+empty: No agent sessions.
+hidden: true
+tool: thread_sessions

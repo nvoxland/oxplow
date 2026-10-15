@@ -1190,6 +1190,10 @@ pub struct AgentSubagentFinishedV1 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn: Option<String>,
     pub subagent: SubagentRef,
+    /// What it said last (Claude's `SubagentStop.last_assistant_message`),
+    /// stored in `event_content`; read as `subagent:<id>#result`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<ContentRef>,
 }
 
 pub struct AgentSubagentFinished;
