@@ -228,6 +228,7 @@ pub const COLLECTOR: &str = "collector";
 /// `after:` may name beside an effect or a collector.
 pub const CONSUMER: &str = crate::ordering::CONSUMER;
 pub const JOB_RUN: &str = "job_run";
+pub const AI_CALL: &str = "ai_call";
 
 /// A repo-relative path: no leading `/`, no `//`, no newline.
 const PATH_ID: &str = r"^[^/\n][^\n]*$";
@@ -281,6 +282,9 @@ pub fn core_kinds() -> KindRegistry {
         // One run of a declared job (`v_job_run.id`); the job itself is
         // the contribution `job:<extension>/<id>`.
         KindSpec::new(JOB_RUN, r"^[0-9a-f-]{36}$"),
+        // A recorded model call (`ai_call.id`): its bodies are `#request`
+        // and `#response`.
+        KindSpec::new(AI_CALL, r"^[0-9]+$"),
         KindSpec::new(CONSUMER, r"^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$"),
     ];
     for spec in specs {

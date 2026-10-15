@@ -71,7 +71,7 @@
     - { not_null: id }
     - { unique: id }
 - name: ai_call
-  version: 3
+  version: 4
   description: "Every model call oxplow itself made (not the coding agent's): role, provider, model, tokens, latency and whether it succeeded."
   columns:
     - { name: "id", type: "INTEGER", doc: "Row id." }
@@ -89,6 +89,7 @@
     - { name: "request_hash", type: "TEXT", doc: "Content hash of what the model was asked (`{ system, prompt, json }` or `{ state, questions }`), its body kept for the `ai` retention window (`read_ai_call`); NULL for a call made before requests were kept." }
     - { name: "response_hash", type: "TEXT", doc: "Content hash of what the model answered (`{ text }` or `{ answers }`), kept like the request; NULL when the call failed." }
     - { name: "run_id", type: "TEXT", doc: "The extension run that made the call (`v_extension_run.run_id`); NULL for oxplow's own calls. (v3)" }
+    - { name: "ref", type: "TEXT", doc: "`ai_call:<id>`: its ref. `read` gives its row and, with `#request` / `#response`, its bodies. (v4)" }
   tests:
     - { not_null: id }
     - { unique: id }

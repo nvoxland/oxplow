@@ -235,6 +235,11 @@ pub fn job_run_ref(id: &str) -> String {
     of(k::JOB_RUN, id)
 }
 
+/// One recorded model call (`v_ai_call.id`).
+pub fn ai_call_ref(id: i64) -> String {
+    of(k::AI_CALL, &id.to_string())
+}
+
 /// A language model by the name its harness or provider reports
 /// (`ai_model:claude-opus-4-8`); not the `model` kind, a published view.
 pub fn ai_model_ref(name: &str) -> String {
@@ -436,6 +441,7 @@ mod tests {
             metric_ref("oxplow.rust.unsafe_blocks"),
             model_ref("effort"),
             job_run_ref("01a1369e-b063-76f8-968f-902d392f882d"),
+            ai_call_ref(42),
             extension_ref("effort-review"),
             finding_ref("clippy:1"),
             thread_note_ref(NoteId::new(5)),
@@ -490,6 +496,7 @@ mod tests {
             metric_ref("m"),
             model_ref("v_a"),
             job_run_ref("01a1369e-b063-76f8-968f-902d392f882d"),
+            ai_call_ref(1),
             ai_model_ref("claude-opus-4-8"),
             extension_ref("e"),
             command_ref("a.b"),

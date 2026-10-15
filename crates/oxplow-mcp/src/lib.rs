@@ -161,6 +161,10 @@ pub struct ReadParams {
     /// `lens:<ext>/<slug>`.
     #[serde(rename = "ref")]
     pub reference: String,
+    /// The stream whose worktree a `file:` or `lens:` ref is read in
+    /// (`stream:str2`); absent, your own.
+    #[serde(default)]
+    pub stream: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -1260,7 +1264,9 @@ impl OxplowMcp {
                        working tree; `file:src/a.rs@git:HEAD#L10-40` a revision's lines \
                        (`@snap:<id>` a local-history snapshot); `event:<id>#output` (or \
                        `#input`, `#prompt`) one of your stream's events' stored bodies; \
-                       `lens:<ext>/<slug>` a lens's definition. Any `ref` a model's column \
+                       `lens:<ext>/<slug>` a lens's definition; `stream` reads a file or lens in \
+                       another stream's worktree. `ai_call:<id>#request` (or `#response`) a \
+                       recorded model call's bodies. Any `ref` a model's column \
                        holds reads the same way (`work_item:…`, `commit:…`, `effort:…`, \
                        `thread:…`, `wiki:…`). Content stops at 64 KB, saying so."
     )]
@@ -1269,9 +1275,28 @@ impl OxplowMcp {
         extensions: rmcp::model::Extensions,
         params: Parameters<ReadParams>,
     ) -> Result<CallToolResult, McpError> {
-        use oxplow_app::ref_read::{read, ReadError};
-        let stream = caller_of(&extensions).stream_id;
-        let out = read(&self.services, &params.0.reference, stream)
+        use oxplow_app::ref_read::{read, ReadError, Reader};
+        let caller = caller_of(&extensions);
+        let reader = Reader {
+            thread: caller.thread_id,
+            stream: caller.stream_id,
+        };
+        let p = params.0;
+        let at = match p.stream.as_deref() {
+            Some(stream) => Some(
+                oxplow_domain::refs::build::id_of(stream, oxplow_domain::refs::kind::STREAM)
+                    .ok()
+                    .and_then(|id| oxplow_domain::StreamId::try_from_str(&id))
+                    .ok_or_else(|| {
+                        McpError::invalid_params(
+                            format!("`stream` is a stream's ref (`stream:str2`), not `{stream}`"),
+                            None,
+                        )
+                    })?,
+            ),
+            None => None,
+        };
+        let out = read(&self.services, &p.reference, &reader, at)
             .await
             .map_err(|e| match e {
                 ReadError::Storage(e) => internal(e),
@@ -2656,6 +2681,7 @@ mod tests {
                     rmcp::model::Extensions::new(),
                     Parameters(ReadParams {
                         reference: "lens:demo/streams".into(),
+                        stream: None,
                     }),
                 )
                 .await
@@ -2708,6 +2734,7 @@ mod tests {
                 rmcp::model::Extensions::new(),
                 Parameters(ReadParams {
                     reference: "lens:demo/nope".into(),
+                    stream: None,
                 }),
             )
             .await
@@ -3043,6 +3070,7 @@ mod tests {
                         rmcp::model::Extensions::new(),
                         Parameters(ReadParams {
                             reference: format!("work_item:oxplow:{id}"),
+                            stream: None,
                         }),
                     )
                     .await
@@ -3514,12 +3542,37 @@ mod tests {
                 extensions_for(parts_as(thread.id, other_id, &[])),
                 Parameters(ReadParams {
                     reference: "file:who.txt".into(),
+                    stream: None,
                 }),
             )
             .await
             .unwrap();
         let read: serde_json::Value = serde_json::from_str(&text_payload(out)).unwrap();
         assert_eq!(read["content"], "mine");
+        // Naming a stream reads its worktree instead.
+        let out = server
+            .read(
+                extensions_for(parts_as(thread.id, other_id, &[])),
+                Parameters(ReadParams {
+                    reference: "file:who.txt".into(),
+                    stream: Some(oxplow_domain::refs::build::stream_ref(primary.id)),
+                }),
+            )
+            .await
+            .unwrap();
+        let read: serde_json::Value = serde_json::from_str(&text_payload(out)).unwrap();
+        assert_eq!(read["content"], "primary");
+        let bad = server
+            .read(
+                extensions_for(parts_as(thread.id, other_id, &[])),
+                Parameters(ReadParams {
+                    reference: "file:who.txt".into(),
+                    stream: Some("str1".into()),
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(bad.message.contains("stream:str2"), "{}", bad.message);
     }
 
     /// tsk574: the extension and lens tools without a `stream_id` read

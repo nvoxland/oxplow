@@ -246,9 +246,13 @@ commit's or an effort's files), and `content` for the kinds whose body no
 model holds — a file at a revision (`file:src/a.rs` is the working tree;
 `file:src/a.rs@git:HEAD#L10-40`; `@snap:<id>` a local-history snapshot),
 an event's stored body (`event:<id>#input`, `#output`, `#prompt`; the
-caller's own stream's events only), a lens's definition
-(`lens:<ext>/<slug>`). Content stops at 64 KB with `truncated: true`; ask
-for lines to read further. A captured file's row comes from
+caller's own stream's events only), a recorded model call's bodies
+(`ai_call:<id>#request`, `#response`; any call but one another agent's
+thread asked for — an extension's, a collector's or a job's are the
+project's), a lens's definition (`lens:<ext>/<slug>`). A file or lens is
+read in the caller's stream's worktree, or another's named by `stream`
+(`stream:str2`). Content stops at 64 KB with `truncated: true`; ask for
+lines to read further. A captured file's row comes from
 `v_snapshot_file`; restoring it is the destructive
 `oxplow.snapshot.restore_file` (an agent's is a proposal), which writes
 into that row's stream's worktree.

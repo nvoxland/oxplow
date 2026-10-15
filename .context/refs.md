@@ -104,6 +104,8 @@ or `<kind>:<name>` for the globally named ones (`command`, `measure`,
 route (`page:settings`), a model also one of core's (`model:effort`), and
 a collector's owner is always an extension name (the project's own
 extension is `project`: `collector:project/repo.scan_clone`). `consumer` names one of core's event consumers (`consumer:change.analyze`), what an `after:` may target (extensions.md "Ordering"). `job_run` names one run of a job (`job_run:<uuid>`);
+`ai_call` one recorded model call (`ai_call:42`; its bodies are the
+fragments `#request` and `#response`, read with `read`);
 `ai_model` a language model by the name its harness reports.
 
 **Event sources aren't refs.** An event's `source` says who emitted it —
