@@ -1,5 +1,6 @@
 import { run, searchable } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
+import { searchLauncher } from "../../support/ui.js";
 
 test("a written page renders, and a task link in it opens the task", async ({ page, daemon }) => {
   const created = await run<{ result: { ref: string } }>(daemon, "oxplow.work_item.create", {
@@ -13,8 +14,7 @@ test("a written page renders, and a task link in it opens the task", async ({ pa
   });
   await searchable(daemon, "wombat", "wiki");
   await page.goto("/");
-  await page.getByTestId("title-bar-search").click();
-  await page.keyboard.type("wombat plan");
+  await searchLauncher(page, "wombat plan");
   await page.getByTestId("launcher-hit-wiki:wombat-plan").click();
   const wiki = page.getByTestId("page-wiki");
   await expect(wiki).toContainText("First do");

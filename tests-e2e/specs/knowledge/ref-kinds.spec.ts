@@ -1,5 +1,6 @@
 import { run, searchable } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
+import { searchLauncher } from "../../support/ui.js";
 
 test("an extension's ref renders as a link and opens its page", async ({ page, daemon }) => {
   const created = await run<{ result: { ref: string } }>(daemon, "oxplow.work_item.create", {
@@ -15,8 +16,7 @@ test("an extension's ref renders as a link and opens its page", async ({ page, d
   });
   await searchable(daemon, "platypus", "wiki");
   await page.goto("/");
-  await page.getByTestId("title-bar-search").click();
-  await page.keyboard.type("platypus notes");
+  await searchLauncher(page, "platypus notes");
   await page.getByTestId("launcher-hit-wiki:platypus-notes").click();
   await page.getByTestId("page-wiki").locator(`a[href="e2e_item:${n}"]`).click();
   // The extension's `item` page: its lens over `v_e2e_item`.

@@ -19,15 +19,21 @@ export async function openNewTask(page: Page): Promise<void> {
   await expect(page.getByTestId("tasks-title")).toBeVisible();
 }
 
+/** Open the launcher and type `query` into it — once it has the focus: it
+ *  shows when the window's stream has loaded, and keys typed before that
+ *  (or while a late page takes the focus) go nowhere. */
+export async function searchLauncher(page: Page, query: string): Promise<void> {
+  await page.getByTestId("title-bar-search").click();
+  await expect(page.getByPlaceholder(/^Search everything/)).toBeFocused();
+  await page.keyboard.type(query);
+}
+
 /** Open a page through the launcher: search for `query`, take the first
  *  result — once it is a page, command or search hit naming the query,
  *  since Enter takes whatever row is first, the results update after the
  *  typing, and "Ask the Agent: <query>" names any query. */
 export async function openFromLauncher(page: Page, query: string): Promise<void> {
-  await page.getByTestId("title-bar-search").click();
-  // It shows once the window's stream has loaded; type into it then.
-  await expect(page.getByPlaceholder(/^Search everything/)).toBeFocused();
-  await page.keyboard.type(query);
+  await searchLauncher(page, query);
   const first = page.locator(
     '[data-row-index="0"]:is([data-testid^="launcher-page-"], [data-testid^="launcher-command-"], [data-testid^="launcher-hit-"])',
   );

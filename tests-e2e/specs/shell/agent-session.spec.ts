@@ -1,5 +1,6 @@
 import { ipc } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
+import { searchLauncher } from "../../support/ui.js";
 
 /// Search offers New Agent Session…; choosing it opens the session picker
 /// rather than starting anything.
@@ -10,8 +11,7 @@ test("search offers a new agent session, which opens the picker", async ({ page 
   const tab = page.locator('[data-testid^="center-tab-agent_session:"]').first();
   await expect(tab).toBeVisible();
   await expect(page.getByTestId("page-new-session")).toBeHidden();
-  await page.getByTestId("title-bar-search").click();
-  await page.keyboard.type("new agent session");
+  await searchLauncher(page, "new agent session");
   await page.getByTestId("launcher-command-oxplow.agent_session.open").click();
   await expect(page.getByTestId("page-new-session")).toBeVisible();
   // The session it started is still there: choosing it started nothing.
@@ -45,12 +45,10 @@ test("search starts an enabled agent's session directly", async ({ fresh }) => {
   await ipc(daemon, "set_agents", { agents: ["acp", "codex"] });
   await page.goto("/");
   await expect(page.getByTestId("page-new-session")).toBeVisible();
-  await page.getByTestId("title-bar-search").click();
-  await page.keyboard.type("new claude session");
+  await searchLauncher(page, "new claude session");
   await expect(page.getByTestId("launcher-command-oxplow.agent_session.open_claude")).toHaveCount(0);
   await page.keyboard.press("Escape");
-  await page.getByTestId("title-bar-search").click();
-  await page.keyboard.type("new codex session");
+  await searchLauncher(page, "new codex session");
   await page.getByTestId("launcher-command-oxplow.agent_session.open_codex").click();
   const tab = page.locator('[data-testid^="center-tab-agent_session:"]').first();
   await expect(tab).toBeVisible();
@@ -103,8 +101,7 @@ test("a remembered choice is what new threads start with", async ({ fresh }) => 
   await expect(page.locator('[data-testid^="center-tab-agent_session:"]')).toHaveCount(0);
 
   // Remember an agent from the picker, which the launcher still opens.
-  await page.getByTestId("title-bar-search").click();
-  await page.keyboard.type("new agent session");
+  await searchLauncher(page, "new agent session");
   await page.getByTestId("launcher-command-oxplow.agent_session.open").click();
   await page.getByTestId("new-session-agent").selectOption("codex");
   await page.getByTestId("new-session-remember").check();

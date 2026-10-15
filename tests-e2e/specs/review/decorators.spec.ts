@@ -1,5 +1,6 @@
-import { ipc, run, searchable } from "../../support/daemon.js";
+import { ipc, run, searchable, until } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
+import { searchLauncher } from "../../support/ui.js";
 
 // oxplow-bundled decorates an effort with its latest verdict: a chip
 // in the effort page's header.
@@ -10,17 +11,20 @@ test("an accepted effort's page carries the review's verdict chip", async ({ pag
     state: "in_progress",
     thread: daemon.thread,
   });
-  const effort = (
-    await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
-      sql: `SELECT 'effort:eff' || id FROM v_effort WHERE work_item = '${created.result.ref}'`,
-    })
-  ).rows[0]?.[0] as string;
+  // The effort opens in the background once the item is in progress.
+  let effort = "";
+  await until("the item's effort to open", 30_000, async () => {
+    const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
+      sql: `SELECT ref FROM v_effort WHERE work_item = '${created.result.ref}'`,
+    });
+    effort = (out.rows[0]?.[0] as string | undefined) ?? "";
+    return effort !== "";
+  });
   expect(effort).toMatch(/^effort:eff\d+$/);
   await run(daemon, "oxplow.review.accept", { ref: effort });
   await searchable(daemon, "Wombat fix", "work_item");
   await page.goto("/");
-  await page.getByTestId("title-bar-search").click();
-  await page.keyboard.type("Wombat fix");
+  await searchLauncher(page, "Wombat fix");
   await page.getByTestId(`launcher-hit-work_item:${created.result.ref.slice("work_item:".length)}`).click();
   // The task's effort, its Review: the effort's own page.
   await page.locator('[data-testid^="tasks-show-in-history-"]').first().click();

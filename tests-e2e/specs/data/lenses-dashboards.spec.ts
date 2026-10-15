@@ -1,5 +1,6 @@
 import { ipc, run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
+import { searchLauncher } from "../../support/ui.js";
 
 test("a lens re-runs when its model changes, and pins to a new dashboard", async ({ page, daemon }) => {
   await run(daemon, "oxplow.lens.keep", {
@@ -8,8 +9,7 @@ test("a lens re-runs when its model changes, and pins to a new dashboard", async
     slug: "numbat-tasks",
   });
   await page.goto("/");
-  await page.getByTestId("title-bar-search").click();
-  await page.keyboard.type("Numbat tasks");
+  await searchLauncher(page, "Numbat tasks");
   await page.getByTestId("launcher-page-lens:mine/numbat-tasks").click();
   const lens = page.getByTestId("page-lens");
   await expect(lens).toContainText("No rows.");
