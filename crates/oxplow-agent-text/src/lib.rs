@@ -173,7 +173,7 @@ mod tests {
             .iter()
             .find(|s| s.name == "oxplow-codebase")
             .expect("the codebase skill");
-        for needle in ["v_op_error", "read_event_content", "output_size", "red"] {
+        for needle in ["v_op_error", "`read`", "output_size", "red"] {
             assert!(
                 skill.body.contains(needle),
                 "the skill never says `{needle}`"
