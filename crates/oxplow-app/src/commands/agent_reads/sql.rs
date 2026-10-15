@@ -68,7 +68,8 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 })
             })
         })),
-    )]
+    )
+    .returns::<oxplow_db::SqlQueryResult>()]
 }
 
 #[cfg(test)]

@@ -934,6 +934,7 @@ pub fn extension_command(
         schema.insert("examples".into(), json!([example]));
     }
     let spec = CommandSpec {
+        output_schema: None,
         id: decl.name.clone(),
         summary,
         input_schema,
@@ -2070,6 +2071,7 @@ mod tests {
                 "provider:held",
                 vec![crate::commands::Command::new(
                     oxplow_domain::CommandSpec {
+                        output_schema: None,
                         id: "held.review.held".into(),
                         summary: "A provider's.".into(),
                         input_schema: json!({ "type": "object" }),
@@ -2793,6 +2795,7 @@ mod tests {
             "provider:held",
             vec![crate::commands::Command::new(
                 oxplow_domain::CommandSpec {
+                    output_schema: None,
                     id: "my_review.review.held".into(),
                     summary: "A provider's.".into(),
                     input_schema: json!({ "type": "object" }),

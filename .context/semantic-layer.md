@@ -828,7 +828,8 @@ The result keeps the two apart.
 - **Generation: what the catalog was.** `generation` is the extension
   catalog's fingerprint (`ExtensionCatalog::generation`) when the query
   ran — an opaque string that changes when any extension does.
-- MCP and RPC `query_sql` and lens runs return the whole result; the
+- MCP and RPC `query_sql` and lens runs return the whole result (over MCP
+  also as structured content, typed by the tool's output schema); the
   row-only script reads carry the row guarantees but not coverage.
 - `freshness` is separate: model changes observed since startup.
 - What an agent should do with all of this when it reports numbers is the

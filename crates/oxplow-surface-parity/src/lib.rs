@@ -413,6 +413,7 @@ pub const MANIFEST: &[Capability] = &[
     agent("oxplow_effort_summary"),
     agent("oxplow_file_history"),
     agent("oxplow_recent_commits"),
+    agent("oxplow_catalog"),
     agent("oxplow_snapshots"),
     agent("oxplow_thread_notes"),
     // ---- git ----

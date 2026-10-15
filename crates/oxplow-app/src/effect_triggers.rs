@@ -1438,6 +1438,7 @@ mod tests {
         use oxplow_domain::{Access, Atomicity, CommandSpec, Confirm, Invokers, Lifecycle};
         let command = Command::new(
             CommandSpec {
+                output_schema: None,
                 id: "oxplow.probe.write".into(),
                 summary: "Write outside oxplow (a test probe).".into(),
                 input_schema: json!({ "type": "object" }),
@@ -1532,6 +1533,7 @@ mod tests {
         // A write outside oxplow that always lands, answering with an event.
         let note = Command::new(
             CommandSpec {
+                output_schema: None,
                 id: "oxplow.probe.note".into(),
                 summary: "Note something outside oxplow (a test probe).".into(),
                 input_schema: json!({ "type": "object" }),

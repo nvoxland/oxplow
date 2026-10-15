@@ -210,6 +210,11 @@ pub struct CommandSpec {
     /// JSON Schema for the input.
     #[specta(type = crate::Json)]
     pub input_schema: Value,
+    /// JSON Schema of its result, when its operation declares one: what an
+    /// MCP client gets as structured content beside the text.
+    #[serde(default)]
+    #[specta(type = Option<crate::Json>)]
+    pub output_schema: Option<Value>,
     pub invokers: Invokers,
     pub confirm: Confirm,
     /// The handler returns an inverse, so `commands.undo` can apply it.
