@@ -168,7 +168,7 @@ mod tests {
     }
 
     /// tsk1072: an error the person saw is in `v_op_error` for the agent to
-    /// read through `query_sql`, and its captured output is the event's
+    /// read through `oxplow_query_sql`, and its captured output is the event's
     /// `output` body, readable by an agent of the thread's stream.
     #[tokio::test]
     async fn a_reported_error_is_readable_by_an_agent_through_v_op_error() {

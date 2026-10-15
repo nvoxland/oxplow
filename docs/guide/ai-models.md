@@ -100,10 +100,10 @@ something its model is restricted from.
 
 Your coding agent can read what's configured and ask your models two things:
 
-- `v_ai_role` and `v_ai_provider` (through `query_sql`): what's configured, and
+- `v_ai_role` and `v_ai_provider` (through `oxplow_query_sql`): what's configured, and
   whether each provider has a key — never the key.
-- `ai_decide`: ask the `decide` model typed questions about some text.
-- `ai_summarize`: summarize text with the `summarize` model.
+- `oxplow_ai_decide`: ask the `decide` model typed questions about some text.
+- `oxplow_ai_summarize`: summarize text with the `summarize` model.
 
 Both spend your key. Each answer is recorded against the thread that
 asked, and asking the same thing again reuses it instead of calling the

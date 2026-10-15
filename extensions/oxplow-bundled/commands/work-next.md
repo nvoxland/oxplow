@@ -2,7 +2,7 @@
 description: Pick up the next ready work item and work on it.
 ---
 
-Run the oxplow lens `oxplow-bundled/work-next` (`run_lens`) with
+Run the oxplow lens `oxplow-bundled/work-next` (`oxplow_run_lens`) with
 `thread` set to your thread's ref (`thread:thr3`). If it lists nothing,
 nothing is ready: say so and stop.
 

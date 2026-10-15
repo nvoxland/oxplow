@@ -196,6 +196,14 @@
         "type": "string"
       },
       "default": []
+    },
+    "tool": {
+      "description": "Offer it to agents as an MCP tool too, named `<namespace>_<tool>`;\nits params are the tool's input.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
     }
   },
   "additionalProperties": false,

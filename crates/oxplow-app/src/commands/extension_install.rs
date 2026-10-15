@@ -1,7 +1,7 @@
 //! Bringing an extension in from git (P8.A9): `oxplow.extension.install` and
 //! `oxplow.extension.update`. `External` (a clone and a copy into a stream's
 //! worktree) and `Confirm::Always`: what an extension can run is a
-//! person's call, made against the review (`review_extension`) of the
+//! person's call, made against the review (`oxplow_review_extension`) of the
 //! commit they saw — `reviewed_sha` is the only commit installed. An
 //! agent's run becomes a proposal a person approves. The files land as
 //! ordinary project files in `oxplow/extensions/<name>/`, to commit for

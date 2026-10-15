@@ -593,6 +593,10 @@ struct LensFile {
     /// `snapshots.contents`).
     #[serde(default)]
     needs: Vec<String>,
+    /// Offer it to agents as an MCP tool too, named `<namespace>_<tool>`;
+    /// its params are the tool's input.
+    #[serde(default)]
+    tool: Option<String>,
 }
 
 /// A button on a lens: a command it runs (P6.B1, target §11.4). The
@@ -604,7 +608,7 @@ struct LensFile {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LensAction {
-    /// Unique within the lens; `run_lens_action` names it.
+    /// Unique within the lens; `oxplow_run_lens_action` names it.
     pub id: String,
     pub label: String,
     /// The command it runs (`oxplow.work_item.transition`).
@@ -1000,7 +1004,7 @@ pub struct LensSlot {
 #[serde(rename_all = "camelCase")]
 pub struct Lens {
     /// `<extension>/<slug>`: the stable id used by `lens:` page refs,
-    /// `run_lens` and `get_lens`.
+    /// `oxplow_run_lens` and `get_lens`.
     pub id: String,
     pub extension: String,
     pub slug: String,
@@ -1042,6 +1046,10 @@ pub struct Lens {
     pub needs: Vec<String>,
     /// Repo-relative path of the lens file.
     pub path: String,
+    /// The MCP tool it is also offered as (`tool:`), prefixed with its
+    /// extension's namespace (`extension_commands::tool_name`): a call
+    /// runs it and returns its text rendering.
+    pub tool: Option<String>,
 }
 
 /// A loaded extension and anything wrong with it.
@@ -1322,6 +1330,7 @@ pub(super) fn resolve_catalog(mut out: Vec<Extension>, disabled: &[String]) -> V
         .collect();
     public_contracts::stage(&mut out);
     crate::extension_commands::refuse_shared_namespaces(&mut out);
+    crate::extension_commands::refuse_duplicate_tools(&mut out);
     for ext in &mut out {
         ext.contributions.retain(|descriptor| {
             descriptor.id.kind != oxplow_domain::contribution::ContributionKind::Command
@@ -2483,10 +2492,16 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 }
                 let actions =
                     parse_actions(std::mem::take(&mut l.actions), &l.params, l.group.is_some())?;
-                Ok((l, alert, actions))
+                let tool = l
+                    .tool
+                    .take()
+                    .map(|t| crate::extension_commands::tool_name(&ext.namespace, &t))
+                    .transpose()?;
+                Ok((l, alert, actions, tool))
             });
         match parsed {
-            Ok((l, alert, actions)) => ext.lenses.push(Lens {
+            Ok((l, alert, actions, tool)) => ext.lenses.push(Lens {
+                tool,
                 id: format!("{name}/{slug}"),
                 extension: name.to_string(),
                 slug,
@@ -4506,6 +4521,7 @@ impl Lens {
             alert: None,
             needs: Vec::new(),
             path: String::new(),
+            tool: None,
         }
     }
 
@@ -7698,7 +7714,7 @@ commands:
     /// (`group`), highlight one (`emphasis`), indent some (`depth`), and
     /// draw a cell's icon and tone from other columns; an action can sit in
     /// a group's heading. Shapes are checked at load; the columns they
-    /// name, against the result by `validate_extension`.
+    /// name, against the result by `oxplow_validate_extension`.
     #[test]
     fn lenses_group_and_style_their_rows() {
         let (_d, ext) = load_x(
@@ -7767,7 +7783,7 @@ commands:
     }
 
     /// The columns `group`, `emphasis`, `depth` and a column's `icon` /
-    /// `tone` name must be in the result (`validate_extension`).
+    /// `tone` name must be in the result (`oxplow_validate_extension`).
     #[tokio::test]
     async fn validate_checks_row_style_columns() {
         let (d, _) = load_x(

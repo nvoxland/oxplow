@@ -1,5 +1,5 @@
 /// The Answers strip (P6.C2, target §13.3.1): beside a terminal thread's
-/// agent, the lenses it showed with `show_lens`, newest first, each live
+/// agent, the lenses it showed with `oxplow_show_lens`, newest first, each live
 /// with Keep This. Collapsible — Escape inside it collapses it — and
 /// remembered per thread. Above them, what the agent asked for that waits
 /// for the person (P9.A3): its pending proposals, never collapsed. Hidden

@@ -6,7 +6,7 @@ aggregate it, and the read-only SQL contract (`v_*`) that views, extensions
 and agents query.
 
 > **Status: partly built (epic tsk275).**
-> - **Current:** the `v_*` read contract for core data, plus `query_sql` and
+> - **Current:** the `v_*` read contract for core data, plus `oxplow_query_sql` and
 >   the catalog as models (`v_model*`), and the **fact substrate**
 >   (`measure`, `dimension`, `metric_spec`, `metric_capture`, `fact`, cube),
 >   documented in [metrics.md](./metrics.md).
@@ -29,7 +29,7 @@ and agents query.
 > - **Current (tsk325):** Settings → Data: every entity with its owner and
 >   row count, and the source rows. `list_data_entities` (IPC, UI-only)
 >   lists models and unsynced entities without counting; the UI counts
->   each model with `query_sql`, one at a time, so a model too big to
+>   each model with `oxplow_query_sql`, one at a time, so a model too big to
 >   count within the 5 s timeout costs only its own cell (tsk1065).
 > - **Current (P4, epic tsk484):** every published view is a **model**
 >   (core files and extensions' `models:`, compiled with lineage,
@@ -668,7 +668,7 @@ and `v_model_test` are the catalog of all of them:
 | `v_job_run` | each job run — one execution of a job an extension declares (V56; [extensions.md](./extensions.md) "Jobs"): `id`, `job` (`job:<ext>/<id>`), `ref` (`job_run:<id>`), `extension`, `version`, `contract_version`, `operation`, `state`, `attempt`, `cancellation_requested`, `invoker`, `run_id`, `created_at`, `updated_at`, and its current attempt's `ai_calls`, `tool_calls`, `input_tokens`, `output_tokens`. Never its request or result |
 | `v_job_run_output` | what a job produced as it ran, in order (`job_id`, `attempt`, `seq`): `kind` (`text`, `tool_call`, `tool_result`, `usage`), `at`, `text` (a text row's), `data` (the row as JSON). Written as it streams, so a lens over it follows a job live |
 | `v_job_run_observation` | what a job's worker said after its attempt was fenced (a lease recovered, an approval revoked, a declaration changed): one row per late result (`id`, `job_id`, `attempt`, `fence`, `at`, `outcome`, `evidence`). Evidence only; it never changes the job |
-| `v_op_error` | operations that failed in front of the person in the app, one row per `ui.op_failed@1` event (`oxplow.ui.report_error`, tsk1072): `event_id`, `at`, `stream_id`, `thread`, `label`, `command`, `message`, `exit_code`, `signal`, `duration_ms`, `output_size`. The stderr / stdout are the event's `output` body (`read` `event:<id>#output`). Kept 30 days, the output 14; an expired event keeps its row with its details NULL and `payload_expired_at` set |
+| `v_op_error` | operations that failed in front of the person in the app, one row per `ui.op_failed@1` event (`oxplow.ui.report_error`, tsk1072): `event_id`, `at`, `stream_id`, `thread`, `label`, `command`, `message`, `exit_code`, `signal`, `duration_ms`, `output_size`. The stderr / stdout are the event's `output` body (`oxplow_read` `event:<id>#output`). Kept 30 days, the output 14; an expired event keeps its row with its details NULL and `payload_expired_at` set |
 | `v_event_content` | large event bodies (tool input/output, prompts) by content hash, without the bytes (V102) |
 | `v_event_dead_letter` | events a consumer failed on, parked with the error; `pending` ones need `retry_dead_letter` / `discard_dead_letter` (V94) |
 | `v_event_checkpoint` | how far each event consumer has read (V94) |
@@ -677,7 +677,7 @@ and `v_model_test` are the catalog of all of them:
 | `v_tool_call` | every agent tool call: the `tool_call.project` pump consumer's projection of `agent.tool.finished` (one row per event; the call as its harness mapped it, `oxplow-app/src/tool_calls.rs`; paths worktree-relative; a shell call's `ok` is NULL when its harness reports no exit code). `tool` is the harness's own name, `kind` oxplow's (V42; v3) (V77; `turn_id`, `event_id` since V102) |
 | `v_context_read` | reads (`kind = 'read'`) of `.context/*.md` (V77) |
 | `v_oxplow_bundled_struggle` | oxplow-bundled's model (review policy, not core): per effort, a file edited 5+ times, or 3+ failed shell commands, by kind (`subject` `shell`), over `v_tool_call` |
-| `v_ai_call` | oxplow's own model calls: role, provider, model, caller, tokens, latency, ok/error, a recorded computation's `input_hash`, and its `ref` (`ai_call:<id>`, whose bodies `read` gives) (V78, V118; see [ai-providers.md](./ai-providers.md)) |
+| `v_ai_call` | oxplow's own model calls: role, provider, model, caller, tokens, latency, ok/error, a recorded computation's `input_hash`, and its `ref` (`ai_call:<id>`, whose bodies `oxplow_read` gives) (V78, V118; see [ai-providers.md](./ai-providers.md)) |
 | `v_ai_result` | recorded AI computations (`classify` / `score` / `summarize` / `extract`), keyed by input hash, model and prompt version, with the output, tokens and the computing call (V118; [ai-providers.md](./ai-providers.md) "Recorded computations") |
 | `v_metric_spec` | metric definitions: aggregation, direction, target / warn / fail (enabled lives in project.yaml) (V80) |
 | `v_agent_nudge` | guidance oxplow sent the agent mid-effort (V80; `turn_id`, `delivered_at` since V102) |
@@ -689,13 +689,13 @@ and `v_model_test` are the catalog of all of them:
 | `v_commit`, `v_commit_file`, `v_commit_work_item`, `v_branch`, `v_tag` | history, branches and tags (V85, V113). The commit indexer (`commit_indexer.rs`, run at boot and on each ref move, `RefMoves`) stores the commits reachable from **every stream's** head — new history whole, up to a 5000-commit horizon (`IndexDepth`) — through the VCS capability (`Vcs::log`/`revision`, `.context/vcs.md`) — with their files (first-parent diff) as it projects them into `page_ref`; `v_commit.parents` (JSON, v2) lets a stream's history be a recursive read from its branch's head. `v_commit_work_item` reads the indexer's work-item mention edges and the work-item → commit links (declared impacts, held effort work), for the active work list's items. `refresh_refs` restates `v_branch` (`is_default`, v2) and `v_tag` from `Vcs::branches`/`tags` and maps each local branch to the stream checked out on it. The desktop's history panel, dashboard lists, branch picker and new-stream form read these models (`apps/desktop/src/vcsHistory.ts`) |
 | `v_test_case_stat` | each test's summary per stream, branch and producer (V139, tsk733): last status and duration, runs, failures, flips, last failed / passed, max and mean duration — updated with every run, the home of per-test history since a run writes change-only per-case facts |
 | `v_test_run`, `v_test_case` | test runs (V87), views only. A run IS its `metric_capture` (producer `tests`, or `test-run` for a run that measured nothing), and both views read its verbatim `test-detail` payload in `detail_json`: counts from the payload, cases by `json_each` over `suites[].cases[]`. Cases come from the payload, not the `oxplow.test_case` facts, because those are skipped while every tests metric is disabled. `effort_id` (v2) is the capture's own: the effort of the tool call that ran it. A run that only reported counts (`oxplow.test.record_run`) has no cases |
-| `v_thread_answer` | the lenses an agent showed on a thread (`show_lens`, V124, P6.C1): `ref` `answer:<id>`, `thread_id`, `turn_id` / `effort_id` open when it was shown, `title`, either `lens` (an existing lens id) or `spec` (the `LensSpec` as JSON), `params`, `created_at`, and `kept_lens` once someone kept it (extensions.md → "Thread answers") |
+| `v_thread_answer` | the lenses an agent showed on a thread (`oxplow_show_lens`, V124, P6.C1): `ref` `answer:<id>`, `thread_id`, `turn_id` / `effort_id` open when it was shown, `title`, either `lens` (an existing lens id) or `spec` (the `LensSpec` as JSON), `params`, `created_at`, and `kept_lens` once someone kept it (extensions.md → "Thread answers") |
 | `v_diagnostic` | what the language servers have published, right now (V86). `lsp_diagnostics.rs` subscribes to the LSP session broadcast and replaces a file's rows per `(stream, language, path)` on each `textDocument/publishDiagnostics` (paths repo-relative, positions 1-based, a URI outside the worktree dropped). Live state: the table is cleared at boot and a server's rows when it restarts, crashes or stops. Only files a server has published appear (usually the open ones, not the whole repo). A view re-runs on `ModelsChanged` when rows commit; at most every 500 ms per stream, from the first change (so a server that publishes continuously can't starve it), `code.diagnostics.changed@1` is logged per changed file (P5.C5) |
 | `v_symbol` / `v_symbol_capture` | the definitions oxplow's own tree-sitter extraction finds in each stream's files, in every supported language, no language server needed (V62) — the current tree, restated per changed file at each snapshot by the `symbols.collect` pump consumer (`ref` `symbol:<path>/<id>`, no revision, unique per stream; `kind` from one vocabulary; `container` `::`-joined; `signature` the parameter types in overloading languages; the name's `line`/`col` and the whole symbol's `start_*`..`end_*`), and what each snapshot's collection covered (`files_collected`, `files_failed`: content unreadable at the snapshot). Details: language-support.md "Symbols" |
 
 **Column docs live with the model, not here.** `models.yaml` documents
 every column, and the registry is the catalog: `v_model` +
-`v_model_column`, read through `query_sql` (extension entities too —
+`v_model_column`, read through `oxplow_query_sql` (extension entities too —
 their contract is their declared columns; tsk517). The compile at
 open fails if a view's columns and its declared ones disagree, in name,
 type or order. So changing a view means:
@@ -714,8 +714,8 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
 - `query_sql(sql, params?, limit?)` over IPC (`querySql` in `api.ts`) and
   MCP. **Every query goes through the SQL gateway** (P4.1, tsk486):
   `Services.sql`, `crates/oxplow-app/src/sql_gateway.rs` — MCP and IPC
-  `query_sql`, lenses, advisories, entity metrics, extension checks
-  (`validate_extension`, `oxplow extension check`) and source inputs alike.
+  `oxplow_query_sql`, lenses, advisories, entity metrics, extension checks
+  (`oxplow_validate_extension`, `oxplow extension check`) and source inputs alike.
   It takes one `SqlQuery { sql, params (positional | named), limit,
   timeout }`; `check(sql)` prepares without running. Mechanics
   (`SemanticLayer` in `crates/oxplow-db/src/semantic_layer.rs`):
@@ -788,7 +788,7 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
   collectors already produced.
 - Everything an extension adds (entities, relations, dimensions, metrics)
   appears in the same models (`v_model`, `v_dimension`, `v_metric_spec`) and
-  the same `query_sql` as core data. Agents never need
+  the same `oxplow_query_sql` as core data. Agents never need
   an extension-specific tool. Full agent surface:
   [extensions.md](./extensions.md) → "Agents: the MCP surface".
 
@@ -1067,7 +1067,7 @@ entities from data already in the semantic layer:
 | Entity tables + views, run state (V133 `collector_run`) | `crates/oxplow-db/src/collector_store.rs` |
 | Settings → Data read model (`data_entities`) | `crates/oxplow-app/src/semantic_catalog.rs` |
 | IPC `list_collectors` / `approve_collector` / `set_credential` (UI only); running is `run_command oxplow.collector.sync` | `crates/oxplow-rpc/src/commands/collectors.rs` |
-| MCP `preview_collector`; an agent syncs with `run_command oxplow.collector.sync`; approval and credentials read `v_collector_state` / `v_collector_credential` (the `oxplow.collector.sync` command as the agent; never approves) | `crates/oxplow-mcp/src/lib.rs` |
+| MCP `oxplow_preview_collector`; an agent syncs with `run_command oxplow.collector.sync`; approval and credentials read `v_collector_state` / `v_collector_credential` (the `oxplow.collector.sync` command as the agent; never approves) | `crates/oxplow-mcp/src/lib.rs` |
 | UI: Settings → Data (entities + counts, collector rows, Run) | `apps/desktop/src/components/DataSection.tsx` |
 | UI: credentials per extension | `apps/desktop/src/components/ExtensionsSection.tsx` |
 | IPC `list_data_entities` (models + counts, unsynced entities) | `crates/oxplow-rpc/src/commands/semantic.rs` |
@@ -1080,7 +1080,7 @@ entities from data already in the semantic layer:
   `v_<extension>_<entity>` view.
   - Oxplow does all the writing from the declared schema, and no
     extension SQL runs on writes, so isolation buys little.
-  - One pool and plain views keep `query_sql` simple.
+  - One pool and plain views keep `oxplow_query_sql` simple.
   - Every run writes all of a collector's entities in **one transaction**,
     so a failed run changes nothing.
   - A changed column set rebuilds the table.
@@ -1247,7 +1247,7 @@ oxplow-bundled change cards) only read them.
 - **Caching.** A change is keyed by (stream, kind, target) — commit shas are
   resolved to full ids, so `HEAD` and a short sha share one row. Commits,
   turns and closed efforts are computed once (an effort that closes since
-  is recomputed: its head moved). `ensure_change` reads a working tree's
+  is recomputed: its head moved). `oxplow_ensure_change` reads a working tree's
   or an open effort's stored analysis, computing it the first time.
 - **Two stages.** Stage one is the file list alone:
   `refresh_files(target)` diffs through `Trees` and stores `change_file`
@@ -1331,7 +1331,7 @@ policy. No extension receives a policy callback or a database connection.
 Private extension state does not pass through SQL models or query overlays.
 Script hosts can obtain a separate StateSource from the gateway's host-owned
 project resources, then read a namespace derived from their RunContext. Bare
-gateways have no state source. This does not change `run` or query_sql's
+gateways have no state source. This does not change `run` or oxplow_query_sql's
 semantic read contract.
 
 ## Generation reader boundary

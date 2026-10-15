@@ -2,7 +2,7 @@
 //! "Services"): each one a scope a script declares in its `needs`, the
 //! builtins it provides, whether a person approves it, and which runs may
 //! use it. One table: the router that builds a run's hosts, `oxplow
-//! extension check`, the reference and `list_services` all read it.
+//! extension check`, and the reference all read it.
 
 use serde::Serialize;
 

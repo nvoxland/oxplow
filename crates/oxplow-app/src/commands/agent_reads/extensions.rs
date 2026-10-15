@@ -101,7 +101,11 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
             "validate",
             services.clone(),
             |svc, actor, p: ValidateExtensionParams| async move {
-                check_optional_stream("validate_extension", "/stream_id", p.stream_id.as_deref())?;
+                check_optional_stream(
+                    "oxplow_validate_extension",
+                    "/stream_id",
+                    p.stream_id.as_deref(),
+                )?;
                 let stream = stream_or_actors(&svc, &actor, p.stream_id.clone()).await?;
                 let root = svc
                     .worktrees
@@ -122,7 +126,11 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
             "preview",
             services.clone(),
             |svc, actor, p: ValidateExtensionParams| async move {
-                check_optional_stream("preview_extension", "/stream_id", p.stream_id.as_deref())?;
+                check_optional_stream(
+                    "oxplow_preview_extension",
+                    "/stream_id",
+                    p.stream_id.as_deref(),
+                )?;
                 let stream = stream_or_actors(&svc, &actor, p.stream_id.clone()).await?;
                 let root = svc
                     .worktrees
@@ -146,7 +154,11 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
             "review",
             services,
             |svc, actor, p: ReviewExtensionParams| async move {
-                check_optional_stream("review_extension", "/stream_id", p.stream_id.as_deref())?;
+                check_optional_stream(
+                    "oxplow_review_extension",
+                    "/stream_id",
+                    p.stream_id.as_deref(),
+                )?;
                 let stream = stream_or_actors(&svc, &actor, p.stream_id.clone()).await?;
                 let root = svc
                     .worktrees

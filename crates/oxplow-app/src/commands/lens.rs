@@ -5,7 +5,7 @@
 //! `oxplow.lens.share` moves a private lens into a shared extension once it
 //! passes the shared checks (committing it is the person's git commit).
 //! The rows live in `thread_answer` (`v_thread_answer`); `run_answer`
-//! runs one for the Answers strip and for `show_lens`'s text.
+//! runs one for the Answers strip and for `oxplow_show_lens`'s text.
 
 use crate::commands::ops::Op;
 use std::collections::BTreeMap;
@@ -24,7 +24,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::util::{invalid, parse, ref_id, schema};
-use super::{Handler, HandlerOutput, Invocation, TxCtx};
+use super::{Handler, HandlerOutput, Invocation};
 use crate::extension_catalog::ExtensionCatalog;
 use crate::extensions::{self, LensContext, LensOrigin, LensSpec};
 
@@ -43,10 +43,12 @@ pub struct LensTarget {
     /// Checks a kept spec's query as the explorer runs it, metric
     /// functions and all (tsk987).
     pub sql: crate::sql_gateway::SqlGateway,
+    /// What `show` renders the answer's text with.
+    pub services: super::util::ServicesSlot,
 }
 
 /// `oxplow.lens.show`: show the person an answer in a thread.
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ShowInput {
     /// An existing lens to show (`<extension>/<slug>`). Give this or `spec`.
@@ -161,7 +163,7 @@ fn stream_root_tx(
     ))
 }
 
-/// A lens spec's query, checked as `query_sql` checks it — one read-only
+/// A lens spec's query, checked as `oxplow_query_sql` checks it — one read-only
 /// statement over the published models, metric functions resolved through
 /// the metric engine (`SqlGateway::check`). `oxplow.lens.show` runs it before its
 /// transaction (its [`Precheck`](crate::commands::Precheck), tsk1010),
@@ -208,9 +210,13 @@ fn answer_id(raw: &str) -> Result<i64, CommandError> {
     })
 }
 
+/// `oxplow.lens.show` returns the answer's text rendering — what an
+/// agent reads back — which needs the stored answer, so it's an `External`
+/// command: the answer is recorded in its own transaction, then rendered.
+/// The bus records the run and its `lens.shown@1` after it returns.
 fn show(target: LensTarget) -> Op {
-    // A spec's query is checked before the transaction: resolving a metric
-    // query takes the metric engine, which a transaction can't (tsk1010).
+    // A spec's query is checked before the run: resolving a metric query
+    // takes the metric engine, which a transaction can't (tsk1010).
     let sql = target.sql.clone();
     let precheck: Arc<crate::commands::Precheck> = Arc::new(move |input: Value| {
         let sql = sql.clone();
@@ -221,76 +227,118 @@ fn show(target: LensTarget) -> Op {
             }
         })
     });
-    let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
-        let input: ShowInput = parse(input)?;
-        let thread: i64 = match input.thread.as_deref() {
-            Some(raw) => {
-                let named: ThreadId = ref_id(raw, "thread", "/thread")?;
-                // An agent shows answers in its own thread only; a person
-                // may name any.
-                if ctx.actor().is_agent_driven() && ctx.actor().thread_id() != Some(named) {
-                    return Err(invalid(
-                        "/thread",
-                        format!("an agent shows answers in its own thread, not `{raw}`"),
-                    ));
-                }
-                named.value()
-            }
-            None => ctx
-                .actor()
-                .thread_id()
-                .ok_or_else(|| invalid("/thread", "no thread given and the caller has none"))?
-                .value(),
-        };
-        let stream = thread_stream_tx(ctx.conn, thread)?
-            .ok_or_else(|| invalid("/thread", format!("no thread `thr{thread}`")))?;
-        let params = input.params.unwrap_or_default();
-        let lens_ctx = LensContext {
-            stream_id: Some(stream),
-            thread_id: Some(thread),
-            active: None,
-        };
-        let (title, shows, lens) = match (input.lens, input.spec) {
-            (Some(id), None) => {
-                let lens = target
-                    .catalog
-                    .find_lens(&target.project_dir, &id)
-                    .map_err(domain)?;
-                extensions::resolve_params(&lens, &cells(&params), &lens_ctx).map_err(domain)?;
-                (lens.title.clone(), AnswerShows::Lens(id.clone()), Some(id))
-            }
-            (None, Some(spec)) => {
-                // Its query was checked before the transaction.
-                check_spec_shape(&spec, &params, &lens_ctx)?;
-                let value = serde_json::to_value(&spec).expect("spec serializes");
-                (spec.title.clone(), AnswerShows::Spec(value), None)
-            }
-            _ => {
-                return Err(invalid(
-                    "",
-                    "give `lens` (an existing lens) or `spec`, not both",
-                ));
-            }
-        };
-        let id = answers::insert_tx(ctx.conn, thread, &title, &shows, &json!(params))
-            .map_err(CommandError::from)?;
-        let event = ctx
-            .events
-            .typed::<LensShown>(&LensShownV1 {
-                answer: answer_ref(id),
-                thread: thread_ref(ThreadId::new(thread)),
-                lens: lens.as_deref().map(lens_ref),
+    let handler = Handler::External(Arc::new(move |invocation: Invocation, input| {
+        let actor = invocation.actor().clone();
+        let target = target.clone();
+        Box::pin(async move {
+            let input: ShowInput = parse(input)?;
+            let (catalog, project_dir) = (target.catalog.clone(), target.project_dir.clone());
+            let source = actor.source();
+            let shown = target
+                .db
+                .transaction(move |tx| {
+                    Ok(record_answer_tx(
+                        tx,
+                        &actor,
+                        &catalog,
+                        &project_dir,
+                        input.clone(),
+                    ))
+                })
+                .await
+                .map_err(CommandError::from)??;
+            let services = target.services.get()?;
+            let (_, text) = text_answer(&services, shown.id).await.map_err(domain)?;
+            let event = Envelope::typed::<LensShown>(
+                source,
+                &LensShownV1 {
+                    answer: answer_ref(shown.id),
+                    thread: thread_ref(ThreadId::new(shown.thread)),
+                    lens: shown.lens.as_deref().map(lens_ref),
+                },
+            )
+            .with_subject([answer_ref(shown.id)]);
+            Ok(HandlerOutput {
+                result: json!({ "answer": answer_ref(shown.id), "title": shown.title, "text": text }),
+                events: vec![event],
+                ..HandlerOutput::default()
             })
-            .with_subject([answer_ref(id)]);
-        Ok(HandlerOutput {
-            result: json!({ "answer": answer_ref(id), "title": title }),
-            inverse: None,
-            events: vec![event],
-            after_commit: None,
-            unchanged: false,
         })
     }));
     Op::new("lenses.show", "show", schema::<ShowInput>(), false, handler).with_precheck(precheck)
+}
+
+/// An answer [`show`] recorded.
+struct Shown {
+    id: i64,
+    thread: i64,
+    title: String,
+    /// The lens it shows, when it isn't a spec of its own.
+    lens: Option<String>,
+}
+
+/// Check what `input` shows for `actor` and record it as an answer in its
+/// thread.
+fn record_answer_tx(
+    tx: &rusqlite::Connection,
+    actor: &oxplow_domain::Actor,
+    catalog: &ExtensionCatalog,
+    project_dir: &Path,
+    input: ShowInput,
+) -> Result<Shown, CommandError> {
+    let thread: i64 = match input.thread.as_deref() {
+        Some(raw) => {
+            let named: ThreadId = ref_id(raw, "thread", "/thread")?;
+            // An agent shows answers in its own thread only; a person
+            // may name any.
+            if actor.is_agent_driven() && actor.thread_id() != Some(named) {
+                return Err(invalid(
+                    "/thread",
+                    format!("an agent shows answers in its own thread, not `{raw}`"),
+                ));
+            }
+            named.value()
+        }
+        None => actor
+            .thread_id()
+            .ok_or_else(|| invalid("/thread", "no thread given and the caller has none"))?
+            .value(),
+    };
+    let stream = thread_stream_tx(tx, thread)?
+        .ok_or_else(|| invalid("/thread", format!("no thread `thr{thread}`")))?;
+    let params = input.params.unwrap_or_default();
+    let lens_ctx = LensContext {
+        stream_id: Some(stream),
+        thread_id: Some(thread),
+        active: None,
+    };
+    let (title, shows, lens) = match (input.lens, input.spec) {
+        (Some(id), None) => {
+            let lens = catalog.find_lens(project_dir, &id).map_err(domain)?;
+            extensions::resolve_params(&lens, &cells(&params), &lens_ctx).map_err(domain)?;
+            (lens.title.clone(), AnswerShows::Lens(id.clone()), Some(id))
+        }
+        (None, Some(spec)) => {
+            // Its query was checked before the transaction.
+            check_spec_shape(&spec, &params, &lens_ctx)?;
+            let value = serde_json::to_value(&spec).expect("spec serializes");
+            (spec.title.clone(), AnswerShows::Spec(value), None)
+        }
+        _ => {
+            return Err(invalid(
+                "",
+                "give `lens` (an existing lens) or `spec`, not both",
+            ));
+        }
+    };
+    let id = answers::insert_tx(tx, thread, &title, &shows, &json!(params))
+        .map_err(CommandError::from)?;
+    Ok(Shown {
+        id,
+        thread,
+        title,
+        lens,
+    })
 }
 
 /// What `oxplow.lens.keep` writes for answer `id`: its spec with the shown
@@ -579,7 +627,7 @@ fn share(target: LensTarget) -> Op {
 
 /// Move lens `id` into shared extension `to` under `root`; its new id.
 /// Written, then checked — the extension must load clean with the lens
-/// in it and the lens's query must pass the `query_sql` authorizer — and
+/// in it and the lens's query must pass the `oxplow_query_sql` authorizer — and
 /// only then is the private copy removed; a failed check leaves nothing
 /// behind.
 async fn share_lens(
@@ -704,7 +752,7 @@ pub async fn run_answer(
 }
 
 /// Answer `id`'s run and its text rendering — what an agent reads back
-/// from `show_lens` — resolved in the answer's own thread's lens context
+/// from `oxplow_show_lens` — resolved in the answer's own thread's lens context
 /// against the main worktree's lenses, the same ones the run used.
 pub async fn text_answer(
     svc: &crate::Services,
@@ -784,8 +832,8 @@ mod tests {
         })
     }
 
-    /// P6.C1's red: an agent shows an answer — stored, logged, and it
-    /// runs as the person will see it.
+    /// An agent shows an answer: stored, logged, run as the person will
+    /// see it, and its text rendering returned.
     #[tokio::test]
     async fn show_stores_logs_and_runs_an_answer() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
@@ -816,6 +864,11 @@ mod tests {
         assert!(
             text.contains("Busy Tasks") || text.contains("title"),
             "{text}"
+        );
+        // The run returns it: what an agent reads back from showing one.
+        assert_eq!(
+            out.result,
+            json!({ "answer": answer, "title": "Busy Tasks", "text": text })
         );
     }
 
@@ -924,7 +977,7 @@ mod tests {
         assert!(events_of(&fx, "lens.shown").await.is_empty());
     }
 
-    /// Agent SQL gets exactly `query_sql`'s rights: a raw table, a write
+    /// Agent SQL gets exactly `oxplow_query_sql`'s rights: a raw table, a write
     /// or a broken spec is refused, and nothing is stored.
     #[tokio::test]
     async fn show_refuses_what_query_sql_would() {
@@ -1149,7 +1202,7 @@ mod tests {
     }
 
     /// tsk1010: an agent shows a metric chart in its thread — the query is
-    /// checked as `query_sql` checks it, metric functions resolved — both
+    /// checked as `oxplow_query_sql` checks it, metric functions resolved — both
     /// called directly and as a step of a composite; an unknown metric is
     /// refused at the query.
     #[tokio::test]

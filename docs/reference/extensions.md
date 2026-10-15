@@ -703,5 +703,5 @@ other replies answer in turn. `--bless` writes a provider's golden
 transcript.
 
 Your coding agent has the same checks as MCP tools
-(`validate_extension`, `preview_collector`), and the
+(`oxplow_validate_extension`, `oxplow_preview_collector`), and the
 `oxplow-extension` skill walks it through building one.

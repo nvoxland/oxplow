@@ -1,5 +1,5 @@
 /// A thread's answers, kept live: re-read when `v_thread_answer` changes
-/// (a new `show_lens`, a Keep This). The Answers strip and an ACP
+/// (a new `oxplow_show_lens`, a Keep This). The Answers strip and an ACP
 /// transcript share it.
 import { useCallback, useEffect, useState } from "react";
 

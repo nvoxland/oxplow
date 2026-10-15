@@ -1943,7 +1943,7 @@ impl MetricsService {
 
     /// Preview `owner`'s fact collector `spec` as the worktree `root` has
     /// it, over the tree of `stream`'s latest snapshot — what a real run
-    /// there would read — recording nothing (the MCP `preview_collector`).
+    /// there would read — recording nothing (the MCP `oxplow_preview_collector`).
     /// `event` is the event an `on:` collector reacts to, as a fixture
     /// writes it. A collector that reads `input` rows is previewed through
     /// an example instead.

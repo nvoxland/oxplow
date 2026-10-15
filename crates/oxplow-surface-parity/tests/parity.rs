@@ -37,9 +37,53 @@ fn ipc_command_names() -> BTreeSet<String> {
     sink.0.into_inner().into_iter().collect()
 }
 
-/// The MCP tool names actually registered via `#[tool]`.
+/// The MCP tools an agent is offered: core's (`list_commands`,
+/// `run_command`) and those oxplow's own extensions declare (`tool:`), read
+/// from a booted project as an agent sees them.
 fn mcp_tool_names() -> BTreeSet<String> {
-    oxplow_mcp::registered_tool_names().into_iter().collect()
+    tokio::runtime::Runtime::new()
+        .expect("a runtime")
+        .block_on(async {
+            let dir = tempfile::tempdir().expect("a temp project");
+            // Stream setup refuses a directory that isn't a repository.
+            for args in [
+                &["init", "-q"][..],
+                &[
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@t",
+                    "commit",
+                    "-q",
+                    "--allow-empty",
+                    "-m",
+                    "init",
+                ],
+            ] {
+                let ok = std::process::Command::new("git")
+                    .args(args)
+                    .current_dir(dir.path())
+                    .status()
+                    .expect("git runs")
+                    .success();
+                assert!(ok, "git {args:?}");
+            }
+            let services = oxplow_app::Services::in_memory(dir.path())
+                .await
+                .expect("services boot");
+            let agent = oxplow_domain::Actor::Agent {
+                session_id: None,
+                thread_id: None,
+                stream_id: None,
+            };
+            let declared = oxplow_app::agent_tools::offered(&services, &agent)
+                .await
+                .expect("the declared tools");
+            oxplow_mcp::core_tool_names()
+                .into_iter()
+                .chain(declared.into_iter().map(|tool| tool.name))
+                .collect()
+        })
 }
 
 #[test]

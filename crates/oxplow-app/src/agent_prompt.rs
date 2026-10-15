@@ -161,7 +161,7 @@ pub fn role_change_banner(initial: RoleMode, current: RoleMode) -> String {
 /// What the harness delivers decides two parts: the `<session-context>`
 /// block is here only when no prompt hook can carry it (`prompt_context`;
 /// otherwise the first prompt's context does, and both would send it
-/// twice), and the skills are indexed here for `get_skill` only when the
+/// twice), and the skills are indexed here for `oxplow_get_skill` only when the
 /// harness ships no skill files (`runtime_text`).
 pub fn assemble_system_prompt(
     config: &OxplowConfig,
@@ -212,12 +212,12 @@ pub fn assemble_system_prompt(
 const RUNTIME_TEXT: &str = "runtime_text";
 
 /// The oxplow skills for an agent that can't discover skill files: one
-/// line each, to be fetched with the MCP `get_skill` tool when the work
+/// line each, to be fetched with the MCP `oxplow_get_skill` tool when the work
 /// matches.
 fn skill_index_block(text: &oxplow_domain::agent::text::AgentText) -> String {
     let mut out = String::from(
         "\n# oxplow skills\nBefore doing work one of these describes, call the oxplow MCP tool \
-         `get_skill` with its name and follow what it says.\n",
+         `oxplow_get_skill` with its name and follow what it says.\n",
     );
     for (name, description) in text.skill_index() {
         out.push_str(&format!("- {name}: {description}\n"));
@@ -528,16 +528,16 @@ mod tests {
     }
 
     /// A harness that ships no skill files (an ACP agent) gets the skills
-    /// indexed in its prompt, fetched with `get_skill`; one that ships them
+    /// indexed in its prompt, fetched with `oxplow_get_skill`; one that ships them
     /// doesn't.
     #[test]
     fn the_prompt_indexes_the_skills_only_without_skill_files() {
         let indexed = prompt_for(&config(), &stream(), &harness(&["prompt_context"]));
-        assert!(indexed.contains("get_skill"), "{indexed}");
+        assert!(indexed.contains("oxplow_get_skill"), "{indexed}");
         assert!(
             indexed.contains("- oxplow-extension: Build oxplow lenses"),
             "{indexed}"
         );
-        assert!(!prompt_for(&config(), &stream(), &full()).contains("get_skill"));
+        assert!(!prompt_for(&config(), &stream(), &full()).contains("oxplow_get_skill"));
     }
 }

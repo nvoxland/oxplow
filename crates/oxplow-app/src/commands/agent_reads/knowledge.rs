@@ -81,7 +81,7 @@ fn resolve_comment_scope(
     let id = id.map(str::trim).filter(|s| !s.is_empty()).ok_or_else(|| {
         invalid(
             "/id",
-            "list_comments: pass `id` — a thread id (`thr…`) or stream id (`str…`)",
+            "oxplow_list_comments: pass `id` — a thread id (`thr…`) or stream id (`str…`)",
         )
     })?;
 
@@ -95,7 +95,7 @@ fn resolve_comment_scope(
             return Err(invalid(
                 "/scope",
                 format!(
-                    "list_comments: `scope` must be \"thread\" or \"stream\", got `{other}` \
+                    "oxplow_list_comments: `scope` must be \"thread\" or \"stream\", got `{other}` \
                      (or omit it and I'll infer it from `id`)"
                 ),
             ));
@@ -106,11 +106,11 @@ fn resolve_comment_scope(
     match want {
         // Explicit scope: validate the id matches, then build it.
         Some(THREAD) => {
-            expect_id_kind("list_comments", "/id", id, THREAD.0, THREAD.1)?;
+            expect_id_kind("oxplow_list_comments", "/id", id, THREAD.0, THREAD.1)?;
             Ok(CommentScope::Thread(thread_id(id)?))
         }
         Some(_) => {
-            expect_id_kind("list_comments", "/id", id, STREAM.0, STREAM.1)?;
+            expect_id_kind("oxplow_list_comments", "/id", id, STREAM.0, STREAM.1)?;
             Ok(CommentScope::Stream(stream_id(id)?))
         }
         // No scope: infer it from the id's prefix.
@@ -120,7 +120,7 @@ fn resolve_comment_scope(
             _ => Err(invalid(
                 "/scope",
                 format!(
-                    "list_comments: couldn't infer `scope` from id `{id}` — pass scope \
+                    "oxplow_list_comments: couldn't infer `scope` from id `{id}` — pass scope \
                      \"thread\" (with a `thr…` id) or \"stream\" (with a `str…` id)"
                 ),
             )),
@@ -231,7 +231,10 @@ mod tests {
         let msg = resolve_comment_scope(Some("thread"), Some("str1"))
             .unwrap_err()
             .to_string();
-        assert!(msg.contains("list_comments"), "tool name missing: {msg}");
+        assert!(
+            msg.contains("oxplow_list_comments"),
+            "tool name missing: {msg}"
+        );
         assert!(msg.contains("thread id"), "expected kind missing: {msg}");
     }
 
@@ -241,7 +244,7 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(
-            msg.contains("list_comments") && msg.contains("`id`"),
+            msg.contains("oxplow_list_comments") && msg.contains("`id`"),
             "{msg}"
         );
         // Blank/whitespace id is treated the same as missing.

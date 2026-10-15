@@ -26,7 +26,7 @@ pub struct AgentText {
 impl AgentText {
     /// Every skill as `(name, description)`, the description taken from
     /// its frontmatter: the index an agent that can't discover skill files
-    /// (an ACP agent) is given, to fetch bodies with `get_skill`.
+    /// (an ACP agent) is given, to fetch bodies with `oxplow_get_skill`.
     pub fn skill_index(&self) -> Vec<(&str, &str)> {
         self.skills
             .iter()

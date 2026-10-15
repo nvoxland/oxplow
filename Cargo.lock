@@ -5061,11 +5061,14 @@ version = "0.7.0"
 dependencies = [
  "oxplow-app",
  "oxplow-db",
+ "oxplow-domain",
  "oxplow-mcp",
  "oxplow-rpc",
  "oxplow-tauri-ipc",
  "oxplow-workspace-hack",
  "tauri-specta",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

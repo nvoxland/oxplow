@@ -15,7 +15,7 @@ LOC). Ask only if genuinely ambiguous.
 
 ## 2. Prefer an existing metric
 
-List the bundled metrics with `query_sql`:
+List the bundled metrics with `oxplow_query_sql`:
 `SELECT key, title, language, enabled FROM v_metric_catalog WHERE scope = 'extension:oxplow-foundation'`.
 If one already measures it (unsafe blocks, unwrap/expect, TODO markers, function
 count, high-complexity functions, `any` usage, …), just turn it on with the
@@ -91,13 +91,13 @@ copy-paste templates.
 ## 4. Verify
 
 1. `oxplow extension check <name>` — no errors and no warnings (or
-   `validate_extension`). It dry-runs the lens, so a bad query shows here.
+   `oxplow_validate_extension`). It dry-runs the lens, so a bad query shows here.
 2. `oxplow extension test <name>` — the collector runs over the fixture's
    files and must return the facts the example expects.
 3. Once the extension loads, `oxplow.collector.sync { collector:
    "collector:<name>/<ns>.scan" }` (`run_command`) runs the collector now and returns the
    `facts` count.
-4. `query_sql`: `SELECT bucket, MEASURE('<ns>.complex_functions') FROM
+4. `oxplow_query_sql`: `SELECT bucket, MEASURE('<ns>.complex_functions') FROM
    metric_grid('day')` — confirm the value; slice it with `metric_grid('day',
    '<ns>.area')`.
 5. It appears on the Metrics page automatically, and the lens in the launcher

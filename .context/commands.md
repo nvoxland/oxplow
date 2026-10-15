@@ -234,7 +234,7 @@ See [extensions.md](./extensions.md) "Private state host boundary".
 | `write` | changes files, git, processes, the configuration | yes | its stream's writer thread only |
 
 **The agent's reads are read scopes.** Every read an agent has beyond
-`query_sql`'s models is an operation of a read scope (`Access::Read`,
+`oxplow_query_sql`'s models is an operation of a read scope (`Access::Read`,
 `Host::Daemon`, an `External` handler over live state), in
 `crates/oxplow-app/src/commands/agent_reads/`, declared in
 `oxplow-foundation` as `oxplow.<area>.<verb>` with `invokers` agent, human
@@ -1005,14 +1005,11 @@ rather than read a listing of every full spec (164 KB): the index keeps
 discovery cheap, the example makes the first call right, and a refusal
 quotes the example. `run_command` answers with the outcome:
 `result`, `audit_id`, `event_id`, `inverse?` — or, for a run that needs
-a person's confirmation, `{ kind: "proposed", proposal, message }`). Extensions never add MCP
-tools. `run_command` is an agent's only write path for records — the
-named write tools (`create_task`, `complete_task`, `amend_effort`,
-`record_test_run`, `add_thread_note`, …) are gone (P8.A10;
-`oxplow-mcp`'s `WRITE_TOOLS` lists every tool that isn't read-only,
-each with its reason, and `read_write_split_covers_every_tool` fails on a
-tool in neither list — a new write tool is a deliberate, reviewed
-addition).
+a person's confirmation, `{ kind: "proposed", proposal, message }`). Every other tool is a
+command or lens an extension declares with `tool:` ([extensions.md](./extensions.md)
+"Agents: the MCP surface"): a named entry to a command, run through the
+bus like `run_command`, hinted read-only by its access. Records are
+written only through commands; there are no write tools of their own.
 
 **Caller identity.** The control plane admits an MCP request only with an
 agent session's bearer, minted at its launch, and puts that session's

@@ -131,11 +131,11 @@ test("a tool call's proposal is found in its result, from oxplow's command tools
   expect(proposalOfTool(call("mcp__oxplow__run_command", [], { kind: "proposed", proposal: "proposal:3" }))).toBe("proposal:3");
   // A lens action's proposal comes back as the refusal's message.
   expect(
-    proposalOfTool(call("mcp__oxplow__run_lens_action", ["`oxplow.work_item.delete` needs a person's approval; it is recorded as proposal:9 and waits"], null, "failed")),
+    proposalOfTool(call("mcp__oxplow__oxplow_run_lens_action", ["`oxplow.work_item.delete` needs a person's approval; it is recorded as proposal:9 and waits"], null, "failed")),
   ).toBe("proposal:9");
   // A run that ran, and other tools quoting such text, name none.
   expect(proposalOfTool(call("mcp__oxplow__run_command", [JSON.stringify({ result: { ok: true } })]))).toBeNull();
   expect(proposalOfTool(call("Bash", [proposed]))).toBeNull();
-  expect(proposalOfTool(call("mcp__oxplow__query_sql", [proposed]))).toBeNull();
+  expect(proposalOfTool(call("mcp__oxplow__oxplow_query_sql", [proposed]))).toBeNull();
 });
 

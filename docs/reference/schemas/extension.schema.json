@@ -1792,6 +1792,14 @@
         "example": {
           "description": "An input that fits its schema: what an agent is shown beside the\nschema and a refused input quotes. A script's defaults to its\nfirst example that runs.",
           "default": null
+        },
+        "tool": {
+          "description": "Offer it to agents as an MCP tool too, named\n`<namespace>_<tool>` ([`tool_name`]).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,

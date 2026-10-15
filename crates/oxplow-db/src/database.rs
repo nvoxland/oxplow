@@ -2055,7 +2055,7 @@ mod tests {
                  ('a', 'agent.tool.requested', 1, 't', 'agent', '[]',
                   '{"tool":"Edit","path":"src/a.rs","decision":"allowed"}'),
                  ('b', 'agent.tool.finished', 1, 't', 'agent', '[]',
-                  '{"tool":"mcp__oxplow__query_sql","ok":true}'),
+                  '{"tool":"mcp__oxplow__oxplow_query_sql","ok":true}'),
                  ('c', 'agent.tool.finished', 1, 't', 'agent', '[]',
                   '{"tool":"Bash","detail":"ls","exit_code":0}'),
                  ('d', 'agent.tool.requested', 1, 't', 'agent', '[]',

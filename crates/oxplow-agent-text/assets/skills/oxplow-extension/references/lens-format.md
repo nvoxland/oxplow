@@ -65,7 +65,7 @@ empty: Nothing is waiting on you.
   `thread_id` is filled in with the viewer's current stream / thread
   (numeric, like the `v_*` columns) unless a value is given. The lens
   page uses the stream the person is on and its selected thread;
-  `run_lens` uses the `stream_id` / `thread_id` you pass (default: the
+  `oxplow_run_lens` uses the `stream_id` / `thread_id` you pass (default: the
   stream's selected thread). A `default:` applies only when there is no
   current value.
 - **`viz`**:
@@ -124,7 +124,7 @@ empty: Nothing is waiting on you.
   onto the agent terminal to add the page to its context.
 - **`alert:`** says when a lens needs attention: `{ min_rows: 1 }` (the
   run returned at least that many rows) or `{ column: pct, below: 80 }` /
-  `above:` (the first row's value), with an optional `label`. `run_lens`
+  `above:` (the first row's value), with an optional `label`. `oxplow_run_lens`
   returns the alert state.
 - **`needs:`** (a lens or a hint) names the capabilities or features it
   can't run without, e.g. `needs: [work_items, snapshots.contents]`. A
@@ -146,7 +146,7 @@ empty: Nothing is waiting on you.
   to Agent Context are on every lens already — don't declare them.
 
   An action runs as the lens acting for whoever pressed it, so it can't do
-  anything they couldn't: you can press one with `run_lens_action`, but a
+  anything they couldn't: you can press one with `oxplow_run_lens_action`, but a
   command you can't run (or that needs a person's confirmation, like
   approving an exec collector) is refused.
 - **Unknown keys are errors.** Only the keys shown here exist today.

@@ -83,6 +83,9 @@ pub struct ExtensionCommand {
     /// with — what `list_commands` shows an agent and a refusal quotes.
     #[specta(type = Option<oxplow_domain::Json>)]
     pub example: Option<Value>,
+    /// The MCP tool it is also offered as (`tool:`), prefixed with its
+    /// namespace: `oxplow_query_sql` ([`tool_name`]).
+    pub tool: Option<String>,
 }
 
 /// What runs an extension's command.
@@ -176,6 +179,10 @@ pub(crate) struct CommandFile {
     /// first example that runs.
     #[serde(default)]
     example: Option<Value>,
+    /// Offer it to agents as an MCP tool too, named
+    /// `<namespace>_<tool>` ([`tool_name`]).
+    #[serde(default)]
+    tool: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -196,6 +203,82 @@ struct ExampleFile {
 /// snake_case segment.
 pub fn valid_op(name: &str) -> bool {
     valid_segment(name)
+}
+
+/// The longest `tool:` name, before its namespace prefix.
+const TOOL_NAME_MAX: usize = 48;
+
+/// The MCP tool a `tool: <name>` entry declares: `<namespace>_<name>`, so
+/// every extension's tools — oxplow's own as `oxplow_*` — are told apart
+/// by the extension's namespace; only core's `list_commands` and
+/// `run_command` go unprefixed.
+pub fn tool_name(namespace: &str, name: &str) -> Result<String, String> {
+    if !valid_segment(name) || name.len() > TOOL_NAME_MAX {
+        return Err(format!(
+            "tool name `{name}` must be lowercase letters, digits and underscores, starting \
+             with a letter, at most {TOOL_NAME_MAX} characters (it is offered as \
+             `{namespace}_<name>`)"
+        ));
+    }
+    Ok(format!("{namespace}_{name}"))
+}
+
+/// Tool names offered more than once among the enabled extensions — by
+/// two entries of one extension, or by two extensions under one namespace
+/// (oxplow's own share `oxplow`): each owner is told, and none offers it.
+pub fn refuse_duplicate_tools(extensions: &mut [Extension]) {
+    let mut owners: BTreeMap<String, Vec<(usize, String)>> = BTreeMap::new();
+    for (i, e) in extensions.iter().enumerate() {
+        if !e.enabled || e.public_contracts.blocked {
+            continue;
+        }
+        let commands = e
+            .commands
+            .iter()
+            .filter_map(|c| Some((c.tool.clone()?, format!("command `{}`", c.name))));
+        let lenses = e
+            .lenses
+            .iter()
+            .filter_map(|l| Some((l.tool.clone()?, format!("lens `{}`", l.id))));
+        for (tool, owner) in commands.chain(lenses) {
+            owners.entry(tool).or_default().push((i, owner));
+        }
+    }
+    for (tool, by) in owners.into_iter().filter(|(_, by)| by.len() > 1) {
+        let mut exts: Vec<usize> = by.iter().map(|(i, _)| *i).collect();
+        exts.dedup();
+        let message = if exts.len() == 1 {
+            let entries: Vec<&str> = by.iter().map(|(_, owner)| owner.as_str()).collect();
+            format!(
+                "tool `{tool}` is offered twice: by {}",
+                entries.join(" and ")
+            )
+        } else {
+            let names: Vec<String> = exts
+                .iter()
+                .map(|&i| format!("`{}`", extensions[i].name))
+                .collect();
+            format!(
+                "tool `{tool}` is offered by {}; give one another `tool:` name",
+                names.join(" and ")
+            )
+        };
+        for &i in &exts {
+            let ext = &mut extensions[i];
+            ext.errors
+                .push(format!("{}/extension.yaml: {message}", ext.path));
+            for c in &mut ext.commands {
+                if c.tool.as_deref() == Some(tool.as_str()) {
+                    c.tool = None;
+                }
+            }
+            for l in &mut ext.lenses {
+                if l.tool.as_deref() == Some(tool.as_str()) {
+                    l.tool = None;
+                }
+            }
+        }
+    }
 }
 
 fn valid_segment(segment: &str) -> bool {
@@ -479,8 +562,14 @@ fn command_of(
             .find(|e| e.refuses.is_none())
             .map(|e| e.input.clone())
     });
+    let tool = f
+        .tool
+        .map(|t| tool_name(namespace, &t))
+        .transpose()
+        .map_err(at_name)?;
     Ok(ExtensionCommand {
         example,
+        tool,
         name,
         summary: f.summary,
         input_schema,
@@ -1658,6 +1747,91 @@ mod tests {
             oxplow_domain::contribution::extension_namespace("my-review"),
             "my_review"
         );
+    }
+
+    /// A command or a lens that asks to be a tool (`tool: <name>`) is
+    /// offered to agents as `<namespace>_<name>`; a name that isn't one is
+    /// an error at its entry, and two entries can't share one.
+    #[test]
+    fn a_command_or_a_lens_is_offered_as_a_tool_under_its_namespace() {
+        let d = tempfile::tempdir().unwrap();
+        let lens = "title: Waiting\nquery: SELECT 1 AS n\ntool: waiting\n";
+        write_ext(
+            d.path(),
+            "my-review",
+            &format!("{GOOD}    tool: finish\n"),
+            &[
+                ("handlers/finish_review.star", HANDLER),
+                ("lenses/waiting.yaml", lens),
+            ],
+        );
+        let ext = project(d.path(), "my-review");
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        assert_eq!(ext.commands[0].tool.as_deref(), Some("my_review_finish"));
+        assert_eq!(ext.lenses[0].tool.as_deref(), Some("my_review_waiting"));
+
+        for (command_tool, lens_tool, says) in [
+            ("Finish", "waiting", "tool name `Finish`"),
+            ("finish", "finish-it", "tool name `finish-it`"),
+            ("finish", "finish", "`my_review_finish` is offered twice"),
+        ] {
+            let d = tempfile::tempdir().unwrap();
+            write_ext(
+                d.path(),
+                "my-review",
+                &format!("{GOOD}    tool: {command_tool}\n"),
+                &[
+                    ("handlers/finish_review.star", HANDLER),
+                    (
+                        "lenses/waiting.yaml",
+                        &format!("title: Waiting\nquery: SELECT 1 AS n\ntool: {lens_tool}\n"),
+                    ),
+                ],
+            );
+            let errors = project(d.path(), "my-review").errors.join("\n");
+            assert!(
+                errors.contains(says),
+                "{command_tool}/{lens_tool}: {errors}"
+            );
+        }
+    }
+
+    /// Two extensions under one namespace (oxplow's own) can't offer one
+    /// tool name: each is told, and neither offers it.
+    #[test]
+    fn a_tool_name_two_extensions_declare_is_refused() {
+        let d = tempfile::tempdir().unwrap();
+        for name in ["first", "second"] {
+            write(
+                d.path(),
+                &format!("oxplow/extensions/{name}/extension.yaml"),
+                &format!("manifest: 2\nname: {name}\nintent:\n  purpose: p\n"),
+            );
+            write(
+                d.path(),
+                &format!("oxplow/extensions/{name}/lenses/waiting.yaml"),
+                "title: Waiting\nquery: SELECT 1 AS n\ntool: waiting\n",
+            );
+        }
+        let mut exts: Vec<Extension> = load_extensions(d.path())
+            .into_iter()
+            .filter(|e| e.origin == "project")
+            .collect();
+        for e in &mut exts {
+            e.namespace = "shared".into();
+            e.lenses[0].tool = Some("shared_waiting".into());
+        }
+        refuse_duplicate_tools(&mut exts);
+        for e in &exts {
+            assert_eq!(e.lenses[0].tool, None, "{}", e.name);
+            assert!(
+                e.errors
+                    .join("\n")
+                    .contains("`shared_waiting` is offered by `first` and `second`"),
+                "{:?}",
+                e.errors
+            );
+        }
     }
 
     /// A command declares what it needs and how a person meets

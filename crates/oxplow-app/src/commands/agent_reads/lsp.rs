@@ -151,7 +151,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
             "symbols",
             services.clone(),
             |svc, actor, p: CodeSymbolsParams| async move {
-                check_optional_stream("code_symbols", "/stream_id", p.stream_id.as_deref())?;
+                check_optional_stream("oxplow_code_symbols", "/stream_id", p.stream_id.as_deref())?;
                 let stream_id = stream_or_primary(&svc, &actor, p.stream_id).await?;
                 let stream = code_stream("/stream_id", &stream_id)?;
                 match svc.code_intel.document_symbols(stream, &p.path).await {
@@ -191,7 +191,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
             services,
             |svc, actor, p: CodeWorkspaceSymbolsParams| async move {
                 check_optional_stream(
-                    "code_workspace_symbols",
+                    "oxplow_code_workspace_symbols",
                     "/stream_id",
                     p.stream_id.as_deref(),
                 )?;

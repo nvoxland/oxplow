@@ -2,7 +2,7 @@
 //! `oxplow/extensions/` and which of them it turned off, activated as boot
 //! activates — the same staged generation, registries and declared
 //! entities (empty, as before any collector ran) a running oxplow has. What
-//! `extension test` and MCP `preview_extension` run everything on, and what
+//! `extension test` and MCP `oxplow_preview_extension` run everything on, and what
 //! `check` asks for a command registry when no oxplow is running.
 //!
 //! It never touches the project's own data: its database is in memory, its

@@ -11,7 +11,7 @@
    facts; returns the `facts` count. `oxplow.metric.rebuild`
    (`{ "force": true }` to redo everything) runs every snapshot collector's
    whole-tree baseline.
-3. **Read the metric back** with `query_sql` and the metric function; slice it
+3. **Read the metric back** with `oxplow_query_sql` and the metric function; slice it
    by your dimension:
 
    ```sql

@@ -1,12 +1,12 @@
-# Testing the whole extension (`preview_extension`, fixtures)
+# Testing the whole extension (`oxplow_preview_extension`, fixtures)
 
-**`preview_extension(name, stream_id)`** (MCP; `oxplow extension test
+**`oxplow_preview_extension(name, stream_id)`** (MCP; `oxplow extension test
    <name>` from a terminal) runs your whole extension in a throwaway
    oxplow: activated as the app activates it (your entities empty, your
    models, commands, effects, jobs and components live), never the
    project's database, your programs seeing no credentials, and every
    model call answered by the fixture's `model.replies` — never a real
-   provider. Run it after `validate_extension` and before handing over.
+   provider. Run it after `oxplow_validate_extension` and before handing over.
    Its report says what it ran, the generation, what the extension
    `contributes`, and what it can't run here (`unsupported`: pages,
    panels, slots, decorators, replacements, skills — the app shows them).

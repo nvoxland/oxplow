@@ -803,7 +803,7 @@ const WORKTREE_PATH_USERS: &[(&str, &str)] = &[
     ("crates/oxplow-app/src/commit_links.rs", "asks git whether a commit holds an effort"),
     ("crates/oxplow-app/src/effort_landing.rs", "asks git where an effort landed"),
     ("crates/oxplow-app/src/commands/extension_install.rs", "installs an extension into the worktree"),
-    ("crates/oxplow-app/src/ref_read.rs", "`read` reads a file at a revision and a lens in the caller's worktree"),
+    ("crates/oxplow-app/src/ref_read.rs", "`oxplow_read` reads a file at a revision and a lens in the caller's worktree"),
     ("crates/oxplow-app/src/commands/agent_reads/collectors.rs", "previews a collector from the caller's worktree"),
     ("crates/oxplow-app/src/commands/agent_reads/extensions.rs", "checks an extension in the caller's worktree"),
     ("crates/oxplow-app/src/commands/agent_reads/vcs.rs", "diffs the caller's worktree"),

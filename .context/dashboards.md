@@ -94,7 +94,7 @@ correctly; frontend field access is snake_case.
 An agent builds a dashboard on request ("make me a dashboard of the
 coverage metrics") with `run_command oxplow.dashboard.create` then
 `oxplow.dashboard.add_item` (P8.A5: the `create_dashboard` / `add_dashboard_item`
-MCP tools are gone). It reads with `query_sql` over `v_dashboard` and
+MCP tools are gone). It reads with `oxplow_query_sql` over `v_dashboard` and
 `v_dashboard_item`. A query tile's `sql` is checked before it is stored, so a tile
 that saves runs; deleting a dashboard is a person's.
 
@@ -142,7 +142,7 @@ row). `parseTileOptions` keeps `chart` and `QueryTile` passes it to
 `adHocLens`, so a pinned chart renders as it did in Explore Data.
 
 **Metric card** — `components/Dashboard/MetricTile.tsx` (+ `TextTile.tsx`).
-A `display: "metric"` query tile runs its `sql` through `query_sql` and
+A `display: "metric"` query tile runs its `sql` through `oxplow_query_sql` and
 switches on the `options_json` `viz`:
 
 | `viz` | Renders |
@@ -155,7 +155,7 @@ cumulative, avg → moving average, else the value). **Simplified (tsk309):**
 the `sparkline` / `bar` visualizations, per-tile chart mode and scale, the
 off-target highlight, the dimension filter, saved views and Save Copy are
 gone; `parseTileOptions` reads tiles saved with those options as plain line
-tiles. Breakdowns are for agents (`metric_grid(…, dim)` through `query_sql`)
+tiles. Breakdowns are for agents (`metric_grid(…, dim)` through `oxplow_query_sql`)
 and lenses.
 
 A `text`-kind item is a **heading band** (`TextTile`) labelling the run of tiles

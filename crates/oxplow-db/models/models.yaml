@@ -71,7 +71,7 @@
     - { not_null: id }
     - { unique: id }
 - name: ai_call
-  version: 4
+  version: 5
   description: "Every model call oxplow itself made (not the coding agent's): role, provider, model, tokens, latency and whether it succeeded."
   columns:
     - { name: "id", type: "INTEGER", doc: "Row id." }
@@ -89,7 +89,7 @@
     - { name: "request_hash", type: "TEXT", doc: "Content hash of what the model was asked (`{ system, prompt, json }` or `{ state, questions }`), its body kept for the `ai` retention window (`read_ai_call`); NULL for a call made before requests were kept." }
     - { name: "response_hash", type: "TEXT", doc: "Content hash of what the model answered (`{ text }` or `{ answers }`), kept like the request; NULL when the call failed." }
     - { name: "run_id", type: "TEXT", doc: "The extension run that made the call (`v_extension_run.run_id`); NULL for oxplow's own calls. (v3)" }
-    - { name: "ref", type: "TEXT", doc: "`ai_call:<id>`: its ref. `read` gives its row and, with `#request` / `#response`, its bodies. (v4)" }
+    - { name: "ref", type: "TEXT", doc: "`ai_call:<id>`: its ref. `oxplow_read` gives its row and, with `#request` / `#response`, its bodies. (v4)" }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -163,7 +163,7 @@
     - { name: "turn_id", type: "INTEGER", doc: "The agent turn it was measured in (v_agent_turn.id), when one produced it." }
 - name: change
   version: 3
-  description: "Analyzed changes: a commit (vs its parent), an effort (start → end snapshot, or → working tree while open), an agent turn (start → end snapshot: what the turn changed) or a stream's working tree (vs HEAD). Created on demand by `ensure_change`; a working tree's and an open effort's are recomputed by the `change.analyze` consumer as the stream moves. The v_change_* views hold its analysis."
+  description: "Analyzed changes: a commit (vs its parent), an effort (start → end snapshot, or → working tree while open), an agent turn (start → end snapshot: what the turn changed) or a stream's working tree (vs HEAD). Created on demand by `oxplow_ensure_change`; a working tree's and an open effort's are recomputed by the `change.analyze` consumer as the stream moves. The v_change_* views hold its analysis."
   columns:
     - { name: "id", type: "INTEGER", doc: "Change id (the change_id in v_change_*)." }
     - { name: "stream_id", type: "INTEGER", doc: "Stream whose repo it's in." }
@@ -1141,7 +1141,7 @@
 - name: lens
   version: 1
   key: [ref]
-  description: "Every lens of every enabled extension: a saved query over the models and how to show it. Each is a page for the person (unless hidden); open one with `show_lens`, run one with `run_lens`, read its definition with `read { ref }`. Restated with each extension generation, so it is what the running catalog holds."
+  description: "Every lens of every enabled extension: a saved query over the models and how to show it. Each is a page for the person (unless hidden); open one with `oxplow_show_lens`, run one with `oxplow_run_lens`, read its definition with `oxplow_read { ref }`. Restated with each extension generation, so it is what the running catalog holds."
   columns:
     - { name: "ref", type: "TEXT", doc: "`lens:<extension>/<slug>`: its ref, the one place SQL spells it." }
     - { name: "extension", type: "TEXT", doc: "The extension that declares it (v_extension.name)." }
@@ -1160,7 +1160,7 @@
 - name: extension
   version: 1
   key: [ref]
-  description: "Every extension the catalog loaded — the project's own (`oxplow/extensions/`) and the ones that ship with oxplow — enabled or not, with why it loaded badly if it did. What an extension contributes is in `v_contribution` (count it by `extension` and `kind`); its lenses are `v_lens`. Restated with each extension generation; an extension that fails to load holds its generation back, so it is not a row — `validate_extension` says why. `errors` and `warnings` are what a loaded one reports."
+  description: "Every extension the catalog loaded — the project's own (`oxplow/extensions/`) and the ones that ship with oxplow — enabled or not, with why it loaded badly if it did. What an extension contributes is in `v_contribution` (count it by `extension` and `kind`); its lenses are `v_lens`. Restated with each extension generation; an extension that fails to load holds its generation back, so it is not a row — `oxplow_validate_extension` says why. `errors` and `warnings` are what a loaded one reports."
   columns:
     - { name: "ref", type: "TEXT", doc: "`extension:<name>`." }
     - { name: "name", type: "TEXT", doc: "Its name: the folder under `oxplow/extensions/`." }
@@ -1281,7 +1281,7 @@
     - { accepted_values: { column: decision, values: [pending, approved, declined, superseded] } }
 - name: thread_answer
   version: 2
-  description: "An agent's answers in a thread: what `show_lens` showed the person — an existing lens with its params, or the answer's own lens spec — and, once kept, the lens it became."
+  description: "An agent's answers in a thread: what `oxplow_show_lens` showed the person — an existing lens with its params, or the answer's own lens spec — and, once kept, the lens it became."
   columns:
     - { name: "id", type: "INTEGER", doc: "Answer id." }
     - { name: "ref", type: "TEXT", doc: "`answer:<id>`." }
@@ -1412,7 +1412,7 @@
     - { relationships: { column: ref, to: work_item, field: ref } }
 - name: knowledge_page
   version: 2
-  description: "Knowledge pages (the wiki): one row per page with what it links to and how many of its file refs have drifted since they were pinned. A page's full text is `v_knowledge_body`; search them with the `search` tool."
+  description: "Knowledge pages (the wiki): one row per page with what it links to and how many of its file refs have drifted since they were pinned. A page's full text is `v_knowledge_body`; search them with the `oxplow_search` tool."
   columns:
     - { name: "ref", type: "TEXT", doc: "`wiki:<slug>`." }
     - { name: "provider", type: "TEXT", doc: "The knowledge store that keeps it: the project's active one (`oxplow`, the wiki; a provider's instance). The pages are the active store's. (v2)" }
@@ -1442,7 +1442,7 @@
     - { not_null: slug }
 - name: knowledge_ref
   version: 1
-  description: "Each knowledge page's file refs and how current they are: the snapshot a ref was pinned to against the file's latest — both the primary stream's, the one definition of staleness every reader uses. `stale` rows are what `v_knowledge_page.stale_ref_count` counts; `wiki_ref_drift` shows one's diff."
+  description: "Each knowledge page's file refs and how current they are: the snapshot a ref was pinned to against the file's latest — both the primary stream's, the one definition of staleness every reader uses. `stale` rows are what `v_knowledge_page.stale_ref_count` counts; `oxplow_wiki_ref_drift` shows one's diff."
   columns:
     - { name: "page", type: "TEXT", doc: "The page (`wiki:<slug>`, v_knowledge_page.ref)." }
     - { name: "path", type: "TEXT", doc: "The file it relies on (workspace-relative)." }
@@ -1651,7 +1651,7 @@
 - name: lsp_server
   version: 1
   key: [language_id]
-  description: "Every language server oxplow knows — configured in `.oxplow/project.yaml` or installed through Mason (the yaml wins per language) — with whether its binary exists and which streams run it now. Read live when a query names it; check it before relying on `code_hover` / `code_definition` / `code_references` for a language, and after an `oxplow.lsp.install_server`."
+  description: "Every language server oxplow knows — configured in `.oxplow/project.yaml` or installed through Mason (the yaml wins per language) — with whether its binary exists and which streams run it now. Read live when a query names it; check it before relying on `oxplow_code_hover` / `oxplow_code_definition` / `oxplow_code_references` for a language, and after an `oxplow.lsp.install_server`."
   columns:
     - { name: "language_id", type: "TEXT", doc: "The LSP language id (`rust`, `typescript`)." }
     - { name: "extensions", type: "TEXT", doc: "File extensions it serves, a JSON array." }

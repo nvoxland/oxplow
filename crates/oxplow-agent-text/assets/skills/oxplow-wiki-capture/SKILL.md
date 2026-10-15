@@ -1,6 +1,6 @@
 ---
 name: oxplow-wiki-capture
-description: Capturing non-trivial exploratory Q&A into wiki pages — codebase walkthroughs AND general synthesis (design rationale, comparisons, tradeoffs, recommendations, advice). The wiki is for any durable understanding worth keeping, not just code questions. Loads on v_knowledge_page, v_knowledge_ref, the oxplow `search` tool (kind wiki), v_page_ref, oxplow.knowledge.write_page, on /note, and when the user asks "how does X work", "where is X", "explain X", "trace X", "describe the architecture", "give me an overview", "summarize the codebase", "walk me through X", "why does/did/should X", "what's the difference between X and Y", "compare X and Y", "what are the tradeoffs", "should I use X or Y", "what's the best way to X", "rationale behind X", "advice on X", or says "save this" / "add a note" / "add to the wiki".
+description: Capturing non-trivial exploratory Q&A into wiki pages — codebase walkthroughs AND general synthesis (design rationale, comparisons, tradeoffs, recommendations, advice). The wiki is for any durable understanding worth keeping, not just code questions. Loads on v_knowledge_page, v_knowledge_ref, the oxplow `oxplow_search` tool (kind wiki), v_page_ref, oxplow.knowledge.write_page, on /note, and when the user asks "how does X work", "where is X", "explain X", "trace X", "describe the architecture", "give me an overview", "summarize the codebase", "walk me through X", "why does/did/should X", "what's the difference between X and Y", "compare X and Y", "what are the tradeoffs", "should I use X or Y", "what's the best way to X", "rationale behind X", "advice on X", or says "save this" / "add a note" / "add to the wiki".
 ---
 
 # Wiki pages — exploratory capture
@@ -22,9 +22,9 @@ captures the same way: `oxplow.knowledge.write_page` is open to every thread.
 
 ## Find before you create
 
-Don't fragment. Look for an existing topic page first: `query_sql` over
+Don't fragment. Look for an existing topic page first: `oxplow_query_sql` over
 `v_knowledge_page` (`slug`, `title`, `excerpt`, `stale_ref_count`), then
-`search` with `kinds: ["wiki"]`. If a relevant page exists, **append a
+`oxplow_search` with `kinds: ["wiki"]`. If a relevant page exists, **append a
 dated section** to it; create a new page only when none fits.
 `references/search-existing.md` has the full lookup, including which
 pages already cite a file.

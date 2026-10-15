@@ -218,7 +218,7 @@ mod tests {
             .find(|s| s.name == "oxplow-codebase")
             .expect("the codebase skill");
         let all = text.skill_full_text("oxplow-codebase").unwrap();
-        for needle in ["v_op_error", "`read`", "output_size", "red"] {
+        for needle in ["v_op_error", "`oxplow_read`", "output_size", "red"] {
             assert!(all.contains(needle), "the skill never says `{needle}`");
         }
         let description = skill.body.lines().nth(2).unwrap_or_default();

@@ -76,7 +76,7 @@ selectors; screenshot when looks matter, and read the image.
 3. **Work concurrently while it runs.** Explore other surfaces, file
    bugs, test features (comments, search, dashboards), brief a second
    thread, or run a second stream in parallel. Useful IPC for
-   inspection: `query_sql` over `v_work_item` / `v_effort` (a thread's
+   inspection: `oxplow_query_sql` over `v_work_item` / `v_effort` (a thread's
    work, an item's efforts), `list_threads` (`{"streamId":"str1"}`),
    `v_effort_observation`, `run_command` to file a task
    (`{"name":"work_item.create","input":{"title":…,"body":…,"state":"todo","native":{"thread":"thr1"}},"confirmed":false}`;
@@ -156,7 +156,7 @@ Drive these like a user would, not just the agent terminal:
   (`knowledge.add_comment`; intent `followup` = "agent, act on this" vs `note`
   = private). It surfaces in the **Comments Dashboard** and bumps the
   **"For me"** badge. A *different* thread's agent (even a different
-  runtime, e.g. opencode) answers it via `list_comments` →
+  runtime, e.g. opencode) answers it via `oxplow_list_comments` →
   `knowledge.reply_comment` → `knowledge.update_comment {status: resolved}`. Exercise this cross-thread,
   cross-agent Q&A loop — it's a core collaboration primitive and it works.
 - **Query/investigation threads + wiki.** Point a second thread at a

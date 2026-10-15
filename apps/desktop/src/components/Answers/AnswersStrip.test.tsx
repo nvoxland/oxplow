@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { Lens, LensRun } from "../../tauri-bridge/generated/bindings.js";
 
-// The Answers strip (P6.C2): an agent's `show_lens` answers, newest first,
+// The Answers strip (P6.C2): an agent's `oxplow_show_lens` answers, newest first,
 // each live, with Keep This running `oxplow.lens.keep`.
 
 const realApi = await import("../../api.js");

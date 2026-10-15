@@ -72,7 +72,7 @@ pub fn valid_slug(slug: &str) -> bool {
 
 /// What new file refs are pinned to: the primary stream's latest snapshot,
 /// and the revision that snapshot is exactly, when it is one. Freshness
-/// compares the pinned snapshot to a file's latest (`wiki_ref_drift`).
+/// compares the pinned snapshot to a file's latest (`oxplow_wiki_ref_drift`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Pin {
     pub snapshot_id: Option<i64>,

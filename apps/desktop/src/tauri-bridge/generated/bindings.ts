@@ -2960,6 +2960,11 @@ export type ExtensionCommand = {
 	 *  with — what `list_commands` shows an agent and a refusal quotes.
 	 */
 	example: unknown | null,
+	/**
+	 *  The MCP tool it is also offered as (`tool:`), prefixed with its
+	 *  namespace: `oxplow_query_sql` ([`tool_name`]).
+	 */
+	tool: string | null,
 };
 
 // One instance of an extension's provider (`extensionInstances`).
@@ -3983,7 +3988,7 @@ export type Lens = Lens_Serialize | Lens_Deserialize;
  *  agent are on every lens, not declared.
  */
 export type LensAction = {
-	// Unique within the lens; `run_lens_action` names it.
+	// Unique within the lens; `oxplow_run_lens_action` names it.
 	id: string,
 	label: string,
 	// The command it runs (`oxplow.work_item.transition`).
@@ -4455,7 +4460,7 @@ export type LensViz =
 export type Lens_Deserialize = {
 	/**
 	 *  `<extension>/<slug>`: the stable id used by `lens:` page refs,
-	 *  `run_lens` and `get_lens`.
+	 *  `oxplow_run_lens` and `get_lens`.
 	 */
 	id: string,
 	extension: string,
@@ -4502,13 +4507,19 @@ export type Lens_Deserialize = {
 	needs: string[],
 	// Repo-relative path of the lens file.
 	path: string,
+	/**
+	 *  The MCP tool it is also offered as (`tool:`), prefixed with its
+	 *  extension's namespace (`extension_commands::tool_name`): a call
+	 *  runs it and returns its text rendering.
+	 */
+	tool: string | null,
 };
 
 // A loaded lens.
 export type Lens_Serialize = {
 	/**
 	 *  `<extension>/<slug>`: the stable id used by `lens:` page refs,
-	 *  `run_lens` and `get_lens`.
+	 *  `oxplow_run_lens` and `get_lens`.
 	 */
 	id: string,
 	extension: string,
@@ -4555,6 +4566,12 @@ export type Lens_Serialize = {
 	needs: string[],
 	// Repo-relative path of the lens file.
 	path: string,
+	/**
+	 *  The MCP tool it is also offered as (`tool:`), prefixed with its
+	 *  extension's namespace (`extension_commands::tool_name`): a call
+	 *  runs it and returns its text rendering.
+	 */
+	tool: string | null,
 };
 
 export type Lifecycle = "stable" | "experimental";

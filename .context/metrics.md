@@ -1306,7 +1306,7 @@ authoritative store; the fact is the analytics grain.
 
 ### Read and write surface (P4.8)
 
-**Reads are SQL.** Agents and the desktop read metrics through `query_sql`
+**Reads are SQL.** Agents and the desktop read metrics through `oxplow_query_sql`
 — `metric_grid(bucket[, dim])` with `MEASURE('<key>')` for series (the
 engine computes each one; see `.context/semantic-layer.md` "Metrics in
 SQL"), and the views `v_metric_spec`, `v_metric_catalog`, `v_measure`,
@@ -1352,7 +1352,7 @@ reached through `run_command`, audited like every command):
   reads it, or a delta whose snapshot has it, clears it). The baseline prune
   (`prune_dominated_tree_captures`) keeps the older captures that hold such a
   file's last good facts. The metric's detail page lists the unchecked files
-  under its chart (`UNCHECKED_FILES_SQL`), and a lens or `query_sql` can join
+  under its chart (`UNCHECKED_FILES_SQL`), and a lens or `oxplow_query_sql` can join
   `v_capture_exclusion` with `v_fact`/`v_capture`. A capture before this was
   recorded has no exclusions. Oversize files can also be listed from
   `v_snapshot_file` (`storage`).
@@ -1641,7 +1641,7 @@ the change loop announces `OxplowEvent::MetricSamplesChanged` for what landed.
 > shape, kept for context; the current IPC wiring + types are in the **IPC**
 > bullet.
 
-- **Agents** read through `query_sql` and change metrics through the
+- **Agents** read through `oxplow_query_sql` and change metrics through the
   `metric.*` commands (see "Read and write surface (P4.8)"). An asserted
   fact (`oxplow.metric.record`) lands on the metric's source measure under a
   `provenance: asserted` / `source: agent-reported` / `scan_kind: asserted`
@@ -1779,7 +1779,7 @@ just carries a Help blurb pointing there.
   table, test tree, coverage lines, top subjects), the Metric Recording page,
   the target-override input and the "In this effort" callout are gone.
   Targets live in config; breakdowns and findings are for agents
-  (`metric_grid(…, dim)`, `v_fact` through `query_sql`) and lenses.
+  (`metric_grid(…, dim)`, `v_fact` through `oxplow_query_sql`) and lenses.
   Old `metric-recording:<capture>:<key>` tab ids reopen the metric.
 
 > **Definition descriptions (tsk309).** Every metric carries a one-line

@@ -3,7 +3,7 @@
 //! ([`conformance`], [`extension_test`]).
 //!
 //! One library behind three callers — the `oxplow extension new|check|test`
-//! CLI in the Tauri binary, the RPC/MCP `validate_extension`, and
+//! CLI in the Tauri binary, the RPC/MCP `oxplow_validate_extension`, and
 //! `save_lens` — so every message reads the same (`file:line: what — fix`)
 //! wherever the author meets it. For an AI author that consistency is the
 //! feature: the skill says "run `check` after every edit", and the error
@@ -1000,7 +1000,7 @@ pub enum DryRun {
 /// manifest's shape and lifecycle, every cross-reference, every lens's
 /// shape, and a dry run of its models, commands, lenses and advisories
 /// against the semantic layer — `layer` (the project's), else a fresh
-/// in-memory database. This is what `validate_extension` returns
+/// in-memory database. This is what `oxplow_validate_extension` returns
 /// and what `oxplow extension check` prints. `commands` (the running app's
 /// registry) checks launcher command entries; without it, a throwaway
 /// oxplow's does. With `against` (a git revision), the report also says
