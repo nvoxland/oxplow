@@ -3857,7 +3857,18 @@ advisories:
   requirements** (decided 2026-10-07): they say what oxplow observed, never
   how a project should code — no coverage target, no "add tests" — and
   a project that wants one writes its own advisory (the `coverage-target`
-  nudge was removed for this). Advisories read
+  nudge was removed for this).
+  Each bundled hint has a fixture in `advisories.rs` that makes it fire
+  and cases that keep it quiet (`every_bundled_hint_has_a_fixture_that_fires_it`
+  fails when a hint ships without one). A count of `fired = 0` in
+  `v_hint_stat` is therefore the project's state, not a broken query:
+  `threshold-crossed` needs a metric with a `warnAt`/`failAt` that an effort
+  moves past (only the coverage metric ships thresholds, and efforts
+  rarely fall under them), `landed-in-progress` needs a commit-closed effort
+  whose item is still in progress, and nothing is evaluated while
+  oxplow-bundled is disabled, since its policy and hints are the
+  extension's. A `coverage-target` row in `v_hint_stat` is residue from
+  before that hint was removed. Advisories read
   stored views (`v_effort_metric_delta`, `v_effort_observation`), never the
   engine directly.
 - The report-less-run nudge stays in core: it's about collection hygiene,

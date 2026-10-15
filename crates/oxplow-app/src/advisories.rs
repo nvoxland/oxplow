@@ -1144,6 +1144,143 @@ mod tests {
         assert!(landed().await.is_empty(), "once per item");
     }
 
+    /// The thread's hits of bundled hint `id` for `on`, with a cause
+    /// anchored to the thread (and `effort`).
+    async fn bundled_hits(
+        f: &crate::test_fixtures::EffortFixture,
+        id: &str,
+        on: AdvisoryOn,
+        effort: Option<oxplow_domain::EffortId>,
+    ) -> Vec<AdvisoryHit> {
+        let cause = crate::collection::RunCause {
+            event_id: "evt".into(),
+            seq: 1,
+            anchors: oxplow_domain::Anchors {
+                thread_id: Some(f.thread),
+                effort_id: effort,
+                ..Default::default()
+            },
+            at: oxplow_domain::Timestamp::now(),
+            started: None,
+        };
+        for_thread(&f.svc.advisory_deps(), &f.thread, on, Some(&cause))
+            .await
+            .into_iter()
+            .filter(|h| h.id == id)
+            .collect()
+    }
+
+    async fn run_command(
+        f: &crate::test_fixtures::EffortFixture,
+        name: &str,
+        input: serde_json::Value,
+    ) {
+        f.svc
+            .commands
+            .run(&oxplow_domain::Actor::Human, name, input, false)
+            .await
+            .unwrap();
+    }
+
+    const LANDED: &str = "oxplow-bundled/landed-in-progress";
+
+    /// `landed-in-progress` is for an item a commit landed that nothing
+    /// is working on and that still says in progress: any other shape of
+    /// the same facts stays quiet.
+    #[tokio::test]
+    async fn bundled_landed_hint_stays_quiet_unless_a_commit_landed_an_unfinished_item() {
+        let item_ref =
+            |f: &crate::test_fixtures::TaskEffortFixture| oxplow_tasks::work_item_ref(f.task);
+        let close = |reason: &'static str| move |f: &crate::test_fixtures::TaskEffortFixture| serde_json::json!({ "effort": oxplow_domain::refs::build::effort_ref(f.effort), "reason": reason });
+
+        // Still being worked on: its effort is open.
+        let f = crate::test_fixtures::services_with_task_effort().await;
+        assert!(bundled_hits(&f, LANDED, AdvisoryOn::TurnEnd, None)
+            .await
+            .is_empty());
+
+        // The thread moved on (a switch), not a commit.
+        let f = crate::test_fixtures::services_with_task_effort().await;
+        run_command(&f, crate::commands::effort::CLOSE, close("switch")(&f)).await;
+        assert!(bundled_hits(&f, LANDED, AdvisoryOn::TurnEnd, None)
+            .await
+            .is_empty());
+
+        // A commit landed it and the item is already done.
+        let f = crate::test_fixtures::services_with_task_effort().await;
+        run_command(&f, crate::commands::effort::CLOSE, close("commit")(&f)).await;
+        run_command(
+            &f,
+            crate::commands::work_item::NAME,
+            serde_json::json!({ "ref": item_ref(&f), "to": "done" }),
+        )
+        .await;
+        assert!(bundled_hits(&f, LANDED, AdvisoryOn::TurnEnd, None)
+            .await
+            .is_empty());
+
+        // A commit landed it, but a new effort is open on the item.
+        let f = crate::test_fixtures::services_with_task_effort().await;
+        run_command(&f, crate::commands::effort::CLOSE, close("commit")(&f)).await;
+        run_command(&f, crate::commands::effort::OPEN, serde_json::json!({ "thread": oxplow_domain::refs::build::thread_ref(f.thread), "work_item": item_ref(&f) })).await;
+        assert!(bundled_hits(&f, LANDED, AdvisoryOn::TurnEnd, None)
+            .await
+            .is_empty());
+
+        // The hint is turn-end only.
+        let f = crate::test_fixtures::services_with_task_effort().await;
+        run_command(&f, crate::commands::effort::CLOSE, close("commit")(&f)).await;
+        assert!(bundled_hits(&f, LANDED, AdvisoryOn::Prompt, None)
+            .await
+            .is_empty());
+        assert_eq!(
+            bundled_hits(&f, LANDED, AdvisoryOn::TurnEnd, None)
+                .await
+                .len(),
+            1
+        );
+    }
+
+    /// `large-uncommitted` counts an open effort's files: a closed effort
+    /// holding many files (its commit landed) is quiet.
+    #[tokio::test]
+    async fn bundled_large_work_hint_stays_quiet_once_the_effort_closed() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        {
+            use oxplow_db::EffortStore as _;
+            for n in 0..20 {
+                f.svc
+                    .effort_store
+                    .record_file(
+                        &f.effort,
+                        &format!("src/f{n}.rs"),
+                        oxplow_db::effort_store::EffortFileChange::Updated,
+                        oxplow_db::effort_store::FileRefVersion {
+                            local_snapshot_id: 0,
+                            closest_vcs_rev: None,
+                            vcs_rev_exact: false,
+                        },
+                    )
+                    .await
+                    .unwrap();
+            }
+        }
+        run_command(
+            &f,
+            crate::commands::effort::CLOSE,
+            serde_json::json!({ "effort": oxplow_domain::refs::build::effort_ref(f.effort), "reason": "commit" }),
+        )
+        .await;
+        let hits = bundled_hits(
+            &f,
+            "oxplow-bundled/large-uncommitted",
+            AdvisoryOn::TurnEnd,
+            Some(f.effort),
+        )
+        .await;
+        assert!(hits.is_empty(), "{hits:?}");
+    }
+
     fn delta(
         key: &str,
         title: &str,
@@ -1222,6 +1359,87 @@ mod tests {
             "the crossing is once per metric: {second:?}"
         );
         assert_eq!(second[0].id, "oxplow-bundled/metric-deltas");
+    }
+
+    /// A metric that moved without crossing a threshold says how it
+    /// moved and nothing more; a warn crossing says warn; and nothing that
+    /// moved, or only an operational or event metric that did, is quiet.
+    #[tokio::test]
+    async fn bundled_metric_hints_say_what_moved_and_are_quiet_otherwise() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let prompt_hits = || async {
+            for_thread(&f.svc.advisory_deps(), &f.thread, AdvisoryOn::Prompt, None).await
+        };
+        let replace = |deltas| {
+            let store = f.svc.effort_evidence_store.clone();
+            let effort = f.effort.value();
+            async move {
+                store
+                    .replace(effort, deltas, Vec::new(), String::new())
+                    .await
+                    .unwrap()
+            }
+        };
+
+        replace(vec![
+            delta("test.flat", "flat", 7.0, 7.0, None),
+            delta("agent.tokens.total", "tokens", 100.0, 5000.0, Some("fail")),
+            delta("effort.minutes", "minutes", 1.0, 30.0, Some("warn")),
+            delta("task.cycle", "cycle", 1.0, 9.0, Some("warn")),
+        ])
+        .await;
+        assert!(
+            prompt_hits().await.is_empty(),
+            "unchanged and operational metrics are quiet"
+        );
+
+        let mut event = delta("test.event", "event", 1.0, 9.0, Some("warn"));
+        event.kind = "event".into();
+        replace(vec![event]).await;
+        assert!(prompt_hits().await.is_empty(), "an event metric is quiet");
+
+        replace(vec![delta("test.size", "size", 2.0, 6.0, Some("warn"))]).await;
+        let hits = prompt_hits().await;
+        let text = |id: &str| {
+            hits.iter()
+                .find(|h| h.id == id)
+                .map(|h| h.text.clone())
+                .unwrap_or_default()
+        };
+        assert_eq!(
+            text("oxplow-bundled/metric-deltas"),
+            "# Metric deltas (this effort)\n- size: 2 → 6 (Δ +4)\n(Advisory — for awareness, not gating.)"
+        );
+        assert_eq!(
+            text("oxplow-bundled/threshold-crossed"),
+            "# Metric thresholds\n⚠ size crossed its warn threshold (5)"
+        );
+
+        replace(vec![delta("test.size", "size", 2.0, 4.0, None)]).await;
+        let hits = prompt_hits().await;
+        assert_eq!(hits.len(), 1, "moved, under its thresholds: {hits:?}");
+        assert_eq!(hits[0].id, "oxplow-bundled/metric-deltas");
+    }
+
+    /// Every hint oxplow-bundled ships has a fixture above that makes it
+    /// fire; a new one is added to this list with its own.
+    #[test]
+    fn every_bundled_hint_has_a_fixture_that_fires_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let exts = crate::extensions::load_extensions(dir.path());
+        let bundled = exts.iter().find(|e| e.name == "oxplow-bundled").unwrap();
+        let mut shipped: Vec<&str> = bundled.advisories.iter().map(|a| a.id.as_str()).collect();
+        shipped.sort_unstable();
+        assert_eq!(
+            shipped,
+            [
+                "landed-in-progress",
+                "large-uncommitted",
+                "metric-deltas",
+                "threshold-crossed"
+            ],
+            "a bundled hint without a fixture that fires it"
+        );
     }
 
     /// Oxplow sets no coding requirements for a project: a poorly covered
