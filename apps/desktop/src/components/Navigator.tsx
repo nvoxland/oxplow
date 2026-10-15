@@ -78,11 +78,11 @@ type RenameTarget = { kind: "stream" | "thread"; id: string };
  *     threads beneath them.
  *   - Thread rows: two-letter glyph, weight 600, slightly indented in
  *     the overlay; in the strip they share the same column.
- *   - The active stream's writer thread is marked with a small pencil
- *     badge in its top-left corner (not an accent outline, which reads
- *     as selected). Activity dot is
- *     overlaid in the top-right corner of the icon cell — same
- *     position in strip and overlay.
+ *   - The active stream's writer thread is marked with a corner fold
+ *     (a small right triangle in `--writer-mark`) on its tab's top-right
+ *     corner — not an accent outline, which reads as selected. The
+ *     activity dot sits on the right end at half height, clear of it;
+ *     both are in the same place in strip and overlay.
  *   - Selection treatment: accent-soft-bg row background + 3px accent
  *     left stripe.
  *   - 8px gap separates the last thread of one stream from the next
@@ -289,8 +289,8 @@ export function Navigator({
   // Build the list of "rows" so the strip and overlay can both walk
   // the same sequence — guaranteeing matching y-positions row-by-row.
   // `add-thread` rows are flyout-only (skipped in the strip render).
-  // Each stream + its threads renders as one panel (a surface-card box,
-  // rounded on the right, flush on the left), with a gap between groups —
+  // Each stream + its threads renders as one panel (a transparent box,
+  // flush on the left), with a gap between groups —
   // mirroring the main rail's panel look. The strip and the slide-over
   // overlay both map this same structure so glyph y-positions stay in
   // lock-step when the overlay opens.
@@ -351,8 +351,9 @@ export function Navigator({
           height: "100%",
           // The panel colour that sits left of the tabs runs the rail's
           // whole height, below the tabs too, with no line between it and
-          // the HUD rail.
-          background: "var(--surface-card)",
+          // the HUD rail. The app's dark, so the tabs stand out the way
+          // the centre tab strip does against the content.
+          background: "var(--surface-app)",
 
           display: "flex",
           flexDirection: "column",
@@ -971,14 +972,17 @@ function IconCell({
         borderRadius: isLast ? "0 0 6px 0" : 0,
         // The centre tab strip's header tint. The writer looks like any
         // other tab (the accent outline and tint read as "selected"); a
-        // pencil badge marks it instead.
+        // corner fold marks it instead.
         backgroundImage: "linear-gradient(var(--panel-header-bg), var(--panel-header-bg))",
         backgroundColor: "var(--surface-card)",
         color: "var(--text-primary)",
-        // Each tab draws its top edge, and the last also its bottom.
+        // Each tab draws its top edge, and the last also its bottom. The
+        // top edge is a dark cut in the background's colour, so a dark
+        // line falls between two light tabs (a lighter one vanished at
+        // this size); the right and bottom keep the frame.
         borderWidth: isLast ? "1px 1px 1px 0" : "1px 1px 0 0",
         borderStyle: "solid",
-        borderColor: "var(--border-strong)",
+        borderColor: "var(--surface-app) var(--border-strong) var(--border-strong) var(--border-strong)",
         fontSize: THREAD_LETTER_FONT,
         fontWeight: 600,
       };
@@ -1013,35 +1017,22 @@ function IconCell({
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
+              position: "relative",
               borderRightWidth: 1,
               borderRightStyle: "solid",
               borderRightColor: isStream ? "rgba(0, 0, 0, 0.3)" : "var(--border-strong)",
             }}
           >
             {letter}
+            {/* On the glyph part, so it lines up with the strip's. */}
+            {isWriter && !isStream ? <WriterMark right={0} /> : null}
           </span>
           <span style={{ flex: 1, minWidth: 0, display: "flex", paddingLeft: 10 }}>{label}</span>
         </>
       ) : (
         letter
       )}
-      {isWriter && !isStream ? (
-        <span
-          data-testid="navigator-writer-badge"
-          title="Writer: this thread can edit project files"
-          style={{
-            position: "absolute",
-            top: 1,
-            left: SELECTION_BAR + 1,
-            display: "flex",
-            color: "var(--text-muted)",
-          }}
-        >
-          <svg width="9" height="9" viewBox="0 0 16 16" aria-hidden fill="currentColor">
-            <path d="M11.9 1.3a1.5 1.5 0 0 1 2.1 0l.7.7a1.5 1.5 0 0 1 0 2.1l-8.6 8.6-3.6.9a.5.5 0 0 1-.6-.6l.9-3.6 8.6-8.6zM3.7 11.1l-.5 2.2 2.2-.5-1.7-1.7z" />
-          </svg>
-        </span>
-      ) : null}
+      {isWriter && !isStream && label === undefined ? <WriterMark right={-1} /> : null}
       {/* Threads always show the agent's activity indicator. Mirrors
           the fallback the Agent tab uses (App.tsx — `agentStatuses[id]
           ?? "waiting"`) so a never-attached thread still reads as the
@@ -1061,6 +1052,28 @@ function IconCell({
           <AgentStatusDot status={status ?? "waiting"} size={8} question={question} />
         </span>
       ) : null}
+    </span>
+  );
+}
+
+/** The writer thread's corner fold: a right triangle, its right angle in
+ *  the tab's top-right corner, in `--writer-mark`. */
+function WriterMark({ right }: { right: number }) {
+  return (
+    <span
+      data-testid="navigator-writer-badge"
+      title="Writer: this thread can edit project files"
+      style={{
+        position: "absolute",
+        top: -1,
+        right,
+        display: "flex",
+        color: "var(--writer-mark)",
+      }}
+    >
+      <svg width="7" height="7" viewBox="0 0 7 7" aria-hidden fill="currentColor">
+        <path d="M0 0H7V7Z" />
+      </svg>
     </span>
   );
 }
@@ -1194,13 +1207,12 @@ const GAP_HEIGHT = 14;
 const ADD_ROW_HEIGHT = 40;
 const OVERLAY_WIDTH = 240;
 
-// Each stream + its threads renders inside this box: a surface-card panel
-// flush along the left window edge, with no outline of its own (the tabs
+// Each stream + its threads renders inside this box: a transparent panel
+// (the strip's dark or the overlay's chrome shows through) flush along the left window edge, with no outline of its own (the tabs
 // carry the borders), square-cornered so the tabs inside it
 // keep their square right edges, with a gap below it. Shared by the strip
 // and the slide-over overlay.
 const STREAM_PANEL_STYLE: CSSProperties = {
-  background: "var(--surface-card)",
   marginBottom: 6,
   overflow: "hidden",
 };

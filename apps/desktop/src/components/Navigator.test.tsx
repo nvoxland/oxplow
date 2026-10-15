@@ -448,11 +448,21 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
   expect(queued.style.borderRadius).toBe("0px 0px 6px");
   expect(writer.style.borderWidth).toBe("1px 1px 0px 0px");
   expect(queued.style.borderWidth).toBe("1px 1px 1px 0px");
-  // The writer is not outlined like the selection: it carries a pencil badge.
-  expect(writer.style.borderColor).toBe("var(--border-strong)");
-  expect(writer.querySelector("[data-testid=navigator-writer-badge]")?.getAttribute("title")).toMatch(/Writer/);
+  // The writer is not outlined like the selection: a corner fold in the
+  // writer colour marks its top-right corner.
+  const mark = writer.querySelector("[data-testid=navigator-writer-badge]") as HTMLElement;
+  expect(mark.getAttribute("title")).toMatch(/Writer/);
+  expect(mark.style.color).toBe("var(--writer-mark)");
+  expect(mark.style.top).toBe("-1px");
+  expect(mark.style.right).toBe("-1px");
   expect(queued.querySelector("[data-testid=navigator-writer-badge]")).toBeNull();
-  expect(queued.style.borderColor).toBe("var(--border-strong)");
+  // A dark cut in the background's colour falls between stacked tabs; the
+  // outer right and bottom edges keep their frame.
+  // (The DOM folds the left side, equal to the right, away.)
+  expect(writer.style.borderColor).toBe("var(--surface-app) var(--border-strong) var(--border-strong)");
+  expect(queued.style.borderColor).toBe(writer.style.borderColor);
+  // The column behind the tabs is one colour: the app's.
+  expect(getByTestId("navigator-strip").style.background).toBe("var(--surface-app)");
 
   // The guide runs from the stream through its threads, ending at the last.
   const guide = (rowId: string) =>
