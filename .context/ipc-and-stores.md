@@ -24,7 +24,7 @@ command):
 
 | Write | Why it isn't a command |
 |---|---|
-| select a thread, switch stream, report the open page | UI selection pointers, not project facts |
+| select a thread, switch stream, report the tabs a window shows | UI selection pointers, not project facts |
 | page visits, usage recording, forgetting a page | implicit navigation telemetry, not an intent: an audit row per tab switch would flood `command_audit`. Their views re-read `v_page_visit` / `v_usage_event` on `ModelsChanged` (P8.A10) |
 | background-task progress | in memory and transient |
 | hook ingest, ACP prompt / cancel / permission answers, terminal input | agent-session activity, born as `agent.*` events ([data-model.md](./data-model.md) "event_log"); oxplow never synthesizes agent input |

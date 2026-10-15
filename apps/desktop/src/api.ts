@@ -1,6 +1,7 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
 import type {
   BackgroundTask,
+  TabReport,
   SecretRef,
   BegunSignIn,
   ChangeScopes,
@@ -703,15 +704,10 @@ export async function validateExtension(name: string, streamId: string | null): 
   return unwrap(await commands.validateExtension(name, streamId));
 }
 
-/// Tell the backend which page the human has open in a thread (for the
-/// agent's `get_open_page`). `pageId` null = nothing open.
-export async function reportOpenPage(
-  threadId: string,
-  pageId: string | null,
-  kind: string | null,
-  detailJson: string | null,
-): Promise<void> {
-  unwrap(await commands.reportOpenPage(threadId, pageId, kind, detailJson));
+/// Tell the backend what this window shows (`tabs/tabReport.ts`), for an
+/// agent's `list_tabs` / `get_open_page`.
+export async function reportTabs(report: TabReport): Promise<void> {
+  unwrap(await commands.reportTabs(report));
 }
 
 /// Turn an extension on or off for the project (`extensions.disabled` in

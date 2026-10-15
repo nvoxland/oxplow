@@ -230,7 +230,7 @@ Every tool foundation declares is named below
 | Ask a model | `oxplow_ai_decide` (typed questions about some text, on the `decide` role), `oxplow_ai_summarize` (on `summarize`): recorded computations paid with the person's key, as the asking thread ([ai-providers.md](./ai-providers.md)) |
 | Show the person | `oxplow_show_lens`, `oxplow_run_lens`, `oxplow_run_lens_action`, `oxplow_navigate` (takes them to any ref's page, switching stream when needed) |
 | Common questions, typed | foundation lenses with `tool:`: `oxplow_thread_work`, `oxplow_work_next`, `oxplow_effort_files`, `oxplow_effort_summary`, `oxplow_file_history`, `oxplow_recent_commits`, `oxplow_snapshots`, `oxplow_thread_notes` — each returns what its lens shows, for a model that shouldn't have to write SQL for them |
-| What the person has | `oxplow_get_open_page` (the page open in a thread, a lens re-run with their params), `oxplow_list_comments` (their anchored comments, hydrated) |
+| What the person has | `oxplow_list_tabs` (the tabs each of their windows shows, per thread, stream or project: selected, on screen, stale), `oxplow_get_open_page` (the page open in a thread in the window they were in last, the others' beside it, or one listed tab; a lens re-run with their params), `oxplow_list_comments` (their anchored comments, hydrated) |
 | Wiki | `oxplow_wiki_ref_drift` (one stale ref's diff against its pin) |
 | Extension authoring | `oxplow_validate_extension`, `oxplow_preview_extension`, `oxplow_preview_collector`, `oxplow_review_extension` |
 | oxplow's guidance | `oxplow_get_skill { name, reference? }` |
