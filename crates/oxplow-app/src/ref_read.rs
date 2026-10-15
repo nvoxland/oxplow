@@ -1,5 +1,5 @@
 //! `read`: one reader for anything a ref names (`.context/refs.md`,
-//! `.context/agent-model.md` "MCP tools"). The agent's single way to look at
+//! `.context/agent-model.md` "The agent's tools"). The agent's single way to look at
 //! a thing it was pointed at or found in a model's `ref` column:
 //!
 //! - the **row** of the model that owns the ref's kind (core's,

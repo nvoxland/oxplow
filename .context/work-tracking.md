@@ -103,9 +103,9 @@ say the mover's thread, a checkpoint's turn, a landing's effort; it is
 offered each of `EVENTS`: `work_item.state_changed` (core's, logged for
 every provider), `effort.linked`, `effort.opened`, `thread.checkpoint`,
 `effort.landed`. `EffortPolicyRegistry` (`Services.effort_policies`) holds
-the policies by id: the declared built-ins, which a catalog reload
-restates (`set_declared`, `effort_policy::register_built_ins` from
-`capabilities::refresh`), and running provider instances, which register
+the policies by id: the declared built-ins, which each activation
+generation restates (`effort_policy::prepare_built_ins`, published with
+`set_declared`), and running provider instances, which register
 themselves and a reload never touches.
 
 `crate::effort_policy::EffortPolicyConsumer` (`effort.policy`) is the
@@ -130,7 +130,7 @@ effort_policy` and a `.star` entry, its `needs:` the scopes it reads —
 [extensions.md](./extensions.md) "Implementations"). It's an effect's
 shape: `transform({event})` gets the event envelope and answers `{
 commands: [{ name, input }] }` or `{ skip }` (events are refused).
-`effort_policy::register_built_ins` registers it as an
+`effort_policy::prepare_built_ins` registers it as an
 `effort_policy_script::ScriptedPolicy`, which `effects::run_over` runs
 under the effects' sandbox, its `scope("sql.read", …)` limited to its
 `needs`. It runs only while a person has approved it as it is
@@ -403,27 +403,5 @@ The four in progress:
   active list's item.
   The app's test fixture opens an effort with no task; only tests about
   tasks make one (which found a claim on an unlinked effort failing).
-- Next: "none" as a work list end to end, then the three
-  capabilities.
-
-
-## Capability candidate consistency
-
-CapabilityRegistry holds core, extension declarations and running-instance
-metadata in one state. Each snapshot, selection, recognizer and row computation
-uses one captured implementation list; feature resolution never rereads a newer
-registry halfway through that operation. This preserves the existing selection
-and fallback rules.
-
-PreparedCapabilities freezes candidate declarations, resolved choices, features,
-work item recognition and SQL rows from one catalog plus registry state. Preparation
-starts no adapters or providers. Its transaction helper restates capability rows
-and switch events with rollback on failure. Registry publication checks the
-original allocation identity and supplied config's resolved choices/provenance;
-a changed registry/config requires restaging. It conveys no authority.
-
-PreparedExtensionDatabase can include those rows/switch events with models,
-vocabulary and contribution descriptors in one savepoint, deriving vocabulary
-recognition from the planned capability selection. Coordinated runtime adapter
-publication, stable config/catalog ownership and compatible reader pinning still
-need the generation activation owner. Legacy refresh remains independent.
+- Next: "none" as a work list end to end, then the other three
+  capabilities in the table (the effort policy, snapshots, knowledge).

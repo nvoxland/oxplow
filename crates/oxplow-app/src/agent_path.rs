@@ -169,7 +169,7 @@ pub fn not_inherited(harnesses: &oxplow_domain::agent::registry::HarnessRegistry
     out
 }
 
-/// The env every agent/terminal PTY is spawned with. One place so the five
+/// The env every agent/terminal PTY is spawned with. One place so the
 /// spawn sites can't drift on whether they widen PATH.
 pub fn base_pty_env() -> Vec<(String, String)> {
     let mut env = vec![

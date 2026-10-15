@@ -10,7 +10,6 @@
 //! - a tool call the policy denies is rejected without asking; anything
 //!   else waits on the person, with no timeout and no "always allow" for
 //!   writes;
-//! - the turn-end directive is shown, never sent;
 //! - a `session/load` replay rebuilds the transcript and records nothing.
 
 use std::collections::{HashMap, HashSet};

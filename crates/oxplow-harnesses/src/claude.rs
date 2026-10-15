@@ -327,9 +327,10 @@ const PLUGIN_VERSION: &str = "0.0.0";
 /// The hook events registered. SessionStart is registered even though
 /// Claude Code drops HTTP hooks for it ("HTTP hooks are not supported for
 /// SessionStart" in its debug log) — the session id comes from whichever
-/// hook fires next instead. The last group is only observed: subagents,
-/// Claude's own task list and compaction are acked unread today, and their
-/// payloads can be dumped (`OXPLOW_HOOK_DEBUG`) to learn their shapes.
+/// hook fires next instead. `PreCompact` resets what the session was told
+/// (the next prompt carries its context again). Subagents are read; Claude's
+/// own task list is acked unread, and its payloads can be dumped
+/// (`OXPLOW_HOOK_DEBUG`) to learn their shapes.
 const HOOK_EVENTS: &[&str] = &[
     "PreToolUse",
     "PostToolUse",

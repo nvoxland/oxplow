@@ -4255,6 +4255,22 @@ generation. A disabled bundled owner cannot be shadowed by a project namesake.
 These checks preserve owner/scope identity during preparation; they do not
 coordinate provider process/adaptor publication with the other registries.
 
+**Capability candidates.** `PreparedCapabilities`
+(`crates/oxplow-app/src/capabilities.rs`) freezes candidate declarations,
+resolved choices, features, work-item recognition and the
+`v_capability_provider` rows from one catalog plus the registry's captured
+state; each snapshot, selection, recognizer and row computation uses that
+one captured implementation list, so feature resolution never rereads a
+newer registry halfway through, and the selection and fallback rules are
+the registry's own. Preparation starts no adapters or providers. Its
+transaction helper restates the capability rows and switch events, rolling
+back on failure. Publication checks the original allocation identity and
+the supplied config's resolved choices and provenance; a changed registry
+or config requires restaging. A prepared candidate conveys no authority.
+`PreparedExtensionDatabase` can include those rows and switch events with
+the models, vocabulary and contribution descriptors in one savepoint
+(`prepare_with_capabilities`, above).
+
 ## Prepared native runtime adapters
 
 `PreparedRuntimeAdapters` captures one CatalogSnapshot and constructs declared
