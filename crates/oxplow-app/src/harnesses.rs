@@ -276,8 +276,8 @@ mod tests {
         );
     }
 
-    /// A harness's settings ride its listing: opencode's model, nothing
-    /// for Claude.
+    /// A harness's settings ride its listing: opencode's model, Claude's MCP
+    /// servers.
     #[test]
     fn the_listing_carries_each_harnesss_settings() {
         let r = HarnessRegistry::new(std::sync::Arc::new(String::new));
@@ -299,6 +299,6 @@ mod tests {
                 .collect()
         };
         assert_eq!(keys("opencode"), ["model"]);
-        assert!(keys("claude").is_empty());
+        assert_eq!(keys("claude"), ["mcpServers"]);
     }
 }

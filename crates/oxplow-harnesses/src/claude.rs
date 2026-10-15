@@ -12,8 +12,10 @@
 //!    (stream/thread/session) rides per-spawn env vars too.
 //! 2. **MCP server config** — `mcp-config.<session>.json` points Claude at
 //!    the same control-plane port via the streamable-HTTP MCP transport,
-//!    passed as `--mcp-config <path> --strict-mcp-config` so the only MCP
-//!    server in scope is oxplow's.
+//!    passed as `--mcp-config <path>`: oxplow's server rides beside the
+//!    person's own (local, project, user and plugin servers, claude.ai
+//!    connectors). The `mcpServers` setting `strict` adds
+//!    `--strict-mcp-config`, so oxplow's is the only one in scope.
 //!
 //! Plus the skills, guide and slash commands it exposes as model-invoked
 //! context. The dir is rewritten on every launch, so edits to skill content
@@ -28,8 +30,8 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 
 use oxplow_domain::agent::harness::{
-    AgentHarness, Endpoints, HarnessError, Interact, Launch, LaunchInput, LaunchSpec, RuntimeRoots,
-    Transcript,
+    AgentHarness, Endpoints, HarnessError, HarnessSetting, Interact, Launch, LaunchInput,
+    LaunchSpec, RuntimeRoots, Transcript,
 };
 use oxplow_domain::agent::observe::{
     HookAnswer, OtlpRecord, Prompt, TokenReading, Turn, UsageDelta,
@@ -109,6 +111,7 @@ impl AgentHarness for Claude {
                 (Resume::Saved(resume_args(id)), missing)
             }
         };
+        let strict_mcp = strict_mcp(&input.config)?;
         let program = input
             .resolve_program("claude")
             .or_else(|| input.home.as_deref().and_then(local_install));
@@ -121,11 +124,21 @@ impl AgentHarness for Claude {
                     plugin_dir: Some(&plugin_dir.to_string_lossy()),
                     system_prompt: input.system_prompt.as_deref(),
                     mcp_config: Some(&mcp_config.to_string_lossy()),
+                    strict_mcp,
                 }),
                 env,
             },
             transcript_missing,
         })
+    }
+
+    fn settings(&self) -> Vec<HarnessSetting> {
+        vec![HarnessSetting {
+            key: "mcpServers".into(),
+            title: "MCP servers".into(),
+            hint: "`all` (the default) runs oxplow's MCP server beside your own (local, project, user and plugin servers, claude.ai connectors); `strict` runs only oxplow's. Applies to sessions started after Save.".into(),
+            placeholder: "all".into(),
+        }]
     }
 
     fn env_markers(&self) -> Vec<String> {
@@ -458,6 +471,23 @@ struct Command<'a> {
     plugin_dir: Option<&'a str>,
     system_prompt: Option<&'a str>,
     mcp_config: Option<&'a str>,
+    /// Only `mcp_config`'s servers (`--strict-mcp-config`).
+    strict_mcp: bool,
+}
+
+/// The `mcpServers` setting: `all` (also blank or unset) or `strict`.
+fn strict_mcp(config: &serde_json::Value) -> Result<bool, HarnessError> {
+    match config
+        .get("mcpServers")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+    {
+        None | Some("") | Some("all") => Ok(false),
+        Some("strict") => Ok(true),
+        Some(other) => Err(HarnessError::Config(format!(
+            "agentConfig.claude.mcpServers is `{other}`; use `all` or `strict`"
+        ))),
+    }
 }
 
 /// `claude --resume <id>`'s arguments.
@@ -479,7 +509,14 @@ fn command(c: Command<'_>) -> String {
         .unwrap_or_default();
     let mcp_arg = c
         .mcp_config
-        .map(|p| format!(" --mcp-config {} --strict-mcp-config", shell_escape(p)))
+        .map(|p| {
+            let strict = if c.strict_mcp {
+                " --strict-mcp-config"
+            } else {
+                ""
+            };
+            format!(" --mcp-config {}{strict}", shell_escape(p))
+        })
         .unwrap_or_default();
     let (prog, guard) = program_and_guard(c.program, "claude");
     let base = format!("{prog}{plugin_arg}{prompt_arg}{mcp_arg}");
@@ -666,6 +703,57 @@ mod tests {
         );
     }
 
+    /// Oxplow's MCP server rides beside the person's own (local, project,
+    /// user, plugin servers and connectors) unless they ask for it alone:
+    /// `mcpServers` is `all` by default and `strict` adds
+    /// `--strict-mcp-config`.
+    #[test]
+    fn the_persons_mcp_servers_stay_unless_strict_is_asked_for() {
+        let h = harness("oxplow:claude-code", "claude");
+        let cmd_with = |config: serde_json::Value| {
+            pty(&launch_in(h.as_ref(), None, None, &config).launch).to_string()
+        };
+        for config in [
+            serde_json::json!({}),
+            serde_json::json!({ "mcpServers": "all" }),
+            serde_json::json!({ "mcpServers": "" }),
+        ] {
+            let cmd = cmd_with(config.clone());
+            assert!(cmd.contains("--mcp-config"), "{config}: {cmd}");
+            assert!(!cmd.contains("--strict-mcp-config"), "{config}: {cmd}");
+        }
+        let cmd = cmd_with(serde_json::json!({ "mcpServers": "strict" }));
+        assert!(
+            cmd.contains("--mcp-config") && cmd.contains("--strict-mcp-config"),
+            "{cmd}"
+        );
+    }
+
+    /// A value that is neither is refused, naming the choices, rather than
+    /// guessed at.
+    #[test]
+    fn an_unknown_mcp_servers_value_is_a_config_error() {
+        let h = harness("oxplow:claude-code", "claude");
+        let err = crate::test_launch::try_launch_in(
+            h.as_ref(),
+            &serde_json::json!({ "mcpServers": "some" }),
+        )
+        .err()
+        .expect("refused");
+        assert!(
+            matches!(&err, HarnessError::Config(m) if m.contains("mcpServers") && m.contains("strict")),
+            "{err:?}"
+        );
+    }
+
+    /// It declares the setting, so Settings shows it with no special case.
+    #[test]
+    fn it_declares_the_mcp_servers_setting() {
+        let h = harness("oxplow:claude-code", "claude");
+        let keys: Vec<String> = h.settings().into_iter().map(|s| s.key).collect();
+        assert_eq!(keys, ["mcpServers"]);
+    }
+
     /// A resume id whose transcript is gone is still resumed — never
     /// replaced by a fresh conversation — and flagged, so a failed resume
     /// can say why.
@@ -735,6 +823,7 @@ mod tests {
             plugin_dir: None,
             system_prompt: None,
             mcp_config: None,
+            strict_mcp: false,
         })
     }
 

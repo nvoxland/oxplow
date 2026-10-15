@@ -170,6 +170,15 @@ mod test_launch {
         )
     }
 
+    /// `h` launched with `config`, as [`launch_in`], for a launch that is
+    /// refused.
+    pub fn try_launch_in(
+        h: &dyn AgentHarness,
+        config: &serde_json::Value,
+    ) -> Result<Launched, oxplow_domain::agent::harness::HarnessError> {
+        try_run(h, None, None, config, None, tempfile::tempdir().unwrap())
+    }
+
     fn run(
         h: &dyn AgentHarness,
         resume: Option<&str>,
@@ -178,6 +187,17 @@ mod test_launch {
         home: Option<&Path>,
         dir: tempfile::TempDir,
     ) -> Launched {
+        try_run(h, resume, system_prompt, config, home, dir).expect("it launches")
+    }
+
+    fn try_run(
+        h: &dyn AgentHarness,
+        resume: Option<&str>,
+        system_prompt: Option<&str>,
+        config: &serde_json::Value,
+        home: Option<&Path>,
+        dir: tempfile::TempDir,
+    ) -> Result<Launched, oxplow_domain::agent::harness::HarnessError> {
         let project = dir.path().to_path_buf();
         let workspace = project.join(WORKSPACE);
         std::fs::create_dir_all(&workspace).unwrap();
@@ -216,13 +236,12 @@ mod test_launch {
             oxplow_executable: "/bin/oxplow".into(),
             home: home.map(Path::to_path_buf),
             search_path: vec![agents],
-        }))
-        .expect("it launches");
-        Launched {
+        }))?;
+        Ok(Launched {
             launch,
             project,
             workspace,
             _dir: dir,
-        }
+        })
     }
 }

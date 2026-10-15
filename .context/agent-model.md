@@ -460,7 +460,7 @@ enabled and the first declared is the default. `set_agents` and
 `oxplow.agent_session.open` check keys against the registry. A harness's
 own settings are `agentConfig: { <key>: { … } }`, what its `launch`
 reads; it declares the ones a person sets (`AgentHarness::settings`:
-opencode's `model`), and Settings → Agents renders a field for each,
+opencode's `model`, Claude's `mcpServers`), and Settings → Agents renders a field for each,
 saved by `set_agent_setting`, which refuses an undeclared one. The UI
 reads the harnesses through `list_agent_harnesses` (`useAgentHarnesses`,
 `agentKinds.ts`). Whether a session is a chat follows from `interact()`,
@@ -485,8 +485,12 @@ one no longer offered is removed, a person's own stay.
   `oxplow`, `hooks/hooks.json`, `skills/`, `commands/`) and a per-session
   `mcp-config.<ses>.json` holding the session's bearer (owner-only; its
   MCP config can't interpolate env). It runs `claude --plugin-dir <abs>
-  --append-system-prompt <text> --mcp-config <file> --strict-mcp-config
-  [--resume <id>]`, falling back to `~/.claude/local/claude` when no
+  --append-system-prompt <text> --mcp-config <file>
+  [--strict-mcp-config] [--resume <id>]`: oxplow's server rides beside the
+  person's own (local, project, user, plugin servers, claude.ai
+  connectors), and `--strict-mcp-config` is added only by the
+  `agentConfig.claude.mcpServers: strict` setting (`all` is the default;
+  anything else is a config error), falling back to `~/.claude/local/claude` when no
   `claude` resolves. Its HTTP hooks (`HOOK_EVENTS`) are `PreToolUse`,
   `PostToolUse` (matcher `"*"`), `UserPromptSubmit`, `SessionStart`,
   `SessionEnd`, `Stop`, `Notification`, `SubagentStart`, `SubagentStop`,
