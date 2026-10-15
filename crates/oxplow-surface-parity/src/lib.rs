@@ -275,7 +275,10 @@ pub const MANIFEST: &[Capability] = &[
         "set_extension_enabled",
         "turning extensions on or off is a person's call",
     ),
-    both("list_collectors"),
+    model(
+        "list_collectors",
+        &["v_collector_state", "v_collector_credential", "v_collector_run"],
+    ),
     // The `oxplow.collector.sync` command: the UI runs it through `run_command`,
     // an agent through this tool (as itself, so it never approves).
     agent("run_collector"),
@@ -380,7 +383,7 @@ pub const MANIFEST: &[Capability] = &[
         "the desktop shell's loopback listener for a person's sign-in (P10)",
     ),
     both("ensure_change"),
-    both_named("ai.settings", "ai_settings", "list_ai_roles"),
+    model("ai_settings", &["v_ai_role", "v_ai_provider"]),
     ui(
         "save_ai_provider",
         "AI providers and their keys are a person's to set",
@@ -410,7 +413,6 @@ pub const MANIFEST: &[Capability] = &[
     agent("code_symbols"),
     agent("code_workspace_symbols"),
     agent("code_call_hierarchy"),
-    agent("lsp_list_servers"),
     // ---- code analysis: generic per-language unit listing (tree-sitter) ----
     agent("list_code_units"),
     // ---- git ----
@@ -680,7 +682,7 @@ pub const MANIFEST: &[Capability] = &[
     // ---- lsp (shared sessions + installer) ----
     ui(
         "list_installed_lsp_packages",
-        "Settings' language servers; an agent has `lsp_list_servers`",
+        "Settings' language servers; an agent reads `v_lsp_server`",
     ),
     ui(
         "lsp_request",
@@ -690,10 +692,7 @@ pub const MANIFEST: &[Capability] = &[
         "lsp_notify",
         "the editor's language-server client; an agent has the `code_*` tools",
     ),
-    ui(
-        "list_lsp_servers",
-        "Settings' language servers; an agent has `lsp_list_servers`",
-    ),
+    model("list_lsp_servers", &["v_lsp_server"]),
     ui(
         "restart_lsp_server",
         "Settings' language servers: restarting one is the person's",

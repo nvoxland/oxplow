@@ -641,27 +641,6 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "List extension-declared data sources (code that pulls external records \
-                       like GitHub PRs into the semantic layer): each source's spec (entities, \
-                       schedule, env), its last run (status, row counts, error) and whether a \
-                       person on this machine has approved its current script."
-    )]
-    async fn list_collectors(&self) -> Result<CallToolResult, McpError> {
-        let root = self
-            .services
-            .worktrees
-            .resolve(None)
-            .await
-            .into_local_path();
-        let list = oxplow_app::collector_runner::list_collectors(
-            &oxplow_app::collector_runner::Collectors::of(&self.services, &root),
-        )
-        .await
-        .map_err(internal)?;
-        json_result(&list)
-    }
-
-    #[tool(
         description = "Run an approved extension collector now (`collector`: its ref, `collector:<extension>/<id>`), refreshing its entities \
                        (`v_<extension>_<entity>`). You cannot approve a collector: running code \
                        the human hasn't approved fails, so ask them to use Settings → Data → \
@@ -822,17 +801,6 @@ impl OxplowMcp {
             .await
             .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
         json_result(&row)
-    }
-
-    #[tool(
-        description = "List oxplow's AI roles — the built-ins (main, summarize, decide), then \
-                       each active extension's AI profiles (`<extension>/<name>`, with the role \
-                       it falls back to): which provider and model each is bound to and would \
-                       use now, or none, plus the configured providers and whether each has a \
-                       key. Keys are never shown. The person manages these in Settings → AI."
-    )]
-    async fn list_ai_roles(&self) -> Result<CallToolResult, McpError> {
-        json_result(&self.services.ai.settings().await.map_err(ai_error)?)
     }
 
     #[tool(
@@ -1542,7 +1510,7 @@ impl OxplowMcp {
         description = "Where the symbol at a position is defined — typed locations \
                        (`{ path, range: { start: { line, col }, end } }`, 1-based; paths \
                        workspace-relative, absolute outside it), from the file's language \
-                       server. See `lsp_list_servers` for coverage."
+                       server. `v_lsp_server` says which languages have one."
     )]
     async fn code_definition(
         &self,
@@ -1706,17 +1674,6 @@ impl OxplowMcp {
             .collect();
         json_result(&units)
     }
-
-    #[tool(
-        description = "List every configured language server (.oxplow/project.yaml + Mason-installed): \
-                       languageId, command, source, binary presence, running streams. Use to \
-                       check what LSP coverage exists before code_hover/definition/references, \
-                       and to verify an `oxplow.lsp.install_server` took effect."
-    )]
-    async fn lsp_list_servers(&self) -> Result<CallToolResult, McpError> {
-        let listings = self.services.lsp_sessions.list_servers().await;
-        json_result(&listings)
-    }
 }
 
 fn code_stream(stream_id: &str) -> Result<StreamId, McpError> {
@@ -1764,8 +1721,6 @@ fn code_err(e: oxplow_domain::code_intel::CodeIntelError) -> McpError {
 /// tool isn't classified here or in [`WRITE_TOOLS`].
 const READ_ONLY_TOOLS: &[&str] = &[
     "get_skill",
-    "list_collectors",
-    "list_ai_roles",
     "get_open_page",
     "run_lens",
     "validate_extension",
@@ -1788,7 +1743,6 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "code_workspace_symbols",
     "list_code_units",
     "code_call_hierarchy",
-    "lsp_list_servers",
 ];
 
 /// Tools that MUTATE state — deliberately left without a `read_only_hint` (they
@@ -1925,15 +1879,6 @@ pub fn registered_tool_names() -> Vec<String> {
         .into_iter()
         .map(|t| t.name.into_owned())
         .collect()
-}
-
-/// AI failures the agent can act on (no model assigned, bad key, provider
-/// error) are invalid-params with the explanation; keychain trouble is internal.
-fn ai_error(e: oxplow_app::ai_service::AiServiceError) -> McpError {
-    match e {
-        oxplow_app::ai_service::AiServiceError::Secret(_) => internal(e),
-        _ => McpError::invalid_params(e.to_string(), None),
-    }
 }
 
 fn internal<E: std::fmt::Display>(e: E) -> McpError {
@@ -2556,10 +2501,6 @@ mod tests {
             .await
             .unwrap();
 
-        let list: serde_json::Value =
-            serde_json::from_str(&text_payload(server.list_collectors().await.unwrap())).unwrap();
-        assert_eq!(list[0]["approved"], false);
-
         // An agent can't consent on the human's behalf.
         let err = server
             .run_collector(
@@ -2790,14 +2731,6 @@ mod tests {
         assert!(row["referenced"][0]["title"].is_null());
         // The raw thread still travels under `thread`.
         assert_eq!(row["thread"]["comment"]["quote"], "the highlighted text");
-    }
-
-    #[tokio::test]
-    async fn lsp_list_servers_returns_array() {
-        let (_proj, _svc, server) = boot().await;
-        let r = server.lsp_list_servers().await.unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&text_payload(r)).unwrap();
-        assert!(parsed.is_array());
     }
 
     #[tokio::test]
@@ -3674,18 +3607,6 @@ mod tests {
             msg.contains("\"thread\"") && msg.contains("\"stream\""),
             "lists valid scopes: {msg}"
         );
-    }
-
-    /// `list_ai_roles` shows the roles: the built-ins, then extensions'.
-    #[tokio::test]
-    async fn ai_roles_are_listed() {
-        let (_proj, _services, server) = boot().await;
-        let roles: serde_json::Value =
-            serde_json::from_str(&text_payload(server.list_ai_roles().await.unwrap())).unwrap();
-        // The three built-ins, then oxplow-bundled's `decisions` profile.
-        assert_eq!(roles["roles"].as_array().unwrap().len(), 4);
-        assert_eq!(roles["roles"][3]["role"], "oxplow-bundled/decisions");
-        assert_eq!(roles["roles"][0]["binding"], serde_json::Value::Null);
     }
 
     #[tokio::test]

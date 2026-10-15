@@ -6,7 +6,7 @@ AI providers you configure, the roles that decide which model does what, the
 
 > **Status (epic tsk275):** built: providers, keychain keys, roles, the
 > client, call records (`oxplow-ai`, `oxplow-app/src/ai_service.rs`,
-> `v_ai_call`), Settings → AI, and the `list_ai_roles` MCP tool, inferred decisions, project role overrides,
+> `v_ai_call`), Settings → AI, and the `v_ai_role` / `v_ai_provider` live models, inferred decisions, project role overrides,
 > recorded computations (`AiCompute`, `v_ai_result`, P5.E1) and the
 > `ai_*` Starlark builtins for collectors (P5.E2). **Not
 > yet:** a models.dev catalog.
@@ -511,8 +511,9 @@ turn's prompt (`turn_kind`).
 
 ## MCP (current)
 
-- `list_ai_roles`: providers (with `keySet`, never keys) and every role's
-  binding.
+- `v_ai_provider` (with `key_set`, never keys) and `v_ai_role` (every role's
+  binding, what a call would use now, and whether its provider has a key),
+  read live: `ai.yaml`, `project.yaml` and the keychain change with no hook.
 - Asking a model is not an agent tool (an agent is a model); collectors
   keep their `ai_*` builtins.
 

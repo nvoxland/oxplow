@@ -1421,7 +1421,7 @@ it: `run_command oxplow.lsp.install_server { package }` installs from the
 Mason registry (picked up immediately by editor + tools) once a person
 approves the proposal — what binaries oxplow downloads and runs is their
 call (P8.A9) — and
-`lsp_list_servers` shows what's configured/installed/running. Adding an
+`v_lsp_server` shows what's configured/installed/running. Adding an
 `lsp.servers` entry to `.oxplow/project.yaml` is the manual alternative for
 servers not in Mason.
 

@@ -11334,5 +11334,236 @@
       ],
       "key": []
     }
+  },
+  "ai_role": {
+    "1": {
+      "columns": [
+        {
+          "name": "role",
+          "type": "TEXT",
+          "doc": "`main`, `summarize`, `decide`, or `<extension>/<profile>`."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "What the role is for: oxplow's text for a built-in, the declaring extension's for a profile."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension declaring a profile; NULL for a built-in."
+        },
+        {
+          "name": "fallback",
+          "type": "TEXT",
+          "doc": "The built-in role an unbound profile uses; NULL for a built-in."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "The provider (`v_ai_provider.id`) of the role's own binding; NULL when it has none."
+        },
+        {
+          "name": "model",
+          "type": "TEXT",
+          "doc": "The model of the role's own binding; NULL when it has none."
+        },
+        {
+          "name": "restrict",
+          "type": "TEXT",
+          "doc": "What a person forbids this binding, a JSON array of `tools`, `sql`, `streaming`, `images`; NULL when it has no binding."
+        },
+        {
+          "name": "effective_provider",
+          "type": "TEXT",
+          "doc": "The provider a call would use now: its binding's, else its fallback's; NULL when a call would be refused."
+        },
+        {
+          "name": "effective_model",
+          "type": "TEXT",
+          "doc": "The model a call would use now."
+        },
+        {
+          "name": "key_set",
+          "type": "INT",
+          "doc": "1 when the effective provider has a key in the keychain (never the key)."
+        },
+        {
+          "name": "overridden",
+          "type": "INT",
+          "doc": "1 when the binding comes from the project's `project.yaml`, not the global `ai.yaml`."
+        },
+        {
+          "name": "problem",
+          "type": "TEXT",
+          "doc": "Why a call on it would be refused, when it would be: a model lacking a feature the profile needs."
+        }
+      ],
+      "key": [
+        "role"
+      ]
+    }
+  },
+  "ai_provider": {
+    "1": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "Your name for it (`anthropic`, `local-ollama`); also its keychain entry."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "What it is: `anthropic`, `openai`, `openai_compatible`, `openrouter`, `typesafe`, …"
+        },
+        {
+          "name": "base_url",
+          "type": "TEXT",
+          "doc": "Its API base when overridden or required; NULL for the default."
+        },
+        {
+          "name": "key_set",
+          "type": "INT",
+          "doc": "1 when the keychain holds a key for it."
+        }
+      ],
+      "key": [
+        "id"
+      ]
+    }
+  },
+  "lsp_server": {
+    "1": {
+      "columns": [
+        {
+          "name": "language_id",
+          "type": "TEXT",
+          "doc": "The LSP language id (`rust`, `typescript`)."
+        },
+        {
+          "name": "extensions",
+          "type": "TEXT",
+          "doc": "File extensions it serves, a JSON array."
+        },
+        {
+          "name": "command",
+          "type": "TEXT",
+          "doc": "The command that starts it."
+        },
+        {
+          "name": "args",
+          "type": "TEXT",
+          "doc": "Its arguments, a JSON array."
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "`yaml` (project.yaml) or `installed` (Mason)."
+        },
+        {
+          "name": "package_name",
+          "type": "TEXT",
+          "doc": "The Mason package, for an installed server."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The installed package's version."
+        },
+        {
+          "name": "binary_exists",
+          "type": "INT",
+          "doc": "1 when the command resolves to a file on this machine."
+        },
+        {
+          "name": "running",
+          "type": "INT",
+          "doc": "How many streams have a live session with it."
+        },
+        {
+          "name": "running_streams",
+          "type": "TEXT",
+          "doc": "Those streams' ids, a JSON array."
+        },
+        {
+          "name": "completion_trigger_characters",
+          "type": "TEXT",
+          "doc": "A running session's completion trigger characters, a JSON array; NULL when none runs."
+        }
+      ],
+      "key": [
+        "language_id"
+      ]
+    }
+  },
+  "collector_state": {
+    "1": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`collector:<owner>/<id>`."
+        },
+        {
+          "name": "owner",
+          "type": "TEXT",
+          "doc": "The extension that declares it."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "Its id within the extension."
+        },
+        {
+          "name": "approved",
+          "type": "INT",
+          "doc": "1 when it needs no approval or this machine approved its script as it is now; 0 means `run_collector` is refused until a person approves it in Settings → Data."
+        },
+        {
+          "name": "network_enforced",
+          "type": "INT",
+          "doc": "1 when this OS enforces the collector's `network` list."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "Its approval hash as it is now — what a person's approval names; NULL for a collector needing none."
+        },
+        {
+          "name": "disabled",
+          "type": "TEXT",
+          "doc": "Why failures disabled it on this machine; NULL when it isn't."
+        }
+      ],
+      "key": [
+        "ref"
+      ]
+    }
+  },
+  "collector_credential": {
+    "1": {
+      "columns": [
+        {
+          "name": "collector",
+          "type": "TEXT",
+          "doc": "The collector's ref (`v_collector_state.ref`)."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The credential's name, as the collector reads it (`env: [NAME]`)."
+        },
+        {
+          "name": "is_set",
+          "type": "INT",
+          "doc": "1 when the keychain holds a value for it."
+        }
+      ],
+      "key": [
+        "collector",
+        "name"
+      ]
+    }
   }
 }

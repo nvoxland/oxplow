@@ -136,6 +136,9 @@ pub mod knowledge_conformance;
 pub mod lens_actions;
 pub mod lens_text;
 pub mod link_check;
+pub mod live_models;
+#[cfg(test)]
+mod live_models_tests;
 pub mod lsp_diagnostics;
 #[cfg(test)]
 mod lsp_fake;
@@ -1290,6 +1293,19 @@ impl Services {
                     &catalog.unpinned(&root, "profiles are read from declarations"),
                 )
             })
+        });
+        // The live models (`live_models`) read these when a query names them.
+        sql.live_models().bind(live_models::LiveSources {
+            ai: ai.clone(),
+            lsp: lsp.clone(),
+            worktrees: worktrees.clone(),
+            project: collector_runner::project_key(&layout.project_dir),
+            approvals: approvals.clone(),
+            collector_store: collector_store.clone(),
+            db: db.clone(),
+            vocabulary: event_log_store.vocabulary().clone(),
+            secrets: machine.secrets.clone(),
+            catalog: extension_catalog.clone(),
         });
         let extension_secrets = Arc::new(extension_secrets::ExtensionSecrets::new(
             extension_catalog.clone(),

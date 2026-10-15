@@ -4001,8 +4001,8 @@ tool list stable no matter how many extensions are installed.
   the agent to write itself.
 - `validate_extension(name)` returns load errors, schema errors and a dry
   run of every lens query, so the agent can check its work without the UI.
-- `v_extension`, `list_collectors`, `run_collector(owner, id)`
-  (never approves).
+- `v_extension`, `v_collector_state` (approval), `v_collector_credential`
+  (set or not, never the value), `run_collector(owner, id)` (never approves).
 - **Worktree streams: preview, don't run (tsk377).** Collected data is
   project-wide (one `ext__<ext>__<entity>` table), so a run (the
   `oxplow.collector.sync` command over `CollectorRunner::sync`, from any caller)

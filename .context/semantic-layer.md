@@ -477,6 +477,47 @@ so the query quotes it.)
 - `grid_rows_equal_the_engine_series` holds the grid to the engine's
   series for every metric, by bucket and by dimension.
 
+## Live models
+
+A few published models hold state that has **no change hook** to restate it
+from: whether a key is in the keychain (`v_ai_provider.key_set`,
+`v_ai_role.key_set`), `ai.yaml` and `project.yaml` (a person edits them by
+hand), which language servers run and whose binary is on disk
+(`v_lsp_server`), and a machine's collector approvals and credentials
+(`v_collector_state`, `v_collector_credential`; per machine, outside the
+repo). A restated table (as `v_lens` and `v_extension` are, in the
+extension-generation transaction) would be wrong between the change and the
+next restatement, and nothing says when that is. So these are **live
+models** (`crates/oxplow-app/src/live_models.rs`, `LiveModels::NAMES`): the
+rows are read when a query names the model.
+
+- **How** (the `metric_grid()` mechanism, in the SQL gateway): before it
+  takes a connection, `SqlGateway::materialize` finds each live model the SQL
+  names (`v_<name>`, bare or quoted), reads its rows from the registry the app
+  bound (`LiveSources`: the AI service, the LSP session manager, the
+  collector listing), and hands them to the query as a temp table
+  `live_<name>` with a temp view `v_<name>` over it. The temp view shadows
+  the core view of the same name for that query alone, and both are dropped
+  with it.
+- **The core model is an empty typed stub** (`SELECT CAST(NULL AS TEXT) AS …
+  WHERE 0`): it carries the contract (columns, docs, version, `v_model`) and
+  gives a `check` something to compile against. A gateway with nothing bound
+  to read the sources (a bare `SqlGateway::new`) **refuses** a run naming one
+  rather than answer empty, and a test pins that no core model is built on a
+  live one (it would read the stub).
+- **Cheap and lock-free:** a read walks in-memory registries, a config file
+  and the keychain; it takes no database connection and holds no lock while
+  the query runs. Nothing is cached, so a result is as current as the query.
+  A live read has no watermark, so a result's `freshness` doesn't mention it.
+- **Never a secret:** the keychain is asked whether an entry exists
+  (`key_set`, `is_set`), never for its value; a test stores a key and a
+  credential and proves neither reaches any column.
+- **Adding one:** a stub `models/<name>.sql` and its `models.yaml` entry (with
+  column docs), the name and columns in `live_models.rs`, a read in
+  `LiveSources`, and an answerability question. Declare an integer column
+  `INT` (what SQLite infers for a `CAST`). If the state does have a change
+  hook, restate it in a table instead.
+
 ## Subscriptions (P4.6)
 
 What a query read is what it subscribes to.
@@ -986,11 +1027,11 @@ entities from data already in the semantic layer:
   approves, exactly as an exec one (`collector_runner::needs_approval`;
   the same `approval_hash`, Settings → Data → Approve & Run). Until then
   `produce` refuses it (a scheduled run records `needs_approval`),
-  `list_collectors` lists it unapproved with its `version`, `extension
+  `v_collector_state` lists it unapproved with its `version`, `extension
   test` skips its examples with a warning, and only an approved script is
   handed a model at all (the services router builds no model for any
   other run, extensions.md "Services").
-  Any other derived collector needs **no approval**: `list_collectors`
+  Any other derived collector needs **no approval**: `v_collector_state`
   reports it approved and the scheduler runs it on its `every:` trigger.
 - **Refused at parse:** `env` / `credentials` on a derived collector,
   `input` on an exec collector, and an `input` that names one of the
@@ -1024,7 +1065,7 @@ entities from data already in the semantic layer:
 | Entity tables + views, run state (V133 `collector_run`) | `crates/oxplow-db/src/collector_store.rs` |
 | Settings → Data read model (`data_entities`) | `crates/oxplow-app/src/semantic_catalog.rs` |
 | IPC `list_collectors` / `approve_collector` / `set_credential` (UI only); running is `run_command oxplow.collector.sync` | `crates/oxplow-rpc/src/commands/collectors.rs` |
-| MCP `list_collectors` / `run_collector` / `preview_collector` (the `oxplow.collector.sync` command as the agent; never approves) | `crates/oxplow-mcp/src/lib.rs` |
+| MCP `run_collector` / `preview_collector`; approval and credentials read `v_collector_state` / `v_collector_credential` (the `oxplow.collector.sync` command as the agent; never approves) | `crates/oxplow-mcp/src/lib.rs` |
 | UI: Settings → Data (entities + counts, collector rows, Run) | `apps/desktop/src/components/DataSection.tsx` |
 | UI: credentials per extension | `apps/desktop/src/components/ExtensionsSection.tsx` |
 | IPC `list_data_entities` (models + counts, unsynced entities) | `crates/oxplow-rpc/src/commands/semantic.rs` |

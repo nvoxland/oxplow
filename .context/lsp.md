@@ -139,7 +139,7 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   — thin calls into `Services.code_intel`, taking
   `{ stream_id, path, line, col }` (1-based) and answering typed JSON.
   They replaced the seven `lsp_*` tools that each built raw LSP requests.
-  `lsp_list_servers` stays (provider-native); installing is the
+  `v_lsp_server` (a live model) lists the servers; installing is the
   `oxplow.lsp.install_server` command. The
   symbol tools work for **any** configured LSP language, not just the
   tree-sitter set; the call hierarchy runs `prepareCallHierarchy` then

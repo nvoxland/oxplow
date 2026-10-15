@@ -49,3 +49,22 @@
       SELECT kind, count(*) AS n FROM v_contribution
       WHERE extension = 'oxplow-bundled' GROUP BY kind
   shape: { columns: [kind, n] }
+- question: Which model would each AI role use now, and does its provider have a key?
+  skill: oxplow-extension
+  reaches:
+    sql: >-
+      SELECT role, effective_provider, effective_model, key_set
+      FROM v_ai_role ORDER BY role
+  shape: { columns: [role, effective_provider, effective_model, key_set] }
+- question: Which collectors still need a person's approval?
+  skill: oxplow-extension
+  reaches:
+    sql: SELECT ref, version FROM v_collector_state WHERE approved = 0
+  shape: { columns: [ref, version] }
+- question: Which credentials has a collector declared that have no value yet?
+  skill: oxplow-extension
+  reaches:
+    sql: >-
+      SELECT collector, name FROM v_collector_credential WHERE is_set = 0
+      ORDER BY collector, name
+  shape: { columns: [collector, name] }

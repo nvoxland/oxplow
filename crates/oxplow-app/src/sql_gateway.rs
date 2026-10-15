@@ -31,6 +31,9 @@ pub struct SqlGateway {
     /// The event types the log speaks (the app's; core's unless set):
     /// what a review reads logged events through.
     vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
+    /// What the live models (`crate::live_models`) are read from; shared by
+    /// every clone, bound once by the app.
+    live: std::sync::Arc<crate::live_models::LiveModels>,
 }
 
 /// What a query result says about the data behind it: which collectors
@@ -55,7 +58,13 @@ impl SqlGateway {
             collection: None,
             activation: std::sync::Arc::new(crate::extension_activation::ExtensionActivation::new()),
             vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
+            live: std::sync::Arc::new(crate::live_models::LiveModels::default()),
         }
+    }
+
+    /// The handle the app binds the live models' sources through.
+    pub fn live_models(&self) -> &crate::live_models::LiveModels {
+        &self.live
     }
 
     /// A gateway over `db` that reads metrics too (`metric_grid()`,
@@ -246,11 +255,12 @@ impl SqlGateway {
         }
         // Boxed: the engine reads entity metrics through a gateway, so
         // this future contains another `run`.
-        let (sql, temp, measures) =
+        let (sql, temp, views, measures) =
             Box::pin(self.materialize(&query.sql, query.stream, true)).await?;
         query.sql = sql;
         query.temp.extend(temp);
         query.temp_views.extend(self.overlay.iter().cloned());
+        query.temp_views.extend(views);
         let mut out = self.layer.run(query).await?;
         out.reads.measures = measures;
         if let Some(c) = &self.collection {
@@ -280,10 +290,22 @@ impl SqlGateway {
         sql: &str,
         stream: Option<i64>,
         with_rows: bool,
-    ) -> Result<(String, Vec<TempTable>, Vec<String>), DomainError> {
+    ) -> Result<(String, Vec<TempTable>, Vec<TempView>, Vec<String>), DomainError> {
         let mut sql = sql.to_string();
         let mut temp = Vec::new();
         let mut measures = Vec::new();
+        // The live models it names are read now, before a connection is
+        // taken. A run with nothing bound to read them is refused rather
+        // than answered from the empty stub; a check only compiles.
+        let live = crate::live_models::LiveModels::named_in(&sql)?;
+        if with_rows && !live.is_empty() && !self.live.is_bound() {
+            return Err(DomainError::Invalid(format!(
+                "v_{} is read live, and this gateway has nothing to read it from",
+                live[0]
+            )));
+        }
+        let (live_tables, live_views) = self.live.materialize(&live, with_rows).await?;
+        temp.extend(live_tables);
         if let Some(plan) = crate::metric_grid::plan(&sql)? {
             let grid = plan
                 .materialize(&sql, self.engine()?, stream, with_rows)
@@ -300,7 +322,7 @@ impl SqlGateway {
         }
         measures.sort();
         measures.dedup();
-        Ok((sql, temp, measures))
+        Ok((sql, temp, live_views, measures))
     }
 
     fn engine(&self) -> Result<&crate::metric_engine::MetricEngine, DomainError> {
@@ -332,10 +354,12 @@ impl SqlGateway {
     async fn check_unpinned(&self, sql: &str) -> Result<Reads, DomainError> {
         // The metrics are resolved (a dimension checked) but not read; the
         // query compiles against empty tables.
-        let (rewritten, temp, measures) = Box::pin(self.materialize(sql, None, false)).await?;
+        let (rewritten, temp, views, measures) =
+            Box::pin(self.materialize(sql, None, false)).await?;
         let mut q = SqlQuery::new(rewritten).limit(Some(1));
         q.temp = temp;
         q.temp_views = self.overlay.to_vec();
+        q.temp_views.extend(views);
         let mut reads = self.layer.check_with(q).await?;
         reads.measures = measures;
         Ok(reads)

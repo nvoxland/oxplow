@@ -332,7 +332,7 @@ impl AiService {
 
     /// Providers (with whether each has a key; never the key) and every
     /// role with its binding and what a call on it would use. What
-    /// Settings → AI and `list_ai_roles` show.
+    /// Settings → AI and `v_ai_role` show.
     pub async fn settings(&self) -> Result<AiSettings, AiServiceError> {
         self.read_generation(self.settings_unpinned()).await?
     }

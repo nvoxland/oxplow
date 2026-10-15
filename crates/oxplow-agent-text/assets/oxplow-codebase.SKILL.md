@@ -51,6 +51,10 @@ terminal.
   `severity`, `message`, `line`). Which files are broken:
   `SELECT path, count(*) FROM v_diagnostic WHERE severity = 'error'
   GROUP BY path`.
+- **`v_lsp_server`** — which language servers exist (`language_id`, `command`,
+  `source`: `yaml` or `installed`), whether the binary is on this machine
+  (`binary_exists`) and how many streams run it (`running`). Read it before
+  relying on a language's `code_*` tools, and after `oxplow.lsp.install_server`.
 - **Live questions** go to the language server itself through the MCP
   tools: `code_definition`, `code_references`, `code_hover`,
   `code_symbols` (a file), `code_workspace_symbols`,

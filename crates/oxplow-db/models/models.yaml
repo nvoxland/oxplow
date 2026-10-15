@@ -1597,3 +1597,65 @@
   tests:
     - { not_null: capture_id }
     - { not_null: path }
+- name: ai_role
+  version: 1
+  key: [role]
+  description: "oxplow's AI roles — the built-ins (`main`, `summarize`, `decide`), then each active extension's AI profiles (`<extension>/<name>`) — with the provider and model each is bound to and would use now, what a person forbids it (`restrict`), and whether that provider has a key. Read live when a query names it (ai.yaml, project.yaml and the keychain change with no hook): the key itself is never in any model. The person manages roles in Settings → AI."
+  columns:
+    - { name: "role", type: "TEXT", doc: "`main`, `summarize`, `decide`, or `<extension>/<profile>`." }
+    - { name: "description", type: "TEXT", doc: "What the role is for: oxplow's text for a built-in, the declaring extension's for a profile." }
+    - { name: "extension", type: "TEXT", doc: "The extension declaring a profile; NULL for a built-in." }
+    - { name: "fallback", type: "TEXT", doc: "The built-in role an unbound profile uses; NULL for a built-in." }
+    - { name: "provider", type: "TEXT", doc: "The provider (`v_ai_provider.id`) of the role's own binding; NULL when it has none." }
+    - { name: "model", type: "TEXT", doc: "The model of the role's own binding; NULL when it has none." }
+    - { name: "restrict", type: "TEXT", doc: "What a person forbids this binding, a JSON array of `tools`, `sql`, `streaming`, `images`; NULL when it has no binding." }
+    - { name: "effective_provider", type: "TEXT", doc: "The provider a call would use now: its binding's, else its fallback's; NULL when a call would be refused." }
+    - { name: "effective_model", type: "TEXT", doc: "The model a call would use now." }
+    - { name: "key_set", type: "INT", doc: "1 when the effective provider has a key in the keychain (never the key)." }
+    - { name: "overridden", type: "INT", doc: "1 when the binding comes from the project's `project.yaml`, not the global `ai.yaml`." }
+    - { name: "problem", type: "TEXT", doc: "Why a call on it would be refused, when it would be: a model lacking a feature the profile needs." }
+- name: ai_provider
+  version: 1
+  key: [id]
+  description: "The configured model providers and whether each has a key (never the key). Read live when a query names it."
+  columns:
+    - { name: "id", type: "TEXT", doc: "Your name for it (`anthropic`, `local-ollama`); also its keychain entry." }
+    - { name: "kind", type: "TEXT", doc: "What it is: `anthropic`, `openai`, `openai_compatible`, `openrouter`, `typesafe`, …" }
+    - { name: "base_url", type: "TEXT", doc: "Its API base when overridden or required; NULL for the default." }
+    - { name: "key_set", type: "INT", doc: "1 when the keychain holds a key for it." }
+- name: lsp_server
+  version: 1
+  key: [language_id]
+  description: "Every language server oxplow knows — configured in `.oxplow/project.yaml` or installed through Mason (the yaml wins per language) — with whether its binary exists and which streams run it now. Read live when a query names it; check it before relying on `code_hover` / `code_definition` / `code_references` for a language, and after an `oxplow.lsp.install_server`."
+  columns:
+    - { name: "language_id", type: "TEXT", doc: "The LSP language id (`rust`, `typescript`)." }
+    - { name: "extensions", type: "TEXT", doc: "File extensions it serves, a JSON array." }
+    - { name: "command", type: "TEXT", doc: "The command that starts it." }
+    - { name: "args", type: "TEXT", doc: "Its arguments, a JSON array." }
+    - { name: "source", type: "TEXT", doc: "`yaml` (project.yaml) or `installed` (Mason)." }
+    - { name: "package_name", type: "TEXT", doc: "The Mason package, for an installed server." }
+    - { name: "version", type: "TEXT", doc: "The installed package's version." }
+    - { name: "binary_exists", type: "INT", doc: "1 when the command resolves to a file on this machine." }
+    - { name: "running", type: "INT", doc: "How many streams have a live session with it." }
+    - { name: "running_streams", type: "TEXT", doc: "Those streams' ids, a JSON array." }
+    - { name: "completion_trigger_characters", type: "TEXT", doc: "A running session's completion trigger characters, a JSON array; NULL when none runs." }
+- name: collector_state
+  version: 1
+  key: [ref]
+  description: "Each declared collector's standing on this machine: whether a person approved its current script, whether this OS enforces its `network` list, and why failures disabled it. Read live when a query names it (approvals are per machine, outside the repo). Its runs are `v_collector_run`; its declaration `v_contribution`."
+  columns:
+    - { name: "ref", type: "TEXT", doc: "`collector:<owner>/<id>`." }
+    - { name: "owner", type: "TEXT", doc: "The extension that declares it." }
+    - { name: "id", type: "TEXT", doc: "Its id within the extension." }
+    - { name: "approved", type: "INT", doc: "1 when it needs no approval or this machine approved its script as it is now; 0 means `run_collector` is refused until a person approves it in Settings → Data." }
+    - { name: "network_enforced", type: "INT", doc: "1 when this OS enforces the collector's `network` list." }
+    - { name: "version", type: "TEXT", doc: "Its approval hash as it is now — what a person's approval names; NULL for a collector needing none." }
+    - { name: "disabled", type: "TEXT", doc: "Why failures disabled it on this machine; NULL when it isn't." }
+- name: collector_credential
+  version: 1
+  key: [collector, name]
+  description: "Each credential a collector declares and whether a value is set for it in this machine's keychain (never the value). Read live when a query names it. A person sets one in Settings → Data."
+  columns:
+    - { name: "collector", type: "TEXT", doc: "The collector's ref (`v_collector_state.ref`)." }
+    - { name: "name", type: "TEXT", doc: "The credential's name, as the collector reads it (`env: [NAME]`)." }
+    - { name: "is_set", type: "INT", doc: "1 when the keychain holds a value for it." }

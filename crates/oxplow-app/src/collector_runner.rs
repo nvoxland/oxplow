@@ -116,6 +116,42 @@ pub struct Collectors<'a> {
     pub trees: Option<std::sync::Arc<dyn crate::services::TreeSource>>,
 }
 
+/// The worktree whose `oxplow/extensions/` declares the collectors: the
+/// primary one.
+pub async fn primary_root(worktrees: &crate::worktrees::WorktreeRouter) -> PathBuf {
+    worktrees.resolve(None).await.into_local_path()
+}
+
+/// What listing the declared collectors reads: the catalog, this machine's
+/// approvals, the stored runs and the keychain (whether a credential is set,
+/// never its value).
+pub struct Listing<'a> {
+    pub root: &'a Path,
+    pub project: &'a str,
+    pub approvals: &'a crate::exec_consent::ApprovalStore,
+    pub store: &'a SqliteCollectorStore,
+    pub db: oxplow_db::Database,
+    pub vocabulary: VocabularyHandle,
+    pub secrets: &'a dyn SecretStore,
+    pub catalog: &'a Arc<crate::extension_catalog::ExtensionCatalog>,
+}
+
+impl Collectors<'_> {
+    /// The part of these a listing reads.
+    pub fn listing(&self) -> Listing<'_> {
+        Listing {
+            root: self.root,
+            project: &self.project,
+            approvals: self.approvals,
+            store: self.store,
+            db: self.db.clone(),
+            vocabulary: self.vocabulary.clone(),
+            secrets: self.secrets,
+            catalog: self.catalog,
+        }
+    }
+}
+
 impl<'a> Collectors<'a> {
     pub fn of(svc: &'a crate::Services, root: &'a Path) -> Self {
         Collectors {
@@ -205,6 +241,11 @@ pub fn set_credential(
 
 /// Every declared collector under `root`, with its last run and consent.
 pub async fn list_collectors(ctx: &Collectors<'_>) -> Result<Vec<CollectorListing>, DomainError> {
+    list_with(&ctx.listing()).await
+}
+
+/// [`list_collectors`] over just what a listing reads.
+pub async fn list_with(ctx: &Listing<'_>) -> Result<Vec<CollectorListing>, DomainError> {
     let runs = ctx.store.list_runs().await?;
     let health =
         crate::contribution_health::ContributionHealth::new(ctx.db.clone(), ctx.vocabulary.clone());
@@ -239,7 +280,7 @@ pub async fn list_collectors(ctx: &Collectors<'_>) -> Result<Vec<CollectorListin
                     name: name.clone(),
                     set: ctx
                         .secrets
-                        .get(&credential_account(&ctx.project, &ext.name, name))
+                        .get(&credential_account(ctx.project, &ext.name, name))
                         .ok()
                         .flatten()
                         .is_some(),

@@ -95,10 +95,11 @@ something its model is restricted from.
 
 ## What your agent can do
 
-Your coding agent is a model itself, so it asks none for you. It has one
-MCP tool here:
+Your coding agent is a model itself, so it asks none for you. It can read
+what's configured:
 
-- `list_ai_roles`: what's configured.
+- `v_ai_role` and `v_ai_provider` (through `query_sql`): what's configured, and
+  whether each provider has a key — never the key.
 
 A person can read what an earlier model call was asked and answered in the app.
 

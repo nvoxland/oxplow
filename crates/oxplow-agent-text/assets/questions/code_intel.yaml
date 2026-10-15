@@ -17,3 +17,10 @@
       SELECT path, count(*) AS errors FROM v_diagnostic
       WHERE severity = 'error' GROUP BY path ORDER BY errors DESC
   shape: { columns: [path, errors] }
+- question: Which languages have a language server, is its binary installed, and is one running?
+  skill: oxplow-codebase
+  reaches:
+    sql: >-
+      SELECT language_id, source, binary_exists, running FROM v_lsp_server
+      ORDER BY language_id
+  shape: { columns: [language_id, source, binary_exists, running] }

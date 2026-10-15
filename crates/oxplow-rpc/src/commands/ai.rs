@@ -1,7 +1,7 @@
 //! Cores for the `ai` command module: Settings → AI. Providers and role
 //! assignments live in the user-global `ai.yaml`; keys go to the keychain
 //! and are never returned, only whether each is set. UI only: agents can
-//! read roles (`list_ai_roles` on MCP) but not change settings or keys.
+//! read roles (`v_ai_role` through `query_sql`) but not change settings or keys.
 //! See `.context/ai-providers.md`.
 
 use oxplow_app::ai_service::{AiServiceError, AiSettings, ProviderConfig, Role, RoleBinding};

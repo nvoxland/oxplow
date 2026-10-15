@@ -72,7 +72,7 @@ section for the column.
     - { id: lint.clippy, records: analysis, entry: "oxplow:clippy", report: { path: target/clippy.json }, trigger: { on_run: analysis } }
   ```
   **Listed in Settings → Data → Collectors** beside the extensions' (owner
-  `project`, the project's own extension, as `list_collectors` lists every
+  `project`, the project's own extension, as `v_collector_state` lists every
   extension's): each with its trigger ("after a test run"), last run
   (`collector_run`), why failures turned it off with **Enable Again**, and **Sync
   Now** (`oxplow.collector.sync { collector: "collector:project/<id>" }`). A report collector with a

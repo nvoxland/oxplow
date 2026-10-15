@@ -693,7 +693,8 @@ Rules:
 - Declare secrets as `credentials: [NAME]`; the script reads them as
   environment variables. The user sets the values in Settings → Extensions
   (they go to the keychain). You can't set or read them, and never
-  hard-code them. `list_collectors` shows which are set. Use `env: [NAME]`
+  hard-code them. `v_collector_credential` (`collector`, `name`, `is_set`) shows which
+  are set, never the value. Use `env: [NAME]`
   only for non-secret settings from the user's environment.
 - Declare every host the script talks to: `network: [api.github.com]`
   (`*.example.com` for subdomains). On macOS nothing else is reachable
@@ -703,7 +704,10 @@ Rules:
 - **You can't approve a collector.** Tell the user to approve it in
   Settings → Data → Approve & Run. After that, `run_collector`
   (MCP) re-runs it.
-- `list_collectors` shows each collector's last run and error.
+- `v_collector_run` shows each collector's last run and error, and
+  `v_collector_state` whether this machine approved it (`approved`; 0 means
+  `run_collector` is refused until a person approves it) and why it is
+  disabled, if it is.
 - **Check a collector before it's merged** with
   `preview_collector(owner, id, stream_id)`: it runs your worktree's
   version and returns the rows it would store, storing nothing. For a
@@ -743,7 +747,10 @@ to a read-only SQL query:
   schema, instructions = "")` → JSON matching `schema`. Each is recorded
   (`v_ai_result`): the same question on the same text is one model call,
   ever, so a re-sync costs nothing for rows that didn't change. They run
-  on the project's AI roles (`decide`, `summarize`, `main`), or on one of
+  on the project's AI roles (`decide`, `summarize`, `main`; `v_ai_role` shows
+  the model each would use now (`effective_provider`, `effective_model`) and
+  whether its provider has a key (`key_set`, never the key), `v_ai_provider` the
+  providers), or on one of
   your `ai_profiles` with `role = "<id>"`; with no model assigned the run
   fails saying which role. A fact collector calls them
   when it declares `needs: [ai.compute]`; a command's, an effect's or a
