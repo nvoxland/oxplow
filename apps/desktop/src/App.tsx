@@ -184,6 +184,7 @@ import { setRefOfferHost } from "./components/refCommands.js";
 import type { WhenContext } from "./when.js";
 import { runLocally, startClientHost, type ClientCallContext, type ClientCallRef, type ClientHandlers } from "./clientHost.js";
 import { streamOfThread, withTab, withoutTab } from "./tabs/threadTabOps.js";
+import { planNavigation } from "./tabs/navigation.js";
 import { usePersonCommands } from "./personCommandsStore.js";
 import { personCommands } from "./personCommands.js";
 import { logUi, setUiLogContext } from "./logger.js";
@@ -2216,6 +2217,19 @@ export function App() {
           if (!stream) throw new Error("no stream is shown");
           setQuickOpenVisible(true);
           return null;
+        },
+        // Takes the person to a ref (`tabs/navigation.ts`): the page opens
+        // and is focused in the thread it belongs to, then the window
+        // switches to that stream and thread.
+        navigate: async (input) => {
+          const plan = planNavigation(input, threadStates, stream?.id ?? null);
+          if (plan.page) {
+            if (!plan.threadId) throw new Error(`stream \`${plan.streamId}\` has no thread`);
+            await open({ ref: plan.page.id }, { threadId: plan.threadId, actor: "human", call: null }, true);
+          }
+          if (stream?.id !== plan.streamId) await handleSwitch(plan.streamId);
+          if (plan.selectThread && plan.threadId) await handleSelectThread(plan.streamId, plan.threadId);
+          return { opened: plan.page?.id ?? null, stream: plan.streamId };
         },
       },
       // A person's only (the command's invokers): oxplow never types for

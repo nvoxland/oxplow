@@ -1006,6 +1006,12 @@ commands:
     op: quick_open
     invokers: { human: true, agent: false, lens: false }
     ui: { label: "Quick Open…", group: File, shortcut: "Ctrl/Cmd+P", while_typing: true, menu: { bar: file, group: 3_go, order: 10 }, when: "streamShown" }
+  - name: window.navigate
+    summary: "Take the person to a ref: opens and focuses its page (a file's editor, a work item, effort, lens, wiki page, directory or `page:<route>`), or selects a `stream:` / `thread:`. `stream` switches to that stream first. Changes what the person sees. Returns `{ opened, stream }`."
+    scope: window.show
+    op: navigate
+    invokers: { human: true, agent: true, lens: true }
+    example: {"ref": "file:src/auth.rs"}
   # work_items.write
   - name: work_item.comment
     summary: "Comment on a work item (oxplow: a note shown with the task)."

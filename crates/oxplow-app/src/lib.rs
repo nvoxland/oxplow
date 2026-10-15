@@ -2476,6 +2476,7 @@ mod tests {
                 "vcs.read/diff",
                 "vcs.read/log",
                 "vcs.read/status",
+                "window.show/navigate",
                 "work_items.write/comment",
                 "work_items.write/create",
                 "work_items.write/link",

@@ -254,6 +254,21 @@ pub struct OpenProjectInput {
     pub new_window: bool,
 }
 
+/// `window.show` `navigate`'s input: the ref to take the person to, and
+/// the stream to show it in (none: the ref's own, else the one shown).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NavigateInput {
+    /// What to show: a page's ref (`file:src/a.rs`, `work_item:oxplow:tsk3`,
+    /// `effort:…`, `lens:…`, `wiki:…`, `dir:…`, `page:<route>`), or a
+    /// `stream:` / `thread:` ref to select it.
+    #[serde(rename = "ref")]
+    pub target: String,
+    /// The stream to switch to first (`stream:str1`).
+    #[serde(default)]
+    pub stream: Option<String>,
+}
+
 /// An operation that takes nothing.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -282,6 +297,14 @@ pub fn ops(host: &Arc<ClientHost>) -> Vec<Op> {
         ClientHost::op(host, "window.show", "quick_open", schema::<NoInput>())
             .open_to(Invokers::HUMAN_ONLY),
     );
+    // Takes the person to a ref: open to an agent, which is how it shows them
+    // what it found.
+    ops.push(ClientHost::op(
+        host,
+        "window.show",
+        "navigate",
+        schema::<NavigateInput>(),
+    ));
     // A person's, through a lens too: oxplow never types for the agent.
     ops.push(
         ClientHost::op(host, "agent_input.write", "draft", schema::<DraftInput>())
@@ -413,6 +436,64 @@ mod tests {
         assert_eq!(input, json!({ "ref": "file:src/a.rs" }));
         assert!(answered);
         assert_eq!(out.result, json!({ "open": true }));
+        assert_eq!(out.audit_id, None);
+    }
+
+    /// An agent runs `oxplow.window.navigate`: the window gets the ref (and
+    /// the stream, when named) as given and its answer is the result.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_agent_takes_the_person_to_a_ref() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let spec = fx.svc.commands.spec("oxplow.window.navigate").unwrap();
+        assert_eq!(
+            spec.op,
+            Some(oxplow_domain::OpRef {
+                scope: "window.show".into(),
+                op: "navigate".into()
+            })
+        );
+        assert_eq!(spec.access, oxplow_domain::Access::View);
+        assert!(spec.invokers.agent && spec.invokers.human && spec.invokers.lens);
+        let mut seen = fx.svc.events.subscribe_ui();
+        fx.svc
+            .client_host
+            .register("w1", vec!["window.show".into()]);
+        let host = fx.svc.client_host.clone();
+        let window = tokio::spawn(async move {
+            loop {
+                if let OxplowEvent::ClientCall {
+                    id,
+                    scope,
+                    op,
+                    input,
+                    ..
+                } = seen.recv().await.unwrap()
+                {
+                    let answer = json!({ "opened": input.0["ref"], "stream": "str2" });
+                    return (scope, op, input.0, host.answer("w1", &id, Ok(answer)));
+                }
+            }
+        });
+        let agent = Actor::Agent {
+            session_id: None,
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let input = json!({ "ref": "file:src/auth.rs", "stream": "stream:str2" });
+        let out = fx
+            .svc
+            .commands
+            .run(&agent, "oxplow.window.navigate", input.clone(), false)
+            .await
+            .unwrap();
+        let (scope, op, got, answered) = window.await.unwrap();
+        assert_eq!((scope.as_str(), op.as_str()), ("window.show", "navigate"));
+        assert_eq!(got, input);
+        assert!(answered);
+        assert_eq!(
+            out.result,
+            json!({ "opened": "file:src/auth.rs", "stream": "str2" })
+        );
         assert_eq!(out.audit_id, None);
     }
 

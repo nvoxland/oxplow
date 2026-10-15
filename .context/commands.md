@@ -319,7 +319,7 @@ call order) or through the SQL gateway.
 handler lives). A scope says its host (`Host`): the **daemon**
 (oxplow's records, the repository, the project's files), the project's
 **window** (`tabs.write`: open, close, focus a tab; `editor.write`:
-save; `window.show`: find, quick open; `agent_input.write`: draft, a
+save; `window.show`: find, quick open, and `navigate` — `oxplow.window.navigate { ref, stream? }`, open to an agent, takes the person to a ref: the window opens and focuses its page in the thread it belongs to (`apps/desktop/src/tabs/navigation.ts` plans it: a file's editor, a work item, effort, lens, wiki page, directory or `page:<route>`), switches to `stream` first when it is named, and a bare `stream:` / `thread:` ref selects it; it returns `{ opened, stream }`; `agent_input.write`: draft, a
 person's) or the **app shell** (`projects.write`: create, open — New /
 Open Project; the window reaches the shell, so the window hosts its
 handlers too). A shell command isn't recorded: there's no app-scope bus
