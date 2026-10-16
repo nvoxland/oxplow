@@ -13,8 +13,8 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   once (`vite build`) and serves it with `vite preview` on 127.0.0.1:4173, so a
   spec never meets a stale `dist/`.
 - **`support/global-setup.ts`** builds `oxplow-daemon-sim`,
-  `oxplow-acp-fake` and `oxplow-provider-fake` and hands their paths to the
-  workers (`OXPLOW_E2E_DAEMON`, `OXPLOW_E2E_ACP_FAKE`,
+  `oxplow-harness-fake` and `oxplow-provider-fake` and hands their paths to the
+  workers (`OXPLOW_E2E_DAEMON`, `OXPLOW_E2E_HARNESS_FAKE`,
   `OXPLOW_E2E_PROVIDER_FAKE`).
 - **`fixtures/extension/`** — the test extension `e2e`, copied into every
   project before boot: a fake work-item provider (`bin/provider`, written
@@ -55,9 +55,12 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   isn't JSON names the call, the HTTP status and what came back.
 - **`support/fixtures.ts`** — `test` and `expect` for specs:
   - `daemon`, one per worker. Its pages open on the stream's seeded
-    thread, which runs the project's default agent — the fake ACP agent
-    (`agents: [acp]`) — so the suite never starts a real agent CLI. That
-    agent is a project program, approved at setup as a person would, so
+    thread, which runs the project's default agent — the fake terminal
+    harness (`agents: [terminal]`) — so the suite never starts a real agent
+    CLI. That harness is the extension's `terminal` provider (`bin/terminal`,
+    the fake provider in harness mode, its `harness.json` kept equal to the
+    fake's declarations like `provider.json`; the fake harness's binary is
+    on the daemon's PATH), enabled in the project's `project.yaml` and approved at setup as a person would, so
     no spec depends on another having approved it.
   - A workspace that fails while booting is stopped and removed; each
     fixture tears down in a `finally`.
@@ -97,8 +100,7 @@ an extension's ref kind; `code/` a commit's diff; `data/` Explore Data
 Programs approval and the settings pages; `integrations/` the fake tracker
 (configure, Check, Enable, active, Sync Now), Delivery (a failed reaction,
 a person's Retry, Backfill) and Approvals (an effect's destructive step);
-`review/` the verdict chip; `agent/` the fake ACP agent's reply and a
-Terminal shell; `components/` the github example's PR Lifetimes (frame,
+`review/` the verdict chip; `agent/` the Terminal shell; `components/` the github example's PR Lifetimes (frame,
 filters, navigation, approval-gated `invoke`, and a self-navigation off
 this machine sending no request), the task-views example (replacing the
 Board, list and editor) and the triage example (its real `todos` collector

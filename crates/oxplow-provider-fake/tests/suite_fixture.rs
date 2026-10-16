@@ -20,3 +20,19 @@ fn the_suite_fixture_declares_what_the_fake_does() {
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     assert_eq!(on_disk, oxplow_provider_fake::declarations());
 }
+
+#[test]
+fn the_suite_harness_fixture_declares_what_the_fake_harness_does() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests-e2e/fixtures/extension/harness.json"
+    );
+    if std::env::var_os("OXPLOW_BLESS").is_some() {
+        let json =
+            serde_json::to_string_pretty(&oxplow_provider_fake::harness_declarations()).unwrap();
+        std::fs::write(path, json + "\n").unwrap();
+    }
+    let on_disk: InitializeResult =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(on_disk, oxplow_provider_fake::harness_declarations());
+}

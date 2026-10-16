@@ -276,6 +276,12 @@ command's UI path, a testid — and add or extend a spec under
   (`approveProgram`, `approveCollector`);
 - a spec whose state no other may touch first (nothing approved, a
   provider configured) takes the `fresh` fixture, its own daemon.
+- every thread runs the fake terminal harness (the test extension's
+  `terminal` provider, `agents: [terminal]`); a spec that needs an agent
+  whose process ends enables Claude, which the daemon's PATH (the person's
+  own bin dirs left out) can't find on any machine, so its launch shell
+  exits at once. Codex won't do: with no program to find, its launch fails
+  before a PTY exists.
 
 A bug the suite finds is its own task, fixed with a unit test where one
 can pin it; the spec stays as the end-to-end check.

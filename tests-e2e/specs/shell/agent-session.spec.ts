@@ -18,15 +18,16 @@ test("search offers a new agent session, which opens the picker", async ({ page 
   await expect(tab).toBeVisible();
 });
 
-/// A terminal agent whose process has ended (here Codex, which isn't
-/// installed where the daemon looks, so it exits at once) shows "Session
-/// ended", and its tab still closes the session.
+/// A terminal agent whose process has ended (here Claude Code, which isn't
+/// installed where the daemon looks — its PATH leaves out the person's own
+/// bin dirs — so its launch shell exits at once)
+/// shows "Session ended", and its tab still closes the session.
 test("an ended terminal session says so and its tab closes it", async ({ fresh }) => {
   const { page, daemon } = fresh;
-  await ipc(daemon, "set_agents", { agents: ["acp", "codex"] });
+  await ipc(daemon, "set_agents", { agents: ["terminal", "claude"] });
   await page.goto("/");
   await expect(page.getByTestId("page-new-session")).toBeVisible();
-  await page.getByTestId("new-session-agent").selectOption("codex");
+  await page.getByTestId("new-session-agent").selectOption("claude");
   await page.getByTestId("new-session-start").click();
   const tab = page.locator('[data-testid^="center-tab-agent_session:"]').first();
   await expect(tab).toBeVisible();
@@ -42,7 +43,7 @@ test("an ended terminal session says so and its tab closes it", async ({ fresh }
 /// project's agents decide which: Codex once enabled, never Claude here.
 test("search starts an enabled agent's session directly", async ({ fresh }) => {
   const { page, daemon } = fresh;
-  await ipc(daemon, "set_agents", { agents: ["acp", "codex"] });
+  await ipc(daemon, "set_agents", { agents: ["terminal", "codex"] });
   await page.goto("/");
   await expect(page.getByTestId("page-new-session")).toBeVisible();
   await searchLauncher(page, "new claude session");
@@ -88,7 +89,7 @@ test("the picker closes, and stays closed", async ({ fresh }) => {
 /// no picker; an agent starts that agent's session.
 test("a remembered choice is what new threads start with", async ({ fresh }) => {
   const { page, daemon } = fresh;
-  await ipc(daemon, "set_agents", { agents: ["acp", "codex"] });
+  await ipc(daemon, "set_agents", { agents: ["terminal", "claude"] });
   await page.goto("/");
   await expect(page.getByTestId("page-new-session")).toBeVisible();
   await page.getByTestId("new-session-remember").check();
@@ -103,7 +104,7 @@ test("a remembered choice is what new threads start with", async ({ fresh }) => 
   // Remember an agent from the picker, which the launcher still opens.
   await searchLauncher(page, "new agent session");
   await page.getByTestId("launcher-command-oxplow.agent_session.open").click();
-  await page.getByTestId("new-session-agent").selectOption("codex");
+  await page.getByTestId("new-session-agent").selectOption("claude");
   await page.getByTestId("new-session-remember").check();
   await page.getByTestId("new-session-start").click();
   await expect(page.locator('[data-testid^="center-tab-agent_session:"]')).toHaveCount(1);

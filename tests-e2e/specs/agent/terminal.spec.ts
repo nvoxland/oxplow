@@ -1,24 +1,6 @@
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
-// The suite declares the fake ACP agent, which does what each
-// `fake:<step>` line of a prompt says.
-
-test("the fake agent's reply streams into the thread's transcript", async ({ page }) => {
-  // An ACP agent is a project program; the workspace approved it. A thread
-  // starts no session by itself: start the fake's from the picker.
-  await page.goto("/");
-  await openFromLauncher(page, "New Agent Session");
-  await page.getByTestId("new-session-agent").selectOption({ label: "ACP · fake" });
-  await page.getByTestId("new-session-start").click();
-  const input = page.getByTestId("acp-prompt-input");
-  await input.fill("fake:say Hello from the fake agent");
-  await input.press("Enter");
-  // The agent's own message, not the prompt that asked for it.
-  const said = page.getByTestId("acp-transcript").locator('[data-kind="agent"]');
-  await expect(said).toContainText("Hello from the fake agent");
-});
-
 // The Terminal page is a plain shell in the stream's worktree.
 test("a terminal opens a shell in the project", async ({ page }) => {
   // The terminal's web font arrives only once its pane is on screen, as on

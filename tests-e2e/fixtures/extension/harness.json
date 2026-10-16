@@ -1,0 +1,124 @@
+{
+  "protocol_version": "4",
+  "provider": {
+    "name": "fake",
+    "version": "1"
+  },
+  "capabilities": [
+    {
+      "capability": "agent_harness",
+      "features": {
+        "terminal": true,
+        "telemetry": true,
+        "subagents": true
+      },
+      "data": {
+        "env_markers": [
+          "OXPLOW_FAKE_HARNESS_SESSION"
+        ],
+        "settings": [
+          {
+            "key": "model",
+            "title": "Model",
+            "hint": "The model its scripted session names.",
+            "placeholder": "fake-1"
+          }
+        ]
+      }
+    }
+  ],
+  "commands": [
+    {
+      "name": "launch",
+      "summary": "How a session of it starts.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "session",
+          "endpoints"
+        ]
+      },
+      "confirm": "never",
+      "access": "record",
+      "undoable": false
+    },
+    {
+      "name": "tool_use",
+      "summary": "A tool hook's body in oxplow's vocabulary.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "body"
+        ]
+      },
+      "confirm": "never",
+      "access": "record",
+      "undoable": false
+    },
+    {
+      "name": "render",
+      "summary": "A hook answer in its hooks' shape.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "answer"
+        ]
+      },
+      "confirm": "never",
+      "access": "record",
+      "undoable": false
+    },
+    {
+      "name": "prompt",
+      "summary": "What a prompt hook's body is: a person's words or a subagent's hand-back.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "body"
+        ]
+      },
+      "confirm": "never",
+      "access": "record",
+      "undoable": false
+    },
+    {
+      "name": "subagent",
+      "summary": "The subagent a subagent hook's body names.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "body"
+        ]
+      },
+      "confirm": "never",
+      "access": "record",
+      "undoable": false
+    },
+    {
+      "name": "token_readings",
+      "summary": "The token counts in one telemetry export.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "records"
+        ]
+      },
+      "confirm": "never",
+      "access": "record",
+      "undoable": false
+    }
+  ],
+  "event_types": [],
+  "collectors": [],
+  "config_schema": {
+    "type": "object",
+    "required": [
+      "team"
+    ],
+    "properties": {
+      "team": {
+        "type": "string"
+      }
+    }
+  }
+}

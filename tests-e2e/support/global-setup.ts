@@ -37,10 +37,10 @@ export default function globalSetup(): void {
   rmSync(LOG_DIR, { recursive: true, force: true });
   const output = execFileSync(
     "cargo",
-    ["build", "-p", "oxplow-daemon-sim", "-p", "oxplow-acp-fake", "-p", "oxplow-provider-fake", "--message-format=json"],
+    ["build", "-p", "oxplow-daemon-sim", "-p", "oxplow-harness-fake", "-p", "oxplow-provider-fake", "--message-format=json"],
     { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "inherit"] },
   );
   process.env.OXPLOW_E2E_DAEMON = built(output, "oxplow-daemon-sim");
-  process.env.OXPLOW_E2E_ACP_FAKE = built(output, "oxplow-acp-fake");
+  process.env.OXPLOW_E2E_HARNESS_FAKE = built(output, "oxplow-harness-fake");
   process.env.OXPLOW_E2E_PROVIDER_FAKE = built(output, "oxplow-provider-fake");
 }

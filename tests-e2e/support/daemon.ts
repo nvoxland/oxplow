@@ -27,10 +27,11 @@ export type Daemon = {
  *  CI uploads it with the traces when a spec fails. */
 export const LOG_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", ".output", "daemons");
 
-/** The project's `.oxplow/project.yaml`: its threads run the fake ACP agent,
- *  so no spec ever starts a real agent CLI. */
-function projectYaml(acpFake: string): string {
-  return `agents: [acp]\nacpAgents:\n  - { name: fake, command: ${JSON.stringify(acpFake)} }\n`;
+/** The project's `.oxplow/project.yaml`: its threads run the fake terminal
+ *  harness (the test extension's `terminal` provider, enabled here), so no
+ *  spec ever starts a real agent CLI. */
+function projectYaml(): string {
+  return `agents: [terminal]\nextensionInstances:\n  e2e/terminal: { enabled: true, config: { team: core } }\n`;
 }
 
 /** Put the suite's test extension (`tests-e2e/fixtures/extension`) into
@@ -49,6 +50,9 @@ function installTestExtension(project: string, providerFake: string): void {
     `#!/bin/sh\nOXPLOW_FAKE_STATE="${state}/fake-state-$OXPLOW_PROVIDER_ID.json" exec ${JSON.stringify(providerFake)} "$@"\n`,
   );
   chmodSync(script, 0o755);
+  const terminal = join(dir, "bin", "terminal");
+  writeFileSync(terminal, `#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=agent_harness exec ${JSON.stringify(providerFake)} "$@"\n`);
+  chmodSync(terminal, 0o755);
 }
 
 /** Put the documented github example (`examples/extensions/github`) into
@@ -67,7 +71,7 @@ function installGithubExample(project: string): void {
  *  reads no rc file and writes no history of the person's), a PATH without
  *  the person's own bin dirs, a plain `/bin/sh`, and no global or system
  *  git config. */
-function isolated(dir: string): NodeJS.ProcessEnv {
+function isolated(dir: string, harnessFake: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     // The person's own bin dirs (an agent CLI installed under their home)
@@ -75,6 +79,7 @@ function isolated(dir: string): NodeJS.ProcessEnv {
     PATH: (process.env.PATH ?? "")
       .split(":")
       .filter((d) => d && !d.startsWith(homedir()))
+      .concat(dirname(harnessFake)) // where the fake harness's launch finds its binary
       .join(":"),
     HOME: join(dir, "user"),
     OXPLOW_HOME: join(dir, "home"),
@@ -98,13 +103,13 @@ function isolated(dir: string): NodeJS.ProcessEnv {
  *  removed; its log is kept and named in the error. `bin` and `tmp` are for
  *  the harness's own spec. */
 export async function startDaemon({ bin = process.env.OXPLOW_E2E_DAEMON, tmp = tmpdir() }: { bin?: string; tmp?: string } = {}): Promise<Daemon> {
-  const acpFake = process.env.OXPLOW_E2E_ACP_FAKE;
+  const harnessFake = process.env.OXPLOW_E2E_HARNESS_FAKE;
   const providerFake = process.env.OXPLOW_E2E_PROVIDER_FAKE;
-  if (!bin || !acpFake || !providerFake) throw new Error("global setup didn't build the suite's binaries");
+  if (!bin || !harnessFake || !providerFake) throw new Error("global setup didn't build the suite's binaries");
   const dir = mkdtempSync(join(tmp, "oxplow-e2e-"));
   mkdirSync(LOG_DIR, { recursive: true });
   const log = join(LOG_DIR, `${basename(dir)}.log`);
-  const env = isolated(dir);
+  const env = isolated(dir, harnessFake);
   const project = join(dir, "project");
   let child: ChildProcess | undefined;
   let exited: Promise<void> = Promise.resolve();
@@ -119,7 +124,7 @@ export async function startDaemon({ bin = process.env.OXPLOW_E2E_DAEMON, tmp = t
   };
   try {
     for (const d of [project, env.HOME!, env.OXPLOW_HOME!, join(project, ".oxplow")]) mkdirSync(d, { recursive: true });
-    writeFileSync(join(project, ".oxplow", "project.yaml"), projectYaml(acpFake));
+    writeFileSync(join(project, ".oxplow", "project.yaml"), projectYaml());
     installTestExtension(project, providerFake);
     installGithubExample(project);
     const git = (...args: string[]) => execFileSync("git", args, { cwd: project, env, stdio: "ignore" });

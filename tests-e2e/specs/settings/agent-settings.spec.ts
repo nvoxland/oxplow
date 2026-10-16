@@ -13,7 +13,7 @@ test("an enabled harness's declared settings are offered and saved", async ({ fr
   await page.goto("/");
   await openFromLauncher(page, "Settings");
   await expect(page.getByTestId("settings-agent-opencode-model")).toHaveCount(0);
-  await ipc(daemon, "set_agents", { agents: ["acp", "opencode"] });
+  await ipc(daemon, "set_agents", { agents: ["terminal", "opencode"] });
   await page.reload();
   await openFromLauncher(page, "Settings");
   const model = page.getByTestId("settings-agent-opencode-model");

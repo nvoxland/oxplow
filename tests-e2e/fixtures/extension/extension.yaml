@@ -8,13 +8,20 @@ intent:
     provider that sorts text by its words.
   origin: null
   examples: []
-# `bin/provider` is written when a suite daemon starts: it runs the
-# oxplow-provider-fake binary this checkout built.
+# `bin/provider` and `bin/terminal` are written when a suite daemon starts:
+# they run the oxplow-provider-fake binary this checkout built, the second in
+# harness mode.
 providers:
   - id: fake
     capability: work_items
     entry: bin/provider
     declarations: provider.json
+  # The agent every session runs: the fake harness (a scripted terminal
+  # agent) behind the provider protocol, so no spec starts a real agent CLI.
+  - id: terminal
+    capability: agent_harness
+    entry: bin/terminal
+    declarations: harness.json
 # A model provider for specs that need an answer from a model, offline: its
 # script sorts each TODO by its words (providers/sorter.star); the host's one
 # HTTP call goes to the spec's own echo server (its instance's baseUrl).
