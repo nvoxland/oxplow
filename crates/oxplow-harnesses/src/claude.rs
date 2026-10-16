@@ -577,8 +577,8 @@ enum ResumeState {
     Present,
     /// The project dir exists but the session `.jsonl` is gone: stale.
     Missing,
-    /// Can't tell (no `projects/<cwd>` dir under the config dir, or the
-    /// agent runs on another host).
+    /// Can't tell (no `projects/<cwd>` dir under the config dir, a folder
+    /// that can't be read, or the agent runs on another host).
     Unknown,
 }
 
@@ -767,10 +767,13 @@ fn resume_state(config_dir: &Path, cwd: &str, session_id: &str) -> ResumeState {
     if !project_dir.is_dir() {
         return ResumeState::Unknown;
     }
-    if project_dir.join(format!("{session_id}.jsonl")).is_file() {
-        ResumeState::Present
-    } else {
-        ResumeState::Missing
+    // Only a transcript that is not there is missing: one that can't be
+    // looked at (an unreadable folder) is unknown.
+    match fs::metadata(project_dir.join(format!("{session_id}.jsonl"))) {
+        Ok(meta) if meta.is_file() => ResumeState::Present,
+        Ok(_) => ResumeState::Missing,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => ResumeState::Missing,
+        Err(_) => ResumeState::Unknown,
     }
 }
 
@@ -1137,6 +1140,29 @@ mod tests {
             "-Users-nv-src-nvoxland-oxplow"
         );
         assert_eq!(encode_cwd("/a/b.c_d"), "-a-b-c-d");
+    }
+
+    /// A transcript that can't be looked at (its folder unreadable) is not
+    /// a transcript that isn't there: the first is unknown, so a resume
+    /// isn't called stale on a guess.
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_transcript_dir_is_unknown_not_missing() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = "/repo/wt";
+        let config = tmp.path().join(".claude");
+        let dir = config.join("projects").join(encode_cwd(cwd));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("sess-1.jsonl"), "{}").unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o000)).unwrap();
+        // A process that can read it anyway (root) can't show this.
+        let readable = fs::read_dir(&dir).is_ok();
+        let state = resume_state(&config, cwd, "sess-1");
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        if !readable {
+            assert_eq!(state, ResumeState::Unknown);
+        }
     }
 
     #[test]

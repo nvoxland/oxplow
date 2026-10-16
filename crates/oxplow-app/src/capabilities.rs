@@ -2012,4 +2012,53 @@ mod contribution_tests {
             "{bundled:?}"
         );
     }
+
+    /// What a built-in harness declares is what it does: a harness lists
+    /// its saved conversations exactly when it declares `conversation_list`
+    /// (the others answer "unsupported", never a guess or an empty list),
+    /// and every feature it declares is one the vocabulary knows, so a
+    /// failure is attributable to a version of a declared capability.
+    #[tokio::test]
+    async fn a_built_in_harness_answers_unsupported_exactly_for_what_it_doesnt_declare() {
+        use oxplow_domain::agent::harness::{ConversationQuery, HarnessError};
+        let vocabulary: Vec<&str> = oxplow_domain::capability::CAPABILITIES
+            .iter()
+            .find(|c| c.id == "agent_harness")
+            .map(|c| c.features.to_vec())
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let mut checked = 0;
+        for b in super::BUILT_INS
+            .iter()
+            .filter(|b| b.capability == "agent_harness")
+        {
+            for f in b.features {
+                assert!(
+                    vocabulary.contains(f),
+                    "{} declares unknown feature {f}",
+                    b.entry
+                );
+            }
+            let id = b.entry.trim_start_matches("oxplow:");
+            let h = oxplow_harnesses::built_in(b.entry, id, b.title).expect("a built-in harness");
+            let query = ConversationQuery {
+                cwd: dir.path().to_path_buf(),
+                home: Some(dir.path().to_path_buf()),
+                search_path: vec![],
+                limit: 1,
+            };
+            let unsupported = matches!(
+                h.conversations(&query).await,
+                Err(HarnessError::Unsupported { .. })
+            );
+            assert_eq!(
+                unsupported,
+                !b.features.contains(&"conversation_list"),
+                "{} lists its conversations iff it declares conversation_list",
+                b.entry
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 3);
+    }
 }
