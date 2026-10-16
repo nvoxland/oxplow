@@ -44,6 +44,9 @@ oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 [dev-dependencies]
 tokio = { workspace = true }
 tempfile = { workspace = true }
+oxplow-ai = { workspace = true }
+# A scripted Codex app-server daemon, for the Codex restart test.
+oxplow-harnesses = { workspace = true, features = ["fake-app-server"] }
 
 [lints]
 workspace = true

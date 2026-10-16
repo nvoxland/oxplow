@@ -1198,7 +1198,7 @@ equivalence between tools.
 | Child-agent attribution | `its_subagents_are_read_from_their_hooks` (recorded `claude/subagent.jsonl`), `its_bridge_sends_the_call_id_the_exit_code_and_a_childs_parent` (opencode), `a_call_inside_a_subagent_call_is_the_subagents`, `a_background_subagent_hands_back_without_a_prompt` |
 | Unsupported capability | the conformance test above; `a_harness_without_a_list_says_so`; `a_native_rename_needs_the_feature_a_name_and_a_running_observer` |
 | Live client reconnect | `an_agent_session_is_reattached_not_spawned_again`; the pane's reopen (`terminalSession.test.ts`); Codex: `a_restarted_daemon_is_observed_again_on_the_next_open` |
-| Backend restart | `a_resumed_session_resets_a_turn_that_died_without_a_stop`, `a_restart_close_is_logged_as_recovery`, `a_process_exit_ends_its_session_once` (not yet end to end through a Codex launch) |
+| Backend restart | `a_resumed_session_resets_a_turn_that_died_without_a_stop`, `a_restart_close_is_logged_as_recovery`, `a_process_exit_ends_its_session_once`; a Codex session end to end, `a_codex_session_resumes_its_thread_after_a_backend_restart` (a fake `codex` on the search path, the scripted daemon, Services reopened over the same database file: the bound thread is resumed, not replaced, and opens writable) |
 | Lazy launch | `mayStartNow` (`terminalSession.test.ts`); `opening_adds_a_slot_and_undo_closes_it` (opening starts nothing) |
 | Deliberate stop | `stopping_marks_the_session_and_starting_clears_it`, `a_session_the_person_stopped_is_not_spawned`, `a_stop_by_the_person_is_marked_and_cleared` |
 | Missing vs inaccessible transcript | `a_missing_transcript_is_still_resumed_and_flagged`, `resume_state_reads_the_transcript_dir`, `an_unreadable_transcript_dir_is_unknown_not_missing` |
@@ -1209,8 +1209,7 @@ equivalence between tools.
 | Stream / worktree assignment | `no_thread_edits_another_streams_worktree` (a thread never writes another stream's worktree, the primary checkout included), `an_agent_opens_in_its_own_stream_and_its_close_is_proposed` |
 | No terminal input from restore, metadata, tab discovery or handoff | `terminal_sessions_send_has_single_production_caller` and `no-agent-input-automation.test.ts`: the one way bytes reach a PTY is the person's keystrokes |
 
-Not yet covered end to end: a recorded Claude hook carrying
-`session_title`, and a restart through a real Codex launch (both filed).
+Not yet covered: a recorded Claude hook carrying `session_title` (filed).
 
 ### Agent status
 

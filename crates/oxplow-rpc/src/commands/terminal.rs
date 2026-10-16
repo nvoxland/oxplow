@@ -689,6 +689,165 @@ mod tests {
         assert!(super::tui_argv(Vec::new(), "thr-1".into()).is_err());
     }
 
+    /// A Codex session end to end, then a backend restart: opening it runs
+    /// the harness's launch, opens its thread on the daemon (a new one,
+    /// writable) and spawns the TUI attached to it; after the backend
+    /// restarts over the same database, opening it again resumes the bound
+    /// thread — it doesn't start another — and the PTY attaches again.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test setup: reopening the database file is how a restart is simulated"
+    )]
+    #[tokio::test]
+    async fn a_codex_session_resumes_its_thread_after_a_backend_restart() {
+        // A failure shows as a failure, not a hang.
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
+            use oxplow_harnesses::codex_app_server::fake::FakeAppServer;
+            // Short paths: a unix socket's path has a length limit.
+            let machine = tempfile::Builder::new().tempdir_in("/tmp").unwrap();
+            let codex_home = machine.path().join("cx");
+            let bin = machine.path().join("bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            // A `codex` the TUI can be: it only has to exist and idle.
+            let program = bin.join("codex");
+            std::fs::write(&program, "#!/bin/sh\nexec sleep 600\n").unwrap();
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            let path = format!(
+                "{}:{}",
+                bin.display(),
+                std::env::var("PATH").unwrap_or_default()
+            );
+            // One process per test (nextest): the machine this one stands for.
+            std::env::set_var("PATH", path);
+            std::env::set_var("CODEX_HOME", &codex_home);
+            std::env::set_var("HOME", machine.path());
+            let daemon = FakeAppServer::start(&codex_home, |method, _| match method {
+                "thread/start" | "thread/resume" => {
+                    Ok(json!({"thread": {"id": "thr-restart", "name": null}}))
+                }
+                "thread/goal/set" | "thread/goal/clear" | "thread/settings/update" => Ok(json!({})),
+                other => Err(format!("no {other}")),
+            });
+
+            let project = tempfile::tempdir().unwrap();
+            let git = |args: &[&str]| {
+                assert!(std::process::Command::new("git")
+                    .args(args)
+                    .current_dir(project.path())
+                    .status()
+                    .unwrap()
+                    .success());
+            };
+            git(&["init", "-q"]);
+            git(&["config", "user.name", "test"]);
+            git(&["config", "user.email", "test@example.com"]);
+            git(&["commit", "-q", "--allow-empty", "-m", "init"]);
+            let db_file = machine.path().join("oxplow.sqlite");
+            let boot = || async {
+                let services = oxplow_app::Services::on_machine_with_database(
+                    project.path(),
+                    project.path().join(".oxplow/global-config"),
+                    std::sync::Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+                    oxplow_app::providers::host::process_env(),
+                    oxplow_db::Database::open(&db_file).unwrap(),
+                )
+                .await
+                .unwrap();
+                crate::RpcContext {
+                    services,
+                    plugin_runtime: Some(runtime()),
+                }
+            };
+
+            let ctx = boot().await;
+            let stream = ctx.streams.ensure_primary().await.unwrap();
+            let thread = ctx
+                .threads
+                .selected_or_first(&stream.id)
+                .await
+                .unwrap()
+                .expect("the primary stream has a thread");
+            let out = crate::dispatch(
+                "run_command",
+                json!({ "id": "oxplow.agent_session.open", "input": {
+                "thread": oxplow_domain::refs::build::thread_ref(thread),
+                "harness": "codex",
+            }, "confirmed": false }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+            let session: oxplow_domain::agent_session::AgentSession =
+                serde_json::from_value(out["result"].clone()).unwrap();
+            let methods = |daemon: &FakeAppServer| -> Vec<String> {
+                daemon
+                    .received()
+                    .iter()
+                    .filter_map(|v| v["method"].as_str().map(str::to_string))
+                    .collect()
+            };
+
+            let first = open(&ctx, &session.id.to_string()).await.unwrap();
+            let start = daemon
+                .received()
+                .into_iter()
+                .find(|v| v["method"] == "thread/start")
+                .expect("the thread was opened on the daemon");
+            assert_eq!(start["params"]["sandbox"], "workspace-write");
+            // The slot is bound to the thread the daemon gave it.
+            let bound = || async {
+                oxplow_domain::stores::AgentSessionStore::get(
+                    &*ctx.agent_session_store,
+                    &session.id,
+                )
+                .await
+                .unwrap()
+                .unwrap()
+                .resume_session_id
+            };
+            for _ in 0..100 {
+                if bound().await == "thr-restart" {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            assert_eq!(bound().await, "thr-restart");
+            let _ = ctx
+                .terminal_sessions
+                .close(first["sessionId"].as_str().unwrap())
+                .await;
+
+            // The backend restarts: everything in memory is gone; the database,
+            // the daemon and the program are not.
+            drop(ctx);
+            let ctx = boot().await;
+            let again = open(&ctx, &session.id.to_string()).await.unwrap();
+            assert!(again["sessionId"].is_string());
+            let sent = methods(&daemon);
+            assert_eq!(
+                sent.iter().filter(|m| *m == "thread/start").count(),
+                1,
+                "the bound thread is resumed, never replaced: {sent:?}"
+            );
+            let resume = daemon
+                .received()
+                .into_iter()
+                .find(|v| v["method"] == "thread/resume")
+                .expect("the bound thread was resumed");
+            assert_eq!(resume["params"]["threadId"], "thr-restart");
+            assert_eq!(resume["params"]["sandbox"], "workspace-write");
+            let _ = ctx
+                .terminal_sessions
+                .close(again["sessionId"].as_str().unwrap())
+                .await;
+        })
+        .await
+        .expect("the restart scenario finishes within a minute");
+    }
+
     #[tokio::test]
     async fn open_terminal_session_rejects_unknown_pane_target() {
         let (svc, _dir) = services().await;

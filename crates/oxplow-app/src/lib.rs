@@ -2043,7 +2043,7 @@ impl Services {
 
     /// [`Self::in_memory_on_machine`] over a database the caller opened: a
     /// test's file, reopened to see what survives a restart.
-    pub(crate) async fn on_machine_with_database(
+    pub async fn on_machine_with_database(
         project_dir: impl Into<PathBuf>,
         global_dir: PathBuf,
         secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,

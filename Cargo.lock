@@ -4950,6 +4950,7 @@ dependencies = [
 name = "oxplow-rpc"
 version = "0.7.0"
 dependencies = [
+ "oxplow-ai",
  "oxplow-app",
  "oxplow-code-deps",
  "oxplow-code-metrics",
@@ -4958,6 +4959,7 @@ dependencies = [
  "oxplow-domain",
  "oxplow-fs-watch",
  "oxplow-git",
+ "oxplow-harnesses",
  "oxplow-sdk",
  "oxplow-session",
  "oxplow-workspace-hack",
