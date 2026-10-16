@@ -30,8 +30,8 @@ pub mod event_channels {
     pub const LSP: &str = "lsp:event";
     /// Terminal bridge events.
     pub const TERMINAL: &str = "terminal:event";
-    /// ACP session events (`acp::session::AcpEvent`, tsk281).
-    pub const ACP: &str = "acp:event";
+    /// Chat session events (`chat::session::ChatEvent`).
+    pub const CHAT: &str = "chat:event";
 
     /// Frame keys used as `{"channel": <key>, "payload": …}` on the
     /// daemon's multiplexed `/events` socket, keyed to the channel
@@ -40,7 +40,7 @@ pub mod event_channels {
         ("oxplow", OXPLOW),
         ("lsp", LSP),
         ("terminal", TERMINAL),
-        ("acp", ACP),
+        ("chat", CHAT),
     ];
 }
 

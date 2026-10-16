@@ -25,14 +25,14 @@ pub async fn open_terminal_session(
 /// `open_terminal_session`: the MCP endpoint comes from the `PluginRuntime`.
 #[tauri::command]
 #[specta::specta]
-pub async fn acp_open_session(
+pub async fn chat_open_session(
     state: tauri::State<'_, AppState>,
     plugin_runtime: tauri::State<'_, PluginRuntimeState>,
     session_id: oxplow_domain::AgentSessionId,
-) -> Result<oxplow_app::acp::manager::AcpSnapshot, IpcError> {
+) -> Result<oxplow_app::chat::manager::ChatSnapshot, IpcError> {
     let ctx = oxplow_rpc::RpcContext {
         services: state.inner().clone(),
         plugin_runtime: Some(plugin_runtime.inner().as_ref().clone()),
     };
-    oxplow_rpc::commands::acp::acp_open_session(&ctx, session_id).await
+    oxplow_rpc::commands::chat::chat_open_session(&ctx, session_id).await
 }

@@ -14,11 +14,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use oxplow_app::acp::host::ServicesAcpHost;
-use oxplow_app::acp::manager::Launch;
-use oxplow_app::acp::session::{AcpEventBody, AcpStatus, SessionSpec};
-use oxplow_app::acp::transcript::ItemBody;
 use oxplow_app::acp::wire::AcpOpen;
+use oxplow_app::chat::host::ServicesChatHost;
+use oxplow_app::chat::manager::Launch;
+use oxplow_app::chat::session::{ChatEventBody, ChatStatus, SessionSpec};
+use oxplow_app::chat::transcript::ItemBody;
 use oxplow_app::Services;
 
 #[tokio::test]
@@ -63,8 +63,8 @@ async fn a_real_adapter_answers_a_prompt() {
         .unwrap()
         .expect("the thread has its session")
         .id;
-    let host = Arc::new(ServicesAcpHost::new(&svc, Some(stream.id), session));
-    svc.acp
+    let host = Arc::new(ServicesChatHost::new(&svc, Some(stream.id), session));
+    svc.chat
         .open(
             host,
             SessionSpec {
@@ -83,15 +83,15 @@ async fn a_real_adapter_answers_a_prompt() {
         )
         .await
         .unwrap();
-    let mut rx = svc.acp.subscribe();
-    svc.acp
+    let mut rx = svc.chat.subscribe();
+    svc.chat
         .submit_human_prompt(&session, "Reply with the single word: pong".into())
         .await
         .unwrap();
     tokio::time::timeout(Duration::from_secs(180), async {
         loop {
-            if let AcpEventBody::Status {
-                status: AcpStatus::Idle,
+            if let ChatEventBody::Status {
+                status: ChatStatus::Idle,
             } = rx.recv().await.unwrap().body
             {
                 return;
@@ -100,12 +100,12 @@ async fn a_real_adapter_answers_a_prompt() {
     })
     .await
     .expect("the turn ended");
-    let items = svc.acp.transcript(&session, 0).unwrap().items;
+    let items = svc.chat.transcript(&session, 0).unwrap().items;
     assert!(
         items
             .iter()
             .any(|i| matches!(&i.body, ItemBody::Agent { text } if !text.trim().is_empty())),
         "no reply: {items:?}"
     );
-    svc.acp.close(&session).unwrap();
+    svc.chat.close(&session).unwrap();
 }

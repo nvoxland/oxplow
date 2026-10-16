@@ -8,26 +8,26 @@ use std::sync::Arc;
 
 use oxplow_domain::AgentSessionId;
 
-use crate::acp::manager::AcpManager;
+use crate::chat::manager::ChatManager;
 use crate::session_auth::SessionAuth;
 use crate::terminal_sessions::{agent_pane_key, TerminalSessionRegistry};
 
 /// Stops what runs in an agent session, whichever kind it is.
 #[derive(Clone)]
 pub struct SessionProcesses {
-    acp: Arc<AcpManager>,
+    chat: Arc<ChatManager>,
     terminals: TerminalSessionRegistry,
     auth: Arc<SessionAuth>,
 }
 
 impl SessionProcesses {
     pub fn new(
-        acp: Arc<AcpManager>,
+        chat: Arc<ChatManager>,
         terminals: TerminalSessionRegistry,
         auth: Arc<SessionAuth>,
     ) -> Self {
         Self {
-            acp,
+            chat,
             terminals,
             auth,
         }
@@ -39,7 +39,7 @@ impl SessionProcesses {
     /// stop.
     pub fn kill(&self, session: AgentSessionId) {
         self.auth.revoke(session);
-        let _ = self.acp.close(&session);
+        let _ = self.chat.close(&session);
         let terminals = self.terminals.clone();
         tokio::spawn(async move {
             terminals.close_key(&agent_pane_key(session)).await;

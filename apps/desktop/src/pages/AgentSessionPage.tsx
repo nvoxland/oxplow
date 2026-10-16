@@ -3,7 +3,7 @@ import { TerminalPane } from "../components/TerminalPane.js";
 import type { Stream, Thread } from "../api.js";
 import { recordUserInterrupt, startAgentSession, startAgentSessionFresh } from "../api.js";
 import { useWorkspaceLinkIndex } from "../useWorkspaceLinkIndex.js";
-import { AcpAgentView } from "../components/acp/AcpAgentView.js";
+import { ChatAgentView } from "../components/chat/ChatAgentView.js";
 import { AnswersStrip } from "../components/Answers/AnswersStrip.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -80,7 +80,7 @@ export function AgentSessionPage({
   if (session.kind === "chat") {
     return (
       <Page testId="page-agent" showNavBar={false} showHeader={false}>
-        <AcpAgentView
+        <ChatAgentView
           key={session.id}
           thread={thread}
           sessionId={session.id}

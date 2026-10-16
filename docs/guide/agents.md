@@ -61,7 +61,7 @@ Efforts belong to the thread and can span sessions. See
 
 ## Input
 
-The person sends terminal input and ACP prompts. Oxplow context and
+The person sends terminal input and chat prompts. Oxplow context and
 advisories supply steering information without automatically typing into
 those interactive surfaces. Recorded AI API computations are separate;
 see [AI models](ai-models.md).

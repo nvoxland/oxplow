@@ -6,7 +6,7 @@ edit or keep an agent working after Stop to reconcile the work queue.
 
 ## Human input and recorded AI computations
 
-Interactive terminal input comes from the person. ACP prompts are sent
+Interactive terminal input comes from the person. Chat prompts are sent
 when the person submits the prompt box; visible oxplow context can
 accompany that prompt. Neither path automatically types prompts or
 answers into a coding agent.

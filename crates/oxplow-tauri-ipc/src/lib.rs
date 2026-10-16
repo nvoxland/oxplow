@@ -83,13 +83,13 @@ fn shell_commands_module() -> String {
 /// Build the tauri-specta `Builder` registering every oxplow command.
 /// Also exports `OxplowEvent` itself so the renderer derives its
 /// event-kind union from the generated type instead of hand-
-/// maintaining one (the "camelcase trap"), `AcpEvent` (the
-/// `acp:event` payload) for the same reason, and `OpOutcome` — what the
+/// maintaining one (the "camelcase trap"), `ChatEvent` (the
+/// `chat:event` payload) for the same reason, and `OpOutcome` — what the
 /// `vcs.*` / `git.*` bus commands return, which no RPC names.
 pub fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .typ::<OxplowEvent>()
-        .typ::<oxplow_app::acp::session::AcpEvent>()
+        .typ::<oxplow_app::chat::session::ChatEvent>()
         .typ::<oxplow_domain::vcs::OpOutcome>()
         // A provider's work-item flags (`v_capability_provider.features`).
         .typ::<oxplow_domain::work_items::WorkItemsFeatures>()
@@ -296,12 +296,12 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             // terminal
             commands::terminal::open_terminal_session,
             // acp
-            commands::terminal::acp_open_session,
-            commands::generated::acp_prompt,
-            commands::generated::acp_cancel,
-            commands::generated::acp_respond_permission,
-            commands::generated::acp_transcript,
-            commands::generated::acp_close_session,
+            commands::terminal::chat_open_session,
+            commands::generated::chat_prompt,
+            commands::generated::chat_cancel,
+            commands::generated::chat_respond_permission,
+            commands::generated::chat_transcript,
+            commands::generated::chat_close_session,
             commands::generated::forward_terminal_input,
             commands::generated::close_terminal_session,
             commands::generated::terminal_session_cwd,

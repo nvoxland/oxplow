@@ -33,6 +33,7 @@ pub mod capabilities;
 mod catalog_models_tests;
 pub mod change_analysis;
 pub mod change_reactor;
+pub mod chat;
 pub mod churn;
 pub mod client_host;
 pub mod client_reports;
@@ -721,8 +722,8 @@ pub struct Services {
     /// Recording and prompt context shared by every agent transport.
     pub agent_context: Arc<agent_context::AgentContext>,
     /// Open ACP agent sessions (tsk281). Sessions get a
-    /// `acp::host::ServicesAcpHost` holding `Services` weakly.
-    pub acp: Arc<acp::manager::AcpManager>,
+    /// `chat::host::ServicesChatHost` holding `Services` weakly.
+    pub chat: Arc<chat::manager::ChatManager>,
     /// This machine's approvals of the project's programs (`exec_consent`).
     pub approvals: Arc<exec_consent::ApprovalStore>,
     pub lsp_installer: lsp_installer::LspInstallerService,
@@ -1529,10 +1530,10 @@ impl Services {
         }) {
             commands.add_op(command).expect("vcs ops register");
         }
-        let acp = Arc::new(acp::manager::AcpManager::new());
+        let chat = Arc::new(chat::manager::ChatManager::new());
         let session_auth = Arc::new(session_auth::SessionAuth::new());
         let session_processes = agent_sessions::SessionProcesses::new(
-            acp.clone(),
+            chat.clone(),
             terminal_sessions.clone(),
             session_auth.clone(),
         );
@@ -1976,7 +1977,7 @@ impl Services {
             lsp_sessions: lsp,
             agent_policy,
             agent_context: Arc::new(agent_context::AgentContext::default()),
-            acp,
+            chat,
             approvals,
             lsp_installer: lsp_installer_svc,
             terminal_sessions,

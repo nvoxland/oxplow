@@ -1063,45 +1063,45 @@ export const commands = {
 	 *  Open (or reattach to) an ACP thread's agent session. Hand-written like
 	 *  `open_terminal_session`: the MCP endpoint comes from the `PluginRuntime`.
 	 */
-	acpOpenSession: (sessionId: AgentSessionId) => typedError<AcpSnapshot, IpcError>(__TAURI_INVOKE("acp_open_session", { sessionId })),
+	chatOpenSession: (sessionId: AgentSessionId) => typedError<ChatSnapshot, IpcError>(__TAURI_INVOKE("chat_open_session", { sessionId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	acpPrompt: (sessionId: AgentSessionId, text: string) => typedError<null, IpcError>(__TAURI_INVOKE("acp_prompt", { sessionId, text })),
+	chatPrompt: (sessionId: AgentSessionId, text: string) => typedError<null, IpcError>(__TAURI_INVOKE("chat_prompt", { sessionId, text })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	acpCancel: (sessionId: AgentSessionId) => typedError<null, IpcError>(__TAURI_INVOKE("acp_cancel", { sessionId })),
+	chatCancel: (sessionId: AgentSessionId) => typedError<null, IpcError>(__TAURI_INVOKE("chat_cancel", { sessionId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	acpRespondPermission: (sessionId: AgentSessionId, requestId: string, optionId: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("acp_respond_permission", { sessionId, requestId, optionId })),
+	chatRespondPermission: (sessionId: AgentSessionId, requestId: string, optionId: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("chat_respond_permission", { sessionId, requestId, optionId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	acpTranscript: (sessionId: AgentSessionId, sinceSeq: number) => typedError<{
+	chatTranscript: (sessionId: AgentSessionId, sinceSeq: number) => typedError<{
 	agent: string,
 	/**
 	 *  The session's generation: a new one (a Restart) replaces the
 	 *  client's transcript instead of merging into it.
 	 */
 	generation: number,
-	status: AcpStatus,
+	status: ChatStatus,
 	usage: ContextUsage | null,
 	/**  The highest `seq` in the transcript; ask `since` this next time. */
 	headSeq: number,
 	items: TranscriptItem[],
 	stderrTail: string[],
-} | null, IpcError>(__TAURI_INVOKE("acp_transcript", { sessionId, sinceSeq })),
+} | null, IpcError>(__TAURI_INVOKE("chat_transcript", { sessionId, sinceSeq })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	acpCloseSession: (sessionId: AgentSessionId) => typedError<null, IpcError>(__TAURI_INVOKE("acp_close_session", { sessionId })),
+	chatCloseSession: (sessionId: AgentSessionId) => typedError<null, IpcError>(__TAURI_INVOKE("chat_close_session", { sessionId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1243,40 +1243,6 @@ export type AcpAgentSource =
 "declared" | 
 /**  The project's `acpAgents:`; needs a person's approval to run. */
 "project";
-
-/**  A change to one agent session's ACP agent, pushed to the UI. */
-export type AcpEvent = {
-	/**  The agent session (`ses3`) it is about. */
-	agentSessionId: string,
-	/**  Its thread, for a client that filters by thread. */
-	threadId: string,
-	/**
-	 *  Which run of the session: each open is a new generation whose
-	 *  ids and seqs start over, so a client resets rather than merging it
-	 *  with the last one's transcript.
-	 */
-	generation: number,
-} & AcpEventBody;
-
-export type AcpEventBody = { type: "item"; item: TranscriptItem } | { type: "status"; status: AcpStatus } | { type: "usage"; usage: ContextUsage } | { type: "closed"; reason: string | null };
-
-/**  A session as the UI reads it. */
-export type AcpSnapshot = {
-	agent: string,
-	/**
-	 *  The session's generation: a new one (a Restart) replaces the
-	 *  client's transcript instead of merging into it.
-	 */
-	generation: number,
-	status: AcpStatus,
-	usage: ContextUsage | null,
-	/**  The highest `seq` in the transcript; ask `since` this next time. */
-	headSeq: number,
-	items: TranscriptItem[],
-	stderrTail: string[],
-};
-
-export type AcpStatus = "starting" | "idle" | "running" | "awaiting_permission" | "stopped";
 
 /**
  *  An MCP server as a provider: oxplow's adapter runs `mcp`'s
@@ -1732,6 +1698,40 @@ export type ChangedPath = {
 	/**  `added`, `modified` or `deleted`. */
 	status: FileStatus,
 };
+
+/**  A change to one agent session's ACP agent, pushed to the UI. */
+export type ChatEvent = {
+	/**  The agent session (`ses3`) it is about. */
+	agentSessionId: string,
+	/**  Its thread, for a client that filters by thread. */
+	threadId: string,
+	/**
+	 *  Which run of the session: each open is a new generation whose
+	 *  ids and seqs start over, so a client resets rather than merging it
+	 *  with the last one's transcript.
+	 */
+	generation: number,
+} & ChatEventBody;
+
+export type ChatEventBody = { type: "item"; item: TranscriptItem } | { type: "status"; status: ChatStatus } | { type: "usage"; usage: ContextUsage } | { type: "closed"; reason: string | null };
+
+/**  A session as the UI reads it. */
+export type ChatSnapshot = {
+	agent: string,
+	/**
+	 *  The session's generation: a new one (a Restart) replaces the
+	 *  client's transcript instead of merging into it.
+	 */
+	generation: number,
+	status: ChatStatus,
+	usage: ContextUsage | null,
+	/**  The highest `seq` in the transcript; ask `since` this next time. */
+	headSeq: number,
+	items: TranscriptItem[],
+	stderrTail: string[],
+};
+
+export type ChatStatus = "starting" | "idle" | "running" | "awaiting_permission" | "stopped";
 
 /**  What `check` found. */
 export type CheckReport = CheckReport_Serialize | CheckReport_Deserialize;

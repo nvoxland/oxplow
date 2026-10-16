@@ -1,16 +1,16 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
-import type { AcpEvent, AcpSnapshot, Thread } from "../../api.js";
+import type { ChatEvent, ChatSnapshot, Thread } from "../../api.js";
 
 // The no-automation contract at the component level: "Put in input" only
-// fills the draft; only Enter (or Send) calls acpPrompt, exactly once.
+// fills the draft; only Enter (or Send) calls chatPrompt, exactly once.
 
 const realApi = await import("../../api.js");
 const prompts: Array<[string, string]> = [];
 const responses: Array<[string, string, string | null]> = [];
-let listener: ((e: AcpEvent) => void) | null = null;
-let snapshot: AcpSnapshot;
+let listener: ((e: ChatEvent) => void) | null = null;
+let snapshot: ChatSnapshot;
 /** `v_command_proposal`'s answer: the thread's proposals' decisions by id. */
 let proposalDecisions: Record<number, string> = {};
 /** The approving run's audit row, by proposal id (none while it runs). */
@@ -18,16 +18,16 @@ let proposalAudits: Record<number, number> = {};
 
 mock.module("../../api.js", () => ({
   ...realApi,
-  acpPrompt: async (sessionId: string, text: string) => {
+  chatPrompt: async (sessionId: string, text: string) => {
     prompts.push([sessionId, text]);
   },
-  acpTranscript: async () => snapshot,
-  acpOpenSession: async () => snapshot,
-  acpRespondPermission: async (t: string, r: string, o: string | null) => {
+  chatTranscript: async () => snapshot,
+  chatOpenSession: async () => snapshot,
+  chatRespondPermission: async (t: string, r: string, o: string | null) => {
     responses.push([t, r, o]);
   },
-  acpCancel: async () => {},
-  subscribeAcpEvents: (l: (e: AcpEvent) => void) => {
+  chatCancel: async () => {},
+  subscribeChatEvents: (l: (e: ChatEvent) => void) => {
     listener = l;
     return () => {
       listener = null;
@@ -85,7 +85,7 @@ mock.module("../Wiki/MarkdownView.js", () => ({
   },
 }));
 
-const { AcpAgentView } = await import("./AcpAgentView.js");
+const { ChatAgentView } = await import("./ChatAgentView.js");
 
 const thread = { id: "thr1" } as unknown as Thread;
 
@@ -105,9 +105,9 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-describe("AcpAgentView", () => {
+describe("ChatAgentView", () => {
   test("typing in the prompt box doesn't re-render the transcript", async () => {
-    const view = render(<AcpAgentView thread={thread} sessionId="ses5" visible={true} />);
+    const view = render(<ChatAgentView thread={thread} sessionId="ses5" visible={true} />);
     await waitFor(() => expect(view.getByTestId("acp-transcript").textContent).toContain("done"));
     const before = markdownRenders;
     const input = view.getByTestId("acp-prompt-input") as HTMLTextAreaElement;
@@ -122,18 +122,18 @@ describe("AcpAgentView", () => {
   // is an EmptyState (what would be here, and prompts to start it).
   test("the starting state is plain text; an empty transcript is an EmptyState", async () => {
     snapshot = { ...snapshot, status: "starting", items: [] };
-    const starting = render(<AcpAgentView thread={thread} sessionId="ses5" visible={true} />);
+    const starting = render(<ChatAgentView thread={thread} sessionId="ses5" visible={true} />);
     await waitFor(() => expect(starting.getByTestId("acp-transcript").textContent).toContain("Starting the agent"));
     expect(starting.container.querySelector("[data-empty-state]")).toBeNull();
     starting.unmount();
 
     snapshot = { ...snapshot, status: "idle", items: [] };
-    const empty = render(<AcpAgentView thread={thread} sessionId="ses5" visible={true} />);
+    const empty = render(<ChatAgentView thread={thread} sessionId="ses5" visible={true} />);
     await waitFor(() => expect(empty.container.querySelector("[data-empty-state]")).not.toBeNull());
   });
 
   test("Shift+Enter sends nothing; Enter sends once", async () => {
-    const view = render(<AcpAgentView thread={thread} sessionId="ses5" visible={true} />);
+    const view = render(<ChatAgentView thread={thread} sessionId="ses5" visible={true} />);
     const input = (await waitFor(() => view.getByTestId("acp-prompt-input"))) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "Close the task." } });
     fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
@@ -146,7 +146,7 @@ describe("AcpAgentView", () => {
 
   test("while a turn runs Enter sends nothing and Escape stops", async () => {
     snapshot = { ...snapshot, status: "running" };
-    const view = render(<AcpAgentView thread={thread} sessionId="ses5" visible={true} />);
+    const view = render(<ChatAgentView thread={thread} sessionId="ses5" visible={true} />);
     await waitFor(() => view.getByTestId("acp-prompt-stop"));
     const input = view.getByTestId("acp-prompt-input") as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "again" } });
@@ -156,7 +156,7 @@ describe("AcpAgentView", () => {
   });
 
   test("live events render and a permission card answers through the API", async () => {
-    const view = render(<AcpAgentView thread={thread} sessionId="ses5" visible={true} />);
+    const view = render(<ChatAgentView thread={thread} sessionId="ses5" visible={true} />);
     await waitFor(() => view.getByTestId("acp-item-1"));
     act(() => {
       listener?.({
@@ -221,7 +221,7 @@ describe("AcpAgentView", () => {
     proposalDecisions = { 7: "pending", 8: "approved", 9: "approved" };
     // 8's run is recorded; 9 is approved and still running (tsk858).
     proposalAudits = { 8: 3 };
-    const view = render(<AcpAgentView thread={thread} sessionId="ses5" visible={true} />);
+    const view = render(<ChatAgentView thread={thread} sessionId="ses5" visible={true} />);
     const card = await waitFor(() => view.getByTestId("proposal-7"));
     expect(card.textContent).toContain("Delete a work item");
     expect(view.getByTestId("proposal-approve-7")).toBeTruthy();
@@ -259,7 +259,7 @@ describe("AcpAgentView", () => {
         },
       ],
     };
-    const view = render(<AcpAgentView thread={thread} sessionId="ses5" visible={true} />);
+    const view = render(<ChatAgentView thread={thread} sessionId="ses5" visible={true} />);
     const item = await waitFor(() => view.getByTestId("acp-item-2"));
     await waitFor(() => expect(item.querySelector('[data-testid="thread-answer"]')).not.toBeNull());
     await waitFor(() => expect(item.textContent).toContain("hot.rs"));

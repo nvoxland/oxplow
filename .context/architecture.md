@@ -67,15 +67,15 @@ which is that oxplow steers and never drives a doing-agent.
   semantic layer — the `ai_*` collector builtins, recorded computations
   (`AiCompute`). That is oxplow's own computation. It never prompts the
   agent doing the work and never touches an agent terminal.
-- **ACP agents** (built): an agent spoken to over the Agent Client
-  Protocol receives a prompt **only** when a human presses Enter in the
+- **Chat agents** (built): an agent spoken to over the Agent Client
+  Protocol, or a Codex thread, receives a prompt **only** when a human presses Enter in the
   thread's prompt box. oxplow's context (session context, advisories,
   decisions, post-tool nudges) rides **only** on that human prompt, as a
   visible block. Two source-scan tests pin this: the
-  Rust `acp/guard_tests.rs` (the prompt type is built only on the human
+  Rust `chat/guard_tests.rs` (the prompt type is built only on the human
   submit path) and the TS `no-agent-input-automation.test.ts` (only the
-  prompt box calls `acpPrompt`). See [agent-model.md](./agent-model.md) →
-  "ACP agents".
+  prompt box calls `chatPrompt`). See [agent-model.md](./agent-model.md) →
+  "Chat sessions".
 
 ## A repo's config never runs a program without consent
 

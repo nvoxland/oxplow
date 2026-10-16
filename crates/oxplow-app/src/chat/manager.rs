@@ -17,11 +17,11 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 
 use super::codex::{CodexConnection, CodexOpen};
 use super::conn::{Connection, Incoming};
-use super::host::AcpHost;
+use super::host::ChatHost;
 use super::model::ContextUsage;
-use super::session::{AcpError, AcpEvent, AcpStatus, Actor, Command, SessionSpec, SessionView};
+use super::session::{Actor, ChatError, ChatEvent, ChatStatus, Command, SessionSpec, SessionView};
 use super::transcript::TranscriptItem;
-use super::wire::{self, AcpOpen};
+use crate::acp::wire::{self, AcpOpen};
 
 /// The ACP agent's program to run.
 #[derive(Debug, Clone)]
@@ -39,13 +39,13 @@ pub struct Launch {
 /// A session as the UI reads it.
 #[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct AcpSnapshot {
+pub struct ChatSnapshot {
     pub agent: String,
     /// The session's generation: a new one (a Restart) replaces the
     /// client's transcript instead of merging into it.
     #[specta(type = oxplow_domain::JsNumber)]
     pub generation: u64,
-    pub status: AcpStatus,
+    pub status: ChatStatus,
     pub usage: Option<ContextUsage>,
     /// The highest `seq` in the transcript; ask `since` this next time.
     #[specta(type = oxplow_domain::JsNumber)]
@@ -72,7 +72,7 @@ impl Handle {
 }
 
 /// An agent session's slot, claimed before anything is spawned (see
-/// [`AcpManager::reserve`]).
+/// [`ChatManager::reserve`]).
 struct Reservation {
     session: AgentSessionId,
     generation: u64,
@@ -81,20 +81,20 @@ struct Reservation {
     current: Arc<AtomicBool>,
 }
 
-pub struct AcpManager {
+pub struct ChatManager {
     sessions: Mutex<HashMap<AgentSessionId, Handle>>,
-    events: broadcast::Sender<AcpEvent>,
+    events: broadcast::Sender<ChatEvent>,
     /// Hands out session generations; one per open.
     next_generation: std::sync::atomic::AtomicU64,
 }
 
-impl Default for AcpManager {
+impl Default for ChatManager {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl AcpManager {
+impl ChatManager {
     pub fn new() -> Self {
         let (events, _) = broadcast::channel(1024);
         Self {
@@ -104,12 +104,12 @@ impl AcpManager {
         }
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<AcpEvent> {
+    pub fn subscribe(&self) -> broadcast::Receiver<ChatEvent> {
         self.events.subscribe()
     }
 
     /// Publish an event as a session would (transport tests).
-    pub fn emit_event_for_tests(&self, event: AcpEvent) {
+    pub fn emit_event_for_tests(&self, event: ChatEvent) {
         let _ = self.events.send(event);
     }
 
@@ -168,10 +168,10 @@ impl AcpManager {
     /// running for the session is kept (`Ok`).
     pub async fn open(
         &self,
-        host: Arc<dyn AcpHost>,
+        host: Arc<dyn ChatHost>,
         spec: SessionSpec,
         launch: Launch,
-    ) -> Result<(), AcpError> {
+    ) -> Result<(), ChatError> {
         let Some(reservation) = self.reserve(&spec) else {
             return Ok(());
         };
@@ -195,7 +195,7 @@ impl AcpManager {
             Ok(c) => c,
             Err(e) => {
                 self.release(&reservation.session, reservation.generation);
-                return Err(AcpError::Agent(format!(
+                return Err(ChatError::Agent(format!(
                     "starting {}: {e}",
                     launch.program.display()
                 )));
@@ -203,7 +203,7 @@ impl AcpManager {
         };
         let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
             self.release(&reservation.session, reservation.generation);
-            return Err(AcpError::Agent("the agent's stdio is unavailable".into()));
+            return Err(ChatError::Agent("the agent's stdio is unavailable".into()));
         };
         if let Some(stderr) = child.stderr.take() {
             let view = reservation.view.clone();
@@ -228,10 +228,10 @@ impl AcpManager {
     /// already running is kept (`Ok`).
     pub async fn open_codex(
         &self,
-        host: Arc<dyn AcpHost>,
+        host: Arc<dyn ChatHost>,
         spec: SessionSpec,
         open: CodexOpen,
-    ) -> Result<(), AcpError> {
+    ) -> Result<(), ChatError> {
         let Some(reservation) = self.reserve(&spec) else {
             return Ok(());
         };
@@ -239,7 +239,7 @@ impl AcpManager {
             Ok(c) => c,
             Err(e) => {
                 self.release(&reservation.session, reservation.generation);
-                return Err(AcpError::Agent(e));
+                return Err(ChatError::Agent(e));
             }
         };
         self.start(host, spec, reservation, conn, incoming).await
@@ -249,12 +249,12 @@ impl AcpManager {
     /// in-process fake). `write` is the agent's input, `read` its output.
     pub async fn open_with_io<W, R>(
         &self,
-        host: Arc<dyn AcpHost>,
+        host: Arc<dyn ChatHost>,
         spec: SessionSpec,
         open: AcpOpen,
         write: W,
         read: R,
-    ) -> Result<(), AcpError>
+    ) -> Result<(), ChatError>
     where
         W: AsyncWrite + Send + 'static,
         R: AsyncRead + Send + 'static,
@@ -276,12 +276,12 @@ impl AcpManager {
     /// on it.
     async fn start_acp<W, R>(
         &self,
-        host: Arc<dyn AcpHost>,
+        host: Arc<dyn ChatHost>,
         spec: SessionSpec,
         reservation: Reservation,
         open: AcpOpen,
         (write, read, child): (W, R, Option<tokio::process::Child>),
-    ) -> Result<(), AcpError>
+    ) -> Result<(), ChatError>
     where
         W: AsyncWrite + Send + 'static,
         R: AsyncRead + Send + 'static,
@@ -319,12 +319,12 @@ impl AcpManager {
     /// Run the session's actor on an open connection.
     async fn start(
         &self,
-        host: Arc<dyn AcpHost>,
+        host: Arc<dyn ChatHost>,
         spec: SessionSpec,
         reservation: Reservation,
         conn: Arc<dyn Connection>,
         incoming: mpsc::UnboundedReceiver<Incoming>,
-    ) -> Result<(), AcpError> {
+    ) -> Result<(), ChatError> {
         let Reservation {
             commands: cmd_rx,
             view,
@@ -346,14 +346,14 @@ impl AcpManager {
     /// Whether the session started: the actor's word, else the agent's
     /// last stderr lines.
     async fn ready(
-        ready: oneshot::Receiver<Result<(), AcpError>>,
+        ready: oneshot::Receiver<Result<(), ChatError>>,
         view: &Mutex<SessionView>,
-    ) -> Result<(), AcpError> {
+    ) -> Result<(), ChatError> {
         match ready.await {
             Ok(r) => r,
             Err(_) => {
                 let tail = view.lock().stderr_tail.join("\n");
-                Err(AcpError::Agent(if tail.is_empty() {
+                Err(ChatError::Agent(if tail.is_empty() {
                     "the agent exited during startup".into()
                 } else {
                     format!("the agent exited during startup:\n{tail}")
@@ -365,13 +365,13 @@ impl AcpManager {
     fn commands(
         &self,
         session: &AgentSessionId,
-    ) -> Result<mpsc::UnboundedSender<Command>, AcpError> {
+    ) -> Result<mpsc::UnboundedSender<Command>, ChatError> {
         self.sessions
             .lock()
             .get(session)
             .filter(|h| h.alive())
             .map(|h| h.commands.clone())
-            .ok_or(AcpError::NotOpen)
+            .ok_or(ChatError::NotOpen)
     }
 
     /// Send what a person typed. The only caller is the UI-only RPC
@@ -380,18 +380,18 @@ impl AcpManager {
         &self,
         session: &AgentSessionId,
         text: String,
-    ) -> Result<(), AcpError> {
+    ) -> Result<(), ChatError> {
         let (reply, rx) = oneshot::channel();
         self.commands(session)?
             .send(Command::Prompt { text, reply })
-            .map_err(|_| AcpError::NotOpen)?;
-        rx.await.map_err(|_| AcpError::NotOpen)?
+            .map_err(|_| ChatError::NotOpen)?;
+        rx.await.map_err(|_| ChatError::NotOpen)?
     }
 
-    pub fn cancel(&self, session: &AgentSessionId) -> Result<(), AcpError> {
+    pub fn cancel(&self, session: &AgentSessionId) -> Result<(), ChatError> {
         self.commands(session)?
             .send(Command::Cancel)
-            .map_err(|_| AcpError::NotOpen)
+            .map_err(|_| ChatError::NotOpen)
     }
 
     /// Answer a permission card; `option_id: None` cancels it.
@@ -400,7 +400,7 @@ impl AcpManager {
         session: &AgentSessionId,
         request_id: String,
         option_id: Option<String>,
-    ) -> Result<(), AcpError> {
+    ) -> Result<(), ChatError> {
         let (reply, rx) = oneshot::channel();
         self.commands(session)?
             .send(Command::Respond {
@@ -408,16 +408,16 @@ impl AcpManager {
                 option_id,
                 reply,
             })
-            .map_err(|_| AcpError::NotOpen)?;
-        rx.await.map_err(|_| AcpError::NotOpen)?
+            .map_err(|_| ChatError::NotOpen)?;
+        rx.await.map_err(|_| ChatError::NotOpen)?
     }
 
     /// The session's state and the items changed after `since`. Also works
     /// for a session that has stopped (its transcript stays readable).
-    pub fn transcript(&self, session: &AgentSessionId, since: u64) -> Option<AcpSnapshot> {
+    pub fn transcript(&self, session: &AgentSessionId, since: u64) -> Option<ChatSnapshot> {
         let sessions = self.sessions.lock();
         let v = sessions.get(session)?.view.lock();
-        Some(AcpSnapshot {
+        Some(ChatSnapshot {
             agent: v.agent.clone(),
             generation: v.generation,
             status: v.status,
@@ -429,12 +429,14 @@ impl AcpManager {
     }
 
     /// Stop the session and its agent process.
-    pub fn close(&self, session: &AgentSessionId) -> Result<(), AcpError> {
+    pub fn close(&self, session: &AgentSessionId) -> Result<(), ChatError> {
         let commands = self.commands(session)?;
         // Closed from this moment, not when the actor gets around to it.
         if let Some(h) = self.sessions.lock().get(session) {
             h.closed.store(true, Ordering::SeqCst);
         }
-        commands.send(Command::Close).map_err(|_| AcpError::NotOpen)
+        commands
+            .send(Command::Close)
+            .map_err(|_| ChatError::NotOpen)
     }
 }

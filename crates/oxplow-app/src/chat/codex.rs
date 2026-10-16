@@ -24,10 +24,10 @@ use tokio::sync::{mpsc, watch};
 use super::conn::{Connection, Incoming, Opened, PermissionReply, TurnEnd, TurnTokens};
 use super::human_prompt::HumanPrompt;
 use super::model::{
-    AcpUpdate, ContextUsage, PermissionAnswer, PermissionAsk, PermissionKind, PermissionOption,
+    ChatUpdate, ContextUsage, PermissionAnswer, PermissionAsk, PermissionKind, PermissionOption,
     PlanEntry, PlanStatus, ToolCall, ToolCallPatch, ToolKind, ToolStatus,
 };
-use super::wire::{cap, cap_value};
+use crate::acp::wire::{cap, cap_value};
 
 /// How the thread opens, as the harness's launch says.
 #[derive(Debug, Clone)]
@@ -294,7 +294,7 @@ fn on_message(message: ServerMessage, server: &AppServer, state: &mut State) -> 
 }
 
 fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> {
-    let update = |u: AcpUpdate| vec![Incoming::Update(Box::new(u))];
+    let update = |u: ChatUpdate| vec![Incoming::Update(Box::new(u))];
     match method {
         "item/started" | "item/completed" => p
             .get("item")
@@ -305,13 +305,13 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
             .collect(),
         "item/agentMessage/delta" => {
             streamed(p, state);
-            update(AcpUpdate::AgentChunk(text_of(p, "delta")))
+            update(ChatUpdate::AgentChunk(text_of(p, "delta")))
         }
         "item/reasoning/summaryTextDelta" => {
             streamed(p, state);
-            update(AcpUpdate::ThoughtChunk(text_of(p, "delta")))
+            update(ChatUpdate::ThoughtChunk(text_of(p, "delta")))
         }
-        "turn/plan/updated" => update(AcpUpdate::Plan(plan(p))),
+        "turn/plan/updated" => update(ChatUpdate::Plan(plan(p))),
         "turn/started" => {
             state.turn = p
                 .pointer("/turn/id")
@@ -335,7 +335,7 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
                 .pointer("/tokenUsage/modelContextWindow")
                 .and_then(Value::as_u64);
             match (used, size) {
-                (Some(used), Some(size)) => update(AcpUpdate::Usage(ContextUsage {
+                (Some(used), Some(size)) => update(ChatUpdate::Usage(ContextUsage {
                     used,
                     size,
                     cost_amount: None,
@@ -409,7 +409,7 @@ fn plan(p: &Value) -> Vec<PlanEntry> {
 
 /// What one thread item says, started or `done`. Text that arrived as
 /// deltas (its id in `streamed`) isn't repeated when the item completes.
-fn item_updates(item: &Value, done: bool, streamed: &mut HashSet<String>) -> Vec<AcpUpdate> {
+fn item_updates(item: &Value, done: bool, streamed: &mut HashSet<String>) -> Vec<ChatUpdate> {
     let id = item
         .get("id")
         .and_then(Value::as_str)
@@ -426,10 +426,10 @@ fn item_updates(item: &Value, done: bool, streamed: &mut HashSet<String>) -> Vec
                 .filter_map(|c| c.get("text").and_then(Value::as_str))
                 .map(cap)
                 .collect();
-            vec![AcpUpdate::UserChunk(text.join("\n"))]
+            vec![ChatUpdate::UserChunk(text.join("\n"))]
         }
         "agentMessage" if done && !was_streamed => {
-            vec![AcpUpdate::AgentChunk(text_of(item, "text"))]
+            vec![ChatUpdate::AgentChunk(text_of(item, "text"))]
         }
         "reasoning" if done && !was_streamed => {
             let summary: Vec<String> = item
@@ -443,14 +443,14 @@ fn item_updates(item: &Value, done: bool, streamed: &mut HashSet<String>) -> Vec
             if summary.is_empty() {
                 Vec::new()
             } else {
-                vec![AcpUpdate::ThoughtChunk(summary.join("\n"))]
+                vec![ChatUpdate::ThoughtChunk(summary.join("\n"))]
             }
         }
         "userMessage" | "agentMessage" | "reasoning" | "plan" | "hookPrompt"
         | "contextCompaction" | "enteredReviewMode" | "exitedReviewMode" | "sleep" => Vec::new(),
         _ => tool_call(item, id)
             .into_iter()
-            .map(AcpUpdate::ToolCall)
+            .map(ChatUpdate::ToolCall)
             .collect(),
     }
 }
@@ -699,7 +699,7 @@ mod tests {
             .iter()
             .filter_map(|i| match i {
                 Incoming::Update(u) => match u.as_ref() {
-                    AcpUpdate::UserChunk(t) => Some(t.as_str()),
+                    ChatUpdate::UserChunk(t) => Some(t.as_str()),
                     _ => None,
                 },
                 _ => None,
@@ -717,7 +717,7 @@ mod tests {
             .iter()
             .filter_map(|i| match i {
                 Incoming::Update(u) => match u.as_ref() {
-                    AcpUpdate::ToolCall(t) => Some(t),
+                    ChatUpdate::ToolCall(t) => Some(t),
                     _ => None,
                 },
                 _ => None,
@@ -744,7 +744,7 @@ mod tests {
             .iter()
             .filter_map(|i| match i {
                 Incoming::Update(u) => match u.as_ref() {
-                    AcpUpdate::AgentChunk(t) => Some(t.as_str()),
+                    ChatUpdate::AgentChunk(t) => Some(t.as_str()),
                     _ => None,
                 },
                 _ => None,

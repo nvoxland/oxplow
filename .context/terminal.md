@@ -52,7 +52,7 @@ consumer. It's mounted by two page renderers:
 - `apps/desktop/src/pages/AgentPage.tsx` — an agent session's tab,
   `paneTarget` the session id (`ses3`). The backend spawns the session's
   harness CLI (Claude or opencode; a chat session, ACP or Codex, renders
-  `AcpAgentView` instead).
+  `ChatAgentView` instead).
 - `apps/desktop/src/pages/TerminalPage.tsx` — the "Terminal" Page (rail
   entry + `indexRef("terminal")`). Hosts **multiple** shells: it mounts
   one `TerminalPane` per terminal, stacked and toggled `display:none`

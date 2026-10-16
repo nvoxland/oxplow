@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 
 use super::human_prompt::HumanPrompt;
-use super::model::{AcpUpdate, PermissionAnswer, PermissionAsk};
+use super::model::{ChatUpdate, PermissionAnswer, PermissionAsk};
 
 /// The agent's side of one session.
 #[async_trait]
@@ -42,7 +42,7 @@ pub struct Opened {
 
 /// What the agent sends, in arrival order.
 pub enum Incoming {
-    Update(Box<AcpUpdate>),
+    Update(Box<ChatUpdate>),
     Permission {
         ask: Box<PermissionAsk>,
         reply: PermissionReply,

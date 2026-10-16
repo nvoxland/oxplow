@@ -186,7 +186,7 @@ macro_rules! oxplow_command_table {
                 // terminal — the agent-spawn path needs plugin_runtime
                 "open_terminal_session" => $crate::commands::terminal::open_terminal_session { pane_target: String, cols: u16, rows: u16 },
                 // acp — opening a session needs plugin_runtime (oxplow's MCP endpoint)
-                "acp_open_session" => $crate::commands::acp::acp_open_session { session_id: ::oxplow_domain::AgentSessionId },
+                "chat_open_session" => $crate::commands::chat::chat_open_session { session_id: ::oxplow_domain::AgentSessionId },
             }
             svc {
             }
@@ -201,12 +201,12 @@ macro_rules! oxplow_command_table {
                 list_threads => $crate::commands::threads::list_threads { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::Thread>,
                 list_acp_agents => $crate::commands::threads::list_acp_agents {} -> Vec<::oxplow_app::acp::agents::AcpAgentListing>,
                 list_agent_harnesses => $crate::commands::threads::list_agent_harnesses {} -> Vec<::oxplow_app::harnesses::HarnessListing>,
-                // acp sessions (tsk281) — UI-only; acp_prompt is the prompt box's Enter
-                acp_prompt => $crate::commands::acp::acp_prompt { session_id: ::oxplow_domain::AgentSessionId, text: String } -> (),
-                acp_cancel => $crate::commands::acp::acp_cancel { session_id: ::oxplow_domain::AgentSessionId } -> (),
-                acp_respond_permission => $crate::commands::acp::acp_respond_permission { session_id: ::oxplow_domain::AgentSessionId, request_id: String, option_id: Option<String> } -> (),
-                acp_transcript => $crate::commands::acp::acp_transcript { session_id: ::oxplow_domain::AgentSessionId, since_seq: u32 } -> Option<::oxplow_app::acp::manager::AcpSnapshot>,
-                acp_close_session => $crate::commands::acp::acp_close_session { session_id: ::oxplow_domain::AgentSessionId } -> (),
+                // acp sessions (tsk281) — UI-only; chat_prompt is the prompt box's Enter
+                chat_prompt => $crate::commands::chat::chat_prompt { session_id: ::oxplow_domain::AgentSessionId, text: String } -> (),
+                chat_cancel => $crate::commands::chat::chat_cancel { session_id: ::oxplow_domain::AgentSessionId } -> (),
+                chat_respond_permission => $crate::commands::chat::chat_respond_permission { session_id: ::oxplow_domain::AgentSessionId, request_id: String, option_id: Option<String> } -> (),
+                chat_transcript => $crate::commands::chat::chat_transcript { session_id: ::oxplow_domain::AgentSessionId, since_seq: u32 } -> Option<::oxplow_app::chat::manager::ChatSnapshot>,
+                chat_close_session => $crate::commands::chat::chat_close_session { session_id: ::oxplow_domain::AgentSessionId } -> (),
                 list_closed_threads => $crate::commands::threads::list_closed_threads { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::Thread>,
                 get_thread_state => $crate::commands::threads::get_thread_state { stream_id: ::oxplow_domain::StreamId } -> $crate::commands::threads::ThreadState,
                 select_thread => $crate::commands::threads::select_thread { req: $crate::commands::threads::SelectThreadRequest } -> (),

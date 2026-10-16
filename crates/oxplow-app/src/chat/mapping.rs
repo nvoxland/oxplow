@@ -168,7 +168,7 @@ fn tool_response(t: &ToolCall) -> Option<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::acp::model::ToolDiff;
+    use crate::chat::model::ToolDiff;
     use serde_json::json;
 
     fn call(kind: ToolKind) -> ToolCall {

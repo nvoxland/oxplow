@@ -16,12 +16,12 @@
 //! NOT here (Tauri-only, never dispatched): `launch`, `menu`, `webview`
 //! — they touch the OS window/clipboard and stay in the shell.
 
-pub mod acp;
 pub mod ai;
 pub mod app;
 pub mod background;
 pub mod bus;
 pub mod changes;
+pub mod chat;
 pub mod collectors;
 pub mod comments;
 pub mod config;

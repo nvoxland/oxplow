@@ -1,5 +1,5 @@
-// The ACP thread view's state, as a pure reducer over the backend's
-// snapshot (`acpTranscript`) and live `acp:event`s.
+// The chat thread view's state, as a pure reducer over the backend's
+// snapshot (`chatTranscript`) and live `chat:event`s.
 //
 // Every transcript item has a stable `id` and a `seq` bumped from one
 // session-wide counter each time it changes; the backend emits an event
@@ -7,16 +7,16 @@
 // seqs, and a jump means some were missed (a lagged socket, a
 // reconnect): the state goes `stale` and the view refetches
 // `since(headSeq)`, which merges back in by id. See
-// .context/agent-model.md → "ACP agents".
+// .context/agent-model.md → "Chat sessions".
 
-import type { AcpEvent, AcpSnapshot, AcpStatus, ContextUsage, TranscriptItem } from "../../api.js";
+import type { ChatEvent, ChatSnapshot, ChatStatus, ContextUsage, TranscriptItem } from "../../api.js";
 
-export interface AcpViewState {
+export interface ChatViewState {
   agent: string;
   /// The session generation this state holds; a new one (a Restart)
   /// starts over rather than merging, since its ids and seqs restart.
   generation: number | null;
-  status: AcpStatus;
+  status: ChatStatus;
   /** Ordered by id (creation order). */
   items: TranscriptItem[];
   headSeq: number;
@@ -27,7 +27,7 @@ export interface AcpViewState {
   stale: boolean;
 }
 
-export function initialState(): AcpViewState {
+export function initialState(): ChatViewState {
   return {
     agent: "",
     generation: null,
@@ -51,12 +51,12 @@ export function upsertItems(items: TranscriptItem[], incoming: TranscriptItem[])
   return [...byId.values()].sort((a, b) => a.id - b.id);
 }
 
-export function fromSnapshot(s: AcpSnapshot): AcpViewState {
+export function fromSnapshot(s: ChatSnapshot): ChatViewState {
   return mergeSnapshot(initialState(), s);
 }
 
 /** Fold a (possibly partial, `since`) snapshot in. */
-export function mergeSnapshot(state: AcpViewState, s: AcpSnapshot): AcpViewState {
+export function mergeSnapshot(state: ChatViewState, s: ChatSnapshot): ChatViewState {
   const base = sameGeneration(state, s.generation) ? state : initialState();
   return {
     ...base,
@@ -72,13 +72,13 @@ export function mergeSnapshot(state: AcpViewState, s: AcpSnapshot): AcpViewState
 }
 
 /// Whether `generation` is the one `state` holds (or `state` holds none yet).
-function sameGeneration(state: AcpViewState, generation: number | undefined): boolean {
+function sameGeneration(state: ChatViewState, generation: number | undefined): boolean {
   return state.generation === null || generation === undefined || generation === state.generation;
 }
 
-export function applyEvent(prev: AcpViewState, e: AcpEvent): AcpViewState {
+export function applyEvent(prev: ChatViewState, e: ChatEvent): ChatViewState {
   // A new session's first event: start over (keeping the agent's name).
-  const state: AcpViewState = sameGeneration(prev, e.generation)
+  const state: ChatViewState = sameGeneration(prev, e.generation)
     ? { ...prev, generation: prev.generation ?? e.generation ?? null }
     : { ...initialState(), agent: prev.agent, generation: e.generation };
   switch (e.type) {
@@ -104,12 +104,12 @@ export function applyEvent(prev: AcpViewState, e: AcpEvent): AcpViewState {
 }
 
 /** A turn is in flight: no new prompt until it ends (never queued). */
-export function isBusy(status: AcpStatus): boolean {
+export function isBusy(status: ChatStatus): boolean {
   return status === "running" || status === "awaiting_permission";
 }
 
 /** Permission cards still waiting on the person. */
-export function openPermissions(state: AcpViewState): TranscriptItem[] {
+export function openPermissions(state: ChatViewState): TranscriptItem[] {
   return state.items.filter((i) => i.type === "permission" && i.answer === null);
 }
 

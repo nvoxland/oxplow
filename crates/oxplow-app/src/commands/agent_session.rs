@@ -7,7 +7,7 @@
 //! no-automation guards keep that true for a session an agent opened too.
 //! Closing one closes its slot and, once that commits, stops its process
 //! (`SessionProcesses`). Stopping a process alone (`terminate_terminal_session`,
-//! `acp_close_session`) leaves the slot open.
+//! `chat_close_session`) leaves the slot open.
 //!
 //! A session is named by ref (`agent_session:ses3`), a thread by
 //! `thread:thr1`. An agent acts only on sessions in its own stream, and its

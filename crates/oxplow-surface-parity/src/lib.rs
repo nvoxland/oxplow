@@ -477,27 +477,27 @@ pub const MANIFEST: &[Capability] = &[
     // ACP sessions: the prompt box, permission cards and banners. Never
     // agent tools — an agent must not prompt an agent (tsk281).
     ui(
-        "acp_open_session",
+        "chat_open_session",
         "an ACP session is the person's: an agent must not prompt an agent (tsk281)",
     ),
     ui(
-        "acp_prompt",
+        "chat_prompt",
         "an ACP session is the person's: an agent must not prompt an agent (tsk281)",
     ),
     ui(
-        "acp_cancel",
+        "chat_cancel",
         "an ACP session is the person's: an agent must not prompt an agent (tsk281)",
     ),
     ui(
-        "acp_respond_permission",
+        "chat_respond_permission",
         "an ACP permission card is answered by a person, never an agent (tsk281)",
     ),
     ui(
-        "acp_transcript",
+        "chat_transcript",
         "an ACP session's transcript, rendered for the person (tsk281)",
     ),
     ui(
-        "acp_close_session",
+        "chat_close_session",
         "an ACP session is the person's: an agent must not prompt an agent (tsk281)",
     ),
     ui(

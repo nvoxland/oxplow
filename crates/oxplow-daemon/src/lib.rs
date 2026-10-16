@@ -139,8 +139,8 @@ async fn health() -> &'static str {
 }
 
 /// `GET /events` — WebSocket multiplexing the backend event channels
-/// (`oxplow:event`, `lsp:event`, `terminal:event`, `acp:event`). Each
-/// frame is `{"channel":"oxplow"|"lsp"|"terminal"|"acp","payload":<event>}`
+/// (`oxplow:event`, `lsp:event`, `terminal:event`, `chat:event`). Each
+/// frame is `{"channel":"oxplow"|"lsp"|"terminal"|"chat","payload":<event>}`
 /// with the event's serialized shape, so the renderer's handlers are
 /// transport-agnostic.
 ///
@@ -204,7 +204,7 @@ fn frame_json<T: serde::Serialize>(channel: &str, event: &T) -> Option<String> {
 /// shared channel registry so the daemon, the Tauri shell, and the
 /// renderer's demux table can't drift.
 fn subscribe(state: &DaemonState) -> [Forwarder; 4] {
-    let [oxplow_key, lsp_key, terminal_key, acp_key] = ws_frame_keys();
+    let [oxplow_key, lsp_key, terminal_key, chat_key] = ws_frame_keys();
     [
         forward(state.ctx.events.subscribe_ui(), move |e| {
             frame_json(oxplow_key, e)
@@ -215,11 +215,11 @@ fn subscribe(state: &DaemonState) -> [Forwarder; 4] {
         forward(state.ctx.terminal_sessions.subscribe(), move |e| {
             frame_json(terminal_key, e)
         }),
-        forward(state.ctx.acp.subscribe(), move |e| frame_json(acp_key, e)),
+        forward(state.ctx.chat.subscribe(), move |e| frame_json(chat_key, e)),
     ]
 }
 
-/// The `/events` frame keys in [oxplow, lsp, terminal, acp] order,
+/// The `/events` frame keys in [oxplow, lsp, terminal, chat] order,
 /// resolved from `oxplow_app::event_channels::FRAMES` by the channel
 /// each key demuxes onto.
 fn ws_frame_keys() -> [&'static str; 4] {
@@ -235,7 +235,7 @@ fn ws_frame_keys() -> [&'static str; 4] {
         key_for(ch::OXPLOW),
         key_for(ch::LSP),
         key_for(ch::TERMINAL),
-        key_for(ch::ACP),
+        key_for(ch::CHAT),
     ]
 }
 
@@ -956,9 +956,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn events_ws_streams_acp_events() {
+    async fn events_ws_streams_chat_events() {
         use futures::StreamExt as _;
-        use oxplow_app::acp::session::{AcpEvent, AcpEventBody, AcpStatus};
+        use oxplow_app::chat::session::{ChatEvent, ChatEventBody, ChatStatus};
         let (svc, _dir) = services().await;
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
             .await
@@ -968,12 +968,12 @@ mod tests {
         // Same subscribe-race handling as the other events tests.
         let frame = tokio::time::timeout(std::time::Duration::from_secs(10), async {
             loop {
-                svc.acp.emit_event_for_tests(AcpEvent {
+                svc.chat.emit_event_for_tests(ChatEvent {
                     agent_session_id: "ses4".into(),
                     thread_id: "thr3".into(),
                     generation: 1,
-                    body: AcpEventBody::Status {
-                        status: AcpStatus::Running,
+                    body: ChatEventBody::Status {
+                        status: ChatStatus::Running,
                     },
                 });
                 match tokio::time::timeout(std::time::Duration::from_millis(200), ws.next()).await {
@@ -987,7 +987,7 @@ mod tests {
         .await
         .expect("ws frame within timeout");
         let v: serde_json::Value = serde_json::from_str(&frame).unwrap();
-        assert_eq!(v["channel"], "acp");
+        assert_eq!(v["channel"], "chat");
         assert_eq!(v["payload"]["agentSessionId"], "ses4");
         assert_eq!(v["payload"]["threadId"], "thr3");
         assert_eq!(v["payload"]["type"], "status");

@@ -2,19 +2,20 @@
 //! agent, a Codex thread).
 //!
 //! Every command here is UI-only (`ui(...)` in the surface-parity table),
-//! so none can become an MCP tool. In particular `acp_prompt` is the
+//! so none can become an MCP tool. In particular `chat_prompt` is the
 //! prompt box's Enter and nothing else: an agent can't prompt an agent,
 //! and oxplow never prompts one on its own (see
-//! `oxplow_app::acp::human_prompt`).
+//! `oxplow_app::chat::human_prompt`).
 
 use std::sync::Arc;
 
-use oxplow_app::acp::codex::CodexOpen;
-use oxplow_app::acp::host::ServicesAcpHost;
-use oxplow_app::acp::manager::{AcpSnapshot, Launch};
-use oxplow_app::acp::session::{AcpError, SessionSpec};
+use oxplow_app::acp::agents;
 use oxplow_app::acp::wire::{AcpOpen, McpHttp};
-use oxplow_app::acp::{agents, manager::AcpManager};
+use oxplow_app::chat::codex::CodexOpen;
+use oxplow_app::chat::host::ServicesChatHost;
+use oxplow_app::chat::manager::ChatManager;
+use oxplow_app::chat::manager::{ChatSnapshot, Launch};
+use oxplow_app::chat::session::{ChatError, SessionSpec};
 use oxplow_app::Services;
 use oxplow_domain::agent::acp_adapter::SystemPromptVia;
 use oxplow_domain::agent::harness::LaunchSpec;
@@ -25,30 +26,30 @@ use oxplow_domain::AgentSessionId;
 use crate::error::IpcError;
 use crate::RpcContext;
 
-fn acp_err(e: AcpError) -> IpcError {
+fn chat_err(e: ChatError) -> IpcError {
     IpcError::invalid(e.to_string())
 }
 
 fn snapshot(
-    acp: &AcpManager,
+    chat: &ChatManager,
     session: &AgentSessionId,
     since: u64,
-) -> Result<AcpSnapshot, IpcError> {
-    acp.transcript(session, since)
-        .ok_or_else(|| acp_err(AcpError::NotOpen))
+) -> Result<ChatSnapshot, IpcError> {
+    chat.transcript(session, since)
+        .ok_or_else(|| chat_err(ChatError::NotOpen))
 }
 
 /// Start chat session `session_id`'s agent (or keep the running one) and
 /// return its state: an ACP agent's program, or its thread on Codex's
 /// app-server daemon, as its harness's launch says. Continues the
 /// session's saved conversation when it has one.
-pub async fn acp_open_session(
+pub async fn chat_open_session(
     ctx: &RpcContext,
     session_id: AgentSessionId,
-) -> Result<AcpSnapshot, IpcError> {
+) -> Result<ChatSnapshot, IpcError> {
     let svc = &ctx.services;
-    if svc.acp.is_open(&session_id) {
-        return snapshot(&svc.acp, &session_id, 0);
+    if svc.chat.is_open(&session_id) {
+        return snapshot(&svc.chat, &session_id, 0);
     }
     let session = svc
         .agent_session_store
@@ -141,7 +142,7 @@ pub async fn acp_open_session(
         agent: name.clone(),
         cwd,
     };
-    let host = Arc::new(ServicesAcpHost::new(svc, Some(stream.id), session_id));
+    let host = Arc::new(ServicesChatHost::new(svc, Some(stream.id), session_id));
     match launch.spec {
         LaunchSpec::Acp {
             program,
@@ -171,7 +172,7 @@ pub async fn acp_open_session(
                 env_remove: oxplow_app::agent_path::not_inherited(&svc.harnesses),
                 open,
             };
-            svc.acp.open(host, spec, launch).await.map_err(acp_err)?;
+            svc.chat.open(host, spec, launch).await.map_err(chat_err)?;
         }
         LaunchSpec::CodexAppServer {
             socket,
@@ -185,16 +186,16 @@ pub async fn acp_open_session(
                 method,
                 params,
             };
-            svc.acp
+            svc.chat
                 .open_codex(host, spec, open)
                 .await
-                .map_err(acp_err)?;
+                .map_err(chat_err)?;
         }
         LaunchSpec::Pty { .. } => {
             return Err(IpcError::invalid("this session runs in a terminal"));
         }
     }
-    snapshot(&svc.acp, &session_id, 0)
+    snapshot(&svc.chat, &session_id, 0)
 }
 
 /// ACP agent `name`'s program, as the project resolves it for the
@@ -232,49 +233,52 @@ fn acp_program(
 
 /// What the person typed in the prompt box. The one path by which a
 /// prompt reaches an ACP agent.
-pub async fn acp_prompt(
+pub async fn chat_prompt(
     svc: &Services,
     session_id: AgentSessionId,
     text: String,
 ) -> Result<(), IpcError> {
-    svc.acp
+    svc.chat
         .submit_human_prompt(&session_id, text)
         .await
-        .map_err(acp_err)
+        .map_err(chat_err)
 }
 
 /// Stop the running turn (open permission cards are cancelled).
-pub async fn acp_cancel(svc: &Services, session_id: AgentSessionId) -> Result<(), IpcError> {
-    svc.acp.cancel(&session_id).map_err(acp_err)
+pub async fn chat_cancel(svc: &Services, session_id: AgentSessionId) -> Result<(), IpcError> {
+    svc.chat.cancel(&session_id).map_err(chat_err)
 }
 
 /// Answer a permission card; no `option_id` cancels it.
-pub async fn acp_respond_permission(
+pub async fn chat_respond_permission(
     svc: &Services,
     session_id: AgentSessionId,
     request_id: String,
     option_id: Option<String>,
 ) -> Result<(), IpcError> {
-    svc.acp
+    svc.chat
         .respond_permission(&session_id, request_id, option_id)
         .await
-        .map_err(acp_err)
+        .map_err(chat_err)
 }
 
 /// The session's state and the transcript items changed after `since_seq`
 /// (0 for all). `None` when its agent hasn't run in this daemon.
-pub async fn acp_transcript(
+pub async fn chat_transcript(
     svc: &Services,
     session_id: AgentSessionId,
     since_seq: u32,
-) -> Result<Option<AcpSnapshot>, IpcError> {
-    Ok(svc.acp.transcript(&session_id, u64::from(since_seq)))
+) -> Result<Option<ChatSnapshot>, IpcError> {
+    Ok(svc.chat.transcript(&session_id, u64::from(since_seq)))
 }
 
 /// Stop the session's agent process (the session itself stays open: its
 /// slot closes with `oxplow.agent_session.close`).
-pub async fn acp_close_session(svc: &Services, session_id: AgentSessionId) -> Result<(), IpcError> {
-    svc.acp.close(&session_id).map_err(acp_err)
+pub async fn chat_close_session(
+    svc: &Services,
+    session_id: AgentSessionId,
+) -> Result<(), IpcError> {
+    svc.chat.close(&session_id).map_err(chat_err)
 }
 
 #[cfg(test)]
@@ -287,7 +291,7 @@ mod tests {
     async fn without_a_session_prompting_is_refused_and_the_transcript_is_empty() {
         let (ctx, _dir) = crate::test_support::services().await;
         let err = crate::dispatch(
-            "acp_prompt",
+            "chat_prompt",
             json!({"sessionId": "ses1", "text": "hi"}),
             &ctx,
         )
@@ -299,7 +303,7 @@ mod tests {
             err.message
         );
         let t = crate::dispatch(
-            "acp_transcript",
+            "chat_transcript",
             json!({"sessionId": "ses1", "sinceSeq": 0}),
             &ctx,
         )
@@ -329,7 +333,7 @@ mod tests {
         .await
         .unwrap();
         let session = opened["result"]["id"].as_str().unwrap().to_string();
-        let err = crate::dispatch("acp_open_session", json!({"sessionId": session}), &ctx)
+        let err = crate::dispatch("chat_open_session", json!({"sessionId": session}), &ctx)
             .await
             .unwrap_err();
         assert!(err.message.contains("isn't a chat"), "{}", err.message);

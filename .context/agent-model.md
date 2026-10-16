@@ -51,8 +51,8 @@ Synthesizing input would be automating the agent CLI, which risks its
 - `forward_terminal_input` is UI-only: never on the MCP surface
   (`oxplow-surface-parity`'s `ui("forward_terminal_input")` row), so an
   agent can't type at itself or a peer.
-- An ACP agent's prompt is built only by `acp/human_prompt.rs`
-  `compose`, from the prompt box ("ACP agents: sessions").
+- An ACP agent's prompt is built only by `chat/human_prompt.rs`
+  `compose`, from the prompt box ("Chat sessions").
 - Drag-and-drop and "Add to agent context" (`agent-input-bus.ts`) are a
   person's gesture: the visible pane pastes the text, or the ACP prompt
   box appends it to the draft.
@@ -63,11 +63,11 @@ Synthesizing input would be automating the agent CLI, which risks its
 - `apps/desktop/src/no-agent-input-automation.test.ts` confines
   `forwardTerminalInput` and `{type:"input"}` construction to
   `TerminalPane.tsx`, `components/terminalInput.ts` and the `api.ts`
-  facade, and `acpPrompt` to `AcpPromptBox.tsx`.
+  facade, and `chatPrompt` to `ChatPromptBox.tsx`.
 - A Rust source scan in `crates/oxplow-rpc/src/commands/terminal.rs`
   asserts the only production caller of `terminal_sessions.send(` is the
   `forward_terminal_input` core.
-- `acp/guard_tests.rs` pins the ACP prompt path ("ACP agents: sessions").
+- `chat/guard_tests.rs` pins the ACP prompt path ("Chat sessions").
 
 ### What we can't do from oxplow hooks
 
@@ -178,7 +178,7 @@ approval, since no prompt comes between; nudges wait for the next call.
 | Launch prompt | `--append-system-prompt` | The thread's `developerInstructions` on `thread/start` / `resume` / `fork`, which Codex puts at the head of its developer message | A per-session instructions file (`.oxplow/runtime/opencode-plugin/prompts/<ses>.md`) named by `OPENCODE_CONFIG_CONTENT`'s `instructions` | `_meta.systemPrompt.append` for an adapter with `systemPrompt: meta` (the Claude adapter), else a block ahead of a new session's first prompt |
 | Skills | Plugin dir `.oxplow/runtime/claude-plugin/skills/` (`--plugin-dir`) | The worktree's `.agents/skills/<name>/` | `.oxplow/runtime/opencode-plugin/skills/`, named by the config's `skills.paths` | The index in the prompt + `oxplow_get_skill` |
 | Slash commands | Plugin `commands/`, run as `/oxplow:<name>` | A skill per command, `oxplow-<name>`, run as `$oxplow-<name>` | Inline config `command` key, run as `/oxplow-<name>` | Not delivered |
-| Hooks | HTTP hooks (`hooks.json`) | None: the thread's notifications, in-process (`ServicesAcpHost`) | A JS bridge plugin posting Claude-shaped bodies | In-process (`ServicesAcpHost`), no hook route |
+| Hooks | HTTP hooks (`hooks.json`) | None: the thread's notifications, in-process (`ServicesChatHost`) | A JS bridge plugin posting Claude-shaped bodies | In-process (`ServicesChatHost`), no hook route |
 | Context channels | Both, as `additionalContext` | Prompt only: a visible leading block on the person's next prompt | Prompt: a `synthetic` text part on the user's message; tool: appended to the tool's result | Prompt only: a visible leading block on the person's next prompt |
 | Token capture | OTEL metrics + the transcript's turns | The thread's `tokenUsage` across the turn | None | The prompt response's `usage` |
 | Final message | Stop's `last_assistant_message` | The transcript's last agent message on the Stop body | The bridge reads the session's last assistant message onto `Stop` | The transcript's last agent message on the Stop body |
@@ -415,7 +415,7 @@ daemon, "Codex: an app-server client"). The built-ins live in `crates/oxplow-har
 shared runtime writers in `shared.rs`) and depend only on the domain;
 core's text lives in `oxplow-agent-text`. The one caller is
 `launch_session` in `crates/oxplow-rpc/src/commands/terminal.rs`, used by
-`open_terminal_session` (PTY) and `acp_open_session` (a chat). It hands
+`open_terminal_session` (PTY) and `chat_open_session` (a chat). It hands
 the harness the session/thread/stream ids, the worktree and project dir,
 the control-plane endpoints with the session's bearer, the identity env,
 the assembled system prompt, the session's resume id, the agent text, the
@@ -649,11 +649,11 @@ adapter (`agent_session.open_<agent>`, `ui.input` fixing `harness` /
 enabled (`when: enabledAgents =~ …`). Those are a person's; an agent uses
 `agent_session.open`.
 
-### ACP agents: protocol mapping and transcript
+### Chat sessions: protocol mapping and transcript
 
 **The SDK is pinned (`agent-client-protocol = "=2.2.0"`) and fenced.**
 `acp/wire.rs` is the only module that names its schema types; it converts
-them to `acp/model.rs` types (`ToolCall`, `ToolCallPatch`, `AcpUpdate`,
+them to `chat/model.rs` types (`ToolCall`, `ToolCallPatch`, `ChatUpdate`,
 `PermissionAsk` / `PermissionAnswer`), so an SDK bump touches one file.
 Content text is capped at 64 KiB per block (`MAX_TEXT`).
 
@@ -662,7 +662,7 @@ Content text is capped at 64 KiB per block (`MAX_TEXT`).
 needs a stable text form builds it from a `BTreeMap` (`metric_cube::dims_key`
 does), and approval hashes never hash JSON.
 
-**`acp/mapping.rs` (pure)** maps the protocol's tool kinds onto oxplow's
+**`chat/mapping.rs` (pure)** maps the protocol's tool kinds onto oxplow's
 vocabulary: edit, delete and move → `edit`; read → `read`; search →
 `search`; execute → `shell` (`rawInput.command` / `cmd`, else the title);
 fetch → `fetch`; an `mcp__…` title or name → `mcp`; other → `other`;
@@ -673,7 +673,7 @@ the diffs, then path-like `rawInput` keys (`file_path`, `path`,
 and once the call finishes `{is_error, …rawOutput}`, so a shell call's
 `exit_code` survives.
 
-**`acp/transcript.rs`** is the in-memory conversation (no table). Items:
+**`chat/transcript.rs`** is the in-memory conversation (no table). Items:
 user, agent, thought, tool (merged with its updates by call id), plan
 (replaced within a turn), permission, policy-denied, bypass, error. Each
 has a stable `id` and a `seq` bumped from one counter whenever it
@@ -682,15 +682,21 @@ by `id`. Chunks of one kind coalesce into the trailing item;
 `usage_update` is state (the context meter), not an item. The ring holds
 2000 items (`DEFAULT_CAP`).
 
-### ACP agents: sessions
+### Chat sessions
 
-**Shape.** `Services.acp` (`acp/manager.rs`) holds each agent session's
+A chat session is an agent oxplow speaks to as a client and shows in its
+own transcript: an ACP agent (`acp::wire`) or a Codex thread
+(`chat/codex.rs`). The machinery is `crates/oxplow-app/src/chat/`; the
+view's `data-testid`s keep their historical `acp-` prefix
+(`acp-prompt-input`, `acp-transcript`, …).
+
+**Shape.** `Services.chat` (`chat/manager.rs`) holds each agent session's
 command sender and a shared `SessionView` (status, transcript, stderr
 tail), keyed by `AgentSessionId`. One actor task per session
-(`acp/session.rs`) owns the connection; `wire::run` feeds every agent
+(`chat/session.rs`) owns the connection; `wire::run` feeds every agent
 message into one channel and the prompt's result is an ordered barrier,
 so the actor sees updates, requests and turn end in wire order. Events
-for every session share one broadcast channel (`AcpEvent`). `open`
+for every session share one broadcast channel (`ChatEvent`). `open`
 reserves the session's slot under one lock before spawning, so
 concurrent opens start one agent; `close` marks the handle closed at
 once, and a closed session still winding down is replaced and marked not
@@ -702,8 +708,8 @@ every open session's process — ACP or PTY — through
 `agent_sessions::SessionProcesses::kill`. A fork (`oxplow.thread.create {
 from }`) keeps the source session's harness and `acp_agent`.
 
-**Host.** `acp/host.rs` `AcpHost` is the seam (tests use a recording
-double). `ServicesAcpHost::new(svc, stream, session)` holds `Weak<Services>`
+**Host.** `chat/host.rs` `ChatHost` is the seam (tests use a recording
+double). `ServicesChatHost::new(svc, stream, session)` holds `Weak<Services>`
 and the session it hosts, and records what a hooked turn records:
 `SessionStart` plus the resume id on start; `UserPromptSubmit` on the
 person's prompt; `PreToolUse` on every policy check; `PostToolUse` on each
@@ -720,13 +726,13 @@ fs writes refused). The system prompt is `assemble_system_prompt` for the
 `acp` harness: the session context is left out (the first prompt carries
 it) and the skill index is in (no skill files).
 
-**Prompts (the no-automation rule).** `acp/human_prompt.rs` `compose` is
+**Prompts (the no-automation rule).** `chat/human_prompt.rs` `compose` is
 the only way to make a `HumanPrompt`, and `wire::AgentConn::prompt` takes
 nothing else. The session calls it only for `Command::Prompt`, which only
-`AcpManager::submit_human_prompt` sends; a second prompt while a turn runs
+`ChatManager::submit_human_prompt` sends; a second prompt while a turn runs
 is `TurnInFlight`, never queued. The session context, advisories,
 decisions and waiting nudges ride the person's prompt as a visible
-leading block (behind a disclosure on the user item). `acp/guard_tests.rs`
+leading block (behind a disclosure on the user item). `chat/guard_tests.rs`
 scans the source: `PromptRequest` only in `wire.rs`, no raw
 `"session/prompt"` outside the fake, `compose(` only from the session,
 `submit_human_prompt(` with no other callers.
@@ -758,31 +764,31 @@ modes that skip asking. At turn end, open cards are cancelled and the
 Stop and tokens recorded.
 
 **RPC and events.** `oxplow-rpc/src/commands/acp.rs`; every command is a
-`ui(...)` parity row, so none can become an MCP tool. `acp_open_session`
+`ui(...)` parity row, so none can become an MCP tool. `chat_open_session`
 (a hand-written Tauri adapter: it needs `plugin_runtime` for the MCP URL
 and bearer) checks the session is open and `acp`, resolves the agent
 (`find`, `may_start`, `resolve_command`), assembles the prompt, passes the
-resume id, opens the session and returns the `AcpSnapshot`. The rest:
-`acp_prompt` (the prompt box's Enter, the only caller of
-`submit_human_prompt`), `acp_cancel`, `acp_respond_permission` (no option
-means cancel), `acp_transcript(sinceSeq)` (`null` with no session),
-`acp_close_session` (stops the process). Every one takes `sessionId`.
-Events ride the `acp:event` channel (frame key `acp`): `AcpEvent {
+resume id, opens the session and returns the `ChatSnapshot`. The rest:
+`chat_prompt` (the prompt box's Enter, the only caller of
+`submit_human_prompt`), `chat_cancel`, `chat_respond_permission` (no option
+means cancel), `chat_transcript(sinceSeq)` (`null` with no session),
+`chat_close_session` (stops the process). Every one takes `sessionId`.
+Events ride the `chat:event` channel (frame key `acp`): `ChatEvent {
 agentSessionId, threadId, generation, type: item|status|usage|closed, …
 }` over the daemon's `/events`. Raw agent JSON is TS `unknown`
 (`specta_typescript::Unknown`).
 
-**UI.** `AgentPage` renders `components/acp/AcpAgentView.tsx` (by
-`sessionId`) for an `acp` session. `acpTranscript.ts` is a pure reducer
+**UI.** `AgentPage` renders `components/chat/ChatAgentView.tsx` (by
+`sessionId`) for an `acp` session. `chatTranscript.ts` is a pure reducer
 over the snapshot and live events: items upsert by id, the newer seq
 wins; a seq gap or a remote reconnect refetches `since(headSeq)` (past a
 gap `headSeq` stays at the last contiguous seq). Each open is a new
 **generation** whose ids and seqs restart, and the reducer starts over on
 one, so a restart never mixes transcripts. The view subscribes before
-fetching. `AcpPromptBox.tsx` is the only renderer caller of `acpPrompt`:
+fetching. `ChatPromptBox.tsx` is the only renderer caller of `chatPrompt`:
 Enter sends, Shift+Enter adds a newline, Escape or Stop cancels, nothing
 sends while a turn runs, and "Add to agent context" appends to the draft
-(`AcpAgentView.test.tsx`).
+(`ChatAgentView.test.tsx`).
 
 **Limits.** A permission reject carries no reason; only an
 `fs/write_text_file` denial says why, and the Claude adapter writes to
@@ -799,8 +805,8 @@ ACP agents get no OTEL env, so nothing double-counts.
 JSON-RPC (deliberately not the SDK, so tests exercise real wire JSON);
 `fake:<step>` lines in a prompt drive it (say, think, edit, bypass,
 fswrite, fsread, bash, plan, usage, tokens, wait, crash).
-`acp/session_tests.rs` runs it in-process over a duplex pipe;
-`tests/acp_services.rs` against real `Services`, and once as its binary;
+`chat/session_tests.rs` runs it in-process over a duplex pipe;
+`tests/chat_services.rs` against real `Services`, and once as its binary;
 the browser suite drives it end to end
 ([working-in-this-repo.md](./working-in-this-repo.md) "The browser
 suite"). `tests/acp_live.rs` is `#[ignore]`d: `OXPLOW_ACP_LIVE_CMD="<adapter
@@ -831,7 +837,7 @@ websocket on the daemon's control socket,
 `$CODEX_HOME/app-server-control/app-server-control.sock` (`$CODEX_HOME`
 defaulting to `~/.codex`); when nothing answers it runs `codex app-server
 daemon start` once. Each user opens its own connection: a session's
-thread (`oxplow_app::acp::codex`), one `thread/list` for the conversation
+thread (`oxplow_app::chat::codex`), one `thread/list` for the conversation
 picker. The handshake is `initialize { clientInfo: oxplow, capabilities:
 { experimentalApi } }` then `initialized`; the protocol is marked
 experimental, and the recorded fixture
@@ -847,10 +853,10 @@ full, sortDirection: desc, limit: 50 } }` for the bound one, or
 `thread/fork { threadId }` — each with the worktree as `cwd`, oxplow's
 system prompt as `developerInstructions` and oxplow's MCP server in
 `config`. The thread's
-id is the session's resume id. `acp_open_session` sends it through
-`AcpManager::open_codex`.
+id is the session's resume id. `chat_open_session` sends it through
+`ChatManager::open_codex`.
 
-**The session.** The chat session's actor (`acp/session.rs`) runs over a
+**The session.** The chat session's actor (`chat/session.rs`) runs over a
 `conn::Connection`: ACP's (`wire.rs`) or Codex's (`codex.rs`), each
 delivering the same `Incoming` messages in order. Codex's connection:
 
@@ -888,7 +894,7 @@ delivering the same `Incoming` messages in order. Codex's connection:
 **The sandbox is the write guard.** No hook runs before a Codex edit, so
 the thread's access is Codex's sandbox: the open request and every
 `turn/start` carry `workspace-write` for the stream's writer thread and
-`read-only` for any other (`AcpHost::writable`, asked each time, so a
+`read-only` for any other (`ChatHost::writable`, asked each time, so a
 promotion or demotion takes effect on the next prompt). A turn's sandbox
 holds for the turns after it, Codex's TUI's included. An approval Codex
 asks for still goes through the policy, and an edit that completes
@@ -900,7 +906,7 @@ as the person's and the turn it starts like any other
 (`external_prompt`). Approvals follow the person's Codex config (their
 `approvals_reviewer` may answer before a card would show).
 
-**Guards.** `"turn/start"` appears only in `acp/codex.rs`
+**Guards.** `"turn/start"` appears only in `chat/codex.rs`
 (`guard_tests::only_the_codex_connection_starts_a_turn`), whose
 `prompt` takes only a `HumanPrompt`.
 
@@ -927,7 +933,7 @@ it names (`paths`), a shell call's `command`, a short `detail`, the
   bridge renames its tools to Claude's — but for `apply_patch` with a
   `patchText`). opencode's `apply_patch` → `edit` of every file the
   patch names (`shared::patch_paths`). An ACP agent's calls and a Codex
-  thread's items are mapped by `acp::mapping` (Codex's onto ACP's tool
+  thread's items are mapped by `chat::mapping` (Codex's onto ACP's tool
   kinds first, "Codex: an app-server client").
 - **Where.** The hook route maps a PreToolUse / PostToolUse body with the
   bearer's harness before the policy runs and hands the call to the

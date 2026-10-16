@@ -696,7 +696,7 @@ the visible page would. `handleOpenPage` special-cases only `agent_session`
   file tabs) closes the entry in `fileSessions`.
 - Agent sessions' tabs are ordinary page tabs in `threadPageTabs`
   (`pageRenderers.agent_session` → `AgentSessionPage`, which wraps
-  `TerminalPane` or `AcpAgentView` in `Page` chrome with
+  `TerminalPane` or `ChatAgentView` in `Page` chrome with
   `showNavBar={false}` and `showHeader={false}`). They are **pinned**
   (`TabRef.pinned`, `CenterTab.pinned`): they lead the strip, are never
   dragged or dropped on, the bulk closes skip them, and the tab cap never

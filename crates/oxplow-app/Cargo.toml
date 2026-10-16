@@ -55,7 +55,7 @@ sha2 = { workspace = true }
 hmac = "0.13"
 hex = { workspace = true }
 specta = { workspace = true }
-# `Unknown` types raw agent JSON as TS `unknown` (acp::model).
+# `Unknown` types raw agent JSON as TS `unknown` (chat::model).
 specta-typescript = { workspace = true }
 async-trait = { workspace = true }
 indexmap = "2.14"

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 
-import { acpPrompt } from "../../api.js";
+import { chatPrompt } from "../../api.js";
 import { subscribeAgentInput } from "../../agent-input-bus.js";
 
 interface Props {
@@ -16,9 +16,9 @@ interface Props {
 }
 
 /**
- * The prompt box of an ACP session — the ONLY place that sends an ACP
+ * The prompt box of a chat session — the ONLY place that sends a chat
  * agent a prompt, and only on the person's Enter / Send. Nothing else in
- * the renderer may call `acpPrompt` (no-agent-input-automation.test.ts).
+ * the renderer may call `chatPrompt` (no-agent-input-automation.test.ts).
  *
  * Enter sends, Shift+Enter adds a newline, Escape stops a running turn.
  * "Add to agent context" gestures (agent-input-bus) append to the draft
@@ -27,7 +27,7 @@ interface Props {
  * The draft is this box's own state, so a keystroke re-renders the box
  * and nothing else — never the transcript above it.
  */
-export function AcpPromptBox({
+export function ChatPromptBox({
   sessionId,
   busy,
   disabled,
@@ -53,7 +53,7 @@ export function AcpPromptBox({
     if (!canSend) return;
     setSending(true);
     try {
-      await acpPrompt(sessionId, draft);
+      await chatPrompt(sessionId, draft);
       setDraft("");
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));

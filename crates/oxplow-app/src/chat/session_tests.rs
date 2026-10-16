@@ -14,12 +14,12 @@ use parking_lot::Mutex;
 use tokio::sync::broadcast;
 
 use super::conn::TurnTokens;
-use super::host::AcpHost;
-use super::manager::AcpManager;
+use super::host::ChatHost;
+use super::manager::ChatManager;
 use super::model::PermissionAnswer;
-use super::session::{AcpError, AcpEvent, AcpEventBody, AcpStatus, SessionSpec};
+use super::session::{ChatError, ChatEvent, ChatEventBody, ChatStatus, SessionSpec};
 use super::transcript::ItemBody;
-use super::wire::{AcpOpen, McpHttp};
+use crate::acp::wire::{AcpOpen, McpHttp};
 use oxplow_domain::agent::tool::{ToolKind as Kind, ToolUse};
 
 #[derive(Default)]
@@ -42,7 +42,7 @@ impl Host {
 }
 
 #[async_trait]
-impl AcpHost for Host {
+impl ChatHost for Host {
     async fn check_tool(
         &self,
         _t: &ThreadId,
@@ -133,9 +133,9 @@ fn acp_open() -> AcpOpen {
 }
 
 struct Rig {
-    mgr: AcpManager,
+    mgr: ChatManager,
     fake: Shared,
-    events: broadcast::Receiver<AcpEvent>,
+    events: broadcast::Receiver<ChatEvent>,
     host: Arc<Host>,
     dir: tempfile::TempDir,
 }
@@ -146,8 +146,8 @@ async fn open_with(
     opts: FakeOptions,
     open_fn: impl FnOnce(&mut AcpOpen),
     dir: tempfile::TempDir,
-) -> (Rig, Result<(), AcpError>) {
-    let mgr = AcpManager::new();
+) -> (Rig, Result<(), ChatError>) {
+    let mgr = ChatManager::new();
     let host = Arc::new(host);
     let (client, agent) = tokio::io::duplex(1 << 16);
     let (ar, aw) = tokio::io::split(agent);
@@ -189,7 +189,7 @@ async fn open(host: Host) -> Rig {
 }
 
 impl Rig {
-    async fn wait(&mut self, what: &str, pred: impl Fn(&AcpEventBody) -> bool) -> AcpEventBody {
+    async fn wait(&mut self, what: &str, pred: impl Fn(&ChatEventBody) -> bool) -> ChatEventBody {
         let fut = async {
             loop {
                 let e = self.events.recv().await.unwrap();
@@ -203,10 +203,10 @@ impl Rig {
             .unwrap_or_else(|_| panic!("timed out waiting for {what}"))
     }
 
-    async fn wait_status(&mut self, status: AcpStatus) {
+    async fn wait_status(&mut self, status: ChatStatus) {
         self.wait(
             &format!("{status:?}"),
-            |b| matches!(b, AcpEventBody::Status { status: s } if *s == status),
+            |b| matches!(b, ChatEventBody::Status { status: s } if *s == status),
         )
         .await;
     }
@@ -221,7 +221,7 @@ impl Rig {
     /// Prompt and wait for the turn to end.
     async fn turn(&mut self, text: &str) {
         self.prompt(text).await;
-        self.wait_status(AcpStatus::Idle).await;
+        self.wait_status(ChatStatus::Idle).await;
     }
 
     fn items(&self) -> Vec<ItemBody> {
@@ -309,10 +309,10 @@ async fn a_permission_card_waits_for_the_person() {
     let mut rig = open(Host::default()).await;
     rig.prompt("fake:edit /w/a.rs").await;
     let item = match rig
-        .wait("card", |b| matches!(b, AcpEventBody::Item { item } if matches!(item.body, ItemBody::Permission { .. })))
+        .wait("card", |b| matches!(b, ChatEventBody::Item { item } if matches!(item.body, ItemBody::Permission { .. })))
         .await
     {
-        AcpEventBody::Item { item } => item,
+        ChatEventBody::Item { item } => item,
         _ => unreachable!(),
     };
     let ItemBody::Permission {
@@ -328,19 +328,19 @@ async fn a_permission_card_waits_for_the_person() {
     assert_eq!(ids, vec!["allow", "reject"]);
     assert_eq!(
         rig.mgr.transcript(&session(), 0).unwrap().status,
-        AcpStatus::AwaitingPermission
+        ChatStatus::AwaitingPermission
     );
     assert_eq!(
         rig.mgr
             .respond_permission(&session(), request_id.clone(), Some("always".into()))
             .await,
-        Err(AcpError::UnknownOption("always".into()))
+        Err(ChatError::UnknownOption("always".into()))
     );
     rig.mgr
         .respond_permission(&session(), request_id, Some("allow".into()))
         .await
         .unwrap();
-    rig.wait_status(AcpStatus::Idle).await;
+    rig.wait_status(ChatStatus::Idle).await;
     assert_eq!(rig.agent_text(), vec!["permission: allow".to_string()]);
     assert!(rig.items().iter().any(|b| matches!(
         b,
@@ -397,10 +397,10 @@ async fn fs_reads_are_served() {
 async fn cancel_answers_open_cards() {
     let mut rig = open(Host::default()).await;
     rig.prompt("fake:edit /w/a.rs").await;
-    rig.wait("card", |b| matches!(b, AcpEventBody::Item { item } if matches!(item.body, ItemBody::Permission { .. })))
+    rig.wait("card", |b| matches!(b, ChatEventBody::Item { item } if matches!(item.body, ItemBody::Permission { .. })))
         .await;
     rig.mgr.cancel(&session()).unwrap();
-    rig.wait_status(AcpStatus::Idle).await;
+    rig.wait_status(ChatStatus::Idle).await;
     assert!(rig.items().iter().any(|b| matches!(
         b,
         ItemBody::Permission {
@@ -415,15 +415,15 @@ async fn cancel_answers_open_cards() {
 async fn a_second_prompt_during_a_turn_is_refused_not_queued() {
     let mut rig = open(Host::default()).await;
     rig.prompt("fake:wait").await;
-    rig.wait_status(AcpStatus::Running).await;
+    rig.wait_status(ChatStatus::Running).await;
     assert_eq!(
         rig.mgr
             .submit_human_prompt(&session(), "again".into())
             .await,
-        Err(AcpError::TurnInFlight)
+        Err(ChatError::TurnInFlight)
     );
     rig.mgr.cancel(&session()).unwrap();
-    rig.wait_status(AcpStatus::Idle).await;
+    rig.wait_status(ChatStatus::Idle).await;
     assert_eq!(rig.prompts().len(), 1);
 }
 
@@ -501,7 +501,7 @@ async fn an_agent_without_http_mcp_is_refused_clearly() {
         tempfile::tempdir().unwrap(),
     )
     .await;
-    let Err(AcpError::Agent(msg)) = r else {
+    let Err(ChatError::Agent(msg)) = r else {
         panic!("expected a refusal")
     };
     assert!(msg.contains("HTTP MCP"), "{msg}");
@@ -580,18 +580,18 @@ async fn an_agent_crash_interrupts_the_session() {
     let mut rig = open(Host::default()).await;
     rig.prompt("fake:say bye\nfake:crash").await;
     let closed = rig
-        .wait("closed", |b| matches!(b, AcpEventBody::Closed { .. }))
+        .wait("closed", |b| matches!(b, ChatEventBody::Closed { .. }))
         .await;
-    assert!(matches!(closed, AcpEventBody::Closed { reason: Some(_) }));
+    assert!(matches!(closed, ChatEventBody::Closed { reason: Some(_) }));
     assert_eq!(
         rig.mgr.transcript(&session(), 0).unwrap().status,
-        AcpStatus::Stopped
+        ChatStatus::Stopped
     );
     assert!(rig.host.log().contains(&"interrupted".to_string()));
     assert!(!rig.mgr.is_open(&session()));
     assert_eq!(
         rig.mgr.submit_human_prompt(&session(), "x".into()).await,
-        Err(AcpError::NotOpen)
+        Err(ChatError::NotOpen)
     );
 }
 
@@ -696,7 +696,7 @@ async fn each_open_is_a_new_generation_and_its_events_say_so() {
 #[tokio::test]
 async fn concurrent_opens_start_one_agent() {
     let fake: Shared = Arc::new(std::sync::Mutex::new(FakeState::default()));
-    let mgr = AcpManager::new();
+    let mgr = ChatManager::new();
     let host = Arc::new(Host::default());
     let dir = tempfile::tempdir().unwrap();
     let transport = || {
@@ -768,9 +768,9 @@ async fn close_is_immediate_and_a_replaced_sessions_teardown_records_nothing() {
 async fn cancelling_a_card_mid_turn_returns_the_view_to_running() {
     let mut rig = open(Host::default()).await;
     rig.prompt("fake:edit /w/a.rs\nfake:wait").await;
-    rig.wait("card", |b| matches!(b, AcpEventBody::Item { item } if matches!(item.body, ItemBody::Permission { .. })))
+    rig.wait("card", |b| matches!(b, ChatEventBody::Item { item } if matches!(item.body, ItemBody::Permission { .. })))
         .await;
-    rig.wait_status(AcpStatus::AwaitingPermission).await;
+    rig.wait_status(ChatStatus::AwaitingPermission).await;
     let request_id = rig
         .items()
         .into_iter()
@@ -785,16 +785,16 @@ async fn cancelling_a_card_mid_turn_returns_the_view_to_running() {
         .await
         .unwrap();
     let next = rig
-        .wait("status", |b| matches!(b, AcpEventBody::Status { .. }))
+        .wait("status", |b| matches!(b, ChatEventBody::Status { .. }))
         .await;
     assert_eq!(
         next,
-        AcpEventBody::Status {
-            status: AcpStatus::Running
+        ChatEventBody::Status {
+            status: ChatStatus::Running
         }
     );
     rig.mgr.cancel(&session()).unwrap();
-    rig.wait_status(AcpStatus::Idle).await;
+    rig.wait_status(ChatStatus::Idle).await;
 }
 
 #[tokio::test]
@@ -814,8 +814,8 @@ async fn a_write_completed_after_a_reject_is_flagged() {
     // Rejected by the person.
     let mut rig = open(Host::default()).await;
     rig.prompt("fake:edit-anyway /w/b.rs").await;
-    let AcpEventBody::Item { item } = rig
-        .wait("card", |b| matches!(b, AcpEventBody::Item { item } if matches!(item.body, ItemBody::Permission { .. })))
+    let ChatEventBody::Item { item } = rig
+        .wait("card", |b| matches!(b, ChatEventBody::Item { item } if matches!(item.body, ItemBody::Permission { .. })))
         .await
     else {
         unreachable!()
@@ -827,7 +827,7 @@ async fn a_write_completed_after_a_reject_is_flagged() {
         .respond_permission(&session(), request_id, Some("reject".into()))
         .await
         .unwrap();
-    rig.wait_status(AcpStatus::Idle).await;
+    rig.wait_status(ChatStatus::Idle).await;
     let bypass = rig.items().into_iter().find_map(|b| match b {
         ItemBody::Bypass { reason, .. } => Some(reason),
         _ => None,
@@ -840,8 +840,8 @@ async fn a_write_completed_after_a_reject_is_flagged() {
     // Allowed: no flag.
     let mut rig = open(Host::default()).await;
     rig.prompt("fake:edit /w/c.rs").await;
-    let AcpEventBody::Item { item } = rig
-        .wait("card", |b| matches!(b, AcpEventBody::Item { item } if matches!(item.body, ItemBody::Permission { .. })))
+    let ChatEventBody::Item { item } = rig
+        .wait("card", |b| matches!(b, ChatEventBody::Item { item } if matches!(item.body, ItemBody::Permission { .. })))
         .await
     else {
         unreachable!()
@@ -853,7 +853,7 @@ async fn a_write_completed_after_a_reject_is_flagged() {
         .respond_permission(&session(), request_id, Some("allow".into()))
         .await
         .unwrap();
-    rig.wait_status(AcpStatus::Idle).await;
+    rig.wait_status(ChatStatus::Idle).await;
     assert!(!rig
         .items()
         .iter()
@@ -866,7 +866,7 @@ async fn a_write_completed_after_a_reject_is_flagged() {
 
 mod codex {
     use super::*;
-    use crate::acp::codex::CodexOpen;
+    use crate::chat::codex::CodexOpen;
     use oxplow_harnesses::codex_app_server::fake::FakeAppServer;
     use serde_json::json;
 
@@ -895,7 +895,7 @@ mod codex {
         // Short: a unix socket's path has a length limit.
         let dir = tempfile::Builder::new().tempdir_in("/tmp").unwrap();
         let fake = daemon(dir.path());
-        let mgr = AcpManager::new();
+        let mgr = ChatManager::new();
         let host = Arc::new(host);
         mgr.open_codex(
             host.clone(),
@@ -975,7 +975,7 @@ mod codex {
             "turn/completed",
             json!({"turn": {"id": "u1", "status": "completed"}}),
         ));
-        rig.wait_status(AcpStatus::Idle).await;
+        rig.wait_status(ChatStatus::Idle).await;
         assert_eq!(rig.agent_text(), ["done"]);
         let users = rig
             .items()
@@ -1012,7 +1012,7 @@ mod codex {
         fake.push(note("turn/started", json!({"turn": {"id": "u1"}})));
         fake.push(json!({"id": 41, "method": "item/commandExecution/requestApproval", "params": {
             "threadId": THREAD, "turnId": "u1", "itemId": "e9", "command": "rm x", "startedAtMs": 1}}));
-        rig.wait_status(AcpStatus::AwaitingPermission).await;
+        rig.wait_status(ChatStatus::AwaitingPermission).await;
         let request_id = rig
             .items()
             .into_iter()
@@ -1031,7 +1031,7 @@ mod codex {
             json!({"id": 42, "method": "item/fileChange/requestApproval", "params": {
             "threadId": THREAD, "turnId": "u1", "itemId": "p9", "startedAtMs": 2}}),
         );
-        rig.wait_status(AcpStatus::AwaitingPermission).await;
+        rig.wait_status(ChatStatus::AwaitingPermission).await;
         rig.mgr.cancel(&session()).unwrap();
         let answer = fake.wait_for(|v| v["id"] == 42).await;
         assert_eq!(answer["result"]["decision"], "cancel");
@@ -1052,7 +1052,7 @@ mod codex {
         let (mut rig, fake) = open_codex(Host::default(), "thread/start").await;
         fake.push(note("turn/started", json!({"turn": {"id": "u2"}})));
         fake.push(note("item/completed", json!({"item": {"type": "userMessage", "id": "m2", "content": [{"type": "text", "text": "from the tui"}]}})));
-        rig.wait_status(AcpStatus::Running).await;
+        rig.wait_status(ChatStatus::Running).await;
         fake.push(note(
             "item/completed",
             json!({"item": {"type": "agentMessage", "id": "a2", "text": "ok"}}),
@@ -1061,7 +1061,7 @@ mod codex {
             "turn/completed",
             json!({"turn": {"id": "u2", "status": "completed"}}),
         ));
-        rig.wait_status(AcpStatus::Idle).await;
+        rig.wait_status(ChatStatus::Idle).await;
         assert_eq!(
             rig.host.log()[1..],
             ["turn_started from the tui", "turn_ended  answer=ok"]

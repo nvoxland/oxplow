@@ -74,13 +74,13 @@ import type {
   CommandSpec,
   FormStart,
   AcpAgentListing,
-  AcpEvent,
-  AcpSnapshot,
-  AcpStatus,
+  ChatEvent,
+  ChatSnapshot,
+  ChatStatus,
   ContextUsage,
   PermissionOption,
   PlanEntry,
-  ToolCall as AcpToolCall,
+  ToolCall as ChatToolCall,
   ToolDiff,
   TranscriptItem,
   ProgramKind,
@@ -93,10 +93,10 @@ import type {
 
 export type { AiSettings, ProviderConfig, RoleBinding };
 export type {
-  AcpEvent,
-  AcpSnapshot,
-  AcpStatus,
-  AcpToolCall,
+  ChatEvent,
+  ChatSnapshot,
+  ChatStatus,
+  ChatToolCall,
   ContextUsage,
   PermissionOption,
   PlanEntry,
@@ -1009,49 +1009,49 @@ export async function listAgentHarnesses(): Promise<HarnessListing[]> {
   return unwrap(await commands.listAgentHarnesses());
 }
 
-// ---- ACP sessions (tsk281) --------------------------------------------
-// A structured agent conversation instead of a terminal. `acpPrompt` is
+// ---- Chat sessions --------------------------------------------
+// A structured agent conversation instead of a terminal. `chatPrompt` is
 // the prompt box's Enter and nothing else: oxplow never sends an agent
 // input on its own (guarded by no-agent-input-automation.test.ts).
 
 /** Start the thread's ACP agent (or reattach) and return its session. */
-export async function acpOpenSession(sessionId: string): Promise<AcpSnapshot> {
-  return unwrap(await commands.acpOpenSession(sessionId));
+export async function chatOpenSession(sessionId: string): Promise<ChatSnapshot> {
+  return unwrap(await commands.chatOpenSession(sessionId));
 }
 
-/** Send what the person typed. Only `AcpPromptBox` calls this. */
-export async function acpPrompt(sessionId: string, text: string): Promise<void> {
-  unwrap(await commands.acpPrompt(sessionId, text));
+/** Send what the person typed. Only `ChatPromptBox` calls this. */
+export async function chatPrompt(sessionId: string, text: string): Promise<void> {
+  unwrap(await commands.chatPrompt(sessionId, text));
 }
 
-export async function acpCancel(sessionId: string): Promise<void> {
-  unwrap(await commands.acpCancel(sessionId));
+export async function chatCancel(sessionId: string): Promise<void> {
+  unwrap(await commands.chatCancel(sessionId));
 }
 
 /** Answer a permission card; `optionId: null` cancels it. */
-export async function acpRespondPermission(
+export async function chatRespondPermission(
   sessionId: string,
   requestId: string,
   optionId: string | null,
 ): Promise<void> {
-  unwrap(await commands.acpRespondPermission(sessionId, requestId, optionId));
+  unwrap(await commands.chatRespondPermission(sessionId, requestId, optionId));
 }
 
 /** The session plus items changed after `sinceSeq`; null when none is open. */
-export async function acpTranscript(sessionId: string, sinceSeq: number): Promise<AcpSnapshot | null> {
-  return unwrap(await commands.acpTranscript(sessionId, sinceSeq));
+export async function chatTranscript(sessionId: string, sinceSeq: number): Promise<ChatSnapshot | null> {
+  return unwrap(await commands.chatTranscript(sessionId, sinceSeq));
 }
 
-export async function acpCloseSession(sessionId: string): Promise<void> {
-  unwrap(await commands.acpCloseSession(sessionId));
+export async function chatCloseSession(sessionId: string): Promise<void> {
+  unwrap(await commands.chatCloseSession(sessionId));
 }
 
-export function subscribeAcpEvents(listener: (event: AcpEvent) => void): () => void {
+export function subscribeChatEvents(listener: (event: ChatEvent) => void): () => void {
   let stopped = false;
   // `listen` rejects when no transport is mounted (bun tests).
-  const unlistenPromise = listen(EVENT_CHANNELS.acp, (e) => {
+  const unlistenPromise = listen(EVENT_CHANNELS.chat, (e) => {
     if (stopped) return;
-    listener(e.payload as AcpEvent);
+    listener(e.payload as ChatEvent);
   }).catch(() => null);
   return () => {
     stopped = true;

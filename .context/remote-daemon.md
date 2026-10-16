@@ -26,11 +26,11 @@ developer-facing mechanics.
   the byte-identical shape via the TS `typedError` wrapper + the same
   `IpcError`, so the two hosts can't diverge on error mapping),
   `GET /events` (WebSocket multiplexing
-  `{channel:"oxplow"|"lsp"|"terminal"|"acp", payload}` with the exact
+  `{channel:"oxplow"|"lsp"|"terminal"|"chat", payload}` with the exact
   payload shapes the Tauri bridges emit; the `lsp` frame carries
   `LspSessionEvent` from `LspSessionManager` — see `.context/lsp.md`;
-  the `acp` frame carries `AcpEvent` from `Services.acp` — see
-  `.context/agent-model.md` → "ACP agents"; every channel is subscribed
+  the `chat` frame carries `ChatEvent` from `Services.chat` — see
+  `.context/agent-model.md` → "Chat sessions"; every channel is subscribed
   before the upgrade is answered, so a client that writes once its socket
   opens never misses the event its write caused — tsk995),
   `GET /health`. Same per-project instance lock as the shell.

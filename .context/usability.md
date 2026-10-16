@@ -146,8 +146,8 @@ Things I keep forgetting. Read this before adding any UI.
   are valid. Use a real `<form onSubmit=...>` wrapper; the browser
   handles single-line Enter for you. For multi-line textareas, Enter
   inserts a newline and Cmd/Ctrl+Enter submits.
-  **Exception: chat prompt boxes.** The ACP thread's prompt box
-  (`components/acp/AcpPromptBox.tsx`) follows the chat convention —
+  **Exception: chat prompt boxes.** A chat thread's prompt box
+  (`components/chat/ChatPromptBox.tsx`) follows the chat convention —
   Enter sends, Shift+Enter inserts a newline, Escape stops a running
   turn — because it is a conversation, not a form. While a turn runs,
   typing still works but Enter/Send do nothing (prompts are never
@@ -236,7 +236,7 @@ Things I keep forgetting. Read this before adding any UI.
 - **A proposal also waits where the conversation is** (P9.A3). A terminal
   thread's Answers strip shows the thread's pending proposals in a
   "Waiting for you (n)" group above its answers — never collapsed, and
-  the strip shows for them alone (`thread-proposals`). An ACP transcript
+  the strip shows for them alone (`thread-proposals`). A chat transcript
   shows the card under the tool call that made the proposal
   (`proposalOfTool`); once decided, a muted line stays there saying what
   became of it — "Approved by you — it ran.", "Declined by you — nothing

@@ -1,13 +1,13 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  acpCancel,
-  acpOpenSession,
-  acpRespondPermission,
-  acpTranscript,
+  chatCancel,
+  chatOpenSession,
+  chatRespondPermission,
+  chatTranscript,
   onRemoteReconnect,
-  subscribeAcpEvents,
-  type AcpToolCall,
+  subscribeChatEvents,
+  type ChatToolCall,
   type Thread,
   type TranscriptItem,
 } from "../../api.js";
@@ -20,15 +20,15 @@ import { ThreadAnswer } from "../Answers/ThreadAnswer.js";
 import { ProposalCard } from "../Proposals/ProposalCard.js";
 import { useThreadAnswers } from "../Answers/useThreadAnswers.js";
 import { MarkdownView } from "../Wiki/MarkdownView.js";
-import { AcpPromptBox } from "./AcpPromptBox.js";
+import { ChatPromptBox } from "./ChatPromptBox.js";
 import {
   applyEvent,
   contextPercent,
   initialState,
   isBusy,
   mergeSnapshot,
-  type AcpViewState,
-} from "./acpTranscript.js";
+  type ChatViewState,
+} from "./chatTranscript.js";
 import { EmptyState } from "../Prompts/EmptyState.js";
 
 
@@ -54,11 +54,11 @@ interface Props {
  * terminal session shows its PTY.
  *
  * oxplow never sends the agent anything on its own: only the person's
- * Enter sends (see AcpPromptBox).
+ * Enter sends (see ChatPromptBox).
  */
-export function AcpAgentView({ thread, sessionId, worktreePath, visible, onOpenDiff, onOpenFile, onOpenSettings, onOpenPage }: Props) {
+export function ChatAgentView({ thread, sessionId, worktreePath, visible, onOpenDiff, onOpenFile, onOpenSettings, onOpenPage }: Props) {
   const threadId = thread.id;
-  const [state, setState] = useState<AcpViewState>(initialState);
+  const [state, setState] = useState<ChatViewState>(initialState);
   const [openError, setOpenError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -69,7 +69,7 @@ export function AcpAgentView({ thread, sessionId, worktreePath, visible, onOpenD
     setOpening(true);
     setOpenError(null);
     try {
-      const snap = await acpOpenSession(sessionId);
+      const snap = await chatOpenSession(sessionId);
       setState((s) => mergeSnapshot({ ...s, closedReason: null }, snap));
     } catch (err) {
       setOpenError(err instanceof Error ? err.message : String(err));
@@ -80,7 +80,7 @@ export function AcpAgentView({ thread, sessionId, worktreePath, visible, onOpenD
 
   const refetch = useCallback(async () => {
     try {
-      const snap = await acpTranscript(sessionId, headSeq.current);
+      const snap = await chatTranscript(sessionId, headSeq.current);
       if (snap) setState((s) => mergeSnapshot(s, snap));
     } catch {
       // The next event or reconnect retries.
@@ -91,14 +91,14 @@ export function AcpAgentView({ thread, sessionId, worktreePath, visible, onOpenD
   // (duplicates merge by id and seq).
   useEffect(() => {
     setState(initialState());
-    const unsubscribe = subscribeAcpEvents((e) => {
+    const unsubscribe = subscribeChatEvents((e) => {
       if (e.agentSessionId !== sessionId) return;
       setState((s) => applyEvent(s, e));
     });
     let cancelled = false;
     void (async () => {
       try {
-        const snap = await acpTranscript(sessionId, 0);
+        const snap = await chatTranscript(sessionId, 0);
         if (cancelled) return;
         if (snap) setState((s) => mergeSnapshot(s, snap));
         else void open();
@@ -125,7 +125,7 @@ export function AcpAgentView({ thread, sessionId, worktreePath, visible, onOpenD
   // Stable, so the memoized transcript re-renders only when what it
   // shows changes.
   const report = useCallback((err: unknown) => setActionError(err instanceof Error ? err.message : String(err)), []);
-  const cancel = useCallback(() => void acpCancel(sessionId).catch(report), [sessionId, report]);
+  const cancel = useCallback(() => void chatCancel(sessionId).catch(report), [sessionId, report]);
   const reportMessage = useCallback((m: string) => setActionError(m), []);
 
   const relPath = useCallback(
@@ -224,7 +224,7 @@ export function AcpAgentView({ thread, sessionId, worktreePath, visible, onOpenD
         </div>
       )}
 
-      <AcpPromptBox
+      <ChatPromptBox
         sessionId={sessionId}
         busy={busy}
         disabled={!live}
@@ -444,7 +444,7 @@ const Item = memo(function Item({
                   type="button"
                   data-testid={`acp-permission-${item.requestId}-${o.id}`}
                   style={o.kind.startsWith("allow") ? primaryButton : smallButton}
-                  onClick={() => void acpRespondPermission(sessionId, item.requestId, o.id).catch(onError)}
+                  onClick={() => void chatRespondPermission(sessionId, item.requestId, o.id).catch(onError)}
                 >
                   {o.name}
                 </button>
@@ -477,7 +477,7 @@ function ToolCard({
   onOpenDiff,
   onOpenFile,
 }: {
-  call: AcpToolCall;
+  call: ChatToolCall;
   itemId: number;
   relPath(p: string): string;
   onOpenDiff?(spec: DiffSpec): void;
@@ -544,7 +544,7 @@ function relTitle(title: string, relPath: (p: string) => string): string {
     .join(" ");
 }
 
-function statusLabel(s: AcpViewState["status"]): string {
+function statusLabel(s: ChatViewState["status"]): string {
   switch (s) {
     case "starting":
       return "Starting";
@@ -559,7 +559,7 @@ function statusLabel(s: AcpViewState["status"]): string {
   }
 }
 
-function statusColor(s: AcpViewState["status"]): string {
+function statusColor(s: ChatViewState["status"]): string {
   switch (s) {
     case "running":
       return "var(--status-running)";
@@ -572,7 +572,7 @@ function statusColor(s: AcpViewState["status"]): string {
   }
 }
 
-function toolStatusColor(s: AcpToolCall["status"]): string {
+function toolStatusColor(s: ChatToolCall["status"]): string {
   switch (s) {
     case "completed":
       return "var(--status-done)";

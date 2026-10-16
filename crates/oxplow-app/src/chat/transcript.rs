@@ -13,7 +13,7 @@ use std::collections::VecDeque;
 use serde::Serialize;
 
 use super::model::{
-    AcpUpdate, ContextUsage, PermissionAnswer, PermissionOption, PlanEntry, ToolCall,
+    ChatUpdate, ContextUsage, PermissionAnswer, PermissionOption, PlanEntry, ToolCall,
 };
 
 pub const DEFAULT_CAP: usize = 2000;
@@ -171,16 +171,16 @@ impl Transcript {
 
     /// Fold one `session/update` in. Returns the item created or changed;
     /// `None` for updates that aren't items (usage, ignored kinds).
-    pub fn apply(&mut self, u: AcpUpdate) -> Option<TranscriptItem> {
+    pub fn apply(&mut self, u: ChatUpdate) -> Option<TranscriptItem> {
         match u {
-            AcpUpdate::UserChunk(t) => Some(self.chunk(t, Chunk::User)),
-            AcpUpdate::AgentChunk(t) => Some(self.chunk(t, Chunk::Agent)),
-            AcpUpdate::ThoughtChunk(t) => Some(self.chunk(t, Chunk::Thought)),
-            AcpUpdate::ToolCall(call) => match self.tool_item_id(&call.id) {
+            ChatUpdate::UserChunk(t) => Some(self.chunk(t, Chunk::User)),
+            ChatUpdate::AgentChunk(t) => Some(self.chunk(t, Chunk::Agent)),
+            ChatUpdate::ThoughtChunk(t) => Some(self.chunk(t, Chunk::Thought)),
+            ChatUpdate::ToolCall(call) => match self.tool_item_id(&call.id) {
                 Some(id) => self.update(id, |b| *b = ItemBody::Tool { call }),
                 None => Some(self.push(ItemBody::Tool { call })),
             },
-            AcpUpdate::ToolCallUpdate(p) => match self.tool_item_id(&p.id) {
+            ChatUpdate::ToolCallUpdate(p) => match self.tool_item_id(&p.id) {
                 Some(id) => self.update(id, |b| {
                     if let ItemBody::Tool { call } = b {
                         call.apply(&p);
@@ -190,15 +190,15 @@ impl Transcript {
                     call: ToolCall::from_patch(&p),
                 })),
             },
-            AcpUpdate::Plan(entries) => match self.current_plan_id() {
+            ChatUpdate::Plan(entries) => match self.current_plan_id() {
                 Some(id) => self.update(id, |b| *b = ItemBody::Plan { entries }),
                 None => Some(self.push(ItemBody::Plan { entries })),
             },
-            AcpUpdate::Usage(u) => {
+            ChatUpdate::Usage(u) => {
                 self.usage = Some(u);
                 None
             }
-            AcpUpdate::Ignored => None,
+            ChatUpdate::Ignored => None,
         }
     }
 
@@ -261,7 +261,7 @@ enum Chunk {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::acp::model::{PlanStatus, ToolCallPatch, ToolKind, ToolStatus};
+    use crate::chat::model::{PlanStatus, ToolCallPatch, ToolKind, ToolStatus};
 
     fn tool(id: &str) -> ToolCall {
         ToolCall {
@@ -275,8 +275,8 @@ mod tests {
     #[test]
     fn chunks_coalesce_into_one_item_with_a_bumped_seq() {
         let mut t = Transcript::default();
-        let a = t.apply(AcpUpdate::AgentChunk("hel".into())).unwrap();
-        let b = t.apply(AcpUpdate::AgentChunk("lo".into())).unwrap();
+        let a = t.apply(ChatUpdate::AgentChunk("hel".into())).unwrap();
+        let b = t.apply(ChatUpdate::AgentChunk("lo".into())).unwrap();
         assert_eq!(a.id, b.id);
         assert!(b.seq > a.seq);
         assert_eq!(
@@ -286,8 +286,8 @@ mod tests {
             }
         );
         // A thought between breaks the run.
-        t.apply(AcpUpdate::ThoughtChunk("hm".into()));
-        let c = t.apply(AcpUpdate::AgentChunk("again".into())).unwrap();
+        t.apply(ChatUpdate::ThoughtChunk("hm".into()));
+        let c = t.apply(ChatUpdate::AgentChunk("again".into())).unwrap();
         assert_ne!(c.id, a.id);
         assert_eq!(t.since(0).len(), 3);
     }
@@ -299,10 +299,10 @@ mod tests {
             text: "go".into(),
             context: None,
         });
-        let first = t.apply(AcpUpdate::AgentChunk("a".into())).unwrap();
+        let first = t.apply(ChatUpdate::AgentChunk("a".into())).unwrap();
         let mark = t.head_seq();
         assert!(t.since(mark).is_empty());
-        t.apply(AcpUpdate::AgentChunk("b".into()));
+        t.apply(ChatUpdate::AgentChunk("b".into()));
         let changed = t.since(mark);
         assert_eq!(changed.len(), 1);
         assert_eq!(changed[0].id, first.id);
@@ -312,10 +312,10 @@ mod tests {
     #[test]
     fn tool_updates_merge_by_id() {
         let mut t = Transcript::default();
-        let first = t.apply(AcpUpdate::ToolCall(tool("c1"))).unwrap();
-        t.apply(AcpUpdate::AgentChunk("x".into()));
+        let first = t.apply(ChatUpdate::ToolCall(tool("c1"))).unwrap();
+        t.apply(ChatUpdate::AgentChunk("x".into()));
         let merged = t
-            .apply(AcpUpdate::ToolCallUpdate(ToolCallPatch {
+            .apply(ChatUpdate::ToolCallUpdate(ToolCallPatch {
                 id: "c1".into(),
                 status: Some(ToolStatus::Completed),
                 ..Default::default()
@@ -326,7 +326,7 @@ mod tests {
         assert_eq!(t.tool("c1").unwrap().title, "t");
         // An update for a call never announced creates it.
         let orphan = t
-            .apply(AcpUpdate::ToolCallUpdate(ToolCallPatch {
+            .apply(ChatUpdate::ToolCallUpdate(ToolCallPatch {
                 id: "c2".into(),
                 title: Some("late".into()),
                 ..Default::default()
@@ -346,10 +346,10 @@ mod tests {
             }]
         };
         let p1 = t
-            .apply(AcpUpdate::Plan(entry(PlanStatus::Pending)))
+            .apply(ChatUpdate::Plan(entry(PlanStatus::Pending)))
             .unwrap();
         let p2 = t
-            .apply(AcpUpdate::Plan(entry(PlanStatus::Completed)))
+            .apply(ChatUpdate::Plan(entry(PlanStatus::Completed)))
             .unwrap();
         assert_eq!(p1.id, p2.id);
         t.push(ItemBody::User {
@@ -357,7 +357,7 @@ mod tests {
             context: None,
         });
         let p3 = t
-            .apply(AcpUpdate::Plan(entry(PlanStatus::Pending)))
+            .apply(ChatUpdate::Plan(entry(PlanStatus::Pending)))
             .unwrap();
         assert_ne!(p3.id, p1.id);
     }
@@ -371,9 +371,9 @@ mod tests {
             cost_amount: None,
             cost_currency: None,
         };
-        assert!(t.apply(AcpUpdate::Usage(u.clone())).is_none());
+        assert!(t.apply(ChatUpdate::Usage(u.clone())).is_none());
         assert_eq!(t.usage(), Some(&u));
-        assert!(t.apply(AcpUpdate::Ignored).is_none());
+        assert!(t.apply(ChatUpdate::Ignored).is_none());
         assert_eq!(t.head_seq(), 0);
     }
 

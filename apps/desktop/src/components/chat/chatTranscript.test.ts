@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import type { AcpEvent, AcpSnapshot, TranscriptItem } from "../../api.js";
+import type { ChatEvent, ChatSnapshot, TranscriptItem } from "../../api.js";
 import {
   applyEvent,
   contextPercent,
@@ -9,7 +9,7 @@ import {
   isBusy,
   mergeSnapshot,
   openPermissions,
-} from "./acpTranscript.js";
+} from "./chatTranscript.js";
 
 const agent = (id: number, seq: number, text: string): TranscriptItem => ({
   id,
@@ -18,7 +18,7 @@ const agent = (id: number, seq: number, text: string): TranscriptItem => ({
   text,
 });
 
-const snap = (items: TranscriptItem[], over: Partial<AcpSnapshot> = {}): AcpSnapshot => ({
+const snap = (items: TranscriptItem[], over: Partial<ChatSnapshot> = {}): ChatSnapshot => ({
   agent: "fake",
   status: "idle",
   usage: null,
@@ -28,9 +28,9 @@ const snap = (items: TranscriptItem[], over: Partial<AcpSnapshot> = {}): AcpSnap
   ...over,
 });
 
-const itemEvent = (item: TranscriptItem): AcpEvent => ({ threadId: "thr1", type: "item", item });
+const itemEvent = (item: TranscriptItem): ChatEvent => ({ threadId: "thr1", type: "item", item });
 
-describe("acp transcript reducer", () => {
+describe("chat transcript reducer", () => {
   test("a snapshot seeds the state in id order", () => {
     const s = fromSnapshot(snap([agent(2, 3, "b"), agent(1, 2, "a")]));
     expect(s.items.map((i) => i.id)).toEqual([1, 2]);

@@ -97,7 +97,7 @@ fn only_the_codex_connection_starts_a_turn() {
     let lines = source_lines();
     assert_eq!(
         files_containing(&lines, "\"turn/start\""),
-        vec!["crates/oxplow-app/src/acp/codex.rs"]
+        vec!["crates/oxplow-app/src/chat/codex.rs"]
     );
 }
 
@@ -116,10 +116,10 @@ fn prompts_are_composed_only_on_the_human_submit_path() {
     let lines = source_lines();
     let calls: Vec<&(String, String)> = lines
         .iter()
-        .filter(|(f, l)| contains_word(l, "compose(") && !f.ends_with("acp/human_prompt.rs"))
+        .filter(|(f, l)| contains_word(l, "compose(") && !f.ends_with("chat/human_prompt.rs"))
         .collect();
     assert_eq!(calls.len(), 1, "compose callers: {calls:?}");
-    assert_eq!(calls[0].0, "crates/oxplow-app/src/acp/session.rs");
+    assert_eq!(calls[0].0, "crates/oxplow-app/src/chat/session.rs");
     assert!(calls[0].1.contains("human_prompt::compose(&text"));
 }
 
@@ -128,9 +128,9 @@ fn only_the_prompt_box_command_submits_human_prompts() {
     let lines = source_lines();
     let allowed = [
         // The definition.
-        "crates/oxplow-app/src/acp/manager.rs",
-        // `acp_prompt`, the prompt box's Enter (a `ui(...)` row).
-        "crates/oxplow-rpc/src/commands/acp.rs",
+        "crates/oxplow-app/src/chat/manager.rs",
+        // `chat_prompt`, the prompt box's Enter (a `ui(...)` row).
+        "crates/oxplow-rpc/src/commands/chat.rs",
     ];
     let hits: Vec<String> = files_containing(&lines, "submit_human_prompt(")
         .into_iter()

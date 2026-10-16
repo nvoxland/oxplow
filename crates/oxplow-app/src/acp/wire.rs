@@ -5,26 +5,26 @@
 
 use agent_client_protocol::schema::v1 as sdk;
 
-use super::conn::{
+use crate::chat::conn::{
     Connection, Incoming, Opened, PermissionReply, ReadReply, TurnEnd, TurnTokens, WriteReply,
 };
-use super::model::{
-    AcpUpdate, ContextUsage, PermissionAnswer, PermissionAsk, PermissionKind, PermissionOption,
+use crate::chat::model::{
+    ChatUpdate, ContextUsage, PermissionAnswer, PermissionAsk, PermissionKind, PermissionOption,
     PlanEntry, PlanStatus, ToolCall, ToolCallPatch, ToolDiff, ToolKind, ToolStatus,
 };
 
 /// Text kept per content block; a runaway command output is cut here.
 pub const MAX_TEXT: usize = 64 * 1024;
 
-pub fn update(u: sdk::SessionUpdate) -> AcpUpdate {
+pub fn update(u: sdk::SessionUpdate) -> ChatUpdate {
     use sdk::SessionUpdate as U;
     match u {
-        U::UserMessageChunk(c) => AcpUpdate::UserChunk(block_text(&c.content)),
-        U::AgentMessageChunk(c) => AcpUpdate::AgentChunk(block_text(&c.content)),
-        U::AgentThoughtChunk(c) => AcpUpdate::ThoughtChunk(block_text(&c.content)),
-        U::ToolCall(t) => AcpUpdate::ToolCall(tool_call(t)),
-        U::ToolCallUpdate(u) => AcpUpdate::ToolCallUpdate(tool_patch(u)),
-        U::Plan(p) => AcpUpdate::Plan(
+        U::UserMessageChunk(c) => ChatUpdate::UserChunk(block_text(&c.content)),
+        U::AgentMessageChunk(c) => ChatUpdate::AgentChunk(block_text(&c.content)),
+        U::AgentThoughtChunk(c) => ChatUpdate::ThoughtChunk(block_text(&c.content)),
+        U::ToolCall(t) => ChatUpdate::ToolCall(tool_call(t)),
+        U::ToolCallUpdate(u) => ChatUpdate::ToolCallUpdate(tool_patch(u)),
+        U::Plan(p) => ChatUpdate::Plan(
             p.entries
                 .into_iter()
                 .map(|e| PlanEntry {
@@ -37,13 +37,13 @@ pub fn update(u: sdk::SessionUpdate) -> AcpUpdate {
                 })
                 .collect(),
         ),
-        U::UsageUpdate(u) => AcpUpdate::Usage(ContextUsage {
+        U::UsageUpdate(u) => ChatUpdate::Usage(ContextUsage {
             used: u.used,
             size: u.size,
             cost_amount: u.cost.as_ref().map(|c| c.amount),
             cost_currency: u.cost.map(|c| c.currency),
         }),
-        _ => AcpUpdate::Ignored,
+        _ => ChatUpdate::Ignored,
     }
 }
 
@@ -183,7 +183,7 @@ fn block_text(b: &sdk::ContentBlock) -> String {
     }
 }
 
-pub(super) fn cap(s: &str) -> String {
+pub(crate) fn cap(s: &str) -> String {
     if s.len() <= MAX_TEXT {
         return s.to_string();
     }
@@ -194,7 +194,7 @@ pub(super) fn cap(s: &str) -> String {
     format!("{}… [truncated]", &s[..end])
 }
 
-pub(super) fn cap_value(v: serde_json::Value) -> serde_json::Value {
+pub(crate) fn cap_value(v: serde_json::Value) -> serde_json::Value {
     match &v {
         serde_json::Value::String(s) if s.len() > MAX_TEXT => serde_json::Value::String(cap(s)),
         serde_json::Value::String(_) => v,
@@ -320,7 +320,11 @@ impl Connection for AcpConnection {
         })
     }
 
-    fn prompt(&self, p: super::human_prompt::HumanPrompt, _writable: bool) -> Result<(), String> {
+    fn prompt(
+        &self,
+        p: crate::chat::human_prompt::HumanPrompt,
+        _writable: bool,
+    ) -> Result<(), String> {
         let blocks: Vec<serde_json::Value> = p
             .blocks()
             .iter()
@@ -534,7 +538,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn upd(v: serde_json::Value) -> AcpUpdate {
+    fn upd(v: serde_json::Value) -> ChatUpdate {
         update(serde_json::from_value(v).unwrap())
     }
 
@@ -544,25 +548,25 @@ mod tests {
             upd(
                 json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "hi"}})
             ),
-            AcpUpdate::AgentChunk("hi".into())
+            ChatUpdate::AgentChunk("hi".into())
         );
         assert_eq!(
             upd(
                 json!({"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "hm"}})
             ),
-            AcpUpdate::ThoughtChunk("hm".into())
+            ChatUpdate::ThoughtChunk("hm".into())
         );
         assert_eq!(
             upd(
                 json!({"sessionUpdate": "user_message_chunk", "content": {"type": "resource_link", "uri": "file:///a.rs", "name": "a.rs"}})
             ),
-            AcpUpdate::UserChunk("[resource_link: file:///a.rs]".into())
+            ChatUpdate::UserChunk("[resource_link: file:///a.rs]".into())
         );
     }
 
     #[test]
     fn tool_call_carries_diffs_locations_and_input() {
-        let AcpUpdate::ToolCall(t) = upd(json!({
+        let ChatUpdate::ToolCall(t) = upd(json!({
             "sessionUpdate": "tool_call",
             "toolCallId": "c1",
             "title": "Edit a.rs",
@@ -595,7 +599,7 @@ mod tests {
 
     #[test]
     fn tool_call_update_is_a_sparse_patch() {
-        let AcpUpdate::ToolCallUpdate(p) = upd(json!({
+        let ChatUpdate::ToolCallUpdate(p) = upd(json!({
             "sessionUpdate": "tool_call_update",
             "toolCallId": "c1",
             "status": "completed",
@@ -617,7 +621,7 @@ mod tests {
                 {"content": "a", "priority": "high", "status": "completed"},
                 {"content": "b", "priority": "low", "status": "pending"}
             ]})),
-            AcpUpdate::Plan(vec![
+            ChatUpdate::Plan(vec![
                 PlanEntry {
                     content: "a".into(),
                     status: PlanStatus::Completed
@@ -632,7 +636,7 @@ mod tests {
             upd(
                 json!({"sessionUpdate": "usage_update", "used": 10, "size": 100, "cost": {"amount": 0.5, "currency": "USD"}})
             ),
-            AcpUpdate::Usage(ContextUsage {
+            ChatUpdate::Usage(ContextUsage {
                 used: 10,
                 size: 100,
                 cost_amount: Some(0.5),
@@ -641,14 +645,14 @@ mod tests {
         );
         assert_eq!(
             upd(json!({"sessionUpdate": "current_mode_update", "currentModeId": "x"})),
-            AcpUpdate::Ignored
+            ChatUpdate::Ignored
         );
     }
 
     #[test]
     fn long_text_is_capped() {
         let big = "é".repeat(MAX_TEXT);
-        let AcpUpdate::AgentChunk(t) = upd(
+        let ChatUpdate::AgentChunk(t) = upd(
             json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": big}}),
         ) else {
             panic!()

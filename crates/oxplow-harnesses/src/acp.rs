@@ -60,9 +60,9 @@ impl AgentHarness for Acp {
     }
 
     /// The canonical names its tool calls are recorded under
-    /// (`acp::mapping::canonical_name`).
+    /// (`chat::mapping::canonical_name`).
     /// An ACP agent's calls arrive already mapped, by the protocol's tool
-    /// kinds (`oxplow_app::acp::mapping`); it posts no hook bodies.
+    /// kinds (`oxplow_app::chat::mapping`); it posts no hook bodies.
     async fn tool_use(&self, _: &serde_json::Value) -> Option<ToolUse> {
         None
     }

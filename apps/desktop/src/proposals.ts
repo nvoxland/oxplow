@@ -6,7 +6,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 
-import { decideProposal, querySql, type AcpToolCall } from "./api.js";
+import { decideProposal, querySql, type ChatToolCall } from "./api.js";
 import { recordOpError } from "./components/opErrorsStore.js";
 import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
 import { configRef } from "./refs/ref.js";
@@ -209,7 +209,7 @@ export function useThreadProposals(threadId: string): Proposal[] {
  *  it where the agent asked. `run_command` answers `{ kind: "proposed",
  *  proposal }`; a lens action's refusal says "recorded as proposal:N".
  *  Only oxplow's command tools: another tool quoting such text names none. */
-export function proposalOfTool(call: AcpToolCall): string | null {
+export function proposalOfTool(call: ChatToolCall): string | null {
   const names = [call.name, call.title].filter((n): n is string => n !== null);
   if (!names.some((n) => /^mcp__\S*__(run_command|oxplow_run_lens_action)\b/.test(n))) return null;
   const output = [...call.text, call.rawOutput === null ? "" : JSON.stringify(call.rawOutput)].join("\n");

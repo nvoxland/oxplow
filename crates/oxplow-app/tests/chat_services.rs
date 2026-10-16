@@ -10,11 +10,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use oxplow_acp_fake::{FakeOptions, Shared};
-use oxplow_app::acp::host::ServicesAcpHost;
-use oxplow_app::acp::manager::Launch;
-use oxplow_app::acp::session::{AcpEventBody, AcpStatus, SessionSpec};
-use oxplow_app::acp::transcript::ItemBody;
 use oxplow_app::acp::wire::AcpOpen;
+use oxplow_app::chat::host::ServicesChatHost;
+use oxplow_app::chat::manager::Launch;
+use oxplow_app::chat::session::{ChatEventBody, ChatStatus, SessionSpec};
+use oxplow_app::chat::transcript::ItemBody;
 use oxplow_app::Services;
 use oxplow_db::semantic_layer::SqlCell;
 use oxplow_domain::stores::{AgentSessionStore, AgentTurnStore, StreamStore, ThreadStore};
@@ -164,8 +164,8 @@ async fn open_session_in_process(
         let _ = oxplow_acp_fake::serve(ar, aw, Shared::default(), FakeOptions::default()).await;
     });
     let (cr, cw) = tokio::io::split(client);
-    let host = Arc::new(ServicesAcpHost::new(svc, Some(StreamId::new(1)), session));
-    svc.acp
+    let host = Arc::new(ServicesChatHost::new(svc, Some(StreamId::new(1)), session));
+    svc.chat
         .open_with_io(
             host,
             spec(session, thread, root),
@@ -178,9 +178,9 @@ async fn open_session_in_process(
 }
 
 async fn wait_for(
-    rx: &mut tokio::sync::broadcast::Receiver<oxplow_app::acp::session::AcpEvent>,
-    pred: impl Fn(&AcpEventBody) -> bool,
-) -> AcpEventBody {
+    rx: &mut tokio::sync::broadcast::Receiver<oxplow_app::chat::session::ChatEvent>,
+    pred: impl Fn(&ChatEventBody) -> bool,
+) -> ChatEventBody {
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             let e = rx.recv().await.unwrap();
@@ -194,7 +194,7 @@ async fn wait_for(
 }
 
 fn items(svc: &Services, session: oxplow_domain::AgentSessionId) -> Vec<ItemBody> {
-    svc.acp
+    svc.chat
         .transcript(&session, 0)
         .unwrap()
         .items
@@ -210,15 +210,15 @@ async fn an_acp_edit_is_recorded_like_a_hooked_one() {
     claim_task(&svc, thread).await;
     let session = open_in_process(&svc, thread, &root).await;
     // After open: the startup `Idle` must not read as a finished turn.
-    let mut rx = svc.acp.subscribe();
+    let mut rx = svc.chat.subscribe();
 
     let target = root.join("src/x.rs");
-    svc.acp
+    svc.chat
         .submit_human_prompt(&session, format!("fake:edit {}", target.display()))
         .await
         .unwrap();
-    let AcpEventBody::Item { item } = wait_for(&mut rx, |b| {
-        matches!(b, AcpEventBody::Item { item } if matches!(item.body, ItemBody::Permission { .. }))
+    let ChatEventBody::Item { item } = wait_for(&mut rx, |b| {
+        matches!(b, ChatEventBody::Item { item } if matches!(item.body, ItemBody::Permission { .. }))
     })
     .await
     else {
@@ -227,15 +227,15 @@ async fn an_acp_edit_is_recorded_like_a_hooked_one() {
     let ItemBody::Permission { request_id, .. } = item.body else {
         unreachable!()
     };
-    svc.acp
+    svc.chat
         .respond_permission(&session, request_id, Some("allow".into()))
         .await
         .unwrap();
     wait_for(&mut rx, |b| {
         matches!(
             b,
-            AcpEventBody::Status {
-                status: AcpStatus::Idle
+            ChatEventBody::Status {
+                status: ChatStatus::Idle
             }
         )
     })
@@ -316,8 +316,8 @@ async fn a_read_only_thread_is_refused_by_the_write_guard() {
     let thread = seed(&svc, &root, ThreadStatus::Queued).await;
     let session = open_in_process(&svc, thread, &root).await;
     // After open: the startup `Idle` must not read as a finished turn.
-    let mut rx = svc.acp.subscribe();
-    svc.acp
+    let mut rx = svc.chat.subscribe();
+    svc.chat
         .submit_human_prompt(
             &session,
             format!("fake:edit {}", root.join("a.rs").display()),
@@ -327,8 +327,8 @@ async fn a_read_only_thread_is_refused_by_the_write_guard() {
     wait_for(&mut rx, |b| {
         matches!(
             b,
-            AcpEventBody::Status {
-                status: AcpStatus::Idle
+            ChatEventBody::Status {
+                status: ChatStatus::Idle
             }
         )
     })
@@ -377,8 +377,8 @@ async fn the_agent_process_runs_and_a_crash_stops_the_thread() {
     let (svc, root, _dir) = boot().await;
     let thread = seed(&svc, &root, ThreadStatus::Active).await;
     let session = session_of(&svc, thread).await;
-    let host = Arc::new(ServicesAcpHost::new(&svc, Some(StreamId::new(1)), session));
-    svc.acp
+    let host = Arc::new(ServicesChatHost::new(&svc, Some(StreamId::new(1)), session));
+    svc.chat
         .open(
             host,
             spec(session, thread, &root),
@@ -392,16 +392,16 @@ async fn the_agent_process_runs_and_a_crash_stops_the_thread() {
         )
         .await
         .unwrap();
-    let mut rx = svc.acp.subscribe();
-    svc.acp
+    let mut rx = svc.chat.subscribe();
+    svc.chat
         .submit_human_prompt(&session, "fake:say from a process".into())
         .await
         .unwrap();
     wait_for(&mut rx, |b| {
         matches!(
             b,
-            AcpEventBody::Status {
-                status: AcpStatus::Idle
+            ChatEventBody::Status {
+                status: ChatStatus::Idle
             }
         )
     })
@@ -410,12 +410,12 @@ async fn the_agent_process_runs_and_a_crash_stops_the_thread() {
         .iter()
         .any(|b| matches!(b, ItemBody::Agent { text } if text == "from a process")));
 
-    svc.acp
+    svc.chat
         .submit_human_prompt(&session, "fake:crash".into())
         .await
         .unwrap();
-    wait_for(&mut rx, |b| matches!(b, AcpEventBody::Closed { .. })).await;
-    assert!(!svc.acp.is_open(&session));
+    wait_for(&mut rx, |b| matches!(b, ChatEventBody::Closed { .. })).await;
+    assert!(!svc.chat.is_open(&session));
     let status = svc
         .agent_status_store
         .get(&thread, Some(session_of(&svc, thread).await))
@@ -447,16 +447,16 @@ async fn two_acp_sessions_in_a_thread_run_apart() {
         .unwrap()
         .id;
     open_session_in_process(&svc, b, thread, &root).await;
-    let mut rx = svc.acp.subscribe();
-    svc.acp
+    let mut rx = svc.chat.subscribe();
+    svc.chat
         .submit_human_prompt(&a, "hello".into())
         .await
         .unwrap();
     wait_for(&mut rx, |b| {
         matches!(
             b,
-            AcpEventBody::Status {
-                status: AcpStatus::Idle
+            ChatEventBody::Status {
+                status: ChatStatus::Idle
             }
         )
     })
@@ -468,9 +468,9 @@ async fn two_acp_sessions_in_a_thread_run_apart() {
     };
     assert!(said(items(&svc, a)));
     assert!(!said(items(&svc, b)));
-    svc.acp.close(&a).unwrap();
-    assert!(!svc.acp.is_open(&a));
-    assert!(svc.acp.is_open(&b));
+    svc.chat.close(&a).unwrap();
+    assert!(!svc.chat.is_open(&a));
+    assert!(svc.chat.is_open(&b));
 }
 
 #[tokio::test]
@@ -480,7 +480,7 @@ async fn closing_an_acp_thread_stops_its_session() {
     let (svc, root, _dir) = boot().await;
     let thread = seed(&svc, &root, ThreadStatus::Queued).await;
     let session = open_in_process(&svc, thread, &root).await;
-    assert!(svc.acp.is_open(&session));
+    assert!(svc.chat.is_open(&session));
     let terminal = svc
         .agent_session_store
         .open(&oxplow_domain::agent_session::NewAgentSession::terminal(
@@ -514,7 +514,7 @@ async fn closing_an_acp_thread_stops_its_session() {
         .await
         .unwrap();
     assert!(
-        !svc.acp.is_open(&session),
+        !svc.chat.is_open(&session),
         "the agent process is stopped with its thread"
     );
     tokio::time::timeout(Duration::from_secs(10), async {
@@ -533,11 +533,11 @@ async fn closing_an_acp_thread_stops_its_session() {
 
 #[tokio::test]
 async fn a_permission_card_restores_the_status_it_interrupted() {
-    use oxplow_app::acp::host::AcpHost as _;
+    use oxplow_app::chat::host::ChatHost as _;
     use oxplow_domain::AgentStatusState;
     let (svc, root, _dir) = boot().await;
     let thread = seed(&svc, &root, ThreadStatus::Active).await;
-    let host = ServicesAcpHost::new(&svc, Some(StreamId::new(1)), session_of(&svc, thread).await);
+    let host = ServicesChatHost::new(&svc, Some(StreamId::new(1)), session_of(&svc, thread).await);
     let status = || async {
         let s = svc
             .agent_status_store

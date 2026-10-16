@@ -150,7 +150,7 @@ pub struct ContextUsage {
 
 /// One `session/update`, in oxplow's terms.
 #[derive(Debug, Clone, PartialEq)]
-pub enum AcpUpdate {
+pub enum ChatUpdate {
     UserChunk(String),
     AgentChunk(String),
     ThoughtChunk(String),

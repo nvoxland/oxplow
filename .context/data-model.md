@@ -519,7 +519,7 @@ One agent slot a person opened on a thread (V32; `ses<n>`, ref
   `v_thread` blocks the drop. `v32_moves_agent_columns_onto_one_session_per_thread`
   checks rows, anchors, the dropped columns and the children.
 - **ACP:** the conversation itself has **no table**: it lives in memory
-  (`acp::transcript::Transcript`) and a `session/load` replay rebuilds it.
+  (`chat::transcript::Transcript`) and a `session/load` replay rebuilds it.
   What an ACP turn records lands in the same tables as a hooked turn.
 
 **Removed in v42:** the `auto_commit` column (added in v15) and the

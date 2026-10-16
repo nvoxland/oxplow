@@ -90,7 +90,7 @@ resource ownership, explicit compatibility, and better authoring tools.
 AI interfaces should evolve to support new functionality while keeping
 provenance, usage, permissions, and cancellation under host control.
 
-Interactive terminal and ACP prompts currently come from the person.
+Interactive terminal and chat prompts currently come from the person.
 Separate recorded AI API computations are built. Programmatic agent
 sessions and additional remote-host capabilities are future work; they
 should preserve the ability to use oxplow with a person driving an agent

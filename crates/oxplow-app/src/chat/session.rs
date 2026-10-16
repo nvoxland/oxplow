@@ -27,7 +27,7 @@ use parking_lot::Mutex;
 use serde::Serialize;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
-use super::host::AcpHost;
+use super::host::ChatHost;
 
 /// What a write oxplow makes for an ACP agent (`fs/write_text_file`) is
 /// called, where a person reads it and in the record.
@@ -35,14 +35,14 @@ const FS_WRITE: &str = "fs/write_text_file";
 use super::conn::{Connection, Incoming, PermissionReply, TurnEnd};
 use super::mapping;
 use super::model::{
-    AcpUpdate, ContextUsage, PermissionAnswer, PermissionKind, PermissionOption, ToolCall,
+    ChatUpdate, ContextUsage, PermissionAnswer, PermissionKind, PermissionOption, ToolCall,
     ToolStatus,
 };
 use super::transcript::{ItemBody, Transcript, TranscriptItem};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
-pub enum AcpStatus {
+pub enum ChatStatus {
     Starting,
     Idle,
     Running,
@@ -56,9 +56,9 @@ pub enum AcpStatus {
     rename_all = "snake_case",
     rename_all_fields = "camelCase"
 )]
-pub enum AcpEventBody {
+pub enum ChatEventBody {
     Item { item: Box<TranscriptItem> },
-    Status { status: AcpStatus },
+    Status { status: ChatStatus },
     Usage { usage: ContextUsage },
     Closed { reason: Option<String> },
 }
@@ -66,7 +66,7 @@ pub enum AcpEventBody {
 /// A change to one agent session's ACP agent, pushed to the UI.
 #[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct AcpEvent {
+pub struct ChatEvent {
     /// The agent session (`ses3`) it is about.
     pub agent_session_id: String,
     /// Its thread, for a client that filters by thread.
@@ -77,11 +77,11 @@ pub struct AcpEvent {
     #[specta(type = oxplow_domain::JsNumber)]
     pub generation: u64,
     #[serde(flatten)]
-    pub body: AcpEventBody,
+    pub body: ChatEventBody,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum AcpError {
+pub enum ChatError {
     #[error("no agent is running for this session")]
     NotOpen,
     #[error("the agent is still working on the last prompt; wait for it or stop it")]
@@ -113,9 +113,9 @@ pub struct SessionSpec {
 #[derive(Debug)]
 pub struct SessionView {
     pub agent: String,
-    /// This session's generation (see [`AcpEvent::generation`]).
+    /// This session's generation (see [`ChatEvent::generation`]).
     pub generation: u64,
-    pub status: AcpStatus,
+    pub status: ChatStatus,
     pub transcript: Transcript,
     pub session_id: Option<String>,
     /// The agent's last stderr lines, for a failed start or a crash.
@@ -129,7 +129,7 @@ impl SessionView {
         Self {
             agent: agent.to_string(),
             generation,
-            status: AcpStatus::Starting,
+            status: ChatStatus::Starting,
             transcript: Transcript::default(),
             session_id: None,
             stderr_tail: Vec::new(),
@@ -147,13 +147,13 @@ impl SessionView {
 pub enum Command {
     Prompt {
         text: String,
-        reply: oneshot::Sender<Result<(), AcpError>>,
+        reply: oneshot::Sender<Result<(), ChatError>>,
     },
     Cancel,
     Respond {
         request_id: String,
         option_id: Option<String>,
-        reply: oneshot::Sender<Result<(), AcpError>>,
+        reply: oneshot::Sender<Result<(), ChatError>>,
     },
     Close,
 }
@@ -171,9 +171,9 @@ pub(super) struct Actor {
     /// False once a newer session replaced this one: its teardown then
     /// records nothing (the new session owns the thread's status).
     current: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    host: Arc<dyn AcpHost>,
+    host: Arc<dyn ChatHost>,
     view: Arc<Mutex<SessionView>>,
-    events: broadcast::Sender<AcpEvent>,
+    events: broadcast::Sender<ChatEvent>,
     session_id: String,
     /// The prompt of the turn in flight.
     turn: Option<String>,
@@ -199,9 +199,9 @@ pub(super) struct Actor {
 impl Actor {
     pub(super) fn new(
         spec: SessionSpec,
-        host: Arc<dyn AcpHost>,
+        host: Arc<dyn ChatHost>,
         view: Arc<Mutex<SessionView>>,
-        events: broadcast::Sender<AcpEvent>,
+        events: broadcast::Sender<ChatEvent>,
         current: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
         let generation = view.lock().generation;
@@ -226,8 +226,8 @@ impl Actor {
         }
     }
 
-    fn emit(&self, body: AcpEventBody) {
-        let _ = self.events.send(AcpEvent {
+    fn emit(&self, body: ChatEventBody) {
+        let _ = self.events.send(ChatEvent {
             agent_session_id: self.spec.session_id.to_string(),
             thread_id: self.spec.thread_id.to_string(),
             generation: self.generation,
@@ -237,13 +237,13 @@ impl Actor {
 
     fn push(&self, body: ItemBody) -> TranscriptItem {
         let item = self.view.lock().transcript.push(body);
-        self.emit(AcpEventBody::Item {
+        self.emit(ChatEventBody::Item {
             item: Box::new(item.clone()),
         });
         item
     }
 
-    fn set_status(&self, status: AcpStatus) {
+    fn set_status(&self, status: ChatStatus) {
         let changed = {
             let mut v = self.view.lock();
             let changed = v.status != status;
@@ -251,7 +251,7 @@ impl Actor {
             changed
         };
         if changed {
-            self.emit(AcpEventBody::Status { status });
+            self.emit(ChatEventBody::Status { status });
         }
     }
 
@@ -266,15 +266,15 @@ impl Actor {
         conn: Arc<dyn Connection>,
         mut incoming: mpsc::UnboundedReceiver<Incoming>,
         mut commands: mpsc::UnboundedReceiver<Command>,
-        ready: oneshot::Sender<Result<(), AcpError>>,
+        ready: oneshot::Sender<Result<(), ChatError>>,
     ) {
         if let Err(e) = self.start(conn.as_ref(), &mut incoming).await {
             self.push(ItemBody::Error { message: e.clone() });
-            self.set_status(AcpStatus::Stopped);
-            self.emit(AcpEventBody::Closed {
+            self.set_status(ChatStatus::Stopped);
+            self.emit(ChatEventBody::Closed {
                 reason: Some(e.clone()),
             });
-            let _ = ready.send(Err(AcpError::Agent(e)));
+            let _ = ready.send(Err(ChatError::Agent(e)));
             return;
         }
         let _ = ready.send(Ok(()));
@@ -327,7 +327,7 @@ impl Actor {
                 .named(self.thread(), &opened.session_id, &title)
                 .await;
         }
-        self.set_status(AcpStatus::Idle);
+        self.set_status(ChatStatus::Idle);
         Ok(())
     }
 
@@ -349,9 +349,9 @@ impl Actor {
                 }
                 // No card left waiting: the view says what's happening.
                 self.set_status(if self.turn.is_some() {
-                    AcpStatus::Running
+                    ChatStatus::Running
                 } else {
-                    AcpStatus::Idle
+                    ChatStatus::Idle
                 });
             }
             Command::Respond {
@@ -366,12 +366,12 @@ impl Actor {
     }
 
     /// The person's prompt: the one place a prompt is built and sent.
-    async fn prompt(&mut self, conn: &dyn Connection, text: String) -> Result<(), AcpError> {
+    async fn prompt(&mut self, conn: &dyn Connection, text: String) -> Result<(), ChatError> {
         if self.turn.is_some() {
-            return Err(AcpError::TurnInFlight);
+            return Err(ChatError::TurnInFlight);
         }
         if text.trim().is_empty() {
-            return Err(AcpError::EmptyPrompt);
+            return Err(ChatError::EmptyPrompt);
         }
         let mut parts: Vec<String> = Vec::new();
         if let Some(sp) = self.pending_system_prompt.take() {
@@ -400,9 +400,9 @@ impl Actor {
         if let Err(e) = conn.prompt(hp, writable) {
             self.turn = None;
             self.push(ItemBody::Error { message: e.clone() });
-            return Err(AcpError::Agent(e));
+            return Err(ChatError::Agent(e));
         }
-        self.set_status(AcpStatus::Running);
+        self.set_status(ChatStatus::Running);
         Ok(())
     }
 
@@ -417,16 +417,16 @@ impl Actor {
             .await;
         self.fs_written.clear();
         self.turn = Some(text);
-        self.set_status(AcpStatus::Running);
+        self.set_status(ChatStatus::Running);
     }
 
     async fn respond(
         &mut self,
         request_id: &str,
         option_id: Option<String>,
-    ) -> Result<(), AcpError> {
+    ) -> Result<(), ChatError> {
         let Some(p) = self.pending.remove(request_id) else {
-            return Err(AcpError::UnknownRequest(request_id.to_string()));
+            return Err(ChatError::UnknownRequest(request_id.to_string()));
         };
         let answer = match option_id {
             Some(id) if p.options.iter().any(|o| o.id == id) => {
@@ -434,7 +434,7 @@ impl Actor {
             }
             Some(id) => {
                 self.pending.insert(request_id.to_string(), p);
-                return Err(AcpError::UnknownOption(id));
+                return Err(ChatError::UnknownOption(id));
             }
             None => PermissionAnswer::Cancelled,
         };
@@ -451,9 +451,9 @@ impl Actor {
         if self.pending.is_empty() {
             self.host.awaiting_user(self.thread(), None).await;
             self.set_status(if self.turn.is_some() {
-                AcpStatus::Running
+                ChatStatus::Running
             } else {
-                AcpStatus::Idle
+                ChatStatus::Idle
             });
         }
         Ok(())
@@ -466,7 +466,7 @@ impl Actor {
             }
         });
         if let Some(item) = item {
-            self.emit(AcpEventBody::Item {
+            self.emit(ChatEventBody::Item {
                 item: Box::new(item),
             });
         }
@@ -499,7 +499,7 @@ impl Actor {
                     return;
                 }
                 let tool_id = ask.tool.id.clone();
-                self.apply(AcpUpdate::ToolCallUpdate(ask.tool.clone()));
+                self.apply(ChatUpdate::ToolCallUpdate(ask.tool.clone()));
                 let tool = self
                     .view
                     .lock()
@@ -570,7 +570,7 @@ impl Actor {
                                 options,
                             },
                         );
-                        self.set_status(AcpStatus::AwaitingPermission);
+                        self.set_status(ChatStatus::AwaitingPermission);
                         self.host
                             .awaiting_user(self.thread(), Some(format!("Permission: {title}")))
                             .await;
@@ -677,24 +677,24 @@ impl Actor {
         }
     }
 
-    fn apply(&self, update: AcpUpdate) -> Option<TranscriptItem> {
-        let usage = matches!(update, AcpUpdate::Usage(_));
+    fn apply(&self, update: ChatUpdate) -> Option<TranscriptItem> {
+        let usage = matches!(update, ChatUpdate::Usage(_));
         let item = self.view.lock().transcript.apply(update);
         if let Some(item) = &item {
-            self.emit(AcpEventBody::Item {
+            self.emit(ChatEventBody::Item {
                 item: Box::new(item.clone()),
             });
         }
         if usage {
             if let Some(u) = self.view.lock().transcript.usage().cloned() {
-                self.emit(AcpEventBody::Usage { usage: u });
+                self.emit(ChatEventBody::Usage { usage: u });
             }
         }
         item
     }
 
-    async fn on_update(&mut self, update: AcpUpdate) {
-        if let (false, AcpUpdate::UserChunk(text)) = (self.replaying, &update) {
+    async fn on_update(&mut self, update: ChatUpdate) {
+        if let (false, ChatUpdate::UserChunk(text)) = (self.replaying, &update) {
             // The person's prompt from here is already an item (pushed
             // when it was sent); a live echo of it would be appended to
             // it. One with no turn in flight is a prompt the person typed
@@ -706,8 +706,8 @@ impl Actor {
             return;
         }
         let tool_id = match &update {
-            AcpUpdate::ToolCall(t) => Some(t.id.clone()),
-            AcpUpdate::ToolCallUpdate(p) => Some(p.id.clone()),
+            ChatUpdate::ToolCall(t) => Some(t.id.clone()),
+            ChatUpdate::ToolCallUpdate(p) => Some(p.id.clone()),
             _ => None,
         };
         self.apply(update);
@@ -806,7 +806,7 @@ impl Actor {
                 tokens.as_ref(),
             )
             .await;
-        self.set_status(AcpStatus::Idle);
+        self.set_status(ChatStatus::Idle);
     }
 
     async fn shut_down(&mut self, reason: Option<String>) {
@@ -838,14 +838,14 @@ pub(super) struct Teardown {
     thread: ThreadId,
     generation: u64,
     view: Arc<Mutex<SessionView>>,
-    host: Arc<dyn AcpHost>,
-    events: broadcast::Sender<AcpEvent>,
+    host: Arc<dyn ChatHost>,
+    events: broadcast::Sender<ChatEvent>,
     current: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Teardown {
-    fn emit(&self, body: AcpEventBody) {
-        let _ = self.events.send(AcpEvent {
+    fn emit(&self, body: ChatEventBody) {
+        let _ = self.events.send(ChatEvent {
             agent_session_id: self.session.to_string(),
             thread_id: self.thread.to_string(),
             generation: self.generation,
@@ -857,7 +857,7 @@ impl Teardown {
         let mut changed = Vec::new();
         {
             let mut v = self.view.lock();
-            if v.status == AcpStatus::Stopped {
+            if v.status == ChatStatus::Stopped {
                 return;
             }
             // Open cards can't be answered any more.
@@ -880,10 +880,10 @@ impl Teardown {
             if let Some(r) = &reason {
                 changed.push(v.transcript.push(ItemBody::Error { message: r.clone() }));
             }
-            v.status = AcpStatus::Stopped;
+            v.status = ChatStatus::Stopped;
         }
         for item in changed {
-            self.emit(AcpEventBody::Item {
+            self.emit(ChatEventBody::Item {
                 item: Box::new(item),
             });
         }
@@ -891,10 +891,10 @@ impl Teardown {
         if self.current.load(std::sync::atomic::Ordering::SeqCst) {
             self.host.interrupted(&self.thread).await;
         }
-        self.emit(AcpEventBody::Status {
-            status: AcpStatus::Stopped,
+        self.emit(ChatEventBody::Status {
+            status: ChatStatus::Stopped,
         });
-        self.emit(AcpEventBody::Closed { reason });
+        self.emit(ChatEventBody::Closed { reason });
     }
 }
 

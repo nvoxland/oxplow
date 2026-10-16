@@ -651,7 +651,7 @@ transaction each. Written one commit per row, it once sent ~250k change
 events at boot (a quarter of a million piled-up findings): the events
 socket lagged, the UI re-read for a minute and terminal input timed out. Typing in the ACP prompt box re-renders only the box:
 its draft is its own state, and the transcript and each message are
-memoized (`AcpAgentView.tsx`).
+memoized (`ChatAgentView.tsx`).
 
 ## What running scripts in workers costs (measured 2026-10-09)
 

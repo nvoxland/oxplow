@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
 
-import type { AcpToolCall } from "./api.js";
+import type { ChatToolCall } from "./api.js";
 import { threadRowId } from "./modelIds.js";
 import { answerOfTool, answersFromRows } from "./threadAnswers.js";
 
-const call = (over: Partial<AcpToolCall>): AcpToolCall => ({
+const call = (over: Partial<ChatToolCall>): ChatToolCall => ({
   id: "t1",
   title: "",
   name: null,
