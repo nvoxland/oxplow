@@ -182,6 +182,9 @@ fn spawn_for_stream(
         // file tree / editor once, not once per touched file. (The
         // snapshot dirty set listens to the raw stream separately.)
         let mut rx = fs.subscribe_debounced(Duration::from_millis(250));
+        // Git's rules as they are now: an edit to an ignore file applies to
+        // what is heard after it.
+        let live_filter = fs.filter();
         let bus = events.clone();
         let id = stream_id;
         let root = worktree.clone();
@@ -205,7 +208,9 @@ fn spawn_for_stream(
                             break;
                         }
                         let rel_path = path.strip_prefix(&root).unwrap_or(&path);
-                        if filter.ignore(rel_path, path.is_dir()) || is_swap_file(&path) {
+                        if live_filter.current().ignore(rel_path, path.is_dir())
+                            || is_swap_file(&path)
+                        {
                             continue;
                         }
                         let rel = rel_path.to_string_lossy().into_owned();
@@ -382,6 +387,63 @@ mod tests {
         // Keep arc alive to avoid drop ordering surprises.
         drop(_watchers);
         let _ = Arc::new(());
+    }
+
+    /// An edit to `.gitignore` applies to the running watcher: a file it
+    /// stops ignoring is announced, with no restart.
+    #[tokio::test]
+    async fn a_gitignore_edit_applies_to_the_running_workspace_watcher() {
+        let dir = tempdir().unwrap();
+        // Canonical, as the OS reports paths: the consumer filters match by prefix.
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::fs::write(root.join(".gitignore"), "hidden.txt\n").unwrap();
+        let bus = EventBus::new();
+        let mut rx = bus.subscribe_ui();
+        let on_orphan: OnOrphan = Box::new(|| Box::pin(async {}));
+        let filter = oxplow_fs_watch::WorkspaceFilter::for_project(
+            &root,
+            Vec::<String>::new(),
+            Vec::<String>::new(),
+        );
+        let _watchers = spawn_for_stream(
+            oxplow_domain::StreamId::new(1),
+            root.clone(),
+            &crate::vcs::GitProvider,
+            Announce {
+                events: bus.clone(),
+                ref_moves: crate::ref_moves::RefMoves::new(bus.clone()),
+                extensions: None,
+            },
+            false,
+            on_orphan,
+            filter,
+        )
+        .expect("watchers");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        async fn heard(
+            name: &str,
+            rx: &mut tokio::sync::broadcast::Receiver<crate::events::OxplowEvent>,
+        ) -> bool {
+            let deadline = std::time::Instant::now() + Duration::from_secs(4);
+            while std::time::Instant::now() < deadline {
+                if let Ok(Ok(crate::events::OxplowEvent::WorkspaceChanged { path, .. })) =
+                    timeout(Duration::from_millis(300), rx.recv()).await
+                {
+                    if path.ends_with(name) {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+        std::fs::write(root.join("src/hidden.txt"), b"1").unwrap();
+        assert!(!heard("hidden.txt", &mut rx).await, "ignored at first");
+        std::fs::write(root.join(".gitignore"), "").unwrap();
+        assert!(heard(".gitignore", &mut rx).await);
+        std::fs::write(root.join("src/hidden.txt"), b"2").unwrap();
+        assert!(heard("hidden.txt", &mut rx).await, "heard once un-ignored");
     }
 
     /// P7.B6: only a file under `oxplow/extensions/` is an extension change.

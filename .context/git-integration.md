@@ -146,6 +146,31 @@ a later one of the same name is new again. Followed directories are keyed
 by name: the OS may report either spelling of the root (`/private/var`
 for `/var`).
 
+**Ignored folders inside a kept directory are dropped at the watcher
+too.** Pruning top-level directories isn't enough: a build in a git-ignored
+folder under a kept one (`.claude/worktrees/<agent>/target`, ignored by
+`.git/info/exclude`) is inside a recursive watch, and thousands of writes
+overflowed the 1024-event channel. Every consumer then logged
+`workspace watcher lagged` / `snapshot capture: fs-watch lagged` and
+rescanned (a snapshot, line counts, the views' reads). So the watch
+callback judges each path by the filter before it sends it
+(`ignored_by`; a file under an ignored directory is ignored with it) and
+drops what git's rules ignore. The filter is the one source: `.gitignore`s,
+`.git/info/exclude`, the global excludes file and the `generated` lists.
+
+**An ignore-file edit takes effect.** The callback reads git's rules again
+when a `.gitignore` or `.git/info/exclude` changes (`WorkspaceFilter::
+refreshed`; the watch also registers `.git/info`, non-recursively, to hear
+the exclude file), so what is written next is judged by them. The follower
+then stops watching a top-level directory the rules now ignore and watches
+(and reports the files of) one they stopped ignoring. A consumer that keeps
+its own filter reads it again on an ignore-file event
+(`oxplow_fs_watch::is_ignore_file`, the snapshot service) or asks the
+watch's live filter per event (`FsWatcher::filter()`, the workspace
+watcher). Pinned by `a_burst_under_an_ignored_folder_never_reaches_the_
+stream`, `a_gitignore_edit_takes_effect_without_a_restart` and
+`a_gitignore_edit_applies_to_the_running_workspace_watcher`.
+
 A recursive root watch would make both edges disappear, and that is what
 this used to be. It is not worth it — see the 345k-file flood above. The
 cost of the scoped set is that *staleness must be handled explicitly*,

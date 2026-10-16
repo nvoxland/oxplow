@@ -803,6 +803,17 @@ impl SnapshotCaptureService {
                     Ok(event) => {
                         let path = event.path;
                         let rel = path.strip_prefix(&self.inner.project_dir).unwrap_or(&path);
+                        // An ignore file changed: read git's rules again, so
+                        // what is heard after it (and every sweep and claim)
+                        // is judged by them.
+                        if oxplow_fs_watch::is_ignore_file(&path) {
+                            let mut f = self
+                                .inner
+                                .workspace_filter
+                                .write()
+                                .unwrap_or_else(|e| e.into_inner());
+                            *f = f.refreshed();
+                        }
                         if self
                             .inner
                             .workspace_filter

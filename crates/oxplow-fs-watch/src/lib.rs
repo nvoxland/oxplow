@@ -60,6 +60,24 @@ pub struct FsWatcher {
     // adds a watch for each top-level directory that appears.
     _watcher: std::sync::Arc<std::sync::Mutex<RecommendedWatcher>>,
     sender: broadcast::Sender<WatchEvent>,
+    /// A workspace watch's live filter (see [`FsWatcher::filter`]).
+    filter: LiveFilter,
+}
+
+/// A workspace watch's filter as it is now. Git's rules are read again when
+/// an ignore file changes, so a consumer that asks per event follows an
+/// edit. Empty (ignores only `.git` and `.oxplow`) for a watch with no
+/// filter.
+#[derive(Clone, Default)]
+pub struct LiveFilter(Option<std::sync::Arc<std::sync::RwLock<WorkspaceFilter>>>);
+
+impl LiveFilter {
+    pub fn current(&self) -> WorkspaceFilter {
+        self.0
+            .as_ref()
+            .map(|f| f.read().unwrap_or_else(|e| e.into_inner()).clone())
+            .unwrap_or_default()
+    }
 }
 
 impl FsWatcher {
@@ -89,7 +107,13 @@ impl FsWatcher {
     /// and the files already in it are reported (as `Other`), since
     /// whatever was written before that watch landed no watch saw.
     pub fn watch_workspace(root: &Path, filter: WorkspaceFilter) -> Result<Self, FsWatchError> {
-        let paths = workspace_watch_paths(root, &filter);
+        let mut paths = workspace_watch_paths(root, &filter);
+        // `.git/info/exclude` is one of git's ignore files: an edit to it
+        // is heard (and nothing else in `.git`).
+        let info = root.join(".git").join("info");
+        if info.is_dir() {
+            paths.push((info, RecursiveMode::NonRecursive));
+        }
         let followed = paths
             .iter()
             .filter(|(_, mode)| matches!(mode, RecursiveMode::Recursive))
@@ -107,7 +131,7 @@ impl FsWatcher {
             paths,
             Some(Follow {
                 roots,
-                filter,
+                filter: std::sync::Arc::new(std::sync::RwLock::new(filter)),
                 followed,
             }),
         )
@@ -126,14 +150,35 @@ impl FsWatcher {
         // A path directly under a followed root goes to the follower, which
         // decides (off the OS callback thread — registering a watch from it
         // can deadlock a backend) whether it's a new top-level directory.
-        let (top_tx, top_rx) = std::sync::mpsc::channel::<PathBuf>();
+        let (top_tx, top_rx) = std::sync::mpsc::channel::<FollowMsg>();
         let top_roots = follow.as_ref().map(|f| f.roots.clone()).unwrap_or_default();
+        // A workspace watch drops what its filter ignores here, before the
+        // channel: a build writing thousands of files under an ignored
+        // folder (inside a kept directory, where the OS watch still sees
+        // it) would overflow the channel and make every consumer lag and
+        // rescan. The filter is shared with the follower, which swaps it
+        // when an ignore file changes.
+        let filter = follow.as_ref().map(|f| f.filter.clone());
+        let live_filter = filter.clone();
 
         let mut watcher =
             notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
                 let Ok(event) = res else { return };
                 let kind = classify(&event);
                 for path in event.paths.iter() {
+                    if let Some(filter) = &filter {
+                        if is_ignore_file(path) {
+                            // Read git's rules again here, so what is
+                            // written next is judged by them; the follower
+                            // then moves the watches.
+                            let fresh =
+                                filter.read().unwrap_or_else(|e| e.into_inner()).refreshed();
+                            *filter.write().unwrap_or_else(|e| e.into_inner()) = fresh;
+                            let _ = top_tx.send(FollowMsg::Refilter);
+                        } else if ignored_by(filter, &top_roots, path) {
+                            continue;
+                        }
+                    }
                     let _ = tx_clone.send(WatchEvent {
                         path: path.clone(),
                         kind: kind.clone(),
@@ -142,7 +187,7 @@ impl FsWatcher {
                         .parent()
                         .is_some_and(|parent| top_roots.iter().any(|r| r == parent))
                     {
-                        let _ = top_tx.send(path.clone());
+                        let _ = top_tx.send(FollowMsg::Top(path.clone()));
                     }
                 }
             })?;
@@ -163,7 +208,13 @@ impl FsWatcher {
         Ok(Self {
             _watcher: watcher,
             sender: tx,
+            filter: LiveFilter(live_filter),
         })
+    }
+
+    /// The filter this watch judges events by (see [`LiveFilter`]).
+    pub fn filter(&self) -> LiveFilter {
+        self.filter.clone()
     }
 
     /// Subscribe to the raw, immediate event stream. Every OS-level
@@ -257,24 +308,69 @@ pub fn workspace_watch_paths(
 struct Follow {
     /// The root, as given and canonical.
     roots: Vec<PathBuf>,
-    filter: WorkspaceFilter,
+    /// Shared with the watch callback.
+    filter: std::sync::Arc<std::sync::RwLock<WorkspaceFilter>>,
     /// The top-level directories with a recursive watch, by name.
     followed: HashSet<std::ffi::OsString>,
 }
 
+/// What the watch callback tells the follower.
+enum FollowMsg {
+    /// A path directly under the root changed.
+    Top(PathBuf),
+    /// An ignore file changed: read git's rules again.
+    Refilter,
+}
+
+/// Whether `path` is a file git reads ignore rules from: a consumer holding
+/// its own filter reads it again on a change to one.
+pub fn is_ignore_file(path: &Path) -> bool {
+    path.file_name().is_some_and(|n| n == ".gitignore")
+        || path.ends_with(Path::new(".git/info/exclude"))
+}
+
+/// Whether the filter ignores `path` (checked as a file: a file under an
+/// ignored directory is ignored with it). A path outside every root is
+/// not judged.
+fn ignored_by(filter: &std::sync::RwLock<WorkspaceFilter>, roots: &[PathBuf], path: &Path) -> bool {
+    let Some(rel) = roots.iter().find_map(|r| path.strip_prefix(r).ok()) else {
+        return false;
+    };
+    filter
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .ignore(rel, false)
+}
+
 impl Follow {
+    fn ignores(&self, rel: &Path, is_dir: bool) -> bool {
+        self.filter
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .ignore(rel, is_dir)
+    }
+
     fn run(
         mut self,
         watcher: &std::sync::Weak<std::sync::Mutex<RecommendedWatcher>>,
-        top: &std::sync::mpsc::Receiver<PathBuf>,
+        top: &std::sync::mpsc::Receiver<FollowMsg>,
         tx: &broadcast::Sender<WatchEvent>,
     ) {
-        while let Ok(path) = top.recv() {
-            let Some(name) = path.file_name().map(|n| n.to_os_string()) else {
-                continue;
-            };
+        while let Ok(msg) = top.recv() {
             let Some(watcher) = watcher.upgrade() else {
                 return;
+            };
+            let path = match msg {
+                FollowMsg::Top(path) => path,
+                FollowMsg::Refilter => {
+                    // One read for a burst of ignore-file events.
+                    while let Ok(FollowMsg::Refilter) = top.try_recv() {}
+                    self.refilter(&watcher, tx);
+                    continue;
+                }
+            };
+            let Some(name) = path.file_name().map(|n| n.to_os_string()) else {
+                continue;
             };
             let mut watcher = watcher.lock().unwrap_or_else(|e| e.into_inner());
             if !path.is_dir() {
@@ -284,7 +380,7 @@ impl Follow {
                 }
                 continue;
             }
-            if self.followed.contains(&name) || self.filter.ignore(Path::new(&name), true) {
+            if self.followed.contains(&name) || self.ignores(Path::new(&name), true) {
                 continue;
             }
             if let Err(e) = watcher.watch(&path, RecursiveMode::Recursive) {
@@ -294,6 +390,42 @@ impl Follow {
             drop(watcher);
             self.followed.insert(name.clone());
             self.report_files(&path, Path::new(&name), tx);
+        }
+    }
+
+    /// An ignore file changed (the callback has read the rules again): stop
+    /// watching a top-level directory they now ignore, and watch (and
+    /// report) one they stopped ignoring.
+    fn refilter(
+        &mut self,
+        watcher: &std::sync::Mutex<RecommendedWatcher>,
+        tx: &broadcast::Sender<WatchEvent>,
+    ) {
+        let Some(root) = self.roots.first().cloned() else {
+            return;
+        };
+        let Ok(entries) = std::fs::read_dir(&root) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            if !entry.file_type().is_ok_and(|t| t.is_dir()) {
+                continue;
+            }
+            let name = entry.file_name();
+            let ignored = self.ignores(Path::new(&name), true);
+            let followed = self.followed.contains(&name);
+            let mut w = watcher.lock().unwrap_or_else(|e| e.into_inner());
+            if ignored && followed {
+                let _ = w.unwatch(&entry.path());
+                self.followed.remove(&name);
+            } else if !ignored && !followed {
+                if w.watch(&entry.path(), RecursiveMode::Recursive).is_err() {
+                    continue;
+                }
+                drop(w);
+                self.followed.insert(name.clone());
+                self.report_files(&entry.path(), Path::new(&name), tx);
+            }
         }
     }
 
@@ -309,7 +441,7 @@ impl Follow {
                 continue;
             };
             let rel = rel.join(entry.file_name());
-            if self.filter.ignore(&rel, file_type.is_dir()) {
+            if self.ignores(&rel, file_type.is_dir()) {
                 continue;
             }
             if file_type.is_dir() {
@@ -385,6 +517,8 @@ pub struct WorkspaceFilter {
     /// Each is rooted at its own directory so nested patterns anchor
     /// correctly; deeper matchers override shallower ones.
     gitignores: std::sync::Arc<Vec<ignore::gitignore::Gitignore>>,
+    /// Git's global excludes file, read again by [`Self::refreshed`].
+    global: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for WorkspaceFilter {
@@ -417,6 +551,7 @@ impl WorkspaceFilter {
             include: Vec::new(),
             root: PathBuf::new(),
             gitignores: std::sync::Arc::new(Vec::new()),
+            global: None,
         }
     }
 
@@ -454,6 +589,20 @@ impl WorkspaceFilter {
             include: parse_filter_entries(include),
             root: root.to_path_buf(),
             gitignores: std::sync::Arc::new(collect_gitignores(root, global.as_deref())),
+            global,
+        }
+    }
+
+    /// This filter with its ignore files (`.gitignore`s, `.git/info/exclude`,
+    /// the global excludes file) read again: the same user entries, git's
+    /// current rules.
+    pub fn refreshed(&self) -> Self {
+        if self.root.as_os_str().is_empty() {
+            return self.clone();
+        }
+        Self {
+            gitignores: std::sync::Arc::new(collect_gitignores(&self.root, self.global.as_deref())),
+            ..self.clone()
         }
     }
 
@@ -861,6 +1010,109 @@ mod tests {
         let after = root.join("oxplow/extensions/mine/lens.yaml");
         let seen = seen_within(&mut rx, &after, Duration::from_secs(20)).await;
         assert!(seen.contains(&after), "written once it's watched: {seen:?}");
+    }
+
+    /// A build writing thousands of files under an ignored folder inside a
+    /// kept directory (`.claude/worktrees/x/target`) never reaches the
+    /// stream: the channel holds 1024 events, and a burst that overflowed
+    /// it made every consumer lag and rescan. What isn't ignored still
+    /// gets through, after the burst.
+    #[tokio::test]
+    async fn a_burst_under_an_ignored_folder_never_reaches_the_stream() {
+        let project = tempdir().unwrap();
+        let root = project.path();
+        std::fs::create_dir_all(root.join(".git/info")).unwrap();
+        std::fs::write(root.join(".git/info/exclude"), "target/\n").unwrap();
+        let tree = root.join(".claude/worktrees/x");
+        std::fs::create_dir_all(tree.join("target")).unwrap();
+        let filter = WorkspaceFilter::build(root, Vec::<String>::new(), Vec::<String>::new(), None);
+        let watcher = FsWatcher::watch_workspace(root, filter).unwrap();
+        // Nothing reads until the burst is over, as a busy consumer doesn't.
+        let mut rx = watcher.subscribe();
+        for i in 0..4000 {
+            std::fs::write(tree.join(format!("target/o{i}.o")), b"x").unwrap();
+        }
+        let real = tree.join("lib.rs");
+        std::fs::write(&real, b"fn main() {}").unwrap();
+        let canon = root.canonicalize().unwrap();
+        let want = canon.join(".claude/worktrees/x/lib.rs");
+        let mut seen = HashSet::new();
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while std::time::Instant::now() < deadline && !seen.contains(&want) {
+            match timeout(Duration::from_millis(500), rx.recv()).await {
+                Ok(Ok(evt)) => {
+                    seen.insert(evt.path.canonicalize().unwrap_or(evt.path));
+                }
+                Ok(Err(broadcast::error::RecvError::Lagged(n))) => {
+                    panic!("the stream lagged by {n}: ignored writes reached it")
+                }
+                Ok(Err(_)) => break,
+                Err(_) => {}
+            }
+        }
+        assert!(seen.contains(&want), "a kept file still gets through");
+        assert!(
+            !seen
+                .iter()
+                .any(|p| p.starts_with(canon.join(".claude/worktrees/x/target"))),
+            "ignored writes were dropped at the watcher"
+        );
+    }
+
+    /// A `.gitignore` edit takes effect while the watch runs: a file it
+    /// starts ignoring goes quiet, one it stops ignoring is heard, and a
+    /// top-level directory it stops ignoring is watched from then on.
+    #[tokio::test]
+    async fn a_gitignore_edit_takes_effect_without_a_restart() {
+        let project = tempdir().unwrap();
+        let root = project.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("built")).unwrap();
+        std::fs::write(root.join(".gitignore"), "built/\n").unwrap();
+        let filter = WorkspaceFilter::build(root, Vec::<String>::new(), Vec::<String>::new(), None);
+        let watcher = FsWatcher::watch_workspace(root, filter).unwrap();
+        let mut rx = watcher.subscribe();
+        let canon = root.canonicalize().unwrap();
+        async fn heard(
+            rx: &mut broadcast::Receiver<WatchEvent>,
+            canon: &Path,
+            rel: &str,
+            ms: u64,
+        ) -> bool {
+            let want = canon.join(rel);
+            seen_within(rx, &want, Duration::from_millis(ms))
+                .await
+                .contains(&want)
+        }
+        std::fs::write(root.join("src/a.txt"), b"1").unwrap();
+        assert!(
+            heard(&mut rx, &canon, "src/a.txt", 20_000).await,
+            "kept at first"
+        );
+
+        // Start ignoring a.txt.
+        std::fs::write(root.join(".gitignore"), "built/\na.txt\n").unwrap();
+        assert!(heard(&mut rx, &canon, ".gitignore", 20_000).await);
+        std::fs::write(root.join("src/a.txt"), b"2").unwrap();
+        assert!(
+            !heard(&mut rx, &canon, "src/a.txt", 1_500).await,
+            "ignored now"
+        );
+
+        // Stop ignoring both: the file is heard again, and so is a write in
+        // the directory that was never watched.
+        std::fs::write(root.join(".gitignore"), "").unwrap();
+        assert!(heard(&mut rx, &canon, ".gitignore", 20_000).await);
+        std::fs::write(root.join("src/a.txt"), b"3").unwrap();
+        assert!(
+            heard(&mut rx, &canon, "src/a.txt", 20_000).await,
+            "kept again"
+        );
+        std::fs::write(root.join("built/out.js"), b"x").unwrap();
+        assert!(
+            heard(&mut rx, &canon, "built/out.js", 20_000).await,
+            "newly watched"
+        );
     }
 
     /// A top-level dir the filter drops stays unwatched when it appears.
