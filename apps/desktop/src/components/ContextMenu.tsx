@@ -160,6 +160,7 @@ export function MenuList({ items, header, onAction, minWidth = 220 }: MenuListPr
             </button>
             {hasSubmenu && openSubmenuId === item.id ? (
               <Submenu
+                anchor={submenuRefs.current.get(item.id) ?? null}
                 items={item.submenu!}
                 header={item.submenuHeader}
                 onAction={onAction}
@@ -174,16 +175,20 @@ export function MenuList({ items, header, onAction, minWidth = 220 }: MenuListPr
 }
 
 /**
- * Nested submenu with viewport-aware positioning. Measures its own rendered
- * size and shifts upward when it would otherwise overflow the bottom of the
- * window — same problem the outer ContextMenu solves for itself.
+ * Nested submenu, placed on the window beside its item (`anchor`): the
+ * list it opens from scrolls in place, and a submenu laid out inside it
+ * would be clipped by it. It measures itself and shifts up when it would
+ * run off the bottom (as the outer ContextMenu does), and opens to the
+ * item's left when there's no room on its right.
  */
 function Submenu({
+  anchor,
   items,
   header,
   onAction,
   minWidth,
 }: {
+  anchor: HTMLElement | null;
   items: MenuItem[];
   /** What the submenu's items do, above them. */
   header?: string;
@@ -191,25 +196,33 @@ function Submenu({
   minWidth: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [topOffset, setTopOffset] = useState(0);
+  const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
 
   useLayoutEffect(() => {
     const node = ref.current;
-    if (!node) return;
-    const rect = node.getBoundingClientRect();
-    setTopOffset(
-      submenuTopOffset({ top: rect.top, height: rect.height }, window.innerHeight),
-    );
-  }, [items, minWidth]);
+    if (!node || !anchor) return;
+    const at = anchor.getBoundingClientRect();
+    const own = node.getBoundingClientRect();
+    const right = at.right + SUBMENU_GAP;
+    const left =
+      right + own.width > window.innerWidth && at.left - own.width - SUBMENU_GAP >= 0
+        ? at.left - own.width - SUBMENU_GAP
+        : right;
+    const top = at.top + submenuTopOffset({ top: at.top, height: own.height }, window.innerHeight);
+    setPlace({ left, top });
+  }, [anchor, items, minWidth]);
 
   return (
     <div
       ref={ref}
+      data-testid="context-submenu"
       style={{
-        position: "absolute",
-        top: topOffset,
-        left: "100%",
-        marginLeft: 2,
+        position: "fixed",
+        left: place?.left ?? 0,
+        top: place?.top ?? 0,
+        // Measured before it's placed: hidden until then, so it never
+        // flashes in the window's corner.
+        visibility: place ? "visible" : "hidden",
         zIndex: 2,
       }}
     >
@@ -217,6 +230,9 @@ function Submenu({
     </div>
   );
 }
+
+/** Between an item and its submenu. */
+const SUBMENU_GAP = 2;
 
 /** A submenu's line of intent, atop its items: it wraps (a sentence, not
  *  a name) and stays as narrow as the menu. */
