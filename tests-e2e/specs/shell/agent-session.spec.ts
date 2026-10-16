@@ -39,6 +39,22 @@ test("an ended terminal session says so and its tab closes it", async ({ fresh }
   await expect(page.getByTestId(tabTestId)).toHaveCount(0);
 });
 
+/// A launch that fails before any process exists (Codex, which the daemon's
+/// PATH can't find) says why where "Session ended" shows, with a retry — not
+/// a blank pane.
+test("a session that can't launch shows why and offers a retry", async ({ fresh }) => {
+  const { page, daemon } = fresh;
+  await ipc(daemon, "set_agents", { agents: ["terminal", "codex"] });
+  await page.goto("/");
+  await expect(page.getByTestId("page-new-session")).toBeVisible();
+  await page.getByTestId("new-session-agent").selectOption("codex");
+  await page.getByTestId("new-session-start").click();
+  const ended = page.getByTestId("terminal-ended");
+  await expect(ended).toContainText("Couldn't start the session");
+  await expect(ended).toContainText("codex");
+  await expect(page.getByTestId("terminal-retry")).toBeVisible();
+});
+
 /// Search offers a command per enabled agent that starts it directly — the
 /// project's agents decide which: Codex once enabled, never Claude here.
 test("search starts an enabled agent's session directly", async ({ fresh }) => {

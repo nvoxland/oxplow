@@ -280,8 +280,8 @@ command's UI path, a testid — and add or extend a spec under
   `terminal` provider, `agents: [terminal]`); a spec that needs an agent
   whose process ends enables Claude, which the daemon's PATH (the person's
   own bin dirs left out) can't find on any machine, so its launch shell
-  exits at once. Codex won't do: with no program to find, its launch fails
-  before a PTY exists.
+  exits at once. (Codex, with no program to find, fails its launch before a
+  PTY exists; the pane says why with a Retry — its own spec.)
 
 A bug the suite finds is its own task, fixed with a unit test where one
 can pin it; the spec stays as the end-to-end check.

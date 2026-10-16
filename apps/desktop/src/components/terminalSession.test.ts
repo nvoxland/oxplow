@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { exitBanner, isSessionGone, isStopped, mayStartNow, readSessionMessage, reopened } from "./terminalSession.js";
+import { exitBanner, failedLaunch, isSessionGone, isStopped, mayStartNow, readSessionMessage, reopened } from "./terminalSession.js";
 
 // tsk1026: after the daemon restarted, the agent pane kept the dead session's
 // screen and swallowed keystrokes; an agent that exited said nothing.
@@ -101,4 +101,25 @@ test("the ended banner says what happened and offers the right actions", () => {
     "start-fresh",
   ]);
   expect(exitBanner({ exitCode: 0, outcome: { kind: "ended" } }, { canChoose: true }).actions).toEqual(["start-again"]);
+});
+
+// A launch that failed before any process existed (a program not installed,
+// the harness refusing) is shown where "Session ended" is, with its reason
+// and a retry — never a blank pane.
+test("a failed launch reads as an ended pane whose banner gives the reason and a retry", () => {
+  const failed = failedLaunch(new Error("`codex` isn't installed where oxplow looks"));
+  expect(failed).toEqual({
+    exitCode: null,
+    outcome: { kind: "launch_failed", message: "`codex` isn't installed where oxplow looks" },
+  });
+  expect(exitBanner(failed)).toEqual({
+    text: "Couldn't start the session: `codex` isn't installed where oxplow looks",
+    actions: ["retry"],
+  });
+  // An error that isn't an Error (an IPC rejection) still says something.
+  expect(failedLaunch("boom").outcome).toEqual({ kind: "launch_failed", message: "boom" });
+  expect(failedLaunch({ message: "refused", code: "INVALID" }).outcome).toEqual({
+    kind: "launch_failed",
+    message: "refused",
+  });
 });

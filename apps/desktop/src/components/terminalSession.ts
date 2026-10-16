@@ -6,6 +6,9 @@
 /** One message from the daemon about a pane's session. */
 export type ExitOutcome =
   | { kind: "ended" }
+  // The launch failed before any process existed (a program not installed,
+  // the harness refusing): the reason, shown where "Session ended" is.
+  | { kind: "launch_failed"; message: string }
   | { kind: "unable_to_resume"; reason: "exited_early" | "transcript_missing"; exitCode: number };
 
 export type SessionMessage =
@@ -80,6 +83,18 @@ export function isStopped(error: unknown): boolean {
   return (error as { code?: unknown } | null)?.code === "STOPPED";
 }
 
+/** The pane state for an open that failed for a reason other than a stop:
+ *  it has no running process, and the banner says why. */
+export function failedLaunch(error: unknown): { exitCode: null; outcome: ExitOutcome } {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof (error as { message?: unknown } | null)?.message === "string"
+        ? (error as { message: string }).message
+        : String(error);
+  return { exitCode: null, outcome: { kind: "launch_failed", message } };
+}
+
 /** What the ended banner says and offers. A resume that failed before a
  *  turn ran keeps the saved conversation: Retry resumes it again, Choose
  *  another (where its harness lists its saved conversations) resumes a
@@ -93,6 +108,9 @@ export function exitBanner(
   actions: Array<"start-again" | "retry" | "choose-another" | "start-fresh">;
 } {
   const o = ended.outcome;
+  if (o.kind === "launch_failed") {
+    return { text: `Couldn't start the session: ${o.message}`, actions: ["retry"] };
+  }
   if (o.kind === "unable_to_resume") {
     const why =
       o.reason === "transcript_missing"

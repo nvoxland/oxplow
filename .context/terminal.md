@@ -268,6 +268,14 @@ both maps), so attaching to its key spawns a fresh one instead of replaying
 the dead one. The pane shows **Session ended (exit N)** with **Start Again**
 and takes no keys meanwhile (they must not reach the next session).
 
+A session that never got a process shows the same banner. When the open
+itself fails for a reason other than a stop — Codex not installed where
+oxplow looks, any launch error raised before a PTY exists — the pane
+takes the ended state with a `launch_failed` outcome: **Couldn't start the
+session: <the error>** and **Retry** (`failedLaunch` in `terminalSession.ts`;
+the same reopen, so the person can fix the cause and retry without
+reopening the tab). It takes no keys, and a reconnect tries the open again.
+
 The pane opens its session through one `openSession` path — first mount,
 Start Again, `onRemoteReconnect` (the daemon came back), and a send that
 fails with "terminal session not found". Opening again returns the same id

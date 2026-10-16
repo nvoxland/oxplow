@@ -5,7 +5,7 @@ import type { TerminalEvent } from "../editor-session.js";
 import { desktopBridge, onRemoteReconnect } from "../api.js";
 import { logUi } from "../logger.js";
 import { terminalSender, type TerminalMessage, type TerminalSender } from "./terminalInput.js";
-import { type ExitOutcome, exitBanner, isSessionGone, isStopped, mayStartNow, readSessionMessage, reopened, RESTARTED_NOTICE } from "./terminalSession.js";
+import { type ExitOutcome, exitBanner, failedLaunch, isSessionGone, isStopped, mayStartNow, readSessionMessage, reopened, RESTARTED_NOTICE } from "./terminalSession.js";
 import { WORK_ITEM_DRAG_MIME } from "../dragMimes.js";
 import { shouldHandleTerminalPageKey } from "../terminal-scroll.js";
 import { subscribeAgentInput } from "../agent-input-bus.js";
@@ -202,6 +202,8 @@ export function TerminalPane({
   // The session's process exited: the pane says so and offers Start Again.
   const [ended, setEnded] = useState<{ exitCode: number | null; outcome: ExitOutcome } | null>(null);
   const endedRef = useRef(false);
+  // The last open failed before any process existed (a reconnect tries again).
+  const launchFailedRef = useRef(false);
   // What the last open did: joined a live process, started, or resumed.
   const [confirmFresh, setConfirmFresh] = useState(false);
   const [launch, setLaunch] = useState<"reattached" | "started" | "resumed" | null>(null);
@@ -542,6 +544,7 @@ export function TerminalPane({
           }
           sessionIdRef.current = sessionId;
           endedRef.current = false;
+          launchFailedRef.current = false;
           setEnded(null);
           setLaunch(launched);
           senderRef.current?.attach(sessionId);
@@ -569,6 +572,11 @@ export function TerminalPane({
             return;
           }
           logUi("error", "terminal session open failed", { paneTarget, error: String(error) });
+          // No process exists: say why where "Session ended" shows, with
+          // Retry (the same reopen), instead of leaving the pane blank.
+          endedRef.current = true;
+          launchFailedRef.current = true;
+          setEnded(failedLaunch(error));
         }).finally(() => {
           opening = false;
         });
@@ -596,7 +604,7 @@ export function TerminalPane({
       // The daemon came back: the session may be gone with it. Opening it
       // again keeps a live one and replaces a dead one.
       const offReconnect = onRemoteReconnect(() => {
-        if (!endedRef.current) openSession(true);
+        if (!endedRef.current || launchFailedRef.current) openSession(true);
       });
 
       // Debounce resizes so a drag doesn't send one per frame.
