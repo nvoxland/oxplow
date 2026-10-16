@@ -233,6 +233,6 @@ mod tests {
                 .collect()
         };
         assert_eq!(keys("opencode"), ["model"]);
-        assert_eq!(keys("claude"), ["mcpServers"]);
+        assert_eq!(keys("claude"), ["mcpServers", "model", "effort"]);
     }
 }

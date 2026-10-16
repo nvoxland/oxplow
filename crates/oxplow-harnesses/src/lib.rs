@@ -165,6 +165,22 @@ mod test_launch {
         launched
     }
 
+    /// `h` launched as [`launch_at_home`], with `config` as the project's
+    /// settings for it.
+    pub fn launch_at_home_with(h: &dyn AgentHarness, config: &serde_json::Value) -> Launched {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        run(
+            h,
+            Run {
+                home: Some(&home),
+                config: Some(config),
+                ..Run::default()
+            },
+            dir,
+        )
+    }
+
     /// `h` launched as [`launch_in`], with the person's home at
     /// `<project>/home`, forking `resume` when `fork`.
     pub fn launch_at_home(

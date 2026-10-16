@@ -14,7 +14,7 @@ pub mod app_server;
 use std::path::PathBuf;
 
 use oxplow_domain::agent::harness::{
-    AgentHarness, ConversationQuery, HarnessError, Launch, LaunchInput, LaunchSpec,
+    AgentHarness, ConversationQuery, HarnessError, HarnessSetting, Launch, LaunchInput, LaunchSpec,
     NativeConversation, RuntimeRoots,
 };
 use oxplow_domain::agent::observe::HookAnswer;
@@ -23,7 +23,7 @@ use oxplow_domain::agent::tool::ToolUse;
 use serde_json::{json, Value};
 
 use super::shared::{
-    refresh_worktree_skills, runtime, saved, toml_string, write_worktree_skills, Saved,
+    refresh_worktree_skills, runtime, saved, setting, toml_string, write_worktree_skills, Saved,
     METADATA_TIMEOUT,
 };
 use super::Named;
@@ -69,6 +69,23 @@ impl AgentHarness for Codex {
             },
             transcript_missing: false,
         })
+    }
+
+    fn settings(&self) -> Vec<HarnessSetting> {
+        vec![
+            HarnessSetting {
+                key: "model".into(),
+                title: "Model".into(),
+                hint: "The model Codex threads open with. Blank uses your own Codex default; applies to sessions started after Save.".into(),
+                placeholder: "gpt-5.2".into(),
+            },
+            HarnessSetting {
+                key: "effort".into(),
+                title: "Reasoning effort".into(),
+                hint: "The reasoning effort Codex threads open with (`minimal`, `low`, `medium`, `high` or `xhigh`; the model decides which it accepts). Blank uses your own Codex default; applies to sessions started after Save.".into(),
+                placeholder: "high".into(),
+            },
+        ]
     }
 
     async fn refresh_text(
@@ -140,6 +157,14 @@ fn open_thread(input: &LaunchInput) -> (&'static str, Value) {
     });
     if let Some(prompt) = input.system_prompt.as_deref() {
         params["developerInstructions"] = json!(prompt);
+    }
+    // The person's model and reasoning effort, when the project sets them;
+    // otherwise the thread takes Codex's own.
+    if let Some(model) = setting(&input.config, "model") {
+        params["model"] = json!(model);
+    }
+    if let Some(effort) = setting(&input.config, "effort") {
+        params["config"]["model_reasoning_effort"] = json!(effort);
     }
     match saved(input) {
         None => ("thread/start", params),
@@ -237,7 +262,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::test_launch::{harness, launch_at_home};
+    use crate::test_launch::{harness, launch_at_home, launch_at_home_with};
 
     fn opened(l: &crate::test_launch::Launched) -> (&std::path::Path, &str, &Value) {
         let LaunchSpec::CodexAppServer {
@@ -275,6 +300,37 @@ mod tests {
             "Bearer secret-bearer"
         );
         assert!(params.get("threadId").is_none());
+    }
+
+    /// The `model` and `effort` settings ride the request that opens the
+    /// thread: `model` as its own param, `effort` as the thread config's
+    /// `model_reasoning_effort`. Blank or unset passes nothing.
+    #[test]
+    fn model_and_effort_ride_the_open_request_and_blank_passes_nothing() {
+        let h = harness("oxplow:codex-cli", "codex");
+        let set = json!({ "model": "gpt-5.2", "effort": " high " });
+        let l = launch_at_home_with(h.as_ref(), &set);
+        let (_, method, params) = opened(&l);
+        assert_eq!(method, "thread/start");
+        assert_eq!(params["model"], "gpt-5.2");
+        assert_eq!(params["config"]["model_reasoning_effort"], "high");
+        assert!(params["config"]["mcp_servers"]["oxplow"].is_object());
+        for config in [json!({}), json!({ "model": "", "effort": "  " })] {
+            let l = launch_at_home_with(h.as_ref(), &config);
+            let (_, _, params) = opened(&l);
+            assert!(params.get("model").is_none(), "{params}");
+            assert!(
+                params["config"].get("model_reasoning_effort").is_none(),
+                "{params}"
+            );
+        }
+    }
+
+    #[test]
+    fn it_declares_its_settings() {
+        let h = harness("oxplow:codex-cli", "codex");
+        let keys: Vec<String> = h.settings().into_iter().map(|s| s.key).collect();
+        assert_eq!(keys, ["model", "effort"]);
     }
 
     /// A saved conversation is resumed (its metadata alone: nothing

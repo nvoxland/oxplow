@@ -483,7 +483,9 @@ enabled and the first declared is the default. `set_agents` and
 `oxplow.agent_session.open` check keys against the registry. A harness's
 own settings are `agentConfig: { <key>: { … } }`, what its `launch`
 reads; it declares the ones a person sets (`AgentHarness::settings`:
-opencode's `model`, Claude's `mcpServers`), and Settings → Agents renders a field for each,
+opencode's `model`, Claude's `mcpServers` / `model` / `effort`, Codex's
+`model` / `effort`; a blank value passes nothing, and a value the harness
+refuses is its to refuse), and Settings → Agents renders a field for each,
 saved by `set_agent_setting`, which refuses an undeclared one. The UI
 reads the harnesses through `list_agent_harnesses` (`useAgentHarnesses`,
 `agentKinds.ts`). Each session keeps its own harness, so Claude and Codex
@@ -508,7 +510,10 @@ one no longer offered is removed, a person's own stay.
   `mcp-config.<ses>.json` holding the session's bearer (owner-only; its
   MCP config can't interpolate env). It runs `claude --plugin-dir <abs>
   --append-system-prompt <text> --mcp-config <file>
-  [--strict-mcp-config] [--resume <id>]`: oxplow's server rides beside the
+  [--strict-mcp-config] [--model <m>] [--effort <e>] [--resume <id>]`:
+  `--model` / `--effort` come from `agentConfig.claude.model` / `.effort`
+  (flags only; the person's `~/.claude/settings.json` is never written).
+  Oxplow's server rides beside the
   person's own (local, project, user, plugin servers, claude.ai
   connectors), and `--strict-mcp-config` is added only by the
   `agentConfig.claude.mcpServers: strict` setting (`all` is the default;
@@ -525,7 +530,10 @@ one no longer offered is removed, a person's own stay.
 - **Codex** keeps nothing under `.oxplow/runtime/`: its launch is the
   request that opens the session's thread on Codex's shared daemon, its
   MCP server and system prompt in the thread's own config, and the TUI
-  that attaches to it ("Codex: its TUI on a thread oxplow observes"). Its skills (and
+  that attaches to it ("Codex: its TUI on a thread oxplow observes").
+  `agentConfig.codex.model` is the open request's `model` param and
+  `.effort` its `config.model_reasoning_effort` (never the person's
+  `~/.codex/config.toml`). Its skills (and
   commands, as skills) go to the worktree's `.agents/skills/`
   (`shared::write_worktree_skills`).
 - **opencode** writes `.oxplow/runtime/opencode-plugin/`
@@ -1197,7 +1205,7 @@ available from outside.
 | Answering from oxplow | — (no interface into an interactive session; a cross-session message can't consent) | — (a request goes to the turn's client) | *HTTP `permission` / `question` reply* — left native |
 | The plan | *`ExitPlanMode` `tool_input.plan`, `planFilePath`* (today only the raw tool input, `event:<id>#input`) | *the `plan` item's text*; `turn/plan/updated` steps reach only the chat library | — (`plan_exit` carries no text) |
 | Model / effort | transcript `message.model` → `v_token_usage.model`; *`effort.level` on tool events and Stop, `SessionStart.model`, `PostModelSwitch`* | *`Thread.model` / `reasoningEffort`, `thread/settings/updated`* | *the assistant message's `modelID`, `variant`* |
-| Set at launch | *`--model`, `--effort`* | *`thread/start` `model`; effort as `config.model_reasoning_effort`* | `agentConfig.opencode.model` → `-m` |
+| Set at launch | `agentConfig.claude.model` → `--model`, `.effort` → `--effort` | `agentConfig.codex.model` → the open request's `model`, `.effort` → its `config.model_reasoning_effort` | `agentConfig.opencode.model` → `-m` |
 | Context fill, compaction | *the transcript tail's last usage; `PostCompact` `compact_summary`*; `PreCompact` resets the context baselines | *`thread/tokenUsage/updated` `last.totalTokens` / `modelContextWindow`; the `contextCompaction` item* | *the message's `tokens`; `session.compacted`* |
 | Tokens | OTLP and the transcript tail | `turn/completed` deltas | — (the bridge sends none) |
 | Skills, commands | shipped (`--plugin-dir`; skills reload live) | shipped (`.agents/skills`) | shipped (plugin dir, inline `command`) |

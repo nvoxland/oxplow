@@ -41,8 +41,8 @@ use oxplow_domain::agent::tool::{Subagent, ToolUse};
 use oxplow_domain::events::schema::TokenKind;
 
 use super::shared::{
-    claude_shaped_tool_use, in_shell, program_and_guard, resume_or_fresh, runtime, shell_escape,
-    write_commands, write_json, write_skills, Resume,
+    claude_shaped_tool_use, in_shell, program_and_guard, resume_or_fresh, runtime, setting,
+    shell_escape, write_commands, write_json, write_skills, Resume,
 };
 use super::Named;
 
@@ -107,6 +107,8 @@ impl AgentHarness for Claude {
             }
         };
         let strict_mcp = strict_mcp(&input.config)?;
+        let model = setting(&input.config, "model");
+        let effort = setting(&input.config, "effort");
         let program = input
             .resolve_program("claude")
             .or_else(|| input.home.as_deref().and_then(local_install));
@@ -120,6 +122,8 @@ impl AgentHarness for Claude {
                     system_prompt: input.system_prompt.as_deref(),
                     mcp_config: Some(&mcp_config.to_string_lossy()),
                     strict_mcp,
+                    model,
+                    effort,
                 }),
                 env,
             },
@@ -128,12 +132,26 @@ impl AgentHarness for Claude {
     }
 
     fn settings(&self) -> Vec<HarnessSetting> {
-        vec![HarnessSetting {
-            key: "mcpServers".into(),
-            title: "MCP servers".into(),
-            hint: "`all` (the default) runs oxplow's MCP server beside your own (local, project, user and plugin servers, claude.ai connectors); `strict` runs only oxplow's. Applies to sessions started after Save.".into(),
-            placeholder: "all".into(),
-        }]
+        vec![
+            HarnessSetting {
+                key: "mcpServers".into(),
+                title: "MCP servers".into(),
+                hint: "`all` (the default) runs oxplow's MCP server beside your own (local, project, user and plugin servers, claude.ai connectors); `strict` runs only oxplow's. Applies to sessions started after Save.".into(),
+                placeholder: "all".into(),
+            },
+            HarnessSetting {
+                key: "model".into(),
+                title: "Model".into(),
+                hint: "The model Claude Code launches with (`--model`: an alias such as `opus`, or a full name). Blank uses your own Claude Code default; applies to sessions started after Save.".into(),
+                placeholder: "opus".into(),
+            },
+            HarnessSetting {
+                key: "effort".into(),
+                title: "Effort".into(),
+                hint: "The effort level Claude Code launches with (`--effort`: `low`, `medium`, `high`, `xhigh` or `max`). Blank uses your own Claude Code default; applies to sessions started after Save.".into(),
+                placeholder: "high".into(),
+            },
+        ]
     }
 
     fn env_markers(&self) -> Vec<String> {
@@ -496,6 +514,10 @@ struct Command<'a> {
     mcp_config: Option<&'a str>,
     /// Only `mcp_config`'s servers (`--strict-mcp-config`).
     strict_mcp: bool,
+    /// `--model`, when the project sets one.
+    model: Option<&'a str>,
+    /// `--effort`, when the project sets one.
+    effort: Option<&'a str>,
 }
 
 /// The `mcpServers` setting: `all` (also blank or unset) or `strict`.
@@ -542,8 +564,17 @@ fn command(c: Command<'_>) -> String {
             format!(" --mcp-config {}{strict}", shell_escape(p))
         })
         .unwrap_or_default();
+    let flag = |name: &str, value: Option<&str>| {
+        value
+            .map(|v| format!(" --{name} {}", shell_escape(v)))
+            .unwrap_or_default()
+    };
     let (prog, guard) = program_and_guard(c.program, "claude");
-    let base = format!("{prog}{plugin_arg}{prompt_arg}{mcp_arg}");
+    let base = format!(
+        "{prog}{plugin_arg}{prompt_arg}{mcp_arg}{}{}",
+        flag("model", c.model),
+        flag("effort", c.effort)
+    );
     in_shell(c.cwd, &guard, &resume_or_fresh(&base, c.resume))
 }
 
@@ -930,12 +961,38 @@ mod tests {
         );
     }
 
-    /// It declares the setting, so Settings shows it with no special case.
+    /// It declares its settings, so Settings shows them with no special case.
     #[test]
-    fn it_declares_the_mcp_servers_setting() {
+    fn it_declares_its_settings() {
         let h = harness("oxplow:claude-code", "claude");
         let keys: Vec<String> = h.settings().into_iter().map(|s| s.key).collect();
-        assert_eq!(keys, ["mcpServers"]);
+        assert_eq!(keys, ["mcpServers", "model", "effort"]);
+    }
+
+    /// The `model` and `effort` settings ride `--model` / `--effort`; blank
+    /// or unset passes nothing, so the person's own Claude Code choice
+    /// stands.
+    #[test]
+    fn model_and_effort_ride_their_flags_and_blank_passes_nothing() {
+        let h = harness("oxplow:claude-code", "claude");
+        let cmd_with = |config: serde_json::Value| {
+            pty(&launch_in(h.as_ref(), None, None, &config).launch).to_string()
+        };
+        let cmd = cmd_with(serde_json::json!({ "model": "opus", "effort": " high " }));
+        assert!(
+            cmd.contains(r" --model '\''opus'\''") && cmd.contains(r" --effort '\''high'\''"),
+            "{cmd}"
+        );
+        for config in [
+            serde_json::json!({}),
+            serde_json::json!({ "model": "", "effort": "  " }),
+        ] {
+            let cmd = cmd_with(config);
+            assert!(
+                !cmd.contains("--model") && !cmd.contains("--effort"),
+                "{cmd}"
+            );
+        }
     }
 
     /// A fork resumes a copy of the saved conversation under a new id.
@@ -1094,6 +1151,8 @@ mod tests {
             system_prompt: None,
             mcp_config: None,
             strict_mcp: false,
+            model: None,
+            effort: None,
         })
     }
 

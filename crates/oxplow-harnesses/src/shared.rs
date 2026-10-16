@@ -54,6 +54,16 @@ pub struct Saved<'a> {
     pub fork: bool,
 }
 
+/// A text setting (`agentConfig.<harness>.<key>`) the person filled in:
+/// trimmed, and `None` when unset or blank.
+pub fn setting<'a>(config: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    config
+        .get(key)
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+}
+
 /// What `input` continues, if anything.
 pub fn saved(input: &oxplow_domain::agent::harness::LaunchInput) -> Option<Saved<'_>> {
     input
