@@ -1073,44 +1073,50 @@ mod tests {
         let watcher = FsWatcher::watch_workspace(root, filter).unwrap();
         let mut rx = watcher.subscribe();
         let canon = root.canonicalize().unwrap();
-        async fn heard(
+        // Write `rel` again and again until its event is heard (`want`), or
+        // for good if it never is: an edit applies once the watcher has
+        // read it, and one write of the ignore file makes several events,
+        // so a single write-and-wait can run ahead of the rules it tests.
+        async fn settles(
             rx: &mut broadcast::Receiver<WatchEvent>,
+            root: &Path,
             canon: &Path,
             rel: &str,
-            ms: u64,
+            heard: bool,
         ) -> bool {
             let want = canon.join(rel);
-            seen_within(rx, &want, Duration::from_millis(ms))
-                .await
-                .contains(&want)
+            for n in 0..40 {
+                std::fs::write(root.join(rel), format!("{n}")).unwrap();
+                let got = seen_within(rx, &want, Duration::from_millis(1_000))
+                    .await
+                    .contains(&want);
+                if got == heard {
+                    return true;
+                }
+            }
+            false
         }
-        std::fs::write(root.join("src/a.txt"), b"1").unwrap();
         assert!(
-            heard(&mut rx, &canon, "src/a.txt", 20_000).await,
+            settles(&mut rx, root, &canon, "src/a.txt", true).await,
             "kept at first"
         );
 
         // Start ignoring a.txt.
         std::fs::write(root.join(".gitignore"), "built/\na.txt\n").unwrap();
-        assert!(heard(&mut rx, &canon, ".gitignore", 20_000).await);
-        std::fs::write(root.join("src/a.txt"), b"2").unwrap();
         assert!(
-            !heard(&mut rx, &canon, "src/a.txt", 1_500).await,
+            settles(&mut rx, root, &canon, "src/a.txt", false).await,
             "ignored now"
         );
 
         // Stop ignoring both: the file is heard again, and so is a write in
         // the directory that was never watched.
         std::fs::write(root.join(".gitignore"), "").unwrap();
-        assert!(heard(&mut rx, &canon, ".gitignore", 20_000).await);
-        std::fs::write(root.join("src/a.txt"), b"3").unwrap();
         assert!(
-            heard(&mut rx, &canon, "src/a.txt", 20_000).await,
+            settles(&mut rx, root, &canon, "src/a.txt", true).await,
             "kept again"
         );
-        std::fs::write(root.join("built/out.js"), b"x").unwrap();
         assert!(
-            heard(&mut rx, &canon, "built/out.js", 20_000).await,
+            settles(&mut rx, root, &canon, "built/out.js", true).await,
             "newly watched"
         );
     }

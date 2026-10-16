@@ -1465,6 +1465,12 @@ mod tests {
         assert!(hits[0].text.contains("Beta"), "{}", hits[0].text);
         assert!(hits[0].text.contains("src/shared.rs"), "{}", hits[0].text);
         assert!(hits[0].text.contains("v_thread_note"), "{}", hits[0].text);
+        assert!(hits[0].text.contains("v_handoff"), "{}", hits[0].text);
+        assert!(
+            hits[0].text.contains("oxplow.handoff.send"),
+            "{}",
+            hits[0].text
+        );
         assert!(
             bundled_hits(&f, SHARED_AGENT, AdvisoryOn::TurnEnd, Some(f.effort))
                 .await
