@@ -1178,6 +1178,56 @@ moves the item it picks to `in_progress`, so the effort links to it.
 Claude Code's `TaskCreate` is a within-turn planner and never mirrors
 oxplow's items.
 
+### Native features: observed, set, left native
+
+Each harness has interactive features of its own. oxplow **observes and
+shows** what it can hear, **sets at launch** what a flag or open request
+takes, and **leaves to the harness** the rest — never answering for the
+person: a prompt or question is answered in the harness's own TUI, which
+is in the tab already ("Key invariant"). The audit behind this table was
+made against Claude Code 2.1.301, Codex 0.163 (daemon) / 0.162.1 (CLI)
+and opencode 1.17.4, from their documentation and protocol schema;
+*italic* is available from the harness but not used yet, — is not
+available from outside.
+
+| | Claude Code | Codex | opencode |
+|---|---|---|---|
+| Waiting on a permission | `Notification` `permission_prompt` → AwaitingUser; *`PermissionRequest` hook (tool + input)* | *`thread/status/changed` `activeFlags` `waitingOnApproval`; the approval request's params (the observer drops the request)* | *SSE `permission.asked` / `replied`* |
+| Asked a question | `AskUserQuestion` PreToolUse → AwaitingUser with its question; a `?`-ending Stop | a `?`-ending Stop; *`waitingOnUserInput`, `requestUserInput.questions`* | a `?`-ending Stop; *`question.asked`* |
+| Answering from oxplow | — (no interface into an interactive session; a cross-session message can't consent) | — (a request goes to the turn's client) | *HTTP `permission` / `question` reply* — left native |
+| The plan | *`ExitPlanMode` `tool_input.plan`, `planFilePath`* (today only the raw tool input, `event:<id>#input`) | *the `plan` item's text*; `turn/plan/updated` steps reach only the chat library | — (`plan_exit` carries no text) |
+| Model / effort | transcript `message.model` → `v_token_usage.model`; *`effort.level` on tool events and Stop, `SessionStart.model`, `PostModelSwitch`* | *`Thread.model` / `reasoningEffort`, `thread/settings/updated`* | *the assistant message's `modelID`, `variant`* |
+| Set at launch | *`--model`, `--effort`* | *`thread/start` `model`; effort as `config.model_reasoning_effort`* | `agentConfig.opencode.model` → `-m` |
+| Context fill, compaction | *the transcript tail's last usage; `PostCompact` `compact_summary`*; `PreCompact` resets the context baselines | *`thread/tokenUsage/updated` `last.totalTokens` / `modelContextWindow`; the `contextCompaction` item* | *the message's `tokens`; `session.compacted`* |
+| Tokens | OTLP and the transcript tail | `turn/completed` deltas | — (the bridge sends none) |
+| Skills, commands | shipped (`--plugin-dir`; skills reload live) | shipped (`.agents/skills`) | shipped (plugin dir, inline `command`) |
+| Native worktrees | `--worktree`, subagent `isolation: worktree` → `<repo>/.claude/worktrees/<name>`; hook `cwd` follows | none (`cwd`, `runtimeWorkspaceRoots`) | none |
+| Rewind | `/rewind` (files and/or conversation), no hook | `thread/revert` trims history only, `thread/reverted` | `/undo` (files and messages) |
+
+**Left native, and why.**
+
+- **Answering a prompt or question.** Claude Code has no interface for
+  it in an interactive session; Codex sends a request to the client
+  driving the turn, the TUI; opencode could take an HTTP reply, but one
+  harness doesn't justify a prompt UI when the TUI is in the tab. A
+  later embedded chat (the chat library) would take a person's answer as
+  UI input, not oxplow's.
+- **Skills and commands.** All three already get oxplow's; nothing to
+  add. Claude Code reloads skills live; a command change needs its
+  `/reload-plugins`.
+- **Native worktrees.** Claude Code's `.claude/worktrees/<name>` sits in
+  the checkout, so under isolation it is the stream's own tree: oxplow
+  neither adopts nor refuses it, and an edit there is claimed like any
+  edit in the stream's worktree. A person can adopt it as a stream like
+  any git worktree (`oxplow.stream.adopt_worktree`).
+- **Rewind.** Three different things: `conversation_fork` copies a
+  conversation (files untouched); `oxplow.snapshot.restore_file`
+  restores one file from oxplow's snapshots; a harness's rewind restores
+  files with no signal oxplow hears (Codex's `thread/revert` restores no
+  files at all). The turn-end snapshot and `thread.checkpoint` record
+  what a rewind leaves behind.
+- **Cost in dollars.** Never recorded ([metrics.md](./metrics.md)).
+
 ### Validated against, and what pins each scenario
 
 The session integration is checked against these versions: **Codex CLI
