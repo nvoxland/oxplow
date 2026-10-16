@@ -2,22 +2,18 @@
 //!
 //! Agent CLIs export token usage as OpenTelemetry to oxplow's control-plane
 //! OTLP receiver. This module decodes the protobuf body into neutral
-//! [`OtlpRecord`]s — metric data points and log records — and asks the
-//! registered harnesses what token counts they hold
-//! (`AgentHarness::token_readings`): each harness knows its own metric and
-//! event names (Claude's token counter, Codex's `response.completed` log
-//! event). The readings are the grain `agent.tokens.reported` carries
+//! [`OtlpRecord`]s — metric data points — and asks the registered harnesses
+//! what token counts they hold (`AgentHarness::token_readings`): each
+//! harness knows its own metric names (Claude's token counter). The readings are the grain `agent.tokens.reported` carries
 //! (`otlp_ingest.rs`), which the `token_usage.otlp` consumer writes as
 //! facts. Every registered harness is asked, since the names are each
 //! harness's own: reading the session's harness first would cost a database
-//! read for every export, most of which (Codex's log events) carry no
-//! counts. Each harness is asked once per export, with all its records — a
+//! read for every export. Each harness is asked once per export, with all its records — a
 //! provider harness answers in one call.
 //!
 //! No IO of its own → fully unit-testable. [`summarize_metrics_request`] is the
-//! opt-in wire-format diagnostic (tsk25), which also decodes logs.
+//! opt-in wire-format diagnostic (tsk25).
 
-use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::common::v1::{any_value, KeyValue};
 use opentelemetry_proto::tonic::metrics::v1::{metric, number_data_point, Gauge, Sum};
@@ -37,20 +33,13 @@ pub struct TokenExport {
     pub window_end: Option<oxplow_domain::Timestamp>,
 }
 
-/// Decode an export body: as metrics (Claude), else as logs (Codex points
-/// its one endpoint here, and its token counts ride log events), and read
-/// its token counts through `harnesses`. `None` when it carries none —
-/// most Codex log events don't.
+/// Decode an export body as metrics and read its token counts through
+/// `harnesses`. `None` when it carries none.
 pub async fn decode_token_export(body: &[u8], harnesses: &HarnessRegistry) -> Option<TokenExport> {
-    let mut counts = match decode_metrics_request(body) {
+    let counts = match decode_metrics_request(body) {
         Ok(req) => read(harnesses, &metric_records(&req)).await,
         Err(_) => Vec::new(),
     };
-    if counts.is_empty() {
-        if let Ok(req) = decode_logs_request(body) {
-            counts = read(harnesses, &log_records(&req)).await;
-        }
-    }
     if counts.is_empty() {
         return None;
     }
@@ -93,14 +82,7 @@ pub fn decode_metrics_request(
     ExportMetricsServiceRequest::decode(body)
 }
 
-/// Decode an OTLP/HTTP protobuf logs export body. Codex points its single OTLP
-/// endpoint at us and sends its log events (which carry its token counts) here.
-pub fn decode_logs_request(body: &[u8]) -> Result<ExportLogsServiceRequest, prost::DecodeError> {
-    ExportLogsServiceRequest::decode(body)
-}
-
-/// Every data point of a metrics export: a counter's or gauge's value, a
-/// histogram's sum.
+/// Every data point of a metrics export: a counter's or gauge's value.
 fn metric_records(req: &ExportMetricsServiceRequest) -> Vec<OtlpRecord> {
     let mut out = Vec::new();
     for rm in &req.resource_metrics {
@@ -133,44 +115,8 @@ fn metric_records(req: &ExportMetricsServiceRequest) -> Vec<OtlpRecord> {
                         );
                     }
                 }
-                Some(metric::Data::Histogram(hist)) => {
-                    for dp in &hist.data_points {
-                        point(
-                            dp.sum.unwrap_or(0.0) as i64,
-                            &dp.attributes,
-                            dp.time_unix_nano,
-                            dp.start_time_unix_nano,
-                        );
-                    }
-                }
                 _ => {}
             }
-        }
-    }
-    out
-}
-
-/// Every log record of a logs export, timed when it happened, else when it
-/// was observed.
-fn log_records(req: &ExportLogsServiceRequest) -> Vec<OtlpRecord> {
-    let mut out = Vec::new();
-    for rl in &req.resource_logs {
-        let resource = attrs(
-            rl.resource
-                .as_ref()
-                .map(|r| r.attributes.as_slice())
-                .unwrap_or(&[]),
-        );
-        for lr in rl.scope_logs.iter().flat_map(|sl| &sl.log_records) {
-            out.push(OtlpRecord::Log {
-                attributes: attrs(&lr.attributes),
-                resource: resource.clone(),
-                time_unix_nano: if lr.time_unix_nano > 0 {
-                    lr.time_unix_nano
-                } else {
-                    lr.observed_time_unix_nano
-                },
-            });
         }
     }
     out
@@ -206,16 +152,13 @@ fn number_value(v: &Option<number_data_point::Value>) -> i64 {
 
 /// Diagnostic (tsk25): a human-readable dump of an OTLP metrics export — the
 /// resource attributes plus every metric's name, data type, and each data
-/// point's attributes + value/sum. Used behind the `OXPLOW_OTLP_DEBUG` flag to
-/// discover an agent's real wire format (e.g. Codex's token metric
-/// name/attributes) from a live run, without guessing.
+/// point's attributes + value. Used behind the `OXPLOW_OTLP_DEBUG` flag to
+/// discover an agent's real wire format (its token metric name and
+/// attributes) from a live run, without guessing.
 pub fn summarize_metrics_request(body: &[u8]) -> String {
     let req = match decode_metrics_request(body) {
         Ok(r) => r,
-        // Codex points its single OTLP endpoint here and sends its LOG events
-        // too (its token counts may ride the `codex.response.completed` event),
-        // so on a metrics-decode miss fall back to dumping the logs payload.
-        Err(metrics_err) => return summarize_logs_request(body, &metrics_err),
+        Err(err) => return format!("<undecodable as metrics ({err}); {} bytes>", body.len()),
     };
     let mut lines = Vec::new();
     for rm in &req.resource_metrics {
@@ -234,17 +177,6 @@ pub fn summarize_metrics_request(body: &[u8]) -> String {
                     Some(metric::Data::Gauge(x)) => {
                         summarize_number_points(&mut lines, &m.name, "gauge", &x.data_points)
                     }
-                    Some(metric::Data::Histogram(x)) => {
-                        for dp in &x.data_points {
-                            lines.push(format!(
-                                "metric {} [histogram] {{{}}} sum={:?} count={}",
-                                m.name,
-                                fmt_attrs(&dp.attributes),
-                                dp.sum,
-                                dp.count
-                            ));
-                        }
-                    }
                     Some(_) => lines.push(format!("metric {} [other data type]", m.name)),
                     None => lines.push(format!("metric {} [no data]", m.name)),
                 }
@@ -256,56 +188,6 @@ pub fn summarize_metrics_request(body: &[u8]) -> String {
     } else {
         lines.join("\n")
     }
-}
-
-/// Fallback dump when a body isn't OTLP MetricsData: try OTLP LogsData and list
-/// each log record's event name + attributes + body (tsk26). Codex's token
-/// counts are suspected to ride the `codex.response.completed` log event.
-fn summarize_logs_request(body: &[u8], metrics_err: &prost::DecodeError) -> String {
-    use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
-    let req = match ExportLogsServiceRequest::decode(body) {
-        Ok(r) => r,
-        Err(logs_err) => {
-            return format!(
-                "<undecodable as metrics ({metrics_err}) or logs ({logs_err}); {} bytes>",
-                body.len()
-            )
-        }
-    };
-    let mut lines = vec!["[OTLP LOGS payload — not metrics]".to_string()];
-    for rl in &req.resource_logs {
-        if let Some(res) = &rl.resource {
-            let a = fmt_attrs(&res.attributes);
-            if !a.is_empty() {
-                lines.push(format!("resource: {a}"));
-            }
-        }
-        for sl in &rl.scope_logs {
-            for lr in &sl.log_records {
-                let name = if !lr.event_name.is_empty() {
-                    lr.event_name.as_str()
-                } else if !lr.severity_text.is_empty() {
-                    lr.severity_text.as_str()
-                } else {
-                    "<log>"
-                };
-                let body_str = lr
-                    .body
-                    .as_ref()
-                    .and_then(|b| b.value.as_ref())
-                    .map(fmt_attr_value)
-                    .unwrap_or_default();
-                lines.push(format!(
-                    "log {name} {{{}}} body={body_str}",
-                    fmt_attrs(&lr.attributes)
-                ));
-            }
-        }
-    }
-    if lines.len() == 1 {
-        lines.push("<no log records>".to_string());
-    }
-    lines.join("\n")
 }
 
 fn summarize_number_points(
@@ -480,13 +362,12 @@ pub(crate) mod tests {
         .encode_to_vec()
     }
     use opentelemetry_proto::tonic::common::v1::AnyValue;
-    use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
     use opentelemetry_proto::tonic::metrics::v1::{
         Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics,
     };
     use oxplow_domain::events::schema::TokenKind;
 
-    /// Claude and Codex registered, as foundation declares them.
+    /// Claude registered, as foundation declares it.
     fn harnesses() -> HarnessRegistry {
         let r = HarnessRegistry::new(std::sync::Arc::new(|| "claude".into()));
         for (entry, id) in [
@@ -629,19 +510,6 @@ pub(crate) mod tests {
         }
     }
 
-    fn logs(records: Vec<LogRecord>) -> Vec<u8> {
-        ExportLogsServiceRequest {
-            resource_logs: vec![ResourceLogs {
-                scope_logs: vec![ScopeLogs {
-                    log_records: records,
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }],
-        }
-        .encode_to_vec()
-    }
-
     /// tsk860: an export says when it was measured — the latest of its
     /// points' times — which is what places it in a turn; one that doesn't
     /// say has no window end, and a body with no token counts is none. It
@@ -707,7 +575,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// A histogram's sum is its value.
     /// No harness registered reads no counts.
     #[test]
     fn with_no_harness_an_export_reads_as_none() {
@@ -728,20 +595,5 @@ pub(crate) mod tests {
         assert!(s.contains("value=100"));
         // A garbage body degrades gracefully rather than panicking.
         assert!(summarize_metrics_request(b"not protobuf").contains("undecodable"));
-    }
-
-    #[test]
-    fn logs_payload_falls_back_to_a_logs_dump() {
-        // tsk26: a body that isn't MetricsData is retried as LogsData so the
-        // dump reveals Codex's log events (where its token counts may live).
-        let body = logs(vec![LogRecord {
-            event_name: "codex.response.completed".into(),
-            attributes: vec![kv("input_tokens", "100"), kv("output_tokens", "20")],
-            ..Default::default()
-        }]);
-        let s = summarize_metrics_request(&body);
-        assert!(s.contains("[OTLP LOGS payload"), "{s}");
-        assert!(s.contains("codex.response.completed"));
-        assert!(s.contains("input_tokens=100"));
     }
 }

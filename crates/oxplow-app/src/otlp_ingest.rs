@@ -1,6 +1,6 @@
 //! An agent's token telemetry in (P10.M2, `.context/agent-model.md` →
-//! "Token usage"): the control plane's OTLP receiver (`POST /v1/metrics`,
-//! `/v1/logs`) hands an export here. It is decoded and logged as one
+//! "Token usage"): the control plane's OTLP receiver (`POST /v1/metrics`)
+//! hands an export here. It is decoded and logged as one
 //! `agent.tokens.reported` event in one transaction — anchored to the turn
 //! the export measured (exports arrive after it; the one its window
 //! overlaps most) and the effort open during that turn — and the `token_usage.otlp` consumer turns the event into

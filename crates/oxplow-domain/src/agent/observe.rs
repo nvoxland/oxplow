@@ -176,12 +176,12 @@ impl Attrs {
 
 /// One record of an OTLP export, as decoded by core. On the wire,
 /// `{ "kind": "point", "metric", "value", "attributes", "resource",
-/// "time_unix_nano", "start_time_unix_nano" }` or `{ "kind": "log", … }`.
+/// "time_unix_nano", "start_time_unix_nano" }`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum OtlpRecord {
-    /// A metric data point: a counter's or gauge's value, or a
-    /// histogram's sum, truncated to an integer.
+    /// A metric data point: a counter's or gauge's value, truncated to an
+    /// integer.
     Point {
         metric: String,
         value: i64,
@@ -194,34 +194,17 @@ pub enum OtlpRecord {
         #[serde(default)]
         start_time_unix_nano: u64,
     },
-    /// A log record; its time is when it happened, else when it was
-    /// observed.
-    Log {
-        #[serde(default)]
-        attributes: Attrs,
-        #[serde(default)]
-        resource: Attrs,
-        #[serde(default)]
-        time_unix_nano: u64,
-    },
 }
 
 impl OtlpRecord {
     /// The model it names: the record's `model`, else the resource's,
     /// else `"unknown"`.
     pub fn model(&self) -> String {
-        let (attributes, resource) = match self {
-            OtlpRecord::Point {
-                attributes,
-                resource,
-                ..
-            }
-            | OtlpRecord::Log {
-                attributes,
-                resource,
-                ..
-            } => (attributes, resource),
-        };
+        let OtlpRecord::Point {
+            attributes,
+            resource,
+            ..
+        } = self;
         attributes
             .str("model")
             .or_else(|| resource.str("model"))
@@ -240,7 +223,7 @@ pub struct TokenReading {
     #[serde(default)]
     pub at_unix_nano: u64,
     /// Where its window starts: a delta point's start (the previous
-    /// collection), a log record's own time (0: it didn't say).
+    /// collection) (0: it didn't say).
     #[serde(default)]
     pub from_unix_nano: u64,
 }
@@ -262,18 +245,16 @@ mod tests {
         );
         assert_eq!(a.str("s"), Some("x"));
         let resource = Attrs(vec![("model".into(), AttrValue::Str("m".into()))]);
-        let log = OtlpRecord::Log {
-            attributes: a,
+        let point = |attributes: Attrs, resource: Attrs| OtlpRecord::Point {
+            metric: "m".into(),
+            value: 1,
+            attributes,
             resource,
             time_unix_nano: 0,
+            start_time_unix_nano: 0,
         };
-        assert_eq!(log.model(), "m");
-        let bare = OtlpRecord::Log {
-            attributes: Attrs::default(),
-            resource: Attrs::default(),
-            time_unix_nano: 0,
-        };
-        assert_eq!(bare.model(), "unknown");
+        assert_eq!(point(a, resource).model(), "m");
+        assert_eq!(point(Attrs::default(), Attrs::default()).model(), "unknown");
     }
 
     /// What a provider harness reads and answers: a record's attributes as

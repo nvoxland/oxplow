@@ -6,7 +6,7 @@
 //!
 //! - `POST /hook/:event` — receives hook envelopes from the plugin's
 //!   HTTP hooks, drains into [`oxplow_app::HookIngestService`].
-//! - `POST /v1/metrics`, `/v1/logs` — the agents' OTLP exports.
+//! - `POST /v1/metrics` — the agents' OTLP exports.
 //! - `POST /mcp` (and friends) — the rmcp Streamable HTTP transport
 //!   wrapping [`oxplow_mcp::OxplowMcp`].
 //!
@@ -73,8 +73,7 @@ impl ControlPlane {
     /// Base URL for the OTLP metrics receiver (epic tsk22). This is the
     /// **base** the agent's OTEL exporter is pointed at via
     /// `OTEL_EXPORTER_OTLP_ENDPOINT`; the SDK appends the signal path
-    /// `/v1/metrics` (which [`handle_otlp_metrics`] serves). Codex, whose
-    /// config wants the full signal URL, appends `/v1/metrics` itself.
+    /// `/v1/metrics` (which [`handle_otlp_metrics`] serves).
     pub fn otlp_base_url(&self) -> String {
         format!("http://{}", self.bind_addr)
     }
@@ -135,7 +134,6 @@ pub async fn spawn(services: Arc<Services>) -> Result<ControlPlane, ControlPlane
         // attributed by the bearer like a hook. Both signal paths hit one
         // handler; the ingest path decodes metrics-or-logs.
         .route("/v1/metrics", post(handle_otlp_metrics))
-        .route("/v1/logs", post(handle_otlp_metrics))
         .layer(axum::middleware::from_fn_with_state(
             ctx.clone(),
             auth_middleware,
@@ -195,8 +193,8 @@ async fn handle_dev_ping() -> Response {
         .into_response()
 }
 
-/// OTLP/HTTP metrics receiver (epic tsk22). Agent CLIs (Claude Code, Codex)
-/// export token usage here, attributed to the session whose bearer the
+/// OTLP/HTTP metrics receiver (epic tsk22). Claude Code exports token usage
+/// here, attributed to the session whose bearer the
 /// exporter carries. The body is logged as one `agent.tokens.reported`
 /// event (`oxplow_app::otlp_ingest`); the `token_usage.otlp` consumer
 /// counts it.

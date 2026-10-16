@@ -1156,7 +1156,7 @@ Stop-hook transcript parse overcounted ~2–3× (Claude writes one JSONL line pe
 content block and repeats the message's cumulative `usage` on each; the parser
 summed every assistant line) and was Claude-only + format-fragile.
 
-- **Receiver:** the control plane hosts `POST /v1/metrics` and `/v1/logs`
+- **Receiver:** the control plane hosts `POST /v1/metrics`
   (`oxplow-control-plane/src/lib.rs::handle_otlp_metrics`), behind the same
   session-bearer auth as `/hook`: the export comes from the session its
   bearer stands for (and that session's thread and stream), and the raw
@@ -1188,11 +1188,11 @@ summed every assistant line) and was Claude-only + format-fragile.
   `otel-tokens:<event id>`, so a redelivery counts nothing twice.
 - **Decode + map:** `oxplow-app/src/otlp_tokens.rs` decodes the OTLP protobuf
   (`opentelemetry-proto` crate) into neutral `OtlpRecord`s (metric data
-  points, log records; `oxplow_domain::agent::observe`) and asks every
+  points; `oxplow_domain::agent::observe`) and asks every
   registered harness for its `TokenReading`s (`AgentHarness::token_readings`,
-  in `crates/oxplow-harnesses`): the metric and event names are each
+  in `crates/oxplow-harnesses`): the metric names are each
   harness's own, and asking only the session's harness would cost a database
-  read per export, most of which carry no counts. Pure + unit-tested:
+  read per export. Pure + unit-tested:
   - **Claude** — `claude_code.token.usage` **counter** (delta temporality → each
     export is the increment), `type ∈ {input,output,cacheRead,cacheCreation}`
     (the cache kinds on their own measure, tsk73);
@@ -1207,9 +1207,9 @@ summed every assistant line) and was Claude-only + format-fragile.
     `PluginRuntime`, + the session's bearer.
   - **opencode** is not auto-instrumented (a user's own OTEL plugin pointed at
     the receiver still works).
-  > **Diagnostic (tsk25/26):** set `OXPLOW_OTLP_DEBUG=<file>` before launching
-  > oxplow — the receiver appends a decoded dump of every OTLP export (metrics
-  > AND logs: names/event-kinds + attributes) to that file
+  > **Diagnostic (tsk25):** set `OXPLOW_OTLP_DEBUG=<file>` before launching
+  > oxplow — the receiver appends a decoded dump of every OTLP export (metric
+  > names + attributes + values) to that file
   > (`otlp_tokens::summarize_metrics_request`). Off by default.
   See `.context/agent-model.md`.
 

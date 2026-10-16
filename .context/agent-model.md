@@ -949,7 +949,7 @@ Every agent session gets its own bearer when it launches
 (`terminal::session_endpoints` → `SessionAuth::issue`,
 `crates/oxplow-app/src/session_auth.rs`), bound in memory to its session,
 thread, stream and harness (a `Principal`). The control plane's routes —
-`/hook/{event}`, `/v1/metrics`, `/v1/logs`, `/mcp`, `/dev/ping` (a
+`/hook/{event}`, `/v1/metrics`, `/mcp`, `/dev/ping` (a
 health check) — admit a request only with a live session's bearer and
 take who sent it from the bearer alone: `auth_middleware` puts the
 `Principal` in the request's extensions, the hook and OTLP handlers read
@@ -1384,9 +1384,8 @@ are `oxplow.effort.record_decision`.
 
 ### Token usage capture
 
-**OTEL (Claude Code).** The control plane's `/v1/metrics` and
-`/v1/logs` OTLP receiver (`handle_otlp_metrics`, behind the session's
-bearer) hands each export to `otlp_ingest.rs`, which asks every
+**OTEL (Claude Code).** The control plane's `/v1/metrics` OTLP
+receiver (`handle_otlp_metrics`, behind the session's bearer) hands each export to `otlp_ingest.rs`, which asks every
 registered harness's `token_readings` once per export and logs one
 `agent.tokens.reported` event anchored to the turn it measured; the
 `token_usage.otlp` consumer turns it into `oxplow.tokens` facts (cache

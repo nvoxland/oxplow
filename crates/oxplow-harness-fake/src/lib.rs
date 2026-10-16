@@ -161,10 +161,7 @@ pub fn token_reading(record: &OtlpRecord) -> Vec<TokenReading> {
         time_unix_nano,
         start_time_unix_nano,
         ..
-    } = record
-    else {
-        return Vec::new();
-    };
+    } = record;
     if metric != TOKEN_METRIC {
         return Vec::new();
     }

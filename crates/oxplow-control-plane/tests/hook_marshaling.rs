@@ -541,6 +541,23 @@ async fn the_bearer_names_the_exports_session() {
     );
 }
 
+/// Only metrics are exported to us: there is no logs receiver.
+#[tokio::test]
+async fn there_is_no_otlp_logs_receiver() {
+    let (cp, svc, _root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let token = common::bearer_for(&svc, session_of(&svc, tid).await).await;
+    let resp = reqwest::Client::new()
+        .post(format!("{}/v1/logs", cp.otlp_base_url()))
+        .bearer_auth(&token)
+        .header("content-type", "application/x-protobuf")
+        .body(otlp_claude_body("claude-opus-4-8", 100, 20))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 404);
+}
+
 #[tokio::test]
 async fn post_tool_use_edit_acks_200_empty() {
     // The observed regression: every Edit's PostToolUse fell through
