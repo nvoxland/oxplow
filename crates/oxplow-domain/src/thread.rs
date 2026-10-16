@@ -11,25 +11,43 @@ use specta::Type;
 use crate::ids::{NoteId, StreamId, ThreadId};
 use crate::time::Timestamp;
 
-/// Thread lifecycle status — mirrors the TS `ThreadState` shape.
-///
-/// `Active` is the writer thread for its stream (only one per stream
-/// can mutate the worktree at a time). `Queued` is a non-writer
-/// thread sharing the same worktree in read-only mode. `Closed` is
-/// terminated; closed threads are excluded from the rail.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+/// The colour a person marks a thread's tab with (`oxplow.thread.mark`):
+/// a fold in its tab's corner, for grouping threads their own way. It
+/// changes nothing else.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
-pub enum ThreadStatus {
-    Active,
-    Queued,
-    Closed,
+pub enum ThreadMark {
+    Amber,
+    Red,
+    Green,
+    Blue,
+    Violet,
 }
 
-impl ThreadStatus {
-    /// True when this thread is the writer for its stream — i.e.
-    /// the only thread allowed to mutate the shared worktree.
-    pub fn is_writer(&self) -> bool {
-        matches!(self, ThreadStatus::Active)
+impl ThreadMark {
+    pub const ALL: [ThreadMark; 5] = [
+        ThreadMark::Amber,
+        ThreadMark::Red,
+        ThreadMark::Green,
+        ThreadMark::Blue,
+        ThreadMark::Violet,
+    ];
+
+    /// The stored and wire name.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ThreadMark::Amber => "amber",
+            ThreadMark::Red => "red",
+            ThreadMark::Green => "green",
+            ThreadMark::Blue => "blue",
+            ThreadMark::Violet => "violet",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<ThreadMark> {
+        ThreadMark::ALL.into_iter().find(|m| m.as_str() == s)
     }
 }
 
@@ -49,13 +67,12 @@ pub struct Thread {
     pub id: ThreadId,
     pub stream_id: StreamId,
     pub title: String,
-    pub status: ThreadStatus,
     #[specta(type = crate::JsNumber)]
     pub sort_index: i64,
     pub summary: String,
     pub summary_updated_at: Option<Timestamp>,
-    /// Timestamp when the thread was closed (status transitions to
-    /// `Closed`). `None` for active/queued threads.
+    /// When the thread was closed; `None` while it is open. Open or
+    /// closed is all a thread's state is.
     pub closed_at: Option<Timestamp>,
     /// Per-thread custom prompt appended to the agent's system message.
     /// `None` when unset; `Some("")` is distinct (empty override).
@@ -66,17 +83,23 @@ pub struct Thread {
     /// "Remove…" action. Archived threads are filtered out of
     /// `ThreadStore::list_for_stream`.
     pub archived_at: Option<Timestamp>,
+    /// The person's colour for its tab; `None` when unmarked.
+    pub mark: Option<ThreadMark>,
 }
 
 impl Thread {
-    /// A new, active thread titled `title` on `stream`, not yet stored
+    /// Whether the thread is open (not closed).
+    pub fn is_open(&self) -> bool {
+        self.closed_at.is_none()
+    }
+
+    /// A new, open thread titled `title` on `stream`, not yet stored
     /// (its id is the placeholder).
     pub fn seed(stream_id: StreamId, title: impl Into<String>, now: Timestamp) -> Self {
         Thread {
             id: ThreadId::placeholder(),
             stream_id,
             title: title.into(),
-            status: ThreadStatus::Active,
             sort_index: 0,
             summary: String::new(),
             summary_updated_at: None,
@@ -85,6 +108,7 @@ impl Thread {
             created_at: now,
             updated_at: now,
             archived_at: None,
+            mark: None,
         }
     }
 }
@@ -106,25 +130,14 @@ mod tests {
     }
 
     #[test]
-    fn status_uses_snake_case() {
-        assert_eq!(
-            serde_json::to_string(&ThreadStatus::Active).unwrap(),
-            "\"active\""
-        );
-        assert_eq!(
-            serde_json::to_string(&ThreadStatus::Queued).unwrap(),
-            "\"queued\""
-        );
-        assert_eq!(
-            serde_json::to_string(&ThreadStatus::Closed).unwrap(),
-            "\"closed\""
-        );
-    }
-
-    #[test]
-    fn only_active_is_writer() {
-        assert!(ThreadStatus::Active.is_writer());
-        assert!(!ThreadStatus::Queued.is_writer());
-        assert!(!ThreadStatus::Closed.is_writer());
+    fn a_mark_reads_back_from_its_name() {
+        for m in ThreadMark::ALL {
+            assert_eq!(ThreadMark::parse(m.as_str()), Some(m));
+            assert_eq!(
+                serde_json::to_string(&m).unwrap(),
+                format!("\"{}\"", m.as_str())
+            );
+        }
+        assert_eq!(ThreadMark::parse("plaid"), None);
     }
 }

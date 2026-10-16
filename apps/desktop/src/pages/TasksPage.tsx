@@ -56,16 +56,16 @@ const NOOP_ASYNC = async () => {};
 
 /** The `work_item.list` contract's props for a scope: `scope` is
  *  `thread`, `stream` or `all`; `thread_id` the thread's row id when it is
- *  `thread` (the current thread's for the default scope), else null.
+ *  `thread` (the selected thread's for the default scope), else null.
  *  Exported for tests. */
 export function listScope(
   scope: TasksScope,
-  activeThreadId: string | null,
+  selectedThreadId: string | null,
 ): { scope: "thread" | "stream" | "all"; thread_id: number | null } {
   switch (scope.kind) {
     case "currentThread":
-      return activeThreadId
-        ? { scope: "thread", thread_id: threadRowId(activeThreadId) }
+      return selectedThreadId
+        ? { scope: "thread", thread_id: threadRowId(selectedThreadId) }
         : { scope: "all", thread_id: null };
     case "thread":
       return { scope: "thread", thread_id: threadRowId(scope.threadId) };
@@ -213,7 +213,7 @@ export function TasksPage({
     return null;
   }, [scope, rest.threadWork, scopedWorkStates, threadsByStream]);
 
-  const readOnly = isReadOnlyScope(scope) || (scope.kind === "thread" && scope.threadId !== rest.activeThreadId);
+  const readOnly = isReadOnlyScope(scope) || (scope.kind === "thread" && scope.threadId !== rest.thread?.id);
 
   const viewAllDone = (
     <button
@@ -227,7 +227,7 @@ export function TasksPage({
   );
 
   // When read-only (cross-thread/stream/all view), neutralize mutation
-  // handlers — the existing wiring is bound to the active thread, and
+  // handlers — the existing wiring is bound to the selected thread, and
   // calling it for items belonging to another thread would write to the
   // wrong place. The picker UI keeps the rest of the view interactive
   // (sorting, filters, expanding epics).
@@ -267,7 +267,7 @@ export function TasksPage({
           <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
             <Replaceable
               target="work_item.list"
-              props={listScope(scope, rest.activeThreadId ?? null)}
+              props={listScope(scope, rest.thread?.id ?? null)}
               streamId={scope.kind === "stream" || scope.kind === "thread" ? scope.streamId : currentStreamId}
               onOpenPage={onOpenPage}
               fallback={

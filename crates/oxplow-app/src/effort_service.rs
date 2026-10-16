@@ -741,7 +741,7 @@ mod tests {
     use super::*;
     use oxplow_db::{Database, SqliteStreamStore};
     use oxplow_domain::stores::StreamStore;
-    use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadStatus, Timestamp};
+    use oxplow_domain::{Stream, StreamId, StreamKind, Thread, Timestamp};
 
     #[test]
     fn close_end_snapshot_prefers_capture_then_start() {
@@ -879,7 +879,6 @@ mod tests {
             id: ThreadId::new(2),
             stream_id: s.id,
             title: "t".into(),
-            status: ThreadStatus::Active,
             sort_index: 0,
             summary: String::new(),
             summary_updated_at: None,
@@ -888,6 +887,7 @@ mod tests {
             created_at: Timestamp::from_unix_ms(1),
             updated_at: Timestamp::from_unix_ms(1),
             archived_at: None,
+            mark: None,
         };
         threads.upsert(&t).await.unwrap();
         let thread_store_for_svc = Arc::new(oxplow_db::SqliteThreadStore::new(db.clone()));
@@ -1506,7 +1506,6 @@ mod tests {
             id: ThreadId::new(3),
             stream_id: worktree.id,
             title: "t".into(),
-            status: ThreadStatus::Active,
             sort_index: 0,
             summary: String::new(),
             summary_updated_at: None,
@@ -1515,6 +1514,7 @@ mod tests {
             created_at: Timestamp::from_unix_ms(3),
             updated_at: Timestamp::from_unix_ms(3),
             archived_at: None,
+            mark: None,
         };
         thread_store_handle.upsert(&thread).await.unwrap();
 

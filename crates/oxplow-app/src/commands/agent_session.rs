@@ -27,7 +27,7 @@ use oxplow_domain::agent_session::{
 };
 use oxplow_domain::refs::build::{agent_session_ref, stream_ref, thread_ref};
 use oxplow_domain::{
-    AgentSessionId, CommandCall, CommandError, Confirm, Invokers, ThreadId, ThreadStatus, Timestamp,
+    AgentSessionId, CommandCall, CommandError, Confirm, Invokers, ThreadId, Timestamp,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -186,7 +186,7 @@ pub fn open_op(config: Arc<RwLock<OxplowConfig>>, harnesses: HarnessRegistry) ->
                 .map_err(sql)?
                 .filter(|t| t.archived_at.is_none())
                 .ok_or_else(|| invalid("/thread", format!("no thread `{}`", thread_ref(thread))))?;
-            if row.status == ThreadStatus::Closed {
+            if !row.is_open() {
                 return Err(invalid(
                     "/thread",
                     format!("`{}` is closed; reopen it first", thread_ref(thread)),

@@ -3100,8 +3100,8 @@ mod tests {
         db.conn()
             .unwrap()
             .execute_batch(
-                "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-                   VALUES (7, 1, 't', 'active', '2026-01-01', '2026-01-01');
+                "INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+                   VALUES (7, 1, 't', '2026-01-01', '2026-01-01');
                  INSERT INTO agent_turn (id, thread_id, prompt, started_at)
                    VALUES (3, 7, 'p', '2026-01-01');",
             )

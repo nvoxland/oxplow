@@ -430,7 +430,7 @@ pub const SCOPES: &[Scope] = &[
         access: Access::Record,
         host: Host::Daemon,
         spends: false,
-        summary: "Create, rename, promote, close and reopen threads.",
+        summary: "Create, rename, mark, close and reopen threads.",
     },
     Scope {
         id: "tree.read",

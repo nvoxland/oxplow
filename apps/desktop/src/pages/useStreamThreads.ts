@@ -1,6 +1,6 @@
 /**
  * Each stream's threads, loaded once when asked for and re-read when a
- * commit touches `v_thread` (a thread created, renamed, promoted, closed,
+ * commit touches `v_thread` (a thread created, renamed, marked, closed,
  * reordered — the `thread.*` commands), so a list built from them never
  * goes stale until remount (tsk790). The api is injected so a test can
  * drive it.

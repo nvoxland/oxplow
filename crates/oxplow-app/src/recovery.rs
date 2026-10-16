@@ -62,8 +62,7 @@ mod tests {
     use oxplow_db::{Database, SqliteAgentTurnStore, SqliteStreamStore, SqliteThreadStore};
     use oxplow_domain::stores::{StreamStore, ThreadStore};
     use oxplow_domain::{
-        AgentTurn, AgentTurnId, Stream, StreamId, StreamKind, Thread, ThreadId, ThreadStatus,
-        Timestamp,
+        AgentTurn, AgentTurnId, Stream, StreamId, StreamKind, Thread, ThreadId, Timestamp,
     };
 
     #[tokio::test]
@@ -93,7 +92,6 @@ mod tests {
             id: ThreadId::new(1),
             stream_id: s.id,
             title: "x".into(),
-            status: ThreadStatus::Active,
             sort_index: 0,
             summary: String::new(),
             summary_updated_at: None,
@@ -102,6 +100,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             archived_at: None,
+            mark: None,
         };
         SqliteThreadStore::new(db.clone()).upsert(&t).await.unwrap();
         let turns = Arc::new(SqliteAgentTurnStore::new(db.clone()));

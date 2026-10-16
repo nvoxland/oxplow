@@ -755,7 +755,7 @@ mod tests {
     use crate::stream_store::SqliteStreamStore;
     use crate::thread_store::SqliteThreadStore;
     use oxplow_domain::stores::{StreamStore, ThreadStore};
-    use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadStatus};
+    use oxplow_domain::{Stream, StreamId, StreamKind, Thread};
 
     async fn fixture() -> (Database, ThreadId) {
         let db = Database::in_memory();
@@ -785,7 +785,6 @@ mod tests {
             id: ThreadId::new(1),
             stream_id: s.id,
             title: "x".into(),
-            status: ThreadStatus::Active,
             sort_index: 0,
             summary: String::new(),
             summary_updated_at: None,
@@ -794,6 +793,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             archived_at: None,
+            mark: None,
         };
         threads.upsert(&t).await.unwrap();
         (db, t.id)
@@ -1103,8 +1103,8 @@ mod tests {
         let seed = format!(
             "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
                VALUES (1, 'primary', 'a', 'main', 'r', 'r', '/r', '{now}', '{now}');
-             INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-               VALUES (1, 1, 't', 'active', '{now}', '{now}');"
+             INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+               VALUES (1, 1, 't', '{now}', '{now}');"
         );
         db.transaction(move |tx| tx.execute_batch(&seed).map_err(map_sql_err))
             .await

@@ -29,8 +29,8 @@ keeps firing is a sign oxplow should infer the thing itself.
 The **turn** (prompt to stop) is the unit of record; each **tool call** is
 the evidence inside it. Per turn oxplow keeps the prompt, the agent's
 final message, the start and end snapshots, the tool calls with their
-time windows, test runs and tokens. Nothing here depends on one writer
-thread per stream.
+time windows, test runs and tokens. Nothing here depends on how many
+threads or agents share a stream.
 
 `OXPLOW_HOOK_DEBUG=<file>` appends every hook payload, as the agent sent
 it, to that file, one JSON line each (`event`, `thread`, `at`, `payload`).
@@ -175,8 +175,8 @@ the thread has none open; a later item start links it (rule 1).
 
 ## No gates
 
-- The edit guard keeps only isolation: a non-writer thread, another
-  stream's worktree, wiki pages (written through `oxplow.knowledge.write_page`).
+- The edit guard keeps only isolation: another
+  stream's worktree (the primary checkout included), wiki pages (written through `oxplow.knowledge.write_page`).
   It never asks for tracked work.
 - The Stop hook never refuses a stop.
 - Nothing the agent must call to close work. `oxplow.effort.report {thread?,

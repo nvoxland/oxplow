@@ -4299,9 +4299,7 @@ mod tests {
         use super::*;
         use oxplow_db::{Database, SqliteSnapshotStore, SqliteStreamStore};
         use oxplow_domain::stores::StreamStore;
-        use oxplow_domain::{
-            EffortId, Stream, StreamId, StreamKind, Thread, ThreadStatus, Timestamp,
-        };
+        use oxplow_domain::{EffortId, Stream, StreamId, StreamKind, Thread, Timestamp};
         use oxplow_tasks::SqliteTaskStore;
         use oxplow_tasks::TaskId;
         use oxplow_tasks::TaskStore;
@@ -4406,7 +4404,6 @@ mod tests {
                 id: ThreadId::new(1),
                 stream_id: stream.id,
                 title: "x".into(),
-                status: ThreadStatus::Active,
                 sort_index: 0,
                 summary: String::new(),
                 summary_updated_at: None,
@@ -4415,6 +4412,7 @@ mod tests {
                 created_at: now,
                 updated_at: now,
                 archived_at: None,
+                mark: None,
             };
             SqliteThreadStore::new(db.clone())
                 .upsert(&thread)
@@ -4728,7 +4726,6 @@ mod tests {
                 id: ThreadId::new(2),
                 stream_id: stream.id,
                 title: "w".into(),
-                status: ThreadStatus::Active,
                 sort_index: 0,
                 summary: String::new(),
                 summary_updated_at: None,
@@ -4737,6 +4734,7 @@ mod tests {
                 created_at: now,
                 updated_at: now,
                 archived_at: None,
+                mark: None,
             };
             SqliteThreadStore::new(h.db.clone())
                 .upsert(&thread)

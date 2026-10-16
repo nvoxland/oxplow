@@ -150,9 +150,6 @@ pub enum Command {
         reply: oneshot::Sender<Result<(), ChatError>>,
     },
     Cancel,
-    /// The thread's access may have changed: tell the connection what it
-    /// is now.
-    SyncAccess,
     Respond {
         request_id: String,
         option_id: Option<String>,
@@ -202,8 +199,6 @@ pub(super) struct Actor {
     /// A name the agent gave the conversation while it replayed, recorded
     /// once the session is.
     replayed_name: Option<String>,
-    /// What the connection was last told the thread may write.
-    writable: bool,
 }
 
 impl Actor {
@@ -233,7 +228,6 @@ impl Actor {
             pending_system_prompt: None,
             replaying: false,
             replayed_name: None,
-            writable: false,
         }
     }
 
@@ -319,10 +313,8 @@ impl Actor {
         conn: &dyn Connection,
         incoming: &mut mpsc::UnboundedReceiver<Incoming>,
     ) -> Result<(), String> {
-        let writable = self.host.writable(self.thread()).await;
-        self.writable = writable;
         self.replaying = true;
-        let opened = conn.open(&self.spec.cwd, writable).await;
+        let opened = conn.open(&self.spec.cwd).await;
         while let Ok(msg) = incoming.try_recv() {
             self.on_incoming(msg).await;
         }
@@ -373,15 +365,6 @@ impl Actor {
             } => {
                 let _ = reply.send(self.respond(&request_id, option_id).await);
             }
-            // Only a change: a sandbox change restarts the thread's MCP
-            // servers.
-            Command::SyncAccess => {
-                let writable = self.host.writable(self.thread()).await;
-                if writable != self.writable {
-                    self.writable = writable;
-                    conn.set_writable(writable);
-                }
-            }
             Command::Rename { name, reply } => {
                 let _ = reply.send(conn.rename(&name).await.map_err(ChatError::Agent));
             }
@@ -420,8 +403,7 @@ impl Actor {
             .await;
         self.fs_written.clear();
         self.turn = Some(text);
-        let writable = self.host.writable(self.thread()).await;
-        if let Err(e) = conn.prompt(hp, writable) {
+        if let Err(e) = conn.prompt(hp) {
             self.turn = None;
             self.push(ItemBody::Error { message: e.clone() });
             return Err(ChatError::Agent(e));

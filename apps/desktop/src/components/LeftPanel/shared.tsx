@@ -136,13 +136,6 @@ export function statusColor(status: FileStatus | null): string {
   }
 }
 
-export function threadStatusColor(status: Thread["status"]) {
-  switch (status) {
-    case "active": return "#86efac";
-    case "queued": return "#7dd3fc";
-  }
-}
-
 export function dirname(path: string): string {
   if (!path) return "";
   const slash = path.lastIndexOf("/");

@@ -5,7 +5,12 @@ export interface MenuItem {
   separator?: boolean;
   checked?: boolean;
   shortcut?: string;
+  /** A colour chip before the label (a CSS colour, e.g. a `var(--…)`
+   *  token): the item picks that colour. */
+  swatch?: string;
   submenu?: MenuItem[];
+  /** One line above the submenu's items saying what they do. */
+  submenuHeader?: string;
   run?(): void | Promise<void>;
 }
 

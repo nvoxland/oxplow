@@ -268,12 +268,11 @@ export type { OpOutcome, RemoteBranchEntry, MergeReadiness } from "./tauri-bridg
 // Stream / Thread come straight from the Tauri bindings — the
 // renderer reads the flat shape (working_pane / talking_pane /
 // custom_prompt) directly; no synthesis happens at the boundary.
-import type { Stream, Thread } from "./tauri-bridge/index.js";
-export type { Stream, Thread };
+import type { Stream, Thread, ThreadMark } from "./tauri-bridge/index.js";
+export type { Stream, Thread, ThreadMark };
 
 export interface ThreadState {
   selectedThreadId: string | null;
-  activeThreadId: string | null;
   threads: Thread[];
 }
 
@@ -1386,8 +1385,13 @@ export async function selectThread(streamId: string, threadId: string): Promise<
   return getThreadState(streamId);
 }
 
-export async function promoteThread(streamId: string, threadId: string): Promise<ThreadState> {
-  await runCommand("oxplow.thread.promote", { thread: threadRef(threadId) });
+/** Mark a thread's tab with a colour, or clear it (`null`). */
+export async function markThread(
+  streamId: string,
+  threadId: string,
+  mark: ThreadMark | null,
+): Promise<ThreadState> {
+  await runCommand("oxplow.thread.mark", { thread: threadRef(threadId), ...(mark ? { mark } : {}) });
   return getThreadState(streamId);
 }
 

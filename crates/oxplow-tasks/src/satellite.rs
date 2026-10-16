@@ -152,7 +152,7 @@ mod tests {
     use crate::store::{SqliteTaskStore, TaskStore};
     use oxplow_db::{SqliteStreamStore, SqliteThreadStore};
     use oxplow_domain::stores::{StreamStore, ThreadStore};
-    use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadStatus};
+    use oxplow_domain::{Stream, StreamId, StreamKind, Thread};
 
     fn now() -> Timestamp {
         Timestamp::from_unix_ms(1_700_000_000_000)
@@ -188,7 +188,6 @@ mod tests {
             id: ThreadId::new(1),
             stream_id: s.id,
             title: "t".into(),
-            status: ThreadStatus::Active,
             sort_index: 0,
             summary: String::new(),
             summary_updated_at: None,
@@ -197,6 +196,7 @@ mod tests {
             created_at: now(),
             updated_at: now(),
             archived_at: None,
+            mark: None,
         };
         threads.upsert(&t).await.unwrap();
 

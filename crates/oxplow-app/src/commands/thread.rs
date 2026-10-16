@@ -1,21 +1,19 @@
 //! Thread commands (P8.A3, `.context/commands.md`): a thread's lifecycle
-//! — create (or fork), rename, its custom prompt, promote to its stream's
-//! writer, close and reopen, the queue's order — as `Tx` commands, so
-//! every surface (the desktop, an agent, a lens) goes through the same
-//! validation, policy, audit and undo. The state machine:
+//! — create (or fork), rename, its custom prompt, its mark, close and
+//! reopen — as `Tx` commands, so every surface (the desktop, an agent, a
+//! lens) goes through the same validation, policy, audit and undo. A
+//! thread is open or closed, nothing more: every open thread of a stream
+//! shares its worktree, and any of them may change it
+//! (`.context/agent-model.md` "Why there is no writer thread").
 //!
-//! - **create** → `active` when the stream has no writer, else `queued`
-//!   at the end of the queue;
-//! - **promote** → `active`, demoting the current writer to `queued` in
-//!   the same transaction (the partial unique index never trips);
-//! - **close** → `closed` (its agent sessions close too, and their
-//!   processes stop after commit);
-//!   **reopen** → `queued`.
+//! - **create** → open, at the end of its stream's order;
+//! - **close** → closed (its agent sessions close too, and their
+//!   processes stop after commit); **reopen** → open again.
 //!
 //! A thread is named by ref (`thread:thr12`), a stream by `stream:str1`.
 //! An agent acts only on its own stream, and closes only its own thread;
-//! promoting a thread and setting a prompt steer an agent, so they are a
-//! person's.
+//! setting a prompt steers an agent and marking a thread is the person's
+//! own grouping, so both are a person's.
 
 use crate::commands::ops::Op;
 use std::sync::Arc;
@@ -23,7 +21,7 @@ use std::sync::Arc;
 use oxplow_db::thread_store::{get_tx, list_for_stream_tx, upsert_tx};
 use oxplow_domain::refs::build::{stream_ref, thread_ref};
 use oxplow_domain::{
-    CommandCall, CommandError, Invokers, StreamId, Thread, ThreadId, ThreadStatus, Timestamp,
+    CommandCall, CommandError, Invokers, StreamId, Thread, ThreadId, ThreadMark, Timestamp,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -35,8 +33,7 @@ use super::{Handler, HandlerOutput, TxCtx};
 pub const CREATE: &str = "oxplow.thread.create";
 pub const RENAME: &str = "oxplow.thread.rename";
 pub const SET_PROMPT: &str = "oxplow.thread.set_prompt";
-pub const PROMOTE: &str = "oxplow.thread.promote";
-pub const DEMOTE: &str = "oxplow.thread.demote";
+pub const MARK: &str = "oxplow.thread.mark";
 pub const CLOSE: &str = "oxplow.thread.close";
 pub const REOPEN: &str = "oxplow.thread.reopen";
 
@@ -68,6 +65,17 @@ pub struct SetPromptInput {
     /// Appended to the agent's prompt; empty or absent clears it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MarkInput {
+    /// The thread (`thread:thr12`).
+    pub thread: String,
+    /// The colour for its tab: `amber`, `red`, `green`, `blue` or
+    /// `violet`; absent clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mark: Option<ThreadMark>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -222,10 +230,9 @@ pub fn create_op() -> Op {
                 }
             }
             let existing = list_for_stream_tx(ctx.conn, stream).map_err(sql)?;
-            let has_writer = existing.iter().any(|t| t.status == ThreadStatus::Active);
             let next_sort = existing
                 .iter()
-                .filter(|t| t.status != ThreadStatus::Closed)
+                .filter(|t| t.is_open())
                 .map(|t| t.sort_index)
                 .max()
                 .unwrap_or(-1)
@@ -235,11 +242,6 @@ pub fn create_op() -> Op {
                 id: ThreadId::placeholder(),
                 stream_id: stream,
                 title: input.title,
-                status: if has_writer {
-                    ThreadStatus::Queued
-                } else {
-                    ThreadStatus::Active
-                },
                 sort_index: next_sort,
                 summary: String::new(),
                 summary_updated_at: None,
@@ -248,6 +250,7 @@ pub fn create_op() -> Op {
                 created_at: now,
                 updated_at: now,
                 archived_at: None,
+                mark: None,
             };
             thread.id = save(ctx, &thread)?;
             Ok(result(&thread))
@@ -306,83 +309,32 @@ pub fn set_prompt_op() -> Op {
     .open_to(Invokers::NO_AGENT)
 }
 
-/// `thread.promote { thread }` — a person's or an agent's: the writer is
-/// who may change the worktree, and handing it to the thread that should
-/// write next is part of an agent's work. The current writer is demoted in
-/// the same transaction; undone by promoting it back.
-pub fn promote_op() -> Op {
+/// `thread.mark { thread, mark? }` — a person's: a colour on the thread's
+/// tab, for grouping threads their own way. It changes nothing else.
+/// Undone by setting the previous mark back; marking it what it already
+/// is leaves no record.
+pub fn mark_op() -> Op {
     Op::new(
         "threads.write",
-        "promote",
-        schema::<ThreadInput>(),
+        "mark",
+        schema::<MarkInput>(),
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
-            let input: ThreadInput = parse(input)?;
+            let input: MarkInput = parse(input)?;
             let mut thread = load(ctx, ref_id(&input.thread, "thread", "/thread")?, "/thread")?;
-            match thread.status {
-                ThreadStatus::Closed => {
-                    return Err(invalid(
-                        "/thread",
-                        format!("`{}` is closed; reopen it first", input.thread),
-                    ));
-                }
-                ThreadStatus::Active => return Ok(unchanged(&thread)),
-                ThreadStatus::Queued => {}
-            }
-            let now = Timestamp::now();
-            let mut before = None;
-            for mut writer in list_for_stream_tx(ctx.conn, thread.stream_id)
-                .map_err(sql)?
-                .into_iter()
-                .filter(|t| t.status == ThreadStatus::Active)
-            {
-                before = Some(writer.id);
-                writer.status = ThreadStatus::Queued;
-                writer.updated_at = now;
-                save(ctx, &writer)?;
-            }
-            thread.status = ThreadStatus::Active;
-            thread.updated_at = now;
-            save(ctx, &thread)?;
-            // Undone by promoting the demoted writer back — or, when the
-            // stream had none, by demoting this one (tsk787).
-            let inverse = match before {
-                Some(w) => call(PROMOTE, json!({ "thread": thread_ref(w) })),
-                None => call(DEMOTE, json!({ "thread": input.thread })),
-            };
-            Ok(HandlerOutput {
-                inverse,
-                ..result(&thread)
-            })
-        })),
-    )
-}
-
-/// `thread.demote { thread }` — a person's or an agent's (handing the
-/// worktree back): the stream's writer joins the queue, leaving the stream
-/// with none. Undone by promoting it back; the
-/// inverse of a promote onto a stream that had no writer.
-pub fn demote_op() -> Op {
-    Op::new(
-        "threads.write",
-        "demote",
-        schema::<ThreadInput>(),
-        true,
-        Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
-            let input: ThreadInput = parse(input)?;
-            let mut thread = load(ctx, ref_id(&input.thread, "thread", "/thread")?, "/thread")?;
-            if thread.status != ThreadStatus::Active {
+            if thread.mark == input.mark {
                 return Ok(unchanged(&thread));
             }
-            thread.status = ThreadStatus::Queued;
+            let before = std::mem::replace(&mut thread.mark, input.mark);
             thread.updated_at = Timestamp::now();
             save(ctx, &thread)?;
             Ok(HandlerOutput {
-                inverse: call(PROMOTE, json!({ "thread": input.thread })),
+                inverse: call(MARK, json!({ "thread": input.thread, "mark": before })),
                 ..result(&thread)
             })
         })),
     )
+    .open_to(Invokers::NO_AGENT)
 }
 
 /// `thread.close { thread }`: its open effort and its agent sessions close
@@ -400,11 +352,10 @@ pub fn close_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
             let id = ref_id(&input.thread, "thread", "/thread")?;
             own_thread_only(ctx, id, "closes")?;
             let mut thread = load(ctx, id, "/thread")?;
-            if thread.status == ThreadStatus::Closed {
+            if !thread.is_open() {
                 return Ok(unchanged(&thread));
             }
             let now = Timestamp::now();
-            thread.status = ThreadStatus::Closed;
             thread.closed_at = Some(now);
             thread.updated_at = now;
             save(ctx, &thread)?;
@@ -454,7 +405,7 @@ pub fn close_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
     )
 }
 
-/// `thread.reopen { thread }` → `queued`; undone by closing it.
+/// `thread.reopen { thread }` → open again; undone by closing it.
 pub fn reopen_op() -> Op {
     Op::new(
         "threads.write",
@@ -466,10 +417,9 @@ pub fn reopen_op() -> Op {
             let id = ref_id(&input.thread, "thread", "/thread")?;
             own_thread_only(ctx, id, "reopens")?;
             let mut thread = load(ctx, id, "/thread")?;
-            if thread.status != ThreadStatus::Closed {
+            if thread.is_open() {
                 return Ok(unchanged(&thread));
             }
-            thread.status = ThreadStatus::Queued;
             thread.closed_at = None;
             thread.updated_at = Timestamp::now();
             save(ctx, &thread)?;
@@ -487,8 +437,7 @@ pub fn ops(processes: crate::agent_sessions::SessionProcesses) -> Vec<Op> {
         create_op(),
         rename_op(),
         set_prompt_op(),
-        promote_op(),
-        demote_op(),
+        mark_op(),
         close_op(processes),
         reopen_op(),
     ]
@@ -561,10 +510,10 @@ mod tests {
         serde_json::from_value::<Thread>(out.result).unwrap().id
     }
 
-    /// A new thread joins the queue behind the stream's writer, with no
-    /// agent session; a fork copies none of its source's.
+    /// A new thread opens at the end of its stream's order with no agent
+    /// session; a fork copies none of its source's.
     #[tokio::test]
-    async fn a_new_thread_queues_behind_the_writer_and_a_fork_copies_no_session() {
+    async fn a_new_thread_opens_last_and_a_fork_copies_no_session() {
         use oxplow_domain::stores::AgentSessionStore as _;
         let fx = services_with_effort().await;
         // Only a stream that's there takes a thread.
@@ -584,7 +533,7 @@ mod tests {
         }
         let second = create(&fx, "second").await;
         let t = thread(&fx, second).await;
-        assert_eq!((t.status, t.sort_index), (ThreadStatus::Queued, 1));
+        assert_eq!((t.is_open(), t.sort_index), (true, 1));
         let fork = run(
             &fx,
             &agent(&fx),
@@ -595,7 +544,7 @@ mod tests {
         .await
         .unwrap();
         let fork: Thread = serde_json::from_value(fork.result).unwrap();
-        assert_eq!(fork.status, ThreadStatus::Queued);
+        assert_eq!((fork.is_open(), fork.sort_index), (true, 2));
         for id in [second, fork.id] {
             assert!(fx
                 .svc
@@ -623,30 +572,93 @@ mod tests {
         assert!(err.to_string().contains("agent"), "{err}");
     }
 
-    /// Promoting demotes the writer in the same run; undoing it promotes
-    /// the old writer back. An agent may promote too: handing the worktree
-    /// to the thread that should write next is part of its work.
+    /// A mark is the person's colour for a thread's tab: set, changed,
+    /// cleared, and undone to what it was. An agent may not mark.
     #[tokio::test]
-    async fn promote_is_one_run_and_undoable_by_a_person_or_an_agent() {
+    async fn a_mark_is_a_persons_and_undoes_to_what_it_was() {
         let fx = services_with_effort().await;
-        let second = create(&fx, "second").await;
-        let out = run(
+        let r = thread_ref(fx.thread);
+        assert_eq!(thread(&fx, fx.thread).await.mark, None);
+        run(
             &fx,
-            &agent(&fx),
-            PROMOTE,
-            json!({ "thread": thread_ref(second) }),
+            &Actor::Human,
+            MARK,
+            json!({ "thread": r, "mark": "red" }),
         )
         .await
         .unwrap();
-        assert_eq!(thread(&fx, second).await.status, ThreadStatus::Active);
-        assert_eq!(thread(&fx, fx.thread).await.status, ThreadStatus::Queued);
+        let out = run(
+            &fx,
+            &Actor::Human,
+            MARK,
+            json!({ "thread": r, "mark": "violet" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(thread(&fx, fx.thread).await.mark, Some(ThreadMark::Violet));
         fx.svc
             .commands
             .undo(&Actor::Human, out.audit_id.unwrap(), false)
             .await
             .unwrap();
-        assert_eq!(thread(&fx, fx.thread).await.status, ThreadStatus::Active);
-        assert_eq!(thread(&fx, second).await.status, ThreadStatus::Queued);
+        assert_eq!(thread(&fx, fx.thread).await.mark, Some(ThreadMark::Red));
+        run(&fx, &Actor::Human, MARK, json!({ "thread": r }))
+            .await
+            .unwrap();
+        assert_eq!(thread(&fx, fx.thread).await.mark, None);
+        let err = run(
+            &fx,
+            &Actor::Human,
+            MARK,
+            json!({ "thread": r, "mark": "plaid" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");
+        let denied = run(
+            &fx,
+            &agent(&fx),
+            MARK,
+            json!({ "thread": r, "mark": "red" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(denied, CommandError::Denied { .. }), "{denied:?}");
+    }
+
+    /// Any open thread's agent may change the workspace — the stream's
+    /// threads share it — and a closed thread's may not, until it reopens.
+    #[tokio::test]
+    async fn an_open_threads_agent_writes_and_a_closed_ones_is_refused() {
+        let fx = services_with_effort().await;
+        let second = create(&fx, "second").await;
+        let as_second = Actor::Agent {
+            session_id: None,
+            thread_id: Some(second),
+            stream_id: None,
+        };
+        let set = |v: i64| json!({ "key": "metricRetentionDays", "value": v });
+        run(&fx, &agent(&fx), "oxplow.config.set", set(30))
+            .await
+            .unwrap();
+        run(&fx, &as_second, "oxplow.config.set", set(31))
+            .await
+            .unwrap();
+        run(
+            &fx,
+            &Actor::Human,
+            CLOSE,
+            json!({ "thread": thread_ref(second) }),
+        )
+        .await
+        .unwrap();
+        let err = run(&fx, &as_second, "oxplow.config.set", set(32))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Denied { reason } if reason.contains("is closed")),
+            "{err:?}"
+        );
     }
 
     /// Moving a thread to the state it's in changes nothing, so it leaves
@@ -654,44 +666,17 @@ mod tests {
     #[tokio::test]
     async fn a_move_to_the_state_a_thread_is_in_leaves_no_record() {
         let fx = services_with_effort().await;
-        let me = json!({ "thread": thread_ref(fx.thread) });
         let second = create(&fx, "second").await;
-        let queued = json!({ "thread": thread_ref(second) });
-        // The writer promoted, a queued thread demoted or reopened.
-        for (name, input) in [(PROMOTE, &me), (DEMOTE, &queued), (REOPEN, &queued)] {
+        let open = json!({ "thread": thread_ref(second) });
+        // An open thread reopened, an unmarked one unmarked.
+        for (name, input) in [(REOPEN, &open), (MARK, &open)] {
             let out = run(&fx, &Actor::Human, name, input.clone()).await.unwrap();
             assert_eq!(out.audit_id, None, "{name}");
             assert!(out.inverse.is_none(), "{name}");
         }
-        run(&fx, &Actor::Human, CLOSE, queued.clone())
-            .await
-            .unwrap();
-        let again = run(&fx, &Actor::Human, CLOSE, queued).await.unwrap();
+        run(&fx, &Actor::Human, CLOSE, open.clone()).await.unwrap();
+        let again = run(&fx, &Actor::Human, CLOSE, open).await.unwrap();
         assert_eq!(again.audit_id, None, "closing a closed thread");
-    }
-
-    /// tsk787: promoting onto a stream with no writer undoes by demoting
-    /// it back; `oxplow.thread.demote` (anyone's: an agent hands the
-    /// worktree back when it's done) undoes by promoting.
-    #[tokio::test]
-    async fn promote_from_no_writer_undoes_by_demoting() {
-        let fx = services_with_effort().await;
-        let me = thread_ref(fx.thread);
-        let demoted = run(&fx, &agent(&fx), DEMOTE, json!({ "thread": me }))
-            .await
-            .unwrap();
-        assert_eq!(thread(&fx, fx.thread).await.status, ThreadStatus::Queued);
-        let promoted = run(&fx, &Actor::Human, PROMOTE, json!({ "thread": me }))
-            .await
-            .unwrap();
-        assert_eq!(thread(&fx, fx.thread).await.status, ThreadStatus::Active);
-        fx.svc
-            .commands
-            .undo(&Actor::Human, promoted.audit_id.unwrap(), false)
-            .await
-            .unwrap();
-        assert_eq!(thread(&fx, fx.thread).await.status, ThreadStatus::Queued);
-        let _ = demoted;
     }
 
     /// An agent acts on its own stream only, and closes only its own
@@ -728,15 +713,13 @@ mod tests {
         .await
         .unwrap();
         let t = thread(&fx, second).await;
-        assert_eq!(t.status, ThreadStatus::Closed);
-        assert!(t.closed_at.is_some());
+        assert!(!t.is_open());
         fx.svc
             .commands
             .undo(&Actor::Human, closed.audit_id.unwrap(), false)
             .await
             .unwrap();
-        let t = thread(&fx, second).await;
-        assert_eq!((t.status, t.closed_at), (ThreadStatus::Queued, None));
+        assert!(thread(&fx, second).await.is_open());
 
         // tsk788: and reopens only its own thread, as it closes only its own.
         run(
@@ -756,7 +739,7 @@ mod tests {
         .await
         .unwrap_err();
         assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
-        assert_eq!(thread(&fx, second).await.status, ThreadStatus::Closed);
+        assert!(!thread(&fx, second).await.is_open());
     }
 
     /// Rename and prompt undo to what they were; a prompt is a person's.

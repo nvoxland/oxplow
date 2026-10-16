@@ -20,77 +20,27 @@
 use oxplow_config::OxplowConfig;
 use oxplow_domain::{Stream, Thread, ThreadId};
 
-/// The two role buckets the agent cares about. Writer threads can
-/// mutate the worktree; read-only threads cannot (their PreToolUse
-/// hook denies Edit/Write/MultiEdit/NotebookEdit). Used as the
-/// comparison baseline for the ROLE CHANGE banner — captured once
-/// per Claude session id at agent launch, then compared against the
-/// current thread status on every UserPromptSubmit / qualifying
-/// PostToolUse.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RoleMode {
-    Writer,
-    ReadOnly,
-}
-
-impl RoleMode {
-    pub fn from_thread(thread: &Thread) -> Self {
-        if thread.status.is_writer() {
-            RoleMode::Writer
-        } else {
-            RoleMode::ReadOnly
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            RoleMode::Writer => "writer",
-            RoleMode::ReadOnly => "read-only",
-        }
-    }
-}
-
-/// Build the visible Oxplow session-context note. Includes worktree
-/// path, stream/thread titles, identifiers, and the practical effect
-/// of the thread's writer/read-only role.
-pub fn build_session_context_block(stream: &Stream, thread: Option<&Thread>) -> String {
-    build_session_context_block_with_role(stream, thread, None)
-}
-
-/// Like `build_session_context_block` but appends a prominent role-
-/// change note before `</session-context>` when the current
-/// thread role differs from the supplied `initial_role`: the role the
-/// agent was first told is in its context for the rest of the session,
-/// so a promotion or demotion has to say it overrides that. No banner is
-/// emitted when the role hasn't changed (steady-state turns don't grow).
-pub fn build_session_context_block_with_role(
-    stream: &Stream,
-    thread: Option<&Thread>,
-    initial_role: Option<RoleMode>,
-) -> String {
-    build_session_context_block_full(stream, thread, initial_role, None)
-}
-
-/// The agent running on the stream's writer thread, so a read-only
-/// thread can match it against what `ListAgents` shows. Agent-neutral:
-/// the harness key, the OS pid and the harness's own session id.
+/// Another live agent sharing the thread's worktree: in any thread of the
+/// same stream, the thread's own included. Named as the person sees it, so
+/// the agent knows it isn't alone and with whom; nothing here is for it to
+/// act on.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WriterAgent {
+pub struct OtherAgent {
+    /// The session's display name (`v_agent_session.display_name`).
+    pub name: String,
+    /// The harness running it (`claude`, `codex`, …).
+    pub harness: String,
     pub thread_title: String,
     pub thread_id: ThreadId,
-    pub harness: String,
-    pub pid: Option<u32>,
-    /// The harness's own session id; empty when unknown.
-    pub session: String,
 }
 
-/// [`build_session_context_block_with_role`] plus, on a read-only
-/// thread, a line naming the live agent on the stream's writer thread.
-pub fn build_session_context_block_full(
+/// The visible Oxplow session-context note: the stream, worktree, branch
+/// and thread the agent works in, and the other live agents sharing that
+/// worktree (`others`; the line is left out when there are none).
+pub fn build_session_context_block(
     stream: &Stream,
     thread: Option<&Thread>,
-    initial_role: Option<RoleMode>,
-    writer: Option<&WriterAgent>,
+    others: &[OtherAgent],
 ) -> String {
     let mut s = String::from(
         "<session-context>\n## Oxplow session context\n\n\
@@ -104,54 +54,24 @@ pub fn build_session_context_block_full(
     s.push_str(&format!("- **Branch:** `{}`\n", stream.branch));
     if let Some(t) = thread {
         s.push_str(&format!("- **Thread:** {} (`{}`)\n", t.title, t.id));
-        let current = RoleMode::from_thread(t);
+    }
+    if !others.is_empty() {
+        let named: Vec<String> = others
+            .iter()
+            .map(|o| {
+                format!(
+                    "{} (`{}`, thread {} (`{}`))",
+                    o.name, o.harness, o.thread_title, o.thread_id
+                )
+            })
+            .collect();
         s.push_str(&format!(
-            "- **Access:** **{}** — {}\n",
-            current.as_str(),
-            role_description(current)
+            "- **Also in this worktree:** {}\n",
+            named.join("; ")
         ));
-        if let (RoleMode::ReadOnly, Some(w)) = (current, writer) {
-            s.push_str(&format!(
-                "- **Writer thread:** {} (`{}`) — agent `{}`",
-                w.thread_title, w.thread_id, w.harness
-            ));
-            if let Some(pid) = w.pid {
-                s.push_str(&format!(", pid {pid}"));
-            }
-            if !w.session.is_empty() {
-                s.push_str(&format!(", session `{}`", w.session));
-            }
-            s.push('\n');
-        }
-        if let Some(initial) = initial_role {
-            if initial != current {
-                s.push('\n');
-                s.push_str(&role_change_banner(initial, current));
-                s.push('\n');
-            }
-        }
     }
     s.push_str("</session-context>");
     s
-}
-
-fn role_description(role: RoleMode) -> &'static str {
-    match role {
-        RoleMode::Writer => "may edit project files",
-        RoleMode::ReadOnly => "may inspect the project, but project file edits are blocked",
-    }
-}
-
-/// Loud banner emitted when the thread's role flipped mid-session.
-/// Phrased so the agent treats it as a direct override of the Access line
-/// in the session context it started with.
-pub fn role_change_banner(initial: RoleMode, current: RoleMode) -> String {
-    match (initial, current) {
-        (RoleMode::ReadOnly, RoleMode::Writer) => "**Access changed:** This thread was promoted to writer after the session started. It may now edit the worktree; the earlier read-only instruction no longer applies.".to_string(),
-        (RoleMode::Writer, RoleMode::ReadOnly) => "**Access changed:** This thread was changed to read-only after the session started. Project file edits are now blocked; wiki pages are still written with `oxplow.knowledge.write_page`.".to_string(),
-        // Same-role pairs never reach this fn — caller skips.
-        _ => String::new(),
-    }
 }
 
 /// Compose the system prompt oxplow adds to whatever the agent's own is,
@@ -161,12 +81,14 @@ pub fn role_change_banner(initial: RoleMode, current: RoleMode) -> String {
 /// What the harness delivers decides two parts: the `<session-context>`
 /// block is here only when no prompt hook can carry it (`prompt_context`;
 /// otherwise the first prompt's context does, and both would send it
-/// twice), and the skills are indexed here for `oxplow_get_skill` only when the
+/// twice) — and then it is frozen as the launch saw it, `others` included —
+/// and the skills are indexed here for `oxplow_get_skill` only when the
 /// harness ships no skill files (`runtime_text`).
 pub fn assemble_system_prompt(
     config: &OxplowConfig,
     stream: &Stream,
     thread: Option<&Thread>,
+    others: &[OtherAgent],
     harness: &crate::capabilities::Implementation,
     skills: &oxplow_domain::agent::text::AgentText,
 ) -> String {
@@ -174,7 +96,7 @@ pub fn assemble_system_prompt(
     out.push_str(oxplow_agent_text::WORKING_IN_OXPLOW.trim());
     out.push_str("\n\n");
     if !harness.has_feature(crate::agent_context::PROMPT_CONTEXT) {
-        out.push_str(&build_session_context_block(stream, thread));
+        out.push_str(&build_session_context_block(stream, thread, others));
         out.push_str("\n\n");
     }
     if let Some(t) = thread {
@@ -228,7 +150,7 @@ fn skill_index_block(text: &oxplow_domain::agent::text::AgentText) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::{StreamId, StreamKind, ThreadId, ThreadStatus, Timestamp};
+    use oxplow_domain::{StreamId, StreamKind, ThreadId, Timestamp};
     use tempfile::tempdir;
 
     /// A harness declaring `features`.
@@ -266,6 +188,7 @@ mod tests {
             config,
             stream,
             Some(&thread()),
+            &[],
             h,
             &oxplow_agent_text::core_text(),
         )
@@ -328,7 +251,6 @@ mod tests {
             id: ThreadId::new(1),
             stream_id: StreamId::new(1),
             title: "explore".into(),
-            status: ThreadStatus::Active,
             sort_index: 0,
             summary: String::new(),
             summary_updated_at: None,
@@ -337,19 +259,20 @@ mod tests {
             created_at: Timestamp::from_unix_ms(1),
             updated_at: Timestamp::from_unix_ms(1),
             archived_at: None,
+            mark: None,
         }
     }
 
     #[test]
     fn session_context_includes_stream_and_thread_metadata() {
-        let block = build_session_context_block(&stream(), Some(&thread()));
+        let block = build_session_context_block(&stream(), Some(&thread()), &[]);
         assert!(block.contains("## Oxplow session context"));
         assert!(block.contains("**Stream:** oxplow (`str1`)"));
         assert!(block.contains("**Worktree:** `/repo`"));
         assert!(block.contains("**Branch:** `main`"));
         assert!(block.contains("**Thread:** explore (`thr1`)"));
-        assert!(block.contains("**Access:** **writer**"));
         assert!(block.contains("after a session restart or when the assignment changes"));
+        assert!(!block.contains("Access"), "{block}");
     }
 
     #[test]
@@ -408,109 +331,37 @@ mod tests {
         assert!(!prompt.contains("Repo rules"), "{prompt}");
     }
 
-    #[test]
-    fn read_only_thread_marks_role() {
-        let mut t = thread();
-        t.status = ThreadStatus::Queued;
-        let block = build_session_context_block(&stream(), Some(&t));
-        assert!(block.contains("**Access:** **read-only**"));
-        assert!(block.contains("project file edits are blocked"));
-    }
-
-    fn writer_agent() -> WriterAgent {
-        WriterAgent {
-            thread_title: "Thread".into(),
-            thread_id: ThreadId::new(1),
-            harness: "claude".into(),
-            pid: Some(11684),
-            session: "abc-123".into(),
+    fn other(name: &str, harness: &str, thread: i64, title: &str) -> OtherAgent {
+        OtherAgent {
+            name: name.into(),
+            harness: harness.into(),
+            thread_title: title.into(),
+            thread_id: ThreadId::new(thread),
         }
     }
 
+    /// Every other live agent in the worktree is named, with its harness
+    /// and thread, on one line.
     #[test]
-    fn a_read_only_thread_is_told_who_the_writer_agent_is() {
-        let mut t = thread();
-        t.id = ThreadId::new(2);
-        t.status = ThreadStatus::Queued;
-        let block =
-            build_session_context_block_full(&stream(), Some(&t), None, Some(&writer_agent()));
+    fn others_in_the_worktree_are_named() {
+        let others = [
+            other("Login fix", "codex", 2, "thread 2"),
+            other("claude 2026-10-16", "claude", 1, "explore"),
+        ];
+        let block = build_session_context_block(&stream(), Some(&thread()), &others);
         assert!(
             block.contains(
-                "**Writer thread:** Thread (`thr1`) — agent `claude`, pid 11684, session `abc-123`"
+                "- **Also in this worktree:** Login fix (`codex`, thread thread 2 (`thr2`)); \
+                 claude 2026-10-16 (`claude`, thread explore (`thr1`))\n"
             ),
             "{block}"
         );
     }
 
     #[test]
-    fn a_writer_thread_is_not_told_of_a_writer() {
-        let block = build_session_context_block_full(
-            &stream(),
-            Some(&thread()),
-            None,
-            Some(&writer_agent()),
-        );
-        assert!(!block.contains("Writer thread"));
-    }
-
-    #[test]
-    fn unknown_writer_agent_parts_are_left_out() {
-        let mut t = thread();
-        t.status = ThreadStatus::Queued;
-        let mut w = writer_agent();
-        w.pid = None;
-        w.session = String::new();
-        let block = build_session_context_block_full(&stream(), Some(&t), None, Some(&w));
-        assert!(
-            block.contains("**Writer thread:** Thread (`thr1`) — agent `claude`\n"),
-            "{block}"
-        );
-    }
-
-    #[test]
-    fn role_change_banner_fires_on_promotion() {
-        // Thread is currently writer; was launched as read-only.
-        let block = build_session_context_block_with_role(
-            &stream(),
-            Some(&thread()),
-            Some(RoleMode::ReadOnly),
-        );
-        assert!(block.contains("**Access:** **writer**"));
-        assert!(block.contains("**Access changed:**"));
-        assert!(block.contains("promoted to writer"));
-        assert!(block.contains("earlier read-only instruction no longer applies"));
-    }
-
-    #[test]
-    fn role_change_banner_fires_on_demotion() {
-        // Thread is currently read-only; was launched as writer.
-        let mut t = thread();
-        t.status = ThreadStatus::Queued;
-        let block =
-            build_session_context_block_with_role(&stream(), Some(&t), Some(RoleMode::Writer));
-        assert!(block.contains("**Access:** **read-only**"));
-        assert!(block.contains("**Access changed:**"));
-        assert!(block.contains("changed to read-only"));
-    }
-
-    #[test]
-    fn no_banner_when_role_matches_initial() {
-        // Initial=Writer, current=Writer → steady state, no banner.
-        let block = build_session_context_block_with_role(
-            &stream(),
-            Some(&thread()),
-            Some(RoleMode::Writer),
-        );
-        assert!(block.contains("**Access:** **writer**"));
-        assert!(!block.contains("**Access changed:**"));
-    }
-
-    #[test]
-    fn no_banner_when_initial_role_unset() {
-        // Caller hasn't captured an initial role yet (e.g. very first
-        // turn or hook fired before capture) — no banner.
-        let block = build_session_context_block_with_role(&stream(), Some(&thread()), None);
-        assert!(!block.contains("**Access changed:**"));
+    fn no_line_when_alone() {
+        let block = build_session_context_block(&stream(), Some(&thread()), &[]);
+        assert!(!block.contains("Also in this worktree"), "{block}");
     }
 
     /// The session context is sent once: by the first prompt's hook when

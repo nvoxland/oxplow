@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use rusqlite::params;
 
 use oxplow_domain::stores::ThreadStore;
-use oxplow_domain::{DomainError, StreamId, Thread, ThreadId, ThreadStatus, Timestamp};
+use oxplow_domain::{DomainError, StreamId, Thread, ThreadId, ThreadMark, Timestamp};
 
 use crate::database::Database;
 use crate::database::{string_to_ts, ts_to_string};
@@ -18,30 +18,10 @@ impl SqliteThreadStore {
     }
 }
 
-fn status_to_str(s: ThreadStatus) -> &'static str {
-    match s {
-        ThreadStatus::Active => "active",
-        ThreadStatus::Queued => "queued",
-        ThreadStatus::Closed => "closed",
-    }
-}
-
-fn str_to_status(s: &str) -> Result<ThreadStatus, DomainError> {
-    match s {
-        "active" => Ok(ThreadStatus::Active),
-        "queued" => Ok(ThreadStatus::Queued),
-        "closed" => Ok(ThreadStatus::Closed),
-        other => Err(DomainError::Invalid(format!(
-            "unknown thread status: {other}"
-        ))),
-    }
-}
-
 fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
     let id: i64 = row.get("id")?;
     let stream_id: i64 = row.get("stream_id")?;
     let title: String = row.get("title")?;
-    let status: String = row.get("status")?;
     let sort_index: i64 = row.get("sort_index")?;
     let summary: String = row.get("summary")?;
     let summary_updated_at: Option<String> = row.get("summary_updated_at")?;
@@ -50,6 +30,7 @@ fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
     let custom_prompt: Option<String> = row.get("custom_prompt")?;
     let created_at: String = row.get("created_at")?;
     let updated_at: String = row.get("updated_at")?;
+    let mark: Option<String> = row.get("mark")?;
     let map_err = |e: DomainError| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     };
@@ -57,7 +38,6 @@ fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
         id: ThreadId::new(id),
         stream_id: StreamId::new(stream_id),
         title,
-        status: str_to_status(&status).map_err(map_err)?,
         sort_index,
         summary,
         summary_updated_at: summary_updated_at
@@ -73,6 +53,13 @@ fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
         updated_at: string_to_ts(&updated_at).map_err(map_err)?,
         archived_at: archived_at
             .map(|s| string_to_ts(&s))
+            .transpose()
+            .map_err(map_err)?,
+        mark: mark
+            .map(|m| {
+                ThreadMark::parse(&m)
+                    .ok_or_else(|| DomainError::Invalid(format!("unknown thread mark: {m}")))
+            })
             .transpose()
             .map_err(map_err)?,
     })
@@ -111,12 +98,12 @@ pub fn upsert_tx(conn: &rusqlite::Connection, thread: &Thread) -> rusqlite::Resu
     };
     conn.execute(
         "INSERT INTO threads (
-            id, stream_id, title, status, sort_index, summary, summary_updated_at,
-            closed_at, custom_prompt, created_at, updated_at
+            id, stream_id, title, sort_index, summary, summary_updated_at,
+            closed_at, custom_prompt, created_at, updated_at, mark
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
          ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
-            status = excluded.status,
+            mark = excluded.mark,
             sort_index = excluded.sort_index,
             summary = excluded.summary,
             summary_updated_at = excluded.summary_updated_at,
@@ -127,7 +114,6 @@ pub fn upsert_tx(conn: &rusqlite::Connection, thread: &Thread) -> rusqlite::Resu
             id_param,
             thread.stream_id.value(),
             thread.title,
-            status_to_str(thread.status),
             thread.sort_index,
             thread.summary,
             thread.summary_updated_at.map(ts_to_string),
@@ -135,6 +121,7 @@ pub fn upsert_tx(conn: &rusqlite::Connection, thread: &Thread) -> rusqlite::Resu
             thread.custom_prompt,
             ts_to_string(thread.created_at),
             ts_to_string(thread.updated_at),
+            thread.mark.map(ThreadMark::as_str),
         ],
     )?;
     Ok(if thread.id.is_placeholder() {
@@ -289,42 +276,25 @@ mod tests {
         let mut t = thread(sid);
         store.upsert(&t).await.unwrap();
         t.title = "updated".into();
-        t.status = ThreadStatus::Closed;
+        t.closed_at = Some(ts());
+        t.mark = Some(ThreadMark::Violet);
         store.upsert(&t).await.unwrap();
         let got = store.get(&t.id).await.unwrap().unwrap();
         assert_eq!(got.title, "updated");
-        assert_eq!(got.status, ThreadStatus::Closed);
+        assert!(!got.is_open());
+        assert_eq!(got.mark, Some(ThreadMark::Violet));
     }
 
-    #[tokio::test]
-    async fn at_most_one_active_thread_per_stream() {
-        let (store, sid) = make_store().await;
-        let mut a = thread(sid);
-        a.id = ThreadId::new(10);
-        a.status = ThreadStatus::Active;
-        let mut b = thread(sid);
-        b.id = ThreadId::new(11);
-        b.status = ThreadStatus::Active;
-        store.upsert(&a).await.unwrap();
-        // Second active thread on the same stream violates the
-        // partial unique index → DB error → DomainError::Constraint.
-        let err = store.upsert(&b).await.unwrap_err();
-        assert!(matches!(err, DomainError::Constraint(_)));
-    }
-
+    /// Several open threads share a stream; the store keeps their order.
     #[tokio::test]
     async fn list_for_stream_orders_by_sort_index() {
         let (store, sid) = make_store().await;
-        // Only one Active per stream — give the second thread Queued
-        // status so we don't trip the partial unique index.
         let mut a = thread(sid);
         a.id = ThreadId::new(10);
         a.sort_index = 1;
-        a.status = ThreadStatus::Active;
         let mut b = thread(sid);
         b.id = ThreadId::new(11);
         b.sort_index = 0;
-        b.status = ThreadStatus::Queued;
         store.upsert(&a).await.unwrap();
         store.upsert(&b).await.unwrap();
         let list = store.list_for_stream(&sid).await.unwrap();

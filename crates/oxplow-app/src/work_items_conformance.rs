@@ -835,7 +835,6 @@ mod tests {
     async fn oxplow_tasks_are_a_conforming_provider() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let provider = fx.svc.work_items.get("oxplow").unwrap();
-        // The writer thread, so moving to in_progress may claim.
         let actor = Actor::Agent {
             session_id: None,
             thread_id: Some(ThreadId::new(fx.thread.value())),

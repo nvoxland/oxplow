@@ -1732,39 +1732,12 @@ mod tests {
     }
 
     #[test]
-    fn active_thread_uniqueness_enforced_at_db() {
-        let db = Database::in_memory();
-        let conn = db.conn().unwrap();
-        let now = "2026-04-29T00:00:00Z";
-        conn.execute(
-            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
-             VALUES (1, 'primary', 'a', 'main', 'refs/heads/main', 'main', '/r', ?1, ?1)",
-            [now],
-        ).unwrap();
-        conn.execute(
-            "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-             VALUES (1, 1, 'a', 'active', ?1, ?1)",
-            [now],
-        )
-        .unwrap();
-        let result = conn.execute(
-            "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-             VALUES (2, 1, 'b', 'active', ?1, ?1)",
-            [now],
-        );
-        assert!(
-            result.is_err(),
-            "DB should reject a second active thread on the same stream"
-        );
-    }
-
-    #[test]
     fn foreign_keys_enabled() {
         let db = Database::in_memory();
         let conn = db.conn().unwrap();
         let result = conn.execute(
-            "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-             VALUES (1, 999, 't', 'queued', '2026-01-01', '2026-01-01')",
+            "INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+             VALUES (1, 999, 't', '2026-01-01', '2026-01-01')",
             [],
         );
         assert!(
@@ -1785,8 +1758,8 @@ mod tests {
             [now],
         ).unwrap();
         conn.execute(
-            "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-             VALUES (1, 1, 't', 'active', ?1, ?1)",
+            "INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+             VALUES (1, 1, 't', ?1, ?1)",
             [now],
         )
         .unwrap();
@@ -2403,6 +2376,79 @@ mod tests {
     /// V80: a chat session still open is closed with its open turns and
     /// becomes a terminal row; `acp_agent` and the `chat` kind leave the
     /// table, and what points at a session still does.
+    /// V81: a thread is open or closed — its status column and the
+    /// one-active-thread index go, every thread survives with its other
+    /// columns and the rows that reference it, and a second open thread on a
+    /// stream is fine. Threads may carry a mark; none is set.
+    #[test]
+    fn v81_drops_thread_status_and_adds_an_unset_mark() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(80))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            r#"INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+                 VALUES (1, 'primary', 'a', 'main', 'refs/heads/main', 'main', '/r', 't0', 't0');
+               INSERT INTO threads (id, stream_id, title, status, sort_index, created_at, updated_at, closed_at)
+                 VALUES (1, 1, 'writer', 'active', 0, 't', 't', NULL),
+                        (2, 1, 'queued', 'queued', 1, 't', 't', NULL),
+                        (3, 1, 'closed', 'closed', 2, 't', 't', 'tc');
+               INSERT INTO thread_note (thread_id, body, author, created_at) VALUES (2, 'n', 'agent', 't');"#,
+        )
+        .unwrap();
+        with_foreign_keys_off(&mut conn, |conn| {
+            embedded::migrations::runner()
+                .set_target(refinery::Target::Version(81))
+                .run(conn)
+                .map(|_| true)
+                .map_err(|e| DbInitError::Migration(e.to_string()))
+        })
+        .unwrap();
+        /// id, title, sort_index, closed_at, mark.
+        type Row = (i64, String, i64, Option<String>, Option<String>);
+        let rows: Vec<Row> = conn
+            .prepare("SELECT id, title, sort_index, closed_at, mark FROM threads ORDER BY id")
+            .unwrap()
+            .query_map([], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            [
+                (1, "writer".into(), 0, None, None),
+                (2, "queued".into(), 1, None, None),
+                (3, "closed".into(), 2, Some("tc".into()), None),
+            ]
+        );
+        let columns: Vec<String> = conn
+            .prepare("SELECT name FROM pragma_table_info('threads')")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert!(!columns.contains(&"status".to_string()), "{columns:?}");
+        let notes: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM thread_note WHERE thread_id = 2",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(notes, 1);
+        // Two open threads may now share a stream; a mark is one of five.
+        conn.execute("UPDATE threads SET mark = 'violet' WHERE id = 1", [])
+            .unwrap();
+        assert!(conn
+            .execute("UPDATE threads SET mark = 'plaid' WHERE id = 1", [])
+            .is_err());
+    }
+
     #[test]
     fn v80_closes_chat_sessions_and_drops_acp_agent() {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -2846,8 +2892,8 @@ mod tests {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-             VALUES (1, 1, 't', 'active', ?1, ?1)",
+            "INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+             VALUES (1, 1, 't', ?1, ?1)",
             [now],
         )
         .unwrap();

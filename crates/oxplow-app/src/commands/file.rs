@@ -5,7 +5,7 @@
 //! logs `file.saved` for whatever should happen on save (an effect
 //! `on: [file.saved]`). A person saves in any stream; an agent — whose
 //! Save the window does for it, as it (`client_host`) — only in its own
-//! stream, and as a write, only from the stream's writer thread.
+//! stream, and as a write, only from an open thread.
 
 use std::sync::Arc;
 

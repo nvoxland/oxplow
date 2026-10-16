@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { flushSync } from "react-dom";
 import {
   closeThread,
+  markThread,
   createThread,
   openAgentSession,
   closeAgentSession,
@@ -32,13 +33,13 @@ import {
   openExternalUrl,
   setGenerated,
   selectThread,
-  promoteThread,
   recordUsage,
   switchStream,
   runCommand,
   runCommandForCall,
   runCommandInBackground,
   commandOpenAfter,
+  type ThreadMark,
   type ThreadState,
   type SqlCell,
   type Stream,
@@ -478,14 +479,11 @@ export function App() {
       const next = await switchStream(id);
       let nextThreadState = threadStates[next.id] ?? await getThreadState(next.id);
       // Invariant: a stream must always have a selected thread. If the
-      // switched-to stream has no remembered selection, auto-pick the
-      // active thread (or the first thread by sort order) and persist
-      // that choice so subsequent switches remember it.
+      // switched-to stream has no remembered selection, auto-pick its
+      // first thread by sort order and persist that choice so subsequent
+      // switches remember it.
       if (!nextThreadState.selectedThreadId && nextThreadState.threads.length > 0) {
-        const fallback =
-          nextThreadState.threads.find((t) => t.id === nextThreadState.activeThreadId)
-          ?? nextThreadState.threads[0];
-        nextThreadState = await selectThread(next.id, fallback.id);
+        nextThreadState = await selectThread(next.id, nextThreadState.threads[0].id);
       }
       const nextThread = nextThreadState.threads.find((thread) => thread.id === nextThreadState.selectedThreadId);
       if (nextThread && !threadWorkStates[nextThread.id]) {
@@ -880,12 +878,12 @@ export function App() {
     }
   }
 
-  async function handlePromoteThread(threadId: string) {
-    if (!stream) return;
+  async function handleMarkThread(threadId: string, mark: ThreadMark | null) {
+    const owner = streams.find((s) => threadStates[s.id]?.threads.some((t) => t.id === threadId));
+    if (!owner) return;
     try {
-      const next = await promoteThread(stream.id, threadId);
-      setThreadStates((prev) => ({ ...prev, [stream.id]: next }));
-      setCenterActive(HOME_TAB);
+      const next = await markThread(owner.id, threadId, mark);
+      setThreadStates((prev) => ({ ...prev, [owner.id]: next }));
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -964,7 +962,7 @@ export function App() {
   const currentFile = selectedFilePath ? currentSession.files[selectedFilePath] ?? null : null;
   const currentFileDirty = !!currentFile && currentFile.draftContent !== currentFile.savedContent;
   const currentThreadState = useMemo(
-    () => (stream ? threadStates[stream.id] ?? { selectedThreadId: null, activeThreadId: null, threads: [] } : { selectedThreadId: null, activeThreadId: null, threads: [] }),
+    () => (stream ? threadStates[stream.id] ?? { selectedThreadId: null, threads: [] } : { selectedThreadId: null, threads: [] }),
     [threadStates, stream],
   );
   const selectedThread = currentThreadState.threads.find((thread) => thread.id === currentThreadState.selectedThreadId) ?? null;
@@ -1007,11 +1005,6 @@ export function App() {
     }
     return out;
   }, [streams, threadStates, agentStatuses]);
-  const streamActiveThreadIds = useMemo<Record<string, string | null>>(() => {
-    const out: Record<string, string | null> = {};
-    for (const s of streams) out[s.id] = threadStates[s.id]?.activeThreadId ?? null;
-    return out;
-  }, [streams, threadStates]);
 
   const currentFileRef = useRef(currentFile);
   currentFileRef.current = currentFile;
@@ -2476,7 +2469,6 @@ export function App() {
     const workPage = (ref: TabRef, nav: SlotNav): CenterTab | null => {
       const sharedProps = {
         thread: selectedThread,
-        activeThreadId: currentThreadState.activeThreadId,
         threadWork: selectedThreadWork,
         agentStatus: agentThreadStatus,
         backlog: backlogState,
@@ -3209,7 +3201,7 @@ export function App() {
                 setThreadStates((prev) => ({
                   ...prev,
                   [stream.id]: {
-                    ...(prev[stream.id] ?? { selectedThreadId: null, activeThreadId: null, threads: [] }),
+                    ...(prev[stream.id] ?? { selectedThreadId: null, threads: [] }),
                     threads: nextThreads,
                   },
                 }));
@@ -3428,7 +3420,6 @@ export function App() {
     generated,
     commitFilesRequest,
     centerActive,
-    currentThreadState.activeThreadId,
     selectedThreadWork,
     backlogState,
   ]);
@@ -3494,7 +3485,7 @@ export function App() {
           onOpenNewStreamPage={() => handleOpenPage(newStreamRef())}
           onRenameStream={handleRenameStreamById}
           onRenameThread={handleRenameThreadById}
-          onPromoteThread={handlePromoteThread}
+          onMarkThread={handleMarkThread}
           onCloseThread={handleCloseThread}
           onOpenStreamSettings={(streamId) => handleOpenPage(streamSettingsRef(streamId))}
           onOpenThreadSettings={(threadId) => handleOpenPage(threadSettingsRef(threadId))}
@@ -3603,7 +3594,7 @@ export function App() {
           {stream ? (
             <DomCommentLayer
               streamId={stream.id}
-              threadId={currentThreadState.activeThreadId ?? null}
+              threadId={currentThreadState.selectedThreadId ?? null}
             />
           ) : null}
         </div>

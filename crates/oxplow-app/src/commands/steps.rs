@@ -338,7 +338,7 @@ fn check_tree(
             });
         }
         if let Some(thread_id) = actor.gated_thread() {
-            let gated = may_write.filter(|_| spec.access.needs_writer());
+            let gated = may_write.filter(|_| spec.access.needs_thread());
             if let PolicyDecision::Deny { reason, .. } =
                 policy.check_command(actor.invoker(), thread_id.as_ref(), spec, gated)
             {

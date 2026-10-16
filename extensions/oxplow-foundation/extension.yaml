@@ -840,24 +840,18 @@ commands:
     invokers: { human: true, agent: true, lens: true }
     example: {"thread": "thread:thr12"}
   - name: thread.create
-    summary: "Start a thread on a stream (`stream:str1`) — or fork one (`from: thread:thr3`). It has no agent session yet (`oxplow.agent_session.open`). It becomes the stream's writer when it has none, else joins the queue."
+    summary: "Start a thread on a stream (`stream:str1`) — or fork one (`from: thread:thr3`). It has no agent session yet (`oxplow.agent_session.open`). It shares the stream's worktree with the stream's other threads."
     scope: threads.write
     op: create
     invokers: { human: true, agent: true, lens: true }
     ui: { label: "New Thread…", group: Tasks, form: new-thread, when: "streamShown" }
     example: {"stream": "stream:str1", "title": "Fix the login redirect loop"}
-  - name: thread.demote
-    summary: "Move a stream's writer back into the queue, leaving the stream with no writer."
+  - name: thread.mark
+    summary: "Mark a thread's tab with a colour (`amber`, `red`, `green`, `blue` or `violet`) for grouping threads your way; no `mark` clears it. It changes nothing else. A person's."
     scope: threads.write
-    op: demote
-    invokers: { human: true, agent: true, lens: true }
-    example: {"thread": "thread:thr12"}
-  - name: thread.promote
-    summary: "Make a thread its stream's writer (the one thread whose agent may change the worktree); the current writer joins the queue. Undo hands the worktree back."
-    scope: threads.write
-    op: promote
-    invokers: { human: true, agent: true, lens: true }
-    example: {"thread": "thread:thr12"}
+    op: mark
+    invokers: { human: true, agent: false, lens: true }
+    example: {"thread": "thread:thr12", "mark": "amber"}
   - name: thread.rename
     summary: "Rename a thread (`thread:thr12`)."
     scope: threads.write
@@ -865,7 +859,7 @@ commands:
     invokers: { human: true, agent: true, lens: true }
     example: {"thread": "thread:thr12", "title": "Fix the login redirect loop"}
   - name: thread.reopen
-    summary: "Reopen a closed thread (`thread:thr12`); it joins its stream's queue. An agent reopens only its own thread."
+    summary: "Reopen a closed thread (`thread:thr12`). An agent reopens only its own thread."
     scope: threads.write
     op: reopen
     invokers: { human: true, agent: true, lens: true }

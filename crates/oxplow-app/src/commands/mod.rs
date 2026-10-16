@@ -140,9 +140,9 @@ pub struct TxCtx<'a> {
     /// and raises `NeedsConfirmation`, which the bus treats as step 4
     /// would: rolled back, nothing audited.
     pub confirmed: bool,
-    /// Step 3's gate: whether the agent's thread may write; `None` for a
-    /// person, the system, or a command the gate doesn't apply to. A
-    /// composite applies it to each child it runs.
+    /// Step 3's gate: whether the agent's thread may write (it is open);
+    /// `None` for a person, the system, or a command the gate doesn't
+    /// apply to. A composite applies it to each child it runs.
     pub may_write: Option<bool>,
     /// How many composites this run is inside: 0 for the bus's own call,
     /// one more for each nested composite. Past [`MAX_NESTING`] a
@@ -462,8 +462,9 @@ impl Command {
     }
 }
 
-/// May this agent thread write? (`Thread::status.is_writer()` in
-/// production.) The bus asks before an agent runs a `Write` command.
+/// May this agent thread write? (`Thread::is_open()` in production: any
+/// open thread may change its worktree.) The bus asks before an agent runs
+/// a `Write` command.
 pub type WriteGate =
     Arc<dyn Fn(oxplow_domain::ThreadId) -> futures::future::BoxFuture<'static, bool> + Send + Sync>;
 
@@ -832,7 +833,7 @@ impl CommandBus {
     }
 
     /// Consult `gate` before an agent thread runs a `Write` command: a
-    /// queued or closed thread can read but not change anything.
+    /// closed thread can read but not change anything.
     pub fn with_write_gate(mut self, gate: WriteGate) -> Self {
         self.write_gate = Some(gate);
         self
@@ -1294,9 +1295,10 @@ impl CommandBus {
         // oxplow's own records.
         let mut gates = Gates { may_write: None };
         if let Some(thread_id) = actor.gated_thread() {
-            if spec.access.needs_writer() && thread_id.is_none() && !actor.is_anchorless_effect() {
+            if spec.access.needs_thread() && thread_id.is_none() && !actor.is_anchorless_effect() {
                 let err = CommandError::Denied {
-                    reason: "a writer-bound command requires the actor's thread".into(),
+                    reason: "a command that changes the workspace requires the actor's thread"
+                        .into(),
                 };
                 self.audit_only(run, spec, &input, Outcome::Denied, Some(err.to_string()))
                     .await;
@@ -1307,7 +1309,7 @@ impl CommandBus {
                 _ => None,
             };
             gates.may_write = may_write;
-            let gated = may_write.filter(|_| spec.access.needs_writer());
+            let gated = may_write.filter(|_| spec.access.needs_thread());
             if let PolicyDecision::Deny { reason, .. } =
                 self.policy
                     .check_command(actor.invoker(), thread_id.as_ref(), spec, gated)

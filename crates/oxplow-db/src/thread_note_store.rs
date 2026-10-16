@@ -206,7 +206,7 @@ mod tests {
     use crate::stream_store::SqliteStreamStore;
     use crate::thread_store::SqliteThreadStore;
     use oxplow_domain::stores::{StreamStore, ThreadStore};
-    use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadStatus};
+    use oxplow_domain::{Stream, StreamId, StreamKind, Thread};
 
     fn kinds() -> oxplow_domain::refs::kind::KindRegistry {
         oxplow_domain::refs::kind::core_kinds()
@@ -240,7 +240,6 @@ mod tests {
             id: ThreadId::new(1),
             stream_id: s.id,
             title: "t".into(),
-            status: ThreadStatus::Active,
             sort_index: 0,
             summary: String::new(),
             summary_updated_at: None,
@@ -249,6 +248,7 @@ mod tests {
             created_at: at,
             updated_at: at,
             archived_at: None,
+            mark: None,
         };
         SqliteThreadStore::new(db.clone()).upsert(&t).await.unwrap();
         (db, t.id)

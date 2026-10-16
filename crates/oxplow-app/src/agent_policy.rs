@@ -43,7 +43,7 @@ impl AgentPolicy {
     /// an effect acts with an agent's rights, so its commands must be open
     /// to agents (a job's were admitted as a job's), and a `Write` command
     /// needs a thread that may write (`may_write`, from the bus's write
-    /// gate — a queued or closed thread can read, not change). `None`
+    /// gate — an open thread; a closed one can read, not change). `None`
     /// means the gate had nothing to say (a read, or no thread/gate).
     pub fn check_command(
         &self,
@@ -62,7 +62,7 @@ impl AgentPolicy {
             return PolicyDecision::Deny {
                 layer: oxplow_runtime::policy::DenyLayer::Command,
                 reason: format!(
-                    "`{}` changes state, and thread {} may not write (only the stream's writer thread can)",
+                    "`{}` changes the workspace, and thread {} is closed (reopen it to write)",
                     spec.id,
                     thread_id.map(|t| t.to_string()).unwrap_or_default()
                 ),
@@ -102,7 +102,6 @@ impl AgentPolicy {
         decide_tool(
             intent,
             &PolicyFacts {
-                thread: &thread,
                 worktree_root: &worktree_root,
                 other_roots: &other_roots,
                 project_dir,

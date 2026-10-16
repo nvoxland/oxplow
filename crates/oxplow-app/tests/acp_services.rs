@@ -18,7 +18,7 @@ use oxplow_app::chat::transcript::ItemBody;
 use oxplow_app::Services;
 use oxplow_db::semantic_layer::SqlCell;
 use oxplow_domain::stores::{AgentSessionStore, AgentTurnStore, StreamStore, ThreadStore};
-use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, ThreadStatus, Timestamp};
+use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, Timestamp};
 use oxplow_tasks::TaskId;
 use oxplow_tasks::TaskStore;
 use oxplow_tasks::{Task, TaskActorKind, TaskPriority, TaskStatus};
@@ -42,7 +42,7 @@ async fn boot() -> (Arc<Services>, std::path::PathBuf, tempfile::TempDir) {
     (svc, root, dir)
 }
 
-async fn seed(svc: &Services, root: &std::path::Path, status: ThreadStatus) -> ThreadId {
+async fn seed(svc: &Services, root: &std::path::Path) -> ThreadId {
     let now = Timestamp::from_unix_ms(1);
     let stream = Stream {
         id: StreamId::new(1),
@@ -67,7 +67,6 @@ async fn seed(svc: &Services, root: &std::path::Path, status: ThreadStatus) -> T
         id: ThreadId::new(1),
         stream_id: stream.id,
         title: "t".into(),
-        status,
         sort_index: 0,
         summary: String::new(),
         summary_updated_at: None,
@@ -76,6 +75,7 @@ async fn seed(svc: &Services, root: &std::path::Path, status: ThreadStatus) -> T
         created_at: now,
         updated_at: now,
         archived_at: None,
+        mark: None,
     };
     svc.thread_store.upsert(&thread).await.unwrap();
     svc.agent_session_store
@@ -206,7 +206,7 @@ fn items(svc: &Services, session: oxplow_domain::AgentSessionId) -> Vec<ItemBody
 #[tokio::test]
 async fn an_acp_edit_is_recorded_like_a_hooked_one() {
     let (svc, root, _dir) = boot().await;
-    let thread = seed(&svc, &root, ThreadStatus::Active).await;
+    let thread = seed(&svc, &root).await;
     claim_task(&svc, thread).await;
     let session = open_in_process(&svc, thread, &root).await;
     // After open: the startup `Idle` must not read as a finished turn.
@@ -310,17 +310,20 @@ async fn an_acp_edit_is_recorded_like_a_hooked_one() {
     assert!(s.resume_session_id.starts_with("fake-session-"));
 }
 
+/// An ACP agent's edit into another stream's worktree is refused by the
+/// write guard, as a terminal agent's is.
 #[tokio::test]
-async fn a_read_only_thread_is_refused_by_the_write_guard() {
+async fn an_edit_into_another_streams_worktree_is_refused_by_the_write_guard() {
     let (svc, root, _dir) = boot().await;
-    let thread = seed(&svc, &root, ThreadStatus::Queued).await;
+    let thread = seed(&svc, &root).await;
+    let other = seed_worktree_stream(&svc, &root).await;
     let session = open_in_process(&svc, thread, &root).await;
     // After open: the startup `Idle` must not read as a finished turn.
     let mut rx = svc.chat.subscribe();
     svc.chat
         .submit_human_prompt(
             &session,
-            format!("fake:edit {}", root.join("a.rs").display()),
+            format!("fake:edit {}", other.join("a.rs").display()),
         )
         .await
         .unwrap();
@@ -344,7 +347,35 @@ async fn a_read_only_thread_is_refused_by_the_write_guard() {
             _ => None,
         })
         .unwrap();
-    assert!(reason.contains("read-only"), "{reason}");
+    assert!(reason.contains("another stream's worktree"), "{reason}");
+}
+
+/// A worktree stream (id 2) beside the project, `<root>-wt`.
+async fn seed_worktree_stream(svc: &Services, root: &std::path::Path) -> std::path::PathBuf {
+    let now = Timestamp::from_unix_ms(1);
+    let tree = std::path::PathBuf::from(format!("{}-wt", root.display()));
+    svc.stream_store
+        .upsert(&Stream {
+            id: StreamId::new(2),
+            kind: StreamKind::Worktree,
+            title: "wt".into(),
+            branch: "feat".into(),
+            branch_ref: "refs/heads/feat".into(),
+            branch_source: "main".into(),
+            worktree_path: tree.to_string_lossy().into(),
+            working_pane: String::new(),
+            talking_pane: String::new(),
+            working_session_id: String::new(),
+            talking_session_id: String::new(),
+            host: oxplow_domain::HostId::LOCAL,
+            custom_prompt: None,
+            created_at: now,
+            updated_at: now,
+            archived_at: None,
+        })
+        .await
+        .unwrap();
+    tree
 }
 
 /// The fake's binary, built next to this test binary by a workspace
@@ -375,7 +406,7 @@ fn fake_bin() -> std::path::PathBuf {
 #[tokio::test]
 async fn the_agent_process_runs_and_a_crash_stops_the_thread() {
     let (svc, root, _dir) = boot().await;
-    let thread = seed(&svc, &root, ThreadStatus::Active).await;
+    let thread = seed(&svc, &root).await;
     let session = session_of(&svc, thread).await;
     let host = Arc::new(ServicesChatHost::new(&svc, Some(StreamId::new(1)), session));
     svc.chat
@@ -436,7 +467,7 @@ async fn the_agent_process_runs_and_a_crash_stops_the_thread() {
 #[tokio::test]
 async fn two_acp_sessions_in_a_thread_run_apart() {
     let (svc, root, _dir) = boot().await;
-    let thread = seed(&svc, &root, ThreadStatus::Active).await;
+    let thread = seed(&svc, &root).await;
     let a = open_in_process(&svc, thread, &root).await;
     let b = svc
         .agent_session_store
@@ -478,7 +509,7 @@ async fn closing_an_acp_thread_stops_its_session() {
     // Every session's process stops with its thread: the ACP agent and a
     // terminal session's PTY.
     let (svc, root, _dir) = boot().await;
-    let thread = seed(&svc, &root, ThreadStatus::Queued).await;
+    let thread = seed(&svc, &root).await;
     let session = open_in_process(&svc, thread, &root).await;
     assert!(svc.chat.is_open(&session));
     let terminal = svc
@@ -536,7 +567,7 @@ async fn a_permission_card_restores_the_status_it_interrupted() {
     use oxplow_app::chat::host::ChatHost as _;
     use oxplow_domain::AgentStatusState;
     let (svc, root, _dir) = boot().await;
-    let thread = seed(&svc, &root, ThreadStatus::Active).await;
+    let thread = seed(&svc, &root).await;
     let host = ServicesChatHost::new(&svc, Some(StreamId::new(1)), session_of(&svc, thread).await);
     let status = || async {
         let s = svc

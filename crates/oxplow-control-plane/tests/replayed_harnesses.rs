@@ -20,7 +20,7 @@ use common::boot;
 use oxplow_app::observe_conformance::{suite, Expect};
 use oxplow_domain::agent_session::NewAgentSession;
 use oxplow_domain::stores::{AgentSessionStore, AgentTurnStore, StreamStore, ThreadStore};
-use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, ThreadStatus, Timestamp};
+use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, Timestamp};
 
 /// One recorded hook: its event and its body as the agent sent it.
 #[derive(serde::Deserialize)]
@@ -105,7 +105,6 @@ async fn replayed(name: &str, harness: &str) -> Replayed {
         id: ThreadId::new(1),
         stream_id: stream.id,
         title: "t".into(),
-        status: ThreadStatus::Active,
         sort_index: 0,
         summary: String::new(),
         summary_updated_at: None,
@@ -114,6 +113,7 @@ async fn replayed(name: &str, harness: &str) -> Replayed {
         created_at: now,
         updated_at: now,
         archived_at: None,
+        mark: None,
     };
     svc.thread_store.upsert(&thread).await.unwrap();
     let session = svc

@@ -17,8 +17,8 @@ where something works, why a choice was made, which approach is better);
 the answer took synthesis, not a one-line lookup; and it's worth keeping.
 Skip when you ran edits or commits (commits capture those), you're still
 asking a clarifying question, or it was a single-file lookup. `/note`,
-"save this" or "add to the wiki" always capture. A read-only thread
-captures the same way: `oxplow.knowledge.write_page` is open to every thread.
+"save this" or "add to the wiki" always capture. Every thread captures
+the same way: `oxplow.knowledge.write_page` is open to every thread.
 
 ## Find before you create
 

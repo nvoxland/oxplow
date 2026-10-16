@@ -414,14 +414,6 @@ impl ChatManager {
         rx.await.map_err(|_| ChatError::NotOpen)?
     }
 
-    /// Tell every running session's connection what its thread may write
-    /// now (a thread was promoted or demoted).
-    pub fn sync_access(&self) {
-        for h in self.sessions.lock().values().filter(|h| h.alive()) {
-            let _ = h.commands.send(Command::SyncAccess);
-        }
-    }
-
     /// Answer a permission card; `option_id: None` cancels it.
     pub async fn respond_permission(
         &self,

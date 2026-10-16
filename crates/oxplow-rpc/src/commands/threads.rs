@@ -47,12 +47,10 @@ pub struct SelectThreadRequest {
 pub struct ThreadState {
     #[serde(rename = "selectedThreadId")]
     pub selected_thread_id: Option<ThreadId>,
-    #[serde(rename = "activeThreadId")]
-    pub active_thread_id: Option<ThreadId>,
     pub threads: Vec<Thread>,
 }
 
-/// Aggregate "what threads exist on this stream and what's selected/active".
+/// What threads are open on this stream, and which the person is on.
 pub async fn get_thread_state(
     svc: &Services,
     stream_id: StreamId,
@@ -64,21 +62,17 @@ pub async fn get_thread_state(
         .list_for_stream(&stream_id)
         .await?
         .into_iter()
-        .filter(|t| t.status != oxplow_domain::ThreadStatus::Closed)
+        .filter(Thread::is_open)
         .collect();
-    let active = threads
-        .iter()
-        .find(|t| t.status == oxplow_domain::ThreadStatus::Active)
-        .map(|t| t.id);
-    // A selection that was closed falls back to the writer.
+    // A selection that was closed falls back to the first open thread.
     let selected = svc
         .threads
         .selected(&stream_id)
         .await?
-        .filter(|id| threads.iter().any(|t| t.id == *id));
+        .filter(|id| threads.iter().any(|t| t.id == *id))
+        .or_else(|| threads.first().map(|t| t.id));
     Ok(ThreadState {
-        selected_thread_id: selected.or(active),
-        active_thread_id: active,
+        selected_thread_id: selected,
         threads,
     })
 }
@@ -107,7 +101,7 @@ mod tests {
 
     /// A closed thread leaves the stream's thread state (the nav lists open
     /// threads; closed ones are on the Closed Threads page), and a stream
-    /// whose selected thread was closed falls back to its writer.
+    /// whose selected thread was closed falls back to its first open one.
     #[tokio::test]
     async fn a_closed_thread_leaves_the_thread_state() {
         let (svc, _dir) = crate::test_support::services().await;
@@ -125,7 +119,7 @@ mod tests {
         let stream_ref = format!("stream:{}", stream.id);
         run(
             "oxplow.thread.create",
-            serde_json::json!({ "stream": stream_ref, "title": "Writer" }),
+            serde_json::json!({ "stream": stream_ref, "title": "First" }),
         )
         .await;
         let other = run(
@@ -161,8 +155,8 @@ mod tests {
             .map(|t| t["id"].as_str().unwrap())
             .collect();
         assert!(!ids.contains(&other_id.as_str()), "{ids:?}");
-        assert!(state["activeThreadId"].is_string());
-        assert_eq!(state["selectedThreadId"], state["activeThreadId"]);
+        assert_eq!(state["selectedThreadId"], ids[0]);
+        assert!(state.get("activeThreadId").is_none());
     }
 
     #[tokio::test]

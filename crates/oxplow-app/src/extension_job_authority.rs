@@ -90,7 +90,7 @@ impl JobGrantResolver for DeclaredJobGrants {
             .map_err(|_| JobAuthorityError::Denied)?;
         // This operation reads through ai.compute. Current principal policy
         // is the host's thread/stream check plus explicit model-use consent;
-        // it acquires no generic command or workspace writer admission.
+        // it acquires no generic command or workspace-changing admission.
         if descriptor.id.kind != oxplow_domain::contribution::ContributionKind::Job
             || descriptor.id != owner.contribution
             || !crate::extensions::jobs::needs_hold(&descriptor.needs)
@@ -147,7 +147,9 @@ pub struct JobAuthorityHost {
 pub struct JobExecution {
     run: RunContext,
     live: Gate,
-    writer: bool,
+    /// It declares a need that changes the workspace: its thread must be
+    /// open.
+    needs_thread: bool,
 }
 
 impl JobExecution {
@@ -167,12 +169,12 @@ impl JobExecution {
                     .map_err(JobAuthorityError::Storage)?
                     .ok_or(JobAuthorityError::Denied)?;
                 if self.run.anchors().stream_id != Some(thread.stream_id)
-                    || (self.writer && !thread.status.is_writer())
+                    || (self.needs_thread && !thread.is_open())
                 {
                     return Err(JobAuthorityError::Denied);
                 }
             }
-            None if self.writer => return Err(JobAuthorityError::Denied),
+            None if self.needs_thread => return Err(JobAuthorityError::Denied),
             None => {}
         }
         Ok(())
@@ -281,9 +283,9 @@ impl JobAuthorityHost {
             return Err(JobAuthorityError::Denied);
         }
         let descriptor = current_descriptor(&self.catalog, &self.project, &job.job.owner)?;
-        let writer = descriptor.needs.iter().any(|need| {
+        let needs_thread = descriptor.needs.iter().any(|need| {
             oxplow_domain::scope::scope(oxplow_domain::service::need_scope(need))
-                .is_some_and(|scope| scope.access.needs_writer())
+                .is_some_and(|scope| scope.access.needs_thread())
         });
         match provenance.anchors().thread_id {
             Some(id) => {
@@ -294,12 +296,12 @@ impl JobAuthorityHost {
                     .map_err(JobAuthorityError::Storage)?
                     .ok_or(JobAuthorityError::Denied)?;
                 if provenance.anchors().stream_id != Some(thread.stream_id)
-                    || (writer && !thread.status.is_writer())
+                    || (needs_thread && !thread.is_open())
                 {
                     return Err(JobAuthorityError::Denied);
                 }
             }
-            None if writer => return Err(JobAuthorityError::Denied),
+            None if needs_thread => return Err(JobAuthorityError::Denied),
             None => {}
         }
         let permission = self
@@ -356,7 +358,11 @@ impl JobAuthorityHost {
         // No generation pin: a job runs for minutes and an activation must
         // not wait for it. Each tool call and the publication pin for
         // themselves, and `live` checks the job's own extension then.
-        Ok(JobExecution { run, live, writer })
+        Ok(JobExecution {
+            run,
+            live,
+            needs_thread,
+        })
     }
 }
 

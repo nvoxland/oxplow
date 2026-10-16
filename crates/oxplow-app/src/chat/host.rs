@@ -30,9 +30,6 @@ pub trait ChatHost: Send + Sync + 'static {
     ) -> PolicyDecision;
     /// A session is up (new or loaded): remember it for the next resume.
     async fn session_started(&self, thread: &ThreadId, session_id: &str);
-    /// Whether the thread may write its worktree now (it is its stream's
-    /// writer).
-    async fn writable(&self, thread: &ThreadId) -> bool;
     /// Context to attach to the person's next prompt.
     async fn prompt_context(&self, thread: &ThreadId, session_id: &str) -> Option<String>;
     async fn turn_started(&self, thread: &ThreadId, session_id: &str, prompt: &str);
@@ -184,25 +181,17 @@ impl ChatHost for ServicesChatHost {
         self.ingest(&svc, env).await;
     }
 
-    /// Unknown reads as read-only.
-    async fn writable(&self, thread: &ThreadId) -> bool {
-        use oxplow_domain::stores::ThreadStore as _;
-        let Some(svc) = self.svc.upgrade() else {
-            return false;
-        };
-        svc.thread_store
-            .get(thread)
-            .await
-            .ok()
-            .flatten()
-            .is_some_and(|t| t.status.is_writer())
-    }
-
     async fn prompt_context(&self, thread: &ThreadId, session_id: &str) -> Option<String> {
         let svc = self.svc.upgrade()?;
         let harness = self.harness(&svc).await;
         svc.agent_context
-            .prompt_context(&svc, thread, Some(session_id), harness.as_deref())
+            .prompt_context(
+                &svc,
+                thread,
+                Some(session_id),
+                Some(self.session),
+                harness.as_deref(),
+            )
             .await
     }
 

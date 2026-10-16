@@ -3214,7 +3214,7 @@ pub async fn lens_context(
     }
     let thread = match (thread, stream) {
         (Some(t), _) => Some(t),
-        (None, Some(s)) => svc.threads.selected_or_active(&s).await.ok().flatten(),
+        (None, Some(s)) => svc.threads.selected_or_first(&s).await.ok().flatten(),
         (None, None) => None,
     };
     LensContext {

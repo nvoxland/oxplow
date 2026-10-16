@@ -1323,9 +1323,9 @@ mod tests {
         parts
     }
 
-    /// The identity of the primary stream's writer thread — what oxplow's
+    /// The identity of the primary stream's first thread — what oxplow's
     /// harness configs send, and what a status-changing tool needs.
-    async fn as_writer(services: &oxplow_app::Services) -> rmcp::model::Extensions {
+    async fn as_primary_thread(services: &oxplow_app::Services) -> rmcp::model::Extensions {
         use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
         let stream = services.stream_store.list().await.unwrap().pop().unwrap();
         let thread = services
@@ -1335,7 +1335,7 @@ mod tests {
             .unwrap()
             .into_iter()
             .next()
-            .expect("primary stream must have a writer thread");
+            .expect("the primary stream has a thread");
         extensions_for(parts_as(thread.id, stream.id, &[]))
     }
 
@@ -1597,7 +1597,7 @@ mod tests {
             .unwrap()
             .into_iter()
             .next()
-            .expect("primary stream must have a writer thread");
+            .expect("the primary stream has a thread");
         let parts = parts_as(thread.id, stream.id, &[]);
         let out = server
             .run_command(
@@ -1785,7 +1785,7 @@ mod tests {
         let out: serde_json::Value = serde_json::from_str(&text_payload(
             call(
                 &server,
-                &as_writer(&services).await,
+                &as_primary_thread(&services).await,
                 "oxplow_show_lens",
                 serde_json::json!({
                     "spec": {
@@ -1913,7 +1913,7 @@ mod tests {
     #[tokio::test]
     async fn ai_tools_decide_and_summarize() {
         let (_proj, services, server) = boot().await;
-        let me = as_writer(&services).await;
+        let me = as_primary_thread(&services).await;
         let thread = oxplow_domain::refs::build::thread_ref(caller_of(&me).thread_id.unwrap());
         // Unassigned role: a clear error, not a crash.
         let err = call(

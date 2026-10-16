@@ -152,15 +152,14 @@ impl CodexConnection {
 #[async_trait]
 impl Connection for CodexConnection {
     /// The harness's request (`thread/start`, `thread/resume`,
-    /// `thread/fork`), sandboxed to what the thread may do. A new thread is
-    /// persisted at once, so Codex's TUI can resume it.
-    async fn open(&self, _cwd: &Path, writable: bool) -> Result<Opened, String> {
+    /// `thread/fork`), sandboxed to the thread's worktree: Codex may change
+    /// it and nothing outside it — another stream's worktree included
+    /// (`.context/agent-model.md` "The sandbox confines Codex to its
+    /// worktree"). A new thread is persisted at once, so Codex's TUI can
+    /// resume it.
+    async fn open(&self, _cwd: &Path) -> Result<Opened, String> {
         let mut params = self.open.params.clone();
-        params["sandbox"] = json!(if writable {
-            "workspace-write"
-        } else {
-            "read-only"
-        });
+        params["sandbox"] = json!("workspace-write");
         let opened = self
             .server
             .request(&self.open.method, params)
@@ -202,32 +201,12 @@ impl Connection for CodexConnection {
     }
 
     /// The person prompts in Codex's TUI; nothing here sends a turn.
-    fn prompt(&self, _prompt: HumanPrompt, _writable: bool) -> Result<(), String> {
+    fn prompt(&self, _prompt: HumanPrompt) -> Result<(), String> {
         Err("a Codex session is prompted in Codex's own TUI".into())
     }
 
     /// The TUI stops its own turns.
     fn cancel(&self) {}
-
-    /// The thread's sandbox for the turns from now on — the TUI's included
-    /// — to what the thread may do: the write guard, as the thread is
-    /// promoted or demoted.
-    fn set_writable(&self, writable: bool) {
-        let sandbox = if writable {
-            json!({"type": "workspaceWrite"})
-        } else {
-            json!({"type": "readOnly"})
-        };
-        let (server, params) = (
-            self.server.clone(),
-            json!({"threadId": self.thread(), "sandboxPolicy": sandbox}),
-        );
-        tokio::spawn(async move {
-            if let Err(e) = server.request("thread/settings/update", params).await {
-                tracing::warn!(error = %e, "codex: setting the thread's sandbox failed");
-            }
-        });
-    }
 
     async fn closed(&self) {
         self.server.closed().await;

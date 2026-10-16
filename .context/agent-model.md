@@ -102,10 +102,10 @@ harness only delivers them.
 | Piece | What | Where it comes from |
 |---|---|---|
 | Preamble | How to work in oxplow: nothing to file, end with the question, reading the errors a person saw, the references oxplow puts in a prompt (`@<path>`, `[oxplow ref …]`, `[oxplow work_item: …]`, `[oxplow lens …]`) | `oxplow_agent_text::WORKING_IN_OXPLOW` (`crates/oxplow-agent-text/assets/working-in-oxplow.md`) |
-| Launch prompt | The preamble; the session context only for a harness without `prompt_context`; the thread's and stream's custom prompts; `agentPromptAppend`; the testing hint (`testing.agentHint`); the skill index only for a harness without `runtime_text` | `agent_prompt::assemble_system_prompt(config, stream, thread, harness, skills)`, given the session's declared harness (`crates/oxplow-app/src/agent_prompt.rs`) |
+| Launch prompt | The preamble; the session context only for a harness without `prompt_context`; the thread's and stream's custom prompts; `agentPromptAppend`; the testing hint (`testing.agentHint`); the skill index only for a harness without `runtime_text` | `agent_prompt::assemble_system_prompt(config, stream, thread, others, harness, skills)`, given the session's declared harness (`crates/oxplow-app/src/agent_prompt.rs`) |
 | Skills | Core's (`oxplow-runtime`, `-wiki-capture`, `-mermaid`, `-collection`, `-metrics`, `-extension`, `-codebase`) and the active extensions' | `AgentText` (`oxplow_agent_text::core_text` + `capabilities::agent_text`) |
 | Slash commands | Core's (`review-comments`, `configure`, `new-metric`) and the active extensions' | Same |
-| Session context | Stream, worktree, branch, thread, access, the writer's agent, a role change | Prompt-time context |
+| Session context | Stream, worktree, branch, thread, the other live agents in the worktree | Prompt-time context |
 | Decisions | The open effort's recorded ones | Prompt-time context |
 | Nudges | Advisory hints, the collection nudge | Prompt- or tool-time context ("Nudge persistence") |
 | Server instructions | What oxplow knows, writes are commands, answer with `oxplow_show_lens` | MCP `get_info` ("The agent's tools") |
@@ -157,18 +157,21 @@ the session-context block off.
 prompt carries the session context and the decisions again. The baselines
 are in memory: a daemon restart costs at most one repeated block.
 
-**The writer's agent.** A read-only thread's block carries a
-`**Writer thread:**` line naming the stream's writer thread and its live
-agent (harness key, pid, the harness's session id), so the agent can find
-it in `ListAgents` (`live_writer_agent`, `build_session_context_block_full`).
-
-**A role change.** The block appends an `**Access changed:**` note when
-the thread's role differs from the one it had when the session was first
-seen (`initial_role_by_session_id`, captured on its first prompt):
-promoted to writer, or made read-only (wiki pages still go through
-`oxplow.knowledge.write_page`). A plan's PostToolUse (`kind: plan`)
-carries the note alone, for a promotion while the plan waited for
-approval, since no prompt comes between; nudges wait for the next call.
+**Who else is in the worktree.** A stream's threads share its worktree,
+and any number of agents may work there at once — in one thread or
+several. The block names the others, so an agent knows it isn't alone:
+`- **Also in this worktree:** <name> (`<harness>`, thread <title>
+(`<thrN>`)); …`, one line, left out when there are none
+(`agent_context::others_in_worktree`, `build_session_context_block`). An
+agent is in it while its session is open on an open thread of the stream
+and its recorded pid is alive (`daemon_supervisor::process_alive`); it is
+named by `v_agent_session.display_name` (read through the SQL gateway, so
+the view stays the one place a session is named), and the asking session
+is left out by its row id (the hook's `agent_session_id`, the chat host's
+session, the launch's row). Nothing in the line is for the agent to act
+on: no pid, no session id. An agent arriving or leaving changes the
+block, so the next prompt carries it; a harness without a prompt channel
+(Codex) has only what its launch saw.
 
 ### Per-harness delivery
 
@@ -840,15 +843,14 @@ with the session or its thread (`SessionProcesses::kill`). After an
 oxplow restart the next open resumes the thread with `config` again
 (a loaded thread no client holds takes it).
 
-**The sandbox is the write guard.** No hook runs before a Codex edit, so
-the thread's access is Codex's sandbox: the open request carries
-`workspace-write` for the stream's writer thread and `read-only` for any
-other (`ChatHost::writable`). After any `oxplow.thread.*` command
-(`chat::access`, a pump consumer on `command.executed`) every running
-session re-reads its access, and a changed one is sent as
-`thread/settings/update { sandboxPolicy }` — only a change, since one
-restarts the thread's MCP servers. It holds for the turns after it, the
-TUI's included.
+**The sandbox confines Codex to its worktree.** No hook runs before a
+Codex edit, so the cross-stream rule ("Isolation") is Codex's sandbox:
+the open request always carries `workspace-write` with the thread's
+worktree as its root, so Codex may change that tree and nothing outside
+it — another stream's included. oxplow never changes the sandbox after.
+A thread the TUI starts itself (`/new`, or a switch of its own) runs on
+the TUI's own config and is outside oxplow: it is the person's Codex
+session, and oxplow leaves it alone.
 
 **No context channel.** The TUI owns the prompt, so Codex declares no
 `prompt_context` / `tool_context`: what it is told comes in the system
@@ -889,8 +891,7 @@ it names (`paths`), a shell call's `command`, a short `detail`, the
   harness's `tool_use` may be a provider's call. A body naming no tool
   records nothing.
 - **What reads it.** The write guard (`edit`, every path), the status
-  derivation (`subagent`, `ask`, `plan`), the role-change note (`plan`),
-  effort file claims (`edit`), test-run collection (`shell`, its `command`
+  derivation (`subagent`, `ask`, `plan`), effort file claims (`edit`), test-run collection (`shell`, its `command`
   and `exit_code`), a turn's writing calls (`thread.checkpoint`, by
   `v_tool_call.kind`), the bundled struggle model, `v_context_read`, and
   `agent.tool.requested@3` / `agent.tool.finished@3`, which carry `tool`,
@@ -1040,15 +1041,13 @@ The write guard is one policy every transport asks, not logic in the hook
 route. It is isolation only; nothing waits on tracked work
 ([work-tracking.md](./work-tracking.md)).
 
-**The one rule:** the guard keeps agents off worktree files, nothing
-more. A non-writer thread may not change its own stream's worktree, and
-no thread may change another stream's. Everything else is open to every
-thread: files outside every stream, the shared wiki (through
-`oxplow.knowledge.write_page`), and oxplow's own objects — work items,
-efforts, notes, comments. A task's state and an effort are records, not
-claims on the worktree, so a research or review thread can say what it's
-working on. The bus's `WriteGate` applies to `Write` commands only;
-`Record` commands skip it ([commands.md](./commands.md) "The pipeline").
+**The two rules:** no thread may change another stream's worktree, and
+wiki pages are written by command. Everything else is open to every
+thread: its own stream's worktree, files outside every stream, the shared
+wiki (through `oxplow.knowledge.write_page`), and oxplow's own objects —
+work items, efforts, notes, comments. The bus's `WriteGate` asks only that
+a `Write` command's thread be open; `Record` commands skip it
+([commands.md](./commands.md) "The pipeline").
 **An agent may open a sibling agent session** in its own stream
 (`oxplow.agent_session.open`): the row makes the UI attach and start its
 process, and nothing types into it; its close is destructive and a
@@ -1061,10 +1060,11 @@ proposal.
   canonicalized), so a `..` or a symlink can't spell a guarded path as an
   outside one. With several paths, the first refused wins.
 - **I/O** in `crates/oxplow-app/src/agent_policy.rs` (`Services.agent_policy`):
-  `check_tool(svc, thread, intent)` gathers the thread, its stream's
-  worktree, the other streams' and the project dir; `check_command(thread,
-  spec)` is the bus's agent gate — an agent runs a command only when its
-  spec admits agents (`DenyLayer::Command`); `intent_of(tool)` makes an
+  `check_tool(svc, thread, intent)` gathers its stream's worktree, the
+  other streams' and the project dir; `check_command(thread, spec,
+  may_write)` is the bus's agent gate — an agent runs a command only when
+  its spec admits agents, and a `Write` only from an open thread
+  (`DenyLayer::Command`); `intent_of(tool)` makes an
   edit a worktree write of every file it names, and nothing else can be
   refused (`may_refuse`).
 - **Transports only render.** The route's answer is a neutral
@@ -1075,32 +1075,37 @@ proposal.
   too. A chat session's agent (ACP, Codex) gets a permission reject or an
   fs error.
 
-### Write guard
+### Isolation
 
-Non-writer threads share the writer's worktree (same checkout, separate
-agent sessions); their writing would corrupt the writer's work in
-progress.
+An edit (`kind: edit` — Claude's `Write`/`Edit`/`MultiEdit`/`NotebookEdit`,
+opencode's `apply_patch`, an ACP agent's or a Codex thread's edit, delete
+or move) is refused in two places, and nowhere else
+(`crates/oxplow-runtime/src/write_guard.rs`):
 
-- **Edits** (`kind: edit` — Claude's `Write`/`Edit`/`MultiEdit`/`NotebookEdit`,
-  opencode's `apply_patch`, an ACP agent's or a Codex thread's edit,
-  delete or move) from a non-writer thread into its own stream's worktree (the
-  project's `.oxplow/` included) are denied; the reason is
-  `write_guard::read_only_reason` (`crates/oxplow-runtime/src/write_guard.rs`)
-  and names the path and `oxplow.thread.promote` (which a person or the
-  agent may run; the current writer joins the queue). An absolute path
-  outside the thread's worktree and every other stream's is allowed
-  (`~/.claude/plans/foo.md`).
-- **Another stream's worktree** (the primary checkout included) is denied
-  for every thread, writer or not.
+- **Another stream's worktree** (the primary checkout included), for
+  every thread (`write_guard::foreign_worktree_reason`, naming the path
+  and the tree). Its own stream's worktree, and an absolute path outside
+  every stream's (`~/.claude/plans/foo.md`), are allowed.
 - **Wiki pages are written by command.** A direct write to the primary
   project's `.oxplow/wiki/` is denied for every thread
   (`write_guard::wiki_page_reason`); pages go through
   `knowledge.write_page`.
-- **Shell isn't classified.** A non-writer's shell commands aren't
-  checked; the session context's Access line says the thread is
-  read-only.
+- **Shell isn't classified.** An agent's shell commands aren't checked.
 - MCP tools are never refused here: their writes are commands, gated on
   the bus.
+
+**Why there is no writer thread.** A stream used to have one writer
+thread whose agent alone could edit its worktree; the others were
+read-only. It never protected the checkout: a thread runs several agents
+at once, shell commands go unchecked, and a Codex TUI starts threads of
+its own outside oxplow's sandbox — a demoted thread still wrote a file
+through one. Closing those holes means reaching into each harness's
+internals and imposing oxplow on sessions it didn't start. So a thread is
+open or closed, nothing more; who works in a checkout at once is the
+person's call (a new stream is the isolated option), and each agent is
+told who else is there ("Who else is in the worktree"). A thread's
+corner fold in the Navigator is the person's own mark
+(`oxplow.thread.mark`), not a role.
 
 ### Stop hook
 
@@ -1440,8 +1445,7 @@ advisories; at most `NUDGE_BUDGET`, 2000 characters, per hook), and
 `prompt_context` takes them the same way. One that lands after its hook
 answered reaches the agent on the thread's next tool call or prompt.
 Nothing is taken for a session whose harness lacks the hook's channel:
-its nudges stay undelivered rather than being stamped and lost. A plan's
-role-change note wins its call; nudges wait for the next. **One-shot marks
+its nudges stay undelivered rather than being stamped and lost. **One-shot marks
 are durable** (`claim_once`, per effort or per thread): the report-less
 nudge fires once per effort, an advisory once per its `once_per` scope,
 across restarts. A person reads what oxplow told the agent in the bundled
@@ -1481,10 +1485,12 @@ No findings passes.
 
 ## Pitfalls
 
-- **The write guard refuses edits from a non-writer thread.** An agent
-  reporting "permission denied" on a write in a non-writer thread is the
-  guard working: promote the thread (`oxplow.thread.promote`) or work in
-  the writer thread.
+- **The write guard refuses edits into another stream's worktree.** An
+  agent reporting "permission denied" on a write there is the guard
+  working: do it from a thread of that stream.
+- **Several agents may share a checkout.** Two agents in one worktree
+  (one thread or two) can step on each other's files, builds and commits;
+  each is told the other is there, nothing stops them.
 - **Filing work doesn't start an idle agent.** Someone has to prompt it
   ("What we can't do from oxplow hooks").
 - **oxplow never commits on its own.** No commit at Stop, no commit

@@ -6,7 +6,7 @@ query: |
          NULL AS ref, t.title AS thread, a.since AS since
   FROM v_agent_status a
   JOIN v_thread t ON t.id = a.thread_id
-  WHERE a.state = 'awaiting_user' AND t.status <> 'closed'
+  WHERE a.state = 'awaiting_user' AND t.closed_at IS NULL
   UNION ALL
   SELECT 'Blocked', title, ref, NULL, updated_at
   FROM v_work_item WHERE state = 'blocked'

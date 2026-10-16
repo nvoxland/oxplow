@@ -1156,8 +1156,8 @@ export type Access =
 "record" | 
 /**
  *  Changes something outside oxplow's records — files, git, processes,
- *  the configuration: audited, and an agent's only from its stream's
- *  writer thread.
+ *  the configuration: audited, and an agent's or job's run must be
+ *  bound to an open thread (the worktree it changes).
  */
 "write";
 
@@ -6259,13 +6259,12 @@ export type Thread = {
 	id: ThreadId,
 	stream_id: StreamId,
 	title: string,
-	status: ThreadStatus,
 	sort_index: number,
 	summary: string,
 	summary_updated_at: Timestamp | null,
 	/**
-	 *  Timestamp when the thread was closed (status transitions to
-	 *  `Closed`). `None` for active/queued threads.
+	 *  When the thread was closed; `None` while it is open. Open or
+	 *  closed is all a thread's state is.
 	 */
 	closed_at: Timestamp | null,
 	/**
@@ -6281,9 +6280,18 @@ export type Thread = {
 	 *  `ThreadStore::list_for_stream`.
 	 */
 	archived_at: Timestamp | null,
+	/**  The person's colour for its tab; `None` when unmarked. */
+	mark: ThreadMark | null,
 };
 
 export type ThreadId = string;
+
+/**
+ *  The colour a person marks a thread's tab with (`oxplow.thread.mark`):
+ *  a fold in its tab's corner, for grouping threads their own way. It
+ *  changes nothing else.
+ */
+export type ThreadMark = "amber" | "red" | "green" | "blue" | "violet";
 
 /**
  *  A note on a thread: the per-thread capture pad an agent writes as it
@@ -6299,19 +6307,8 @@ export type ThreadNote = {
 
 export type ThreadState = {
 	selectedThreadId: ThreadId | null,
-	activeThreadId: ThreadId | null,
 	threads: Thread[],
 };
-
-/**
- *  Thread lifecycle status — mirrors the TS `ThreadState` shape.
- * 
- *  `Active` is the writer thread for its stream (only one per stream
- *  can mutate the worktree at a time). `Queued` is a non-writer
- *  thread sharing the same worktree in read-only mode. `Closed` is
- *  terminated; closed threads are excluded from the rail.
- */
-export type ThreadStatus = "active" | "queued" | "closed";
 
 /**  A thread's tabs in one window. */
 export type ThreadTabs = {

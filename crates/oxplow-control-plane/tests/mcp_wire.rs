@@ -54,7 +54,7 @@ async fn post(
 async fn mcp_session_initializes_lists_and_calls_tools_over_http() {
     let (cp, services, _root, _dir) = boot().await;
     let url = cp.mcp_endpoint_url();
-    let token = common::bearer(&services, writer_thread(&services).await.id).await;
+    let token = common::bearer(&services, primary_thread(&services).await.id).await;
     let client = reqwest::Client::new();
 
     let (session, init) = post(
@@ -151,8 +151,8 @@ async fn mcp_rejects_a_missing_bearer_token() {
     assert_eq!(resp.status(), 401);
 }
 
-/// The primary stream's writer thread, which the in-memory project has.
-async fn writer_thread(services: &oxplow_app::Services) -> oxplow_domain::Thread {
+/// The primary stream's first thread, which the in-memory project has.
+async fn primary_thread(services: &oxplow_app::Services) -> oxplow_domain::Thread {
     use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
     let stream = services.stream_store.list().await.unwrap().pop().unwrap();
     services
@@ -162,7 +162,7 @@ async fn writer_thread(services: &oxplow_app::Services) -> oxplow_domain::Thread
         .unwrap()
         .into_iter()
         .next()
-        .expect("primary stream has a writer thread")
+        .expect("the primary stream has a thread")
 }
 
 /// A `run_command` over the wire runs as the session its bearer was
@@ -172,7 +172,7 @@ async fn writer_thread(services: &oxplow_app::Services) -> oxplow_domain::Thread
 async fn run_command_over_http_is_audited_to_the_bearers_thread() {
     let (cp, services, root, _dir) = boot().await;
     let url = cp.mcp_endpoint_url();
-    let thread = writer_thread(&services).await;
+    let thread = primary_thread(&services).await;
     let token = common::bearer(&services, thread.id).await;
     let client = reqwest::Client::builder()
         .default_headers({

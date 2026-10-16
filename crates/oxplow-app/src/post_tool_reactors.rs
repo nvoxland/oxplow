@@ -321,7 +321,7 @@ mod tests {
             .unwrap();
         let first = svc
             .agent_context
-            .post_tool_context(svc, &f.thread, Some("s"), None, None)
+            .post_tool_context(svc, &f.thread, None)
             .await;
         assert!(
             first
@@ -331,7 +331,7 @@ mod tests {
         );
         assert_eq!(
             svc.agent_context
-                .post_tool_context(svc, &f.thread, Some("s"), None, None)
+                .post_tool_context(svc, &f.thread, None)
                 .await,
             None,
             "delivered once"
@@ -347,7 +347,7 @@ mod tests {
             .await;
         assert_eq!(
             svc.agent_context
-                .post_tool_context(svc, &f.thread, Some("s"), None, None)
+                .post_tool_context(svc, &f.thread, None)
                 .await
                 .as_deref(),
             Some("a late nudge")

@@ -21,14 +21,14 @@ use oxplow_tasks::work_item_ref;
 use oxplow_app::Services;
 use oxplow_control_plane::ControlPlane;
 use oxplow_domain::stores::{AgentSessionStore, StreamStore, ThreadStore};
-use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, ThreadStatus, Timestamp};
+use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, Timestamp};
 use oxplow_tasks::TaskId;
 use oxplow_tasks::TaskStore;
 use oxplow_tasks::{Task, TaskActorKind, TaskPriority, TaskStatus};
 
-/// Seed a stream + thread with the given status; returns the thread id
+/// Seed a stream + thread; returns the thread id
 /// string used in the X-Oxplow-Thread header.
-async fn seed_thread(services: &Services, status: ThreadStatus) -> ThreadId {
+async fn seed_thread(services: &Services) -> ThreadId {
     let now = Timestamp::from_unix_ms(1);
     let stream = Stream {
         id: StreamId::new(1),
@@ -54,7 +54,6 @@ async fn seed_thread(services: &Services, status: ThreadStatus) -> ThreadId {
         id: ThreadId::new(1),
         stream_id: stream.id,
         title: "t".into(),
-        status,
         sort_index: 0,
         summary: String::new(),
         summary_updated_at: None,
@@ -63,6 +62,7 @@ async fn seed_thread(services: &Services, status: ThreadStatus) -> ThreadId {
         created_at: now,
         updated_at: now,
         archived_at: None,
+        mark: None,
     };
     services.thread_store.upsert(&thread).await.unwrap();
     services
@@ -142,7 +142,7 @@ async fn hook_post_without_bearer_is_unauthorized() {
 #[tokio::test]
 async fn unknown_hook_event_is_acked_not_persisted() {
     let (cp, svc, _root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let tid = seed_thread(&svc).await;
     let resp = post_hook(&cp, &svc, "TotallyNovelEvent", tid, serde_json::json!({})).await;
     // Claude Code's HTTP hooks treat anything but 200 as a failure and
     // print a "non-blocking status code" warning into the agent's
@@ -153,7 +153,7 @@ async fn unknown_hook_event_is_acked_not_persisted() {
 #[tokio::test]
 async fn session_start_resets_and_acks() {
     let (cp, svc, _root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let tid = seed_thread(&svc).await;
     let resp = post_hook(
         &cp,
         &svc,
@@ -166,10 +166,12 @@ async fn session_start_resets_and_acks() {
 }
 
 #[tokio::test]
-async fn pre_tool_use_on_read_only_thread_denies_with_write_guard_shape() {
+async fn pre_tool_use_into_another_streams_worktree_denies_with_write_guard_shape() {
     let (cp, svc, root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Queued).await;
-    let target = root.join("src/x.rs");
+    let tid = seed_thread(&svc).await;
+    let target = common::seed_worktree_stream(&svc, &root)
+        .await
+        .join("src/x.rs");
     let resp = post_hook(
         &cp,
         &svc,
@@ -187,15 +189,19 @@ async fn pre_tool_use_on_read_only_thread_denies_with_write_guard_shape() {
     assert_eq!(out["hookEventName"], "PreToolUse");
     assert_eq!(out["permissionDecision"], "deny");
     let reason = out["permissionDecisionReason"].as_str().unwrap();
-    assert!(reason.contains("read-only"), "unexpected reason: {reason}");
+    assert!(
+        reason.contains("another stream's worktree"),
+        "unexpected reason: {reason}"
+    );
 }
 
-/// The writer edits with nothing tracked: no task, no effort. oxplow
-/// never asks for tracked work before an edit (inferred work tracking).
+/// An agent edits its worktree with nothing tracked: no task, no effort.
+/// oxplow never asks for tracked work before an edit (inferred work
+/// tracking).
 #[tokio::test]
-async fn the_writer_edits_without_any_tracked_work() {
+async fn an_agent_edits_without_any_tracked_work() {
     let (cp, svc, root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let tid = seed_thread(&svc).await;
     let target = root.join("src/x.rs");
     let resp = post_hook(
         &cp,
@@ -216,7 +222,7 @@ async fn the_writer_edits_without_any_tracked_work() {
 #[tokio::test]
 async fn a_stop_is_never_refused_and_keeps_the_final_message() {
     let (cp, svc, root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let tid = seed_thread(&svc).await;
     seed_in_progress_task(&svc, tid).await;
     post_hook(
         &cp,
@@ -307,7 +313,7 @@ async fn session_end_clear_drops_the_resume_token() {
     // resurrect the cleared session — SessionEnd(reason=clear) drops
     // the token so the relaunch starts fresh.
     let (cp, svc, _root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let tid = seed_thread(&svc).await;
     set_resume_session_id(&svc, tid, "cleared-session").await;
     let resp = post_hook(
         &cp,
@@ -326,7 +332,7 @@ async fn session_end_other_reason_keeps_the_resume_token() {
     // Normal exits (user quit, process end) should still resume — only
     // an explicit clear discards the session.
     let (cp, svc, _root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let tid = seed_thread(&svc).await;
     set_resume_session_id(&svc, tid, "keep-me").await;
     let resp = post_hook(
         &cp,
@@ -345,7 +351,7 @@ async fn session_end_clear_for_stale_session_keeps_newer_token() {
     // The resume token already moved on to a newer session — a clear
     // of an older one must not wipe it.
     let (cp, svc, _root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let tid = seed_thread(&svc).await;
     set_resume_session_id(&svc, tid, "newer-session").await;
     let resp = post_hook(
         &cp,
@@ -397,8 +403,6 @@ async fn seed_other_thread(services: &Services) -> ThreadId {
         id: ThreadId::new(2),
         stream_id: StreamId::new(1),
         title: "other".into(),
-        // One writer per stream: the seeded thread is it.
-        status: ThreadStatus::Queued,
         sort_index: 1,
         summary: String::new(),
         summary_updated_at: None,
@@ -407,6 +411,7 @@ async fn seed_other_thread(services: &Services) -> ThreadId {
         created_at: now,
         updated_at: now,
         archived_at: None,
+        mark: None,
     };
     services.thread_store.upsert(&thread).await.unwrap();
     open_second_session(services, thread.id).await;
@@ -431,7 +436,7 @@ async fn anchored_threads(services: &Services, ty: &str) -> Vec<Option<ThreadId>
 #[tokio::test]
 async fn the_bearer_names_the_hooks_session() {
     let (cp, svc, _root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let tid = seed_thread(&svc).await;
     let first = session_of(&svc, tid).await;
     let token = common::bearer_for(&svc, first).await;
     open_second_session(&svc, tid).await;
@@ -454,7 +459,7 @@ async fn the_bearer_names_the_hooks_session() {
 #[tokio::test]
 async fn identity_headers_are_ignored() {
     let (cp, svc, _root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let tid = seed_thread(&svc).await;
     let other = seed_other_thread(&svc).await;
     let other_session = session_of(&svc, other).await;
     let token = common::bearer(&svc, tid).await;
@@ -484,7 +489,7 @@ async fn identity_headers_are_ignored() {
 #[tokio::test]
 async fn a_retired_or_revoked_bearer_is_unauthorized() {
     let (cp, svc, _root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let tid = seed_thread(&svc).await;
     let session = session_of(&svc, tid).await;
     // Issued again for the session (a tab attaching to its process), the
     // bearer is the same one; issued for it on another thread, the old
@@ -521,7 +526,7 @@ async fn a_retired_or_revoked_bearer_is_unauthorized() {
 #[tokio::test]
 async fn the_bearer_names_the_exports_session() {
     let (cp, svc, _root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let tid = seed_thread(&svc).await;
     let first = session_of(&svc, tid).await;
     let token = common::bearer_for(&svc, first).await;
     let other = seed_other_thread(&svc).await;
@@ -545,7 +550,7 @@ async fn the_bearer_names_the_exports_session() {
 #[tokio::test]
 async fn there_is_no_otlp_logs_receiver() {
     let (cp, svc, _root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let tid = seed_thread(&svc).await;
     let token = common::bearer_for(&svc, session_of(&svc, tid).await).await;
     let resp = reqwest::Client::new()
         .post(format!("{}/v1/logs", cp.otlp_base_url()))
@@ -565,7 +570,7 @@ async fn post_tool_use_edit_acks_200_empty() {
     // error ... non-blocking status code" into the agent terminal on
     // every single edit.
     let (cp, svc, root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let tid = seed_thread(&svc).await;
     seed_in_progress_task(&svc, tid).await;
     let target = root.join("src/x.rs");
     let resp = post_hook(
@@ -593,7 +598,7 @@ async fn post_tool_use_edit_auto_claims_file_on_open_effort() {
     // confirms/amends rather than enumerating from scratch.
     use oxplow_app::EffortStore as _;
     let (cp, svc, root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let tid = seed_thread(&svc).await;
     // Insert a task and open an effort on the thread.
     let now = Timestamp::from_unix_ms(1);
     let task_id = svc
@@ -648,7 +653,7 @@ async fn post_tool_use_edit_auto_claims_file_on_open_effort() {
 #[tokio::test]
 async fn post_tool_use_is_persisted_as_a_tool_call() {
     let (cp, svc, root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let tid = seed_thread(&svc).await;
     let doc = root.join(".context/usability.md");
     let resp = post_hook(
         &cp,
@@ -679,7 +684,7 @@ async fn post_tool_use_is_persisted_as_a_tool_call() {
 async fn prompts_carry_the_efforts_decisions_once_per_session() {
     use oxplow_app::EffortStore as _;
     let (cp, svc, _root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let tid = seed_thread(&svc).await;
     let now = Timestamp::from_unix_ms(1);
     let task_id = svc
         .task_store
@@ -873,7 +878,7 @@ async fn otlp_metrics_without_bearer_is_unauthorized() {
 #[tokio::test]
 async fn otlp_metrics_ingests_token_facts_attributed_by_headers() {
     let (cp, svc, _root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let tid = seed_thread(&svc).await;
     let resp = post_otlp(&cp, &svc, tid, otlp_claude_body("claude-opus-4-8", 100, 20)).await;
     // OTLP success ack is always a 200 (best-effort side-band).
     assert_eq!(resp.status(), 200);

@@ -169,8 +169,8 @@ pub enum Access {
     /// open to any thread.
     Record,
     /// Changes something outside oxplow's records — files, git, processes,
-    /// the configuration: audited, and an agent's only from its stream's
-    /// writer thread.
+    /// the configuration: audited, and an agent's or job's run must be
+    /// bound to an open thread (the worktree it changes).
     #[default]
     Write,
 }
@@ -189,8 +189,8 @@ impl Access {
         !self.reads_only()
     }
 
-    /// A `Write`: refused to an agent thread that isn't its stream's writer.
-    pub fn needs_writer(self) -> bool {
+    /// A `Write`: a gated actor's run must be bound to an open thread.
+    pub fn needs_thread(self) -> bool {
         self == Access::Write
     }
 }
@@ -533,7 +533,7 @@ pub enum Actor {
     System,
     /// An extension's effect reacting to an event (`effects:`, P8.D8):
     /// an agent's rights and gates, for the thread and stream the event
-    /// happened in (the writer gate, its own stream's VCS), and never a
+    /// happened in (an open thread for a write, its own stream's VCS), and never a
     /// confirmation — a command that asks becomes a proposal for a person.
     Effect {
         /// `<extension>/<effect id>`.
@@ -629,11 +629,11 @@ impl Actor {
     }
 
     /// An effect whose event carries no thread (a project-level fact: a
-    /// contribution's health, a config change). The writer gate exists to
-    /// stop a non-writer *thread* changing a stream's worktree; this one
-    /// acts for no thread and writes into no worktree, so that gate doesn't
-    /// apply to it. Its approval, each command's invokers and its
-    /// confirmation still do.
+    /// contribution's health, a config change). A write needs an open
+    /// thread because it changes that thread's worktree; this one acts for
+    /// no thread and writes into no worktree, so that rule doesn't apply to
+    /// it. Its approval, each command's invokers and its confirmation still
+    /// do.
     pub fn is_anchorless_effect(&self) -> bool {
         matches!(
             self,
@@ -1193,7 +1193,7 @@ mod tests {
     }
 
     /// A view runs as a read does; a record is audited but open to any
-    /// thread; only a write needs the stream's writer.
+    /// thread; only a write needs an open thread.
     #[test]
     fn what_each_access_asks_of_a_run() {
         let all = [Access::View, Access::Read, Access::Record, Access::Write];
@@ -1201,8 +1201,8 @@ mod tests {
         assert_eq!(reads, [true, true, false, false]);
         let records: Vec<bool> = all.iter().map(|a| a.records()).collect();
         assert_eq!(records, [false, false, true, true]);
-        let writer: Vec<bool> = all.iter().map(|a| a.needs_writer()).collect();
-        assert_eq!(writer, [false, false, false, true]);
+        let thread: Vec<bool> = all.iter().map(|a| a.needs_thread()).collect();
+        assert_eq!(thread, [false, false, false, true]);
         let mut sorted = all;
         sorted.sort();
         assert_eq!(sorted, all, "weakest first");

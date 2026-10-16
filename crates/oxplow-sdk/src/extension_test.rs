@@ -612,7 +612,7 @@ async fn job_example(
         "request": ex.input.get("request").cloned().unwrap_or(Value::Null),
     });
     // A job asked for in a thread: the effects that react to its end run
-    // for that thread, as a writer-bound command needs.
+    // for that thread, as a command that changes the workspace needs.
     let asker = if delivers {
         Actor::Agent {
             session_id: None,

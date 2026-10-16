@@ -22,12 +22,6 @@
    `{ kind:"wiki", id:"<slug>", action:"created"|"updated" }`, which
    backlinks your effort's item to the page.
 
-## A read-only thread
-
-`oxplow.knowledge.write_page` is open to every thread; capture exactly as
-on the writer thread. The wiki is where exploration goes regardless of
-writer status.
-
 ## A project with no knowledge store
 
 A project can choose no store for knowledge (Settings → Capabilities).

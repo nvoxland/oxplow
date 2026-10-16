@@ -195,15 +195,15 @@ mod tests {
         assert_eq!(targets, vec!["src/only_primary.rs"]);
     }
 
-    /// A queued agent — one that may not write the worktree — still takes
-    /// notes, on its own thread whatever it names; the note's event is
-    /// caused by the run, and a broken link comes back as a warning.
+    /// An agent takes notes on its own thread whatever it names; the
+    /// note's event is caused by the run, and a broken link comes back as a
+    /// warning.
     #[tokio::test]
-    async fn a_queued_agent_takes_notes_on_its_own_thread() {
+    async fn an_agent_takes_notes_on_its_own_thread() {
         let fx = services_with_effort().await;
         let second =
             crate::test_fixtures::new_thread(&fx.svc, oxplow_domain::StreamId::new(1), "q").await;
-        let queued = Actor::Agent {
+        let other = Actor::Agent {
             session_id: None,
             thread_id: Some(second.id),
             stream_id: None,
@@ -212,7 +212,7 @@ mod tests {
             .svc
             .commands
             .run(
-                &queued,
+                &other,
                 ADD,
                 json!({ "body": "found it in [[tsk999]]" }),
                 false,
@@ -232,7 +232,7 @@ mod tests {
             .svc
             .commands
             .run(
-                &queued,
+                &other,
                 ADD,
                 json!({ "thread": thread_ref(fx.thread), "body": "x" }),
                 false,

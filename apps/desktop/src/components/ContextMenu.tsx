@@ -22,6 +22,8 @@ interface ContextMenuProps {
 
 interface MenuListProps {
   items: MenuItem[];
+  /** One line above the items saying what they do (a submenu's). */
+  header?: string;
   onAction?(): void;
   minWidth?: number;
 }
@@ -105,12 +107,17 @@ const headerStyle: CSSProperties = {
   maxWidth: 320,
 };
 
-export function MenuList({ items, onAction, minWidth = 220 }: MenuListProps) {
+export function MenuList({ items, header, onAction, minWidth = 220 }: MenuListProps) {
   const [openSubmenuId, setOpenSubmenuId] = useState<string | null>(null);
   const submenuRefs = useRef(new Map<string, HTMLButtonElement | null>());
 
   return (
     <div style={{ ...menuStyle, position: "relative", minWidth }}>
+      {header ? (
+        <div data-testid="context-submenu-header" style={submenuHeaderStyle}>
+          {header}
+        </div>
+      ) : null}
       {items.map((item) => {
         if (item.separator) {
           return <div key={item.id} style={separatorStyle} />;
@@ -147,11 +154,17 @@ export function MenuList({ items, onAction, minWidth = 220 }: MenuListProps) {
               }}
             >
               <span style={checkStyle}>{item.checked ? "✓" : ""}</span>
+              {item.swatch ? <span aria-hidden style={{ ...swatchStyle, background: item.swatch }} /> : null}
               <span style={{ flex: 1 }}>{item.label}</span>
               <span style={shortcutStyle}>{hasSubmenu ? "▸" : item.shortcut ?? ""}</span>
             </button>
             {hasSubmenu && openSubmenuId === item.id ? (
-              <Submenu items={item.submenu!} onAction={onAction} minWidth={minWidth} />
+              <Submenu
+                items={item.submenu!}
+                header={item.submenuHeader}
+                onAction={onAction}
+                minWidth={minWidth}
+              />
             ) : null}
           </div>
         );
@@ -167,10 +180,13 @@ export function MenuList({ items, onAction, minWidth = 220 }: MenuListProps) {
  */
 function Submenu({
   items,
+  header,
   onAction,
   minWidth,
 }: {
   items: MenuItem[];
+  /** What the submenu's items do, above them. */
+  header?: string;
   onAction?(): void;
   minWidth: number;
 }) {
@@ -197,10 +213,29 @@ function Submenu({
         zIndex: 2,
       }}
     >
-      <MenuList items={items} onAction={onAction} minWidth={minWidth} />
+      <MenuList items={items} header={header} onAction={onAction} minWidth={minWidth} />
     </div>
   );
 }
+
+/** A submenu's line of intent, atop its items: it wraps (a sentence, not
+ *  a name) and stays as narrow as the menu. */
+const submenuHeaderStyle: CSSProperties = {
+  padding: "4px 8px 6px",
+  fontSize: "var(--text-xs)",
+  color: "var(--text-secondary)",
+  borderBottom: "1px solid var(--border-subtle)",
+  marginBottom: 2,
+  maxWidth: 220,
+  whiteSpace: "normal",
+};
+
+const swatchStyle: CSSProperties = {
+  width: 10,
+  height: 10,
+  borderRadius: 2,
+  flexShrink: 0,
+};
 
 const menuStyle: CSSProperties = {
   display: "flex",

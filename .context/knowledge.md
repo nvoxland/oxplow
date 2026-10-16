@@ -63,8 +63,8 @@ the end of the page's `## Related` section — the wiki before any section
 after it, or a new one at the end, with `@version` literals stripped;
 tsk572 — and core records the body it kept), and
 `oxplow.knowledge.resync { slug }` (the wiki's: restate from the file, a
-`Tx` command; the repair when a row and its file disagree). All are `Record`: a read-only thread captures
-what it explored too. `oxplow.knowledge.write_page` replaced MCP
+`Tx` command; the repair when a row and its file disagree). All are `Record`: any thread captures
+what it explored. `oxplow.knowledge.write_page` replaced MCP
 `record_wiki_page_update`, `resync_wiki_page` and `delete_wiki_page`, and
 RPCs `write_wiki_page_body`, `upsert_wiki_page`, `delete_wiki_page`,
 `mark_wiki_ref_verified` and `mark_all_wiki_refs_verified`.

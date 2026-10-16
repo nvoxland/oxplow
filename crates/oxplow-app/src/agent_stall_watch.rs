@@ -107,7 +107,7 @@ mod tests {
     use crate::agent_status_derive::AGENT_STALL_AFTER_MS;
     use oxplow_db::{Database, SqliteStreamStore, SqliteThreadStore};
     use oxplow_domain::stores::{StreamStore, ThreadStore};
-    use oxplow_domain::{HookKind, Stream, StreamId, StreamKind, Thread, ThreadId, ThreadStatus};
+    use oxplow_domain::{HookKind, Stream, StreamId, StreamKind, Thread, ThreadId};
 
     struct Fixture {
         watch: AgentStallWatch,
@@ -148,7 +148,6 @@ mod tests {
             id: ThreadId::new(1),
             stream_id: s.id,
             title: "x".into(),
-            status: ThreadStatus::Active,
             sort_index: 0,
             summary: String::new(),
             summary_updated_at: None,
@@ -157,6 +156,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             archived_at: None,
+            mark: None,
         };
         threads.upsert(&t).await.unwrap();
         let session = open_session(&db).await;

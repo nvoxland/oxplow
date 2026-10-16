@@ -10,7 +10,4 @@
 pub mod policy;
 pub mod write_guard;
 
-pub use policy::{
-    decide_tool, path_outside_worktree, DenyLayer, IntentKind, PolicyDecision, PolicyFacts,
-    ToolIntent,
-};
+pub use policy::{decide_tool, DenyLayer, IntentKind, PolicyDecision, PolicyFacts, ToolIntent};

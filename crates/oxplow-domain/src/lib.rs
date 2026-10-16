@@ -67,6 +67,6 @@ pub use row_ids::{
     AiCallId, AuditId, ByteSize, DeadLetterId, FileSnapshotId, ProposalId, SnapshotId,
 };
 pub use stream::{HostId, Stream, StreamKind};
-pub use thread::{Thread, ThreadNote, ThreadStatus};
+pub use thread::{Thread, ThreadMark, ThreadNote};
 pub use time::Timestamp;
 pub use tree_diff::{diff_trees, ChangeStatus, FileChange};

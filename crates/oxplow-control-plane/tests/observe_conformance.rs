@@ -24,7 +24,7 @@ use oxplow_domain::agent::harness::{Endpoints, LaunchInput, LaunchSpec, SessionI
 use oxplow_domain::agent::text::AgentText;
 use oxplow_domain::agent_session::NewAgentSession;
 use oxplow_domain::stores::{AgentSessionStore, StreamStore, ThreadStore};
-use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, ThreadStatus, Timestamp};
+use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, Timestamp};
 use oxplow_harness_fake::{FakeHarness, BIN, EDITED, TOKENS};
 
 /// The fake's binary, built on demand into this test's target dir.
@@ -95,7 +95,6 @@ async fn a_session_of(
         id: ThreadId::new(1),
         stream_id: stream.id,
         title: "t".into(),
-        status: ThreadStatus::Active,
         sort_index: 0,
         summary: String::new(),
         summary_updated_at: None,
@@ -104,6 +103,7 @@ async fn a_session_of(
         created_at: now,
         updated_at: now,
         archived_at: None,
+        mark: None,
     };
     svc.thread_store.upsert(&thread).await.unwrap();
 

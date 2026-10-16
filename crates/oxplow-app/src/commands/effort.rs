@@ -459,10 +459,10 @@ mod tests {
                     "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
                        VALUES (2, 'worktree', 'b', 'b', 'refs/heads/b', 'main', '/elsewhere',
                                '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z');
-                     INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-                       VALUES (2, 2, 'other', 'active',
+                     INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+                       VALUES (2, 2, 'other',
                                '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z'),
-                              (3, 1, 'q', 'queued',
+                              (3, 1, 'q',
                                '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z');",
                 )
                 .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))

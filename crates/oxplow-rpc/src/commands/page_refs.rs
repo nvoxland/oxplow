@@ -158,10 +158,10 @@ mod tests {
         let stream = svc.streams.ensure_primary().await.unwrap();
         let thread = svc
             .threads
-            .selected_or_active(&stream.id)
+            .selected_or_first(&stream.id)
             .await
             .unwrap()
-            .expect("the primary stream has a writer thread");
+            .expect("the primary stream has a thread");
         let made = svc
             .commands
             .run(

@@ -277,9 +277,7 @@ impl Connection for AcpConnection {
     /// `initialize`, then `session/load` of the saved session when the
     /// agent supports it (its replay arrives as updates first), else
     /// `session/new`.
-    /// Its writes are gated as it asks (`fs/write_text_file`, permission
-    /// requests), so `writable` changes nothing here.
-    async fn open(&self, cwd: &std::path::Path, _writable: bool) -> Result<Opened, String> {
+    async fn open(&self, cwd: &std::path::Path) -> Result<Opened, String> {
         let info = self.initialize().await?;
         if !self.open.mcp.is_empty() && !info.mcp_http {
             return Err(format!(
@@ -320,11 +318,7 @@ impl Connection for AcpConnection {
         })
     }
 
-    fn prompt(
-        &self,
-        p: crate::chat::human_prompt::HumanPrompt,
-        _writable: bool,
-    ) -> Result<(), String> {
+    fn prompt(&self, p: crate::chat::human_prompt::HumanPrompt) -> Result<(), String> {
         let blocks: Vec<serde_json::Value> = p
             .blocks()
             .iter()

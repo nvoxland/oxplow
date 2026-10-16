@@ -1643,7 +1643,7 @@ mod tests {
     use crate::test_tasks::a_task;
     use crate::thread_store::SqliteThreadStore;
     use oxplow_domain::stores::{StreamStore, ThreadStore};
-    use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadStatus};
+    use oxplow_domain::{Stream, StreamId, StreamKind, Thread};
 
     async fn fixture() -> (SqliteEffortStore, String, ThreadId) {
         let (store, _db, tid, thread) = fixture_with_db().await;
@@ -1907,7 +1907,6 @@ mod tests {
             id: ThreadId::new(1),
             stream_id: s.id,
             title: "x".into(),
-            status: ThreadStatus::Active,
             sort_index: 0,
             summary: String::new(),
             summary_updated_at: None,
@@ -1916,6 +1915,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             archived_at: None,
+            mark: None,
         };
         SqliteThreadStore::new(db.clone()).upsert(&t).await.unwrap();
         let tid = a_task(&db, Some(t.id)).await;
@@ -2170,8 +2170,8 @@ mod tests {
         let (store, db, _tid, t) = fixture_with_db().await;
         db.call(|c| {
             c.execute_batch(
-                "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-                   VALUES (2, 1, 'other', 'queued', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');",
+                "INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+                   VALUES (2, 1, 'other', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');",
             )
         })
         .await
@@ -2585,7 +2585,6 @@ mod tests {
             id: ThreadId::new(1),
             stream_id: s.id,
             title: "x".into(),
-            status: ThreadStatus::Active,
             sort_index: 0,
             summary: String::new(),
             summary_updated_at: None,
@@ -2594,6 +2593,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             archived_at: None,
+            mark: None,
         };
         SqliteThreadStore::new(db.clone()).upsert(&t).await.unwrap();
         let tid = a_task(&db, Some(t.id)).await;
@@ -2658,7 +2658,6 @@ mod tests {
             id: ThreadId::new(1),
             stream_id: s.id,
             title: "x".into(),
-            status: ThreadStatus::Active,
             sort_index: 0,
             summary: String::new(),
             summary_updated_at: None,
@@ -2667,6 +2666,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             archived_at: None,
+            mark: None,
         };
         SqliteThreadStore::new(db.clone()).upsert(&t).await.unwrap();
         let tid = a_task(&db, Some(t.id)).await;
@@ -2741,7 +2741,6 @@ mod tests {
             id: ThreadId::new(n),
             stream_id: s.id,
             title: format!("t{n}"),
-            status: ThreadStatus::Active,
             sort_index: 0,
             summary: String::new(),
             summary_updated_at: None,
@@ -2750,6 +2749,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             archived_at: None,
+            mark: None,
         };
         SqliteThreadStore::new(db.clone()).upsert(&t).await.unwrap();
         let tid = a_task(db, Some(t.id)).await;

@@ -1141,8 +1141,8 @@ mod tests {
             c.execute_batch(
                 "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
                    VALUES (1, 'primary', 'oxplow', 'main', 'refs/heads/main', 'local', '/tmp/x', '2026-01-01', '2026-01-01');
-                 INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-                   VALUES (1, 1, 'Thread', 'active', '2026-01-01', '2026-01-01');
+                 INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+                   VALUES (1, 1, 'Thread', '2026-01-01', '2026-01-01');
                  INSERT INTO capability_provider (capability, provider) VALUES ('work_items', 'oxplow');
                  INSERT INTO work_item (ref, provider, title, body, state, native_state, thread_id, created_at, updated_at)
                    VALUES ('work_item:oxplow:a', 'oxplow', 'Live item', '', 'in_progress', 'in_progress', 1, '2026-01-01', '2026-01-01');

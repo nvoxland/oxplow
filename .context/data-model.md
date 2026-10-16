@@ -407,11 +407,16 @@ streams cannot be archived.
 
 Lines of the person's work *within* a stream. A thread needs no agent and
 may have several: its agent slots are `agent_session`
-rows. Statuses: `active` (writer — may mutate the worktree) and `queued`
-(read-only, agents can run but writes are denied — see
-[agent-model.md](./agent-model.md)'s write-guard section). Writer status
-is the thread's: every session in the writer thread may write. Exactly
-one thread per stream is `active`; the rest are `queued`. A newly-seeded
+rows. A thread is open or closed, nothing more
+(`Thread::is_open()`, `closed_at` below): every open thread of a stream
+shares its worktree and any of them may change it, and several agents
+may share a checkout — that is the person's call (a new stream is the
+isolated option). Migration V81 dropped the `status` column and the
+one-active-thread-per-stream unique index. `mark` (nullable TEXT, CHECK
+of `amber`, `red`, `green`, `blue`, `violet`; `Thread.mark:
+Option<ThreadMark>`) is a colour on the thread's Navigator tab, set by
+`oxplow.thread.mark`, for grouping threads the person's way; it changes
+nothing else. A newly-seeded
 stream ships with one thread titled `Thread` and no agent session; neither
 does `oxplow.thread.create` open one. A person opens sessions
 (`oxplow.agent_session.open`, whose default harness is the project's first
@@ -419,21 +424,15 @@ enabled agent, else the first declared (`HarnessRegistry::default`)).
 The rolling `summary` field + `record_batch_summary` MCP tool were
 removed in v13 — use the task log as the source of truth instead.
 
-`closed_at` (migration v44, nullable TEXT) — closing a thread is
-orthogonal to its status. A closed thread keeps its `queued` status but
-sits hidden from the rail; it surfaces only on the **Closed Threads**
+`closed_at` (migration v44, nullable TEXT) — set means the thread is
+closed. A closed thread sits hidden from the rail; it surfaces only on the **Closed Threads**
 page (`apps/desktop/src/pages/ClosedThreadsPage.tsx`), which lists each closed
-thread with its tasks (read-only) and a Reopen action. Closing is
-allowed only for non-writer threads with no tasks in `ready` /
-`blocked` / `in_progress` (`ThreadStore.close()`); promote another
-thread or finish/move open items first. `ThreadStore.reopen()` clears
-`closed_at` and the thread returns to the rail as a queued read-only
-tab. `ThreadStore.list()` already filters closed threads out, so every
+thread with its tasks (read-only) and a Reopen action. `oxplow.thread.reopen` clears
+`closed_at` and the thread returns to the rail as an open tab.
+`ThreadStore.list()` already filters closed threads out, so every
 existing surface (rail, work panel, dispatch) treats them as gone
 without code changes; `listClosed(streamId)` is the dedicated reader
-for the Closed Threads page. Migration v44 also retires the legacy
-`completed` status — any pre-existing `completed` rows are remapped to
-`queued` with `closed_at = updated_at`.
+for the Closed Threads page.
 
 `archived_at` (migration v4, nullable TEXT) — soft-delete stamp set
 when the parent stream's "Remove…" action archives every thread under
@@ -1733,7 +1732,7 @@ are derived by query rather than stored, so adding a new "kind"
 Indexes: `(kind, key, occurred_at DESC)`, `(stream_id, kind,
 occurred_at DESC)`, `(thread_id, kind, occurred_at DESC)`. Both scopes
 are recorded simultaneously — `stream_id` is the workspace tab,
-`thread_id` is the active thread within it — so consumers can roll
+`thread_id` is the selected thread within it — so consumers can roll
 up by either dimension or intersect them.
 
 The store coalesces rapid repeats: if the most recent matching
@@ -2204,7 +2203,7 @@ recorded by `App.handleOpenPage` (skipping `agent`, `new-stream`,
 Rows carry canonical tab ids ([refs.md](./refs.md)); V93 wiped the
 pre-canonical ones. Columns: `id`, `page_kind`, `page_id`, `visited_at` (ISO),
 `duration_ms?`, `thread_id?` (added in v3 — nullable so legacy rows and
-boot-screen visits with no active thread still record). Indexes on
+boot-screen visits with no selected thread still record). Indexes on
 `visited_at DESC`, `(page_kind, page_id)`, and
 `(thread_id, visited_at DESC)`. Aggregates derived by query:
 

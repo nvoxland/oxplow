@@ -16,22 +16,15 @@ use super::model::{ChatUpdate, PermissionAnswer, PermissionAsk};
 pub trait Connection: Send + Sync + 'static {
     /// Start the session, or continue the saved one it was built for.
     /// What a continued session replays reaches the incoming channel
-    /// before this returns. `writable`: the thread may write its worktree
-    /// now — a connection that can confine its agent (Codex's sandbox)
-    /// does so when it may not.
-    async fn open(&self, cwd: &Path, writable: bool) -> Result<Opened, String>;
-    /// Send a person's prompt, `writable` as for [`Self::open`]. The
-    /// turn's end arrives as [`Incoming::PromptDone`], after everything
-    /// the turn did.
-    fn prompt(&self, prompt: HumanPrompt, writable: bool) -> Result<(), String>;
+    /// before this returns.
+    async fn open(&self, cwd: &Path) -> Result<Opened, String>;
+    /// Send a person's prompt. The turn's end arrives as
+    /// [`Incoming::PromptDone`], after everything the turn did.
+    fn prompt(&self, prompt: HumanPrompt) -> Result<(), String>;
     /// Stop the turn in flight.
     fn cancel(&self);
     /// Resolves when the agent has gone away.
     async fn closed(&self);
-    /// The thread may now write its worktree, or no longer may: a
-    /// connection that confines its agent (Codex's sandbox) follows; one
-    /// whose writes are gated as it asks has nothing to do.
-    fn set_writable(&self, _writable: bool) {}
     /// Name the agent's conversation (what its own UI lists it as). An
     /// agent that can't says so.
     async fn rename(&self, _name: &str) -> Result<(), String> {

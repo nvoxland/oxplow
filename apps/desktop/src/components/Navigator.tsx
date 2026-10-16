@@ -7,7 +7,7 @@ import {
   subscribeNavigatorOpenRequests,
   type NavigatorMenuRequest,
 } from "../navigator-bus.js";
-import { archiveStream, type Stream, type Thread, type ThreadState } from "../api.js";
+import { archiveStream, type Stream, type Thread, type ThreadMark, type ThreadState } from "../api.js";
 import { subscribeNewThreadRequests } from "../new-thread-bus.js";
 import { AgentStatusDot, type AgentStatusDotState } from "./AgentStatusDot.js";
 import { useContextMenu, useRowContextMenu } from "./useRowContextMenu.js";
@@ -31,7 +31,8 @@ interface NavigatorProps {
   onOpenNewStreamPage?(): void;
   onRenameStream?(streamId: string, title: string): void | Promise<void>;
   onRenameThread?(threadId: string, title: string): void | Promise<void>;
-  onPromoteThread?(threadId: string): void | Promise<void>;
+  /** Mark a thread's tab with a colour, or clear it (`null`). */
+  onMarkThread?(threadId: string, mark: ThreadMark | null): void | Promise<void>;
   onCloseThread?(threadId: string): void | Promise<void>;
   onOpenStreamSettings?(streamId: string): void;
   onOpenThreadSettings?(threadId: string): void;
@@ -77,11 +78,11 @@ type RenameTarget = { kind: "stream" | "thread"; id: string };
  *     threads beneath them.
  *   - Thread rows: two-letter glyph, weight 600, slightly indented in
  *     the overlay; in the strip they share the same column.
- *   - The active stream's writer thread is marked with a corner fold
- *     (a small right triangle in `--writer-mark`) on its tab's top-left
- *     corner — not an accent outline, which reads as selected. The
- *     activity dot sits on the right end at half height, clear of it;
- *     both are in the same place in strip and overlay.
+ *   - A thread the person marked (thread menu → Mark with…) carries a
+ *     corner fold (a small right triangle in its `--thread-mark-<colour>`)
+ *     on its tab's top-left corner — not an accent outline, which reads as
+ *     selected. The activity dot sits on the right end at half height,
+ *     clear of it; both are in the same place in strip and overlay.
  *   - Selection treatment: accent-soft-bg row background + 3px accent
  *     left stripe.
  *   - 8px gap separates the last thread of one stream from the next
@@ -100,7 +101,7 @@ export function Navigator({
   onOpenNewStreamPage,
   onRenameStream,
   onRenameThread,
-  onPromoteThread,
+  onMarkThread,
   onCloseThread,
   onOpenStreamSettings,
   onOpenThreadSettings,
@@ -245,21 +246,24 @@ export function Navigator({
     }
     return items;
   };
-  const threadMenu = (thread: Thread, isWriter: boolean): MenuItem[] => {
+  const threadMenu = (thread: Thread): MenuItem[] => {
+    const markItem = (mark: ThreadMark | null): MenuItem => ({
+      id: `thread.mark.${mark ?? "none"}`,
+      label: mark ? MARK_LABELS[mark] : "None",
+      enabled: true,
+      checked: (thread.mark ?? null) === mark,
+      swatch: mark ? markColour(mark) : undefined,
+      run: () => onMarkThread?.(thread.id, mark),
+    });
     const items: MenuItem[] = [];
-    // "Make writer" is the headline action for a read-only thread: only
-    // the stream's single active thread can edit files, so a queued thread
-    // is "edits blocked" until promoted. Show it FIRST, and only when this
-    // thread isn't already the writer (tsk132).
-    if (!isWriter) {
-      items.push({
-        id: "thread.promote",
-        label: "Make writer",
-        enabled: !!onPromoteThread,
-        run: () => onPromoteThread?.(thread.id),
-      });
-    }
     items.push(
+      {
+        id: "thread.mark",
+        label: "Mark with…",
+        enabled: !!onMarkThread,
+        submenuHeader: "A colour on the thread's tab, for grouping threads your way. It changes nothing else.",
+        submenu: [...THREAD_MARKS.map(markItem), markItem(null)],
+      },
       {
         id: "thread.rename",
         label: "Rename…",
@@ -301,9 +305,9 @@ export function Navigator({
       const s = streams.find((x) => x.id === r.id);
       return s ? { items: streamMenu(s), header: s.title } : null;
     }
-    for (const [streamId, ts] of Object.entries(threadStates)) {
+    for (const ts of Object.values(threadStates)) {
       const t = ts.threads.find((x) => x.id === r.id);
-      if (t) return { items: threadMenu(t, threadStates[streamId]?.activeThreadId === t.id), header: t.title };
+      if (t) return { items: threadMenu(t), header: t.title };
     }
     return null;
   };
@@ -323,11 +327,7 @@ export function Navigator({
     () =>
       orderedStreams.map((s) => {
         const ts = threadStates[s.id];
-        const writerId = ts?.activeThreadId ?? null;
-        return {
-          stream: s,
-          threads: (ts?.threads ?? []).map((t) => ({ thread: t, isWriter: t.id === writerId })),
-        };
+        return { stream: s, threads: ts?.threads ?? [] };
       }),
     [orderedStreams, threadStates],
   );
@@ -377,14 +377,14 @@ export function Navigator({
                 label={g.stream.title}
                 isStream
                 guide={g.threads.length > 0 ? "stream" : "none"}
-                isWriter={false}
+                mark={null}
                 selected={false}
                 status={undefined}
                 onClick={() => handleStripStream(g.stream.id)}
                 menu={streamMenu(g.stream)}
                 testId={`navigator-strip-stream-${g.stream.id}`}
               />
-              {g.threads.map(({ thread, isWriter }, i) => {
+              {g.threads.map((thread, i) => {
                 const isSelected =
                   g.stream.id === currentStreamId &&
                   threadStates[g.stream.id]?.selectedThreadId === thread.id;
@@ -395,12 +395,12 @@ export function Navigator({
                     label={thread.title}
                     isStream={false}
                     guide={i === g.threads.length - 1 ? "last" : "mid"}
-                    isWriter={isWriter}
+                    mark={thread.mark ?? null}
                     selected={isSelected}
                     status={agentStatuses[thread.id]}
                     question={agentQuestions?.[thread.id]}
                     onClick={() => handleStripThread(g.stream.id, thread.id, isSelected)}
-                    menu={threadMenu(thread, isWriter)}
+                    menu={threadMenu(thread)}
                     testId={`navigator-strip-thread-${thread.id}`}
                   />
                 );
@@ -452,7 +452,7 @@ export function Navigator({
                     label={g.stream.title}
                     isStream
                     guide={g.threads.length > 0 ? "stream" : "none"}
-                    isWriter={false}
+                    mark={null}
                     selected={false}
                     status={undefined}
                     onClick={() => handleSwitchStream(g.stream.id)}
@@ -467,7 +467,7 @@ export function Navigator({
                     menu={streamMenu(g.stream)}
                     testId={`navigator-stream-row-${g.stream.id}`}
                   />
-                  {g.threads.map(({ thread, isWriter }, i) => {
+                  {g.threads.map((thread, i) => {
                     const isSelected =
                       g.stream.id === currentStreamId &&
                       threadStates[g.stream.id]?.selectedThreadId === thread.id;
@@ -478,7 +478,7 @@ export function Navigator({
                         label={thread.title}
                         isStream={false}
                         guide={i === g.threads.length - 1 ? "last" : "mid"}
-                        isWriter={isWriter}
+                        mark={thread.mark ?? null}
                         selected={isSelected}
                         status={agentStatuses[thread.id]}
                         question={agentQuestions?.[thread.id]}
@@ -491,7 +491,7 @@ export function Navigator({
                           }
                         }}
                         onCancelRename={() => setRenaming(null)}
-                        menu={threadMenu(thread, isWriter)}
+                        menu={threadMenu(thread)}
                         testId={`navigator-thread-row-${thread.id}`}
                       />
                     );
@@ -613,7 +613,7 @@ function StripRow({
   label,
   isStream,
   guide,
-  isWriter,
+  mark,
   selected,
   status,
   question,
@@ -625,7 +625,9 @@ function StripRow({
   label: string;
   isStream: boolean;
   guide: Guide;
-  isWriter: boolean;
+  /** The person's colour for a thread's tab (`null` unmarked, and for a
+   *  stream). */
+  mark: ThreadMark | null;
   selected: boolean;
   status: AgentStatusDotState | undefined;
   question?: string;
@@ -685,7 +687,7 @@ function StripRow({
           isStream={isStream}
           isLast={guide === "last"}
           hasThreads={guide === "stream"}
-          isWriter={isWriter}
+          mark={mark}
           status={status}
           question={question}
         />
@@ -702,7 +704,7 @@ function OverlayRow({
   label,
   isStream,
   guide,
-  isWriter,
+  mark,
   selected,
   status,
   question,
@@ -717,7 +719,9 @@ function OverlayRow({
   label: string;
   isStream: boolean;
   guide: Guide;
-  isWriter: boolean;
+  /** The person's colour for a thread's tab (`null` unmarked, and for a
+   *  stream). */
+  mark: ThreadMark | null;
   selected: boolean;
   status: AgentStatusDotState | undefined;
   question?: string;
@@ -769,7 +773,7 @@ function OverlayRow({
           isStream={isStream}
           isLast={guide === "last"}
           hasThreads={guide === "stream"}
-          isWriter={isWriter}
+          mark={mark}
           status={status}
           question={question}
           label={
@@ -857,11 +861,6 @@ function RenameInput({
   );
 }
 
-/** The shared icon cell that appears in both strip and overlay. The
- *  letter is centered in a 22px box; for writer threads the box is
- *  marked with a pencil badge. The
- *  activity dot is absolutely positioned in the top-right corner so
- *  its location is identical regardless of writer/non-writer. */
 /** Where a row sits on its stream's guide line: the stream that starts it
  *  (with threads under it), a thread it runs past, the thread it ends at. */
 type Guide = "none" | "stream" | "mid" | "last";
@@ -921,7 +920,7 @@ function IconCell({
   isStream,
   isLast,
   hasThreads,
-  isWriter,
+  mark,
   selected,
   status,
   question,
@@ -935,7 +934,9 @@ function IconCell({
   isLast: boolean;
   /** A stream with threads under it: its tab is the stack's top. */
   hasThreads: boolean;
-  isWriter: boolean;
+  /** The person's colour for a thread's tab (`null` unmarked, and for a
+   *  stream). */
+  mark: ThreadMark | null;
   /** The selected thread: its tab carries the accent bar down its left. */
   selected: boolean;
   status: AgentStatusDotState | undefined;
@@ -945,7 +946,7 @@ function IconCell({
   // strip's header tint, its threads' stopping short of the guide line on
   // the right and butted up
   // against each other — each fills its row, drawing its top edge, and the
-  // last one also the bottom — transparent, the writer's in the accent.
+  // last one also the bottom.
   // Rounded on the right only. In the panel a tab runs on across the row
   // carrying the title, its glyph kept at the strip's width so the two
   // line up.
@@ -969,9 +970,9 @@ function IconCell({
         // Tabs next to each other are flat; only the stack's last is
         // rounded at the bottom.
         borderRadius: isLast ? "0 0 6px 0" : 0,
-        // The centre tab strip's header tint. The writer looks like any
-        // other tab (the accent outline and tint read as "selected"); a
-        // corner fold marks it instead.
+        // The centre tab strip's header tint. A marked thread looks like
+        // any other tab (the accent outline and tint read as "selected");
+        // a corner fold in its colour marks it instead.
         backgroundImage: "linear-gradient(var(--panel-header-bg), var(--panel-header-bg))",
         backgroundColor: "var(--surface-card)",
         color: "var(--text-primary)",
@@ -1029,7 +1030,7 @@ function IconCell({
         letter
       )}
       {/* At the window's edge, so the strip's and the panel's line up. */}
-      {isWriter && !isStream ? <WriterMark /> : null}
+      {mark && !isStream ? <MarkFold mark={mark} /> : null}
       {/* Threads always show the agent's activity indicator. Mirrors
           the fallback the Agent tab uses (App.tsx — `agentStatuses[id]
           ?? "waiting"`) so a never-attached thread still reads as the
@@ -1053,19 +1054,35 @@ function IconCell({
   );
 }
 
-/** The writer thread's corner fold: a right triangle, its right angle in
- *  the tab's top-left corner, in `--writer-mark`. */
-function WriterMark() {
+/** The colours a person marks a thread with, in menu order. */
+const THREAD_MARKS: ThreadMark[] = ["amber", "red", "green", "blue", "violet"];
+
+const MARK_LABELS: Record<ThreadMark, string> = {
+  amber: "Amber",
+  red: "Red",
+  green: "Green",
+  blue: "Blue",
+  violet: "Violet",
+};
+
+/** A mark's colour token (`--thread-mark-<colour>`, theming.md). */
+function markColour(mark: ThreadMark): string {
+  return `var(--thread-mark-${mark})`;
+}
+
+/** A marked thread's corner fold: a right triangle, its right angle in
+ *  the tab's top-left corner, in its mark's colour. */
+function MarkFold({ mark }: { mark: ThreadMark }) {
   return (
     <span
-      data-testid="navigator-writer-badge"
-      title="Writer: this thread can edit project files"
+      data-testid="navigator-thread-mark"
+      title={`Marked ${mark}`}
       style={{
         position: "absolute",
         top: -1,
         left: 0,
         display: "flex",
-        color: "var(--writer-mark)",
+        color: markColour(mark),
       }}
     >
       <svg width="7" height="7" viewBox="0 0 7 7" aria-hidden fill="currentColor">

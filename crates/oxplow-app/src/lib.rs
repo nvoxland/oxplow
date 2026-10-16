@@ -223,10 +223,7 @@ pub mod workspace_files;
 pub mod workspace_watch;
 pub mod worktrees;
 
-pub use agent_prompt::{
-    build_session_context_block, build_session_context_block_with_role, role_change_banner,
-    RoleMode,
-};
+pub use agent_prompt::{build_session_context_block, OtherAgent};
 pub use events::{event_channels, EventBus, OxplowEvent, WorkspaceChangeKind};
 pub use hook_ingest::{
     HookEnvelope, HookIngestError, HookIngestService, IngestOutcome, ToolDecision,
@@ -1451,15 +1448,15 @@ impl Services {
             )
             .with_activation(extension_activation.clone())
             .with_sql_gateway(sql.clone())
-            // Only a stream's writer thread may change state; an unknown
-            // thread may not.
+            // Only an open thread may change the workspace; an unknown or
+            // closed one may not.
             .with_write_gate({
                 let threads = thread_store.clone();
                 Arc::new(move |thread| {
                     let threads = threads.clone();
                     Box::pin(async move {
                         use oxplow_domain::stores::ThreadStore as _;
-                        matches!(threads.get(&thread).await, Ok(Some(t)) if t.status.is_writer())
+                        matches!(threads.get(&thread).await, Ok(Some(t)) if t.is_open())
                     })
                 })
             })
@@ -2412,7 +2409,7 @@ mod tests {
                 "efforts.write/report",
                 "efforts.write/update",
                 // Anyone else than a person only in its own stream, and as
-                // a write, from its writer thread.
+                // a write, from an open thread.
                 "extension_config.read/inspect",
                 "extension_config.read/snapshot",
                 "extension_config.write/compare_exchange",
@@ -2465,9 +2462,6 @@ mod tests {
                 "test_runs.write/record_run",
                 "threads.write/close",
                 "threads.write/create",
-                // Handing the worktree on is part of an agent's work.
-                "threads.write/demote",
-                "threads.write/promote",
                 "threads.write/rename",
                 "threads.write/reopen",
                 // Every work list's verbs; `delete` asks.

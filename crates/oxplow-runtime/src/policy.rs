@@ -1,20 +1,17 @@
 //! The tool policy every agent transport asks: may this thread run this
-//! tool now? It is isolation only — the write guard (a read-only thread
-//! can't touch its worktree; no thread touches another stream's; wiki
-//! pages are written by command). It never asks for tracked work
-//! (`.context/work-tracking.md`). The hook route asks it with
-//! Claude-shaped payloads; the ACP client asks it with ACP tool calls. The
-//! answer carries the reason text only; each transport renders it in its
-//! own wire shape. See `.context/agent-model.md` → "Write guard".
+//! tool now? It is isolation only — the write guard (no thread touches
+//! another stream's worktree; wiki pages are written by command). It never
+//! asks for tracked work (`.context/work-tracking.md`). The hook route asks
+//! it with Claude-shaped payloads; the ACP client asks it with ACP tool
+//! calls. The answer carries the reason text only; each transport renders
+//! it in its own wire shape. See `.context/agent-model.md` → "Isolation".
 //!
-//! Pure: the facts (the thread, the worktrees) are gathered by the caller
+//! Pure: the facts (the worktrees) are gathered by the caller
 //! (`oxplow_app::agent_policy`).
 
 use std::path::{Path, PathBuf};
 
-use oxplow_domain::Thread;
-
-use crate::write_guard::read_only_reason;
+use crate::write_guard::{foreign_worktree_reason, wiki_page_reason};
 
 /// What a tool call would do, as far as the policy cares.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,9 +50,8 @@ pub enum PolicyDecision {
 
 /// The facts a decision needs, gathered by the caller.
 pub struct PolicyFacts<'a> {
-    pub thread: &'a Thread,
-    /// The thread's own stream worktree: where its write guard applies, and
-    /// what relative paths resolve against.
+    /// The thread's own stream worktree: what relative paths resolve
+    /// against, and the one tree it may write.
     pub worktree_root: &'a Path,
     /// Every other stream's worktree (the primary checkout included). No
     /// thread edits them (workspace isolation).
@@ -63,13 +59,6 @@ pub struct PolicyFacts<'a> {
     /// The primary project, whose `.oxplow/wiki` pages every stream shares
     /// (written by `oxplow.knowledge.write_page`, never by a tool).
     pub project_dir: &'a Path,
-}
-
-/// An absolute path outside the project: not oxplow's concern (it can't
-/// be a project file or an effort's change), so neither rule applies.
-pub fn path_outside_worktree(path: &str, project_dir: &Path) -> bool {
-    let p = Path::new(path);
-    p.is_absolute() && !p.starts_with(project_dir)
 }
 
 /// `path` made absolute (against `base`), with `.`/`..` resolved and the
@@ -116,19 +105,6 @@ pub fn normalize_path(path: &Path, base: &Path) -> PathBuf {
     }
 }
 
-/// The other stream's worktree `path` falls in, if any.
-fn foreign_root<'a>(path: &str, facts: &'a PolicyFacts<'_>) -> Option<&'a Path> {
-    let p = Path::new(path);
-    if !p.is_absolute() || p.starts_with(facts.worktree_root) {
-        return None;
-    }
-    facts
-        .other_roots
-        .iter()
-        .map(PathBuf::as_path)
-        .find(|root| p.starts_with(root))
-}
-
 /// Decide whether `intent` may run; with several paths, the first path
 /// refused wins.
 pub fn decide_tool(intent: &ToolIntent<'_>, facts: &PolicyFacts<'_>) -> PolicyDecision {
@@ -152,54 +128,18 @@ pub fn decide_tool(intent: &ToolIntent<'_>, facts: &PolicyFacts<'_>) -> PolicyDe
                 .into_owned()
         })
         .collect();
-    let facts = &PolicyFacts {
-        thread: facts.thread,
-        worktree_root: &own,
-        other_roots: &others,
-        project_dir: &project,
-    };
-    let intent = &ToolIntent {
-        label: intent.label,
-        kind: intent.kind,
-        paths: &resolved,
-    };
     // A wiki page is written by command, whatever the thread.
-    for p in intent.paths {
-        if let Some(reason) = crate::write_guard::wiki_page_reason(Some(p), Some(facts.project_dir))
-        {
+    for p in &resolved {
+        if let Some(reason) = wiki_page_reason(Some(p), Some(&project)) {
             return PolicyDecision::Deny {
                 layer: DenyLayer::WriteGuard,
                 reason,
             };
         }
     }
-    // Another stream's tree is off limits to every thread, writer or not.
-    for p in intent.paths {
-        if let Some(root) = foreign_root(p, facts) {
-            return PolicyDecision::Deny {
-                layer: DenyLayer::WriteGuard,
-                reason: format!(
-                    "path `{p}` is in another stream's worktree (`{}`). A thread may edit only \
-                     its own stream's worktree; do this from that stream's thread, or record it \
-                     as a note on the current task.",
-                    root.display()
-                ),
-            };
-        }
-    }
-    let targets: Vec<Option<&str>> = if intent.paths.is_empty() {
-        vec![None]
-    } else {
-        intent
-            .paths
-            .iter()
-            .map(String::as_str)
-            .filter(|p| !path_outside_worktree(p, facts.worktree_root))
-            .map(Some)
-            .collect()
-    };
-    for t in &targets {
-        if let Some(reason) = read_only_reason(facts.thread, *t, Some(facts.worktree_root)) {
+    // Another stream's tree is off limits to every thread.
+    for p in &resolved {
+        if let Some(reason) = foreign_worktree_reason(p, &own, &others) {
             return PolicyDecision::Deny {
                 layer: DenyLayer::WriteGuard,
                 reason,
@@ -212,46 +152,33 @@ pub fn decide_tool(intent: &ToolIntent<'_>, facts: &PolicyFacts<'_>) -> PolicyDe
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::{StreamId, ThreadId, ThreadStatus, Timestamp};
 
-    fn thread(status: ThreadStatus) -> Thread {
-        Thread {
-            id: ThreadId::new(2),
-            stream_id: StreamId::new(1),
-            title: "t".into(),
-            status,
-            sort_index: 0,
-            summary: String::new(),
-            summary_updated_at: None,
-            closed_at: None,
-            custom_prompt: None,
-            created_at: Timestamp::now(),
-            updated_at: Timestamp::now(),
-            archived_at: None,
-        }
-    }
-
-    fn decide(
-        status: ThreadStatus,
-        label: &str,
-        kind: IntentKind,
-        paths: &[&str],
-    ) -> PolicyDecision {
-        let t = thread(status);
+    /// A call from a thread of the stream at `own`, the other stream's
+    /// tree at `other`, the project at `/proj`.
+    fn decide_at(own: &str, other: &str, kind: IntentKind, paths: &[&str]) -> PolicyDecision {
         let paths: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
         decide_tool(
             &ToolIntent {
-                label,
+                label: "Edit",
                 kind,
                 paths: &paths,
             },
             &PolicyFacts {
-                thread: &t,
-                worktree_root: Path::new("/proj"),
-                other_roots: &[std::path::PathBuf::from("/proj-wt")],
+                worktree_root: Path::new(own),
+                other_roots: &[std::path::PathBuf::from(other)],
                 project_dir: Path::new("/proj"),
             },
         )
+    }
+
+    /// From the primary's thread (`/proj`, a worktree stream at `/proj-wt`).
+    fn decide(kind: IntentKind, paths: &[&str]) -> PolicyDecision {
+        decide_at("/proj", "/proj-wt", kind, paths)
+    }
+
+    /// From a worktree stream's thread (`/proj-wt`, the primary at `/proj`).
+    fn decide_in_worktree(paths: &[&str]) -> PolicyDecision {
+        decide_at("/proj-wt", "/proj", IntentKind::WorktreeWrite, paths)
     }
 
     fn layer(d: &PolicyDecision) -> Option<DenyLayer> {
@@ -261,120 +188,44 @@ mod tests {
         }
     }
 
+    /// Any thread edits its own stream's worktree with nothing tracked —
+    /// relative or absolute, or naming no path at all.
     #[test]
-    fn a_read_only_thread_cannot_write_inside_the_worktree() {
-        let d = decide(
-            ThreadStatus::Queued,
-            "Edit",
-            IntentKind::WorktreeWrite,
-            &["/proj/src/a.rs"],
-        );
-        assert_eq!(layer(&d), Some(DenyLayer::WriteGuard));
-        let PolicyDecision::Deny { reason, .. } = d else {
-            unreachable!()
-        };
-        assert!(
-            reason.contains("/proj/src/a.rs") && reason.contains("read-only"),
-            "{reason}"
-        );
-        // No path at all: the generic read-only reason.
-        let d = decide(
-            ThreadStatus::Queued,
-            "Write",
-            IntentKind::WorktreeWrite,
-            &[],
-        );
-        assert_eq!(layer(&d), Some(DenyLayer::WriteGuard));
-    }
-
-    /// The writer edits its worktree with nothing tracked.
-    #[test]
-    fn the_writer_edits_without_tracked_work() {
-        assert_eq!(
-            decide(
-                ThreadStatus::Active,
-                "Delete",
-                IntentKind::WorktreeWrite,
-                &["src/a.rs"]
-            ),
-            PolicyDecision::Allow
-        );
+    fn a_thread_edits_its_own_worktree_without_tracked_work() {
+        for paths in [&["src/a.rs"][..], &["/proj/src/a.rs"], &[]] {
+            assert_eq!(
+                decide(IntentKind::WorktreeWrite, paths),
+                PolicyDecision::Allow,
+                "{paths:?}"
+            );
+        }
+        for p in ["/proj-wt/src/a.rs", "src/a.rs"] {
+            assert_eq!(decide_in_worktree(&[p]), PolicyDecision::Allow, "{p}");
+        }
     }
 
     #[test]
     fn outside_paths_and_non_writes_are_allowed() {
         assert_eq!(
-            decide(
-                ThreadStatus::Queued,
-                "Edit",
-                IntentKind::WorktreeWrite,
-                &["/tmp/x"]
-            ),
+            decide(IntentKind::WorktreeWrite, &["/tmp/x"]),
             PolicyDecision::Allow
         );
         assert_eq!(
-            decide(
-                ThreadStatus::Queued,
-                "Read",
-                IntentKind::Other,
-                &["/proj/a"]
-            ),
+            decide(IntentKind::Other, &["/proj-wt/a"]),
             PolicyDecision::Allow
         );
     }
 
     #[test]
     fn any_denied_path_denies_a_multi_path_call() {
-        // A move from outside into the worktree still writes the worktree.
-        let d = decide(
-            ThreadStatus::Queued,
-            "Move",
-            IntentKind::WorktreeWrite,
-            &["/tmp/x", "/proj/y"],
-        );
+        // A move from its own tree into another stream's still writes there.
+        let d = decide(IntentKind::WorktreeWrite, &["/proj/x", "/proj-wt/y"]);
         assert_eq!(layer(&d), Some(DenyLayer::WriteGuard));
-    }
-
-    /// A thread in a worktree stream: its worktree is a sibling of the
-    /// primary checkout (`/proj-wt` next to `/proj`).
-    fn decide_in_worktree(status: ThreadStatus, paths: &[&str]) -> PolicyDecision {
-        let t = thread(status);
-        let paths: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
-        decide_tool(
-            &ToolIntent {
-                label: "Edit",
-                kind: IntentKind::WorktreeWrite,
-                paths: &paths,
-            },
-            &PolicyFacts {
-                thread: &t,
-                worktree_root: Path::new("/proj-wt"),
-                other_roots: &[std::path::PathBuf::from("/proj")],
-                project_dir: Path::new("/proj"),
-            },
-        )
-    }
-
-    #[test]
-    fn a_worktree_streams_own_tree_is_guarded() {
-        // Read-only: denied inside its own worktree (relative or absolute).
-        for p in ["/proj-wt/src/a.rs", "src/a.rs"] {
-            assert_eq!(
-                layer(&decide_in_worktree(ThreadStatus::Queued, &[p])),
-                Some(DenyLayer::WriteGuard),
-                "{p}"
-            );
-        }
-        // The writer edits it.
-        assert_eq!(
-            decide_in_worktree(ThreadStatus::Active, &["/proj-wt/src/a.rs"]),
-            PolicyDecision::Allow
-        );
     }
 
     #[test]
     fn no_thread_edits_another_streams_worktree() {
-        let d = decide_in_worktree(ThreadStatus::Active, &["/proj/src/a.rs"]);
+        let d = decide_in_worktree(&["/proj/src/a.rs"]);
         let PolicyDecision::Deny { layer: lyr, reason } = d else {
             panic!("should deny")
         };
@@ -382,18 +233,15 @@ mod tests {
         assert!(reason.contains("another stream"), "{reason}");
         // The primary's thread can't edit a worktree stream's tree either.
         assert_eq!(
-            layer(&decide(
-                ThreadStatus::Active,
-                "Edit",
-                IntentKind::WorktreeWrite,
-                &["/proj-wt/src/a.rs"]
-            )),
+            layer(&decide(IntentKind::WorktreeWrite, &["/proj-wt/src/a.rs"])),
             Some(DenyLayer::WriteGuard)
         );
         // The shared wiki is written by command, not by a tool, whatever
         // the thread.
-        for status in [ThreadStatus::Queued, ThreadStatus::Active] {
-            let d = decide_in_worktree(status, &["/proj/.oxplow/wiki/x.md"]);
+        for d in [
+            decide_in_worktree(&["/proj/.oxplow/wiki/x.md"]),
+            decide(IntentKind::WorktreeWrite, &["/proj/.oxplow/wiki/x.md"]),
+        ] {
             assert!(
                 matches!(&d, PolicyDecision::Deny { layer: DenyLayer::WriteGuard, reason }
                     if reason.contains("oxplow.knowledge.write_page")),
@@ -403,18 +251,18 @@ mod tests {
     }
 
     #[test]
-    fn dot_dot_and_symlinks_cant_smuggle_a_path_out_of_the_guard() {
+    fn dot_dot_and_symlinks_cant_smuggle_a_path_into_another_streams_tree() {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap().join("proj");
-        std::fs::create_dir_all(root.join("src")).unwrap();
-        let elsewhere = dir.path().canonicalize().unwrap().join("tmp");
-        std::fs::create_dir_all(&elsewhere).unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        let own = base.join("proj");
+        let other = base.join("proj-wt");
+        std::fs::create_dir_all(own.join("src")).unwrap();
+        std::fs::create_dir_all(other.join("src")).unwrap();
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&root, elsewhere.join("lnk")).unwrap();
-        let t = thread(ThreadStatus::Queued);
-        let mut paths = vec![format!("{}/../proj/src/a.rs", elsewhere.display())];
+        std::os::unix::fs::symlink(&other, own.join("lnk")).unwrap();
+        let mut paths = vec![format!("{}/../proj-wt/src/a.rs", own.display())];
         #[cfg(unix)]
-        paths.push(format!("{}/lnk/src/new.rs", elsewhere.display()));
+        paths.push(format!("{}/lnk/src/new.rs", own.display()));
         for p in paths {
             let one = vec![p.clone()];
             let d = decide_tool(
@@ -424,10 +272,9 @@ mod tests {
                     paths: &one,
                 },
                 &PolicyFacts {
-                    thread: &t,
-                    worktree_root: &root,
-                    other_roots: &[],
-                    project_dir: &root,
+                    worktree_root: &own,
+                    other_roots: std::slice::from_ref(&other),
+                    project_dir: &own,
                 },
             );
             assert_eq!(layer(&d), Some(DenyLayer::WriteGuard), "{p}");

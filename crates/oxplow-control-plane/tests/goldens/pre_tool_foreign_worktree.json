@@ -1,0 +1,7 @@
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "deny",
+    "permissionDecisionReason": "path `<ROOT>-wt/src/x.rs` is in another stream's worktree (`<ROOT>-wt`). A thread may edit only its own stream's worktree; do this from that stream's thread, or record it as a note on the current task."
+  }
+}

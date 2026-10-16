@@ -26,8 +26,6 @@ use oxplow_domain::agent::tool::{ToolKind as Kind, ToolUse};
 struct Host {
     /// Deny every worktree write with this reason.
     deny_writes: Option<String>,
-    /// The thread isn't its stream's writer (flipped to demote it).
-    read_only: std::sync::atomic::AtomicBool,
     context: Option<String>,
     log: Mutex<Vec<String>>,
 }
@@ -63,9 +61,6 @@ impl ChatHost for Host {
     }
     async fn session_started(&self, _t: &ThreadId, s: &str) {
         self.log.lock().push(format!("started {s}"));
-    }
-    async fn writable(&self, _t: &ThreadId) -> bool {
-        !self.read_only.load(std::sync::atomic::Ordering::SeqCst)
     }
     async fn prompt_context(&self, _t: &ThreadId, _s: &str) -> Option<String> {
         self.context.clone()
@@ -288,7 +283,7 @@ async fn a_prompt_streams_the_reply_and_records_the_turn_once() {
 #[tokio::test]
 async fn a_denied_edit_is_rejected_without_asking() {
     let mut rig = open(Host {
-        deny_writes: Some("read-only thread".into()),
+        deny_writes: Some("another stream's worktree".into()),
         ..Default::default()
     })
     .await;
@@ -298,7 +293,7 @@ async fn a_denied_edit_is_rejected_without_asking() {
         .iter()
         .any(|b| matches!(b, ItemBody::Permission { .. })));
     assert!(items.iter().any(
-        |b| matches!(b, ItemBody::PolicyDenied { reason, .. } if reason == "read-only thread")
+        |b| matches!(b, ItemBody::PolicyDenied { reason, .. } if reason == "another stream's worktree")
     ));
     assert_eq!(rig.agent_text(), vec!["permission: reject".to_string()]);
     assert_eq!(rig.host.count("awaiting"), 0);
@@ -869,7 +864,6 @@ mod codex {
     use crate::chat::codex::CodexOpen;
     use oxplow_harnesses::codex_app_server::fake::FakeAppServer;
     use serde_json::json;
-    use std::sync::atomic::Ordering;
 
     const THREAD: &str = "thr-x";
 
@@ -879,7 +873,7 @@ mod codex {
         FakeAppServer::start(home, |method, _| match method {
             "thread/start" => Ok(json!({"thread": {"id": THREAD, "name": null}})),
             "thread/resume" => Ok(json!({"thread": {"id": THREAD, "name": "Earlier work"}})),
-            "thread/goal/set" | "thread/goal/clear" | "thread/settings/update" => Ok(json!({})),
+            "thread/goal/set" | "thread/goal/clear" => Ok(json!({})),
             "thread/name/set" => Ok(json!({})),
             other => Err(format!("no {other}")),
         })
@@ -1098,48 +1092,13 @@ mod codex {
         assert!(!methods(&fake).iter().any(|m| m == "turn/start"));
     }
 
-    /// The thread opens sandboxed to what it may write, and follows a
-    /// promotion or demotion — only a change, since a sandbox change
-    /// restarts the thread's MCP servers.
+    /// The thread opens sandboxed to its worktree — Codex may change it,
+    /// nothing outside it — and nothing here changes the sandbox after.
     #[tokio::test]
-    async fn the_sandbox_follows_the_threads_write_access() {
-        let host = Host::default();
-        host.read_only.store(true, Ordering::SeqCst);
-        let (rig, fake) = open_codex(host, "thread/start").await;
+    async fn the_thread_opens_sandboxed_to_its_worktree() {
+        let (_rig, fake) = open_codex(Host::default(), "thread/start").await;
         let start = fake.wait_for(|v| v["method"] == "thread/start").await;
-        assert_eq!(start["params"]["sandbox"], "read-only");
-        rig.mgr.sync_access();
-        rig.host.read_only.store(false, Ordering::SeqCst);
-        rig.mgr.sync_access();
-        let update = fake
-            .wait_for(|v| v["method"] == "thread/settings/update")
-            .await;
-        assert_eq!(update["params"]["threadId"], THREAD);
-        assert_eq!(
-            update["params"]["sandboxPolicy"],
-            json!({"type": "workspaceWrite"})
-        );
-        rig.mgr.sync_access();
-        rig.host.read_only.store(true, Ordering::SeqCst);
-        rig.mgr.sync_access();
-        let updates = || {
-            fake.received()
-                .into_iter()
-                .filter(|v| v["method"] == "thread/settings/update")
-                .collect::<Vec<_>>()
-        };
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while updates().len() < 2 {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .unwrap();
-        let updates = updates();
-        assert_eq!(updates.len(), 2, "one per change");
-        assert_eq!(
-            updates[1]["params"]["sandboxPolicy"],
-            json!({"type": "readOnly"})
-        );
+        assert_eq!(start["params"]["sandbox"], "workspace-write");
+        assert!(!methods(&fake).iter().any(|m| m == "thread/settings/update"));
     }
 }

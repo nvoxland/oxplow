@@ -208,10 +208,15 @@ pub async fn open_terminal_session(
                 session.harness
             ))
         })?;
+    // A harness without a prompt channel hears who else is in the worktree
+    // only here, as the launch saw it.
+    let others =
+        oxplow_app::agent_context::others_in_worktree(ctx, stream.id, Some(session.id)).await;
     let prompt = assemble_system_prompt(
         &config,
         &stream,
         Some(&thread),
+        &others,
         &declared,
         &oxplow_app::capabilities::agent_text(ctx),
     );
@@ -498,15 +503,15 @@ mod tests {
     }
 
     /// An agent session opened, as a person does, on the primary stream's
-    /// writer thread.
+    /// first thread.
     async fn first_session(ctx: &crate::RpcContext) -> oxplow_domain::agent_session::AgentSession {
         let stream = ctx.streams.ensure_primary().await.unwrap();
         let thread = ctx
             .threads
-            .selected_or_active(&stream.id)
+            .selected_or_first(&stream.id)
             .await
             .unwrap()
-            .expect("the primary stream has a writer thread");
+            .expect("the primary stream has a thread");
         let out = crate::dispatch(
             "run_command",
             json!({ "id": "oxplow.agent_session.open", "input": {

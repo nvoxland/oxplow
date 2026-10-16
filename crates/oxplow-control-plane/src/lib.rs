@@ -579,20 +579,14 @@ async fn handle_hook_inner(
 
     // PostToolUse: record the call (wiki attribution, effort claim, tool
     // call, collection — pump reactors on the event the ingest logged) and
-    // hand back any context for the agent (the ROLE CHANGE banner after a
-    // plan settles, else the thread's undelivered nudges).
+    // hand back any context for the agent (the thread's undelivered
+    // nudges).
     if kind == HookKind::PostToolUse {
         if let Some(thread_id) = envelope_for_resume.thread_id.as_ref() {
             if let Some(context) = ctx
                 .services
                 .agent_context
-                .post_tool_context(
-                    &ctx.services,
-                    thread_id,
-                    envelope_for_resume.session_id.as_deref(),
-                    harness,
-                    tool.as_ref(),
-                )
+                .post_tool_context(&ctx.services, thread_id, harness)
                 .await
             {
                 return respond(
@@ -619,6 +613,7 @@ async fn handle_hook_inner(
                     &ctx.services,
                     thread_id,
                     envelope_for_resume.session_id.as_deref(),
+                    envelope_for_resume.agent_session_id,
                     harness,
                 )
                 .await

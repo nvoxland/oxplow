@@ -24,9 +24,9 @@ fn bus() -> (Database, CommandBus) {
                                       worktree_path, created_at, updated_at)
                    VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/tmp/x',
                            '2026-01-01', '2026-01-01');
-                 INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-                   VALUES (7, 1, 'T', 'active', '2026-01-01', '2026-01-01'),
-                          (8, 1, 'U', 'queued', '2026-01-01', '2026-01-01');",
+                 INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+                   VALUES (7, 1, 'T', '2026-01-01', '2026-01-01'),
+                          (8, 1, 'U', '2026-01-01', '2026-01-01');",
             )
             .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
         })
@@ -297,7 +297,7 @@ async fn an_agent_thread_that_may_not_write_is_refused_writes_not_reads() {
 /// an event on a thread that may not write, its writes are refused; on
 /// one that may, or with no thread, they run.
 #[tokio::test(flavor = "multi_thread")]
-async fn an_effect_is_held_to_its_events_threads_writer_gate() {
+async fn an_effect_is_held_to_its_events_threads_write_gate() {
     let (db, bus) = bus();
     let bus = bus.with_write_gate(Arc::new(|thread| {
         Box::pin(async move { thread != ThreadId::new(7) })
@@ -335,7 +335,7 @@ async fn an_effect_is_held_to_its_events_threads_writer_gate() {
     .await
     .unwrap();
     // An effect whose event carries no thread acts for no thread, so the
-    // writer gate doesn't apply to it (it writes into no worktree); an
+    // write gate doesn't apply to it (it writes into no worktree); an
     // effect on a thread that may not write is still refused, above.
     bus.run(
         &on(None),
@@ -348,11 +348,11 @@ async fn an_effect_is_held_to_its_events_threads_writer_gate() {
     assert_eq!(kv_value(&db, "b").await, Some("1".into()));
 }
 
-/// A job with no thread is denied a writer-bound command. Today the
-/// invoker floor already refuses every job (jobs have no generic command
-/// surface), ahead of the thread rule that backs it up.
+/// A job with no thread is denied a command that changes the workspace.
+/// Today the invoker floor already refuses every job (jobs have no generic
+/// command surface), ahead of the thread rule that backs it up.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_job_without_a_thread_is_denied_a_writer_bound_command() {
+async fn a_job_without_a_thread_is_denied_a_thread_bound_command() {
     let (db, bus) = bus();
     bus.register(
         Command::new(

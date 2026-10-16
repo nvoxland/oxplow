@@ -1919,17 +1919,17 @@ mod tests {
         );
     }
 
-    /// A queued thread (tsk466) may edit a task and move it anywhere but
-    /// `in_progress`: task bookkeeping isn't a claim on the worktree.
+    /// Another thread's agent may edit a task and finish it: task
+    /// bookkeeping isn't a claim on the worktree.
     #[tokio::test]
-    async fn a_queued_thread_edits_and_finishes_tasks() {
+    async fn another_threads_agent_edits_and_finishes_tasks() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
-        let queued = queued_agent(&fx).await;
+        let other = other_threads_agent(&fx).await;
         let out = fx
             .svc
             .commands
             .run(
-                &queued,
+                &other,
                 UPDATE,
                 json!({ "ref": work_item_ref(fx.task), "title": "renamed", "state": "done" }),
                 false,
@@ -1948,14 +1948,14 @@ mod tests {
     /// Any thread may start a task: a task's state is a record, not a
     /// claim on the worktree (only edits are guarded, by isolation).
     #[tokio::test]
-    async fn a_queued_thread_starts_and_files_tasks_in_progress() {
+    async fn another_threads_agent_starts_and_files_tasks_in_progress() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        let queued = queued_agent(&fx).await;
+        let other = other_threads_agent(&fx).await;
         let later = file_on(&fx, "later", Some(fx.thread)).await;
         fx.svc
             .commands
             .run(
-                &queued,
+                &other,
                 NAME,
                 json!({ "ref": later, "to": "in_progress" }),
                 false,
@@ -1966,7 +1966,7 @@ mod tests {
             .svc
             .commands
             .run(
-                &queued,
+                &other,
                 CREATE,
                 json!({ "title": "mine now", "thread": "thr9", "state": "in_progress" }),
                 false,
@@ -2065,14 +2065,14 @@ mod tests {
         assert!(!out_refs.is_empty(), "the body mention was projected");
     }
 
-    /// Thread 9, queued, in stream 1, as its agent.
-    async fn queued_agent(fx: &crate::test_fixtures::EffortFixture) -> Actor {
+    /// Thread 9, another open thread in stream 1, as its agent.
+    async fn other_threads_agent(fx: &crate::test_fixtures::EffortFixture) -> Actor {
         fx.svc
             .db
             .transaction(|c| {
                 c.execute_batch(
-                    "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-                       VALUES (9, 1, 'q', 'queued',
+                    "INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+                       VALUES (9, 1, 'q',
                                '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z');",
                 )
                 .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))

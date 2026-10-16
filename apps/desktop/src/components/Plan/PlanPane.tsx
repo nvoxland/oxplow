@@ -65,7 +65,6 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 interface Props {
   thread: Thread | null;
-  activeThreadId: string | null;
   threadWork: WorkList | null;
   /** Live agent status for the displayed thread. Drives the In Progress
    *  empty-state placeholder ("Thinking..." vs "Waiting"). */
@@ -131,7 +130,6 @@ interface ContextMenuState {
 
 export function PlanPane({
   thread,
-  activeThreadId,
   threadWork,
   agentStatus,
   backlog,
@@ -521,7 +519,8 @@ export function PlanPane({
         ) : (
           groups.map((group) => {
             const isRootThread = mode === "thread";
-            const isActive = isRootThread && thread?.id === activeThreadId;
+            // The thread's own list: its in-progress rows are live work.
+            const isActive = isRootThread;
             const readyMenuItems: MenuItem[] = [
               {
                 id: "plan-new-task",

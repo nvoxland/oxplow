@@ -518,8 +518,8 @@ mod tests {
             tx.execute_batch(
                 "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
                    VALUES (1, 'primary', 'p', 'main', 'r', 'r', '/r', '2026-01-01', '2026-01-01');
-                 INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-                   VALUES (1, 1, 't', 'active', '2026-01-01', '2026-01-01');
+                 INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+                   VALUES (1, 1, 't', '2026-01-01', '2026-01-01');
                  INSERT INTO effort (id, work_item, thread_id, started_at, ended_at) VALUES
                    (1, 'work_item:issues:A-1', 1, '2026-01-01', '2026-01-01'),
                    (2, 'work_item:issues:A-2', 1, '2026-01-01', '2026-01-01'),
@@ -802,7 +802,7 @@ mod tests {
         let stream = svc.streams.list_streams().await.unwrap()[0].id.value();
         let context = svc
             .agent_context
-            .prompt_context(svc, &f.thread, Some("s"), None)
+            .prompt_context(svc, &f.thread, Some("s"), None, None)
             .await
             .unwrap_or_default();
         assert!(
@@ -826,7 +826,7 @@ mod tests {
         );
         let again = svc
             .agent_context
-            .prompt_context(svc, &f.thread, Some("s"), None)
+            .prompt_context(svc, &f.thread, Some("s"), None, None)
             .await
             .unwrap_or_default();
         assert!(
@@ -837,7 +837,7 @@ mod tests {
         settle().await;
         let third = svc
             .agent_context
-            .prompt_context(svc, &f.thread, Some("s"), None)
+            .prompt_context(svc, &f.thread, Some("s"), None, None)
             .await
             .unwrap_or_default();
         assert!(!third.contains("effort none"), "once per thread: {third}");
@@ -916,7 +916,7 @@ mod tests {
     async fn prompt(f: &crate::test_fixtures::EffortFixture) -> String {
         f.svc
             .agent_context
-            .prompt_context(&f.svc, &f.thread, Some("s"), None)
+            .prompt_context(&f.svc, &f.thread, Some("s"), None, None)
             .await
             .unwrap_or_default()
     }

@@ -405,8 +405,8 @@ mod tests {
                     [now],
                 )?;
                 conn.execute(
-                    "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-                     VALUES (1, 1, 't', 'active', ?1, ?1)",
+                    "INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+                     VALUES (1, 1, 't', ?1, ?1)",
                     [now],
                 )?;
                 conn.execute(

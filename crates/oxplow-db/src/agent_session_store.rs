@@ -522,8 +522,8 @@ mod tests {
         conn.execute_batch(
             "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
                VALUES (1, 'primary', 'a', 'main', 'refs/heads/main', 'main', '/r', 't', 't');
-             INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-               VALUES (1, 1, 'a', 'active', 't', 't'), (2, 1, 'b', 'queued', 't', 't');",
+             INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+               VALUES (1, 1, 'a', 't', 't'), (2, 1, 'b', 't', 't');",
         )
         .unwrap();
         conn

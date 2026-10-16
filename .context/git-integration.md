@@ -525,15 +525,14 @@ about this repo's own auto-deploy workflow, which oxplow can't assume of any
 project. Rationale in [collection.md](./collection.md) → "Commits get no
 nudge of their own".
 
-### Non-writer threads still cannot call git
+### Any thread may call git in its own stream's worktree
 
-Non-writer threads share the worktree with the writer, and any ref or
-index change corrupts the writer's in-progress work. The write-guard
-hook denies their edits (`kind: edit`), and the `oxplow.vcs.*` commands
-are `Write` commands a non-writer thread is refused. A git command run
-in a shell isn't classified: the session context's Access line ("project
-file edits are blocked") is all that tells a read-only thread to leave
-git alone.
+Every open thread of a stream shares its worktree, so any thread's agent
+may run git there; the `oxplow.vcs.*` commands are `Write` commands that
+need the actor's thread, and that thread open. A different stream's
+worktree (the primary checkout included) is off limits: the write guard
+denies edits into it (`kind: edit`). A git command run in a shell isn't
+classified.
 
 ## Commit indexer
 

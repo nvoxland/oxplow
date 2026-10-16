@@ -31,7 +31,11 @@ sinks.
 |-------------------------|---------------|--------------------------------------------|
 | `--surface-app`         | `#0f1115`     | App background, page bodies (darkest content tier) |
 | `--surface-card`        | `#161a20`     | Cards, inner content surfaces, rail panels |
-| `--writer-mark`         | `#edc948`     | The Navigator's writer thread: a corner fold on its tab's top-left (amber, same as `--chart-6`; not `--accent`, which means selected) |
+| `--thread-mark-amber`   | `#edc948`     | A Navigator thread's mark: a corner fold on its tab's top-left, in the colour the person marked it (not `--accent`, which means selected) |
+| `--thread-mark-red`     | `#e15759`     | The `red` mark |
+| `--thread-mark-green`   | `#59a14f`     | The `green` mark |
+| `--thread-mark-blue`    | `#4e79a7`     | The `blue` mark |
+| `--thread-mark-violet`  | `#b07aa1`     | The `violet` mark |
 | `--surface-chrome`      | `#1b2129`     | Lighter **chrome frame** around the dark content — rail aside, Navigator strip, content-panel surround. The content recesses below it. |
 | `--surface-rail`        | `#13161b`     | Legacy rail tier (PageNavBar fallback, TerminalTabStrip, TaskDetail) — chrome surfaces moved to `--surface-chrome` |
 | `--surface-tab-active`  | `#1c2027`     | Currently-focused tab body                 |
@@ -39,7 +43,7 @@ sinks.
 | `--surface-elevated`    | `#20242c`     | Popovers, slideovers, context menus        |
 | `--surface-overlay`     | rgba dim      | Backdrops behind slideovers / overlays     |
 | `--surface-stream-tile` | `#c9d0dc`     | The Navigator's stream glyph: an inverted (light) tile heading its threads, with `--text-on-stream-tile` (`#12161c`) letters |
-| `--surface-thread-tab`  | 4% white      | A Navigator thread's tab, indented off its stream's guide line (the writer's is marked by a `--writer-mark` corner fold) |
+| `--surface-thread-tab`  | 4% white      | A Navigator thread's tab, indented off its stream's guide line (a marked thread shows a `--thread-mark-<colour>` corner fold) |
 
 **Panel headers.** `--panel-header-bg` (`rgba(108,156,246,0.12)`, a muted
 accent wash — *not* grey) tints the header band of every panel so titles

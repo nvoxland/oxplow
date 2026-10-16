@@ -768,12 +768,12 @@ declaring *what it is* and mounting the generic layer.
     any kind-specific entries)
   - `thread-rail-create-input`, `thread-rail-create-submit` on the
     new-thread creation row; `thread-chip-rename-input-<id>` on the
-    inline rename input; `thread-chip-promote-<id>` and
-    `thread-chip-complete-<id>` on the hover-card actions (also
-    reachable via the chip's right-click menu →
-    `menu-item-thread.promote` / `menu-item-thread.complete`, or the
-    Menu key / Shift+F10 on a focused chip — keyboard-first users should
-    never have to hover to promote a thread)
+    inline rename input; `thread-chip-complete-<id>` on the
+    hover-card action (also reachable via the chip's right-click menu →
+    `menu-item-thread.complete`, or the Menu key / Shift+F10 on a
+    focused chip). The Navigator's thread menu has **Mark with…**
+    (`menu-item-thread.mark`; submenu `menu-item-thread.mark.<colour|none>`,
+    headed by a one-line intent in `context-submenu-header`)
   - `terminal-tab-strip` on the Terminal page's left initials strip;
     `terminal-tab-<id>` on each terminal's glyph button (click to
     activate). Hovering the strip slides out an overlay

@@ -348,8 +348,8 @@ mod tests {
             .db
             .transaction(|c| {
                 c.execute_batch(
-                    "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-                       VALUES (7, 1, 'other', 'queued',
+                    "INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+                       VALUES (7, 1, 'other',
                                '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z');",
                 )
                 .map_err(oxplow_db::map_sql_err)

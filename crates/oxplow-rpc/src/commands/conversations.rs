@@ -161,10 +161,10 @@ mod tests {
         let stream = ctx.streams.ensure_primary().await.unwrap();
         let thread = ctx
             .threads
-            .selected_or_active(&stream.id)
+            .selected_or_first(&stream.id)
             .await
             .unwrap()
-            .expect("the primary stream has a writer thread");
+            .expect("the primary stream has a thread");
         let out = crate::dispatch(
             "run_command",
             json!({ "id": "oxplow.agent_session.open", "input": {

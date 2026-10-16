@@ -1,31 +1,30 @@
 //! The context oxplow hands an agent, shared by every transport (tsk334,
-//! P3.8): the `<session-context>` block (deduped per session), prompt
-//! advisories and the open effort's decisions on a prompt; the ROLE CHANGE
-//! banner or the thread's undelivered nudges after a tool call. What an
-//! agent *did* is recorded elsewhere — the hook ingest logs `agent.*` events
-//! and pump reactors record from them (`tool_call_reactors`,
-//! `post_tool_reactors`, the token reactor).
+//! P3.8): the `<session-context>` block (deduped per session — it names
+//! the other live agents in the worktree, so it changes as they come and
+//! go), prompt advisories and the open effort's decisions on a prompt; the
+//! thread's undelivered nudges after a tool call. What an agent *did* is
+//! recorded elsewhere — the hook ingest logs `agent.*` events and pump
+//! reactors record from them (`tool_call_reactors`, `post_tool_reactors`,
+//! the token reactor).
 //!
 //! State kept here is runtime-only (losing it on a restart costs at most
-//! one repeated context block): the launch role and last context per agent
-//! session. The session's resume id is the hook ingest's (`hook_ingest`).
-//! See `.context/agent-model.md`.
+//! one repeated context block): the last context per agent session. The
+//! session's resume id is the hook ingest's (`hook_ingest`). See
+//! `.context/agent-model.md`.
 
 use std::collections::HashMap;
 
-use oxplow_domain::agent::tool::{ToolKind, ToolUse};
 use oxplow_domain::stores::{StreamStore, ThreadStore};
-use oxplow_domain::ThreadId;
+use oxplow_domain::{AgentSessionId, StreamId, ThreadId};
 use parking_lot::Mutex;
 use tracing::warn;
 
-use crate::agent_prompt::{build_session_context_block_full, WriterAgent};
-use crate::{role_change_banner, RoleMode, Services};
+use crate::agent_prompt::{build_session_context_block, OtherAgent};
+use crate::Services;
 
-/// The launch role and the last context block per agent session.
+/// The last context block per agent session.
 #[derive(Default)]
-struct RoleState {
-    initial_role_by_session_id: HashMap<String, RoleMode>,
+struct ContextState {
     /// Last context block returned per session (and per `…#decisions`
     /// key). The launch prompt already carries this data, so a
     /// byte-identical repeat adds noise without new information.
@@ -43,7 +42,7 @@ const DECISIONS_KEY_SUFFIX: &str = "#decisions";
 /// (`Services.agent_context`).
 #[derive(Default)]
 pub struct AgentContext {
-    role_state: Mutex<RoleState>,
+    state: Mutex<ContextState>,
 }
 
 impl AgentContext {
@@ -53,17 +52,15 @@ impl AgentContext {
         let Some(session_id) = session_id else {
             return;
         };
-        let mut state = self.role_state.lock();
-        state.initial_role_by_session_id.remove(session_id);
+        let mut state = self.state.lock();
         state.last_context_by_session_id.remove(session_id);
         state
             .last_context_by_session_id
             .remove(&format!("{session_id}{DECISIONS_KEY_SUFFIX}"));
     }
 
-    /// What the agent hears after a tool call: the ROLE CHANGE banner after
-    /// a plan settles, else the thread's undelivered nudges (collection and
-    /// post-tool advisories). The recording itself is the pump's
+    /// What the agent hears after a tool call: the thread's undelivered
+    /// nudges (collection and post-tool advisories). The recording itself is the pump's
     /// (`tool_call_reactors`, `post_tool_reactors`, P3.5–P3.6): this waits
     /// up to [`POST_TOOL_SETTLE`] for the two reactors that write nudges,
     /// then takes whatever is undelivered — a nudge that lands after the
@@ -75,21 +72,10 @@ impl AgentContext {
         &self,
         svc: &Services,
         thread_id: &ThreadId,
-        session_id: Option<&str>,
         harness: Option<&str>,
-        tool: Option<&ToolUse>,
     ) -> Option<String> {
         if !carries(svc, harness, TOOL_CONTEXT) {
             return None;
-        }
-        // A plan just settled: a promotion or demotion while the plan was
-        // up for approval gets no prompt event before the agent resumes, so
-        // the banner rides this call's context. (A plan is never a test-run
-        // command; any nudges wait for the next call.)
-        if tool.is_some_and(|t| t.kind == ToolKind::Plan) {
-            if let Some(banner) = self.role_change_banner(svc, thread_id, session_id).await {
-                return Some(banner);
-            }
         }
         svc.event_pump
             .settle(
@@ -103,8 +89,9 @@ impl AgentContext {
         undelivered(svc, thread_id).await
     }
 
-    /// Context for a human's prompt: the `<session-context>` block (only
-    /// when it changed for this session), the thread's undelivered nudges
+    /// Context for a human's prompt in agent session `agent_session` (its
+    /// harness's own id is `session_id`): the `<session-context>` block
+    /// (only when it changed for this session), the thread's undelivered nudges
     /// (prompt advisories, and the hints its last turn's end left), and the
     /// open effort's decisions (once per session, and when they change).
     /// Nothing for a session whose harness can't carry context on a prompt
@@ -114,13 +101,14 @@ impl AgentContext {
         svc: &Services,
         thread_id: &ThreadId,
         session_id: Option<&str>,
+        agent_session: Option<AgentSessionId>,
         harness: Option<&str>,
     ) -> Option<String> {
         if !carries(svc, harness, PROMPT_CONTEXT) {
             return None;
         }
         let ctx_block = self
-            .refreshed_session_context(svc, thread_id, session_id)
+            .refreshed_session_context(svc, thread_id, session_id, agent_session)
             .await;
         // Prompt advisories land as nudges beside any a turn's end or a
         // late tool call left; the prompt carries them all.
@@ -143,33 +131,15 @@ impl AgentContext {
         (!combined.is_empty()).then_some(combined)
     }
 
-    /// The role this thread had when `session_id` started (captured on
-    /// first sight). `None` without a session id.
-    async fn capture_or_get_initial_role(
-        &self,
-        svc: &Services,
-        thread_id: &ThreadId,
-        session_id: Option<&str>,
-    ) -> Option<RoleMode> {
-        let session_id = session_id?.to_string();
-        let thread = svc.thread_store.get(thread_id).await.ok().flatten()?;
-        let current = RoleMode::from_thread(&thread);
-        let mut st = self.role_state.lock();
-        Some(
-            *st.initial_role_by_session_id
-                .entry(session_id)
-                .or_insert(current),
-        )
-    }
-
-    /// A fresh `<session-context>` block (with a ROLE CHANGE banner when
-    /// the role flipped), unless it's unchanged for this session or the
-    /// project turned injection off.
+    /// A fresh `<session-context>` block, naming the other live agents in
+    /// the worktree, unless it's unchanged for this session or the project
+    /// turned injection off.
     async fn refreshed_session_context(
         &self,
         svc: &Services,
         thread_id: &ThreadId,
         session_id: Option<&str>,
+        agent_session: Option<AgentSessionId>,
     ) -> Option<String> {
         let cfg = svc.config.read().ok()?.clone();
         if !cfg.inject_session_context {
@@ -182,16 +152,8 @@ impl AgentContext {
             .await
             .ok()
             .flatten()?;
-        let initial = self
-            .capture_or_get_initial_role(svc, thread_id, session_id)
-            .await;
-        let writer = if RoleMode::from_thread(&thread) == RoleMode::ReadOnly {
-            live_writer_agent(svc, &thread).await
-        } else {
-            None
-        };
-        let block =
-            build_session_context_block_full(&stream, Some(&thread), initial, writer.as_ref());
+        let others = others_in_worktree(svc, stream.id, agent_session).await;
+        let block = build_session_context_block(&stream, Some(&thread), &others);
         self.should_emit(session_id, &block).then_some(block)
     }
 
@@ -222,7 +184,7 @@ impl AgentContext {
         let Some(session_id) = session_id else {
             return true;
         };
-        let mut state = self.role_state.lock();
+        let mut state = self.state.lock();
         match state.last_context_by_session_id.get(session_id) {
             Some(previous) if previous == block => false,
             _ => {
@@ -232,26 +194,6 @@ impl AgentContext {
                 true
             }
         }
-    }
-
-    /// Just the ROLE CHANGE sentence, when the thread's role differs from
-    /// the role recorded at the start of `session_id`.
-    async fn role_change_banner(
-        &self,
-        svc: &Services,
-        thread_id: &ThreadId,
-        session_id: Option<&str>,
-    ) -> Option<String> {
-        let session_id = session_id?.to_string();
-        let thread = svc.thread_store.get(thread_id).await.ok().flatten()?;
-        let current = RoleMode::from_thread(&thread);
-        let initial = self
-            .role_state
-            .lock()
-            .initial_role_by_session_id
-            .get(&session_id)
-            .copied()?;
-        (initial != current).then(|| role_change_banner(initial, current))
     }
 }
 
@@ -296,45 +238,81 @@ async fn undelivered(svc: &Services, thread_id: &ThreadId) -> Option<String> {
     (!text.is_empty()).then(|| text.join("\n\n"))
 }
 
-/// The live agent on the writer thread of `thread`'s stream: its newest
-/// open session whose process still exists. `None` with no writer thread
-/// or no live agent on it.
-async fn live_writer_agent(svc: &Services, thread: &oxplow_domain::Thread) -> Option<WriterAgent> {
-    use oxplow_domain::stores::AgentSessionStore as _;
-    let writer = svc
-        .thread_store
-        .list_for_stream(&thread.stream_id)
+/// The live agents in stream `stream`'s worktree but `except` (the asking
+/// session): its open sessions on open threads whose process still runs,
+/// named as the person sees them (`v_agent_session.display_name`).
+pub async fn others_in_worktree(
+    svc: &Services,
+    stream: StreamId,
+    except: Option<AgentSessionId>,
+) -> Vec<OtherAgent> {
+    use oxplow_db::semantic_layer::SqlCell;
+    let Ok(out) = svc
+        .sql
+        .query_sql(
+            "SELECT s.id, s.display_name, s.harness, s.pid, t.id, t.title
+               FROM v_agent_session s JOIN v_thread t ON t.id = s.thread_id
+              WHERE t.stream_id = ?1 AND s.closed_at IS NULL AND t.closed_at IS NULL
+                AND s.pid IS NOT NULL
+              ORDER BY t.sort_index, s.opened_at, s.id",
+            vec![SqlCell::Int(stream.value())],
+            None,
+        )
         .await
-        .ok()?
-        .into_iter()
-        .find(|t| t.id != thread.id && t.status.is_writer())?;
-    let sessions = svc
-        .agent_session_store
-        .list_open_for_thread(&writer.id)
-        .await
-        .ok()?;
-    let (session, pid) = sessions
-        .into_iter()
-        .rev()
-        .filter_map(|s| s.pid.map(|pid| (s, pid)))
-        .find(|(_, pid)| crate::daemon_supervisor::process_alive(*pid))?;
-    Some(WriterAgent {
-        thread_title: writer.title,
-        thread_id: writer.id,
-        harness: session.harness,
-        pid: Some(pid),
-        session: session.resume_session_id,
-    })
+    else {
+        return Vec::new();
+    };
+    let int = |c: &SqlCell| match c {
+        SqlCell::Int(i) => Some(*i),
+        _ => None,
+    };
+    let text = |c: &SqlCell| match c {
+        SqlCell::Text(t) => t.clone(),
+        _ => String::new(),
+    };
+    out.rows
+        .iter()
+        .filter(|r| int(&r[0]).map(AgentSessionId::new) != except)
+        .filter(|r| {
+            int(&r[3])
+                .and_then(|pid| u32::try_from(pid).ok())
+                .is_some_and(crate::daemon_supervisor::process_alive)
+        })
+        .filter_map(|r| {
+            Some(OtherAgent {
+                name: text(&r[1]),
+                harness: text(&r[2]),
+                thread_id: ThreadId::new(int(&r[4])?),
+                thread_title: text(&r[5]),
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// A read-only thread's context names the writer thread's live agent;
-    /// a writer's own does not, and a dead pid names nothing.
+    /// Record `pid` as `session`'s process.
+    async fn set_pid(svc: &Services, session: AgentSessionId, pid: u32) {
+        svc.db
+            .transaction(move |tx| {
+                oxplow_db::agent_session_store::set_pid_tx(
+                    tx,
+                    session,
+                    pid,
+                    oxplow_domain::Timestamp::now(),
+                )
+            })
+            .await
+            .unwrap();
+    }
+
+    /// An agent's context names every other live agent in its worktree —
+    /// in its own thread or another of the stream — but not one whose
+    /// process is gone, one with no process, or itself.
     #[tokio::test]
-    async fn a_read_only_thread_is_told_the_writer_threads_live_agent() {
+    async fn an_agent_is_told_who_else_is_live_in_its_worktree() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &*fx.svc;
         let stream = svc
@@ -345,43 +323,55 @@ mod tests {
             .unwrap()
             .stream_id;
         let other = crate::test_fixtures::new_thread(svc, stream, "other").await;
-        assert!(!other.status.is_writer());
-
-        // No pid yet: nothing to name.
-        let ctx = AgentContext::default();
-        let none = ctx
-            .refreshed_session_context(svc, &other.id, Some("s1"))
-            .await
-            .unwrap();
-        assert!(!none.contains("Writer thread"), "{none}");
-
-        // This test process stands in for the agent.
+        let theirs = crate::test_fixtures::open_session(svc, other.id).await;
+        let gone = crate::test_fixtures::open_session(svc, other.id).await;
+        let _no_process = crate::test_fixtures::open_session(svc, other.id).await;
+        // This test process stands in for a live agent; a pid past any the
+        // OS hands out, for one that's gone.
         let me = std::process::id();
-        svc.db
-            .transaction(move |tx| {
-                oxplow_db::agent_session_store::set_pid_tx(
-                    tx,
-                    fx.session,
-                    me,
-                    oxplow_domain::Timestamp::now(),
-                )
-            })
+        set_pid(svc, fx.session, me).await;
+        set_pid(svc, theirs, me).await;
+        set_pid(svc, gone, i32::MAX as u32).await;
+
+        let mine = AgentContext::default()
+            .refreshed_session_context(svc, &fx.thread, Some("s1"), Some(fx.session))
             .await
             .unwrap();
-        let ctx = AgentContext::default();
-        let named = ctx
-            .refreshed_session_context(svc, &other.id, Some("s2"))
+        let line = mine
+            .lines()
+            .find(|l| l.starts_with("- **Also in this worktree:**"))
+            .unwrap_or_else(|| panic!("{mine}"));
+        assert!(
+            line.contains(&format!("(`claude`, thread other (`{}`))", other.id)),
+            "{line}"
+        );
+        assert_eq!(
+            line.matches("(`claude`").count(),
+            1,
+            "only the live one: {line}"
+        );
+
+        // From the other thread, the first session is the one named.
+        let theirs_ctx = AgentContext::default()
+            .refreshed_session_context(svc, &other.id, Some("s2"), Some(theirs))
             .await
             .unwrap();
         assert!(
-            named.contains(&format!("agent `claude`, pid {me}")),
-            "{named}"
+            theirs_ctx.contains(&format!("thread Thread (`{}`)", fx.thread)),
+            "{theirs_ctx}"
         );
-        let own = AgentContext::default()
-            .refreshed_session_context(svc, &fx.thread, Some("s3"))
+    }
+
+    /// Alone in the worktree, the context has no such line.
+    #[tokio::test]
+    async fn the_calling_session_is_not_listed() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        set_pid(&fx.svc, fx.session, std::process::id()).await;
+        let ctx = AgentContext::default()
+            .refreshed_session_context(&fx.svc, &fx.thread, Some("s1"), Some(fx.session))
             .await
             .unwrap();
-        assert!(!own.contains("Writer thread"), "{own}");
+        assert!(!ctx.contains("Also in this worktree"), "{ctx}");
     }
 
     #[test]
@@ -403,18 +393,9 @@ mod tests {
     #[test]
     fn clearing_session_context_baseline_allows_fresh_emission() {
         let state = AgentContext::default();
-        state
-            .role_state
-            .lock()
-            .initial_role_by_session_id
-            .insert("session-1".into(), RoleMode::Writer);
         assert!(state.should_emit(Some("session-1"), "context"));
+        assert!(!state.should_emit(Some("session-1"), "context"));
         state.reset_session(Some("session-1"));
-        assert!(!state
-            .role_state
-            .lock()
-            .initial_role_by_session_id
-            .contains_key("session-1"));
         assert!(state.should_emit(Some("session-1"), "context"));
     }
 }

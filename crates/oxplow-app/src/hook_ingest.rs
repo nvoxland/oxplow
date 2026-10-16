@@ -1144,7 +1144,7 @@ mod tests {
     use oxplow_db::{Database, SqliteStreamStore, SqliteThreadStore};
     use oxplow_domain::stores::AgentTurnStore as _;
     use oxplow_domain::stores::{StreamStore, ThreadStore};
-    use oxplow_domain::{Stream, StreamKind, Thread, ThreadStatus};
+    use oxplow_domain::{Stream, StreamKind, Thread};
     use serde_json::json;
 
     async fn fixture() -> (HookIngestService, ThreadId) {
@@ -1175,7 +1175,6 @@ mod tests {
             id: ThreadId::new(1),
             stream_id: s.id,
             title: "x".into(),
-            status: ThreadStatus::Active,
             sort_index: 0,
             summary: String::new(),
             summary_updated_at: None,
@@ -1184,6 +1183,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             archived_at: None,
+            mark: None,
         };
         threads.upsert(&t).await.unwrap();
         db.transaction(move |tx| {
@@ -1710,8 +1710,8 @@ mod tests {
             .db
             .transaction(|tx| {
                 tx.execute_batch(
-                    "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-                       VALUES (2, 1, 'y', 'queued', 't', 't')",
+                    "INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+                       VALUES (2, 1, 'y', 't', 't')",
                 )
                 .map_err(oxplow_db::map_sql_err)
             })

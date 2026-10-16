@@ -16,13 +16,13 @@
 
 mod common;
 
-use common::boot;
+use common::{boot, seed_worktree_stream};
 
 use oxplow_app::Services;
 use oxplow_control_plane::ControlPlane;
 use oxplow_db::EffortStore as _;
 use oxplow_domain::stores::{AgentSessionStore, StreamStore, ThreadStore};
-use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, ThreadStatus, Timestamp};
+use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, Timestamp};
 use oxplow_tasks::TaskId;
 use oxplow_tasks::TaskStore as _;
 use oxplow_tasks::{Task, TaskActorKind, TaskPriority, TaskStatus};
@@ -44,7 +44,7 @@ fn golden(name: &str, body: &serde_json::Value, root: &std::path::Path) {
     assert_eq!(text.trim_end(), want.trim_end(), "golden {name} changed");
 }
 
-async fn seed_thread(services: &Services, status: ThreadStatus) -> ThreadId {
+async fn seed_thread(services: &Services) -> ThreadId {
     let now = Timestamp::from_unix_ms(1);
     let stream = Stream {
         id: StreamId::new(1),
@@ -70,7 +70,6 @@ async fn seed_thread(services: &Services, status: ThreadStatus) -> ThreadId {
         id: ThreadId::new(1),
         stream_id: stream.id,
         title: "t".into(),
-        status,
         sort_index: 0,
         summary: String::new(),
         summary_updated_at: None,
@@ -79,6 +78,7 @@ async fn seed_thread(services: &Services, status: ThreadStatus) -> ThreadId {
         created_at: now,
         updated_at: now,
         archived_at: None,
+        mark: None,
     };
     services.thread_store.upsert(&thread).await.unwrap();
     services
@@ -145,28 +145,21 @@ fn edit(path: &std::path::Path) -> serde_json::Value {
     serde_json::json!({ "tool_name": "Edit", "tool_input": { "file_path": path.to_string_lossy() } })
 }
 
+/// No thread edits another stream's worktree: the deny names it.
 #[tokio::test]
-async fn write_guard_denies() {
+async fn the_guard_denies_another_streams_worktree() {
     let (cp, svc, root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Queued).await;
-    let with_path = post(&cp, &svc, "PreToolUse", tid, edit(&root.join("src/x.rs"))).await;
-    golden("pre_tool_write_guard_path", &with_path, &root);
-    let no_path = post(
-        &cp,
-        &svc,
-        "PreToolUse",
-        tid,
-        serde_json::json!({ "tool_name": "Write", "tool_input": {} }),
-    )
-    .await;
-    golden("pre_tool_write_guard_no_path", &no_path, &root);
+    let tid = seed_thread(&svc).await;
+    let other = seed_worktree_stream(&svc, &root).await;
+    let denied = post(&cp, &svc, "PreToolUse", tid, edit(&other.join("src/x.rs"))).await;
+    golden("pre_tool_foreign_worktree", &denied, &root);
 }
 
-/// The writer's edit is allowed with nothing tracked.
+/// An edit in its own worktree is allowed with nothing tracked.
 #[tokio::test]
 async fn allowed_edit_and_post_tool_ack() {
     let (cp, svc, root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let tid = seed_thread(&svc).await;
     let allowed = post(&cp, &svc, "PreToolUse", tid, edit(&root.join("src/x.rs"))).await;
     golden("pre_tool_allowed", &allowed, &root);
     let mut after = edit(&root.join("src/x.rs"));
@@ -179,7 +172,7 @@ async fn allowed_edit_and_post_tool_ack() {
 #[tokio::test]
 async fn stop_ack() {
     let (cp, svc, root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let tid = seed_thread(&svc).await;
     seed_task(&svc, tid, "ship the thing").await;
     post(
         &cp,
@@ -204,13 +197,57 @@ async fn stop_ack() {
 #[tokio::test]
 async fn prompt_context_first_then_deduped() {
     let (cp, svc, root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let tid = seed_thread(&svc).await;
     seed_task(&svc, tid, "ship the thing").await;
     let prompt = || serde_json::json!({ "prompt": "go", "session_id": "s1" });
     let first = post(&cp, &svc, "UserPromptSubmit", tid, prompt()).await;
     golden("prompt_context_first", &first, &root);
     let second = post(&cp, &svc, "UserPromptSubmit", tid, prompt()).await;
     golden("prompt_context_second", &second, &root);
+}
+
+/// The session context names the other live agents in the worktree: one
+/// on another thread of the stream, its process running.
+#[tokio::test]
+async fn prompt_context_names_the_other_agents_in_the_worktree() {
+    let (cp, svc, root, _dir) = boot().await;
+    let tid = seed_thread(&svc).await;
+    let now = Timestamp::from_unix_ms(1);
+    let other = Thread {
+        id: ThreadId::new(2),
+        stream_id: StreamId::new(1),
+        title: "other".into(),
+        sort_index: 1,
+        summary: String::new(),
+        summary_updated_at: None,
+        closed_at: None,
+        custom_prompt: None,
+        created_at: now,
+        updated_at: now,
+        archived_at: None,
+        mark: None,
+    };
+    svc.thread_store.upsert(&other).await.unwrap();
+    let mut new = oxplow_domain::agent_session::NewAgentSession::terminal(other.id, "codex");
+    new.title = "Login fix".into();
+    let session = svc.agent_session_store.open(&new).await.unwrap().id;
+    // This test process stands in for the other agent's.
+    let me = std::process::id();
+    svc.db
+        .transaction(move |tx| {
+            oxplow_db::agent_session_store::set_pid_tx(tx, session, me, Timestamp::now())
+        })
+        .await
+        .unwrap();
+    let out = post(
+        &cp,
+        &svc,
+        "UserPromptSubmit",
+        tid,
+        serde_json::json!({ "prompt": "go", "session_id": "s1" }),
+    )
+    .await;
+    golden("prompt_context_with_others", &out, &root);
 }
 
 /// Every harness core runs renders the write guard's deny as the golden:
@@ -221,7 +258,7 @@ async fn prompt_context_first_then_deduped() {
 async fn every_built_in_harness_renders_the_golden_deny() {
     let (_cp, svc, _root, _dir) = boot().await;
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/goldens/pre_tool_write_guard_path.json");
+        .join("tests/goldens/pre_tool_foreign_worktree.json");
     let golden: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let reason = golden["hookSpecificOutput"]["permissionDecisionReason"]
@@ -271,7 +308,7 @@ async fn post_as(
 #[tokio::test]
 async fn a_harness_without_hook_context_is_acked_and_keeps_its_nudges() {
     let (cp, svc, root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let tid = seed_thread(&svc).await;
     let session = svc
         .agent_session_store
         .open(&oxplow_domain::agent_session::NewAgentSession::terminal(
@@ -319,7 +356,7 @@ async fn a_harness_without_hook_context_is_acked_and_keeps_its_nudges() {
 #[tokio::test]
 async fn a_compaction_brings_the_context_back_on_the_next_prompt() {
     let (cp, svc, root, _dir) = boot().await;
-    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let tid = seed_thread(&svc).await;
     let prompt = || serde_json::json!({ "prompt": "go", "session_id": "s1" });
     let first = post(&cp, &svc, "UserPromptSubmit", tid, prompt()).await;
     golden("prompt_context_first", &first, &root);

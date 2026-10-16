@@ -181,8 +181,8 @@ mod tests {
             )
             .unwrap();
             conn.execute(
-                "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
-                 VALUES (?1, ?1, 't', 'active', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                "INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+                 VALUES (?1, ?1, 't', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
                 params![s],
             )
             .unwrap();

@@ -283,7 +283,7 @@ mod tests {
     use super::*;
     use oxplow_db::Database;
     use oxplow_domain::stores::{StreamStore, ThreadStore};
-    use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, ThreadStatus, Timestamp};
+    use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, Timestamp};
     use oxplow_tasks::TaskId;
     use oxplow_tasks::TaskStore;
     use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
@@ -444,7 +444,6 @@ mod tests {
                 id: ThreadId::new(1),
                 stream_id: StreamId::new(1),
                 title: "x".into(),
-                status: ThreadStatus::Active,
                 sort_index: 0,
                 summary: String::new(),
                 summary_updated_at: None,
@@ -453,6 +452,7 @@ mod tests {
                 created_at: ts(),
                 updated_at: ts(),
                 archived_at: None,
+                mark: None,
             })
             .await
             .unwrap();

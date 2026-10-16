@@ -3141,9 +3141,9 @@ says which run first (`oxplow_domain::ordering`, compiled by
 too; `effects.rs`) are scripts that react
 to a logged event by composing commands, run as
 `Actor::Effect { effect: "<extension>/<id>" }` for the event's thread and
-stream — an agent's rights and gates there (the writer gate, its own
+stream — an agent's rights and gates there (the open-thread gate, its own
 stream's VCS; an event with no thread, like a contribution's health, is
-an anchorless effect: no writer gate, since it writes into no worktree —
+an anchorless effect: no thread gate, since it writes into no worktree —
 its approval and each command's own invokers still apply), never a confirmation (commands.md "Only a person
 confirms"):
 
@@ -3652,7 +3652,7 @@ Every contribution that runs — an external provider instance, a collector, an 
   effect like `verify-unchecked`, so **repair items appear once a person
   approves it**, and revoking the approval or disabling the effect stops new
   ones. It runs as an anchorless effect (the event has no thread), so the
-  writer gate doesn't apply. oxplow never sends the item to an agent.
+  thread gate doesn't apply. oxplow never sends the item to an agent.
 - **The events** are `contribution.disabled@1 { contribution, reason }` and
   `contribution.enabled@1 { contribution }`, `contribution` the ref
   (`collector:triage/todos`, `effect:…`, `provider:…`).
@@ -4531,7 +4531,7 @@ commands:
   in the audit or any model).
 - **Running.** The scheduler (four at a time, polling each second)
   claims a queued job, resolves its authority afresh — the declaration
-  and approval as they are now, the thread's writer gate — and runs it
+  and approval as they are now, the thread's open-thread gate (a Write-scope need must be bound to an open thread: `JobExecution.needs_thread`) — and runs it
   as `Actor::Job` (`job:<id>:<attempt>:<fence>`) on a run of its own,
   linked to the run that asked. Each model round streams on the role
   (`AiCompute::stream_typed`, a recorded computation: the same request

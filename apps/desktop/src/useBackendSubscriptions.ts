@@ -157,7 +157,7 @@ export function useBackendSubscriptions(
     };
   }, [threadWorkStatesRef, setBacklogState, setThreadWorkStates]);
 
-  // A thread changed (created, renamed, promoted, closed, reordered — the
+  // A thread changed (created, renamed, marked, closed, reordered — the
   // `thread.*` commands): re-read each loaded stream's thread state when a
   // commit touched `v_thread`.
   useEffect(() => {

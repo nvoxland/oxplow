@@ -94,3 +94,40 @@ pub async fn bearer_for(services: &Services, session: oxplow_domain::AgentSessio
             harness: row.harness.clone(),
         })
 }
+
+/// A worktree stream (id 2) beside the project — `<root>-wt`, as
+/// stream creation makes one — whose tree no thread of another stream may
+/// edit. Returns its worktree.
+#[allow(dead_code, reason = "not every test crate edits across streams")]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test seeds the stream through its store"
+)]
+pub async fn seed_worktree_stream(
+    services: &Services,
+    root: &std::path::Path,
+) -> std::path::PathBuf {
+    use oxplow_domain::stores::StreamStore as _;
+    let now = oxplow_domain::Timestamp::from_unix_ms(1);
+    let tree = std::path::PathBuf::from(format!("{}-wt", root.display()));
+    let stream = oxplow_domain::Stream {
+        id: oxplow_domain::StreamId::new(2),
+        kind: oxplow_domain::StreamKind::Worktree,
+        title: "wt".into(),
+        branch: "feat".into(),
+        branch_ref: "refs/heads/feat".into(),
+        branch_source: "main".into(),
+        worktree_path: tree.to_string_lossy().into(),
+        working_pane: String::new(),
+        talking_pane: String::new(),
+        working_session_id: String::new(),
+        talking_session_id: String::new(),
+        host: oxplow_domain::HostId::LOCAL,
+        custom_prompt: None,
+        created_at: now,
+        updated_at: now,
+        archived_at: None,
+    };
+    services.stream_store.upsert(&stream).await.unwrap();
+    tree
+}

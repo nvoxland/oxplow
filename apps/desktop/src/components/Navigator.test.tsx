@@ -20,28 +20,27 @@ const STREAM = {
   branch: "main",
 } as unknown as Stream;
 
-const WRITER = {
+// A thread the person marked amber, and one they didn't mark.
+const MARKED = {
   id: "thr1",
   stream_id: "str1",
   title: "Writer",
-  status: "active",
+  mark: "amber",
 } as unknown as Thread;
 
-// A second thread that is NOT the active writer — i.e. queued / read-only
-// (the write guard allows one writer per stream).
-const QUEUED = {
+const UNMARKED = {
   id: "thr2",
   stream_id: "str1",
   title: "Research",
-  status: "queued",
+  mark: null,
 } as unknown as Thread;
 
 const THREAD_STATES: Record<string, ThreadState> = {
-  str1: { selectedThreadId: "thr1", activeThreadId: "thr1", threads: [WRITER, QUEUED] },
+  str1: { selectedThreadId: "thr1", threads: [MARKED, UNMARKED] },
 };
 
 function renderNavigator(opts?: {
-  onPromoteThread?: (threadId: string) => void;
+  onMarkThread?: (threadId: string, mark: string | null) => void;
   onSwitchStream?: (streamId: string) => void;
   onSelectThread?: (streamId: string, threadId: string) => void;
   onRenameThread?: (threadId: string, title: string) => void;
@@ -57,7 +56,7 @@ function renderNavigator(opts?: {
       onSwitchStream={opts?.onSwitchStream ?? NOOP_ASYNC}
       onSelectThread={opts?.onSelectThread ?? NOOP_ASYNC}
       onCreateThread={NOOP_ASYNC}
-      onPromoteThread={opts?.onPromoteThread}
+      onMarkThread={opts?.onMarkThread}
       onRenameThread={opts?.onRenameThread}
       vcsEnabled
     />,
@@ -304,7 +303,7 @@ test("the panel stays open while a form is active even if the pointer leaves", a
   expect(queryByTestId("navigator-new-thread-input") !== null).toBe(true);
 });
 
-// --- "Make writer" promote action (tsk132) -------------------------------
+// --- "Mark with…": the person's colour for a thread's tab ----------------
 
 /** Open a thread row's right-click menu inside the expanded overlay. */
 function openThreadMenu(
@@ -315,61 +314,57 @@ function openThreadMenu(
   fireEvent.contextMenu(getByTestId(`navigator-thread-row-${threadId}`));
 }
 
-test("a read-only (non-writer) thread's menu leads with an enabled 'Make writer'", () => {
-  const { getByTestId } = renderNavigator({ onPromoteThread: () => {} });
-  openThreadMenu(getByTestId, "thr2");
-
-  const promote = getByTestId("menu-item-thread.promote");
-  expect(promote.textContent).toContain("Make writer");
-  expect((promote as HTMLButtonElement).disabled).toBe(false);
-
-  // It is the headline action — ahead of Rename — so a user whose new
-  // thread is "edits blocked" finds the way out first.
-  const rename = getByTestId("menu-item-thread.rename");
-  expect(promote.compareDocumentPosition(rename) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-});
-
-test("the active writer's menu does NOT offer 'Make writer'", () => {
-  const { getByTestId, queryByTestId } = renderNavigator();
+test("a thread's menu offers 'Mark with…': what it does, five colours and None", () => {
+  const { getByTestId } = renderNavigator({ onMarkThread: () => {} });
   openThreadMenu(getByTestId, "thr1");
 
-  // The writer is already writable; only queued/read-only threads can be
-  // promoted, so the action is absent rather than shown-but-disabled.
-  expect(queryByTestId("menu-item-thread.promote") === null).toBe(true);
-  // The menu still renders its other actions.
-  expect(queryByTestId("menu-item-thread.rename") !== null).toBe(true);
+  const mark = getByTestId("menu-item-thread.mark");
+  expect(mark.textContent).toContain("Mark with…");
+  fireEvent.click(mark);
+
+  expect(getByTestId("context-submenu-header").textContent).toMatch(
+    /colour on the thread's tab.*changes nothing else/,
+  );
+  for (const colour of ["amber", "red", "green", "blue", "violet", "none"]) {
+    expect(getByTestId(`menu-item-thread.mark.${colour}`)).toBeTruthy();
+  }
+  // The current mark is checked.
+  expect(getByTestId("menu-item-thread.mark.amber").textContent).toContain("✓");
+  expect(getByTestId("menu-item-thread.mark.red").textContent).not.toContain("✓");
 });
 
-test("clicking 'Make writer' promotes that thread via the IPC handler", () => {
-  const promoted: string[] = [];
-  const { getByTestId } = renderNavigator({
-    onPromoteThread: (id) => promoted.push(id),
-  });
-  openThreadMenu(getByTestId, "thr2");
+test("choosing a colour marks the thread; None clears it", async () => {
+  const marked: [string, string | null][] = [];
+  const { getByTestId, queryByTestId } = renderNavigator({ onMarkThread: (id, m) => marked.push([id, m]) });
 
-  fireEvent.click(getByTestId("menu-item-thread.promote"));
-  expect(promoted).toEqual(["thr2"]);
+  openThreadMenu(getByTestId, "thr2");
+  fireEvent.click(getByTestId("menu-item-thread.mark"));
+  fireEvent.click(getByTestId("menu-item-thread.mark.violet"));
+  // Choosing closes the menu.
+  await waitFor(() => expect(queryByTestId("menu-item-thread.mark") === null).toBe(true));
+  fireEvent.contextMenu(getByTestId("navigator-thread-row-thr1"));
+  fireEvent.click(getByTestId("menu-item-thread.mark"));
+  fireEvent.click(getByTestId("menu-item-thread.mark.none"));
+
+  expect(marked).toEqual([["thr2", "violet"], ["thr1", null]]);
 });
 
 // --- Right-click on the strip's icons ---------------------------------------
 
 test("right-clicking a thread icon in the strip opens its row menu, headed by its title", () => {
-  const promoted: string[] = [];
-  const { getByTestId, queryByTestId } = renderNavigator({ onPromoteThread: (id) => promoted.push(id) });
+  const { getByTestId, queryByTestId } = renderNavigator({ onMarkThread: () => {} });
 
   fireEvent.contextMenu(getByTestId("navigator-strip-thread-thr2"));
 
   // The icon shows only initials, so the menu names the thread.
   expect(getByTestId("context-menu-header").textContent).toBe("Research");
   // The same items as the expanded row's menu.
-  expect(getByTestId("menu-item-thread.promote")).toBeTruthy();
+  expect(getByTestId("menu-item-thread.mark")).toBeTruthy();
   expect(getByTestId("menu-item-thread.rename")).toBeTruthy();
   expect(getByTestId("menu-item-thread.settings")).toBeTruthy();
   expect(getByTestId("menu-item-thread.close")).toBeTruthy();
   // Sessions start from the thread's own page, not its menu.
   expect(queryByTestId("menu-item-thread.new-session") === null).toBe(true);
-  fireEvent.click(getByTestId("menu-item-thread.promote"));
-  expect(promoted).toEqual(["thr2"]);
   // Right-click opens a menu, not the panel.
   expect(queryByTestId("navigator-overlay") === null).toBe(true);
 });
@@ -404,13 +399,14 @@ test("the expanded rows' menus are headed by the name too", () => {
 });
 
 test("a menu request from elsewhere (the title bar) opens that row's menu, headed by its name", () => {
-  const promoted: string[] = [];
-  const { getByTestId, queryByTestId } = renderNavigator({ onPromoteThread: (id) => promoted.push(id) });
+  const marked: string[] = [];
+  const { getByTestId, queryByTestId } = renderNavigator({ onMarkThread: (id) => marked.push(id) });
 
   act(() => requestNavigatorMenu({ kind: "thread", id: "thr2", x: 200, y: 15 }));
   expect(getByTestId("context-menu-header").textContent).toBe("Research");
-  fireEvent.click(getByTestId("menu-item-thread.promote"));
-  expect(promoted).toEqual(["thr2"]);
+  fireEvent.click(getByTestId("menu-item-thread.mark"));
+  fireEvent.click(getByTestId("menu-item-thread.mark.green"));
+  expect(marked).toEqual(["thr2"]);
 
   act(() => requestNavigatorMenu({ kind: "stream", id: "str1", x: 120, y: 14 }));
   expect(getByTestId("context-menu-header").textContent).toBe("Main");
@@ -448,14 +444,15 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
   expect(queued.style.borderRadius).toBe("0px 0px 6px");
   expect(writer.style.borderWidth).toBe("1px 1px 0px 0px");
   expect(queued.style.borderWidth).toBe("1px 1px 1px 0px");
-  // The writer is not outlined like the selection: a corner fold in the
-  // writer colour marks its top-left corner, at the window's edge.
-  const mark = writer.querySelector("[data-testid=navigator-writer-badge]") as HTMLElement;
-  expect(mark.getAttribute("title")).toMatch(/Writer/);
-  expect(mark.style.color).toBe("var(--writer-mark)");
+  // A marked thread is not outlined like the selection: a corner fold in
+  // its mark's colour sits in its top-left corner, at the window's edge;
+  // an unmarked thread has none.
+  const mark = writer.querySelector("[data-testid=navigator-thread-mark]") as HTMLElement;
+  expect(mark.getAttribute("title")).toBe("Marked amber");
+  expect(mark.style.color).toBe("var(--thread-mark-amber)");
   expect(mark.style.top).toBe("-1px");
   expect(mark.style.left).toBe("0px");
-  expect(queued.querySelector("[data-testid=navigator-writer-badge]")).toBeNull();
+  expect(queued.querySelector("[data-testid=navigator-thread-mark]")).toBeNull();
   // A dark cut in the background's colour falls between stacked tabs; the
   // outer right and bottom edges keep their frame.
   // (The DOM folds the left side, equal to the right, away.)

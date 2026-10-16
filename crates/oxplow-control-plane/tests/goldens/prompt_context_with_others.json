@@ -1,0 +1,6 @@
+{
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": "<session-context>\n## Oxplow session context\n\nOxplow is providing the agent's current workspace assignment. This note is refreshed after a session restart or when the assignment changes.\n\n- **Stream:** p (`str1`)\n- **Worktree:** `<ROOT>`\n- **Branch:** `main`\n- **Thread:** t (`thr1`)\n- **Also in this worktree:** Login fix (`codex`, thread other (`thr2`))\n</session-context>"
+  }
+}

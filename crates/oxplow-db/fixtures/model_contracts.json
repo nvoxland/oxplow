@@ -7003,6 +7003,61 @@
         }
       ],
       "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Thread id."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Owning stream (v_stream.id)."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Display name."
+        },
+        {
+          "name": "sort_index",
+          "type": "INTEGER",
+          "doc": "Order within the stream."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "closed_at",
+          "type": "TEXT",
+          "doc": "Set when the thread was closed; NULL while it is open. Open or closed is all a thread's state is (v4: `status` is gone)."
+        },
+        {
+          "name": "archived_at",
+          "type": "TEXT",
+          "doc": "Set when the thread was archived."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`thread:thr<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
+        },
+        {
+          "name": "mark",
+          "type": "TEXT",
+          "doc": "The person's colour for its tab — `amber`, `red`, `green`, `blue` or `violet` — or NULL when unmarked. It changes nothing else. (v4)"
+        }
+      ],
+      "key": []
     }
   },
   "asset": {

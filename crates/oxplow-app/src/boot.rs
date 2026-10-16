@@ -162,8 +162,6 @@ pub async fn run_boot_orchestration(
     crate::change_reactor::register(state);
     crate::effort_landing::register(state);
     crate::capabilities::register(state);
-    // A thread's write access, kept on its running sessions' connections.
-    crate::chat::access::register(state);
     // `on:` collectors (P7.B3), after the consumers they may name.
     crate::collector_triggers::register(state);
     // Extensions' effects (P8.D10), approved ones only — and a person's

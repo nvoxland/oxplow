@@ -21,7 +21,7 @@ const threadReads = () => readWorkList.mock.calls.map((c) => c[0]).filter((t) =>
 const listAgentStatuses = mock(async (): Promise<unknown[]> => []);
 const setSessionStatuses = mock((_next: unknown) => {});
 const getConfig = mock(async () => ({ generated: { exclude: [], include: [] } }));
-const getThreadState = mock(async () => ({ selectedThreadId: null, activeThreadId: null, threads: [] }));
+const getThreadState = mock(async () => ({ selectedThreadId: null, threads: [] }));
 
 function makeApi(): BackendSubscriptionApi {
   const noopSub = () => () => {
