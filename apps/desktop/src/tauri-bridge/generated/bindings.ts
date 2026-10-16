@@ -3564,6 +3564,12 @@ export type HookKind =
  *  the harness's own dialog decides.
  */
 "permission_request" | 
+/**
+ *  The harness put a plan to the person outside a tool call (Codex's
+ *  `plan` item): `tool.plan` carries it. Claude's `ExitPlanMode` is a
+ *  tool call and arrives as a `PreToolUse`.
+ */
+"plan_proposed" | 
 /**  A subagent of the session started (Claude's `SubagentStart`). */
 "subagent_start" | 
 /**

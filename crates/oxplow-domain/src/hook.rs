@@ -35,6 +35,10 @@ pub enum HookKind {
     /// `PermissionRequest`). Observed only: the answer is always `Ack`, so
     /// the harness's own dialog decides.
     PermissionRequest,
+    /// The harness put a plan to the person outside a tool call (Codex's
+    /// `plan` item): `tool.plan` carries it. Claude's `ExitPlanMode` is a
+    /// tool call and arrives as a `PreToolUse`.
+    PlanProposed,
     /// A subagent of the session started (Claude's `SubagentStart`).
     SubagentStart,
     /// A subagent of the session finished (Claude's `SubagentStop`, or a

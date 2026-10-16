@@ -13175,5 +13175,57 @@
       ],
       "key": []
     }
+  },
+  "agent_plan": {
+    "1": {
+      "columns": [
+        {
+          "name": "event_id",
+          "type": "TEXT",
+          "doc": "The `agent.plan.proposed` event (v_event.id); read it with `oxplow_read event:<id>`."
+        },
+        {
+          "name": "seq",
+          "type": "INTEGER",
+          "doc": "The event's place in the log (v_event.seq): orders plans proposed in the same instant."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread (v_thread.id)."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "The thread's open effort when it was proposed (v_effort.id); NULL when none was open."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "The turn it came in (v_agent_turn.id); NULL when none was open."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session (v_agent_session.id); NULL for a hook no session claims."
+        },
+        {
+          "name": "proposed_at",
+          "type": "TEXT",
+          "doc": "When it was proposed (RFC 3339)."
+        },
+        {
+          "name": "text",
+          "type": "TEXT",
+          "doc": "The plan, as the agent wrote it (the first 64 KiB)."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "The file the harness saved it in (Claude's `planFilePath`); NULL when it says none."
+        }
+      ],
+      "key": []
+    }
   }
 }

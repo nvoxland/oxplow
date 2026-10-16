@@ -81,6 +81,17 @@ pub struct Subagent {
     pub kind: Option<String>,
 }
 
+/// A plan the agent proposes to the person before it acts (Claude's
+/// `ExitPlanMode`, Codex's `plan` item). Whether the person accepted it is
+/// in no harness's hooks, so it isn't known.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Plan {
+    pub text: String,
+    /// The file the harness saved it in, when it says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
 /// One tool call, as its harness maps it: the harness's own name for the
 /// tool, and what oxplow reads of it. On the wire, these fields; one left
 /// out is empty.
@@ -107,6 +118,8 @@ pub struct ToolUse {
     pub exit_code: Option<i64>,
     /// What an `Ask` asks: its first question.
     pub question: Option<String>,
+    /// What a `Plan` call proposes: its text, and the file it was saved in.
+    pub plan: Option<Plan>,
     /// The subagent that made the call, when it wasn't the session's own
     /// agent (the harness says, or core brackets it by the open subagent
     /// call).

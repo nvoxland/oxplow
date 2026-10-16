@@ -57,6 +57,8 @@ pub trait ChatHost: Send + Sync + 'static {
     async fn named(&self, thread: &ThreadId, session_id: &str, title: &str);
     /// A permission card is (or no longer is) waiting on the person.
     async fn awaiting_user(&self, thread: &ThreadId, question: Option<String>);
+    /// The agent put a plan to the person. Recorded; nothing waits on it.
+    async fn plan_proposed(&self, thread: &ThreadId, session_id: &str, text: &str);
     /// The agent went away mid-session.
     async fn interrupted(&self, thread: &ThreadId);
     /// The agent did something (stall-watch liveness).
@@ -276,6 +278,27 @@ impl ChatHost for ServicesChatHost {
         {
             warn!(?err, "acp: naming the conversation failed");
         }
+    }
+
+    async fn plan_proposed(&self, thread: &ThreadId, session_id: &str, text: &str) {
+        let Some(svc) = self.svc.upgrade() else {
+            return;
+        };
+        let mut env = self.envelope(
+            HookKind::PlanProposed,
+            thread,
+            session_id,
+            serde_json::json!({}),
+            None,
+        );
+        env.tool = Some(oxplow_domain::agent::tool::ToolUse {
+            plan: Some(oxplow_domain::agent::tool::Plan {
+                text: text.to_string(),
+                path: None,
+            }),
+            ..Default::default()
+        });
+        self.ingest(&svc, env).await;
     }
 
     async fn awaiting_user(&self, thread: &ThreadId, question: Option<String>) {

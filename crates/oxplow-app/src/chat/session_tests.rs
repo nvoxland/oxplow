@@ -90,6 +90,9 @@ impl ChatHost for Host {
     async fn named(&self, _t: &ThreadId, _s: &str, title: &str) {
         self.log.lock().push(format!("named {title}"));
     }
+    async fn plan_proposed(&self, _t: &ThreadId, _s: &str, text: &str) {
+        self.log.lock().push(format!("plan {text}"));
+    }
     async fn awaiting_user(&self, _t: &ThreadId, q: Option<String>) {
         self.log.lock().push(format!("awaiting {}", q.is_some()));
     }
@@ -1104,6 +1107,23 @@ mod codex {
             .received()
             .iter()
             .any(|v| v.get("id") == Some(&json!(41)) && v.get("method").is_none()));
+    }
+
+    /// A plan the agent completes in the TUI reaches the host once, whole.
+    #[tokio::test]
+    async fn a_plan_item_in_the_tui_is_handed_to_the_host() {
+        let (rig, fake) = open_codex(Host::default(), "thread/start").await;
+        fake.push(note(
+            "item/completed",
+            json!({"turnId": "u1", "item": {"type": "plan", "id": "p1", "text": "1. a\n2. b"}}),
+        ));
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !rig.host.log().iter().any(|l| l == "plan 1. a\n2. b") {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the plan reaches the host");
     }
 
     /// Nothing here prompts the thread, and the TUI answers its own

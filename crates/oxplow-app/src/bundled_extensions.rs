@@ -160,6 +160,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-bundled", "lenses/effort-failed-tests.yaml"),
             ext_file!("oxplow-bundled", "lenses/effort-metric-deltas.yaml"),
             ext_file!("oxplow-bundled", "lenses/effort-nudges.yaml"),
+            ext_file!("oxplow-bundled", "lenses/effort-plan.yaml"),
             ext_file!("oxplow-bundled", "lenses/effort-test-runs.yaml"),
             ext_file!("oxplow-bundled", "lenses/effort-tests.yaml"),
             ext_file!("oxplow-bundled", "lenses/effort-untested-files.yaml"),
@@ -194,6 +195,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-bundled", "lenses/task-turns.yaml"),
             ext_file!("oxplow-bundled", "lenses/tests-weakened.yaml"),
             ext_file!("oxplow-bundled", "lenses/thread-activity.yaml"),
+            ext_file!("oxplow-bundled", "lenses/thread-plan.yaml"),
             ext_file!("oxplow-bundled", "lenses/thread-tokens.yaml"),
             ext_file!("oxplow-bundled", "lenses/token-total.yaml"),
             ext_file!("oxplow-bundled", "lenses/tokens-by-agent.yaml"),
@@ -2393,6 +2395,61 @@ mod tests {
         match &out.rows[0][0] {
             oxplow_db::SqlCell::Text(r) => r.clone(),
             other => panic!("{other:?}"),
+        }
+    }
+
+    /// The Plan lenses: the plans an agent proposed, newest first, under
+    /// an effort and under a thread; nothing when none was.
+    #[tokio::test]
+    async fn the_plan_lenses_show_the_proposed_plans() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        for lens in ["oxplow-bundled/effort-plan", "oxplow-bundled/thread-plan"] {
+            let param = if lens.contains("effort") {
+                ("effort_id", f.effort.value())
+            } else {
+                ("thread_id", f.thread.value())
+            };
+            let rows = run_bundled_lens(&f, lens, &[param]).await;
+            assert_eq!(rows.as_array().unwrap().len(), 0, "{lens}: none yet");
+        }
+        use oxplow_domain::hook::HookKind;
+        for (kind, id, plan) in [
+            (HookKind::UserPromptSubmit, "", ""),
+            (HookKind::PreToolUse, "t1", "1. First"),
+            (HookKind::PreToolUse, "t2", "1. Second"),
+        ] {
+            let body = serde_json::json!({ "tool_name": "ExitPlanMode", "tool_use_id": id,
+                "tool_input": { "plan": plan } });
+            f.svc
+                .hook_ingest
+                .ingest(crate::hook_ingest::HookEnvelope {
+                    session_title: None,
+                    turn_run: None,
+                    kind,
+                    thread_id: Some(f.thread),
+                    stream_id: None,
+                    agent_session_id: None,
+                    session_id: None,
+                    payload_json: body.to_string(),
+                    prompt: None,
+                    decision: None,
+                    tool: crate::test_fixtures::claude_tool(kind, &body),
+                    subagent: None,
+                })
+                .await
+                .unwrap();
+        }
+        for lens in ["oxplow-bundled/effort-plan", "oxplow-bundled/thread-plan"] {
+            let param = if lens.contains("effort") {
+                ("effort_id", f.effort.value())
+            } else {
+                ("thread_id", f.thread.value())
+            };
+            let rows = run_bundled_lens(&f, lens, &[param]).await;
+            let text = rows[0][0].as_str().unwrap();
+            let (first, second) = (text.find("1. First"), text.find("1. Second"));
+            assert!(first.is_some() && second.is_some(), "{lens}: {text}");
+            assert!(second < first, "{lens}: newest first: {text}");
         }
     }
 

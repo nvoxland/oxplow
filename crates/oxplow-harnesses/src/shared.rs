@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use oxplow_domain::agent::harness::HarnessError;
 use oxplow_domain::agent::observe::HookAnswer;
 use oxplow_domain::agent::text::Text;
-use oxplow_domain::agent::tool::{ToolKind, ToolUse};
+use oxplow_domain::agent::tool::{Plan, ToolKind, ToolUse};
 use oxplow_domain::HookKind;
 use serde_json::json;
 
@@ -154,6 +154,7 @@ fn event_name(kind: HookKind) -> &'static str {
         HookKind::SessionEnd => "SessionEnd",
         HookKind::Notification => "Notification",
         HookKind::PermissionRequest => "PermissionRequest",
+        HookKind::PlanProposed => "PlanProposed",
         HookKind::SubagentStart => "SubagentStart",
         HookKind::SubagentStop => "SubagentStop",
     }
@@ -247,6 +248,13 @@ pub fn claude_shaped_tool_use(body: &serde_json::Value) -> Option<ToolUse> {
                 .and_then(|q| q.as_str())
         })
         .map(str::to_string);
+    let plan = (kind == ToolKind::Plan)
+        .then(|| field("plan").filter(|p| !p.trim().is_empty()))
+        .flatten()
+        .map(|text| Plan {
+            text: text.to_string(),
+            path: field("planFilePath").map(str::to_string),
+        });
     let response = body.get("tool_response").filter(|r| !r.is_null());
     let exit_code = response.and_then(|r| {
         ["exit_code", "exitCode", "returnCode", "code"]
@@ -279,6 +287,7 @@ pub fn claude_shaped_tool_use(body: &serde_json::Value) -> Option<ToolUse> {
         ok,
         exit_code,
         question,
+        plan,
         subagent: subagent_of(body),
     })
 }
@@ -475,6 +484,29 @@ mod tests {
             (asked.kind, asked.question.as_deref()),
             (ToolKind::Ask, Some("Which one?"))
         );
+        // The plan a proposal carries, and the file it was saved in.
+        let planned = claude_shaped_tool_use(&json!({
+            "tool_name": "ExitPlanMode",
+            "tool_input": {"plan": "1. Do it", "planFilePath": "/home/u/.claude/plans/x.md"}
+        }))
+        .unwrap();
+        assert_eq!(
+            planned.plan,
+            Some(Plan {
+                text: "1. Do it".into(),
+                path: Some("/home/u/.claude/plans/x.md".into()),
+            })
+        );
+        // The plan file is not a file the call edits.
+        assert!(planned.paths.is_empty());
+        // No text, no plan (and another tool's `plan` field is not one).
+        for body in [
+            json!({"tool_name": "ExitPlanMode", "tool_input": {"plan": "  "}}),
+            json!({"tool_name": "ExitPlanMode"}),
+            json!({"tool_name": "Bash", "tool_input": {"plan": "x"}}),
+        ] {
+            assert_eq!(claude_shaped_tool_use(&body).unwrap().plan, None, "{body}");
+        }
         for (name, kind) in [
             ("Write", ToolKind::Edit),
             ("MultiEdit", ToolKind::Edit),

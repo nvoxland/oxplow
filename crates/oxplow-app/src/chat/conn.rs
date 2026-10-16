@@ -71,6 +71,9 @@ pub enum Incoming {
     /// (`None`). Observed only: whoever answers does it in the agent's own
     /// UI.
     Waiting(Option<String>),
+    /// The agent put a plan to the person (Codex's completed `plan` item).
+    /// Recorded; whether the person accepts it is not observable.
+    Plan(String),
     /// The turn in flight finished (or failed).
     PromptDone(Result<TurnEnd, String>),
 }

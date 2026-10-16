@@ -158,6 +158,8 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<AgentStatusChanged>()
             .expect("core type registers");
+        r.register::<AgentPlanProposed>()
+            .expect("core type registers");
         r.register::<AgentTokensReported>()
             .expect("core type registers");
         r.register::<TestRunRecorded>()
@@ -1216,6 +1218,31 @@ pub struct AgentStatusChangedV1 {
     pub detail: Option<String>,
 }
 
+/// `agent.plan.proposed@1`: the agent put a plan to the person before
+/// acting (Claude's `ExitPlanMode`, Codex's `plan` item; opencode's
+/// `plan_exit` carries no text, so it records none). Whether the person
+/// accepted it is in no hook, so it isn't recorded. The text sits in the
+/// payload, capped, so `v_agent_plan` reads it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentPlanProposedV1 {
+    pub thread: String,
+    /// The session's turn open when it proposed, when one was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<String>,
+    pub text: String,
+    /// The file the harness saved it in (Claude's `planFilePath`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+pub struct AgentPlanProposed;
+impl EventType for AgentPlanProposed {
+    const TYPE: &'static str = "agent.plan.proposed";
+    const V: u32 = 1;
+    type Payload = AgentPlanProposedV1;
+}
+
 pub struct AgentStatusChanged;
 impl EventType for AgentStatusChanged {
     const TYPE: &'static str = "agent.status.changed";
@@ -2050,6 +2077,7 @@ mod tests {
         assert_eq!(
             versions,
             vec![
+                ("agent.plan.proposed", 1),
                 ("agent.prompt.submitted", 1),
                 ("agent.session.ended", 1),
                 ("agent.session.started", 2),

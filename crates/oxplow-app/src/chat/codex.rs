@@ -339,6 +339,19 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
                 Vec::new()
             }
         }
+        // The plan the agent put to the person: the completed item is the
+        // whole text.
+        "item/completed" if p.pointer("/item/type").and_then(Value::as_str) == Some("plan") => {
+            let text = p
+                .pointer("/item/text")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if text.trim().is_empty() {
+                Vec::new()
+            } else {
+                vec![Incoming::Plan(text.to_string())]
+            }
+        }
         "item/started" | "item/completed" => p
             .get("item")
             .map(|item| item_updates(item, method == "item/completed", &mut state.streamed))
@@ -699,6 +712,32 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// A completed `plan` item is the plan the agent put to the person (the
+    /// completed item is authoritative, its text is whole); a started one,
+    /// an empty one and another item say nothing.
+    #[test]
+    fn a_completed_plan_item_is_a_proposed_plan() {
+        let mut state = State::default();
+        let mut item = |done: &str, text: &str| {
+            on_notification(
+                done,
+                &json!({"threadId": THREAD, "item": {"type": "plan", "id": "p1", "text": text}}),
+                &mut state,
+            )
+        };
+        let plans = |v: Vec<Incoming>| -> Vec<String> {
+            v.into_iter()
+                .filter_map(|i| match i {
+                    Incoming::Plan(t) => Some(t),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert!(plans(item("item/started", "1. a")).is_empty());
+        assert!(plans(item("item/completed", "  ")).is_empty());
+        assert_eq!(plans(item("item/completed", "1. a\n2. b")), ["1. a\n2. b"]);
     }
 
     fn status(flags: &[&str]) -> Value {

@@ -1212,7 +1212,7 @@ available from outside.
 | Waiting on a permission | `Notification` `permission_prompt` → AwaitingUser; *`PermissionRequest` hook (tool + input)* | *`thread/status/changed` `activeFlags` `waitingOnApproval`; the approval request's params (the observer drops the request)* | *SSE `permission.asked` / `replied`* |
 | Asked a question | `AskUserQuestion` PreToolUse → AwaitingUser with its question; a `?`-ending Stop | a `?`-ending Stop; *`waitingOnUserInput`, `requestUserInput.questions`* | a `?`-ending Stop; *`question.asked`* |
 | Answering from oxplow | — (no interface into an interactive session; a cross-session message can't consent) | — (a request goes to the turn's client) | *HTTP `permission` / `question` reply* — left native |
-| The plan | *`ExitPlanMode` `tool_input.plan`, `planFilePath`* (today only the raw tool input, `event:<id>#input`) | *the `plan` item's text*; `turn/plan/updated` steps reach only the chat library | — (`plan_exit` carries no text) |
+| The plan | `ExitPlanMode` PreToolUse `tool_input.plan`, `planFilePath` → `agent.plan.proposed` | the `plan` item's text on `item/completed` → `agent.plan.proposed`; `turn/plan/updated` steps reach only the chat library | — (`plan_exit` carries no text, so none is recorded) |
 | Model / effort | `agent_turn.model` / `effort`: the Stop's `effort.level` and the transcript tail's newest `message.model`; transcript `message.model` → `v_token_usage.model`; *`SessionStart.model`, `PostModelSwitch`* | `agent_turn.model` / `effort`: `Thread.model` / `reasoningEffort` at open, moved by `thread/settings/updated` | `agent_turn.model` / `effort`: the bridge's Stop carries the last assistant message's `modelID` and `variant` |
 | Set at launch | `agentConfig.claude.model` → `--model`, `.effort` → `--effort` | `agentConfig.codex.model` → the open request's `model`, `.effort` → its `config.model_reasoning_effort` | `agentConfig.opencode.model` → `-m` |
 | Context fill, compaction | *the transcript tail's last usage; `PostCompact` `compact_summary`*; `PreCompact` resets the context baselines | *`thread/tokenUsage/updated` `last.totalTokens` / `modelContextWindow`; the `contextCompaction` item* | *the message's `tokens`; `session.compacted`* |
@@ -1287,6 +1287,30 @@ equivalence between tools.
 | No terminal input from restore, metadata, tab discovery or handoff | `terminal_sessions_send_has_single_production_caller` and `no-agent-input-automation.test.ts`: the one way bytes reach a PTY is the person's keystrokes |
 
 Not yet covered: a recorded Claude hook carrying `session_title` (filed).
+
+### Plans
+
+A plan the agent puts to the person is an `agent.plan.proposed` event
+(`{ thread, turn?, text, path? }`), anchored to the turn and effort open
+when it came. The text sits in the payload, capped at 64 KiB, so a model
+reads it. Claude Code's `ExitPlanMode` PreToolUse is mapped by the
+harness (`claude_shaped_tool_use`: `ToolUse.plan` from `tool_input.plan`
+and `planFilePath`; core never names the tool); ingest logs the event
+beside the tool request, once per call id, and only for an allowed call.
+Codex has no tool call: the observer maps a completed `plan` item (its
+text is authoritative) to `Incoming::Plan`, which the chat host ingests as
+a `PlanProposed` hook with `tool.plan`; that waits on no one. opencode's
+`plan_exit` carries no text, so it records none.
+
+`v_agent_plan` (thread, effort, turn, session, `proposed_at`, `text`,
+`path`, and `event_id`, the event to read with `oxplow_read event:<id>`)
+reads them; the bundled `effort-plan` (slot `effort.review.details`) and
+`thread-plan` (slot `thread.plan.header`) lenses show a plan, newest
+first.
+
+**Whether the person accepted the plan is not recorded.** No hook or
+notification carries the dialog's answer; a later edit or a new prompt
+only suggests it.
 
 ### Agent status
 

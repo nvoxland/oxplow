@@ -53,10 +53,11 @@ use oxplow_db::event_log_store::{append_unique_tx, EventCtx};
 use oxplow_db::{event_content_store, Database};
 use oxplow_domain::agent::tool::{Subagent, ToolKind, ToolUse};
 use oxplow_domain::events::schema::{
-    AgentPromptSubmitted, AgentPromptSubmittedV1, AgentSessionEnded, AgentSessionEndedV1,
-    AgentSessionStarted, AgentSessionStartedV2, AgentSubagentFinished, AgentSubagentFinishedV1,
-    AgentSubagentStarted, AgentSubagentStartedV1, AgentToolFinished, AgentToolFinishedV3,
-    AgentToolRequested, AgentToolRequestedV3, ContentRef, SubagentRef, ToolDecision as Decision,
+    AgentPlanProposed, AgentPlanProposedV1, AgentPromptSubmitted, AgentPromptSubmittedV1,
+    AgentSessionEnded, AgentSessionEndedV1, AgentSessionStarted, AgentSessionStartedV2,
+    AgentSubagentFinished, AgentSubagentFinishedV1, AgentSubagentStarted, AgentSubagentStartedV1,
+    AgentToolFinished, AgentToolFinishedV3, AgentToolRequested, AgentToolRequestedV3, ContentRef,
+    SubagentRef, ToolDecision as Decision,
 };
 use oxplow_domain::refs::build::{thread_ref, turn_ref};
 use oxplow_domain::{
@@ -628,6 +629,12 @@ fn record_tx(
             ev.append(conn, &env)?;
             status = Some((AgentStatusState::Running, None));
         }
+        // A plan outside any tool call: recorded, and nothing waits on it.
+        HookKind::PlanProposed => {
+            if let Some(plan) = env.tool.as_ref().and_then(|t| t.plan.as_ref()) {
+                log_plan_tx(conn, ev, thread, &row, plan, None)?;
+            }
+        }
         HookKind::PreToolUse | HookKind::PostToolUse => {
             // The call as its harness mapped it: the sender's reading (the
             // hook route maps the body by the bearer's harness, the ACP
@@ -636,6 +643,16 @@ fn record_tx(
             // A body that names no tool records nothing.
             if let Some(tool) = &tool {
                 log_tool_tx(conn, ev, thread, &row, env, tool, &body, session)?;
+                // A plan put to the person: on the record before the dialog
+                // answers (a refused call proposes nothing).
+                let allowed = env.decision.as_ref().is_none_or(|d| d.allowed);
+                if let (HookKind::PreToolUse, true, Some(plan)) = (env.kind, allowed, &tool.plan) {
+                    let key = tool
+                        .call_id
+                        .as_deref()
+                        .map(|id| format!("{}:{id}:plan", session.unwrap_or("-")));
+                    log_plan_tx(conn, ev, thread, &row, plan, key)?;
+                }
             }
             let asking = tool.filter(|t| t.kind.waits_on_person());
             let asks = asking.is_some();
@@ -1061,6 +1078,37 @@ fn bracketing_subagent_tx(
             kind: None,
         })
     }))
+}
+
+/// The longest plan text kept in an event. A plan runs to a page or two;
+/// past this a model's reading of it is cut, not the harness's own file.
+const PLAN_TEXT_CAP: usize = 64 * 1024;
+
+/// Log `agent.plan.proposed` for `plan`, anchored to the session's open
+/// turn and effort. `dedupe` makes a re-posted hook log once.
+fn log_plan_tx(
+    conn: &rusqlite::Connection,
+    ev: &EventCtx<'_>,
+    thread: ThreadId,
+    row: &ThreadRow,
+    plan: &oxplow_domain::agent::tool::Plan,
+    dedupe: Option<String>,
+) -> Result<(), DomainError> {
+    let anchors = activity_anchors_tx(conn, thread, row.session)?;
+    let turn = anchors.turn_id.map(|t| turn_ref(AgentTurnId::new(t)));
+    let text: String = plan.text.chars().take(PLAN_TEXT_CAP).collect();
+    let envelope = ev
+        .typed::<AgentPlanProposed>(&AgentPlanProposedV1 {
+            thread: thread_ref(thread),
+            turn: turn.clone(),
+            text,
+            path: plan.path.clone(),
+        })
+        .with_dedupe_key_opt(dedupe)
+        .with_anchors(anchors)
+        .with_subject([turn.unwrap_or_else(|| thread_ref(thread))]);
+    append_unique_tx(conn, ev.vocabulary, &envelope)?;
+    Ok(())
 }
 
 #[allow(
@@ -2908,5 +2956,71 @@ mod tests {
         let s = status(&svc, tid).await.unwrap();
         assert_eq!(s.state, AgentStatusState::AwaitingUser);
         assert_eq!(s.detail.as_deref(), Some("Which branch?"));
+    }
+
+    /// A plan put to the person (Claude's `ExitPlanMode`, before the
+    /// dialog) is one `agent.plan.proposed`, in the turn it came in, with
+    /// its text and file; a repost of the hook logs once, and a call with
+    /// no plan text logs none. The call still waits on the person.
+    #[tokio::test]
+    async fn a_proposed_plan_is_recorded_once_in_its_turn() {
+        let (svc, tid) = fixture().await;
+        svc.ingest(hook(HookKind::UserPromptSubmit, tid, None, json!({})))
+            .await
+            .unwrap();
+        let plan = json!({ "tool_name": "ExitPlanMode", "tool_use_id": "toolu_1",
+            "tool_input": { "plan": "1. Add the model", "planFilePath": "/h/.claude/plans/p.md" } });
+        for _ in 0..2 {
+            svc.ingest(hook(HookKind::PreToolUse, tid, None, plan.clone()))
+                .await
+                .unwrap();
+        }
+        svc.ingest(hook(
+            HookKind::PreToolUse,
+            tid,
+            None,
+            json!({ "tool_name": "ExitPlanMode", "tool_use_id": "toolu_2", "tool_input": {} }),
+        ))
+        .await
+        .unwrap();
+        let events = logged(&svc).await;
+        let plans = of_type(&events, "agent.plan.proposed");
+        assert_eq!(plans.len(), 1);
+        let p = &plans[0].envelope.payload;
+        assert_eq!(p["text"], "1. Add the model");
+        assert_eq!(p["path"], "/h/.claude/plans/p.md");
+        assert!(p["turn"].as_str().is_some(), "{p}");
+        assert!(plans[0].envelope.anchors.turn_id.is_some());
+        assert_eq!(
+            status(&svc, tid).await.unwrap().state,
+            AgentStatusState::AwaitingUser
+        );
+    }
+
+    /// A harness that proposes a plan outside any tool call (Codex's
+    /// `plan` item) says so with a `PlanProposed` hook; it waits on no one.
+    #[tokio::test]
+    async fn a_plan_proposed_outside_a_tool_call_is_recorded_without_a_wait() {
+        let (svc, tid) = fixture().await;
+        svc.ingest(hook(HookKind::UserPromptSubmit, tid, None, json!({})))
+            .await
+            .unwrap();
+        let mut env = hook(HookKind::PlanProposed, tid, None, json!({}));
+        env.tool = Some(oxplow_domain::agent::tool::ToolUse {
+            plan: Some(oxplow_domain::agent::tool::Plan {
+                text: "Do it in two steps".into(),
+                path: None,
+            }),
+            ..Default::default()
+        });
+        svc.ingest(env).await.unwrap();
+        let events = logged(&svc).await;
+        let plans = of_type(&events, "agent.plan.proposed");
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].envelope.payload["text"], "Do it in two steps");
+        assert_eq!(
+            status(&svc, tid).await.unwrap().state,
+            AgentStatusState::Running
+        );
     }
 }

@@ -166,6 +166,8 @@ pub mod output_activity;
 pub mod pacing;
 pub mod page_ref_backfill;
 pub mod page_ref_consumers;
+#[cfg(test)]
+mod plan_tests;
 pub mod post_tool_reactors;
 pub mod prompt_catalog;
 pub mod providers;

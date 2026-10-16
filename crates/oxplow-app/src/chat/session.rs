@@ -502,6 +502,13 @@ impl Actor {
             // says it waits.
             Incoming::Waiting(_) if self.replaying => {}
             Incoming::Waiting(question) => self.host.awaiting_user(self.thread(), question).await,
+            // A replayed history's plan was recorded when it was proposed.
+            Incoming::Plan(_) if self.replaying => {}
+            Incoming::Plan(text) => {
+                self.host
+                    .plan_proposed(self.thread(), &self.session_id, &text)
+                    .await
+            }
             Incoming::Permission { ask, reply } => {
                 let ask = *ask;
                 if self.replaying {

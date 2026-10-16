@@ -940,6 +940,13 @@ whose harness said nothing (opencode when the bridge can't read its last
 message), has NULLs. The `AgentTurn` struct doesn't carry them: SQL reads
 them.
 
+**Plans an agent proposed are events, not a table.** `agent.plan.proposed@1`
+(`thread`, `turn?`, `text`, `path?`), logged by hook ingest when Claude's
+`ExitPlanMode` is requested or Codex completes a `plan` item, anchored to
+the turn and the open effort; `v_agent_plan` (a model over `event_log`, no
+table, no migration) reads it. Whether the person accepted the plan is not
+recorded. See `agent-model.md` "Plans".
+
 **Effort↔snapshot linkage lives on the effort row.** There is no
 `effort_id` or `source` column on `snapshot` / `file_snapshot`
 themselves — the bracket is recorded by `effort.start_snapshot_id`

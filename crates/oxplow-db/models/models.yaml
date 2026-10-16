@@ -43,6 +43,23 @@
     - { name: "state", type: "", doc: "`running`, `idle`, `awaiting_user`, `stopped` or `error`: the session status that ranks first." }
     - { name: "detail", type: "", doc: "What that session waits on (the question, the permission asked), or why it stopped." }
     - { name: "since", type: "TEXT", doc: "When that session moved to it (RFC 3339)." }
+- name: agent_plan
+  version: 1
+  description: "Plans the agent put to the person, newest event last: Claude Code's `ExitPlanMode` (its plan and the file it saved it in) and Codex's `plan` item. opencode's `plan_exit` carries no text, so it records none. Whether the person accepted a plan is in no harness's hooks, so nothing here says. The row's event is `event:<event_id>`."
+  columns:
+    - { name: "event_id", type: "TEXT", doc: "The `agent.plan.proposed` event (v_event.id); read it with `oxplow_read event:<id>`." }
+    - { name: "seq", type: "INTEGER", doc: "The event's place in the log (v_event.seq): orders plans proposed in the same instant." }
+    - { name: "thread_id", type: "INTEGER", doc: "The thread (v_thread.id)." }
+    - { name: "effort_id", type: "INTEGER", doc: "The thread's open effort when it was proposed (v_effort.id); NULL when none was open." }
+    - { name: "turn_id", type: "INTEGER", doc: "The turn it came in (v_agent_turn.id); NULL when none was open." }
+    - { name: "agent_session_id", type: "INTEGER", doc: "The agent session (v_agent_session.id); NULL for a hook no session claims." }
+    - { name: "proposed_at", type: "TEXT", doc: "When it was proposed (RFC 3339)." }
+    - { name: "text", type: "TEXT", doc: "The plan, as the agent wrote it (the first 64 KiB)." }
+    - { name: "path", type: "TEXT", doc: "The file the harness saved it in (Claude's `planFilePath`); NULL when it says none." }
+  tests:
+    - { not_null: event_id }
+    - { unique: event_id }
+    - { relationships: { column: thread_id, to: thread, field: id } }
 - name: agent_session_status
   version: 1
   description: "Each open agent session's status as last logged: `running`, `idle`, `awaiting_user`, `stopped`, `error`. A dead turn's `stalled` is derived live, never logged. v_agent_status rolls a thread's sessions up."

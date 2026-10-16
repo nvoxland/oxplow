@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`agent.plan.proposed@1`: the agent put a plan to the person before\nacting (Claude's `ExitPlanMode`, Codex's `plan` item; opencode's\n`plan_exit` carries no text, so it records none). Whether the person\naccepted it is in no hook, so it isn't recorded. The text sits in the\npayload, capped, so `v_agent_plan` reads it.",
+  "properties": {
+    "path": {
+      "description": "The file the harness saved it in (Claude's `planFilePath`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "text": {
+      "type": "string"
+    },
+    "thread": {
+      "type": "string"
+    },
+    "turn": {
+      "description": "The session's turn open when it proposed, when one was.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "thread",
+    "text"
+  ],
+  "title": "AgentPlanProposedV1",
+  "type": "object"
+}

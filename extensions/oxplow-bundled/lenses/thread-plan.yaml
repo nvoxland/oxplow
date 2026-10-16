@@ -1,0 +1,15 @@
+title: Plan
+description: The plans this thread's agent put to the person, newest first. Whether a plan was accepted is not recorded.
+params: [{ name: thread_id }]
+query: |
+  SELECT group_concat(
+           '### Proposed ' || proposed_at
+           || CASE WHEN path IS NOT NULL THEN ' · `' || path || '`' ELSE '' END
+           || char(10) || char(10) || text,
+           char(10) || char(10)) AS plan
+  FROM (SELECT proposed_at, path, text FROM v_agent_plan
+         WHERE thread_id = :thread_id
+         ORDER BY seq DESC)
+  HAVING count(*) > 0
+viz: markdown
+hidden: true
