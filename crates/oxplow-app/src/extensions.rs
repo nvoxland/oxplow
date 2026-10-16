@@ -6714,7 +6714,9 @@ commands:
                 "landed-in-progress",
                 "metric-deltas",
                 "threshold-crossed",
-                "hint-never-fires"
+                "hint-never-fires",
+                "shared-files",
+                "shared-files-agent"
             ]
         );
         let mut models: Vec<&str> = b.models.iter().map(|m| m.decl.name.as_str()).collect();

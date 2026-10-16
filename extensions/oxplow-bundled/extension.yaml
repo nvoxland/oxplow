@@ -92,6 +92,8 @@ ui:
     - { slot: work_item.detail.body, lens: task-tokens }
     - { slot: thread.plan.header, lens: thread-tokens }
     - { slot: thread.plan.header, lens: thread-plan }
+    - { slot: thread.plan.header, lens: thread-shared-work }
+    - { slot: work_item.detail.body, lens: item-shared-work }
     - { slot: diff.file.header, lens: file-co-change }
     - { slot: effort.review.details, lens: decisions }
     - { slot: effort.review.details, lens: inferred-decisions }
@@ -219,6 +221,65 @@ advisories:
       WHERE hint <> 'oxplow-bundled/hint-never-fires'
       GROUP BY hint
       HAVING sum(evaluated) >= 100 AND sum(fired) = 0
+  # Two open efforts on different threads that changed the same file within
+  # the window: duplicate or colliding work, shown to the person once per
+  # pair of threads. Either thread's turn end can raise it; the Alert that
+  # exists already (its text opens with the pair) silences the other. It
+  # never refuses anything: an item stays with its thread.
+  - id: shared-files
+    on: turn-end
+    audience: person
+    once_per: row
+    query: |
+      WITH recent AS (
+        SELECT c.thread_id, c.path
+        FROM v_tool_call c JOIN v_effort e ON e.id = c.effort_id AND e.ended_at IS NULL
+        WHERE c.kind = 'edit' AND c.path IS NOT NULL
+          AND julianday(c.at) >= julianday('now') - config('/sharedFiles/windowMinutes') / 1440.0
+        GROUP BY c.thread_id, c.path
+      ), shared AS (
+        SELECT min(a.thread_id, b.thread_id) AS lo, max(a.thread_id, b.thread_id) AS hi, a.path
+        FROM recent a JOIN recent b ON b.path = a.path AND b.thread_id <> a.thread_id
+        WHERE a.thread_id = :thread_id
+        GROUP BY 1, 2, 3
+      ), pairs AS (
+        SELECT lo, hi,
+               '“' || (SELECT title FROM v_thread WHERE id = lo) || '” and “'
+                   || (SELECT title FROM v_thread WHERE id = hi) || '” both changed ' AS lead,
+               (SELECT group_concat(path, ', ') FROM
+                 (SELECT path FROM shared s WHERE s.lo = p.lo AND s.hi = p.hi ORDER BY path LIMIT 5)) AS files
+        FROM (SELECT DISTINCT lo, hi FROM shared) p
+      )
+      SELECT lo || '-' || hi AS key,
+             lead || files || '. Two threads on the same files may duplicate or collide; '
+             || 'nothing stops either, and each item stays on its own thread.' AS message
+      FROM pairs
+      WHERE NOT EXISTS (SELECT 1 FROM v_agent_nudge n
+                         WHERE n.kind = 'oxplow-bundled/shared-files'
+                           AND substr(n.message, 1, length(pairs.lead)) = pairs.lead)
+  # The same overlap, said to the agent once per thread: what to look at
+  # before duplicating the other thread's work.
+  - id: shared-files-agent
+    on: turn-end
+    once_per: thread
+    query: |
+      WITH recent AS (
+        SELECT c.thread_id, c.path
+        FROM v_tool_call c JOIN v_effort e ON e.id = c.effort_id AND e.ended_at IS NULL
+        WHERE c.kind = 'edit' AND c.path IS NOT NULL
+          AND julianday(c.at) >= julianday('now') - config('/sharedFiles/windowMinutes') / 1440.0
+        GROUP BY c.thread_id, c.path
+      ), shared AS (
+        SELECT b.thread_id AS other, a.path
+        FROM recent a JOIN recent b ON b.path = a.path AND b.thread_id <> a.thread_id
+        WHERE a.thread_id = :thread_id
+      )
+      SELECT 'Another thread’s open effort (“' || (SELECT title FROM v_thread WHERE id = other)
+             || '”) also changed ' || group_concat(path, ', ')
+             || '. What that thread knows is in its notes (v_thread_note, thread_id = ' || other
+             || '); read them before duplicating its work. The work item you are on stays with this thread.' AS message
+      FROM (SELECT other, path FROM shared ORDER BY path)
+      GROUP BY other
 measures:
   - key: oxplow_bundled.effort_churn_lines
     unit: lines
@@ -277,6 +338,12 @@ configuration:
         properties:
           repeatedEdits: { type: integer, minimum: 1, description: Edits of one file at or above which it counts. }
           failedCommands: { type: integer, minimum: 1, description: Failed shell commands at or above which they count. }
+      sharedFiles:
+        type: object
+        additionalProperties: false
+        description: The shared-files advisories.
+        properties:
+          windowMinutes: { type: integer, minimum: 1, description: How recent an edit is for two threads' work on the same file to count as overlapping. }
       largeUncommitted:
         type: object
         additionalProperties: false
@@ -288,6 +355,7 @@ configuration:
     coChange: { minShared: 3, windowDays: 180, maxFilesPerCommit: 50, dormantDays: 90 }
     struggle: { repeatedEdits: 5, failedCommands: 3 }
     largeUncommitted: { files: 15 }
+    sharedFiles: { windowMinutes: 60 }
 models:
   - name: change_interest
     version: 1

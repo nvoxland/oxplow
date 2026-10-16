@@ -178,12 +178,28 @@ the thread has none open; a later item start links it (rule 1).
 A work item is owned by the thread it is on (`work_item.thread_id`;
 `oxplow.work_item.move`); there is no second owner. Two threads may
 still work on the same thing, and nothing refuses it (below, "No
-gates"). **Decided (2026-10-16), not built:** it is made visible, all
-bundled over existing models: a "Shared work" lens (items linked to open
-efforts on two threads, files two threads' open efforts changed, an
-epic's children spread over threads), a person-audience advisory when
-two threads change the same file within an hour, and a turn-end hint
-to each agent naming the other thread. Work handed from one thread to
+gates"). It is made visible, all of it bundled over existing models
+(oxplow-bundled):
+
+- The **Shared work** lens (`shared-work` in the launcher under Work;
+  `thread-shared-work` on the thread page, slot `thread.plan.header`;
+  `item-shared-work` on a work item, slot `work_item.detail.body`): items
+  with open efforts on two threads, files changed by two threads' efforts
+  (open, or closed in the last day, from `v_effort_file`), and epics whose
+  open children sit on different threads.
+- The advisory **`shared-files`** (turn end, to the person, once per pair
+  of threads): two open efforts on different threads edited the same file
+  (`v_tool_call`, kind `edit`) within `sharedFiles.windowMinutes`
+  (default 60). It names both threads and the files. Either thread's turn
+  end can raise it; an Alert already raised for the pair (its text opens
+  with the pair, `v_agent_nudge`) silences the other, so a long overlap
+  alerts once.
+- The advisory **`shared-files-agent`** (turn end, to the agent, once per
+  thread): another thread's open effort also changed the files, with a
+  pointer to that thread's notes (`v_thread_note`). A pointer to
+  `v_handoff` waits for handoffs, which are decided and not built.
+
+None refuses anything. Work handed from one thread to
 another is a handoff ([agent-model.md](./agent-model.md) "Handoffs and
 native messaging"): taking one moves its item.
 
@@ -244,7 +260,7 @@ whole alternative review built that way.
 | Per-effort test outcome and time to green | oxplow-foundation collector `oxplow.effort_test_outcome` | metric specs over its facts |
 | Look here first, co-change surprise, deviation, tests weakened | oxplow-bundled models and lenses | `changeInterest.*`, `coChange.*`; the rest fork |
 | Metric thresholds (coverage 80/50, complexity > 10, length > 60) | oxplow-foundation metric specs | `metrics: [{ use: …, target, warnAt, failAt }]` |
-| Advisories (15-file uncommitted, threshold crossed, landed in progress) | oxplow-bundled advisories | `largeUncommitted.files`; the rest fork |
+| Advisories (15-file uncommitted, threshold crossed, landed in progress, two threads on one file) | oxplow-bundled advisories | `largeUncommitted.files`, `sharedFiles.windowMinutes`; the rest fork |
 | Accept / request changes and their verdict events | oxplow-bundled commands | another extension's commands |
 
 **What stays in core, and why.** These are collection's own mechanics
@@ -267,8 +283,8 @@ or operational limits, not a view of what good work is:
 (`config('/pointer')`, `.context/extensions.md` "Configuration in SQL"),
 so oxplow-bundled's constants are settings, not forks: `changeInterest.*`
 (weights and the long-function cut-off), `coChange.*` (pair threshold,
-window, per-commit file cap, dormant days), `struggle.*` and
-`largeUncommitted.files`, with today's values as defaults; set them with
+window, per-commit file cap, dormant days), `struggle.*`,
+`largeUncommitted.files` and `sharedFiles.windowMinutes`, with today's values as defaults; set them with
 `oxplow.review_policy.write`. A metric's `target` / `warnAt` / `failAt` stay
 tunable from `project.yaml`.
 

@@ -3879,7 +3879,11 @@ advisories:
   once per effort: an open effort holding 15 or more files — a commit
   landing its work would have closed it) and `landed-in-progress`
   (turn-end, to the person, once per item: an item still in progress
-  though a commit landed its work and nothing is open on it); and two
+  though a commit landed its work and nothing is open on it); the two
+  shared-files hints (turn-end: two open efforts on different threads
+  changed one file within `sharedFiles.windowMinutes`; the Alert to the
+  person once per pair, and a note to each agent, once per thread; see
+  work-tracking.md "Cross-thread ownership"); and two
   metric ones, `metric-deltas` and `threshold-crossed` (see
   [metrics.md](./metrics.md)). **Bundled advisories set no coding
   requirements** (decided 2026-10-07): they say what oxplow observed, never

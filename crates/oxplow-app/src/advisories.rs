@@ -1281,6 +1281,198 @@ mod tests {
         assert!(hits.is_empty(), "{hits:?}");
     }
 
+    /// A second thread on the fixture's stream, with its own open effort.
+    async fn second_thread_with_effort(
+        f: &crate::test_fixtures::EffortFixture,
+        title: &str,
+    ) -> (oxplow_domain::Thread, oxplow_domain::EffortId) {
+        use oxplow_domain::stores::ThreadStore as _;
+        let stream = f
+            .svc
+            .thread_store
+            .get(&f.thread)
+            .await
+            .unwrap()
+            .unwrap()
+            .stream_id;
+        let thread = crate::test_fixtures::new_thread(&f.svc, stream, title).await;
+        let opened = f
+            .svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                crate::commands::effort::OPEN,
+                serde_json::json!({ "thread": oxplow_domain::refs::build::thread_ref(thread.id) }),
+                false,
+            )
+            .await
+            .unwrap();
+        let effort = opened.result["effort"]
+            .as_str()
+            .and_then(oxplow_domain::refs::build::effort_of_ref)
+            .unwrap();
+        (thread, effort)
+    }
+
+    /// An edit of `path` by `thread` in its `effort`, `minutes_ago`.
+    async fn edit_of(
+        f: &crate::test_fixtures::EffortFixture,
+        thread: oxplow_domain::ThreadId,
+        effort: oxplow_domain::EffortId,
+        path: &str,
+        minutes_ago: i64,
+    ) {
+        let at = oxplow_domain::Timestamp::from_unix_ms(
+            oxplow_domain::Timestamp::now().unix_ms() - minutes_ago * 60_000,
+        )
+        .to_string();
+        let path = path.to_string();
+        f.svc
+            .db
+            .transaction(move |tx| {
+                tx.execute(
+                    "INSERT INTO agent_tool_call (thread_id, effort_id, tool, kind, path, at)
+                     VALUES (?1, ?2, 'Edit', 'edit', ?3, ?4)",
+                    rusqlite::params![thread.value(), effort.value(), path, at],
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+    }
+
+    const SHARED: &str = "oxplow-bundled/shared-files";
+    const SHARED_AGENT: &str = "oxplow-bundled/shared-files-agent";
+
+    /// Two open efforts on different threads that changed the same file
+    /// within the hour raise one Alert to the person naming both threads
+    /// and the file, however many threads' turns end after: the other
+    /// thread's turn end repeats nothing.
+    #[tokio::test]
+    async fn bundled_shared_files_alert_names_both_threads_once() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let (beta, beta_effort) = second_thread_with_effort(&f, "Beta").await;
+        edit_of(&f, f.thread, f.effort, "src/shared.rs", 5).await;
+        assert!(
+            bundled_hits(&f, SHARED, AdvisoryOn::TurnEnd, Some(f.effort))
+                .await
+                .is_empty(),
+            "one thread's edit is not shared"
+        );
+        edit_of(&f, beta.id, beta_effort, "src/shared.rs", 2).await;
+        edit_of(&f, beta.id, beta_effort, "src/only-beta.rs", 2).await;
+        let first = bundled_hits(&f, SHARED, AdvisoryOn::TurnEnd, Some(f.effort)).await;
+        assert_eq!(first.len(), 1, "{first:?}");
+        assert_eq!(first[0].audience, AdvisoryAudience::Person);
+        assert!(first[0].text.contains("src/shared.rs"), "{}", first[0].text);
+        assert!(first[0].text.contains("Beta"), "{}", first[0].text);
+        assert!(
+            !first[0].text.contains("only-beta"),
+            "only files both changed: {}",
+            first[0].text
+        );
+        assert!(
+            bundled_hits(&f, SHARED, AdvisoryOn::TurnEnd, Some(f.effort))
+                .await
+                .is_empty(),
+            "a long overlap raises it once"
+        );
+        // The other thread's turn end, with the same overlap, says nothing
+        // more: the person has the Alert.
+        let cause = crate::collection::RunCause {
+            event_id: "evt".into(),
+            seq: 1,
+            anchors: oxplow_domain::Anchors {
+                thread_id: Some(beta.id),
+                effort_id: Some(beta_effort),
+                ..Default::default()
+            },
+            at: oxplow_domain::Timestamp::now(),
+            started: None,
+        };
+        let again = for_thread(
+            &f.svc.advisory_deps(),
+            &beta.id,
+            AdvisoryOn::TurnEnd,
+            Some(&cause),
+        )
+        .await
+        .into_iter()
+        .filter(|h| h.id == SHARED)
+        .count();
+        assert_eq!(again, 0);
+    }
+
+    /// The same facts in any other shape stay quiet: edits outside the
+    /// hour, a closed effort, one thread's two efforts, other files.
+    #[tokio::test]
+    async fn bundled_shared_files_stay_quiet_without_a_live_overlap() {
+        // Edits older than the window.
+        let f = crate::test_fixtures::services_with_effort().await;
+        let (beta, beta_effort) = second_thread_with_effort(&f, "Beta").await;
+        edit_of(&f, f.thread, f.effort, "src/a.rs", 180).await;
+        edit_of(&f, beta.id, beta_effort, "src/a.rs", 2).await;
+        assert!(
+            bundled_hits(&f, SHARED, AdvisoryOn::TurnEnd, Some(f.effort))
+                .await
+                .is_empty()
+        );
+        // Different files.
+        let f = crate::test_fixtures::services_with_effort().await;
+        let (beta, beta_effort) = second_thread_with_effort(&f, "Beta").await;
+        edit_of(&f, f.thread, f.effort, "src/a.rs", 2).await;
+        edit_of(&f, beta.id, beta_effort, "src/b.rs", 2).await;
+        assert!(
+            bundled_hits(&f, SHARED, AdvisoryOn::TurnEnd, Some(f.effort))
+                .await
+                .is_empty()
+        );
+        // The other thread's effort closed.
+        let f = crate::test_fixtures::services_with_effort().await;
+        let (beta, beta_effort) = second_thread_with_effort(&f, "Beta").await;
+        edit_of(&f, f.thread, f.effort, "src/a.rs", 2).await;
+        edit_of(&f, beta.id, beta_effort, "src/a.rs", 2).await;
+        run_command(
+            &f,
+            crate::commands::effort::CLOSE,
+            serde_json::json!({ "effort": oxplow_domain::refs::build::effort_ref(beta_effort), "reason": "commit" }),
+        )
+        .await;
+        assert!(
+            bundled_hits(&f, SHARED, AdvisoryOn::TurnEnd, Some(f.effort))
+                .await
+                .is_empty()
+        );
+    }
+
+    /// The agent is told, once per thread, that another thread's open
+    /// effort also changed the file, and where to read what that thread
+    /// knows.
+    #[tokio::test]
+    async fn bundled_shared_files_agent_hint_names_the_other_thread() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let (beta, beta_effort) = second_thread_with_effort(&f, "Beta").await;
+        edit_of(&f, f.thread, f.effort, "src/shared.rs", 5).await;
+        assert!(
+            bundled_hits(&f, SHARED_AGENT, AdvisoryOn::TurnEnd, Some(f.effort))
+                .await
+                .is_empty()
+        );
+        edit_of(&f, beta.id, beta_effort, "src/shared.rs", 2).await;
+        let hits = bundled_hits(&f, SHARED_AGENT, AdvisoryOn::TurnEnd, Some(f.effort)).await;
+        assert_eq!(hits.len(), 1, "{hits:?}");
+        assert_eq!(hits[0].audience, AdvisoryAudience::Agent);
+        assert!(hits[0].text.contains("Beta"), "{}", hits[0].text);
+        assert!(hits[0].text.contains("src/shared.rs"), "{}", hits[0].text);
+        assert!(hits[0].text.contains("v_thread_note"), "{}", hits[0].text);
+        assert!(
+            bundled_hits(&f, SHARED_AGENT, AdvisoryOn::TurnEnd, Some(f.effort))
+                .await
+                .is_empty(),
+            "once per thread"
+        );
+    }
+
     fn delta(
         key: &str,
         title: &str,
@@ -1489,6 +1681,8 @@ mod tests {
                 "landed-in-progress",
                 "large-uncommitted",
                 "metric-deltas",
+                "shared-files",
+                "shared-files-agent",
                 "threshold-crossed"
             ],
             "a bundled hint without a fixture that fires it"

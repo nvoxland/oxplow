@@ -25,6 +25,7 @@ today's values as the defaults, so a project tunes them without forking:
 | `coChange.dormantDays` | 90 | a file no commit touched in this long is dormant |
 | `struggle.repeatedEdits`, `.failedCommands` | 5, 3 | when edits of one file, or failed shell commands, count as struggle |
 | `largeUncommitted.files` | 15 | files an open effort holds before the agent is told to commit |
+| `sharedFiles.windowMinutes` | 60 | how recent an edit is for two threads' open efforts changing the same file to count as overlapping work |
 
 `oxplow.review_policy.read` returns the effective values and where each came
 from; `oxplow.review_policy.write` sets the project's or the person's layer

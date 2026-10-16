@@ -194,7 +194,10 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-bundled", "lenses/task-tokens.yaml"),
             ext_file!("oxplow-bundled", "lenses/task-turns.yaml"),
             ext_file!("oxplow-bundled", "lenses/tests-weakened.yaml"),
+            ext_file!("oxplow-bundled", "lenses/item-shared-work.yaml"),
+            ext_file!("oxplow-bundled", "lenses/shared-work.yaml"),
             ext_file!("oxplow-bundled", "lenses/thread-activity.yaml"),
+            ext_file!("oxplow-bundled", "lenses/thread-shared-work.yaml"),
             ext_file!("oxplow-bundled", "lenses/thread-plan.yaml"),
             ext_file!("oxplow-bundled", "lenses/thread-tokens.yaml"),
             ext_file!("oxplow-bundled", "lenses/token-total.yaml"),
@@ -2396,6 +2399,138 @@ mod tests {
             oxplow_db::SqlCell::Text(r) => r.clone(),
             other => panic!("{other:?}"),
         }
+    }
+
+    /// Shared work: items with open efforts on two threads, files two
+    /// threads' efforts changed, an epic whose children sit on different
+    /// threads. The thread and item variants keep only their own rows.
+    #[tokio::test]
+    async fn the_shared_work_lenses_show_what_two_threads_hold() {
+        use oxplow_db::EffortStore as _;
+        let f = crate::test_fixtures::services_with_task_effort().await;
+        let item = oxplow_tasks::work_item_ref(f.task);
+        let lens = |id: &'static str| {
+            let id = format!("oxplow-bundled/{id}");
+            let f = &f;
+            async move { run_bundled_lens(f, &id, &[]).await }
+        };
+        assert_eq!(
+            lens("shared-work").await.as_array().unwrap().len(),
+            0,
+            "nothing shared yet"
+        );
+
+        // A second thread on the same item, with its own effort and a file
+        // both efforts changed.
+        use oxplow_domain::stores::ThreadStore as _;
+        let stream = f
+            .svc
+            .thread_store
+            .get(&f.thread)
+            .await
+            .unwrap()
+            .unwrap()
+            .stream_id;
+        let beta = crate::test_fixtures::new_thread(&f.svc, stream, "Beta").await;
+        let opened = f
+            .svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                crate::commands::effort::OPEN,
+                serde_json::json!({ "thread": oxplow_domain::refs::build::thread_ref(beta.id), "work_item": item }),
+                false,
+            )
+            .await
+            .unwrap();
+        let beta_effort = opened.result["effort"]
+            .as_str()
+            .and_then(oxplow_domain::refs::build::effort_of_ref)
+            .unwrap();
+        for effort in [f.effort, beta_effort] {
+            f.svc
+                .effort_store
+                .record_file(
+                    &effort,
+                    "src/shared.rs",
+                    oxplow_db::effort_store::EffortFileChange::Updated,
+                    oxplow_db::effort_store::FileRefVersion {
+                        local_snapshot_id: 0,
+                        closest_vcs_rev: None,
+                        vcs_rev_exact: false,
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        // An epic whose children are on the two threads.
+        let epic =
+            crate::test_fixtures::file_item(&f.svc, serde_json::json!({ "title": "Epic" })).await;
+        let epic_ref = oxplow_tasks::work_item_ref(epic);
+        for (title, thread) in [("Child A", f.thread), ("Child B", beta.id)] {
+            crate::test_fixtures::file_item(
+                &f.svc,
+                serde_json::json!({ "title": title, "parent_ref": epic_ref,
+                    "thread": thread.to_string() }),
+            )
+            .await;
+        }
+
+        let all = lens("shared-work").await;
+        let sections: Vec<(String, String)> = all
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| (r[0].as_str().unwrap().into(), r[1].as_str().unwrap().into()))
+            .collect();
+        for want in [
+            ("Items on two threads", "t"),
+            ("Files two threads changed", "src/shared.rs"),
+            ("Epics spread over threads", "Epic"),
+        ] {
+            assert!(
+                sections.contains(&(want.0.to_string(), want.1.to_string())),
+                "{want:?} in {sections:?}"
+            );
+        }
+        let threads = all.as_array().unwrap()[0][2].as_str().unwrap();
+        assert!(threads.contains("Beta"), "{threads}");
+
+        // The thread variant keeps what involves the thread; a third
+        // thread sees none of it.
+        let mine = run_bundled_lens(
+            &f,
+            "oxplow-bundled/thread-shared-work",
+            &[("thread_id", beta.id.value())],
+        )
+        .await;
+        assert_eq!(mine.as_array().unwrap().len(), 3, "{mine}");
+        let third = crate::test_fixtures::new_thread(&f.svc, stream, "Gamma").await;
+        let none = run_bundled_lens(
+            &f,
+            "oxplow-bundled/thread-shared-work",
+            &[("thread_id", third.id.value())],
+        )
+        .await;
+        assert_eq!(none.as_array().unwrap().len(), 0, "{none}");
+        // The item variant: the item's own row and the files its efforts changed.
+        let item_rows = run_bundled_lens_with(
+            &f,
+            "oxplow-bundled/item-shared-work",
+            &[("ref", oxplow_db::SqlCell::Text(item))],
+        )
+        .await;
+        let kinds: Vec<&str> = item_rows
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r[0].as_str().unwrap())
+            .collect();
+        assert!(
+            kinds.contains(&"Items on two threads") && kinds.contains(&"Files two threads changed"),
+            "{kinds:?}"
+        );
+        assert!(!kinds.contains(&"Epics spread over threads"), "{kinds:?}");
     }
 
     /// The Plan lenses: the plans an agent proposed, newest first, under
