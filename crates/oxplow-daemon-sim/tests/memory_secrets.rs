@@ -115,9 +115,17 @@ async fn an_approval_lives_and_dies_with_the_memory_secrets() {
             .unwrap()
             .success());
     }
+    // A program a person approves: the project's own effort policy, a script.
+    let ext = project.join("oxplow/extensions/project");
+    std::fs::create_dir_all(ext.join("policies")).unwrap();
     std::fs::write(
-        project.join(".oxplow/project.yaml"),
-        "acpAgents:\n  - { name: mine, command: tools/agent, args: [--acp] }\n",
+        ext.join("extension.yaml"),
+        "manifest: 2\nname: project\nsharing: private\nintent:\n  purpose: a policy\n  examples: [{ name: a }]\nimplementations:\n  - { capability: effort_policy, id: mine, entry: policies/mine.star, needs: [sql.read] }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("policies/mine.star"),
+        "def transform(x):\n    return {\"skip\": \"no\"}\n",
     )
     .unwrap();
 
@@ -127,21 +135,21 @@ async fn an_approval_lives_and_dies_with_the_memory_secrets() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|p| p["name"] == "mine")
+        .find(|p| p["name"] == "project/mine")
         .cloned()
-        .expect("the project's ACP agent is a program");
+        .expect("the project's policy script is a program");
     assert_eq!(mine["approved"], false);
     let approved = ipc(
         &first,
         "approve_project_program",
-        json!({ "kind": mine["kind"], "name": "mine", "version": mine["version"] }),
+        json!({ "kind": mine["kind"], "name": "project/mine", "version": mine["version"] }),
     )
     .await;
     assert!(approved
         .as_array()
         .unwrap()
         .iter()
-        .any(|p| p["name"] == "mine" && p["approved"] == true));
+        .any(|p| p["name"] == "project/mine" && p["approved"] == true));
     assert!(
         files_under(&home)
             .iter()
@@ -158,5 +166,5 @@ async fn an_approval_lives_and_dies_with_the_memory_secrets() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|p| p["name"] == "mine" && p["approved"] == false));
+        .any(|p| p["name"] == "project/mine" && p["approved"] == false));
 }

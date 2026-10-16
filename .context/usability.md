@@ -240,7 +240,7 @@ Things I keep forgetting. Read this before adding any UI.
   shows the card under the tool call that made the proposal
   (`proposalOfTool`); once decided, a muted line stays there saying what
   became of it — "Approved by you — it ran.", "Declined by you — nothing
-  ran.", "Replaced by a newer proposal." (`acp-proposal-<id>-decided`) —
+  ran.", "Replaced by a newer proposal." —
   so the transcript keeps what the agent asked. An approved one says it
   ran only once its run is recorded (`audit_id`): until then it says
   "Approved by you — running…", since an External command is claimed
@@ -791,8 +791,7 @@ declaring *what it is* and mounting the generic layer.
   (`components/Prompts/EmptyState.tsx`, P6.D2): a title saying what
   would be here, one sentence on how it gets here, and 1–3 prompts the
   person can hand the agent. Each prompt is an Ask — it fills the agent's
-  input and never sends. `compact` is the one-line form (rail sections,
-  the ACP transcript). A loading state isn't an empty one: "Starting the
+  input and never sends. `compact` is the one-line form (rail sections). A loading state isn't an empty one: "Starting the
   agent…" is plain text, and only the empty transcript is an `EmptyState`. Don't offer prompts for what an agent can't do
   (AI providers, keys, consent): say who does it instead. The session
   picker (`NewSessionPage`, a thread with no agent session) offers **no**

@@ -20,7 +20,7 @@ hooks deny worktree writes. This is a workflow guard, not an operating
 system sandbox.
 
 A thread can have no agent session or several. Sessions use registered
-harnesses, such as Claude Code, Codex, OpenCode, or an ACP connection.
+harnesses, such as Claude Code, Codex, or OpenCode.
 The harness belongs to the session, rather than being a permanent choice
 for the thread. See [Agents](../guide/agents.md).
 

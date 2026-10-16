@@ -19,7 +19,6 @@ mock.module("../../api.js", () => ({
   listMetricCatalog: async () => ({ rows: [], reads: { models: [], tables: [], measures: [] } }),
   listMetricDefinitions: async () => ({ rows: [], reads: { models: [], tables: [], measures: [] } }),
   listMetricSamples: async () => ({ rows: [], reads: { models: [], tables: [], measures: [] } }),
-  listAcpAgents: async () => [],
 }));
 
 const { BacklinksList } = await import("../../tabs/BacklinksList.js");
@@ -66,9 +65,9 @@ test("a thread with no agent session shows the picker, with no prompts", () => {
     <NewSessionPage
       thread={thread}
       harnesses={[
-        { id: "claude", title: "Claude", acpAgent: false, enabled: true },
-        { id: "codex", title: "Codex", acpAgent: false, enabled: true },
-        { id: "opencode", title: "OpenCode", acpAgent: false, enabled: false },
+        { id: "claude", title: "Claude", enabled: true },
+        { id: "codex", title: "Codex", enabled: true },
+        { id: "opencode", title: "OpenCode", enabled: false },
       ]}
       onStart={async () => {}}
       onNoSession={async () => {}}

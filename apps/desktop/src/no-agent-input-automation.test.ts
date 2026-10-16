@@ -61,21 +61,11 @@ describe("no agent input automation", () => {
     expect(hits).toEqual([]);
   });
 
-  // Chat sessions: a prompt is sent only by the prompt box, on the
-  // person's Enter. `api.ts` defines the wrapper; nothing else may call it.
-  test("chatPrompt is only referenced by the prompt box", () => {
-    const allowed = new Set(["api.ts", join("components", "chat", "ChatPromptBox.tsx")]);
-    const hits = sourceFiles()
-      .filter((rel) => !allowed.has(rel))
-      .filter((rel) => /\bchatPrompt\b/.test(readFileSync(join(SRC_DIR, rel), "utf8")));
-    expect(hits).toEqual([]);
-  });
-
   // Starting a session only opens its slot: the picker never types into
   // the agent it starts, nor drafts a prompt for it.
   test("the session picker sends the agent nothing", () => {
     const text = readFileSync(join(SRC_DIR, "pages", "NewSessionPage.tsx"), "utf8");
-    expect(text).not.toMatch(/\b(chatPrompt|forwardTerminalInput|insertIntoAgent|submitHumanPrompt)\b/);
+    expect(text).not.toMatch(/\b(forwardTerminalInput|insertIntoAgent|submitHumanPrompt)\b/);
   });
 
   // A failing extension's repair (P7.C3): the person presses Repair with

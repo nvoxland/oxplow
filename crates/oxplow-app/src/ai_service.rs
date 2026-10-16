@@ -1899,11 +1899,10 @@ mod tests {
         assert!(err.contains("Settings → Data → Programs"), "{err}");
         assert!(seen.lock().unwrap().is_empty(), "nothing was sent");
 
-        let config = svc.config.read().unwrap().clone();
         let extensions = svc
             .extension_catalog
             .unpinned(dir.path(), "a test reads declarations");
-        let listed = crate::exec_consent::list(&svc.approvals, dir.path(), &config, &extensions)
+        let listed = crate::exec_consent::list(&svc.approvals, dir.path(), &extensions)
             .into_iter()
             .find(|p| p.kind == crate::exec_consent::ProgramKind::AiProvider)
             .expect("it is listed to approve");
@@ -1911,7 +1910,6 @@ mod tests {
         crate::exec_consent::approve_program(
             &svc.approvals,
             dir.path(),
-            &config,
             &extensions,
             crate::exec_consent::ProgramKind::AiProvider,
             &listed.name,

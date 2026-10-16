@@ -54,13 +54,12 @@ pub fn script_request(needs: &[String]) -> GrantRequest {
 
 /// A project program's request, as Settings → Data → Programs lists it.
 pub fn program_request(p: &ProjectProgram) -> GrantRequest {
-    let runs_program = matches!(p.kind, ProgramKind::AcpAgent | ProgramKind::Provider);
+    let runs_program = matches!(p.kind, ProgramKind::Provider);
     GrantRequest {
         scopes: scopes(&p.scopes),
         program: runs_program.then(|| p.program.clone()),
         hosts: p.network.iter().cloned().collect(),
         credentials: p.credentials.iter().cloned().collect(),
-        // An ACP agent's are `NAME=value`: the name is what it reads.
         env: p
             .env
             .iter()

@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 
 import { agentChoices } from "../agentKinds.js";
-import { listAcpAgents } from "../api.js";
 import { readNewThreadSession, saveNewThreadSession } from "../newThreadSession.js";
-import type { AcpAgentListing, HarnessListing } from "../tauri-bridge/generated/bindings.js";
+import type { HarnessListing } from "../tauri-bridge/generated/bindings.js";
 
 /**
  * Settings → Agents: what a new thread starts with — the person's own
@@ -19,24 +18,16 @@ export function NewThreadSessionSetting({
   save?: (choice: string) => Promise<void>;
 }) {
   const [choice, setChoice] = useState<string | null>(null);
-  const [acpAgents, setAcpAgents] = useState<AcpAgentListing[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const acpEnabled = harnesses.some((h) => h.enabled && h.acpAgent);
   useEffect(() => {
     void read()
       .then(setChoice)
       .catch((e) => setError(String(e)));
   }, [read]);
-  useEffect(() => {
-    if (!acpEnabled) return;
-    void listAcpAgents()
-      .then(setAcpAgents)
-      .catch(() => setAcpAgents([]));
-  }, [acpEnabled]);
   const options = [
     { value: "ask", label: "Ask (the session picker)" },
     { value: "none", label: "No session" },
-    ...agentChoices(harnesses, acpAgents),
+    ...agentChoices(harnesses),
   ];
   if (choice !== null && !options.some((o) => o.value === choice)) {
     options.push({ value: choice, label: `${choice} (not available: new threads ask)` });

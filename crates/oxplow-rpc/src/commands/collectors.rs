@@ -66,15 +66,9 @@ pub async fn set_credential(
 pub async fn list_project_programs(
     svc: &Services,
 ) -> Result<Vec<oxplow_app::exec_consent::ProjectProgram>, IpcError> {
-    let config = svc
-        .config
-        .read()
-        .map(|c| c.clone())
-        .unwrap_or_else(|p| p.into_inner().clone());
     Ok(oxplow_app::exec_consent::list(
         &svc.approvals,
         &svc.layout.project_dir,
-        &config,
         &shared_extensions(svc).await,
     ))
 }
@@ -123,16 +117,10 @@ pub async fn approve_project_program(
     name: String,
     version: String,
 ) -> Result<Vec<oxplow_app::exec_consent::ProjectProgram>, IpcError> {
-    let config = svc
-        .config
-        .read()
-        .map(|c| c.clone())
-        .unwrap_or_else(|p| p.into_inner().clone());
     let extensions = shared_extensions(svc).await;
     oxplow_app::exec_consent::approve_program(
         &svc.approvals,
         &svc.layout.project_dir,
-        &config,
         &extensions,
         kind,
         &name,
@@ -153,7 +141,6 @@ pub async fn approve_project_program(
     Ok(oxplow_app::exec_consent::list(
         &svc.approvals,
         &svc.layout.project_dir,
-        &config,
         &shared_extensions(svc).await,
     ))
 }
@@ -166,16 +153,10 @@ pub async fn revoke_project_program(
     kind: oxplow_app::exec_consent::ProgramKind,
     name: String,
 ) -> Result<Vec<oxplow_app::exec_consent::ProjectProgram>, IpcError> {
-    let config = svc
-        .config
-        .read()
-        .map(|c| c.clone())
-        .unwrap_or_else(|p| p.into_inner().clone());
     let extensions = shared_extensions(svc).await;
     oxplow_app::exec_consent::revoke_program(
         &svc.approvals,
         &svc.layout.project_dir,
-        &config,
         &extensions,
         kind,
         &name,
@@ -189,7 +170,6 @@ pub async fn revoke_project_program(
     Ok(oxplow_app::exec_consent::list(
         &svc.approvals,
         &svc.layout.project_dir,
-        &config,
         &shared_extensions(svc).await,
     ))
 }

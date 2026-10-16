@@ -3,7 +3,6 @@
 use std::collections::BTreeSet;
 use std::sync::{Arc, RwLock};
 
-use super::acp_adapter::AcpAdapter;
 use super::harness::AgentHarness;
 use crate::work_items::ActiveSource;
 
@@ -125,33 +124,10 @@ impl HarnessRegistry {
     }
 }
 
-/// The ACP adapters the project's extensions declare, in declaration
-/// order: the agents an `acp` session can run before the project's own
-/// `acpAgents:`. Cloning shares them.
-#[derive(Clone, Default)]
-pub struct AcpAdapterRegistry {
-    adapters: Arc<RwLock<Vec<AcpAdapter>>>,
-}
-
-impl AcpAdapterRegistry {
-    /// Replace what's declared.
-    pub fn set(&self, adapters: Vec<AcpAdapter>) {
-        *self.adapters.write().unwrap_or_else(|e| e.into_inner()) = adapters;
-    }
-
-    /// Every declared adapter, in declaration order.
-    pub fn all(&self) -> Vec<AcpAdapter> {
-        self.adapters
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::harness::{HarnessError, Interact, Launch, LaunchInput, Transcript};
+    use crate::agent::harness::{HarnessError, Launch, LaunchInput};
 
     struct Fake(&'static str);
 
@@ -162,12 +138,6 @@ mod tests {
         }
         fn title(&self) -> &str {
             self.0
-        }
-        fn interact(&self) -> Interact {
-            Interact {
-                transcript: Transcript::Terminal,
-                acp_agent: false,
-            }
         }
         async fn launch(&self, _: &LaunchInput) -> Result<Launch, HarnessError> {
             Err(HarnessError::Config("a fake".into()))
@@ -210,9 +180,9 @@ mod tests {
         r.set_declared(vec![Arc::new(Fake("codex")), Arc::new(Fake("claude"))]);
         assert_eq!(r.names(), ["codex", "claude"]);
         assert_eq!(r.default().unwrap().id(), "codex");
-        r.register(Arc::new(Fake("acp")));
+        r.register(Arc::new(Fake("opencode")));
         r.register(Arc::new(Fake("codex")));
-        assert_eq!(r.names(), ["codex", "claude", "acp"]);
+        assert_eq!(r.names(), ["codex", "claude", "opencode"]);
     }
 
     /// A catalog reload restates the declared harnesses — one no longer

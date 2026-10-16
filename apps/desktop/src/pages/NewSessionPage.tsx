@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
-import { listAcpAgents, type Thread } from "../api.js";
-import { agentChoices, parseAgentChoice } from "../agentKinds.js";
-import type { AcpAgentListing, HarnessListing } from "../tauri-bridge/generated/bindings.js";
+import type { Thread } from "../api.js";
+import { agentChoices } from "../agentKinds.js";
+import type { HarnessListing } from "../tauri-bridge/generated/bindings.js";
 import { EmptyState } from "../components/Prompts/EmptyState.js";
 import { Page, pageH1Style } from "../tabs/Page.js";
 
@@ -12,7 +12,7 @@ interface NewSessionPageProps {
   harnesses: HarnessListing[];
   /** Open the session; resolves once its row exists (its tab follows).
    *  `remember`: new threads start this agent from now on. */
-  onStart(harness: string, acpAgent: string | null, remember: boolean): Promise<void>;
+  onStart(harness: string, remember: boolean): Promise<void>;
   /** Leave the thread without a session (the picker closes).
    *  `remember`: new threads start with none from now on. */
   onNoSession(remember: boolean): Promise<void>;
@@ -25,18 +25,10 @@ interface NewSessionPageProps {
  * It offers no prompts to hand an agent: there is no agent here yet.
  */
 export function NewSessionPage({ thread, harnesses, onStart, onNoSession }: NewSessionPageProps) {
-  const [acpAgents, setAcpAgents] = useState<AcpAgentListing[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [remember, setRemember] = useState(false);
-  const acpEnabled = harnesses.some((h) => h.enabled && h.acpAgent);
-  useEffect(() => {
-    if (!acpEnabled) return;
-    void listAcpAgents()
-      .then(setAcpAgents)
-      .catch(() => setAcpAgents([]));
-  }, [acpEnabled]);
-  const choices = agentChoices(harnesses, acpAgents);
+  const choices = agentChoices(harnesses);
   const [choice, setChoice] = useState<string>(choices[0]?.value ?? "");
   // Focus the picker when the page opens — unless focus is already
   // somewhere (the launcher a person opened while it loaded): a page that
@@ -63,8 +55,7 @@ export function NewSessionPage({ thread, harnesses, onStart, onNoSession }: NewS
               setBusy(true);
               setError(null);
               try {
-                const { harness, acpAgent } = parseAgentChoice(picked);
-                await onStart(harness, acpAgent, remember);
+                await onStart(picked, remember);
               } catch (err) {
                 setError(err instanceof Error ? err.message : String(err));
               } finally {

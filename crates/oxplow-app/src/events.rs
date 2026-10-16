@@ -30,18 +30,11 @@ pub mod event_channels {
     pub const LSP: &str = "lsp:event";
     /// Terminal bridge events.
     pub const TERMINAL: &str = "terminal:event";
-    /// Chat session events (`chat::session::ChatEvent`).
-    pub const CHAT: &str = "chat:event";
 
     /// Frame keys used as `{"channel": <key>, "payload": …}` on the
     /// daemon's multiplexed `/events` socket, keyed to the channel
     /// each frame demuxes back onto.
-    pub const FRAMES: &[(&str, &str)] = &[
-        ("oxplow", OXPLOW),
-        ("lsp", LSP),
-        ("terminal", TERMINAL),
-        ("chat", CHAT),
-    ];
+    pub const FRAMES: &[(&str, &str)] = &[("oxplow", OXPLOW), ("lsp", LSP), ("terminal", TERMINAL)];
 }
 
 /// fs-watch classification mirrored onto the wire so the renderer can

@@ -6,7 +6,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 
-import { decideProposal, querySql, type ChatToolCall } from "./api.js";
+import { decideProposal, querySql } from "./api.js";
 import { recordOpError } from "./components/opErrorsStore.js";
 import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
 import { configRef } from "./refs/ref.js";
@@ -182,8 +182,7 @@ export async function readThreadProposals(threadId: string): Promise<{ proposals
 }
 
 /** A thread's proposals, re-read when the model changes: what waits for
- *  the person where the conversation is (the Answers strip, an ACP
- *  transcript), and what became of the ones they decided. */
+ *  the person where the conversation is (the Answers strip), and what became of the ones they decided. */
 export function useThreadProposals(threadId: string): Proposal[] {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [reads, setReads] = useState<Reads>(NO_READS);
@@ -203,16 +202,4 @@ export function useThreadProposals(threadId: string): Proposal[] {
   }, [load]);
   useRerunOnChange(reads, load);
   return proposals;
-}
-
-/** The proposal a tool call left (`proposal:N`), so an ACP transcript shows
- *  it where the agent asked. `run_command` answers `{ kind: "proposed",
- *  proposal }`; a lens action's refusal says "recorded as proposal:N".
- *  Only oxplow's command tools: another tool quoting such text names none. */
-export function proposalOfTool(call: ChatToolCall): string | null {
-  const names = [call.name, call.title].filter((n): n is string => n !== null);
-  if (!names.some((n) => /^mcp__\S*__(run_command|oxplow_run_lens_action)\b/.test(n))) return null;
-  const output = [...call.text, call.rawOutput === null ? "" : JSON.stringify(call.rawOutput)].join("\n");
-  const m = /\\*"proposal\\*"\s*:\s*\\*"(proposal:[0-9]+)\\*"|recorded as (proposal:[0-9]+)/.exec(output);
-  return m?.[1] ?? m?.[2] ?? null;
 }

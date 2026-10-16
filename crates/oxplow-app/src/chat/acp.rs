@@ -1,6 +1,6 @@
 //! The only module that names `agent-client-protocol` schema types. It
 //! converts them to and from `model.rs`, so the pinned SDK (`=2.2.0`, a
-//! young 2.x) can change without touching the rest of `acp/`. It also owns
+//! young 2.x) can change without touching the rest of `chat/`. It also owns
 //! the ACP connection ([`run`], [`AcpConnection`]).
 
 use agent_client_protocol::schema::v1 as sdk;

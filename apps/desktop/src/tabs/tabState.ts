@@ -29,7 +29,7 @@ export type EntityPageKind =
   | "turn"
   // Opens its file at the symbol's line; never a tab of its own (P6.E3).
   | "symbol"
-  // An agent slot on the thread: its terminal or ACP chat.
+  // An agent slot on the thread: its terminal.
   | "agent_session";
 
 export type RoutePageKind =

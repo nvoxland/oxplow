@@ -1,6 +1,5 @@
 /// A thread's answers, kept live: re-read when `v_thread_answer` changes
-/// (a new `oxplow_show_lens`, a Keep This). The Answers strip and an ACP
-/// transcript share it.
+/// (a new `oxplow_show_lens`, a Keep This). The Answers strip uses it.
 import { useCallback, useEffect, useState } from "react";
 
 import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";

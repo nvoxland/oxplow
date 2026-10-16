@@ -13,16 +13,9 @@
 //! (`capabilities::BUILT_INS`), the way a collector names `oxplow:junit`;
 //! which one is active is the person's and the project's choice
 //! (`capabilities::CapabilityRegistry::resolve`) — or, for a capability
-//! many implementations serve (`agent_harness`, `acp_adapter`,
-//! `ai_provider`), every one declared. `config:` configures the built-in,
-//! checked against its schema:
-//!
-//! ```yaml
-//!   - capability: acp_adapter
-//!     id: gemini
-//!     entry: oxplow:acp-adapter
-//!     config: { command: gemini, args: [--acp] }
-//! ```
+//! many implementations serve (`agent_harness`, `ai_provider`), every one
+//! declared. `config:` configures a built-in that takes one, checked
+//! against its schema (none does today).
 
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
@@ -458,22 +451,10 @@ mod tests {
     }
 
     /// A declaration's `config:` is checked against its built-in's schema;
-    /// one that takes none refuses any.
+    /// one that takes none (every built-in today) refuses any.
     #[test]
     fn config_is_checked_against_the_built_ins_schema() {
-        let (decls, errors) = parse(
-            "  - { capability: acp_adapter, id: gemini, entry: oxplow:acp-adapter, config: { command: gemini, args: [--acp] } }\n",
-        );
-        assert_eq!(errors, Vec::<String>::new());
-        assert_eq!(
-            decls[0].config,
-            serde_json::json!({ "command": "gemini", "args": ["--acp"] })
-        );
         let errors = |yaml: &str| parse(yaml).1.join("\n");
-        assert!(
-            errors("  - { capability: acp_adapter, id: x, entry: oxplow:acp-adapter, config: { args: [] } }\n")
-                .contains("command"),
-        );
         assert!(errors(
             "  - { capability: agent_harness, id: claude, entry: oxplow:claude-code, config: { a: 1 } }\n"
         )

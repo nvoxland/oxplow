@@ -136,36 +136,6 @@ const DEFAULT_SCRIPTS_MEMORY_MB: u64 = 512;
 const MIN_SCRIPTS_MEMORY_MB: u64 = 64;
 const DEFAULT_INJECT_SESSION_CONTEXT: bool = true;
 
-/// An agent oxplow talks to over the Agent Client Protocol (tsk335): a
-/// program that speaks ACP on its stdio. The extensions' declared ACP
-/// adapters cover the common ones; `acpAgents:` in `.oxplow/project.yaml`
-/// adds or overrides by name (`oxplow_app::acp::agents`). A project entry
-/// names a program from the repo, so it runs only once a person approved it
-/// (see `exec_consent`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct AcpAgentConfig {
-    /// Short name a thread picks it by (`claude`, `gemini`, `my-agent`).
-    pub name: String,
-    /// The program: a name on PATH or a path.
-    pub command: String,
-    #[serde(default)]
-    pub args: Vec<String>,
-    /// Extra environment for the program.
-    #[serde(default)]
-    pub env: std::collections::BTreeMap<String, String>,
-}
-
-/// Where an ACP agent definition came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "lowercase")]
-pub enum AcpAgentSource {
-    /// An adapter an extension declares; runs without approval.
-    Declared,
-    /// The project's `acpAgents:`; needs a person's approval to run.
-    Project,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
 pub struct LspServerConfig {
     #[serde(rename = "languageId")]
@@ -724,10 +694,6 @@ pub struct OxplowConfig {
     #[serde(rename = "agentConfig")]
     #[specta(type = std::collections::BTreeMap<String, oxplow_domain::Json>)]
     pub agent_config: std::collections::BTreeMap<String, serde_json::Value>,
-    /// The project's ACP agents (`acpAgents:`), layered over the declared
-    /// ACP adapters (`oxplow_app::acp::agents::resolve`).
-    #[serde(rename = "acpAgents")]
-    pub acp_agents: Vec<AcpAgentConfig>,
     /// The project's extension provider instances
     /// (`extensionInstances: { "<ext>/<id>": { enabled, config } }`).
     #[serde(rename = "extensionInstances")]
@@ -743,7 +709,7 @@ pub struct OxplowConfig {
     pub personal_active_providers: std::collections::BTreeMap<String, String>,
     /// What a new thread starts with, a person's own (`newThreadSession`
     /// in `.oxplow/personal.yaml`): `ask` (the session picker), `none`, or
-    /// an agent (`<harness>` / `<harness>:<acp agent>`). Unset means `ask`.
+    /// an agent (a harness's key). Unset means `ask`.
     #[serde(rename = "personalNewThreadSession")]
     pub personal_new_thread_session: Option<String>,
     /// Whose component shows for a replaceable core sub-component, by
@@ -972,9 +938,6 @@ struct RawConfig {
     #[serde(rename = "agentModels", default)]
     #[schemars(skip)]
     agent_models: Option<serde_yaml::Value>,
-    /// The project's ACP agents, layered over the presets. Runs programs.
-    #[serde(rename = "acpAgents", default)]
-    acp_agents: Option<Vec<AcpAgentConfig>>,
     /// Instances of extension providers, by `<extension>/<instance id>`: `{ enabled, config, provider? }` (the provider's instance config; `provider` names which of the extension's providers an instance with its own id is). Enabling one runs its program once this machine approved it.
     #[serde(rename = "extensionInstances", default)]
     extension_instances: Option<std::collections::BTreeMap<String, ExtensionInstanceConfig>>,
@@ -1563,11 +1526,6 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
         !config.agent_config.is_empty(),
     );
     put(
-        "acpAgents",
-        to_yaml(&config.acp_agents),
-        !config.acp_agents.is_empty(),
-    );
-    put(
         "extensionInstances",
         to_yaml(&instances_as_written(&config.extension_instances)),
         !config.extension_instances.is_empty(),
@@ -1684,7 +1642,6 @@ fn default_config(project_name: String) -> OxplowConfig {
         metrics: Vec::new(),
         zones: Vec::new(),
         agent_config: Default::default(),
-        acp_agents: Vec::new(),
         extension_instances: std::collections::BTreeMap::new(),
         active_providers: std::collections::BTreeMap::new(),
         personal_active_providers: std::collections::BTreeMap::new(),
@@ -2034,40 +1991,6 @@ fn validate_active_providers(
     Ok(raw)
 }
 
-/// Validate `acpAgents:`: lowercase-dash names, unique, with a command.
-fn validate_acp_agents(raw: Vec<AcpAgentConfig>) -> Result<Vec<AcpAgentConfig>, ConfigError> {
-    let mut seen = std::collections::HashSet::new();
-    let mut out = Vec::with_capacity(raw.len());
-    for (i, mut a) in raw.into_iter().enumerate() {
-        a.name = a.name.trim().to_string();
-        a.command = a.command.trim().to_string();
-        let ok_name = !a.name.is_empty()
-            && a.name
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
-        if !ok_name {
-            return Err(ConfigError::Invalid(format!(
-                "acpAgents[{i}].name must be lowercase letters, digits and dashes (got \"{}\")",
-                a.name
-            )));
-        }
-        if a.command.is_empty() {
-            return Err(ConfigError::Invalid(format!(
-                "acpAgents[{i}] ({}) needs a command",
-                a.name
-            )));
-        }
-        if !seen.insert(a.name.clone()) {
-            return Err(ConfigError::Invalid(format!(
-                "acpAgents: `{}` is declared twice",
-                a.name
-            )));
-        }
-        out.push(a);
-    }
-    Ok(out)
-}
-
 fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigError> {
     let agents = validate_agents(raw.agents)?;
 
@@ -2190,7 +2113,6 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
     }
     let agent_config = validate_agent_config(raw.agent_config.unwrap_or_default())?;
 
-    let acp_agents = validate_acp_agents(raw.acp_agents.unwrap_or_default())?;
     let extension_instances =
         validate_extension_instances(raw.extension_instances.unwrap_or_default())?;
     let active_providers = validate_active_providers(raw.active_providers.unwrap_or_default())?;
@@ -2256,7 +2178,6 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         metrics,
         zones,
         agent_config,
-        acp_agents,
         extension_instances,
         active_providers,
         personal_active_providers: std::collections::BTreeMap::new(),
@@ -3932,45 +3853,6 @@ mod tests {
             back.extension_instances["acme/github"].config,
             serde_json::json!({ "pollMinutes": 5, "ratio": 0.5 })
         );
-    }
-
-    #[test]
-    fn acp_agents_parse_validate_and_round_trip() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
-        std::fs::write(
-            config_path(dir.path()),
-            "acpAgents:\n  - { name: gemini, command: /opt/gemini, args: [--acp, --yolo] }\n  - { name: mine, command: ./tools/agent, env: { MODE: fast } }\n",
-        )
-        .unwrap();
-        let cfg = load_project_config(dir.path()).unwrap();
-        let names: Vec<&str> = cfg.acp_agents.iter().map(|a| a.name.as_str()).collect();
-        assert_eq!(names, ["gemini", "mine"]);
-        assert_eq!(cfg.acp_agents[0].args, vec!["--acp", "--yolo"]);
-        // Written back as it was.
-        write_rendered(dir.path(), &cfg);
-        assert_eq!(
-            load_project_config(dir.path()).unwrap().acp_agents,
-            cfg.acp_agents
-        );
-        for (bad, needle) in [
-            (
-                "acpAgents:\n  - { name: Bad Name, command: x }\n",
-                "lowercase",
-            ),
-            (
-                "acpAgents:\n  - { name: a, command: \"\" }\n",
-                "needs a command",
-            ),
-            (
-                "acpAgents:\n  - { name: a, command: x }\n  - { name: a, command: y }\n",
-                "twice",
-            ),
-        ] {
-            std::fs::write(config_path(dir.path()), bad).unwrap();
-            let err = load_project_config(dir.path()).unwrap_err().to_string();
-            assert!(err.contains(needle), "{bad}: {err}");
-        }
     }
 
     #[test]

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use oxplow_acp_fake::{FakeOptions, Shared};
-use oxplow_app::acp::wire::AcpOpen;
+use oxplow_app::chat::acp::AcpOpen;
 use oxplow_app::chat::host::ServicesChatHost;
 use oxplow_app::chat::manager::Launch;
 use oxplow_app::chat::session::{ChatEventBody, ChatStatus, SessionSpec};
@@ -79,8 +79,8 @@ async fn seed(svc: &Services, root: &std::path::Path, status: ThreadStatus) -> T
     };
     svc.thread_store.upsert(&thread).await.unwrap();
     svc.agent_session_store
-        .open(&oxplow_domain::agent_session::NewAgentSession::chat(
-            thread.id, "acp", "fake",
+        .open(&oxplow_domain::agent_session::NewAgentSession::terminal(
+            thread.id, "fake",
         ))
         .await
         .unwrap();
@@ -440,8 +440,8 @@ async fn two_acp_sessions_in_a_thread_run_apart() {
     let a = open_in_process(&svc, thread, &root).await;
     let b = svc
         .agent_session_store
-        .open(&oxplow_domain::agent_session::NewAgentSession::chat(
-            thread, "acp", "fake",
+        .open(&oxplow_domain::agent_session::NewAgentSession::terminal(
+            thread, "fake",
         ))
         .await
         .unwrap()

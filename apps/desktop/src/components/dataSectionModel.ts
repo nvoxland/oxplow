@@ -80,8 +80,8 @@ type BaseRow = Omit<ProgramRowModel, "unenforced" | "grant" | "canRevoke" | "rev
 
 const localWhen = (iso: string) => new Date(iso).toLocaleString();
 
-/// A program the project's config would run (an `exec` collector, an ACP
-/// agent, an extension's provider, effect or component): unapproved ones
+/// A program the project's config would run (an `exec` collector, an
+/// extension's provider, effect or component): unapproved ones
 /// don't run until a person approves them here. What the grant doesn't
 /// hold on this machine (`unenforced`), when it was approved or revoked,
 /// and whether it can be revoked, are the same for every kind.
@@ -226,28 +226,16 @@ function baseRow(p: ProjectProgram): BaseRow {
       showsSource: true,
     };
   }
-  if (p.kind === "component") {
-    // Unapproved it still renders and queries its lenses; only acting —
-    // running its commands with the viewer's rights — waits (tsk960).
-    const commands = p.commands.join(", ");
-    return {
-      key: `${p.kind}:${p.name}`,
-      label: `Component ${p.name}`,
-      command: `${p.program}\nmay run: ${commands}`,
-      status: p.approved ? "Approved on this machine" : "Not approved: it shows and reads, but can't act",
-      approved: p.approved,
-      approveTitle: `Lets the custom component ${p.name} run ${commands} with your rights when you use it (a command that asks still asks you), approving every file of its bundle (${p.program}). Approve only if you trust this extension; a changed bundle or command list needs approval again.`,
-      showsSource: false,
-    };
-  }
-  const command = [...(p.env ?? []), p.program, ...p.args].join(" ");
+  // A component. Unapproved it still renders and queries its lenses; only acting —
+  // running its commands with the viewer's rights — waits (tsk960).
+  const commands = p.commands.join(", ");
   return {
     key: `${p.kind}:${p.name}`,
-    label: `ACP agent ${p.name}`,
-    command,
-    status: p.approved ? "Approved on this machine" : "Not approved: it won't run",
+    label: `Component ${p.name}`,
+    command: `${p.program}\nmay run: ${commands}`,
+    status: p.approved ? "Approved on this machine" : "Not approved: it shows and reads, but can't act",
     approved: p.approved,
-    approveTitle: `Runs ${command} from this project's config on this machine. Approve only if you trust this repo; a changed program or arguments need approval again.`,
+    approveTitle: `Lets the custom component ${p.name} run ${commands} with your rights when you use it (a command that asks still asks you), approving every file of its bundle (${p.program}). Approve only if you trust this extension; a changed bundle or command list needs approval again.`,
     showsSource: false,
   };
 }

@@ -148,7 +148,6 @@ async fn every_run_is_recorded_once_as_itself() {
 
     // The effect, as itself, caused by the event; its attempt and the run
     // of what it composed name its run.
-    let config = svc.config.read().unwrap().clone();
     let (ext, decl) = crate::effect_triggers::effects(svc)
         .into_iter()
         .find(|(e, _)| e.name == "acme")
@@ -157,7 +156,6 @@ async fn every_run_is_recorded_once_as_itself() {
     crate::exec_consent::approve_program(
         &svc.approvals,
         &root,
-        &config,
         std::slice::from_ref(&ext),
         ProgramKind::Effect,
         &program.name,

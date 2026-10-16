@@ -1163,14 +1163,13 @@
     - { not_null: id }
     - { unique: id }
 - name: agent_session
-  version: 6
-  description: "Agent sessions: the agent slots a person opened on a thread — a terminal agent, an ACP chat, or a one-shot action. The row is the slot, not the process: a harness process ending leaves it open; closing the session, its thread or its stream's archive closes it."
+  version: 7
+  description: "Agent sessions: the agent slots a person opened on a thread — a terminal agent, or a one-shot action. The row is the slot, not the process: a harness process ending leaves it open; closing the session, its thread or its stream's archive closes it."
   columns:
     - { name: "id", type: "INTEGER", doc: "Session id (its ref is `agent_session:ses<id>`)." }
     - { name: "thread_id", type: "INTEGER", doc: "The thread it's on (v_thread.id)." }
-    - { name: "kind", type: "TEXT", doc: "`terminal` (a harness in a PTY), `chat` (an ACP agent) or `action` (a one-shot session)." }
-    - { name: "harness", type: "TEXT", doc: "What runs in it: `claude`, `codex`, `opencode`, or `acp` (an Agent Client Protocol agent)." }
-    - { name: "acp_agent", type: "TEXT", doc: "For an `acp` session, which ACP agent it runs (`claude`, `gemini`, a project `acpAgents` name); NULL otherwise." }
+    - { name: "kind", type: "TEXT", doc: "`terminal` (a harness in a PTY) or `action` (a one-shot session). (v7: `chat` is gone.)" }
+    - { name: "harness", type: "TEXT", doc: "What runs in it: `claude`, `codex`, `opencode`, or a harness an extension declares." }
     - { name: "title", type: "TEXT", doc: "What the person called it; empty until renamed." }
     - { name: "resume_session_id", type: "TEXT", doc: "The harness's own session id, to resume it; empty when unknown." }
     - { name: "host", type: "TEXT", doc: "The host it runs on; NULL is the local machine." }
@@ -1337,9 +1336,9 @@
     - { not_null: target_ref }
 - name: capability_provider
   version: 7
-  description: "Each capability's implementations — core's, the built-ins extensions declare (`oxplow-bundled`'s defaults, `oxplow-foundation`'s agent harnesses, ACP agents and AI providers), running provider instances', and `none` for an optional capability — with the features each declares, which is active and why. A capability many implementations serve at once (`agent_harness`, `acp_adapter`, `ai_provider`) has every declared row active. A choice that isn't available (its extension disabled, its instance stopped) is listed with `available = 0`; the active row is then the fallback. Settings lists the choices from here, and the UI shows an implementation's enhancements only when its features allow them."
+  description: "Each capability's implementations — core's, the built-ins extensions declare (`oxplow-bundled`'s defaults, `oxplow-foundation`'s agent harnesses and AI providers), running provider instances', and `none` for an optional capability — with the features each declares, which is active and why. A capability many implementations serve at once (`agent_harness`, `acp_adapter`, `ai_provider`) has every declared row active. A choice that isn't available (its extension disabled, its instance stopped) is listed with `available = 0`; the active row is then the fallback. Settings lists the choices from here, and the UI shows an implementation's enhancements only when its features allow them."
   columns:
-    - { name: "capability", type: "TEXT", doc: "`work_items`, `effort_policy`, `snapshots`, `vcs`, `knowledge`, `agent_harness`, `acp_adapter`, `ai_provider`." }
+    - { name: "capability", type: "TEXT", doc: "`work_items`, `effort_policy`, `snapshots`, `vcs`, `knowledge`, `agent_harness`, `ai_provider`." }
     - { name: "provider", type: "TEXT", doc: "The implementation's id: what `activeProviders` names, a work item ref's segment (`work_item:<provider>:…`), `git`, `none`." }
     - { name: "extension", type: "TEXT", doc: "The extension declaring it; NULL for core's." }
     - { name: "features", type: "TEXT", doc: "The features it declares, as JSON (`work_items`: `hierarchy`, `comments`, `links`, `delete`, `idempotent_writes`; `vcs`: `isolated_workspaces`, `remotes`, `rename_detection`; `snapshots`: `contents`)." }
@@ -1483,7 +1482,7 @@
     - { name: "thread_id", type: "INTEGER", doc: "Thread." }
     - { name: "effort_id", type: "INTEGER", doc: "Effort open at the time, if any." }
     - { name: "turn_id", type: "INTEGER", doc: "Turn it happened in (v_agent_turn.id), when known." }
-    - { name: "tool", type: "TEXT", doc: "The harness's own name for the tool (`Edit`, `apply_patch`, an ACP agent's title, …)." }
+    - { name: "tool", type: "TEXT", doc: "The harness's own name for the tool (`Edit`, `apply_patch`, …)." }
     - { name: "kind", type: "TEXT", doc: "What it does, the same for every harness: `read`, `edit`, `shell`, `subagent`, `ask`, `plan`, `search`, `fetch`, `mcp` or `other`." }
     - { name: "path", type: "TEXT", doc: "File it touched, repo-relative when inside the project." }
     - { name: "detail", type: "TEXT", doc: "Short context: a shell command (truncated), a search pattern, …" }

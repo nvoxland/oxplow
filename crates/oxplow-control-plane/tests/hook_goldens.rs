@@ -230,7 +230,7 @@ async fn every_built_in_harness_renders_the_golden_deny() {
         .to_string();
     let harnesses = svc.harnesses.all();
     assert!(
-        harnesses.len() >= 4,
+        harnesses.len() >= 3,
         "foundation's harnesses are registered"
     );
     for h in harnesses {

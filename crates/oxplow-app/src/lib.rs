@@ -7,7 +7,6 @@
 //! Held inside `Arc<Services>` and registered as Tauri state. Methods
 //! on `Services` are the high-level "use cases" the IPC layer calls.
 
-pub mod acp;
 pub mod advisories;
 pub mod agent_context;
 pub mod agent_path;
@@ -593,9 +592,6 @@ pub struct Services {
     /// Each agent session's bearer: who a hook, an export or an MCP call
     /// comes from (`.context/agent-model.md` "Caller identity").
     pub session_auth: Arc<session_auth::SessionAuth>,
-    /// The ACP adapters they declare, in declaration order
-    /// (`acp::agents` layers the project's `acpAgents:` over them).
-    pub acp_adapters: oxplow_domain::agent::registry::AcpAdapterRegistry,
     /// Every capability's implementations and which is active.
     pub capabilities: Arc<capabilities::CapabilityRegistry>,
     /// The effort policies, by id: the declared built-ins and the running
@@ -1486,8 +1482,6 @@ impl Services {
         // None as a work list: the sink every verb reaches while no list is
         // active (`work_items::none_provider`).
         work_items.register(work_items::none_provider());
-        // The ACP adapters foundation declares.
-        let acp_adapters = oxplow_domain::agent::registry::AcpAdapterRegistry::default();
         // A turn's end take becomes a `thread.checkpoint` a policy reads.
         event_pump.register_async(Arc::new(thread_checkpoint::ThreadCheckpointConsumer {
             log: (*event_log_store).clone(),
@@ -1560,7 +1554,6 @@ impl Services {
         .chain(commands::agent_session::ops(
             config_arc.clone(),
             harnesses.clone(),
-            acp_adapters.clone(),
             session_processes.clone(),
         ))
         .chain(commands::effort::ops(work_items.clone()))
@@ -1921,7 +1914,6 @@ impl Services {
             work_items,
             harnesses,
             session_auth,
-            acp_adapters,
             capabilities,
             effort_policies,
             snapshots,

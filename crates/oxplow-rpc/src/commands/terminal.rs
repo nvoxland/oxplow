@@ -39,7 +39,7 @@ fn shell_session_key(stream_id: &str, pane_target: &str) -> Option<String> {
 }
 
 /// Whether `session` runs in a terminal oxplow may start: it is open, and
-/// a terminal one (an ACP chat speaks the protocol on its stdio).
+/// a terminal one.
 fn has_a_terminal(session: &AgentSession) -> Result<(), IpcError> {
     if !session.is_open() {
         return Err(IpcError::invalid(format!(
@@ -270,11 +270,6 @@ pub async fn open_terminal_session(
                 .map_err(|e| IpcError::invalid(e.to_string()))?;
             let (program, args) = tui_argv(attach, thread_id)?;
             (program, args, Vec::new())
-        }
-        LaunchSpec::Acp { .. } => {
-            return Err(IpcError::invalid(format!(
-                "agent session {session_id} runs no terminal"
-            )));
         }
     };
     let env_remove = oxplow_app::agent_path::not_inherited(&ctx.harnesses);
@@ -549,9 +544,9 @@ mod tests {
         );
     }
 
-    /// A closed session has no terminal, and neither does a chat.
+    /// A closed session has no terminal, and neither does an action.
     #[test]
-    fn a_closed_or_chat_session_has_no_terminal() {
+    fn a_closed_or_action_session_has_no_terminal() {
         use oxplow_domain::agent_session::{AgentSession, SessionCloseReason, SessionKind};
         let now = oxplow_domain::Timestamp::from_unix_ms(1);
         let open = AgentSession {
@@ -559,7 +554,6 @@ mod tests {
             thread_id: oxplow_domain::ThreadId::new(1),
             kind: SessionKind::Terminal,
             harness: "claude".into(),
-            acp_agent: None,
             title: String::new(),
             resume_session_id: String::new(),
             host: None,
@@ -574,13 +568,12 @@ mod tests {
             fork_next: false,
         };
         assert!(super::has_a_terminal(&open).is_ok());
-        let chat = AgentSession {
-            kind: SessionKind::Chat,
-            harness: "acp".into(),
+        let action = AgentSession {
+            kind: SessionKind::Action,
             ..open.clone()
         };
-        let err = super::has_a_terminal(&chat).unwrap_err();
-        assert!(err.message.contains("chat"), "msg: {}", err.message);
+        let err = super::has_a_terminal(&action).unwrap_err();
+        assert!(err.message.contains("action"), "msg: {}", err.message);
         let closed = AgentSession {
             closed_at: Some(now),
             closed_reason: Some(SessionCloseReason::Closed),
@@ -599,7 +592,6 @@ mod tests {
             thread_id: oxplow_domain::ThreadId::new(1),
             kind: SessionKind::Terminal,
             harness: "claude".into(),
-            acp_agent: None,
             title: String::new(),
             resume_session_id: String::new(),
             host: None,

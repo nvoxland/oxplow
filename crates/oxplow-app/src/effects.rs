@@ -686,14 +686,12 @@ effects:
         let before = log().await;
         assert_eq!(gate_at(svc, &root, before).await, Gate::Unapproved);
 
-        let config = svc.config.read().unwrap().clone();
         let approve = || {
             let ext = acme(&root);
             let program = effect_program(&ext, &ext.effects[0]);
             crate::exec_consent::approve_program(
                 &svc.approvals,
                 &root,
-                &config,
                 std::slice::from_ref(&ext),
                 ProgramKind::Effect,
                 &program.name,

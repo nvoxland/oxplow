@@ -233,11 +233,9 @@ async fn a_scaffolded_effect_checks_tests_and_once_approved_reacts() {
     let ext = loaded(&svc, dir.path(), "done-notes");
     let decl = &ext.effects[0];
     let program = oxplow_app::effects::effect_program(&ext, decl);
-    let config = svc.config.read().unwrap().clone();
     approve_program(
         &svc.approvals,
         dir.path(),
-        &config,
         std::slice::from_ref(&ext),
         ProgramKind::Effect,
         &program.name,

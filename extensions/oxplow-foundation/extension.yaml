@@ -15,16 +15,12 @@ intent:
     - name: a person bookmarks a page for their thread
       input: { command: oxplow.bookmark.set, input: { ref: "page:git-dashboard", page_kind: git-dashboard, scope: thread, thread: "thread:thr1" } }
       expect: the page in v_bookmark at the thread's scope, undone by oxplow.bookmark.remove
-# The agent harnesses, ACP agents and AI providers oxplow runs: core's
+# The agent harnesses and AI providers oxplow runs: core's
 # built-ins, many of each at once (every one declared here is active).
 implementations:
   - { capability: agent_harness, id: claude, entry: "oxplow:claude-code", title: Claude }
   - { capability: agent_harness, id: codex, entry: "oxplow:codex-cli", title: Codex }
   - { capability: agent_harness, id: opencode, entry: "oxplow:opencode", title: OpenCode }
-  - { capability: agent_harness, id: acp, entry: "oxplow:acp", title: ACP }
-  - { capability: acp_adapter, id: claude, entry: "oxplow:acp-adapter", config: { command: claude-agent-acp, systemPrompt: meta } }
-  - { capability: acp_adapter, id: gemini, entry: "oxplow:acp-adapter", config: { command: gemini, args: [--acp] } }
-  - { capability: acp_adapter, id: codex, entry: "oxplow:acp-adapter", config: { command: codex-acp } }
   # AI providers are scripts a person approves (Settings → Data → Programs).
   - { capability: ai_provider, id: anthropic, title: Anthropic, entry: providers/anthropic.star, config: { baseUrl: "https://api.anthropic.com", ops: [complete, completeTyped, streamTyped] } }
   - { capability: ai_provider, id: openai, title: OpenAI, entry: providers/openai_compatible.star, config: { baseUrl: "https://api.openai.com/v1", ops: [complete, completeTyped, streamTyped] } }
@@ -147,7 +143,7 @@ commands:
     ui: { label: "New Lens with Your Agent…", group: Tasks, input: { text: "Build me an oxplow lens (a page I can open with Cmd+P) that shows " }, when: "threadShown" }
   # agent_sessions.write
   - name: agent_session.close
-    summary: "Close an agent session (`agent_session:ses3`): its open turn ends and its process — the terminal agent or ACP agent — stops. An agent's waits for a person."
+    summary: "Close an agent session (`agent_session:ses3`): its open turn ends and its process stops. An agent's waits for a person."
     scope: agent_sessions.write
     op: close
     confirm: destructive
@@ -178,24 +174,6 @@ commands:
     op: open
     invokers: { human: true, agent: false, lens: false }
     ui: { label: "New OpenCode Session", group: Tasks, keywords: [agent, session, start, opencode], input: { thread: "{{thread}}", harness: opencode }, open_after: "agent_session:{{result.id}}", when: "threadShown && enabledAgents =~ /(^|,)opencode(,|$)/" }
-  - name: agent_session.open_acp_claude
-    summary: "Open a session of the Claude ACP agent on the thread shown; its tab starts the agent."
-    scope: agent_sessions.write
-    op: open
-    invokers: { human: true, agent: false, lens: false }
-    ui: { label: "New Claude Session (ACP)", group: Tasks, keywords: [agent, session, start, claude], input: { thread: "{{thread}}", harness: acp, acp_agent: claude }, open_after: "agent_session:{{result.id}}", when: "threadShown && enabledAgents =~ /(^|,)acp(,|$)/" }
-  - name: agent_session.open_acp_gemini
-    summary: "Open a session of the Gemini ACP agent on the thread shown; its tab starts the agent."
-    scope: agent_sessions.write
-    op: open
-    invokers: { human: true, agent: false, lens: false }
-    ui: { label: "New Gemini Session (ACP)", group: Tasks, keywords: [agent, session, start, gemini], input: { thread: "{{thread}}", harness: acp, acp_agent: gemini }, open_after: "agent_session:{{result.id}}", when: "threadShown && enabledAgents =~ /(^|,)acp(,|$)/" }
-  - name: agent_session.open_acp_codex
-    summary: "Open a session of the Codex ACP agent on the thread shown; its tab starts the agent."
-    scope: agent_sessions.write
-    op: open
-    invokers: { human: true, agent: false, lens: false }
-    ui: { label: "New Codex Session (ACP)", group: Tasks, keywords: [agent, session, start, codex], input: { thread: "{{thread}}", harness: acp, acp_agent: codex }, open_after: "agent_session:{{result.id}}", when: "threadShown && enabledAgents =~ /(^|,)acp(,|$)/" }
   - name: agent_session.rename
     summary: "Rename an agent session (`agent_session:ses3`)."
     scope: agent_sessions.write

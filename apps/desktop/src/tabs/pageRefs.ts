@@ -106,8 +106,8 @@ export function workItemTabRef(ref: string): TabRef {
   return { id: ref, kind: "work_item", payload: { ref } };
 }
 
-/** An agent session's tab (`agent_session:ses3`): its terminal or ACP
- *  chat. Pinned — it leads the strip and is never evicted; its tab follows
+/** An agent session's tab (`agent_session:ses3`): its terminal.
+ *  Pinned — it leads the strip and is never evicted; its tab follows
  *  the session's row (`reconcileSessionTabs`). */
 export function agentSessionRef(sessionId: string): TabRef {
   return { id: agentSessionRefString(sessionId), kind: "agent_session", payload: { sessionId }, pinned: true };

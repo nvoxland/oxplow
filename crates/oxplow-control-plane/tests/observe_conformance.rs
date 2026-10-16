@@ -234,15 +234,13 @@ async fn a_provider_launched_session_is_recorded_canonically() {
         .cloned()
         .expect("the harness extension loads");
     assert_eq!(ext.errors, Vec::<String>::new());
-    let config = oxplow_app::config_service::read_config(&svc.config);
-    let program = exec_consent::list(&svc.approvals, &root, &config, &extensions)
+    let program = exec_consent::list(&svc.approvals, &root, &extensions)
         .into_iter()
         .find(|p| p.kind == exec_consent::ProgramKind::Provider)
         .expect("the provider is a program");
     exec_consent::approve_program(
         &svc.approvals,
         &root,
-        &config,
         &extensions,
         program.kind,
         &program.name,

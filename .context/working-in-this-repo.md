@@ -160,7 +160,7 @@ The backend is Rust; the desktop frontend is React/Monaco/xterm.
   `oxplow-runtime` (the write guard),
   `oxplow-pty`, `oxplow-lsp`, `oxplow-mcp`,
   `oxplow-harnesses` (the built-in agent harnesses — Claude Code, Codex,
-  opencode, ACP — each launching its sessions and writing its runtime;
+  opencode — each launching its sessions and writing its runtime;
   depends only on the domain), `oxplow-agent-text` (core's skills,
   slash commands and answerability questions),
   `oxplow-coverage` (pure report-parse data types),
@@ -258,7 +258,7 @@ test reads or relies on the task.
 
 `tests-e2e/` drives the built frontend in Chromium (and, for custom
 components, WebKit) against `oxplow-daemon-sim` over a throwaway git
-project — the real app, a real daemon, the fake ACP agent and the fake
+project — the real app, a real daemon, the fake terminal harness and the fake
 work-item provider; `tests-e2e/README.md` has the harness. It isn't part
 of `test:collect` (it builds the frontend and boots a daemon per worker,
 ~40 s); CI runs it as its own `e2e` job. **Run it when a change touches

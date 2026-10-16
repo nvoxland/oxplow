@@ -1018,11 +1018,9 @@ actions:
     async fn approve_board(fx: &crate::test_fixtures::EffortFixture, root: &Path) {
         let ext = fx.svc.extension_catalog.named(root, "acme").unwrap();
         let program = crate::exec_consent::component_program(&ext, &ext.custom_components[0]);
-        let config = fx.svc.config.read().unwrap().clone();
         crate::exec_consent::approve_program(
             &fx.svc.approvals,
             root,
-            &config,
             std::slice::from_ref(&ext),
             crate::exec_consent::ProgramKind::Component,
             &program.name,
@@ -1061,11 +1059,9 @@ actions:
         fx: &crate::test_fixtures::EffortFixture,
         root: &Path,
     ) -> Vec<crate::exec_consent::ProjectProgram> {
-        let config = fx.svc.config.read().unwrap().clone();
         crate::exec_consent::list(
             &fx.svc.approvals,
             root,
-            &config,
             fx.svc
                 .extension_catalog
                 .unpinned(root, "a test reads declarations")

@@ -366,7 +366,7 @@ function AgentPicker({
 
 /** Where a person-only setting's direct control is, if the page has one. */
 function controlFor(key: string): string | null {
-  if (["agents", "agentConfig", "acpAgents", "agentPromptAppend", "personal.newThreadSession"].includes(key)) {
+  if (["agents", "agentConfig", "agentPromptAppend", "personal.newThreadSession"].includes(key)) {
     return "settings-agents";
   }
   if (key === "ai" || key.startsWith("ai.")) return "settings-ai";

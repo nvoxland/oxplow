@@ -2425,7 +2425,6 @@ async fn policy_suite(
         oxplow_app::exec_consent::approve_program(
             &svc.approvals,
             tmp.path(),
-            &oxplow_app::config_service::read_config(&svc.config),
             std::slice::from_ref(&hosted),
             oxplow_app::exec_consent::ProgramKind::EffortPolicy,
             &program.name,
@@ -2476,7 +2475,6 @@ async fn suite(
         oxplow_app::exec_consent::approve_program(
             &svc.approvals,
             tmp.path(),
-            &oxplow_app::config_service::read_config(&svc.config),
             std::slice::from_ref(&hosted),
             oxplow_app::exec_consent::ProgramKind::Provider,
             &program.name,

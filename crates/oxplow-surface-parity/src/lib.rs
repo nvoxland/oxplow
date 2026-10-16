@@ -467,38 +467,8 @@ pub const MANIFEST: &[Capability] = &[
     ),
     // ---- threads ----
     ui(
-        "list_acp_agents",
-        "the thread picker's ACP agents (tsk335): an agent never starts an agent",
-    ),
-    ui(
         "list_agent_harnesses",
         "the session picker's and Settings' harnesses: an agent never starts an agent",
-    ),
-    // ACP sessions: the prompt box, permission cards and banners. Never
-    // agent tools — an agent must not prompt an agent (tsk281).
-    ui(
-        "chat_open_session",
-        "an ACP session is the person's: an agent must not prompt an agent (tsk281)",
-    ),
-    ui(
-        "chat_prompt",
-        "an ACP session is the person's: an agent must not prompt an agent (tsk281)",
-    ),
-    ui(
-        "chat_cancel",
-        "an ACP session is the person's: an agent must not prompt an agent (tsk281)",
-    ),
-    ui(
-        "chat_respond_permission",
-        "an ACP permission card is answered by a person, never an agent (tsk281)",
-    ),
-    ui(
-        "chat_transcript",
-        "an ACP session's transcript, rendered for the person (tsk281)",
-    ),
-    ui(
-        "chat_close_session",
-        "an ACP session is the person's: an agent must not prompt an agent (tsk281)",
     ),
     ui(
         "set_agents",

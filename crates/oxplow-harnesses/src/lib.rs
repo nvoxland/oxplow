@@ -1,10 +1,9 @@
 //! The built-in agent harnesses (`agent_harness` implementations,
-//! `.context/agent-model.md`): Claude Code, Codex, opencode and ACP agents,
+//! `.context/agent-model.md`): Claude Code, Codex and opencode,
 //! each an `AgentHarness` that writes its own runtime under
 //! `.oxplow/runtime/` and launches its sessions. Core registers the ones a
 //! project's extensions declare, under the key each declaration gives.
 
-mod acp;
 mod claude;
 mod codex;
 mod opencode;
@@ -18,7 +17,6 @@ use std::sync::Arc;
 /// through.
 pub use codex::app_server as codex_app_server;
 
-use oxplow_domain::agent::acp_adapter::AcpAdapter;
 use oxplow_domain::agent::harness::AgentHarness;
 
 /// The harness a built-in `entry` is, registered under `id`.
@@ -31,21 +29,8 @@ pub fn built_in(entry: &str, id: &str, title: &str) -> Option<Arc<dyn AgentHarne
         "oxplow:claude-code" => Arc::new(claude::Claude(named)),
         "oxplow:codex-cli" => Arc::new(codex::Codex(named)),
         "oxplow:opencode" => Arc::new(opencode::Opencode(named)),
-        "oxplow:acp" => Arc::new(acp::Acp(named)),
         _ => return None,
     })
-}
-
-/// The ACP adapter a built-in `entry` declares as `id`, from its `config`
-/// (`{ command, args?, env?, systemPrompt?: meta|prompt }`); `None` for an
-/// entry that isn't one.
-pub fn acp_adapter(
-    entry: &str,
-    id: &str,
-    title: &str,
-    config: &serde_json::Value,
-) -> Option<Result<AcpAdapter, String>> {
-    (entry == "oxplow:acp-adapter").then(|| AcpAdapter::from_config(id, title, config))
 }
 
 /// A harness's key and title, as its declaration gives them.

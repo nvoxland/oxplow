@@ -3,7 +3,7 @@
 - `.oxplow/project.yaml` keys: `oxplow.config.list_keys`,
   `oxplow.config.get { key }`, `oxplow.config.set { key, value }`,
   `oxplow.config.unset { key }`. Keys that run a program or pick the model
-  (`agents`, `lsp`, `testing`, `ai`, `acpAgents`, `agentModels`,
+  (`agents`, `lsp`, `testing`, `ai`, `agentModels`,
   `extensions`, `agentPromptAppend`, …) need the person's confirmation.
 - Efforts `effort.*`; work items `work_item.*` (when a list is active); test
   evidence `oxplow.test.record_run`, `oxplow.collector.sync`; notes and

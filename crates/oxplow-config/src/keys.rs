@@ -14,7 +14,7 @@ use crate::{
 };
 
 /// Keys only a person may set. Each either runs a program (`lsp`,
-/// `acpAgents`, `extensionInstances`, `agents`), chooses the model that
+/// `extensionInstances`, `agents`), chooses the model that
 /// reads the project (`ai`, `agentConfig`), enables code (`extensions`),
 /// chooses where the project's work goes and how it is tracked
 /// (`activeProviders`: an agent moving filing to another tracker, or
@@ -33,7 +33,6 @@ use crate::{
 pub const HUMAN_ONLY_KEYS: &[&str] = &[
     "agents",
     "agentConfig",
-    "acpAgents",
     "extensionInstances",
     "activeProviders",
     "replacements",

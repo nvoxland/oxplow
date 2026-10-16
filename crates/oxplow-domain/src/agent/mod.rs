@@ -1,15 +1,12 @@
 //! Agents: the harness interfaces core keeps (`.context/agent-model.md`).
 //!
 //! An agent session runs a **harness** (`harness::AgentHarness`): what
-//! launches its process, what its hooks mean, how a person interacts with
-//! it. Implementations are declared (`agent_harness` built-ins), many at
+//! launches its process, what its hooks mean. Implementations are declared (`agent_harness` built-ins), many at
 //! once, and looked up by the session's harness key
-//! (`registry::HarnessRegistry`). An ACP agent's program is data
-//! (`acp_adapter::AcpAdapter`). Driving an agent — oxplow prompting it — is
+//! (`registry::HarnessRegistry`). Driving an agent — oxplow prompting it — is
 //! an interface only (`drive::Drive`): oxplow never drives an agent through
 //! a surface licensed for interactive use.
 
-pub mod acp_adapter;
 pub mod drive;
 pub mod harness;
 pub mod observe;

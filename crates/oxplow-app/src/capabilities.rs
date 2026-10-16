@@ -164,28 +164,6 @@ pub const BUILT_INS: &[BuiltIn] = &[
             "conversation_fork",
         ],
     ),
-    // Context rides the person's next prompt; nothing mid-turn.
-    harness(
-        "oxplow:acp",
-        "An ACP agent",
-        &[
-            "structured_transcript",
-            "permission_prompts",
-            "resume",
-            "prompt_context",
-        ],
-    ),
-    // An ACP agent's program, as data (its preset or a project's).
-    BuiltIn {
-        entry: "oxplow:acp-adapter",
-        capability: "acp_adapter",
-        provider: None,
-        title: "An ACP agent's program",
-        features: &[],
-        id_pattern: None,
-        fields: &[],
-        config_schema: Some(ACP_ADAPTER_CONFIG),
-    },
 ];
 
 /// An agent harness built-in.
@@ -205,21 +183,6 @@ const fn harness(
         config_schema: None,
     }
 }
-
-/// An ACP adapter's declaration: the program that speaks ACP, and whether
-/// the system prompt rides `_meta.systemPrompt.append` on `session/new`
-/// (`meta`) or goes ahead of the first prompt (`prompt`).
-const ACP_ADAPTER_CONFIG: &str = r#"{
-  "type": "object",
-  "required": ["command"],
-  "additionalProperties": false,
-  "properties": {
-    "command": { "type": "string", "minLength": 1 },
-    "args": { "type": "array", "items": { "type": "string" } },
-    "env": { "type": "object", "additionalProperties": { "type": "string" } },
-    "systemPrompt": { "enum": ["meta", "prompt"] }
-  }
-}"#;
 
 /// One built-in implementation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

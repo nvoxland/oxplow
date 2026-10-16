@@ -14,8 +14,8 @@ pub mod app_server;
 use std::path::PathBuf;
 
 use oxplow_domain::agent::harness::{
-    AgentHarness, ConversationQuery, HarnessError, Interact, Launch, LaunchInput, LaunchSpec,
-    NativeConversation, RuntimeRoots, Transcript,
+    AgentHarness, ConversationQuery, HarnessError, Launch, LaunchInput, LaunchSpec,
+    NativeConversation, RuntimeRoots,
 };
 use oxplow_domain::agent::observe::HookAnswer;
 use oxplow_domain::agent::text::{AgentText, Text};
@@ -38,13 +38,6 @@ impl AgentHarness for Codex {
 
     fn title(&self) -> &str {
         &self.0.title
-    }
-
-    fn interact(&self) -> Interact {
-        Interact {
-            transcript: Transcript::Terminal,
-            acp_agent: false,
-        }
     }
 
     async fn launch(&self, input: &LaunchInput) -> Result<Launch, HarnessError> {

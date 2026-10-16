@@ -106,12 +106,10 @@ fn component_version(svc: &oxplow_app::Services, root: &Path) -> String {
 }
 
 fn approve_board(svc: &oxplow_app::Services, root: &Path, version: &str) -> Result<(), String> {
-    let config = svc.config.read().expect("it works").clone();
     let extensions = svc.extension_catalog.get(root);
     approve_program(
         &svc.approvals,
         root,
-        &config,
         &extensions,
         ProgramKind::Component,
         LENS,
@@ -157,12 +155,10 @@ async fn revoking_the_board_stops_it_deciding_and_approving_again_keeps_what_it_
         .await
         .expect("it works");
 
-    let config = svc.config.read().expect("it works").clone();
     let extensions = svc.extension_catalog.get(root);
     revoke_program(
         &svc.approvals,
         root,
-        &config,
         &extensions,
         ProgramKind::Component,
         LENS,

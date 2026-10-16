@@ -1,7 +1,7 @@
 //! An agent harness: what runs in an agent session.
 //!
 //! Its **Launch** seam (`launch`) says how the session's process comes to
-//! exist — a PTY command, or an ACP agent's program — writing whatever
+//! exist — a PTY command — writing whatever
 //! runtime files its agent reads under `.oxplow/runtime/` (never the
 //! worktree). Starting a session only spawns: nothing here prompts.
 
@@ -14,25 +14,6 @@ use super::observe::{HookAnswer, OtlpRecord, Prompt, TokenReading, Turn};
 use super::text::AgentText;
 use super::tool::{Subagent, ToolUse};
 use crate::ids::{AgentSessionId, StreamId, ThreadId};
-
-/// How a person interacts with a harness's session — what the UI reads,
-/// never something core invokes (the Interact seam).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Interact {
-    pub transcript: Transcript,
-    /// Its sessions each name one of the project's ACP agents
-    /// (`agent_session.acp_agent`), the program its launch runs.
-    pub acp_agent: bool,
-}
-
-/// What the person reads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Transcript {
-    /// The harness's own terminal.
-    Terminal,
-    /// oxplow's structured transcript (an ACP agent's, a Codex thread's).
-    Structured,
-}
 
 /// The session a launch is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,8 +55,7 @@ pub struct LaunchInput {
     pub fork: bool,
     /// The skills and commands offered now.
     pub text: AgentText,
-    /// The harness's configuration (`agentConfig.<harness>`), or for an
-    /// ACP agent its adapter's resolved program.
+    /// The harness's configuration (`agentConfig.<harness>`).
     pub config: serde_json::Value,
     /// The person's home, where a harness keeps its own sessions.
     pub home: Option<PathBuf>,
@@ -114,8 +94,7 @@ pub struct RuntimeRoots {
 }
 
 /// How the session's agent is reached. On the wire, `{ "kind": "pty",
-/// "command", "env" }`, `{ "kind": "acp", "program", "args", "env",
-/// "system_prompt_via_meta" }` or `{ "kind": "codex_app_server", "socket",
+/// "command", "env" }` or `{ "kind": "codex_app_server", "socket",
 /// "program", "method", "params" }`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -127,18 +106,6 @@ pub enum LaunchSpec {
         command: String,
         #[serde(default)]
         env: Vec<(String, String)>,
-    },
-    /// An ACP agent's program, spoken to over its stdio.
-    Acp {
-        program: PathBuf,
-        #[serde(default)]
-        args: Vec<String>,
-        #[serde(default)]
-        env: Vec<(String, String)>,
-        /// The system prompt rides `_meta.systemPrompt.append` on
-        /// `session/new` rather than ahead of the first prompt.
-        #[serde(default)]
-        system_prompt_via_meta: bool,
     },
     /// Codex's TUI in a PTY on a thread of Codex's shared app-server
     /// daemon. oxplow opens the thread first, over the daemon's control
@@ -264,7 +231,6 @@ pub trait AgentHarness: Send + Sync {
     fn id(&self) -> &str;
     /// How a person names it.
     fn title(&self) -> &str;
-    fn interact(&self) -> Interact;
     /// How the session's process starts. Spawns only — never prompts.
     async fn launch(&self, input: &LaunchInput) -> Result<Launch, HarnessError>;
     /// One of its tool hooks' bodies (a PreToolUse or PostToolUse) mapped

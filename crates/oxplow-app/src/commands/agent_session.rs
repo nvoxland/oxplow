@@ -20,7 +20,7 @@ use oxplow_config::OxplowConfig;
 use oxplow_db::agent_session_store::{
     bind_tx, get_tx, insert_tx, set_fork_next_tx, set_stopped_tx, set_title_tx, unbind_tx,
 };
-use oxplow_domain::agent::registry::{AcpAdapterRegistry, HarnessRegistry};
+use oxplow_domain::agent::registry::HarnessRegistry;
 use oxplow_domain::agent_session::BindingOrigin;
 use oxplow_domain::agent_session::{
     AgentSession, NewAgentSession, SessionCloseReason, SessionKind,
@@ -50,17 +50,13 @@ pub const FORK_CONVERSATION: &str = "oxplow.agent_session.fork_conversation";
 pub struct OpenInput {
     /// The thread (`thread:thr1`).
     pub thread: String,
-    /// `terminal` or `chat` (default: `chat` for a harness with a
-    /// structured transcript, such as `acp`, else `terminal`).
+    /// `terminal` (the default); an `action` session isn't built yet.
     #[serde(default)]
     pub kind: Option<SessionKind>,
     /// What runs in it: a registered harness's key (default: the project's
     /// first enabled agent).
     #[serde(default)]
     pub harness: Option<String>,
-    /// For a chat session, which ACP agent.
-    #[serde(default)]
-    pub acp_agent: Option<String>,
     /// What to call it.
     #[serde(default)]
     pub title: Option<String>,
@@ -145,16 +141,14 @@ fn in_own_stream(ctx: &TxCtx<'_>, thread: ThreadId) -> Result<(), CommandError> 
     Ok(())
 }
 
-/// The harness, kind and ACP agent a session runs: what was named, checked
-/// against the registered harnesses, the project's enabled ones and its
-/// ACP agents, else the project's default. A harness with a structured
-/// transcript runs an ACP agent in a chat; the rest run in a terminal.
+/// The harness and kind a session runs: what was named, checked against
+/// the registered harnesses and the project's enabled ones, else the
+/// project's default. Every harness runs in a terminal.
 fn choose_agent(
     config: &OxplowConfig,
     harnesses: &HarnessRegistry,
-    adapters: &AcpAdapterRegistry,
     input: &OpenInput,
-) -> Result<(String, SessionKind, Option<String>), CommandError> {
+) -> Result<(String, SessionKind), CommandError> {
     let harness = match &input.harness {
         Some(key) => harnesses.get(key),
         None => harnesses.default(),
@@ -167,60 +161,19 @@ fn choose_agent(
             format!("agent `{key}` isn't enabled for this project"),
         ));
     }
-    let natural = SessionKind::default_for(harness.interact());
-    let kind = input.kind.unwrap_or(natural);
-    match kind {
-        SessionKind::Action => {
-            return Err(invalid(
-                "/kind",
-                "an action session has no implementation yet",
-            ));
-        }
-        k if k != natural => {
-            return Err(invalid(
-                "/kind",
-                format!(
-                    "a `{}` session runs {}",
-                    k.as_str(),
-                    if k == SessionKind::Chat {
-                        "a harness shown in oxplow's chat"
-                    } else {
-                        "a terminal harness"
-                    }
-                ),
-            ));
-        }
-        _ => {}
+    match input.kind.unwrap_or(SessionKind::Terminal) {
+        SessionKind::Action => Err(invalid(
+            "/kind",
+            "an action session has no implementation yet",
+        )),
+        kind => Ok((key, kind)),
     }
-    let acp_agent = match (harness.interact().acp_agent, input.acp_agent.clone()) {
-        (true, Some(name)) => {
-            if crate::acp::agents::find(adapters, config, &name).is_none() {
-                return Err(invalid(
-                    "/acp_agent",
-                    format!("no ACP agent named `{name}`"),
-                ));
-            }
-            Some(name)
-        }
-        (true, None) if input.harness.is_none() => Some(
-            crate::acp::agents::default_agent(adapters, config)
-                .ok_or_else(|| invalid("/acp_agent", "there are no ACP agents"))?,
-        ),
-        (true, None) => return Err(invalid("/acp_agent", "an ACP session needs one")),
-        (false, Some(_)) => return Err(invalid("/acp_agent", "only an ACP session names one")),
-        (false, None) => None,
-    };
-    Ok((key, kind, acp_agent))
 }
 
-/// `agent_session.open { thread, kind?, harness?, acp_agent?, title? }`:
+/// `agent_session.open { thread, kind?, harness?, title?, resume? }`:
 /// a new slot on the thread. It only inserts the row — it never starts a
 /// process and never sends a prompt. Undone by closing it.
-pub fn open_op(
-    config: Arc<RwLock<OxplowConfig>>,
-    harnesses: HarnessRegistry,
-    adapters: AcpAdapterRegistry,
-) -> Op {
+pub fn open_op(config: Arc<RwLock<OxplowConfig>>, harnesses: HarnessRegistry) -> Op {
     Op::new(
         "agent_sessions.write",
         "open",
@@ -241,7 +194,7 @@ pub fn open_op(
             }
             in_own_stream(ctx, thread)?;
             let config = crate::config_service::read_config(&config);
-            let (harness, kind, acp_agent) = choose_agent(&config, &harnesses, &adapters, &input)?;
+            let (harness, kind) = choose_agent(&config, &harnesses, &input)?;
             if input.resume.is_some() && ctx.actor().is_agent_driven() {
                 return Err(CommandError::Denied {
                     reason:
@@ -256,7 +209,6 @@ pub fn open_op(
                     thread_id: thread,
                     kind,
                     harness,
-                    acp_agent,
                     title: input.title.unwrap_or_default(),
                 },
                 now,
@@ -589,11 +541,10 @@ pub fn fork_conversation_op(processes: crate::agent_sessions::SessionProcesses) 
 pub fn ops(
     config: Arc<RwLock<OxplowConfig>>,
     harnesses: HarnessRegistry,
-    adapters: AcpAdapterRegistry,
     processes: crate::agent_sessions::SessionProcesses,
 ) -> Vec<Op> {
     vec![
-        open_op(config, harnesses, adapters),
+        open_op(config, harnesses),
         rename_op(),
         close_op(processes.clone()),
         stop_op(processes.clone()),
@@ -937,8 +888,8 @@ mod tests {
 
     /// The input is checked: an unknown field and a bad value name their
     /// field; an action session isn't built; a harness nothing registers,
-    /// or the project hasn't enabled, or an ACP agent named wrong, is
-    /// refused.
+    /// or the project hasn't enabled, or the retired `chat` kind or `acp`
+    /// harness, is refused.
     #[tokio::test]
     async fn the_input_is_checked() {
         let fx = services_with_effort().await;
@@ -949,10 +900,7 @@ mod tests {
             (json!({ "thread": thread, "kind": "chat" }), "/kind"),
             (json!({ "thread": thread, "harness": "codex" }), "/harness"),
             (json!({ "thread": thread, "harness": "nope" }), "/harness"),
-            (
-                json!({ "thread": thread, "acp_agent": "gemini" }),
-                "/acp_agent",
-            ),
+            (json!({ "thread": thread, "harness": "acp" }), "/harness"),
             (json!({ "thread": "thread:thr99" }), "/thread"),
         ] {
             let err = run(&fx, &Actor::Human, OPEN, input.clone(), false)
@@ -973,30 +921,6 @@ mod tests {
         .await
         .unwrap_err();
         assert!(err.to_string().contains("agent"), "{err}");
-        fx.svc.config.write().unwrap().agents.push("acp".into());
-        let err = run(
-            &fx,
-            &Actor::Human,
-            OPEN,
-            json!({ "thread": thread, "harness": "acp", "acp_agent": "nope" }),
-            false,
-        )
-        .await
-        .unwrap_err();
-        assert!(
-            matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/acp_agent"),
-            "{err:?}"
-        );
-        let chat = open(
-            &fx,
-            &Actor::Human,
-            json!({ "thread": thread, "harness": "acp", "acp_agent": "gemini" }),
-        )
-        .await;
-        assert_eq!(
-            (chat.kind, chat.acp_agent.as_deref()),
-            (SessionKind::Chat, Some("gemini"))
-        );
     }
 
     /// An agent opens and renames sessions only in its own stream, and its

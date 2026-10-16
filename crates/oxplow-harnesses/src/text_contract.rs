@@ -1,6 +1,5 @@
 //! The text contract's launch half (`.context/agent-model.md` "What every
-//! agent is told"): a launch of every built-in harness but ACP's (whose
-//! agent is the project's program) delivers oxplow's system prompt, every
+//! agent is told"): a launch of every built-in harness delivers oxplow's system prompt, every
 //! skill and every slash command to where its agent reads them — its
 //! command line, its environment, the request that opens its thread, or a
 //! file it was pointed at. Hook context is the other half: a harness declares the
@@ -52,7 +51,6 @@ fn delivered(project: &Path, workspace: &Path, spec: &LaunchSpec) -> Vec<String>
             .chain(env.iter().map(|(_, v)| v.clone()))
             .collect(),
         LaunchSpec::CodexAppServer { params, .. } => vec![params.to_string()],
-        LaunchSpec::Acp { .. } => panic!("an ACP agent's program is the project's"),
     };
     walk(&project.join(".oxplow/runtime"), &mut out);
     walk(workspace, &mut out);

@@ -1081,14 +1081,12 @@ mod tests {
     /// A person approves every effect of `acme` as it is now.
     async fn approve(svc: &Services) {
         let root = &svc.layout.project_dir;
-        let config = svc.config.read().unwrap().clone();
         let ext = effects(svc).into_iter().next().unwrap().0;
         for decl in &ext.effects {
             let program = effects::effect_program(&ext, decl);
             crate::exec_consent::approve_program(
                 &svc.approvals,
                 root,
-                &config,
                 std::slice::from_ref(&ext),
                 ProgramKind::Effect,
                 &program.name,
@@ -2128,7 +2126,6 @@ mod tests {
         );
         crate::test_fixtures::activate_with_problems(svc).await;
         // The subscriber is `acme`; `effects()` lists the owner first.
-        let config = svc.config.read().unwrap().clone();
         let (ext, decl) = effects(svc)
             .into_iter()
             .find(|(e, _)| e.name == "acme")
@@ -2137,7 +2134,6 @@ mod tests {
         crate::exec_consent::approve_program(
             &svc.approvals,
             &root,
-            &config,
             std::slice::from_ref(&ext),
             ProgramKind::Effect,
             &program.name,

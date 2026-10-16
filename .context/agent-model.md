@@ -1,7 +1,6 @@
 # Agent execution model
 
-How oxplow and a coding agent (Claude Code, Codex, opencode, an ACP
-agent) meet: how a session is launched, what every agent is told, the
+How oxplow and a coding agent (Claude Code, Codex, opencode) meet: how a session is launched, what every agent is told, the
 tools it calls, what oxplow observes of it, and the rules that keep one
 thread from clobbering another's worktree. How oxplow turns that record
 into efforts is [work-tracking.md](./work-tracking.md); the commands an
@@ -28,7 +27,7 @@ server-side. Never return a bespoke status from a hook branch.
 **Driving is an interface only.** `oxplow_domain::agent::drive::Drive`
 (`programmatic`, `prompt`) is how oxplow or an extension would one day
 prompt an agent, and only on a surface licensed for it (API-funded; a PTY,
-or an ACP agent signed in with a plan, never is). Nothing implements,
+or an agent signed in with a plan, never is). Nothing implements,
 holds or calls it: `source_guards::nothing_in_core_drives_an_agent` fails
 on production code outside `drive.rs` that names it, so the first driver
 is a decision, not a drift.
@@ -51,11 +50,11 @@ Synthesizing input would be automating the agent CLI, which risks its
 - `forward_terminal_input` is UI-only: never on the MCP surface
   (`oxplow-surface-parity`'s `ui("forward_terminal_input")` row), so an
   agent can't type at itself or a peer.
-- An ACP agent's prompt is built only by `chat/human_prompt.rs`
-  `compose`, from the prompt box ("Chat sessions").
+- A chat-library prompt is built only by `chat/human_prompt.rs`
+  `compose`, from a person's submit ("The chat machinery (library)");
+  nothing in production submits one.
 - Drag-and-drop and "Add to agent context" (`agent-input-bus.ts`) are a
-  person's gesture: the visible pane pastes the text, or the ACP prompt
-  box appends it to the draft.
+  person's gesture: the visible pane pastes the text.
 - Steering (session context, nudges) reaches the agent through hook
   answers its own harness injects, never through the terminal.
 
@@ -63,11 +62,12 @@ Synthesizing input would be automating the agent CLI, which risks its
 - `apps/desktop/src/no-agent-input-automation.test.ts` confines
   `forwardTerminalInput` and `{type:"input"}` construction to
   `TerminalPane.tsx`, `components/terminalInput.ts` and the `api.ts`
-  facade, and `chatPrompt` to `ChatPromptBox.tsx`.
+  facade.
 - A Rust source scan in `crates/oxplow-rpc/src/commands/terminal.rs`
   asserts the only production caller of `terminal_sessions.send(` is the
   `forward_terminal_input` core.
-- `chat/guard_tests.rs` pins the ACP prompt path ("Chat sessions").
+- `chat/guard_tests.rs` pins the chat library's prompt path: no production
+  code calls `submit_human_prompt` ("The chat machinery (library)").
 
 ### What we can't do from oxplow hooks
 
@@ -79,17 +79,16 @@ Synthesizing input would be automating the agent CLI, which risks its
   cold start too: an idle agent stays idle when work is filed. A person
   sends the first prompt.
 
-## The four seams
+## The three seams
 
 An agent session runs a **harness** (`AgentHarness`,
 `crates/oxplow-domain/src/agent/harness.rs`). oxplow meets the agent at
-four seams:
+three seams:
 
 | Seam | What crosses it | Where |
 |---|---|---|
-| Launch | The process or thread: its command, ACP program or Codex thread request, env, runtime files, system prompt, resume | `AgentHarness::launch` → `LaunchSpec::{Pty, Acp, CodexAppServer}` ("Launching the agent") |
+| Launch | The process or thread: its command or Codex thread request, env, runtime files, system prompt, resume | `AgentHarness::launch` → `LaunchSpec::{Pty, CodexAppServer}` ("Launching the agent") |
 | Observe | Hooks, tool calls, transcripts and token telemetry, mapped into oxplow's vocabulary and logged as `agent.*` events | `tool_use`, `prompt`, `subagent`, `turns`, `token_readings`, `render` ("Observing") |
-| Interact | How the person works with the session: the harness's own terminal, or oxplow's structured transcript (ACP, Codex) | `AgentHarness::interact()` (`Transcript::Terminal` / `Structured`, and whether its sessions name an ACP agent); never something core invokes |
 | Drive | oxplow prompting the agent | `drive::Drive`, an interface nothing implements |
 
 The agent's MCP tools ("The agent's tools") are the one channel the agent
@@ -137,8 +136,7 @@ step). `AgentContext::prompt_context` / `post_tool_context`
 (`crates/oxplow-app/src/agent_context.rs`) take the session's harness and
 give nothing for a channel it lacks (`agent_context::carries`; a hook from
 no session is answered), so nothing meant for its agent is taken: nudges
-wait in the store. Claude Code and opencode declare both; an ACP agent
-declares `prompt_context` only, and Codex neither (its TUI owns the
+wait in the store. Claude Code and opencode declare both; Codex neither (its TUI owns the
 prompt).
 
 **Once, then on change.** On every prompt, `prompt_context` builds the
@@ -155,7 +153,7 @@ the session-context block off.
 
 **Compaction.** A compaction or a fresh start forgets what was sent
 (`AgentContext::reset_session`): on `PreCompact` (Claude Code's; its HTTP
-`SessionStart` never arrives) and on `SessionStart` (a chat session's start), so the next
+`SessionStart` never arrives) and on `SessionStart`, so the next
 prompt carries the session context and the decisions again. The baselines
 are in memory: a daemon restart costs at most one repeated block.
 
@@ -174,15 +172,15 @@ approval, since no prompt comes between; nudges wait for the next call.
 
 ### Per-harness delivery
 
-| | Claude Code | Codex | opencode | ACP agent |
-|---|---|---|---|---|
-| Launch prompt | `--append-system-prompt` | The thread's `developerInstructions` on `thread/start` / `resume` / `fork`, which Codex puts at the head of its developer message | A per-session instructions file (`.oxplow/runtime/opencode-plugin/prompts/<ses>.md`) named by `OPENCODE_CONFIG_CONTENT`'s `instructions` | `_meta.systemPrompt.append` for an adapter with `systemPrompt: meta` (the Claude adapter), else a block ahead of a new session's first prompt |
-| Skills | Plugin dir `.oxplow/runtime/claude-plugin/skills/` (`--plugin-dir`) | The worktree's `.agents/skills/<name>/` | `.oxplow/runtime/opencode-plugin/skills/`, named by the config's `skills.paths` | The index in the prompt + `oxplow_get_skill` |
-| Slash commands | Plugin `commands/`, run as `/oxplow:<name>` | A skill per command, `oxplow-<name>`, run as `$oxplow-<name>` | Inline config `command` key, run as `/oxplow-<name>` | Not delivered |
-| Hooks | HTTP hooks (`hooks.json`) | None: the thread's notifications, in-process (`ServicesChatHost`) | A JS bridge plugin posting Claude-shaped bodies | In-process (`ServicesChatHost`), no hook route |
-| Context channels | Both, as `additionalContext` | None: the session context rides the system prompt | Prompt: a `synthetic` text part on the user's message; tool: appended to the tool's result | Prompt only: a visible leading block on the person's next prompt |
-| Token capture | OTEL metrics + the transcript's turns | The thread's `tokenUsage` across the turn | None | The prompt response's `usage` |
-| Final message | Stop's `last_assistant_message` | The turn's last agent message on the Stop body | The bridge reads the session's last assistant message onto `Stop` | The transcript's last agent message on the Stop body |
+| | Claude Code | Codex | opencode |
+|---|---|---|---|
+| Launch prompt | `--append-system-prompt` | The thread's `developerInstructions` on `thread/start` / `resume` / `fork`, which Codex puts at the head of its developer message | A per-session instructions file (`.oxplow/runtime/opencode-plugin/prompts/<ses>.md`) named by `OPENCODE_CONFIG_CONTENT`'s `instructions` |
+| Skills | Plugin dir `.oxplow/runtime/claude-plugin/skills/` (`--plugin-dir`) | The worktree's `.agents/skills/<name>/` | `.oxplow/runtime/opencode-plugin/skills/`, named by the config's `skills.paths` |
+| Slash commands | Plugin `commands/`, run as `/oxplow:<name>` | A skill per command, `oxplow-<name>`, run as `$oxplow-<name>` | Inline config `command` key, run as `/oxplow-<name>` |
+| Hooks | HTTP hooks (`hooks.json`) | None: the thread's notifications, in-process (`ServicesChatHost`) | A JS bridge plugin posting Claude-shaped bodies |
+| Context channels | Both, as `additionalContext` | None: the session context rides the system prompt | Prompt: a `synthetic` text part on the user's message; tool: appended to the tool's result |
+| Token capture | OTEL metrics + the transcript's turns | The thread's `tokenUsage` across the turn | None |
+| Final message | Stop's `last_assistant_message` | The turn's last agent message on the Stop body | The bridge reads the session's last assistant message onto `Stop` |
 
 Codex finds skills only beside the directory it runs in (`skills.config`
 entries don't add one, and a plugin must be installed into `~/.codex`),
@@ -196,7 +194,7 @@ plugin namespacing, hence `oxplow-` instead of Claude's `/oxplow:`.
 ### How it's tested
 
 - **Launch half:** `crates/oxplow-harnesses/src/text_contract.rs`
-  launches every built-in harness but ACP's with a marked system prompt
+  launches every built-in harness with a marked system prompt
   and checks that the prompt, every core skill and every core slash
   command reach its agent: its command line, its environment, the request
   that opens its thread, or a file it was given
@@ -280,7 +278,7 @@ agents"). A command that needs a person's confirmation isn't run: it's
 kept as a proposal and `run_command` answers `{ proposal, message }`
 (the person decides in the thread and in Alerts; `v_command_proposal`;
 [commands.md](./commands.md) "Proposals"). Program- and model-choosing
-config keys (`agents`, `lsp`, `acpAgents`, `agentConfig`, `extensions`,
+config keys (`agents`, `lsp`, `agentConfig`, `extensions`,
 `agentPromptAppend`, …) set with `oxplow.config.set` are proposals; keys
 like `zones` or `snapshotTurnBudgetMs` an agent sets itself. An anonymous
 connection may read and list but not run. Which commands an agent may run
@@ -408,16 +406,15 @@ Each harness launches its own sessions: `AgentHarness::launch(&LaunchInput)`
 writes whatever runtime files the agent needs and returns `Launch { spec,
 transcript_missing }`. The spec is `LaunchSpec::Pty { command, env }` (a
 shell command and the env the spawn sets — anything secret goes in `env`,
-never `command`), `LaunchSpec::Acp { program, args, env,
-system_prompt_via_meta }`, or `LaunchSpec::CodexAppServer { socket,
+never `command`), or `LaunchSpec::CodexAppServer { socket,
 program, method, params, attach }` (the request that opens a thread on
 Codex's daemon, and the TUI's argv that attaches to it, "Codex: its TUI
 on a thread oxplow observes"). The built-ins live in `crates/oxplow-harnesses/`
-(`claude.rs`, `codex/`, `opencode.rs`, `acp.rs`; shell quoting and
+(`claude.rs`, `codex/`, `opencode.rs`; shell quoting and
 shared runtime writers in `shared.rs`) and depend only on the domain;
 core's text lives in `oxplow-agent-text`. The one caller is
 `launch_session` in `crates/oxplow-rpc/src/commands/terminal.rs`, used by
-`open_terminal_session` (PTY) and `chat_open_session` (a chat). It hands
+`open_terminal_session` (a PTY, Codex's TUI included). It hands
 the harness the session/thread/stream ids, the worktree and project dir,
 the control-plane endpoints with the session's bearer, the identity env,
 the assembled system prompt, the session's resume id, the agent text, the
@@ -425,7 +422,7 @@ harness's config, `HOME` (local streams only) and the program search
 path. A harness never touches the database.
 
 **What a harness implements.** `AgentHarness` requires what every harness
-answers: `id`, `title`, `interact`, `launch`, `tool_use` (its calls in
+answers: `id`, `title`, `launch`, `tool_use` (its calls in
 oxplow's vocabulary, "Tool vocabulary") and `render` (a `HookAnswer` in
 its wire shape). Everything else defaults to none: `env_markers`,
 `settings`, `refresh_text`, `turns`, `token_readings`, `prompt`,
@@ -449,7 +446,6 @@ harness's features from `list_agent_harnesses` (`HarnessListing.features`):
 | Claude Code (`claude`) | terminal, permission_prompts, resume, transcript, telemetry, runtime_text, subagents, prompt_context, tool_context, conversation_list, conversation_fork |
 | Codex (`codex`) | terminal, permission_prompts, resume, runtime_text, conversation_list, conversation_fork |
 | opencode (`opencode`) | terminal, resume, runtime_text, subagents, prompt_context, tool_context, conversation_list, conversation_fork |
-| ACP agent (`acp`) | structured_transcript, permission_prompts, resume, prompt_context |
 
 (`crates/oxplow-app/src/capabilities.rs`, the `harness(…)` built-ins.)
 `crates/oxplow-app/src/harness_conformance.rs` checks the floor every
@@ -473,8 +469,7 @@ reads; it declares the ones a person sets (`AgentHarness::settings`:
 opencode's `model`, Claude's `mcpServers`), and Settings → Agents renders a field for each,
 saved by `set_agent_setting`, which refuses an undeclared one. The UI
 reads the harnesses through `list_agent_harnesses` (`useAgentHarnesses`,
-`agentKinds.ts`). Whether a session is a chat follows from `interact()`,
-not its name. Each session keeps its own harness, so Claude and Codex
+`agentKinds.ts`). Each session keeps its own harness, so Claude and Codex
 sessions run side by side.
 
 ### What each harness writes
@@ -535,9 +530,6 @@ one no longer offered is removed, a person's own stay.
   No `SessionStart`, `SessionEnd` or `Notification`. The bridge runs under
   bun in `its_bridge_sends_the_call_id_the_exit_code_and_a_childs_parent`
   and `its_bridge_delivers_hook_context_and_sends_the_final_message`.
-- **ACP** launches the agent's program as its config resolves it (an
-  adapter's or a project's `acpAgents` entry, "ACP agents:
-  configuration"); the session writes nothing to disk.
 
 **Identity.** Every process oxplow starts for a session gets
 `OXPLOW_HOOK_TOKEN` (its session's bearer, which alone says who it is —
@@ -545,7 +537,7 @@ one no longer offered is removed, a person's own stay.
 `OXPLOW_THREAD_ID`, `OXPLOW_SESSION` (`ses<n>`): the agent's own knowledge
 of where it runs, which nothing trusts (`identity_env` in `terminal.rs`).
 
-**What an agent inherits.** Every agent and terminal (PTY and ACP) is
+**What an agent inherits.** Every agent and terminal is
 spawned without `agent_path::not_inherited(&harnesses)`: an oxplow
 agent's identity (`agent_path::NOT_INHERITED`: the `OXPLOW_*` above and
 `OXPLOW_HOOK_DEBUG`) and every registered harness's `env_markers()`
@@ -609,52 +601,12 @@ under the effective config dir (`$CLAUDE_CONFIG_DIR`, else
 (`resume_state`) and reports `transcript_missing` when the project dir
 exists but the file is gone, so a failed resume can say why ("Resume
 outcomes" in [terminal.md](./terminal.md)). An absent project dir, or a
-stream on another host (no `HOME` passed), reads as unknown. An ACP
-session `session/load`s its resume id when the agent supports it.
+stream on another host (no `HOME` passed), reads as unknown.
 
-### ACP agents: configuration
-
-A chat session (its harness's transcript is structured: `acp`) names an
-ACP agent in `agent_session.acp_agent`; `open_terminal_session` refuses
-it.
-
-**Configuration.** Agents are `acp_adapter` declarations in
-`oxplow-foundation` (the `oxplow:acp-adapter` built-in, config `{
-command, args?, env?, systemPrompt?: meta|prompt }`, read into an
-`AcpAdapter` by `oxplow_harnesses::acp_adapter`, kept in declaration order
-in `Services.acp_adapters`): `claude` (`claude-agent-acp`, the prompt in
-`_meta`), `gemini` (`gemini --acp`), `codex` (`codex-acp`). The
-project's `acpAgents: [{name, command, args, env}]` layer over them
-(`acp::agents::resolve`): an entry with a declared id overrides its
-program and keeps the adapter's prompt mode; a new name is a generic
-adapter (the prompt ahead of the first message). An `acp` session that
-names no agent runs the project's first entry, else the first declared
-adapter (`acp::agents::default_agent`).
-
-**Listing and approval.** `oxplow_app::acp::agents::list` (IPC
-`list_acp_agents`, UI-only) reports each agent's source, whether it may
-start, and its resolved path. A declared adapter may always start; a
-project entry needs a person's approval in Settings → Data → Programs
-(`exec_consent`, `ProgramKind::AcpAgent`). A personal (user-global)
-`acpAgents` file isn't built.
-
-**Opening sessions.** `oxplow.agent_session.open` takes `acp_agent`:
-required for a chat harness (defaulted as above), refused otherwise, and
-checked against the list. It declares `ui: { label: "New Agent Session…",
-form: "page:new-session" }`, so a person choosing it gets the picker
-("<harness title> · <name>" per ACP agent, flagged "not installed" or
-"needs approval", `agentChoices` in `agentKinds.ts`). `oxplow-foundation`
-also declares a direct command per agent — "New Claude Session", "New
-Codex Session", "New OpenCode Session", "New … Session (ACP)" per declared
-adapter (`agent_session.open_<agent>`, `ui.input` fixing `harness` /
-`acp_agent`, `open_after` the new tab), each offered while its harness is
-enabled (`when: enabledAgents =~ …`). Those are a person's; an agent uses
-`agent_session.open`.
-
-### Chat sessions: protocol mapping and transcript
+### The chat machinery (a library): protocol mapping and transcript
 
 **The SDK is pinned (`agent-client-protocol = "=2.2.0"`) and fenced.**
-`acp/wire.rs` is the only module that names its schema types; it converts
+`chat/acp.rs` is the only module that names its schema types; it converts
 them to `chat/model.rs` types (`ToolCall`, `ToolCallPatch`, `ChatUpdate`,
 `PermissionAsk` / `PermissionAnswer`), so an SDK bump touches one file.
 Content text is capped at 64 KiB per block (`MAX_TEXT`).
@@ -684,18 +636,21 @@ by `id`. Chunks of one kind coalesce into the trailing item;
 `usage_update` is state (the context meter), not an item. The ring holds
 2000 items (`DEFAULT_CAP`).
 
-### Chat sessions
+### The chat machinery (a library)
 
-A chat session is an agent oxplow speaks to as a client and shows in its
-own transcript: an ACP agent (`acp::wire`) or a Codex thread
-(`chat/codex.rs`). The machinery is `crates/oxplow-app/src/chat/`; the
-view's `data-testid`s keep their historical `acp-` prefix
-(`acp-prompt-input`, `acp-transcript`, …).
+oxplow once opened ACP agents as chat sessions with their own view. That
+product surface is gone — no session kind, harness, RPC, event channel or
+UI opens one — but the machinery stays in `crates/oxplow-app/src/chat/`
+as a library: it speaks ACP over stdio (`chat/acp.rs`) and observes a
+Codex thread (`chat/codex.rs`, which *is* in production, "Codex: its TUI
+on a thread oxplow observes"). `ChatManager::open` (ACP) has no
+production caller; `tests/acp_services.rs` and `tests/acp_live.rs`
+exercise it against `crates/oxplow-acp-fake`.
 
 **Shape.** `Services.chat` (`chat/manager.rs`) holds each agent session's
 command sender and a shared `SessionView` (status, transcript, stderr
 tail), keyed by `AgentSessionId`. One actor task per session
-(`chat/session.rs`) owns the connection; `wire::run` feeds every agent
+(`chat/session.rs`) owns the connection; `acp::run` feeds every agent
 message into one channel and the prompt's result is an ordered barrier,
 so the actor sees updates, requests and turn end in wire order. Events
 for every session share one broadcast channel (`ChatEvent`). `open`
@@ -706,9 +661,8 @@ current, so it records no Interrupt over its successor. The agent runs
 via `tokio::process` with `kill_on_drop` and the augmented `PATH`; its
 stderr's last lines explain a failed start. Closing a thread
 (`oxplow.thread.close`) closes its open effort and, once committed, stops
-every open session's process — ACP or PTY — through
-`agent_sessions::SessionProcesses::kill`. A fork (`oxplow.thread.create {
-from }`) keeps the source session's harness and `acp_agent`.
+every open session's process through
+`agent_sessions::SessionProcesses::kill`.
 
 **Host.** `chat/host.rs` `ChatHost` is the seam (tests use a recording
 double). `ServicesChatHost::new(svc, stream, session)` holds `Weak<Services>`
@@ -724,20 +678,19 @@ MCP rides `session/new|load` as an HTTP MCP entry with the session's
 bearer; an agent without HTTP MCP support is refused with a clear error.
 The resume id is `session/load`ed when supported; the replay rebuilds the
 transcript and records nothing (no hooks, no tool rows, no bypass checks,
-fs writes refused). The system prompt is `assemble_system_prompt` for the
-`acp` harness: the session context is left out (the first prompt carries
+fs writes refused). The system prompt is `assemble_system_prompt`: the session context is left out (the first prompt carries
 it) and the skill index is in (no skill files).
 
 **Prompts (the no-automation rule).** `chat/human_prompt.rs` `compose` is
-the only way to make a `HumanPrompt`, and `wire::AgentConn::prompt` takes
+the only way to make a `HumanPrompt`, and `acp::AgentConn::prompt` takes
 nothing else. The session calls it only for `Command::Prompt`, which only
 `ChatManager::submit_human_prompt` sends; a second prompt while a turn runs
 is `TurnInFlight`, never queued. The session context, advisories,
 decisions and waiting nudges ride the person's prompt as a visible
 leading block (behind a disclosure on the user item). `chat/guard_tests.rs`
-scans the source: `PromptRequest` only in `wire.rs`, no raw
+scans the source: `PromptRequest` only in `acp.rs`, no raw
 `"session/prompt"` outside the fake, `compose(` only from the session,
-`submit_human_prompt(` with no other callers.
+no production code calling `submit_human_prompt(` outside `chat/manager.rs`.
 
 **Permissions.** Each `session/request_permission` asks `AgentPolicy`. A
 deny is answered `reject_once` (or `cancelled` when no reject option
@@ -765,40 +718,10 @@ bannered if the policy would deny it — the only backstop for adapter
 modes that skip asking. At turn end, open cards are cancelled and the
 Stop and tokens recorded.
 
-**RPC and events.** `oxplow-rpc/src/commands/acp.rs`; every command is a
-`ui(...)` parity row, so none can become an MCP tool. `chat_open_session`
-(a hand-written Tauri adapter: it needs `plugin_runtime` for the MCP URL
-and bearer) checks the session is open and `acp`, resolves the agent
-(`find`, `may_start`, `resolve_command`), assembles the prompt, passes the
-resume id, opens the session and returns the `ChatSnapshot`. The rest:
-`chat_prompt` (the prompt box's Enter, the only caller of
-`submit_human_prompt`), `chat_cancel`, `chat_respond_permission` (no option
-means cancel), `chat_transcript(sinceSeq)` (`null` with no session),
-`chat_close_session` (stops the process). Every one takes `sessionId`.
-Events ride the `chat:event` channel (frame key `acp`): `ChatEvent {
-agentSessionId, threadId, generation, type: item|status|usage|closed, …
-}` over the daemon's `/events`. Raw agent JSON is TS `unknown`
-(`specta_typescript::Unknown`).
-
-**UI.** `AgentPage` renders `components/chat/ChatAgentView.tsx` (by
-`sessionId`) for an `acp` session. `chatTranscript.ts` is a pure reducer
-over the snapshot and live events: items upsert by id, the newer seq
-wins; a seq gap or a remote reconnect refetches `since(headSeq)` (past a
-gap `headSeq` stays at the last contiguous seq). Each open is a new
-**generation** whose ids and seqs restart, and the reducer starts over on
-one, so a restart never mixes transcripts. The view subscribes before
-fetching. `ChatPromptBox.tsx` is the only renderer caller of `chatPrompt`:
-Enter sends, Shift+Enter adds a newline, Escape or Stop cancels, nothing
-sends while a turn runs, and "Add to agent context" appends to the draft
-(`ChatAgentView.test.tsx`).
-
 **Limits.** A permission reject carries no reason; only an
 `fs/write_text_file` denial says why, and the Claude adapter writes to
 disk itself, so its only gate is the permission request. Bypass
-detection is after the fact. "UI-only" is enforced twice: the `ui(...)`
-rows, and the daemon's `/ipc` requiring the per-launch UI token only the
-renderer holds ([remote-daemon.md](./remote-daemon.md) "Auth"), so no
-agent can prompt an agent through the daemon. Per-turn tokens come only
+detection is after the fact. Per-turn tokens come only
 from the prompt response's `usage` (an unstable field, SDK feature
 `unstable_end_turn_token_usage`); `usage_update` drives only the meter;
 ACP agents get no OTEL env, so nothing double-counts.
@@ -808,11 +731,9 @@ JSON-RPC (deliberately not the SDK, so tests exercise real wire JSON);
 `fake:<step>` lines in a prompt drive it (say, think, edit, bypass,
 fswrite, fsread, bash, plan, usage, tokens, wait, crash).
 `chat/session_tests.rs` runs it in-process over a duplex pipe;
-`tests/chat_services.rs` against real `Services`, and once as its binary;
-the browser suite drives it end to end
-([working-in-this-repo.md](./working-in-this-repo.md) "The browser
-suite"). `tests/acp_live.rs` is `#[ignore]`d: `OXPLOW_ACP_LIVE_CMD="<adapter
-command>" cargo test -p oxplow-app --test acp_live -- --ignored`.
+`tests/acp_services.rs` against real `Services`. `tests/acp_live.rs` is
+`#[ignore]`d: `OXPLOW_ACP_LIVE_CMD="<adapter command>" cargo test -p
+oxplow-app --test acp_live -- --ignored`.
 
 ### Codex: its TUI on a thread oxplow observes
 
@@ -1217,8 +1138,7 @@ with their subagents beneath each.
 turns from `v_agent_turn` oldest first with the thread's notes where
 they fall, a subagent's hand-back marked (a turn with no prompt), each
 row a turn ref. A turn ref opens it at that turn (`v_agent_turn
-.transcript_page`, built with `lens_ref`); an ACP chat's turns aren't
-stored, and the lens says so. Its action **Resume in a new session**
+.transcript_page`, built with `lens_ref`). Its action **Resume in a new session**
 runs `oxplow.agent_session.open` with `resume`: a saved conversation of
 the harness, bound `chosen` in the same transaction, refused when it is
 open in another session. A person's: an agent may open a session but not

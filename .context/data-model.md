@@ -415,9 +415,7 @@ one thread per stream is `active`; the rest are `queued`. A newly-seeded
 stream ships with one thread titled `Thread` and no agent session; neither
 does `oxplow.thread.create` open one. A person opens sessions
 (`oxplow.agent_session.open`, whose default harness is the project's first
-enabled agent, else the first declared (`HarnessRegistry::default`), and for
-a chat harness `acp::agents::default_agent`: the project's first
-`acpAgents:` entry, else the first declared ACP adapter).
+enabled agent, else the first declared (`HarnessRegistry::default`)).
 The rolling `summary` field + `record_batch_summary` MCP tool were
 removed in v13 — use the task log as the source of truth instead.
 
@@ -451,7 +449,7 @@ IPC-exposed as `setBatchPrompt(streamId, threadId, prompt)`. Emits a
 `thread.changed` event (kind: "prompt-changed") so the UI refreshes thread
 state.
 
-The thread's agent columns (`agent`, `acp_agent`, `resume_session_id`,
+The thread's agent columns (`agent`, `acp_agent` (since dropped, V80), `resume_session_id`,
 `pane_target`) moved onto `agent_session` in V32.
 
 ### `agent_session` — `SqliteAgentSessionStore` (`crates/oxplow-db/src/agent_session_store.rs`)
@@ -460,11 +458,10 @@ One agent slot a person opened on a thread (V32; `ses<n>`, ref
 `agent_session:ses<n>`, model `v_agent_session`).
 
 - **Columns:** `thread_id` (cascade), `kind` (`terminal` — a harness in
-  a PTY; `chat` — an ACP agent; `action` — a one-shot session, not built
+  a PTY; `action` — a one-shot session, not built
   yet), `harness` (a registry key: TEXT with no CHECK on purpose),
-  `acp_agent` (for an `acp` session, a preset or a project `acpAgents`
-  name), `title` (empty until renamed), `resume_session_id` (the
-  harness's own session id: `claude --resume`, ACP `session/load`), `host`
+  `title` (empty until renamed), `resume_session_id` (the
+  harness's own session id: `claude --resume`), `host`
   (reserved; NULL is the local machine), `opened_at`, `closed_at`,
   `closed_reason` (`closed`, `thread_closed`, `stream_archived`),
   `updated_at`, `pid` and `last_seen_at` (V49) and `stopped_by_user_at`
@@ -491,7 +488,7 @@ One agent slot a person opened on a thread (V32; `ses<n>`, ref
   (`thread_closed`) or its stream's archive (`stream_archived`) —
   `agent_stores::close_session_tx`, which also ends its open turns and logs
   `stopped`; the caller stops its process after commit. A
-  harness process ending (a PTY exit, `/clear`, an ACP close) logs
+  harness process ending (a PTY exit, `/clear`) logs
   `agent.session.ended` and leaves the row open, so its tab keeps the
   ended notice and the resume id.
 - **Resume id and its bindings (V78):** `resume_session_id` is the open
@@ -510,17 +507,19 @@ One agent slot a person opened on a thread (V32; `ses<n>`, ref
   a hook from an agent oxplow didn't start claims none) and the
   `event_log.agent_session_id` anchor (`Anchors.agent_session_id`, named
   apart from `agent_turn.session_id`, the harness's string). V32
-  backfilled one session per existing thread (a `chat` for an ACP thread,
-  else a `terminal`; closed with the thread, or `stream_archived` with its
+  backfilled one session per existing thread (a `terminal`; closed with the thread, or `stream_archived` with its
   archive) and anchored its turns and `agent.*` events to it.
 - **Migration:** V32 drops the thread columns with `DROP COLUMN` (it ran
   when migrations still had foreign keys on, where rebuilding `threads`
   cascade-deleted its children); `migrate_and_compile` drops the model views first, so no
   `v_thread` blocks the drop. `v32_moves_agent_columns_onto_one_session_per_thread`
   checks rows, anchors, the dropped columns and the children.
-- **ACP:** the conversation itself has **no table**: it lives in memory
-  (`chat::transcript::Transcript`) and a `session/load` replay rebuilds it.
-  What an ACP turn records lands in the same tables as a hooked turn.
+- **V80 (chat sessions removed):** open `chat` sessions were closed
+  (`closed_reason='closed'`, their open turns ended with the answer
+  'session closed'); every `chat` row became kind `terminal` as closed
+  history; the table was rebuilt without `acp_agent` and with `kind IN
+  ('terminal','action')`. The chat machinery's transcript
+  (`chat::transcript::Transcript`) has no table.
 
 **Removed in v42:** the `auto_commit` column (added in v15) and the
 `commit_point` / `wait_point` tables (added in v6/v7). Commits are now
@@ -1972,7 +1971,7 @@ message_count, provenance (CHECK `observed`), recorded_at, turn_id, cause`.
 Indexes on `(effort_id, recorded_at DESC)` and `(thread_id, recorded_at
 DESC)`. V102 (P3.2) added `turn_id` (the turn the tokens were spent in) and
 `cause` (`UNIQUE WHERE NOT NULL`: the `agent.turn.ended` event whose own
-report — ACP — carried the counts, so a redelivered event counts once).
+report carried the counts, so a redelivered event counts once).
 Transcript rows leave `cause` NULL: one transcript chunk can hold several
 turns, and the cursor committing with the rows is what makes their
 redelivery a no-op (tsk498).

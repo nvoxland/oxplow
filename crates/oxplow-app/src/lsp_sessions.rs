@@ -900,7 +900,6 @@ mod tests {
             metrics: Default::default(),
             zones: Default::default(),
             agent_config: Default::default(),
-            acp_agents: Vec::new(),
             extension_instances: Default::default(),
             active_providers: Default::default(),
             personal_active_providers: Default::default(),

@@ -103,7 +103,6 @@ async fn a_signed_in_bearer_renews_once_when_its_server_stops_taking_it() {
     oxplow_app::exec_consent::approve_program(
         &svc.approvals,
         project,
-        &oxplow_app::config_service::read_config(&svc.config),
         std::slice::from_ref(&hosted),
         oxplow_app::exec_consent::ProgramKind::Provider,
         &program.name,

@@ -23,12 +23,12 @@ use parking_lot::Mutex;
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, watch};
 
+use super::acp::{cap, cap_value};
 use super::conn::{Connection, Incoming, Opened, TurnEnd, TurnTokens};
 use super::human_prompt::HumanPrompt;
 use super::model::{
     ChatUpdate, ContextUsage, PlanEntry, PlanStatus, ToolCall, ToolKind, ToolStatus,
 };
-use crate::acp::wire::{cap, cap_value};
 
 /// How the thread opens, as the harness's launch says.
 #[derive(Debug, Clone)]

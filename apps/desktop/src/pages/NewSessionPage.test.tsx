@@ -9,19 +9,19 @@ afterEach(cleanup);
 
 const thread = { id: "thr1", title: "Fix the cart" } as unknown as Thread;
 const harnesses: HarnessListing[] = [
-  { id: "claude", title: "Claude", acpAgent: false, enabled: true, settings: [] },
-  { id: "codex", title: "Codex", acpAgent: false, enabled: true, settings: [] },
+  { id: "claude", title: "Claude", enabled: true, settings: [] },
+  { id: "codex", title: "Codex", enabled: true, settings: [] },
 ];
 
 function renderPicker() {
-  const started: Array<[string, string | null, boolean]> = [];
+  const started: Array<[string, boolean]> = [];
   const declined: boolean[] = [];
   const view = render(
     <NewSessionPage
       thread={thread}
       harnesses={harnesses}
-      onStart={async (harness, acpAgent, remember) => {
-        started.push([harness, acpAgent, remember]);
+      onStart={async (harness, remember) => {
+        started.push([harness, remember]);
       }}
       onNoSession={async (remember) => {
         declined.push(remember);
@@ -51,7 +51,7 @@ test("start passes whether to remember the choice", async () => {
   fireEvent.change(getByTestId("new-session-agent"), { target: { value: "codex" } });
   fireEvent.click(getByTestId("new-session-remember"));
   fireEvent.click(getByTestId("new-session-start"));
-  await waitFor(() => expect(started).toEqual([["codex", null, true]]));
+  await waitFor(() => expect(started).toEqual([["codex", true]]));
 });
 
 /** The page focuses its picker when it opens, but a page that opens late

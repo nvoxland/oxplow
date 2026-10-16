@@ -2,8 +2,7 @@
 
 Terminal agent sessions run their selected harness in a PTY in the
 stream's worktree. A thread can have several sessions or none; each
-session has its own tab and resume identity. ACP sessions instead use a
-structured conversation. See [Agents](agents.md).
+session has its own tab and resume identity. See [Agents](agents.md).
 
 ## Agent terminal
 

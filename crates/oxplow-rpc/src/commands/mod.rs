@@ -21,7 +21,6 @@ pub mod app;
 pub mod background;
 pub mod bus;
 pub mod changes;
-pub mod chat;
 pub mod collectors;
 pub mod comments;
 pub mod config;

@@ -1864,14 +1864,12 @@ mod tests {
         use oxplow_app::exec_consent::{approve_program, list, ProgramKind};
         // The shipped providers are scripts a person approves first.
         let project = services.layout.project_dir.clone();
-        let config = services.config.read().unwrap().clone();
         let extensions = services.extension_catalog.get(&project);
-        for p in list(&services.approvals, &project, &config, &extensions) {
+        for p in list(&services.approvals, &project, &extensions) {
             if p.kind == ProgramKind::AiProvider {
                 approve_program(
                     &services.approvals,
                     &project,
-                    &config,
                     &extensions,
                     p.kind,
                     &p.name,

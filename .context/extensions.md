@@ -829,9 +829,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       thread's answers from `v_thread_answer` (`threadAnswers.ts`,
       `useThreadAnswers`), newest first, hidden while there are none,
       collapsible (Escape inside it collapses; remembered per thread in
-      `oxplow.answers.collapsed`). An ACP thread renders each answer
-      inline under the `oxplow_show_lens` call that made it (`answerOfTool`
-      finds `answer:<id>` in the call's result). Each `ThreadAnswer`
+      `oxplow.answers.collapsed`). Each `ThreadAnswer`
       re-runs through `run_answer` with `useRerunOnChange`, and offers
       **Keep This** (an inline name — empty takes it from the title —
       Enter keeps via `oxplow.lens.keep`, Escape cancels) or, once it is a lens
@@ -1027,9 +1025,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   from one `AgentText` (`oxplow_domain::agent::text`): core's
   (`OXPLOW_SKILLS` and `CORE_COMMANDS` in
   `crates/oxplow-agent-text/src/lib.rs`) plus what
-  extensions offer now ("Skills"). ACP agents get the same set as an
-  index in their system prompt plus the MCP `oxplow_get_skill` tool (see
-  agent-model.md → ACP).
+  extensions offer now ("Skills").
 
 - **P6b (epic tsk592, 2026-10-01).** An extension can also *act* and
   *extend the shell*: `commands:` (Starlark composing core commands, see
@@ -3700,14 +3696,13 @@ implementations:
 ```
 
 - `capability` is a choosable one, or one many implementations serve
-  (`oxplow_domain::capability`: `agent_harness`, `acp_adapter`,
+  (`oxplow_domain::capability`: `agent_harness`,
   `ai_provider` — every one declared is active); `id` is what
   `activeProviders` names, or a many-capability's key (an agent session's
-  `harness`, a session's `acp_agent`) — lowercase, never `none`.
+  `harness`) — lowercase, never `none`.
 - `config:` configures the built-in, checked at load against its schema
   (`BuiltIn.config_schema`, `capability::check_config`; a built-in with
-  none refuses any config): an ACP adapter's `{ command, args?, env?,
-  systemPrompt?: meta|prompt }`.
+  none refuses any config); no built-in takes one now.
 - `entry` names a built-in in core's standard library
   (`capabilities::BUILT_INS`: `oxplow:tasks`, `oxplow:commit-or-switch`,
   `oxplow:snapshots`, `oxplow:snapshot-hashes`, `oxplow:wiki`), the way a collector names
@@ -3742,8 +3737,7 @@ implementations:
     effect's does, and Settings → Data → Programs lists it with what it
     reads and offers the script to read.
 - `oxplow-foundation` declares the agent harnesses (`oxplow:claude-code`,
-  `oxplow:codex-cli`, `oxplow:opencode`, `oxplow:acp`), the ACP agents'
-  programs (`oxplow:acp-adapter`, one declaration per preset) and the AI
+  `oxplow:codex-cli`, `oxplow:opencode`) and the AI
   providers, as scripts (`providers/anthropic.star`,
   `openai_compatible.star` — twice, `openai` with OpenAI's `baseUrl` —
   `openrouter.star`, `typesafe.star`); foundation is required, so
@@ -3809,7 +3803,6 @@ implementations:
   already on disk (`refresh_agent_text` → each harness's `refresh_text`). A skill folder oxplow wrote
   carries a `.oxplow` marker, so one no longer offered is removed and a
   person's own stay; the Claude `commands/` folder is oxplow's whole.
-  ACP agents get the offered set's index and `oxplow_get_skill`.
 - `oxplow-bundled` gives the `work-items` skill (any work list) and the
   `work-next` command (oxplow's tasks' ready queue).
 
@@ -4340,9 +4333,9 @@ the models, vocabulary and contribution descriptors in one savepoint
 ## Prepared native runtime adapters
 
 `PreparedRuntimeAdapters` captures one CatalogSnapshot and constructs declared
-work-item, harness, effort-policy, ACP, knowledge, snapshot and model-provider
+work-item, harness, effort-policy, knowledge, snapshot and model-provider
 maps without changing running registries. It rejects enabled load errors and
-strict ACP/AI factory failures before any map publication. Script/gate objects
+strict AI factory failures before any map publication. Script/gate objects
 are constructed but no process, handshake, network call or paid probe runs.
 External adapters/processes remain the provider lifecycle owner's work.
 

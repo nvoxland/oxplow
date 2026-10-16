@@ -89,17 +89,13 @@ tsk162). Its committed config can name programs:
   results go into the agent's context (tsk352). Approved as a unit per
   extension, and the listing shows each advisory's query. Bundled
   extensions' aren't gated;
-- `acpAgents` in `.oxplow/project.yaml` (tsk335). The hash covers the
-  command, its args and env, and the file's content when the command is
-  a project path. The built-in presets aren't gated.
-
 None of these run until a person approves that program on their machine.
 
 - **What an approval covers.** It is bound to a hash of what runs
   (tsk347):
   - the program's content;
   - its args, plus the content of any arg that names a file, read where
-    the program runs (an ACP agent from its stream's worktree), so
+    the program runs (from the stream's worktree), so
     `node tools/agent.js` covers `agent.js`;
   - for an extension collector, every file in the extension except
     `extension.yaml` and `lenses/` (not code it runs, so a lens edit
@@ -175,9 +171,8 @@ A new way for config to start a program must go through the same gate.
 > `crates/oxplow-app/src/bundled_extensions.rs`), and core works with it
 > disabled. The engine they read stays in core: the fact store, metrics
 > and fact collectors, the cube, collection ingest, snapshots, plus the basic
-> metrics explorer and dashboards. ACP agents and AI providers are built
-> (see [agent-model.md](./agent-model.md) → ACP,
-> [ai-providers.md](./ai-providers.md)); the semantic layer is partly
+> metrics explorer and dashboards. AI providers are built
+> (see [ai-providers.md](./ai-providers.md)); the semantic layer is partly
 > built ([semantic-layer.md](./semantic-layer.md)). This section is the
 > direction future decisions follow.
 
@@ -185,8 +180,7 @@ The core app is a **skeleton**: the controls you steer with, plus a data
 layer everything else builds on.
 
 - **Controls in core, instruments in extensions.** Core keeps streams,
-  threads, tasks and efforts, agent surfaces (terminal harnesses and
-  ACP agents), comments, wiki, diff and file drill-down, and the
+  threads, tasks and efforts, agent surfaces (terminal harnesses), comments, wiki, diff and file drill-down, and the
   page graph (rail, launcher, tabs). Anything that **measures or
   visualizes** is an extension ([extensions.md](./extensions.md)).
 - **All data goes through the [semantic layer](./semantic-layer.md).**
@@ -215,7 +209,7 @@ layer everything else builds on.
 - Custom backend daemon that owns:
   - streams
   - per-stream worktrees
-  - agent terminals (PTYs) and ACP sessions
+  - agent terminals (PTYs)
   - hook events
   - stream-scoped APIs
 

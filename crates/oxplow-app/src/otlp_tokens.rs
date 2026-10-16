@@ -396,12 +396,6 @@ pub(crate) mod tests {
         fn title(&self) -> &str {
             "Counting"
         }
-        fn interact(&self) -> oxplow_domain::agent::harness::Interact {
-            oxplow_domain::agent::harness::Interact {
-                transcript: oxplow_domain::agent::harness::Transcript::Terminal,
-                acp_agent: false,
-            }
-        }
         async fn launch(
             &self,
             _: &oxplow_domain::agent::harness::LaunchInput,

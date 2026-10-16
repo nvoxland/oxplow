@@ -22,8 +22,7 @@ pages are THE shell.
   selected thread of the new stream.
 - **A thread's agents are its agent sessions, one tab each.** Every open
   `agent_session` row has a pinned tab (`agent_session:ses3`) leading the
-  thread's tabs, in the order the sessions opened: its terminal or its
-  ACP chat. The tabs follow the rows — `useThreadSessions` reads
+  thread's tabs, in the order the sessions opened its terminal. The tabs follow the rows — `useThreadSessions` reads
   `v_agent_session`, and `reconcileSessionTabs` (`tabs/sessionTabs.ts`)
   keeps each open session's tab first and drops a closed one's — a
   session opened later still goes ahead of every other tab. **A new
@@ -170,7 +169,7 @@ moved into the project DB and started fresh again) — see the decision in [refs
 | ext-page | `page:<extension>/<page>` (`extPageRef`; the page contribution's ref) — an extension's `pages:` entry, its lens full-page (`ExtensionPageView` resolves the page from the stream's extensions, so a restored tab opens too, and titles the tab with the page's manifest `title` through `LensPage`'s `title`). Not a named route: `PageKind` includes `ExtensionPageKind`, and `refFromTabId` / `pageKindOf` recognise an extension's page by the slash in its id (a shell route has none). Params ride the id (`?ref=`) into the lens's `initialParams`: a ref of an extension's kind (`acme_pr:12`, P8.D7, extensions.md "Ref kinds") opens its kind's page this way | `page:github/open-prs`, `page:acme/pr?ref=acme_pr:12` |
 | symbols | `page:symbols[?path=<p>]` — one file's outline, or the project's symbols (filtered), from the tree-sitter index | `page:symbols?path=src/lib.rs` |
 | symbol | `symbol:<path>/<id>` (`v_symbol.ref`, `symbolRef(ref)`) — no revision in the id; never a tab: opening one (`handleOpenPage`, or in-tab navigation) resolves it (`resolve_symbol`) and opens its file at the name's line (`openSymbol`). A pinned one (`@snap:<id>` / `@git:<sha>`) opens the file viewer at that revision; if the version is gone it shows a notice and opens the current symbol | `symbol:src/lib.rs/Widget::spin` |
-| agent_session | `agent_session:<ses id>` (`agentSessionRef(id)`, pinned) — an open agent session's terminal or ACP chat | `agent_session:ses3` |
+| agent_session | `agent_session:<ses id>` (`agentSessionRef(id)`, pinned) — an open agent session's terminal | `agent_session:ses3` |
 | new-session | `page:new-session` (`newSessionRef()`) — the session picker | `page:new-session` |
 | index routes | `page:<kind>` — `tasks`, `done-work`, `backlog`, `archived`, `wiki-index`, `files`, `comments`, `local-history(-full\|-by-commit-full)`, `git-history`, `git-dashboard`, `uncommitted-changes`, `hook-events`, `terminal`, `settings`, `metrics-recorded`, `dashboards`, `explore-data`, `catalog`, `board`, `problems`, `closed-threads`, `new-stream`, `new-task` | `page:tasks` |
 | diff | `page:diff?path=<p>&left=<ver>&right=<ver>[&label=<l>]` (versions `disk` / `ref:<x>` / `snap:<id>`; `diffRef(spec)` / `computeDiffId(spec)` — `revealLine` is not in the id, so re-clicking reuses the tab) | `page:diff?path=src/a.ts&left=ref:abc&right=disk` |
@@ -696,7 +695,7 @@ the visible page would. `handleOpenPage` special-cases only `agent_session`
   file tabs) closes the entry in `fileSessions`.
 - Agent sessions' tabs are ordinary page tabs in `threadPageTabs`
   (`pageRenderers.agent_session` → `AgentSessionPage`, which wraps
-  `TerminalPane` or `ChatAgentView` in `Page` chrome with
+  `TerminalPane` in `Page` chrome with
   `showNavBar={false}` and `showHeader={false}`). They are **pinned**
   (`TabRef.pinned`, `CenterTab.pinned`): they lead the strip, are never
   dragged or dropped on, the bulk closes skip them, and the tab cap never

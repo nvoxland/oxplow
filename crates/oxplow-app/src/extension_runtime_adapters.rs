@@ -8,7 +8,6 @@ pub struct PreparedRuntimeAdapters {
     work_items: crate::work_items::PreparedWorkItems,
     harnesses: crate::harnesses::PreparedHarnesses,
     policies: crate::effort_policy::PreparedEffortPolicies,
-    acp: crate::harnesses::PreparedAcpAdapters,
     knowledge: crate::knowledge::PreparedKnowledge,
     snapshots: crate::snapshots::PreparedSnapshots,
     models: crate::ai_service::PreparedModelProviders,
@@ -29,11 +28,6 @@ impl PreparedRuntimeAdapters {
         let declared = crate::capabilities::declared_by(snapshot.extensions());
         let jobs = svc.jobs.prepare_registry(snapshot)?;
         let mut errors = VocabularyErrors::new();
-        let acp = crate::harnesses::prepare_acp_adapters(&declared).map_err(|failures| {
-            for (id, message) in failures {
-                errors.insert(format!("<acp:{id}>"), vec![message]);
-            }
-        });
         let models = crate::ai_service::prepare_built_ins(
             &declared,
             &svc.approvals,
@@ -60,7 +54,6 @@ impl PreparedRuntimeAdapters {
                 &svc.approvals,
                 &svc.layout.project_dir,
             ),
-            acp: acp.expect("all adapter errors were rejected"),
             knowledge: crate::knowledge::prepare_built_ins(&declared, &svc.layout.project_dir),
             snapshots: crate::snapshots::prepare_built_ins(
                 &declared,
@@ -84,7 +77,6 @@ impl PreparedRuntimeAdapters {
         self.work_items.publish(&svc.work_items);
         self.harnesses.publish(&svc.harnesses);
         self.policies.publish(&svc.effort_policies);
-        self.acp.publish(&svc.acp_adapters);
         self.knowledge.publish_maps(&svc.knowledge, &svc.wiki);
         self.snapshots
             .publish(&svc.snapshots, &svc.snapshot_captures);

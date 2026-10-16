@@ -73,16 +73,6 @@ import type {
   CommandOutcome,
   CommandSpec,
   FormStart,
-  AcpAgentListing,
-  ChatEvent,
-  ChatSnapshot,
-  ChatStatus,
-  ContextUsage,
-  PermissionOption,
-  PlanEntry,
-  ToolCall as ChatToolCall,
-  ToolDiff,
-  TranscriptItem,
   ProgramKind,
   ProjectProgram,
   ProviderInstanceView,
@@ -92,17 +82,6 @@ import type {
 } from "./tauri-bridge/generated/bindings.js";
 
 export type { AiSettings, ProviderConfig, RoleBinding };
-export type {
-  ChatEvent,
-  ChatSnapshot,
-  ChatStatus,
-  ChatToolCall,
-  ContextUsage,
-  PermissionOption,
-  PlanEntry,
-  ToolDiff,
-  TranscriptItem,
-};
 export type { ChangedPath, DiffEntry };
 export type { ServiceListing, ScriptServices };
 export type { DataEntity, Extension, ExtensionReview, Lens, LensRun, LensViz, LensSpec, SearchHit, CollectorListing, CollectorRunReport, SqlCell, SqlQueryResult };
@@ -998,65 +977,10 @@ export {
   type SignInListener,
 } from "./tauri-bridge/oauthRedirect.js";
 
-/// The ACP agents this project can run (the new-thread picker).
-export async function listAcpAgents(): Promise<AcpAgentListing[]> {
-  return unwrap(await commands.listAcpAgents());
-}
-
 /// The registered agent harnesses in priority order: the session picker's
 /// and Settings' (`agentKinds.ts`).
 export async function listAgentHarnesses(): Promise<HarnessListing[]> {
   return unwrap(await commands.listAgentHarnesses());
-}
-
-// ---- Chat sessions --------------------------------------------
-// A structured agent conversation instead of a terminal. `chatPrompt` is
-// the prompt box's Enter and nothing else: oxplow never sends an agent
-// input on its own (guarded by no-agent-input-automation.test.ts).
-
-/** Start the thread's ACP agent (or reattach) and return its session. */
-export async function chatOpenSession(sessionId: string): Promise<ChatSnapshot> {
-  return unwrap(await commands.chatOpenSession(sessionId));
-}
-
-/** Send what the person typed. Only `ChatPromptBox` calls this. */
-export async function chatPrompt(sessionId: string, text: string): Promise<void> {
-  unwrap(await commands.chatPrompt(sessionId, text));
-}
-
-export async function chatCancel(sessionId: string): Promise<void> {
-  unwrap(await commands.chatCancel(sessionId));
-}
-
-/** Answer a permission card; `optionId: null` cancels it. */
-export async function chatRespondPermission(
-  sessionId: string,
-  requestId: string,
-  optionId: string | null,
-): Promise<void> {
-  unwrap(await commands.chatRespondPermission(sessionId, requestId, optionId));
-}
-
-/** The session plus items changed after `sinceSeq`; null when none is open. */
-export async function chatTranscript(sessionId: string, sinceSeq: number): Promise<ChatSnapshot | null> {
-  return unwrap(await commands.chatTranscript(sessionId, sinceSeq));
-}
-
-export async function chatCloseSession(sessionId: string): Promise<void> {
-  unwrap(await commands.chatCloseSession(sessionId));
-}
-
-export function subscribeChatEvents(listener: (event: ChatEvent) => void): () => void {
-  let stopped = false;
-  // `listen` rejects when no transport is mounted (bun tests).
-  const unlistenPromise = listen(EVENT_CHANNELS.chat, (e) => {
-    if (stopped) return;
-    listener(e.payload as ChatEvent);
-  }).catch(() => null);
-  return () => {
-    stopped = true;
-    void unlistenPromise.then((u) => u?.());
-  };
 }
 
 /// Settings → Data: every published model with its row count, and the
@@ -1385,7 +1309,6 @@ export interface AgentSessionRecord {
   kind: string;
   /** The harness's key. */
   harness: string;
-  acp_agent: string | null;
   title: string;
 }
 
@@ -1394,14 +1317,12 @@ export interface AgentSessionRecord {
 export async function openAgentSession(
   threadId: string,
   harness?: string,
-  acpAgent?: string | null,
   title?: string,
 ): Promise<AgentSessionRecord> {
   return (
     await runCommand("oxplow.agent_session.open", {
       thread: threadRef(threadId),
       ...(harness ? { harness } : {}),
-      ...(acpAgent ? { acp_agent: acpAgent } : {}),
       ...(title ? { title } : {}),
     })
   ).result as AgentSessionRecord;

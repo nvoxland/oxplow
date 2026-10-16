@@ -22,12 +22,6 @@ query: |
     WHERE n.thread_id = s.thread_id
       AND n.created_at >= s.opened_at
       AND n.created_at <= coalesce(s.closed_at, '9999')
-    UNION ALL
-    SELECT s.ref, s.opened_at, 'note', NULL,
-           'This agent''s transcript isn''t stored here: it keeps it.', '', 0
-    FROM s
-    WHERE s.harness = 'acp'
-      AND NOT EXISTS (SELECT 1 FROM v_agent_turn t WHERE t.agent_session_id = s.id)
   )
   SELECT i.ref, i.at, i.kind, i.ended_at, i.prompt, i.answer, i.tool_calls,
          s.thread_id AS thread_id, s.harness AS harness, s.resume_session_id AS conversation,

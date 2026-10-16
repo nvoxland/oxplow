@@ -349,11 +349,9 @@ pub async fn approve_effect(svc: &Arc<crate::Services>, id: &str) {
     let (ext, decl) = crate::effect_triggers::find_effect(svc, id).expect("its effect");
     let program = crate::effects::effect_program(&ext, &decl);
     let root = svc.layout.project_dir.clone();
-    let config = svc.config.read().unwrap().clone();
     crate::exec_consent::approve_program(
         &svc.approvals,
         &root,
-        &config,
         std::slice::from_ref(&ext),
         crate::exec_consent::ProgramKind::Effect,
         &program.name,
@@ -367,11 +365,9 @@ pub async fn approve_effect(svc: &Arc<crate::Services>, id: &str) {
 pub fn revoke_effect(svc: &Arc<crate::Services>, id: &str) {
     let (ext, decl) = crate::effect_triggers::find_effect(svc, id).expect("its effect");
     let program = crate::effects::effect_program(&ext, &decl);
-    let config = svc.config.read().unwrap().clone();
     crate::exec_consent::revoke_program(
         &svc.approvals,
         &svc.layout.project_dir,
-        &config,
         std::slice::from_ref(&ext),
         crate::exec_consent::ProgramKind::Effect,
         &program.name,

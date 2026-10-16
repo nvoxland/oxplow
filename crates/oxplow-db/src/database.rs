@@ -2400,6 +2400,82 @@ mod tests {
         assert_eq!(rows("SELECT body FROM thread_note"), vec!["n"]);
     }
 
+    /// V80: a chat session still open is closed with its open turns and
+    /// becomes a terminal row; `acp_agent` and the `chat` kind leave the
+    /// table, and what points at a session still does.
+    #[test]
+    fn v80_closes_chat_sessions_and_drops_acp_agent() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(79))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            r#"INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+                 VALUES (1, 'primary', 'a', 'main', 'refs/heads/main', 'main', '/r', 't0', 't0');
+               INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+                 VALUES (1, 1, 'a', 'active', 't', 't');
+               INSERT INTO agent_session (id, thread_id, kind, harness, acp_agent, resume_session_id, opened_at, updated_at, native_title, fork_next)
+                 VALUES (1, 1, 'terminal', 'claude', NULL, 'r1', 't1', 't1', 'named', 1),
+                        (2, 1, 'chat', 'acp', 'gemini', '', 't2', 't2', '', 0);
+               INSERT INTO agent_session_binding (agent_session_id, native_id, origin, bound_at)
+                 VALUES (1, 'r1', 'started', 't1');
+               INSERT INTO agent_turn (id, thread_id, agent_session_id, prompt, started_at)
+                 VALUES (7, 1, 1, 'p', 't1'), (8, 1, 2, 'q', 't2');"#,
+        )
+        .unwrap();
+        // As the app runs its migrations: foreign keys off, then checked.
+        with_foreign_keys_off(&mut conn, |conn| {
+            embedded::migrations::runner()
+                .set_target(refinery::Target::Version(80))
+                .run(conn)
+                .map(|_| true)
+                .map_err(|e| DbInitError::Migration(e.to_string()))
+        })
+        .unwrap();
+        let rows = |sql: &str| -> Vec<String> {
+            conn.prepare(sql)
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        assert_eq!(
+            rows("SELECT id || ' ' || kind || ' ' || harness || ' ' || (closed_at IS NOT NULL)
+                         || ' ' || coalesce(closed_reason, '-') || ' ' || native_title || ' ' || fork_next
+                    FROM agent_session ORDER BY id"),
+            vec!["1 terminal claude 0 - named 1", "2 terminal acp 1 closed  0"]
+        );
+        assert_eq!(
+            rows("SELECT id || ' ' || (ended_at IS NOT NULL) || ' ' || coalesce(answer, '-') FROM agent_turn ORDER BY id"),
+            vec!["7 0 -", "8 1 session closed"]
+        );
+        assert_eq!(
+            rows(
+                "SELECT CAST(count(*) AS TEXT) FROM agent_turn WHERE agent_session_id IS NOT NULL"
+            ),
+            vec!["2"],
+            "the turns still name their sessions"
+        );
+        let columns = rows("SELECT name FROM pragma_table_info('agent_session')");
+        assert!(!columns.iter().any(|c| c == "acp_agent"), "{columns:?}");
+        // The kind check no longer allows a chat, and the binding still
+        // points at its session.
+        assert!(conn
+            .execute(
+                "INSERT INTO agent_session (thread_id, kind, harness, opened_at, updated_at)
+                 VALUES (1, 'chat', 'x', 't', 't')",
+                [],
+            )
+            .is_err());
+        assert_eq!(
+            rows("SELECT native_id FROM agent_session_binding b JOIN agent_session s ON s.id = b.agent_session_id"),
+            vec!["r1"]
+        );
+    }
+
     /// V8: effort events are v2 only and lose `retroactive`.
     #[test]
     fn v8_moves_effort_events_to_v2_without_retroactive() {

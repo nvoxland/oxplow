@@ -28,19 +28,6 @@ pub async fn list_agent_harnesses(
     ))
 }
 
-/// The ACP agents this project can run, with approval and install state.
-pub async fn list_acp_agents(
-    svc: &Services,
-) -> Result<Vec<oxplow_app::acp::agents::AcpAgentListing>, IpcError> {
-    let config = read_config(&svc.config);
-    Ok(oxplow_app::acp::agents::list(
-        &svc.approvals,
-        &svc.layout.project_dir,
-        &svc.acp_adapters,
-        &config,
-    ))
-}
-
 pub async fn list_closed_threads(
     svc: &Services,
     stream_id: StreamId,

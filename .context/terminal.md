@@ -52,8 +52,7 @@ consumer. It's mounted by two page renderers:
 - `apps/desktop/src/pages/AgentPage.tsx` — an agent session's tab,
   `paneTarget` the session id (`ses3`). The backend spawns the session's
   harness CLI (Claude, opencode, or Codex's TUI on the thread oxplow
-  opened on its daemon; an ACP chat session renders `ChatAgentView`
-  instead).
+  opened on its daemon).
 - `apps/desktop/src/pages/TerminalPage.tsx` — the "Terminal" Page (rail
   entry + `indexRef("terminal")`). Hosts **multiple** shells: it mounts
   one `TerminalPane` per terminal, stacked and toggled `display:none`
@@ -79,7 +78,7 @@ server-side spawn) differs.
 An agent PTY is keyed by its **agent session** only (`agent_session_key`
 in `commands/terminal.rs`, `session|ses3`): `open_terminal_session` reads
 the session, then its thread and stream (never the person's selection),
-refuses a closed session or a `chat` one (an ACP agent has no terminal),
+refuses a closed session,
 resumes from the session's resume id and passes `OXPLOW_SESSION`. Two
 sessions in one thread are two PTYs; a re-attach from another window or
 transport resumes the one live agent PTY, never a duplicate `claude` in

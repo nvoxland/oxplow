@@ -14,7 +14,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use oxplow_app::acp::wire::AcpOpen;
+use oxplow_app::chat::acp::AcpOpen;
 use oxplow_app::chat::host::ServicesChatHost;
 use oxplow_app::chat::manager::Launch;
 use oxplow_app::chat::session::{ChatEventBody, ChatStatus, SessionSpec};
@@ -35,9 +35,6 @@ async fn a_real_adapter_answers_a_prompt() {
     let root = dir.path().canonicalize().unwrap();
     let svc = Services::in_memory(&root).await.unwrap();
     let stream = svc.streams.ensure_primary().await.unwrap();
-    // An ACP thread names a known ACP agent; the session below launches the
-    // adapter under test whatever the thread names.
-    svc.config.write().unwrap().agents.push("acp".into());
     let created = svc
         .commands
         .run(
@@ -46,8 +43,6 @@ async fn a_real_adapter_answers_a_prompt() {
             serde_json::json!({
                 "stream": oxplow_domain::refs::build::stream_ref(stream.id),
                 "title": "live",
-                "agent": "acp",
-                "acp_agent": "claude",
             }),
             false,
         )

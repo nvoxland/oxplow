@@ -13,7 +13,7 @@ use oxplow_domain::{AgentSessionId, DomainError, ThreadId, Timestamp};
 use crate::database::{map_sql_err, string_to_ts, ts_to_string, Database};
 use oxplow_domain::vocabulary::VocabularyHandle;
 
-const COLUMNS: &str = "id, thread_id, kind, harness, acp_agent, title, resume_session_id, host,
+const COLUMNS: &str = "id, thread_id, kind, harness, title, resume_session_id, host,
                        opened_at, closed_at, closed_reason, updated_at, pid, last_seen_at, stopped_by_user_at,
                        native_title, fork_next";
 
@@ -41,7 +41,6 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentSession> {
         thread_id: ThreadId::new(row.get("thread_id")?),
         kind: SessionKind::parse(&kind).ok_or_else(|| invalid("kind", &kind))?,
         harness,
-        acp_agent: row.get("acp_agent")?,
         title: row.get("title")?,
         resume_session_id: row.get("resume_session_id")?,
         host: row.get("host")?,
@@ -183,13 +182,12 @@ pub fn insert_tx(
     let at = ts_to_string(now);
     let id = conn
         .query_row(
-            "INSERT INTO agent_session (thread_id, kind, harness, acp_agent, title, opened_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6) RETURNING id",
+            "INSERT INTO agent_session (thread_id, kind, harness, title, opened_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5) RETURNING id",
             params![
                 new.thread_id.value(),
                 new.kind.as_str(),
                 new.harness.as_str(),
-                new.acp_agent,
                 new.title,
                 at
             ],
@@ -536,12 +534,11 @@ mod tests {
         let conn = fixture();
         let opened = insert_tx(
             &conn,
-            &NewAgentSession::chat(ThreadId::new(1), "acp", "gemini"),
+            &NewAgentSession::terminal(ThreadId::new(1), "claude"),
             at(1),
         )
         .unwrap();
-        assert_eq!(opened.kind, SessionKind::Chat);
-        assert_eq!(opened.acp_agent.as_deref(), Some("gemini"));
+        assert_eq!(opened.kind, SessionKind::Terminal);
         assert_eq!((opened.opened_at, opened.updated_at), (at(1), at(1)));
         assert!(opened.is_open());
         assert_eq!(get_tx(&conn, opened.id).unwrap(), Some(opened.clone()));
@@ -659,7 +656,7 @@ mod tests {
         let conn = fixture();
         let s = insert_tx(
             &conn,
-            &NewAgentSession::chat(ThreadId::new(1), "acp", "gemini"),
+            &NewAgentSession::terminal(ThreadId::new(1), "claude"),
             at(0),
         )
         .unwrap();
@@ -691,7 +688,7 @@ mod tests {
         let conn = fixture();
         let s = insert_tx(
             &conn,
-            &NewAgentSession::chat(ThreadId::new(1), "acp", "gemini"),
+            &NewAgentSession::terminal(ThreadId::new(1), "claude"),
             at(0),
         )
         .unwrap();
@@ -758,14 +755,11 @@ mod tests {
         for new in [
             NewAgentSession::terminal(ThreadId::new(1), "codex"),
             NewAgentSession::terminal(ThreadId::new(1), "someones-harness"),
-            NewAgentSession::chat(ThreadId::new(1), "acp", "gemini"),
+            NewAgentSession::terminal(ThreadId::new(1), "claude"),
         ] {
             let s = insert_tx(&conn, &new, at(1)).unwrap();
             let back = get_tx(&conn, s.id).unwrap().unwrap();
-            assert_eq!(
-                (back.kind, back.harness, back.acp_agent),
-                (new.kind, new.harness, new.acp_agent)
-            );
+            assert_eq!((back.kind, back.harness), (new.kind, new.harness));
         }
     }
 

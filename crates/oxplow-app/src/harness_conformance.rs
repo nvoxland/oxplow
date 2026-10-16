@@ -139,17 +139,6 @@ async fn run(
                 );
             }
         }
-        Ok(LaunchSpec::Acp { program, args, .. }) => {
-            if program.to_string_lossy().contains(BEARER) || args.iter().any(|a| a.contains(BEARER))
-            {
-                fail(
-                    "a_launch_keeps_the_bearer_in_its_env",
-                    "the session's bearer is in the agent's program or arguments, which any \
-                     process can list"
-                        .into(),
-                );
-            }
-        }
         // The bearer rides the request that opens the thread, over the
         // daemon's socket: never a command line.
         Ok(LaunchSpec::CodexAppServer { program, .. }) => {
@@ -214,8 +203,7 @@ mod tests {
     use crate::test_fixtures::services_with_effort;
 
     /// Every built-in harness keeps the floor: run over each as any
-    /// harness is (the ACP one launches the program its config names), its
-    /// CLI where oxplow looks.
+    /// harness is, its CLI where oxplow looks.
     #[tokio::test]
     async fn every_built_in_harness_passes() {
         let fx = services_with_effort().await;
@@ -224,13 +212,8 @@ mod tests {
             std::fs::write(bin.path().join(program), "").unwrap();
         }
         let search_path = [bin.path().to_path_buf()];
-        for id in ["claude", "codex", "opencode", "acp"] {
-            let config = if id == "acp" {
-                json!({ "program": "/bin/true" })
-            } else {
-                json!({})
-            };
-            let run = suite(&fx.svc, id, &config, &search_path).await;
+        for id in ["claude", "codex", "opencode"] {
+            let run = suite(&fx.svc, id, &json!({}), &search_path).await;
             assert!(run.findings.is_empty(), "{id}: {:#?}", run.findings);
         }
     }
@@ -241,7 +224,7 @@ mod tests {
     /// command line.
     #[tokio::test]
     async fn a_harness_off_the_floor_is_named_check_by_check() {
-        use oxplow_domain::agent::harness::{HarnessError, Interact, Launch, Transcript};
+        use oxplow_domain::agent::harness::{HarnessError, Launch};
         use oxplow_domain::agent::tool::{ToolKind, ToolUse};
 
         struct Sloppy;
@@ -252,12 +235,6 @@ mod tests {
             }
             fn title(&self) -> &str {
                 "Sloppy"
-            }
-            fn interact(&self) -> Interact {
-                Interact {
-                    transcript: Transcript::Terminal,
-                    acp_agent: false,
-                }
             }
             async fn launch(&self, input: &LaunchInput) -> Result<Launch, HarnessError> {
                 Ok(Launch {

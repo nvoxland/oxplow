@@ -89,7 +89,7 @@ Built-in terminal harness keys:
 
 The list order matters: the first available entry is the default for new
 sessions. The Settings page's **Up** and **Down** buttons change that
-order. ACP and extension implementations add other registered keys.
+order. Extension implementations add other registered keys.
 
 The setting must contain at least one value and cannot contain
 duplicates. Omitting it offers the registered harnesses. Names are

@@ -4,12 +4,10 @@
 //! declaration gives — the key an agent session's `harness` names. Many are
 //! registered at once, the way collectors are.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use oxplow_domain::agent::acp_adapter::AcpAdapter;
 use oxplow_domain::agent::harness::AgentHarness;
-use oxplow_domain::agent::registry::{AcpAdapterRegistry, HarnessRegistry};
+use oxplow_domain::agent::registry::HarnessRegistry;
 
 use crate::capabilities::{Implementation, Source};
 
@@ -43,9 +41,6 @@ pub struct HarnessListing {
     /// Its key (what `agents:` and a session's `harness` name).
     pub id: String,
     pub title: String,
-    /// A session of it runs one of the project's ACP agents, and names
-    /// it.
-    pub acp_agent: bool,
     /// The project enables it (`agents:` names it, or names none).
     pub enabled: bool,
     /// The settings it reads from its `agentConfig` entry.
@@ -84,7 +79,6 @@ pub fn listing(
         .map(|h| HarnessListing {
             id: h.id().to_string(),
             title: h.title().to_string(),
-            acp_agent: h.interact().acp_agent,
             enabled: agents.is_empty() || agents.iter().any(|a| a == h.id()),
             settings: h
                 .settings()
@@ -108,85 +102,6 @@ pub fn listing(
                 .unwrap_or_default(),
         })
         .collect()
-}
-
-/// Set the ACP adapters `declared` names, in declaration order. One whose
-/// config doesn't hold is left out (logged); the loader checked it against
-/// the built-in's schema already.
-pub fn register_acp_adapters(registry: &AcpAdapterRegistry, declared: &[Implementation]) {
-    let (adapters, errors) = build_acp_adapters(declared);
-    for (id, diagnostic) in errors {
-        if diagnostic == "ACP adapter config is invalid" {
-            tracing::warn!(adapter = %id, %diagnostic, "an ACP adapter's config doesn't hold");
-        }
-    }
-    adapters.publish(registry);
-}
-
-/// ACP adapters prepared from one declaration snapshot.
-pub struct PreparedAcpAdapters {
-    adapters: Vec<AcpAdapter>,
-}
-
-impl PreparedAcpAdapters {
-    pub fn publish(self, registry: &AcpAdapterRegistry) {
-        registry.set(self.adapters);
-    }
-}
-
-/// Prepare all declared ACP adapters, failing the candidate if any entry
-/// cannot be built. Diagnostics are fixed and do not include config values.
-pub fn prepare_acp_adapters(
-    declared: &[Implementation],
-) -> Result<PreparedAcpAdapters, BTreeMap<String, String>> {
-    let (adapters, errors) = build_acp_adapters(declared);
-    if errors.is_empty() {
-        Ok(adapters)
-    } else {
-        Err(errors)
-    }
-}
-
-fn build_acp_adapters(
-    declared: &[Implementation],
-) -> (PreparedAcpAdapters, BTreeMap<String, String>) {
-    let mut adapters = Vec::new();
-    let mut errors = BTreeMap::new();
-    for implementation in declared.iter().filter(|i| i.capability == "acp_adapter") {
-        let adapter = match &implementation.source {
-            Source::BuiltIn(entry) => {
-                match oxplow_harnesses::acp_adapter(
-                    entry,
-                    &implementation.id,
-                    &implementation.title,
-                    &implementation.config,
-                ) {
-                    Some(Ok(adapter)) => Some(adapter),
-                    Some(Err(_)) => {
-                        errors.insert(
-                            implementation.id.clone(),
-                            "ACP adapter config is invalid".into(),
-                        );
-                        None
-                    }
-                    None => {
-                        errors.insert(
-                            implementation.id.clone(),
-                            "ACP adapter entry is unsupported".into(),
-                        );
-                        None
-                    }
-                }
-            }
-            // External implementations are prepared by the provider owner,
-            // rather than constructed as native adapters here.
-            _ => None,
-        };
-        if let Some(adapter) = adapter {
-            adapters.push(adapter);
-        }
-    }
-    (PreparedAcpAdapters { adapters }, errors)
 }
 
 #[cfg(test)]
@@ -244,85 +159,53 @@ mod tests {
             &r,
             &[
                 declared("agent_harness", "claude", "oxplow:claude-code"),
-                declared("agent_harness", "acp", "oxplow:acp"),
+                declared("agent_harness", "codex", "oxplow:codex-cli"),
                 declared("work_items", "oxplow", "oxplow:tasks"),
             ],
         );
-        assert_eq!(r.names(), ["claude", "acp"]);
+        assert_eq!(r.names(), ["claude", "codex"]);
         assert_eq!(r.default().unwrap().id(), "claude");
-        register(&r, &[declared("agent_harness", "acp", "oxplow:acp")]);
-        assert_eq!(r.names(), ["acp"]);
-    }
-
-    /// The declared ACP adapters are set in declaration order, each from
-    /// its config; one whose config doesn't hold is left out.
-    #[test]
-    fn the_declared_acp_adapters_are_set_from_their_config() {
-        let adapter = |id: &str, config: serde_json::Value| Implementation {
-            config,
-            ..declared("acp_adapter", id, "oxplow:acp-adapter")
-        };
-        let r = AcpAdapterRegistry::default();
-        register_acp_adapters(
+        register(
             &r,
-            &[
-                adapter(
-                    "gemini",
-                    serde_json::json!({ "command": "gemini", "args": ["--acp"] }),
-                ),
-                adapter("broken", serde_json::json!({ "args": [] })),
-                declared("agent_harness", "claude", "oxplow:claude-code"),
-                adapter(
-                    "claude",
-                    serde_json::json!({ "command": "claude-agent-acp" }),
-                ),
-            ],
+            &[declared("agent_harness", "codex", "oxplow:codex-cli")],
         );
-        let ids: Vec<(String, String)> = r.all().into_iter().map(|a| (a.id, a.command)).collect();
-        assert_eq!(
-            ids,
-            [
-                ("gemini".to_string(), "gemini".to_string()),
-                ("claude".to_string(), "claude-agent-acp".to_string())
-            ]
-        );
+        assert_eq!(r.names(), ["codex"]);
     }
 
     /// The listing is the registry's, the enabled ones first in `agents:`
     /// order; with no `agents:` every harness is enabled, as declared.
     #[test]
-    fn the_listing_says_which_run_acp_agents_and_which_are_enabled() {
+    fn the_listing_says_which_are_enabled() {
         let r = HarnessRegistry::new(std::sync::Arc::new(String::new));
         register(
             &r,
             &[
                 declared("agent_harness", "claude", "oxplow:claude-code"),
                 declared("agent_harness", "codex", "oxplow:codex-cli"),
-                declared("agent_harness", "acp", "oxplow:acp"),
+                declared("agent_harness", "opencode", "oxplow:opencode"),
             ],
         );
         let rows = |agents: &[&str]| {
             let agents: Vec<String> = agents.iter().map(|a| a.to_string()).collect();
             listing(&r, &no_capabilities(), &agents)
                 .into_iter()
-                .map(|h| (h.id, h.acp_agent, h.enabled))
+                .map(|h| (h.id, h.enabled))
                 .collect::<Vec<_>>()
         };
-        // Codex is a chat too, of its own thread: no ACP agent to name.
         assert_eq!(
             rows(&[]),
             [
-                ("claude".into(), false, true),
-                ("codex".into(), false, true),
-                ("acp".into(), true, true)
+                ("claude".into(), true),
+                ("codex".into(), true),
+                ("opencode".into(), true)
             ]
         );
         assert_eq!(
-            rows(&["acp"]),
+            rows(&["opencode"]),
             [
-                ("acp".into(), true, true),
-                ("claude".into(), false, false),
-                ("codex".into(), false, false)
+                ("opencode".into(), true),
+                ("claude".into(), false),
+                ("codex".into(), false)
             ]
         );
     }

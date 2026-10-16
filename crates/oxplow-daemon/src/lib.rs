@@ -139,8 +139,8 @@ async fn health() -> &'static str {
 }
 
 /// `GET /events` — WebSocket multiplexing the backend event channels
-/// (`oxplow:event`, `lsp:event`, `terminal:event`, `chat:event`). Each
-/// frame is `{"channel":"oxplow"|"lsp"|"terminal"|"chat","payload":<event>}`
+/// (`oxplow:event`, `lsp:event`, `terminal:event`). Each
+/// frame is `{"channel":"oxplow"|"lsp"|"terminal","payload":<event>}`
 /// with the event's serialized shape, so the renderer's handlers are
 /// transport-agnostic.
 ///
@@ -203,8 +203,8 @@ fn frame_json<T: serde::Serialize>(channel: &str, event: &T) -> Option<String> {
 /// Subscribe every channel the socket carries. Frame keys come from the
 /// shared channel registry so the daemon, the Tauri shell, and the
 /// renderer's demux table can't drift.
-fn subscribe(state: &DaemonState) -> [Forwarder; 4] {
-    let [oxplow_key, lsp_key, terminal_key, chat_key] = ws_frame_keys();
+fn subscribe(state: &DaemonState) -> [Forwarder; 3] {
+    let [oxplow_key, lsp_key, terminal_key] = ws_frame_keys();
     [
         forward(state.ctx.events.subscribe_ui(), move |e| {
             frame_json(oxplow_key, e)
@@ -215,14 +215,13 @@ fn subscribe(state: &DaemonState) -> [Forwarder; 4] {
         forward(state.ctx.terminal_sessions.subscribe(), move |e| {
             frame_json(terminal_key, e)
         }),
-        forward(state.ctx.chat.subscribe(), move |e| frame_json(chat_key, e)),
     ]
 }
 
-/// The `/events` frame keys in [oxplow, lsp, terminal, chat] order,
+/// The `/events` frame keys in [oxplow, lsp, terminal] order,
 /// resolved from `oxplow_app::event_channels::FRAMES` by the channel
 /// each key demuxes onto.
-fn ws_frame_keys() -> [&'static str; 4] {
+fn ws_frame_keys() -> [&'static str; 3] {
     use oxplow_app::event_channels as ch;
     let key_for = |channel: &str| -> &'static str {
         ch::FRAMES
@@ -231,17 +230,12 @@ fn ws_frame_keys() -> [&'static str; 4] {
             .map(|(k, _)| *k)
             .unwrap_or_else(|| unreachable!("channel {channel} missing from FRAMES"))
     };
-    [
-        key_for(ch::OXPLOW),
-        key_for(ch::LSP),
-        key_for(ch::TERMINAL),
-        key_for(ch::CHAT),
-    ]
+    [key_for(ch::OXPLOW), key_for(ch::LSP), key_for(ch::TERMINAL)]
 }
 
 /// Start each channel's forwarder into one queue, then pump the socket
 /// from it.
-async fn events_stream(socket: WebSocket, subscriptions: [Forwarder; 4]) {
+async fn events_stream(socket: WebSocket, subscriptions: [Forwarder; 3]) {
     let (mut sink, mut inbound) = socket.split();
     let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(256);
     let forwarders = subscriptions.map(|start| start(tx.clone()));
@@ -953,45 +947,6 @@ mod tests {
             v["payload"]["message"].is_string(),
             "terminal frame carries the JSON-encoded protocol message"
         );
-    }
-
-    #[tokio::test]
-    async fn events_ws_streams_chat_events() {
-        use futures::StreamExt as _;
-        use oxplow_app::chat::session::{ChatEvent, ChatEventBody, ChatStatus};
-        let (svc, _dir) = services().await;
-        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
-            .await
-            .unwrap();
-        let url = format!("ws://{}/events?token={UI_TOKEN}", daemon.bind_addr);
-        let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
-        // Same subscribe-race handling as the other events tests.
-        let frame = tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            loop {
-                svc.chat.emit_event_for_tests(ChatEvent {
-                    agent_session_id: "ses4".into(),
-                    thread_id: "thr3".into(),
-                    generation: 1,
-                    body: ChatEventBody::Status {
-                        status: ChatStatus::Running,
-                    },
-                });
-                match tokio::time::timeout(std::time::Duration::from_millis(200), ws.next()).await {
-                    Ok(Some(Ok(msg))) if msg.is_text() => {
-                        return msg.into_text().unwrap().to_string()
-                    }
-                    _ => continue,
-                }
-            }
-        })
-        .await
-        .expect("ws frame within timeout");
-        let v: serde_json::Value = serde_json::from_str(&frame).unwrap();
-        assert_eq!(v["channel"], "chat");
-        assert_eq!(v["payload"]["agentSessionId"], "ses4");
-        assert_eq!(v["payload"]["threadId"], "thr3");
-        assert_eq!(v["payload"]["type"], "status");
-        assert_eq!(v["payload"]["status"], "running");
     }
 
     #[tokio::test]

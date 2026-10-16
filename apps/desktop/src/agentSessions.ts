@@ -19,24 +19,20 @@ export interface AgentSessionRow {
   id: string;
   /** `thr1`. */
   threadId: string;
-  /** `terminal`, `chat` or `action`. */
+  /** `terminal` or `action`. */
   kind: string;
   /** The harness's key. */
   harness: string;
-  /** For an `acp` session, the ACP agent's name. */
-  acpAgent: string | null;
   /** What the person called it; empty until renamed. */
   title: string;
   openedAt: string;
   /** The person stopped it, and hasn't started it again: its tab spawns
    *  nothing until they do. */
   stoppedByUser: boolean;
-  /** The harness's saved conversation it is bound to; empty until it has one. */
-  resumeId: string;
 }
 
 const COLUMNS =
-  "s.ref, (SELECT t.ref FROM v_thread t WHERE t.id = s.thread_id) AS thread_ref, s.kind, s.harness, s.acp_agent, s.title, s.opened_at, s.stopped_by_user_at, s.resume_session_id";
+  "s.ref, (SELECT t.ref FROM v_thread t WHERE t.id = s.thread_id) AS thread_ref, s.kind, s.harness, s.title, s.opened_at, s.stopped_by_user_at";
 
 export function agentSessionsFromResult(result: SqlQueryResult): AgentSessionRow[] {
   const at = (row: SqlCell[], name: string) => row[result.columns.indexOf(name)] ?? null;
@@ -45,11 +41,9 @@ export function agentSessionsFromResult(result: SqlQueryResult): AgentSessionRow
     threadId: idOf(String(at(row, "thread_ref")), "thread") ?? "",
     kind: String(at(row, "kind")),
     harness: String(at(row, "harness")),
-    acpAgent: at(row, "acp_agent") == null ? null : String(at(row, "acp_agent")),
     title: String(at(row, "title") ?? ""),
     openedAt: String(at(row, "opened_at")),
     stoppedByUser: at(row, "stopped_by_user_at") != null,
-    resumeId: String(at(row, "resume_session_id") ?? ""),
   }));
 }
 

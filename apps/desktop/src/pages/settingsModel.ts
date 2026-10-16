@@ -13,7 +13,7 @@ const GROUPS: { title: string; matches(key: string): boolean }[] = [
   {
     title: "Agents",
     matches: (k) =>
-      ["agents", "agentConfig", "acpAgents", "agentPromptAppend", "injectSessionContext", "personal.newThreadSession"].includes(
+      ["agents", "agentConfig", "agentPromptAppend", "injectSessionContext", "personal.newThreadSession"].includes(
         k,
       ),
   },

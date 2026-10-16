@@ -94,12 +94,11 @@ pub(super) async fn observations(fx: &Fixture, id: &str) -> i64 {
 /// extension's job).
 pub(super) fn job_key(fx: &Fixture) -> String {
     let project = fx.svc.layout.project_dir.clone();
-    let config = fx.svc.config.read().unwrap().clone();
     let extensions = fx
         .svc
         .extension_catalog
         .unpinned(&project, "a test reads declarations");
-    crate::exec_consent::list(&fx.svc.approvals, &project, &config, &extensions)
+    crate::exec_consent::list(&fx.svc.approvals, &project, &extensions)
         .into_iter()
         .find(|p| p.kind == crate::exec_consent::ProgramKind::Job && p.name.starts_with("triage/"))
         .expect("the job is a program")

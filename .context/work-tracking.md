@@ -18,8 +18,7 @@ commit links with no help from the agent.
 
 So: **infer, don't enforce.** oxplow works out what is going on; the agent
 is never required to do bookkeeping. This must hold for weak models and
-for harnesses where a block never reaches the agent (ACP shows a Stop
-directive to the person, never the agent). Any wall-clock or tokens the
+for harnesses where a block never reaches the agent. Any wall-clock or tokens the
 tracking costs must buy something the person or the agent uses.
 
 **Order of remedies:** infer first, hint second, gate never. A hint that
@@ -288,7 +287,7 @@ own — heavier ones included (beads as a work list).
 - **One active, or many at once.** Most capabilities have one active
   implementation, chosen (the work list, the effort policy, snapshots) or
   fixed (`vcs`). A **many-capability** (`CapabilitySpec.many`:
-  `agent_harness`, `acp_adapter`, `ai_provider`) is served by every
+  `agent_harness`, `ai_provider`) is served by every
   implementation declared — the way collectors are — never chosen,
   never none and never switched: each declared row is active
   (`chosen_by = declared`), its `default` is the one used when nothing

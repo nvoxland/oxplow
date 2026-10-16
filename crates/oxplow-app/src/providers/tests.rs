@@ -89,11 +89,9 @@ fn extension(project: &Path) -> Extension {
 
 /// The listing's view of the provider, as a person sees it.
 fn program(fx: &EffortFixture, ext: &Extension) -> exec_consent::ProjectProgram {
-    let config = fx.svc.config.read().unwrap().clone();
     exec_consent::list(
         &fx.svc.approvals,
         &fx.svc.layout.project_dir,
-        &config,
         std::slice::from_ref(ext),
     )
     .into_iter()
@@ -110,11 +108,9 @@ async fn approve(fx: &EffortFixture, ext: &Extension) {
 
 fn approve_without_activating(fx: &EffortFixture, ext: &Extension) {
     let p = program(fx, ext);
-    let config = fx.svc.config.read().unwrap().clone();
     exec_consent::approve_program(
         &fx.svc.approvals,
         &fx.svc.layout.project_dir,
-        &config,
         std::slice::from_ref(ext),
         ProgramKind::Provider,
         &p.name,
@@ -2575,13 +2571,11 @@ async fn an_effect_doesnt_hear_its_own_external_write_echoed_by_a_read() {
     let ext = extension(&project);
     approve(&fx, &ext).await;
     make_active(&fx, "fake").await;
-    let config = fx.svc.config.read().unwrap().clone();
     let decl = &ext.effects[0];
     let effect = crate::effects::effect_program(&ext, decl);
     exec_consent::approve_program(
         &fx.svc.approvals,
         &project,
-        &config,
         std::slice::from_ref(&ext),
         ProgramKind::Effect,
         &effect.name,
@@ -3173,11 +3167,9 @@ async fn sibling_project(
 /// Approve the tracker's provider program as it is in `svc`'s project.
 async fn approve_in(svc: &std::sync::Arc<crate::Services>) {
     let ext = extension(&svc.layout.project_dir);
-    let config = svc.config.read().unwrap().clone();
     let program = exec_consent::list(
         &svc.approvals,
         &svc.layout.project_dir,
-        &config,
         std::slice::from_ref(&ext),
     )
     .into_iter()
@@ -3186,7 +3178,6 @@ async fn approve_in(svc: &std::sync::Arc<crate::Services>) {
     exec_consent::approve_program(
         &svc.approvals,
         &svc.layout.project_dir,
-        &config,
         std::slice::from_ref(&ext),
         ProgramKind::Provider,
         &program.name,
@@ -3577,11 +3568,9 @@ async fn a_global_instances_credential_is_shared_across_projects() {
     .await
     .unwrap();
     let other_ext = extension(dir.path());
-    let config = other.config.read().unwrap().clone();
     let program = exec_consent::list(
         &other.approvals,
         dir.path(),
-        &config,
         std::slice::from_ref(&other_ext),
     )
     .into_iter()
@@ -3590,7 +3579,6 @@ async fn a_global_instances_credential_is_shared_across_projects() {
     exec_consent::approve_program(
         &other.approvals,
         dir.path(),
-        &config,
         std::slice::from_ref(&other_ext),
         ProgramKind::Provider,
         &program.name,
@@ -5187,11 +5175,9 @@ async fn with_effect(hooks: &str, script: &str) -> TaskEffortFixture {
     make_active(&fx, "fake").await;
     let decl = ext.effects[0].clone();
     let program = crate::effects::effect_program(&ext, &decl);
-    let config = fx.svc.config.read().unwrap().clone();
     exec_consent::approve_program(
         &fx.svc.approvals,
         &project,
-        &config,
         std::slice::from_ref(&ext),
         ProgramKind::Effect,
         &program.name,
@@ -6629,10 +6615,6 @@ async fn a_harness_provider_is_a_registered_harness() {
     let (fx, _ext) = running_harness("").await;
     let h = fx.svc.harnesses.get("fake").expect("registered as `fake`");
     assert_eq!(h.title(), "fake");
-    assert_eq!(
-        h.interact().transcript,
-        oxplow_domain::agent::harness::Transcript::Terminal
-    );
     assert_eq!(h.env_markers(), ["OXPLOW_FAKE_HARNESS_SESSION".to_string()]);
     assert_eq!(h.settings()[0].key, "model");
     assert!(crate::agent_path::not_inherited(&fx.svc.harnesses)

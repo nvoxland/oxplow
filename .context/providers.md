@@ -530,15 +530,13 @@ instance's call timeout).
 
 **A harness provider** answers what a built-in harness answers in code
 (`.context/agent-model.md` "What a harness implements"). Its title is its
-`provider.name`; it's a chat (a structured transcript) when it declares
-`structured_transcript`; its environment markers and settings are its
+`provider.name`; its environment markers and settings are its
 capability's `data`. Each operation is one invoke:
 `launch` takes the launch's input as it is (`LaunchInput`: the session,
 its worktree and project, the endpoints and the session's bearer, the
 identity env, the system prompt, the resume id, the agent text, its
 `agentConfig`, oxplow's executable, home, and the program `search_path`)
-and answers a `Launch` (`{ spec: { kind: pty, command, env } | { kind:
-acp, program, args, env, system_prompt_via_meta }, transcript_missing? }`);
+and answers a `Launch` (`{ spec: { kind: pty, command, env }, transcript_missing? }`);
 `tool_use { body }` → `{ tool }`; `render { answer }` (`{ kind: ack |
 deny | context, … }`) → `{ body }`; `refresh_text { roots, text }` → `{}`;
 `turns { transcript }` → `{ turns }`; `prompt { body }` → `{ prompt: { kind:
@@ -565,9 +563,8 @@ harness, config, search_path)`) checks any registered harness through its
 own operations, built-ins and providers alike: its answers render as
 objects, a refusal and added context read unlike an acknowledgement, an
 empty hook body maps to no tool, and a launch in a scratch worktree (placeholder endpoints, a
-marked bearer) keeps the bearer off the command line or an ACP agent's
-program and args, and in a terminal launch's env. In-tree it runs over the
-four built-ins (`acp` with `{ program: /bin/true }`) and the fake provider;
+marked bearer) keeps the bearer off the command line or program and args, and in a terminal launch's env. In-tree it runs over the
+three built-ins and the fake provider;
 it found Codex passing its telemetry bearer in `--config`. The kit's arm
 runs it with config `{}` and the kit environment's search path (its PATH,
 then the install dirs under its HOME — `kit_search_path`), so a harness

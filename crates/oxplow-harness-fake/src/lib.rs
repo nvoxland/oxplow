@@ -6,9 +6,7 @@
 //! answers have a shape of its own (`{"fake": …}`) and its binary fails on
 //! any other, so a pass shows core let the harness render every answer.
 
-use oxplow_domain::agent::harness::{
-    AgentHarness, HarnessError, Interact, Launch, LaunchInput, LaunchSpec, Transcript,
-};
+use oxplow_domain::agent::harness::{AgentHarness, HarnessError, Launch, LaunchInput, LaunchSpec};
 use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, Prompt, TokenReading};
 use oxplow_domain::agent::tool::{Subagent, ToolKind, ToolUse};
 use oxplow_domain::events::schema::TokenKind;
@@ -40,13 +38,6 @@ impl AgentHarness for FakeHarness {
 
     fn title(&self) -> &str {
         "Fake"
-    }
-
-    fn interact(&self) -> Interact {
-        Interact {
-            transcript: Transcript::Terminal,
-            acp_agent: false,
-        }
     }
 
     async fn launch(&self, input: &LaunchInput) -> Result<Launch, HarnessError> {

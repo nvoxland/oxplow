@@ -1,37 +1,10 @@
 import { expect, test } from "bun:test";
 
-import type { ChatToolCall } from "./api.js";
 import { threadRowId } from "./modelIds.js";
-import { answerOfTool, answersFromRows } from "./threadAnswers.js";
-
-const call = (over: Partial<ChatToolCall>): ChatToolCall => ({
-  id: "t1",
-  title: "",
-  name: null,
-  kind: "other",
-  status: "completed",
-  locations: [],
-  rawInput: null,
-  rawOutput: null,
-  diffs: [],
-  text: [],
-  ...over,
-});
+import { answersFromRows } from "./threadAnswers.js";
 
 test("a thread's row id is its number", () => {
   expect(threadRowId("thr12")).toBe(12);
-});
-
-test("a finished oxplow_show_lens call names its answer, whatever the MCP server's prefix", () => {
-  const out = JSON.stringify({ answer: "answer:7", title: "Churn", text: "| a |" });
-  expect(answerOfTool(call({ name: "mcp__oxplow__oxplow_show_lens", text: [out] }))).toBe("answer:7");
-  expect(
-    answerOfTool(call({ title: "mcp__plugin_oxplow_oxplow__oxplow_show_lens", rawOutput: [{ type: "text", text: out }] })),
-  ).toBe("answer:7");
-  // Still running, another tool, or a failed call: nothing to show.
-  expect(answerOfTool(call({ name: "mcp__oxplow__oxplow_show_lens", status: "in_progress", text: [out] }))).toBeNull();
-  expect(answerOfTool(call({ name: "mcp__oxplow__oxplow_run_lens", text: [out] }))).toBeNull();
-  expect(answerOfTool(call({ name: "mcp__oxplow__oxplow_show_lens", text: ["refused: DELETE"] }))).toBeNull();
 });
 
 test("answers read newest first, with the lens they show or were kept as", () => {

@@ -30,8 +30,8 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 
 use oxplow_domain::agent::harness::{
-    AgentHarness, ConversationQuery, Endpoints, HarnessError, HarnessSetting, Interact, Launch,
-    LaunchInput, LaunchSpec, NativeConversation, RuntimeRoots, Transcript,
+    AgentHarness, ConversationQuery, Endpoints, HarnessError, HarnessSetting, Launch, LaunchInput,
+    LaunchSpec, NativeConversation, RuntimeRoots,
 };
 use oxplow_domain::agent::observe::{
     HookAnswer, OtlpRecord, Prompt, TokenReading, Turn, UsageDelta,
@@ -74,13 +74,6 @@ impl AgentHarness for Claude {
 
     fn title(&self) -> &str {
         &self.0.title
-    }
-
-    fn interact(&self) -> Interact {
-        Interact {
-            transcript: Transcript::Terminal,
-            acp_agent: false,
-        }
     }
 
     async fn launch(&self, input: &LaunchInput) -> Result<Launch, HarnessError> {

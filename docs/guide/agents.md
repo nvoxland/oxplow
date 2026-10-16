@@ -5,10 +5,9 @@ no agent session or several. Sessions have their own agent implementation,
 process, resume identity, activity, and status; they share the thread's
 context, tabs, and writer role.
 
-Oxplow ships harness integrations for Claude Code, Codex, OpenCode, and
-ACP, with implementations declared by its foundation extension. An ACP
-session uses a structured conversation; terminal harnesses use a PTY in
-the stream's worktree.
+Oxplow ships harness integrations for Claude Code, Codex, and OpenCode,
+with implementations declared by its foundation extension. Each runs in a
+PTY in the stream's worktree.
 
 ## Choose available harnesses
 
@@ -27,14 +26,13 @@ registered harnesses; an explicit list must be nonempty and contain no
 duplicates. Its first available entry is the default. Additional
 implementations can extend the registry.
 
-ACP agent commands are configured separately. Enabling an implementation
-does not install its CLI or authenticate it. See
-[Settings](../reference/settings.md#agents).
+Enabling an implementation does not install its CLI or authenticate it.
+See [Settings](../reference/settings.md#agents).
 
 ## Sessions inside a thread
 
 Open a session from the session picker or **New Agent Session…**. Choose
-its implementation and, for ACP, the configured ACP agent. Each open
+its implementation. Each open
 session has its own tab. A personal new-thread preference can seed a
 session when a thread is created; otherwise a thread can start empty.
 

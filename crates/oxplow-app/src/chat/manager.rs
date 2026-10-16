@@ -15,13 +15,13 @@ use serde::Serialize;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
+use super::acp::{self as wire, AcpOpen};
 use super::codex::{CodexConnection, CodexOpen};
 use super::conn::{Connection, Incoming};
 use super::host::ChatHost;
 use super::model::ContextUsage;
 use super::session::{Actor, ChatError, ChatEvent, ChatStatus, Command, SessionSpec, SessionView};
 use super::transcript::TranscriptItem;
-use crate::acp::wire::{self, AcpOpen};
 
 /// The ACP agent's program to run.
 #[derive(Debug, Clone)]

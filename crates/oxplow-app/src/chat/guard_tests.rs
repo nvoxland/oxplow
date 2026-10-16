@@ -86,7 +86,7 @@ fn only_wire_names_the_sdk_prompt_request() {
     let lines = source_lines();
     assert_eq!(
         files_containing(&lines, "PromptRequest"),
-        vec!["crates/oxplow-app/src/acp/wire.rs"]
+        vec!["crates/oxplow-app/src/chat/acp.rs"]
     );
 }
 
@@ -120,14 +120,16 @@ fn prompts_are_composed_only_on_the_human_submit_path() {
     assert!(calls[0].1.contains("human_prompt::compose(&text"));
 }
 
+/// No production code submits a human prompt: the chat view that did is
+/// gone, and a session's person types in the agent's own TUI. The library
+/// keeps the entry point (`ChatManager::submit_human_prompt`) for an
+/// embedded chat to come, called from its tests only.
 #[test]
-fn only_the_prompt_box_command_submits_human_prompts() {
+fn no_production_code_calls_submit_human_prompt() {
     let lines = source_lines();
     let allowed = [
         // The definition.
         "crates/oxplow-app/src/chat/manager.rs",
-        // `chat_prompt`, the prompt box's Enter (a `ui(...)` row).
-        "crates/oxplow-rpc/src/commands/chat.rs",
     ];
     let hits: Vec<String> = files_containing(&lines, "submit_human_prompt(")
         .into_iter()

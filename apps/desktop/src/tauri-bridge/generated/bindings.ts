@@ -106,11 +106,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listAcpAgents: () => typedError<AcpAgentListing[], IpcError>(__TAURI_INVOKE("list_acp_agents")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listAgentHarnesses: () => typedError<HarnessListing[], IpcError>(__TAURI_INVOKE("list_agent_harnesses")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1060,49 +1055,6 @@ export const commands = {
 	 */
 	openTerminalSession: (paneTarget: string, cols: number, rows: number) => typedError<AttachResult, IpcError>(__TAURI_INVOKE("open_terminal_session", { paneTarget, cols, rows })),
 	/**
-	 *  Open (or reattach to) an ACP thread's agent session. Hand-written like
-	 *  `open_terminal_session`: the MCP endpoint comes from the `PluginRuntime`.
-	 */
-	chatOpenSession: (sessionId: AgentSessionId) => typedError<ChatSnapshot, IpcError>(__TAURI_INVOKE("chat_open_session", { sessionId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	chatPrompt: (sessionId: AgentSessionId, text: string) => typedError<null, IpcError>(__TAURI_INVOKE("chat_prompt", { sessionId, text })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	chatCancel: (sessionId: AgentSessionId) => typedError<null, IpcError>(__TAURI_INVOKE("chat_cancel", { sessionId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	chatRespondPermission: (sessionId: AgentSessionId, requestId: string, optionId: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("chat_respond_permission", { sessionId, requestId, optionId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	chatTranscript: (sessionId: AgentSessionId, sinceSeq: number) => typedError<{
-	agent: string,
-	/**
-	 *  The session's generation: a new one (a Restart) replaces the
-	 *  client's transcript instead of merging into it.
-	 */
-	generation: number,
-	status: ChatStatus,
-	usage: ContextUsage | null,
-	/**  The highest `seq` in the transcript; ask `since` this next time. */
-	headSeq: number,
-	items: TranscriptItem[],
-	stderrTail: string[],
-} | null, IpcError>(__TAURI_INVOKE("chat_transcript", { sessionId, sinceSeq })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	chatCloseSession: (sessionId: AgentSessionId) => typedError<null, IpcError>(__TAURI_INVOKE("chat_close_session", { sessionId })),
-	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
@@ -1203,46 +1155,6 @@ export type Access =
  *  writer thread.
  */
 "write";
-
-/**
- *  An agent oxplow talks to over the Agent Client Protocol (tsk335): a
- *  program that speaks ACP on its stdio. The extensions' declared ACP
- *  adapters cover the common ones; `acpAgents:` in `.oxplow/project.yaml`
- *  adds or overrides by name (`oxplow_app::acp::agents`). A project entry
- *  names a program from the repo, so it runs only once a person approved it
- *  (see `exec_consent`).
- */
-export type AcpAgentConfig = {
-	/**  Short name a thread picks it by (`claude`, `gemini`, `my-agent`). */
-	name: string,
-	/**  The program: a name on PATH or a path. */
-	command: string,
-	args?: string[],
-	/**  Extra environment for the program. */
-	env?: { [key in string]: string },
-};
-
-/**  One ACP agent, as the thread picker and Settings see it. */
-export type AcpAgentListing = {
-	name: string,
-	command: string,
-	args: string[],
-	source: AcpAgentSource,
-	/**
-	 *  May start on this machine: a declared adapter, or an approved
-	 *  project entry.
-	 */
-	approved: boolean,
-	/**  The command's absolute path, or `None` when it isn't installed. */
-	resolvedPath: string | null,
-};
-
-/**  Where an ACP agent definition came from. */
-export type AcpAgentSource = 
-/**  An adapter an extension declares; runs without approval. */
-"declared" | 
-/**  The project's `acpAgents:`; needs a person's approval to run. */
-"project";
 
 /**
  *  An MCP server as a provider: oxplow's adapter runs `mcp`'s
@@ -1698,40 +1610,6 @@ export type ChangedPath = {
 	/**  `added`, `modified` or `deleted`. */
 	status: FileStatus,
 };
-
-/**  A change to one agent session's ACP agent, pushed to the UI. */
-export type ChatEvent = {
-	/**  The agent session (`ses3`) it is about. */
-	agentSessionId: string,
-	/**  Its thread, for a client that filters by thread. */
-	threadId: string,
-	/**
-	 *  Which run of the session: each open is a new generation whose
-	 *  ids and seqs start over, so a client resets rather than merging it
-	 *  with the last one's transcript.
-	 */
-	generation: number,
-} & ChatEventBody;
-
-export type ChatEventBody = { type: "item"; item: TranscriptItem } | { type: "status"; status: ChatStatus } | { type: "usage"; usage: ContextUsage } | { type: "closed"; reason: string | null };
-
-/**  A session as the UI reads it. */
-export type ChatSnapshot = {
-	agent: string,
-	/**
-	 *  The session's generation: a new one (a Restart) replaces the
-	 *  client's transcript instead of merging into it.
-	 */
-	generation: number,
-	status: ChatStatus,
-	usage: ContextUsage | null,
-	/**  The highest `seq` in the transcript; ask `since` this next time. */
-	headSeq: number,
-	items: TranscriptItem[],
-	stderrTail: string[],
-};
-
-export type ChatStatus = "starting" | "idle" | "running" | "awaiting_permission" | "stopped";
 
 /**  What `check` found. */
 export type CheckReport = CheckReport_Serialize | CheckReport_Deserialize;
@@ -2351,17 +2229,6 @@ export type ConfigurationFile = {
 export type Confirm = "never" | "always" | 
 /**  Irreversible; presented as destructive and always confirmed. */
 "destructive";
-
-/**
- *  Context-window occupancy and cumulative cost from `usage_update`. It
- *  drives the context meter only — never token accounting.
- */
-export type ContextUsage = {
-	used: number,
-	size: number,
-	costAmount: number | null,
-	costCurrency: string | null,
-};
 
 /**
  *  A contribution's identity within the catalog: who declared it, what
@@ -3608,11 +3475,6 @@ export type HarnessListing = {
 	/**  Its key (what `agents:` and a session's `harness` name). */
 	id: string,
 	title: string,
-	/**
-	 *  A session of it runs one of the project's ACP agents, and names
-	 *  it.
-	 */
-	acpAgent: boolean,
 	/**  The project enables it (`agents:` names it, or names none). */
 	enabled: boolean,
 	/**  The settings it reads from its `agentConfig` entry. */
@@ -3924,21 +3786,6 @@ export type IpcError = {
 	 */
 	field?: string | null,
 };
-
-export type ItemBody = 
-/**
- *  What the human sent. `context` is the oxplow block attached to it,
- *  shown behind a disclosure.
- */
-{ type: "user"; text: string; context: string | null } | { type: "agent"; text: string } | { type: "thought"; text: string } | { type: "tool"; call: ToolCall } | { type: "plan"; entries: PlanEntry[] } | 
-/**  A permission request waiting on (or answered by) the human. */
-{ type: "permission"; requestId: string; toolCallId: string; title: string; options: PermissionOption[]; answer: PermissionAnswer | null } | 
-/**  oxplow's policy rejected the call without asking the human. */
-{ type: "policy_denied"; toolCallId: string; label: string; reason: string } | 
-/**  A write the policy would deny ran without asking first. */
-{ type: "bypass"; toolCallId: string; label: string; reason: string } | 
-/**  Something failed: the prompt, the agent process, the protocol. */
-{ type: "error"; message: string };
 
 /**  A host-recognized operation owned by one extension contribution. */
 export type JobDecl = {
@@ -5141,11 +4988,6 @@ export type OxplowConfig = {
 	 */
 	agentConfig: { [key in string]: unknown },
 	/**
-	 *  The project's ACP agents (`acpAgents:`), layered over the declared
-	 *  ACP adapters (`oxplow_app::acp::agents::resolve`).
-	 */
-	acpAgents: AcpAgentConfig[],
-	/**
 	 *  The project's extension provider instances
 	 *  (`extensionInstances: { "<ext>/<id>": { enabled, config } }`).
 	 */
@@ -5164,7 +5006,7 @@ export type OxplowConfig = {
 	/**
 	 *  What a new thread starts with, a person's own (`newThreadSession`
 	 *  in `.oxplow/personal.yaml`): `ask` (the session picker), `none`, or
-	 *  an agent (`<harness>` / `<harness>:<acp agent>`). Unset means `ask`.
+	 *  an agent (a harness's key). Unset means `ask`.
 	 */
 	personalNewThreadSession: string | null,
 	/**
@@ -5385,28 +5227,8 @@ export type PanelPlacement = {
  */
 export type PanelScope = "project" | "stream" | "thread";
 
-/**  How a permission request was answered. */
-export type PermissionAnswer = { type: "selected"; optionId: string } | { type: "cancelled" };
-
-export type PermissionKind = "allow_once" | "allow_always" | "reject_once" | "reject_always";
-
-export type PermissionOption = {
-	id: string,
-	name: string,
-	kind: PermissionKind,
-};
-
-export type PlanEntry = {
-	content: string,
-	status: PlanStatus,
-};
-
-export type PlanStatus = "pending" | "in_progress" | "completed";
-
 /**  What kind of project program it is. */
 export type ProgramKind = 
-/**  An agent spoken to over ACP (`acpAgents`, tsk335). */
-"acp-agent" | 
 /**
  *  A shared extension's advisories: SQL whose results go into the
  *  agent's context (tsk352). Bundled extensions' aren't gated.
@@ -5459,10 +5281,7 @@ export type ProjectProgram = {
 	/**  Project-relative path of the program. */
 	program: string,
 	args: string[],
-	/**
-	 *  Extra environment it runs with, as `NAME=value` (ACP agents), or
-	 *  the host variables it gets by name (a provider).
-	 */
+	/**  The host variables it gets by name (a provider). */
 	env: string[],
 	/**  Keychain credentials it gets, by name (a provider). */
 	credentials: string[],
@@ -6501,27 +6320,6 @@ export type ThreadTabs = {
 export type Timestamp = string;
 
 /**
- *  A tool call as last reported: the initial `tool_call` with every
- *  `tool_call_update` for its id applied.
- */
-export type ToolCall = {
-	id: string,
-	title: string,
-	/**  The agent's programmatic tool name, when it sends one. */
-	name: string | null,
-	kind: ToolKind,
-	status: ToolStatus,
-	/**  Paths from `locations` (absolute, per the protocol). */
-	locations: string[],
-	/**  The agent's own JSON for the call; `unknown` to the renderer. */
-	rawInput: unknown | null,
-	rawOutput: unknown | null,
-	diffs: ToolDiff[],
-	/**  Text content blocks (command output, messages). */
-	text: string[],
-};
-
-/**
  *  What the agent policy decided about a tool call (PreToolUse), carried
  *  on the envelope so the log records it.
  */
@@ -6529,23 +6327,6 @@ export type ToolDecision = {
 	allowed: boolean,
 	reason: string | null,
 };
-
-/**  One file change a tool call reports. `old_text: None` means a new file. */
-export type ToolDiff = {
-	path: string,
-	oldText: string | null,
-	newText: string,
-};
-
-/**  The ACP tool categories, mirrored so the SDK's enum stays in `wire.rs`. */
-export type ToolKind = "read" | "edit" | "delete" | "move" | "search" | "execute" | "think" | "fetch" | "switch_mode" | "other";
-
-export type ToolStatus = "pending" | "in_progress" | "completed" | "failed";
-
-export type TranscriptItem = {
-	id: number,
-	seq: number,
-} & ItemBody;
 
 /**  When a collector runs by itself. */
 export type Trigger = 

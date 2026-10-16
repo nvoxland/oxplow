@@ -2,12 +2,12 @@
 //! [`AgentHarness`] registered under the instance's id while it runs
 //! (`.context/agent-model.md`, `.context/providers.md` "What a provider may
 //! implement"). What a built-in answers in code it declared — its
-//! features (a `structured_transcript` is a chat) and its capability's
+//! features and its capability's
 //! `data` (environment markers, settings); each
 //! operation is one invoke of the verb of its name:
 //!
 //! - `launch` — the launch's input as it is → a `Launch`
-//!   (`{ spec: { kind: pty|acp, … }, resume_dropped? }`);
+//!   (`{ spec: { kind: pty|codex_app_server, … }, resume_dropped? }`);
 //! - `tool_use { body }` → `{ tool }` (`null`: the body names no tool);
 //! - `render { answer }` → `{ body }`;
 //! - `refresh_text { roots, text }` → `{}`;
@@ -31,8 +31,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use oxplow_domain::agent::harness::{
-    AgentHarness, HarnessData, HarnessError, HarnessSetting, Interact, Launch, LaunchInput,
-    RuntimeRoots, Transcript,
+    AgentHarness, HarnessData, HarnessError, HarnessSetting, Launch, LaunchInput, RuntimeRoots,
 };
 use oxplow_domain::agent::observe::{HookAnswer, OtlpRecord, Prompt, TokenReading, Turn};
 use oxplow_domain::agent::registry::HarnessRegistry;
@@ -92,21 +91,9 @@ impl CapabilityHost for HarnessHost {
                 verbs.insert(verb.name, input);
             }
         }
-        let structured = features
-            .get("structured_transcript")
-            .and_then(Value::as_bool)
-            == Some(true);
         let harness = Arc::new(ExternalHarness {
             instance: instance.clone(),
             title: declared.provider.name.clone(),
-            interact: Interact {
-                transcript: if structured {
-                    Transcript::Structured
-                } else {
-                    Transcript::Terminal
-                },
-                acp_agent: false,
-            },
             data,
             verbs,
         });
@@ -125,7 +112,6 @@ impl CapabilityHost for HarnessHost {
 pub struct ExternalHarness {
     instance: Arc<Instance>,
     title: String,
-    interact: Interact,
     data: HarnessData,
     /// The verbs it declares, their input schemas compiled.
     verbs: BTreeMap<&'static str, InputValidator>,
@@ -215,10 +201,6 @@ impl AgentHarness for ExternalHarness {
 
     fn title(&self) -> &str {
         &self.title
-    }
-
-    fn interact(&self) -> Interact {
-        self.interact
     }
 
     async fn launch(&self, input: &LaunchInput) -> Result<Launch, HarnessError> {

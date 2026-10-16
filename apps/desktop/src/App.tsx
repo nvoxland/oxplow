@@ -109,7 +109,7 @@ import { AgentSessionPage } from "./pages/AgentSessionPage.js";
 import { NewSessionPage } from "./pages/NewSessionPage.js";
 import { InlinePromptStrip } from "./components/InlinePromptStrip.js";
 import { reconcileSessionTabs } from "./tabs/sessionTabs.js";
-import { agentChoiceValue, newThreadOpening, saveNewThreadSession } from "./newThreadSession.js";
+import { newThreadOpening, saveNewThreadSession } from "./newThreadSession.js";
 import { sessionLabel } from "./agentKinds.js";
 import { useAgentHarnesses } from "./useAgentHarnesses.js";
 import { useThreadSessions } from "./agentSessions.js";
@@ -1771,7 +1771,7 @@ export function App() {
         });
       }
       if (opening.start) {
-        const opened = await openAgentSession(threadId, opening.start.harness, opening.start.acpAgent);
+        const opened = await openAgentSession(threadId, opening.start.harness);
         setThreadCenterActive((prev) => ({ ...prev, [threadId]: agentSessionRef(opened.id).id }));
       }
     } catch (error) {
@@ -2566,7 +2566,7 @@ export function App() {
               run: () => setRenamingSessionId(sessionId),
             },
             // Its harness's saved conversations: switch to one, or fork one.
-            ...(session?.kind === "terminal" && harnessFeatures(session.harness).includes("conversation_list")
+            ...(session && harnessFeatures(session.harness).includes("conversation_list")
               ? [
                   {
                     id: "agent-session.switch-conversation",
@@ -2588,7 +2588,7 @@ export function App() {
               : []),
             // A terminal agent's process: stopping keeps the slot and the
             // saved conversation, and it stays stopped until started.
-            ...(session?.kind === "terminal"
+            ...(session
               ? [
                   session.stoppedByUser
                     ? {
@@ -2613,8 +2613,6 @@ export function App() {
               stream={stream}
               visible={effectiveCenterActive === ref.id}
               onOpenFile={openTerminalPath}
-              onOpenDiff={handleOpenDiff}
-              onOpenSettings={() => handleOpenPage(indexRef("settings"))}
               onOpenPage={handleOpenPage}
               canChooseConversation={!!session && harnessFeatures(session.harness).includes("conversation_list")}
               picker={conversationPicker?.sessionId === sessionId ? conversationPicker.mode : null}
@@ -2631,10 +2629,10 @@ export function App() {
           <NewSessionPage
             thread={selectedThread}
             harnesses={harnesses}
-            onStart={async (harness, acpAgent, remember) => {
+            onStart={async (harness, remember) => {
               if (!selectedThread) return;
-              if (remember) await saveNewThreadSession(agentChoiceValue(harness, acpAgent));
-              const opened = await openAgentSession(selectedThread.id, harness, acpAgent);
+              if (remember) await saveNewThreadSession(harness);
+              const opened = await openAgentSession(selectedThread.id, harness);
               // The picker gives way to the session's tab (it follows the
               // row once the model re-reads).
               closePageTab(ref.id);

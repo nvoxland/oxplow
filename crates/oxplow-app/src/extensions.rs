@@ -6645,7 +6645,7 @@ commands:
             c.handler,
             crate::extension_commands::CommandHandler::Scope { .. }
         )));
-        // The agent harnesses, ACP agents and AI providers core runs are
+        // The agent harnesses and AI providers core runs are
         // foundation's declarations — many of each, all active.
         let declared = |capability: &str| {
             foundation
@@ -6655,11 +6655,7 @@ commands:
                 .map(|d| d.id.as_str())
                 .collect::<Vec<_>>()
         };
-        assert_eq!(
-            declared("agent_harness"),
-            ["claude", "codex", "opencode", "acp"]
-        );
-        assert_eq!(declared("acp_adapter"), ["claude", "gemini", "codex"]);
+        assert_eq!(declared("agent_harness"), ["claude", "codex", "opencode"]);
         assert_eq!(
             declared("ai_provider"),
             [

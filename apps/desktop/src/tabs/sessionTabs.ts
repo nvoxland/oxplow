@@ -4,7 +4,6 @@
  * opened, and a closed one's goes. The rows are the truth — the tabs are
  * never a copy the UI keeps on its own (`.context/pages-and-tabs.md`).
  */
-import { parseAgentChoice } from "../agentKinds.js";
 import type { HarnessListing } from "../tauri-bridge/generated/bindings.js";
 import { agentSessionRef, newSessionRef } from "./pageRefs.js";
 import type { TabRef } from "./tabState.js";
@@ -23,18 +22,15 @@ export function reconcileSessionTabs(tabs: TabRef[], openSessions: ReadonlyArray
 
 /** What a new thread opens with, by the person's `newThreadSession`: `ask`
  *  opens the session picker, `none` nothing, and an agent
- *  (`<harness>` / `<harness>:<acp agent>`) starts that agent's session —
- *  unless it can't start any more (disabled, gone, or an ACP harness
- *  without its agent), when it asks instead. */
+ *  (a harness's key) starts that agent's session — unless it can't start
+ *  any more (disabled, or gone), when it asks instead. */
 export function newThreadTabs(
   setting: string,
   harnesses: ReadonlyArray<HarnessListing>,
-): { tabs: TabRef[]; start: { harness: string; acpAgent: string | null } | null } {
+): { tabs: TabRef[]; start: { harness: string } | null } {
   const ask = { tabs: [newSessionRef()], start: null };
   if (setting === "none") return { tabs: [], start: null };
   if (setting === "ask") return ask;
-  const start = parseAgentChoice(setting);
-  const harness = harnesses.find((h) => h.id === start.harness && h.enabled);
-  if (!harness || harness.acpAgent !== (start.acpAgent !== null)) return ask;
-  return { tabs: [], start };
+  const harness = harnesses.find((h) => h.id === setting && h.enabled);
+  return harness ? { tabs: [], start: { harness: harness.id } } : ask;
 }

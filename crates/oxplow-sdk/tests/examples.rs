@@ -166,11 +166,9 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
     );
     assert_eq!(lifetimes("open").await, [serde_json::json!(12)]);
     assert_eq!(lifetimes("merged").await, [serde_json::json!(11)]);
-    let config = svc.config.read().unwrap().clone();
     let programs = oxplow_app::exec_consent::list(
         &svc.approvals,
         root,
-        &config,
         svc.extension_catalog.get(root).as_ref(),
     );
     let component = programs
@@ -419,9 +417,8 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
         )
         .unwrap();
     // The provider kind is itself a script a person approves.
-    let config = svc.config.read().unwrap().clone();
     let extensions = svc.extension_catalog.get(root);
-    let provider = oxplow_app::exec_consent::list(&svc.approvals, root, &config, &extensions)
+    let provider = oxplow_app::exec_consent::list(&svc.approvals, root, &extensions)
         .into_iter()
         .find(|p| {
             p.kind == oxplow_app::exec_consent::ProgramKind::AiProvider
@@ -431,7 +428,6 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
     oxplow_app::exec_consent::approve_program(
         &svc.approvals,
         root,
-        &config,
         &extensions,
         oxplow_app::exec_consent::ProgramKind::AiProvider,
         &provider.name,

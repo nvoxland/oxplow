@@ -1,7 +1,7 @@
 /**
  * What a new thread starts with — the person's own `newThreadSession`
  * (`.oxplow/personal.yaml`): `ask` (the session picker, the default),
- * `none`, or an agent (`<harness>` / `<harness>:<acp agent>`). Settings →
+ * `none`, or an agent (a harness's key). Settings →
  * Agents and the picker's Remember This set it.
  */
 import { effectiveConfig, listAgentHarnesses, runCommand } from "./api.js";
@@ -22,11 +22,6 @@ export async function saveNewThreadSession(choice: string): Promise<void> {
   } else {
     await runCommand("oxplow.config.set", { key: KEY, value: choice, layer: "personal" }, true);
   }
-}
-
-/** An agent choice's value, as the picker and the setting name it. */
-export function agentChoiceValue(harness: string, acpAgent: string | null): string {
-  return acpAgent ? `${harness}:${acpAgent}` : harness;
 }
 
 /** What a new thread opens with now: the setting against the harnesses as

@@ -47,29 +47,24 @@ test("reconciling never brings the picker back", () => {
 const harness = (id: string, over: Partial<HarnessListing> = {}): HarnessListing => ({
   id,
   title: id,
-  acpAgent: false,
   enabled: true,
   settings: [],
   ...over,
 });
-const harnesses = [harness("claude"), harness("acp", { acpAgent: true }), harness("codex", { enabled: false })];
+const harnesses = [harness("claude"), harness("opencode"), harness("codex", { enabled: false })];
 
 /** A new thread follows the person's `newThreadSession`: ask opens the
  *  picker, none opens nothing, an agent starts it. */
 test("a new thread asks, starts nothing, or starts the chosen agent", () => {
   expect(newThreadTabs("ask", harnesses)).toEqual({ tabs: [newSessionRef()], start: null });
   expect(newThreadTabs("none", harnesses)).toEqual({ tabs: [], start: null });
-  expect(newThreadTabs("claude", harnesses)).toEqual({ tabs: [], start: { harness: "claude", acpAgent: null } });
-  expect(newThreadTabs("acp:gemini", harnesses)).toEqual({
-    tabs: [],
-    start: { harness: "acp", acpAgent: "gemini" },
-  });
+  expect(newThreadTabs("claude", harnesses)).toEqual({ tabs: [], start: { harness: "claude" } });
 });
 
-/** An agent that can't start any more — disabled, gone, or a chat harness
- *  without its agent — asks instead. */
+/** An agent that can't start any more — disabled, gone, or a setting
+ *  naming one that no longer exists (`acp:gemini`) — asks instead. */
 test("an agent that isn't available asks instead", () => {
-  for (const choice of ["codex", "gone", "acp"]) {
+  for (const choice of ["codex", "gone", "acp:gemini"]) {
     expect(newThreadTabs(choice, harnesses)).toEqual({ tabs: [newSessionRef()], start: null });
   }
 });

@@ -415,7 +415,6 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
         default: "claude",
         features: &[
             "terminal",
-            "structured_transcript",
             "permission_prompts",
             "resume",
             "programmatic",
@@ -429,16 +428,6 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
             "conversation_fork",
         ],
         provider: Some(&AGENT_HARNESS),
-    },
-    CapabilitySpec {
-        id: "acp_adapter",
-        title: "ACP agent",
-        choosable: false,
-        optional: false,
-        many: true,
-        default: "claude",
-        features: &[],
-        provider: None,
     },
     CapabilitySpec {
         id: "ai_provider",
@@ -625,11 +614,7 @@ mod tests {
                 .filter(|c| c.many)
                 .map(|c| (c.id, c.default))
                 .collect::<Vec<_>>(),
-            [
-                ("agent_harness", "claude"),
-                ("acp_adapter", "claude"),
-                ("ai_provider", "anthropic")
-            ]
+            [("agent_harness", "claude"), ("ai_provider", "anthropic")]
         );
         assert_eq!(spec("snapshots").map(|c| c.optional), Some(false));
         assert!(spec("nope").is_none());

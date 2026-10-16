@@ -2028,8 +2028,7 @@ mod tests {
 
     /// The transcript lens lists a session's turns oldest first with the
     /// thread's notes where they fall, marks a subagent's hand-back, counts
-    /// each turn's tool calls, starts at a turn, pages by 50, and says an
-    /// ACP chat's transcript isn't stored. A turn opens it.
+    /// each turn's tool calls, starts at a turn, and pages by 50.
     #[tokio::test]
     async fn session_transcript_lists_turns_notes_and_handbacks() {
         use oxplow_db::SqlCell::{Int, Text};
@@ -2119,27 +2118,6 @@ mod tests {
         let rows =
             run_bundled_lens_with(&f, "oxplow-foundation/session-transcript", &params("", 2)).await;
         assert_eq!(col(&rows, 2), Vec::<String>::new(), "{rows}");
-
-        // An ACP chat with no turns says its transcript isn't stored.
-        f.svc
-            .db
-            .transaction(move |tx| {
-                tx.execute("DELETE FROM agent_turn", [])
-                    .map_err(oxplow_db::map_sql_err)?;
-                tx.execute("UPDATE agent_session SET harness = 'acp'", [])
-                    .map_err(oxplow_db::map_sql_err)?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-        let rows =
-            run_bundled_lens_with(&f, "oxplow-foundation/session-transcript", &params("", 1)).await;
-        assert!(
-            col(&rows, 4)
-                .iter()
-                .any(|p| p.contains("transcript isn't stored")),
-            "{rows}"
-        );
     }
 
     /// A turn opens its session's transcript at it: the page is the lens
@@ -3259,11 +3237,9 @@ mod tests {
         let (ext, decl) = crate::effect_triggers::find_effect(&f.svc, VERIFY).expect("its effect");
         let program = crate::effects::effect_program(&ext, &decl);
         let root = f.svc.layout.project_dir.clone();
-        let config = f.svc.config.read().unwrap().clone();
         crate::exec_consent::approve_program(
             &f.svc.approvals,
             &root,
-            &config,
             std::slice::from_ref(&ext),
             crate::exec_consent::ProgramKind::Effect,
             &program.name,
@@ -3279,12 +3255,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn the_review_follow_up_waits_for_a_persons_approval() {
         let f = review_fixture().await;
-        let config = f.svc.config.read().unwrap().clone();
         let root = f.svc.layout.project_dir.clone();
         let programs = crate::exec_consent::list(
             &f.svc.approvals,
             &root,
-            &config,
             f.svc
                 .extension_catalog
                 .unpinned(&root, "a test reads declarations")

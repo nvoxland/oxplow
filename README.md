@@ -49,7 +49,7 @@ limits documented in the [extension reference](docs/reference/extensions.md).
   record understanding without editing that stream's worktree.
 - **Threads and agent sessions.** A thread is a line of work, with its
   own tabs and context. It can have no agent session or several, using
-  terminal harnesses or ACP conversations.
+  terminal harnesses.
 - **Work tracking and history.** Activity is recorded without requiring
   task bookkeeping. Optional effort policies group work and link it to
   work items. Snapshots preserve working-tree history alongside git.
@@ -61,7 +61,7 @@ limits documented in the [extension reference](docs/reference/extensions.md).
 
 Commits are user-driven. Oxplow does not require a task before an edit
 or refuse an agent's stop because bookkeeping is incomplete. Terminal
-input and ACP prompts originate from the person; recorded AI API
+input originates from the person; recorded AI API
 computations are a separate service.
 
 ## Architecture

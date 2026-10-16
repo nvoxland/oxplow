@@ -649,9 +649,7 @@ restates every work item, effort, note and finding slice: it writes them in
 batches of 1000 through `SqlitePageRefStore::replace_sources`, one
 transaction each. Written one commit per row, it once sent ~250k change
 events at boot (a quarter of a million piled-up findings): the events
-socket lagged, the UI re-read for a minute and terminal input timed out. Typing in the ACP prompt box re-renders only the box:
-its draft is its own state, and the transcript and each message are
-memoized (`ChatAgentView.tsx`).
+socket lagged, the UI re-read for a minute and terminal input timed out.
 
 ## What running scripts in workers costs (measured 2026-10-09)
 
