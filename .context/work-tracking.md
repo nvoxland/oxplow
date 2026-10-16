@@ -173,6 +173,20 @@ so no policy reads a tool's name. The policy opens an unlinked effort with
 `adopt_since` the turn's start when `changed` and `writing_tools > 0` and
 the thread has none open; a later item start links it (rule 1).
 
+## Cross-thread ownership
+
+A work item is owned by the thread it is on (`work_item.thread_id`;
+`oxplow.work_item.move`); there is no second owner. Two threads may
+still work on the same thing, and nothing refuses it (below, "No
+gates"). **Decided (2026-10-16), not built:** it is made visible, all
+bundled over existing models: a "Shared work" lens (items linked to open
+efforts on two threads, files two threads' open efforts changed, an
+epic's children spread over threads), a person-audience advisory when
+two threads change the same file within an hour, and a turn-end hint
+to each agent naming the other thread. Work handed from one thread to
+another is a handoff ([agent-model.md](./agent-model.md) "Handoffs and
+native messaging"): taking one moves its item.
+
 ## No gates
 
 - The edit guard keeps only isolation: another

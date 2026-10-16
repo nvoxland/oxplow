@@ -1231,8 +1231,8 @@ available from outside.
 
 | | Claude Code | Codex | opencode |
 |---|---|---|---|
-| Waiting on a permission | `Notification` `permission_prompt` → AwaitingUser; *`PermissionRequest` hook (tool + input)* | *`thread/status/changed` `activeFlags` `waitingOnApproval`; the approval request's params (the observer drops the request)* | *SSE `permission.asked` / `replied`* |
-| Asked a question | `AskUserQuestion` PreToolUse → AwaitingUser with its question; a `?`-ending Stop | a `?`-ending Stop; *`waitingOnUserInput`, `requestUserInput.questions`* | a `?`-ending Stop; *`question.asked`* |
+| Waiting on a permission | `Notification` `permission_prompt` / `agent_needs_input`, and the `PermissionRequest` hook (observed, answered `Ack`) → AwaitingUser | `thread/status/changed` `activeFlags` `waitingOnApproval` → AwaitingUser, the request's command or reason as detail; cleared by the flags or `serverRequest/resolved` | the bridge forwards `permission.asked` (a `Notification`) and `permission.replied` |
+| Asked a question | `AskUserQuestion` PreToolUse → AwaitingUser with its question; a `?`-ending Stop | `waitingOnUserInput` with `requestUserInput`'s first question; a `?`-ending Stop | `question.asked` (an Ask `PreToolUse`); a `?`-ending Stop |
 | Answering from oxplow | — (no interface into an interactive session; a cross-session message can't consent) | — (a request goes to the turn's client) | *HTTP `permission` / `question` reply* — left native |
 | The plan | `ExitPlanMode` PreToolUse `tool_input.plan`, `planFilePath` → `agent.plan.proposed` | the `plan` item's text on `item/completed` → `agent.plan.proposed`; `turn/plan/updated` steps reach only the chat library | — (`plan_exit` carries no text, so none is recorded) |
 | Model / effort | `agent_turn.model` / `effort`: the Stop's `effort.level` and the transcript tail's newest `message.model`; transcript `message.model` → `v_token_usage.model`; *`SessionStart.model`, `PostModelSwitch`* | `agent_turn.model` / `effort`: `Thread.model` / `reasoningEffort` at open, moved by `thread/settings/updated` | `agent_turn.model` / `effort`: the bridge's Stop carries the last assistant message's `modelID` and `variant` |
@@ -1276,6 +1276,71 @@ available from outside.
   files at all). The turn-end snapshot and `thread.checkpoint` record
   what a rewind leaves behind.
 - **Cost in dollars.** Never recorded ([metrics.md](./metrics.md)).
+
+### Handoffs and native messaging
+
+**Decided (2026-10-16), not built.** Work moving between threads is a
+**record oxplow keeps, never a message it delivers.** Today the person
+carries a result from one terminal to another, or agents use their
+harness's own messaging, which oxplow doesn't see, which nobody
+acknowledges, and which wakes the recipient at the sender's choice. The
+design gives that move one durable, visible fact, and leaves every
+transport native.
+
+What the harnesses offer (Claude Code 2.1.301, Codex 0.163, opencode
+1.17.4; "wakes" is: starts a turn, so it spends that session's quota):
+
+| | Claude Code | Codex | opencode |
+|---|---|---|---|
+| Discovery | `ListAgents`: sessions on this machine that bind an inbox socket, teammates, named subagents | the `listAgents` collab tool, its own thread's tree only | none for the model; the server's `/session/:id/children`, `session.created { info.parentID }` |
+| Agent to agent | `SendMessage`, same machine, plain text: an idle recipient **wakes**, a busy one reads it between tool calls; held messages expire after 5 min; no acknowledgement. Teams (experimental): a mailbox file per teammate | `sendMessage` / `sendInput` inside one thread's agent tree | none built in; a background subagent's result is pushed to its parent as a user message (**wakes**, experimental) |
+| Delegation | `Agent` (foreground, background), teammates | `spawnAgent`, `followupTask`, `resumeAgent`, `wait`, `closeAgent`; each child is a thread | `task` → a child session (`parentID`); `task_id` resumes it |
+| Interruption | `TaskStop`, Escape | `interruptAgent`, `turn/interrupt` | `POST /session/:id/abort` |
+| Restart | subagents live on only in the resumed session; teammates aren't restored by `/resume` | `thread/resume`; children are threads | sessions persist; runners, pending permissions and questions are lost |
+| Delivery from outside | inbox socket, channels (research preview), `claude -p --resume`: all **wake**; hook context doesn't | `turn/start` **wakes**; `thread/inject_items` doesn't | `prompt_async` / `message` **wake**; `message` with `noReply` doesn't |
+| What oxplow can hear | an inbound message is a turn of its own (no dedicated hook); `TeammateIdle`, `TaskCreated`, `TaskCompleted` are lifecycle only | `collabAgentToolCall`, `subAgentActivity` items | `session.created { parentID }`, the task part's `{ parentSessionId, sessionId }` |
+
+Every path that puts words in front of a model wakes it. The ones that
+don't are context channels, which wait for a turn someone else starts.
+None is cross-thread, visible to the person, and acknowledged.
+
+**The design:**
+
+- **A `handoff` entity** (`handoff:hnd<n>`): from a thread (and the
+  agent session, or the person; the actor, never an input), to an open
+  **thread** (never a session: the thread outlives processes; another
+  stream's is allowed, a handoff isn't a write into its worktree), an
+  optional work item, a Markdown body with checked `[[…]]` links, a
+  `delivered_at` stamp, and a state: `open`, `taken`, `declined`,
+  `withdrawn`. Commands `oxplow.handoff.send`, `.resolve { outcome:
+  taken | declined, note? }`, `.withdraw`; `v_handoff`; searchable.
+  Taking one with an item moves the item onto the recipient thread in
+  the same run, so ownership keeps one home (the item's thread).
+- **Thread notes stay as they are.** They were the candidate carrier
+  and don't fit: a note belongs to its writer's thread, has no
+  recipient, state or delivery stamp, and the Explore hand-back already
+  relies on that.
+- **When the recipient sees it:** its agent at the start of its next
+  prompt (a `<handoffs>` block in `prompt_context`, which stamps
+  `delivered_at`; never at a tool hook, so it doesn't interleave with
+  work in progress; Codex at launch until it has a context channel);
+  the person at once (the thread's Handoffs panel, a count in the
+  Navigator, a Waiting on Me row when no agent is live there). Later
+  sessions see a one-line count in the session context, not the
+  bodies again.
+- **Nothing wakes a model.** oxplow never opens an inbox socket, a
+  channel, `prompt_async` or `turn/start`: those are Drive on an
+  interactive surface ("Key invariant"). A source guard will pin that
+  handoff delivery lives only in `prompt_context`. Restarts lose
+  nothing: the record and its stamps are in the database.
+- **Native messaging stays native, and is observed:** Claude Code's
+  inbound cross-session message as its own kind of prompt (not the
+  person's words, like a subagent's hand-back); Codex's collab agents as
+  subagents. oxplow doesn't read Claude's team mailboxes (not a
+  documented interface).
+
+Cross-thread ownership and duplicate work are visibility, not gates
+([work-tracking.md](./work-tracking.md) "Cross-thread ownership").
 
 ### Validated against, and what pins each scenario
 
