@@ -491,6 +491,72 @@ console.log(JSON.stringify({{ posts, prompt, tool }}));
         );
     }
 
+    /// What opencode 1.17.4 emits when it waits on the person: a permission
+    /// asked (a Notification of a permission prompt naming it), a question
+    /// asked (a PreToolUse of an Ask call with its first question), and
+    /// either answered (a PostToolUse that clears the wait). Only
+    /// forwarded: the bridge answers nothing. Run under bun.
+    #[test]
+    fn its_bridge_reports_a_wait_on_a_permission_or_a_question() {
+        let dir = tempfile::tempdir().unwrap();
+        let driver = dir.path().join("drive.mjs");
+        let bridge =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/opencode-hooks.js");
+        std::fs::write(
+            &driver,
+            format!(
+                r#"import {{ OxplowHooks }} from {bridge};
+const posts = [];
+globalThis.fetch = async (url, init) => {{
+  posts.push({{ event: url.split("/").pop(), payload: JSON.parse(init.body) }});
+  return {{ json: async () => ({{}}) }};
+}};
+process.env.OXPLOW_HOOK_BASE_URL = "http://hook.invalid";
+const hooks = await OxplowHooks({{ client: {{ session: {{ get: async () => ({{ data: {{}} }}), messages: async () => ({{ data: [] }}) }} }} }});
+const ev = (type, properties) => hooks.event({{ event: {{ type, properties }} }});
+await ev("permission.asked", {{ id: "per_1", sessionID: "ses1", permission: "bash", patterns: ["rm -rf build"], metadata: {{}}, always: [] }});
+await ev("permission.replied", {{ sessionID: "ses1", requestID: "per_1", reply: "once" }});
+await ev("question.asked", {{ id: "que_1", sessionID: "ses1", questions: [{{ question: "Which branch?", header: "Branch", options: [] }}] }});
+await ev("question.rejected", {{ sessionID: "ses1", requestID: "que_1" }});
+console.log(JSON.stringify({{ posts }}));
+"#,
+                bridge = serde_json::to_string(&format!("file://{}", bridge.display())).unwrap()
+            ),
+        )
+        .unwrap();
+        let out = std::process::Command::new("bun")
+            .arg(&driver)
+            .output()
+            .expect("bun runs the bridge (the repo's JS runtime)");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let run: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let posts = run["posts"].as_array().unwrap();
+        let events: Vec<&str> = posts.iter().map(|p| p["event"].as_str().unwrap()).collect();
+        assert_eq!(
+            events,
+            ["Notification", "PostToolUse", "PreToolUse", "PostToolUse"]
+        );
+        assert_eq!(
+            posts[0]["payload"]["notification_type"],
+            "permission_prompt"
+        );
+        assert_eq!(posts[0]["payload"]["message"], "bash: rm -rf build");
+        assert_eq!(posts[0]["payload"]["session_id"], "ses1");
+        // The permission's answer names no tool: it only clears the wait.
+        assert!(posts[1]["payload"].get("tool_name").is_none());
+        assert_eq!(posts[2]["payload"]["tool_name"], "AskUserQuestion");
+        assert_eq!(
+            posts[2]["payload"]["tool_input"]["questions"][0]["question"],
+            "Which branch?"
+        );
+        assert_eq!(posts[3]["payload"]["tool_name"], "AskUserQuestion");
+        assert_eq!(posts[3]["payload"]["tool_use_id"], "que_1");
+    }
+
     use super::*;
     use crate::test_launch::{harness, launch_in, project_only};
     use tempfile::TempDir;

@@ -143,6 +143,7 @@ fn event_name(kind: HookKind) -> &'static str {
         HookKind::SessionStart => "SessionStart",
         HookKind::SessionEnd => "SessionEnd",
         HookKind::Notification => "Notification",
+        HookKind::PermissionRequest => "PermissionRequest",
         HookKind::SubagentStart => "SubagentStart",
         HookKind::SubagentStop => "SubagentStop",
     }

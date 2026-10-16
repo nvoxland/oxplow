@@ -1062,6 +1062,49 @@ mod codex {
         assert!(methods(&back).contains(&"thread/resume".to_string()));
     }
 
+    /// An approval the TUI waits on shows as the agent waiting on the
+    /// person, with what it asked, and clears once it is answered there. The
+    /// request is read and never answered from here.
+    #[tokio::test]
+    async fn an_approval_in_the_tui_is_a_wait_that_clears_when_answered() {
+        let (rig, fake) = open_codex(Host::default(), "thread/start").await;
+        fake.push(
+            json!({"id": 41, "method": "item/commandExecution/requestApproval", "params": {
+            "threadId": THREAD, "turnId": "u1", "itemId": "e1", "command": "rm -rf build"}}),
+        );
+        fake.push(note(
+            "thread/status/changed",
+            json!({"status": {"type": "active", "activeFlags": ["waitingOnApproval"]}}),
+        ));
+        let waited = |rig: &Rig, want: &str| {
+            let log = rig.host.log();
+            log.iter().any(|l| l == want)
+        };
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !waited(&rig, "awaiting true") {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the wait is reported");
+        fake.push(note(
+            "thread/status/changed",
+            json!({"status": {"type": "active", "activeFlags": []}}),
+        ));
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !waited(&rig, "awaiting false") {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("answering clears it");
+        // Observed only: nothing was sent back for the request.
+        assert!(!fake
+            .received()
+            .iter()
+            .any(|v| v.get("id") == Some(&json!(41)) && v.get("method").is_none()));
+    }
+
     /// Nothing here prompts the thread, and the TUI answers its own
     /// approvals: a request reaches no card and gets no answer from here.
     #[tokio::test]

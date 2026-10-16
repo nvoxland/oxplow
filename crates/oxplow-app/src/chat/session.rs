@@ -498,6 +498,10 @@ impl Actor {
                     .named(self.thread(), &self.session_id, &title)
                     .await
             }
+            // The agent's own UI is where it is answered; the status only
+            // says it waits.
+            Incoming::Waiting(_) if self.replaying => {}
+            Incoming::Waiting(question) => self.host.awaiting_user(self.thread(), question).await,
             Incoming::Permission { ask, reply } => {
                 let ask = *ask;
                 if self.replaying {

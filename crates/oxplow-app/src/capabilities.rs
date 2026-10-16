@@ -156,6 +156,7 @@ pub const BUILT_INS: &[BuiltIn] = &[
         "opencode",
         &[
             "terminal",
+            "permission_prompts",
             "resume",
             "runtime_text",
             "subagents",

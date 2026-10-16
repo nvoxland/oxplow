@@ -3558,6 +3558,12 @@ export type HookKind =
  *  a permission prompt waits on them.
  */
 "notification" | 
+/**
+ *  The harness asks the person to allow a tool (Claude's
+ *  `PermissionRequest`). Observed only: the answer is always `Ack`, so
+ *  the harness's own dialog decides.
+ */
+"permission_request" | 
 /**  A subagent of the session started (Claude's `SubagentStart`). */
 "subagent_start" | 
 /**

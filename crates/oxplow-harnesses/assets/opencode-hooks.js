@@ -22,6 +22,14 @@
 ///   event session.idle  -> Stop         (closes the turn; never refused;
 ///                          carries the agent's last message, so a reply
 ///                          ending in a question sets waiting)
+///   event permission.asked / question.asked
+///                       -> Notification (a permission prompt, naming it) /
+///                          PreToolUse of an `AskUserQuestion` call (the
+///                          first question): the agent waits on the person.
+///   event permission.replied / question.replied|rejected
+///                       -> PostToolUse  (names no tool, or the Ask call:
+///                          the wait is over). Only forwarded: the person
+///                          answers in opencode's own UI, never here.
 ///
 /// Everything is best-effort: a hook POST failure must never break the
 /// agent, matching oxplow's side-band hook policy.
@@ -192,8 +200,45 @@ export const OxplowHooks = async ({ client }) => {
     },
 
     event: async ({ event }) => {
-      if (!event || event.type !== "session.idle") return;
-      const sessionID = event.properties?.sessionID;
+      if (!event) return;
+      const props = event.properties || {};
+      // The agent waits on the person (or no longer does): reported, never
+      // answered. A child session's wait is its parent's.
+      if (event.type === "permission.asked") {
+        const patterns = Array.isArray(props.patterns) ? props.patterns.join(", ") : "";
+        await post("Notification", {
+          ...(await whose(props.sessionID)),
+          notification_type: "permission_prompt",
+          message: patterns ? `${props.permission}: ${patterns}` : `${props.permission || "A permission"}`,
+        });
+        return;
+      }
+      if (event.type === "question.asked") {
+        await post("PreToolUse", {
+          ...(await whose(props.sessionID)),
+          // The tool call that asked, when it names one, so the two pair.
+          tool_use_id: props.tool?.callID || props.id,
+          tool_name: "AskUserQuestion",
+          tool_input: { questions: props.questions || [] },
+        });
+        return;
+      }
+      if (event.type === "permission.replied") {
+        await post("PostToolUse", await whose(props.sessionID));
+        return;
+      }
+      if (event.type === "question.replied" || event.type === "question.rejected") {
+        await post("PostToolUse", {
+          ...(await whose(props.sessionID)),
+          tool_use_id: props.requestID,
+          tool_name: "AskUserQuestion",
+          tool_input: {},
+          tool_response: {},
+        });
+        return;
+      }
+      if (event.type !== "session.idle") return;
+      const sessionID = props.sessionID;
       if (await isChildSession(sessionID)) return;
       await post("Stop", {
         session_id: sessionID,

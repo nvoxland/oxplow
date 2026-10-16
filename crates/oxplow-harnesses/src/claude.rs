@@ -374,6 +374,7 @@ const HOOK_EVENTS: &[&str] = &[
     "SessionEnd",
     "Stop",
     "Notification",
+    "PermissionRequest",
     "SubagentStart",
     "SubagentStop",
     "TaskCreated",
@@ -1334,6 +1335,7 @@ mod tests {
             "TaskCompleted",
             "PreCompact",
             "Notification",
+            "PermissionRequest",
         ] {
             assert_eq!(
                 v["hooks"][event][0]["hooks"][0]["url"],

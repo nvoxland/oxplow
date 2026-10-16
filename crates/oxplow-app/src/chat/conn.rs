@@ -65,6 +65,10 @@ pub enum Incoming {
     },
     /// The agent named the conversation (Codex's thread name).
     Named(String),
+    /// The agent waits on the person (`Some`: what for) or no longer does
+    /// (`None`). Observed only: whoever answers does it in the agent's own
+    /// UI.
+    Waiting(Option<String>),
     /// The turn in flight finished (or failed).
     PromptDone(Result<TurnEnd, String>),
 }

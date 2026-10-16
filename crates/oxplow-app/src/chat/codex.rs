@@ -54,6 +54,12 @@ struct State {
     /// The thread's cumulative counts at the last turn's end, and now.
     tokens_at_turn_start: Option<Counts>,
     tokens_now: Option<Counts>,
+    /// What the last approval or question request this client saw asked,
+    /// for the wait that follows it. The request is the TUI's to answer;
+    /// it is only read.
+    asked: Option<String>,
+    /// The thread is waiting on the person (the status was reported).
+    waiting: bool,
 }
 
 /// One `tokenUsage` breakdown.
@@ -231,8 +237,12 @@ async fn pump(
         if !ours {
             continue;
         }
-        // A request (an approval, a question) is the TUI's to answer.
+        // A request (an approval, a question) is the TUI's to answer; what
+        // it asks is remembered for the wait the status reports.
         let ServerMessage::Notification { method, params } = message else {
+            if let ServerMessage::Request { method, params, .. } = &message {
+                note_request(method, params, &mut state.lock());
+            }
             continue;
         };
         for incoming in on_notification(&method, &params, &mut state.lock()) {
@@ -243,9 +253,69 @@ async fn pump(
     }
 }
 
+/// Remember what an approval or question request asks, to say it when the
+/// thread's status reports the wait.
+fn note_request(method: &str, p: &Value, state: &mut State) {
+    let text = |pointer: &str| {
+        p.pointer(pointer)
+            .and_then(Value::as_str)
+            .filter(|t| !t.is_empty())
+    };
+    state.asked = match method {
+        "item/commandExecution/requestApproval" => {
+            text("/command").map(|c| format!("Approve in Codex: {c}"))
+        }
+        "item/fileChange/requestApproval" | "item/permissions/requestApproval" => {
+            text("/reason").map(|r| format!("Approve in Codex: {r}"))
+        }
+        "item/tool/requestUserInput" => text("/questions/0/question").map(str::to_string),
+        _ => return,
+    };
+}
+
 fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> {
     let update = |u: ChatUpdate| vec![Incoming::Update(Box::new(u))];
     match method {
+        // The thread waits on the person, or no longer does.
+        "thread/status/changed" => {
+            let flags: Vec<&str> = p
+                .pointer("/status/activeFlags")
+                .and_then(Value::as_array)
+                .map(|f| f.iter().filter_map(Value::as_str).collect())
+                .unwrap_or_default();
+            let on_approval = flags.contains(&"waitingOnApproval");
+            let on_input = flags.contains(&"waitingOnUserInput");
+            if on_approval || on_input {
+                if state.waiting {
+                    return Vec::new();
+                }
+                state.waiting = true;
+                let said = state.asked.take().unwrap_or_else(|| {
+                    if on_input {
+                        "Waiting on your answer in Codex".to_string()
+                    } else {
+                        "Waiting on an approval in Codex".to_string()
+                    }
+                });
+                vec![Incoming::Waiting(Some(said))]
+            } else {
+                state.asked = None;
+                if std::mem::take(&mut state.waiting) {
+                    vec![Incoming::Waiting(None)]
+                } else {
+                    Vec::new()
+                }
+            }
+        }
+        // Answered, one way or another.
+        "serverRequest/resolved" => {
+            state.asked = None;
+            if std::mem::take(&mut state.waiting) {
+                vec![Incoming::Waiting(None)]
+            } else {
+                Vec::new()
+            }
+        }
         "item/started" | "item/completed" => p
             .get("item")
             .map(|item| item_updates(item, method == "item/completed", &mut state.streamed))
@@ -585,6 +655,104 @@ mod tests {
                 ServerMessage::Request { .. } => Vec::new(),
             })
             .collect()
+    }
+
+    fn waits(method: &str, params: Value, state: &mut State) -> Vec<Option<String>> {
+        on_notification(method, &params, state)
+            .into_iter()
+            .filter_map(|i| match i {
+                Incoming::Waiting(q) => Some(q),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn status(flags: &[&str]) -> Value {
+        json!({"threadId": THREAD, "status": {"type": "active", "activeFlags": flags}})
+    }
+
+    /// The thread waiting on an approval or an answer is the agent waiting
+    /// on the person: the status says so, with what it asked when the
+    /// request was seen, and goes back once the flags clear, the request is
+    /// resolved or the thread idles. Only observed: nothing answers.
+    #[test]
+    fn a_thread_waiting_on_the_person_is_reported_with_what_it_asked() {
+        let mut state = State {
+            thread: Some(THREAD.into()),
+            ..State::default()
+        };
+        // An approval, with the command the request named.
+        note_request(
+            "item/commandExecution/requestApproval",
+            &json!({"threadId": THREAD, "command": "rm -rf build"}),
+            &mut state,
+        );
+        assert_eq!(
+            waits(
+                "thread/status/changed",
+                status(&["waitingOnApproval"]),
+                &mut state
+            ),
+            [Some("Approve in Codex: rm -rf build".to_string())]
+        );
+        // The same state again says nothing new.
+        assert!(waits(
+            "thread/status/changed",
+            status(&["waitingOnApproval"]),
+            &mut state
+        )
+        .is_empty());
+        assert_eq!(
+            waits("thread/status/changed", status(&[]), &mut state),
+            [None]
+        );
+        // A question: its text.
+        note_request(
+            "item/tool/requestUserInput",
+            &json!({"threadId": THREAD, "questions": [{"question": "Which branch?"}]}),
+            &mut state,
+        );
+        assert_eq!(
+            waits(
+                "thread/status/changed",
+                status(&["waitingOnUserInput"]),
+                &mut state
+            ),
+            [Some("Which branch?".to_string())]
+        );
+        // Resolved, whichever way it was answered.
+        assert_eq!(
+            waits(
+                "serverRequest/resolved",
+                json!({"threadId": THREAD, "requestId": 3}),
+                &mut state
+            ),
+            [None]
+        );
+        // A wait whose request this client never saw still says so.
+        assert_eq!(
+            waits(
+                "thread/status/changed",
+                status(&["waitingOnApproval"]),
+                &mut state
+            ),
+            [Some("Waiting on an approval in Codex".to_string())]
+        );
+        assert_eq!(
+            waits(
+                "thread/status/changed",
+                json!({"threadId": THREAD, "status": {"type": "idle"}}),
+                &mut state
+            ),
+            [None]
+        );
+        // Not waiting, nothing to clear.
+        assert!(waits(
+            "thread/status/changed",
+            json!({"threadId": THREAD, "status": {"type": "idle"}}),
+            &mut state
+        )
+        .is_empty());
     }
 
     #[test]

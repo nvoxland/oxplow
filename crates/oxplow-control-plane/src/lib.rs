@@ -408,7 +408,12 @@ async fn handle_hook_inner(
     }
     if matches!(
         event.as_str(),
-        "SessionStart" | "SessionEnd" | "Notification" | "SubagentStart" | "SubagentStop"
+        "SessionStart"
+            | "SessionEnd"
+            | "Notification"
+            | "PermissionRequest"
+            | "SubagentStart"
+            | "SubagentStop"
     ) {
         if event == "SessionStart" {
             ctx.services
@@ -420,12 +425,23 @@ async fn handle_hook_inner(
             "SessionEnd" => HookKind::SessionEnd,
             "SubagentStart" => HookKind::SubagentStart,
             "SubagentStop" => HookKind::SubagentStop,
+            "PermissionRequest" => HookKind::PermissionRequest,
             _ => HookKind::Notification,
         };
         let subagent = match (kind, body_value.as_ref()) {
             (HookKind::SubagentStart | HookKind::SubagentStop, Some(body)) => {
                 match ctx.services.harnesses.get(&principal.harness) {
                     Ok(h) => h.subagent(body).await,
+                    Err(_) => None,
+                }
+            }
+            _ => None,
+        };
+        // The tool a permission request names, as the harness maps it.
+        let tool = match (kind, body_value.as_ref()) {
+            (HookKind::PermissionRequest, Some(body)) => {
+                match ctx.services.harnesses.get(&principal.harness) {
+                    Ok(h) => h.tool_use(body).await,
                     Err(_) => None,
                 }
             }
@@ -441,7 +457,7 @@ async fn handle_hook_inner(
             payload_json: body_str,
             prompt: None,
             decision: None,
-            tool: None,
+            tool,
             subagent,
         };
         let harness = match ctx.services.hook_ingest.ingest(envelope).await {

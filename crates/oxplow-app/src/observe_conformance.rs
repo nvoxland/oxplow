@@ -120,6 +120,29 @@ pub async fn suite(svc: &crate::Services, expect: &Expect<'_>) -> Vec<Finding> {
     findings
 }
 
+/// The `permission_prompts` check: a harness that declares the feature
+/// must have its session's wait on the person recorded as an
+/// `agent.status.changed` to `awaiting_user` that says what it waits on.
+pub async fn waits_on_the_person(svc: &crate::Services, thread: ThreadId) -> Vec<Finding> {
+    let events = events_of(svc, thread).await;
+    let waits: Vec<&Value> = events
+        .iter()
+        .filter(|e| e.envelope.event_type == "agent.status.changed")
+        .map(|e| &e.envelope.payload)
+        .filter(|p| p["state"] == "awaiting_user")
+        .collect();
+    if waits
+        .iter()
+        .any(|p| p["detail"].as_str().is_some_and(|d| !d.is_empty()))
+    {
+        return Vec::new();
+    }
+    vec![Finding {
+        check: "permission_prompts",
+        message: format!("no awaiting_user status with its detail: {waits:?}"),
+    }]
+}
+
 /// Whether a tool event is an edit (in oxplow's vocabulary, whatever the
 /// harness calls it) naming `path`.
 fn edits(payload: &serde_json::Value, path: &str) -> bool {

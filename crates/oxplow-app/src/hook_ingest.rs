@@ -650,7 +650,7 @@ fn record_tx(
             // an idle reminder says nothing new.
             let waits = matches!(
                 body.get("notification_type").and_then(|t| t.as_str()),
-                Some("permission_prompt" | "elicitation_dialog")
+                Some("permission_prompt" | "elicitation_dialog" | "agent_needs_input")
             );
             if waits {
                 let message = body
@@ -660,6 +660,15 @@ fn record_tx(
                     .to_string();
                 status = Some((AgentStatusState::AwaitingUser, Some(message)));
             }
+        }
+        // Claude asks the person to allow a tool: a wait that names it.
+        // Observed only; the answer to the hook stays `Ack`.
+        HookKind::PermissionRequest => {
+            let tool = env.tool.as_ref().map_or("a tool", |t| t.name.as_str());
+            status = Some((
+                AgentStatusState::AwaitingUser,
+                Some(format!("Waiting on your permission to use {tool}")),
+            ));
         }
         // The person's Escape with no turn running closed a menu or a
         // prompt, not a turn: nothing to end, and a thread waiting on them
@@ -2767,5 +2776,52 @@ mod tests {
             status(&svc, tid).await.unwrap().state,
             AgentStatusState::Running
         );
+    }
+
+    /// Claude's `PermissionRequest` hook names the tool it waits on; the
+    /// newer `agent_needs_input` notification waits like a prompt does.
+    #[tokio::test]
+    async fn a_permission_request_and_an_agent_needing_input_wait_on_the_person() {
+        let (svc, tid) = fixture().await;
+        svc.ingest(hook(HookKind::UserPromptSubmit, tid, None, json!({})))
+            .await
+            .unwrap();
+        svc.ingest(hook(
+            HookKind::PermissionRequest,
+            tid,
+            None,
+            json!({ "tool_name": "Bash", "tool_input": { "command": "rm -rf build" } }),
+        ))
+        .await
+        .unwrap();
+        let s = status(&svc, tid).await.unwrap();
+        assert_eq!(s.state, AgentStatusState::AwaitingUser);
+        assert_eq!(
+            s.detail.as_deref(),
+            Some("Waiting on your permission to use Bash")
+        );
+        svc.ingest(hook(
+            HookKind::PostToolUse,
+            tid,
+            None,
+            json!({ "tool_name": "Bash" }),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(
+            status(&svc, tid).await.unwrap().state,
+            AgentStatusState::Running
+        );
+        svc.ingest(hook(
+            HookKind::Notification,
+            tid,
+            None,
+            json!({ "notification_type": "agent_needs_input", "message": "Which branch?" }),
+        ))
+        .await
+        .unwrap();
+        let s = status(&svc, tid).await.unwrap();
+        assert_eq!(s.state, AgentStatusState::AwaitingUser);
+        assert_eq!(s.detail.as_deref(), Some("Which branch?"));
     }
 }

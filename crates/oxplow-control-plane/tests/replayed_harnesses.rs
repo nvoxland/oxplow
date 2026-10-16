@@ -180,6 +180,60 @@ async fn a_recorded_opencode_session_is_recorded_canonically() {
     assert_eq!(resume_of(&r).await, "ses_ee095c454ffep2jtN6LDC21YZJ");
 }
 
+/// A harness that declares `permission_prompts` has the wait on a
+/// permission recorded as `awaiting_user` with what it waits on. These
+/// two fixtures are written from each harness's documented hook, not
+/// recorded.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_declared_permission_wait_is_recorded_as_awaiting_the_person() {
+    for (name, harness) in [
+        ("claude/permission.jsonl", "claude"),
+        ("opencode/permission.jsonl", "opencode"),
+    ] {
+        let r = replayed(name, harness).await;
+        let findings = oxplow_app::observe_conformance::waits_on_the_person(&r.svc, r.thread).await;
+        assert!(findings.is_empty(), "{name}: {findings:#?}");
+    }
+}
+
+/// Observe only: the answer to a `PermissionRequest` carries no decision,
+/// so Claude's own dialog still asks the person.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_permission_request_is_answered_with_an_ack_only() {
+    let r = replayed("claude/permission.jsonl", "claude").await;
+    let token = common::bearer_for(&r.svc, r.session).await;
+    let post = |event: &'static str| {
+        let url = format!("{}/{event}", r._cp.hook_base_url());
+        let token = token.clone();
+        async move {
+            reqwest::Client::new()
+                .post(url)
+                .bearer_auth(token)
+                .json(&serde_json::json!({ "session_id": "s", "tool_name": "Bash" }))
+                .send()
+                .await
+                .unwrap()
+                .text()
+                .await
+                .unwrap()
+        }
+    };
+    let answer = post("PermissionRequest").await;
+    assert_eq!(answer, post("Notification").await);
+    assert!(
+        !answer.contains("decision") && !answer.contains("permission"),
+        "{answer}"
+    );
+}
+
+/// The check fails for a session that never waited.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_session_that_never_waited_fails_the_permission_check() {
+    let r = replayed("claude/hooks.jsonl", "claude").await;
+    let findings = oxplow_app::observe_conformance::waits_on_the_person(&r.svc, r.thread).await;
+    assert_eq!(findings.len(), 1);
+}
+
 /// Claude Code's background subagent, recorded: its own call carries its
 /// id, it starts and finishes once, its hand-back opens a turn with no
 /// person's prompt, and the session resumes the parent.

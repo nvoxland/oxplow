@@ -1,0 +1,2 @@
+{"event": "UserPromptSubmit", "payload": {"session_id": "ses_synthetic0permission", "prompt": "run the build"}}
+{"event": "Notification", "payload": {"session_id": "ses_synthetic0permission", "notification_type": "permission_prompt", "message": "opencode needs your permission to use bash"}}

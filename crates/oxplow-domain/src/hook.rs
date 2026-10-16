@@ -31,6 +31,10 @@ pub enum HookKind {
     /// The harness told the person something (Claude's `Notification`):
     /// a permission prompt waits on them.
     Notification,
+    /// The harness asks the person to allow a tool (Claude's
+    /// `PermissionRequest`). Observed only: the answer is always `Ack`, so
+    /// the harness's own dialog decides.
+    PermissionRequest,
     /// A subagent of the session started (Claude's `SubagentStart`).
     SubagentStart,
     /// A subagent of the session finished (Claude's `SubagentStop`, or a

@@ -304,7 +304,10 @@ pub fn claude_tool(
     body: &serde_json::Value,
 ) -> Option<oxplow_domain::agent::tool::ToolUse> {
     use oxplow_domain::HookKind;
-    if !matches!(kind, HookKind::PreToolUse | HookKind::PostToolUse) {
+    if !matches!(
+        kind,
+        HookKind::PreToolUse | HookKind::PostToolUse | HookKind::PermissionRequest
+    ) {
         return None;
     }
     let claude =

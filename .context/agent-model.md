@@ -462,7 +462,7 @@ harness's features from `list_agent_harnesses` (`HarnessListing.features`):
 |---|---|
 | Claude Code (`claude`) | terminal, permission_prompts, resume, transcript, telemetry, runtime_text, subagents, prompt_context, tool_context, conversation_list, conversation_fork |
 | Codex (`codex`) | terminal, permission_prompts, resume, runtime_text, conversation_list, conversation_fork, native_rename |
-| opencode (`opencode`) | terminal, resume, runtime_text, subagents, prompt_context, tool_context, conversation_list, conversation_fork |
+| opencode (`opencode`) | terminal, permission_prompts, resume, runtime_text, subagents, prompt_context, tool_context, conversation_list, conversation_fork |
 
 (`crates/oxplow-app/src/capabilities.rs`, the `harness(…)` built-ins.)
 `crates/oxplow-app/src/harness_conformance.rs` checks the floor every
@@ -1286,7 +1286,23 @@ ingest logs `awaiting_user` for a Stop whose final message ends in a
 question (its last line is the detail), a pending call that waits on the
 person (`kind: ask` or `plan`, until its PostToolUse), and Claude's
 `Notification` with `notification_type` `permission_prompt` or
-`elicitation_dialog`; ACP permission cards log it through `set_status`.
+`elicitation_dialog` or `agent_needs_input`, and Claude's
+`PermissionRequest` hook (the detail names the tool; registered to observe
+only, so its answer is always `Ack` and Claude's own dialog decides).
+Codex's observer logs it from `thread/status/changed` active flags
+(`waitingOnApproval`, `waitingOnUserInput`; the detail is the request's
+command, reason or first question) and clears it on the cleared flags or
+`serverRequest/resolved`. opencode's bridge forwards `permission.asked`
+(a `Notification`) and `question.asked` (an Ask `PreToolUse`); the
+`*.replied` events become a tool-less `PostToolUse` that clears the wait.
+ACP permission cards log it through `set_status`.
+
+**`permission_prompts`** means: oxplow learns when the agent waits on a
+permission or a question, and on what. Observe only: nothing answers or
+decides for the person. The observe conformance checks it for a harness
+that declares it (`observe_conformance::waits_on_the_person`; the
+`permission.jsonl` fixtures of Claude and opencode are written from the
+documented hooks, not recorded).
 
 - **Subagents in flight.** Unreturned `subagent` calls (and the reducer's
   `running_subagents`) keep a Stop from flipping the session to idle
