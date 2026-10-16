@@ -391,6 +391,81 @@
         }
       ],
       "key": []
+    },
+    "5": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Turn id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread the turn ran in."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session it ran in (v_agent_session.id); NULL for a turn no session claims (a hook from an agent oxplow didn't start)."
+        },
+        {
+          "name": "prompt",
+          "type": "TEXT",
+          "doc": "What the human typed."
+        },
+        {
+          "name": "answer",
+          "type": "TEXT",
+          "doc": "The agent's final answer, once the turn ended."
+        },
+        {
+          "name": "session_id",
+          "type": "TEXT",
+          "doc": "The harness session id, when it reported one."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "ended_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp; NULL while running."
+        },
+        {
+          "name": "start_snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot the worktree was at when the turn opened (v_snapshot.id); NULL if the stream had none yet."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot the worktree was at when the turn ended (v_snapshot.id); NULL while running."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`turn:trn<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
+        },
+        {
+          "name": "transcript_page",
+          "type": "TEXT",
+          "doc": "The session's transcript lens opened at this turn (`lens:oxplow-foundation/session-transcript?session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)"
+        },
+        {
+          "name": "model",
+          "type": "TEXT",
+          "doc": "The model the turn ran on, as its harness reported it with the turn's end; NULL while running, or when the harness said nothing (opencode). (v5)"
+        },
+        {
+          "name": "effort",
+          "type": "TEXT",
+          "doc": "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
+        }
+      ],
+      "key": []
     }
   },
   "ai_call": {

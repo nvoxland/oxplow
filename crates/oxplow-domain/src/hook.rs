@@ -99,6 +99,16 @@ pub struct AgentTurn {
     pub snapshot_id: Option<i64>,
 }
 
+/// What a turn ran on, as its harness reported it with the turn's end.
+/// Each part is `None` when the harness said nothing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TurnRun {
+    /// The model's id, as the harness names it.
+    pub model: Option<String>,
+    /// The reasoning effort, as the harness names it (`high`, `medium`, …).
+    pub effort: Option<String>,
+}
+
 /// How a turn ended (`agent.turn.ended`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]

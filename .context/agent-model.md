@@ -694,8 +694,9 @@ double). `ServicesChatHost::new(svc, stream, session)` holds `Weak<Services>`
 and the session it hosts, and records what a hooked turn records:
 `SessionStart` plus the resume id on start; `UserPromptSubmit` on the
 person's prompt; `PreToolUse` on every policy check; `PostToolUse` on each
-finished call; `Stop` with the turn's counts (`TURN_USAGE_KEY`) and its
-last agent message (`LAST_ASSISTANT_MESSAGE`); `Interrupt` when the agent
+finished call; `Stop` with the turn's counts (`TURN_USAGE_KEY`), its
+last agent message (`LAST_ASSISTANT_MESSAGE`) and the model and effort
+the observer reports (`turn_run`); `Interrupt` when the agent
 goes away.
 
 **Starting.** `initialize` offers fs read/write and no terminal. oxplow's
@@ -839,7 +840,9 @@ Codex's `conn::Connection`, with no view. It:
   `mcp__<server>__<tool>`, `webSearch` → fetch, anything else → other;
   `turn/completed` → the Stop with its last agent message and the turn's
   tokens (the change in the thread's cumulative counts: input less the
-  cached input, cache reads separate); `thread/name/updated` → the
+  cached input, cache reads separate) and the model and effort then
+  (the open result's `thread.model` / `reasoningEffort`, moved by
+  `thread/settings/updated`'s `model` / `effort`); `thread/name/updated` → the
   conversation's name (`HookIngestService::name_conversation`);
 - sends no turn and answers no request: approvals and questions are the
   TUI's (`prompt` refuses; `guard_tests::nothing_starts_a_codex_turn`
@@ -992,7 +995,13 @@ more than the stream would even when it's sometimes wrong.
   the dedupe key, so a re-posted hook logs once.
 - **Stop / Interrupt** close the session's open turns
   (`agent.turn.ended@2`, with Claude's `transcript_path`), then the
-  turn-end snapshot ("Snapshot tracking").
+  turn-end snapshot ("Snapshot tracking"). A Stop also sets the turn's
+  `model` and `effort` (`agent_turn`) from `HookEnvelope.turn_run`: the
+  route asks the bearer's harness (`AgentHarness::turn_run(body)`: Claude's
+  `effort.level` and the newest non-synthetic `message.model` among the
+  transcript's last 256 KB; opencode's `model` / `variant`), and the chat
+  host sets it from the observer (Codex). A harness that says nothing
+  leaves NULLs.
 - **Status.** A status the hook sets (Running, Idle / AwaitingUser,
   Stopped) is logged as `agent.status.changed` when it differs from the
   newest logged one, read in the same transaction (`last_status_tx`). The
@@ -1204,7 +1213,7 @@ available from outside.
 | Asked a question | `AskUserQuestion` PreToolUse → AwaitingUser with its question; a `?`-ending Stop | a `?`-ending Stop; *`waitingOnUserInput`, `requestUserInput.questions`* | a `?`-ending Stop; *`question.asked`* |
 | Answering from oxplow | — (no interface into an interactive session; a cross-session message can't consent) | — (a request goes to the turn's client) | *HTTP `permission` / `question` reply* — left native |
 | The plan | *`ExitPlanMode` `tool_input.plan`, `planFilePath`* (today only the raw tool input, `event:<id>#input`) | *the `plan` item's text*; `turn/plan/updated` steps reach only the chat library | — (`plan_exit` carries no text) |
-| Model / effort | transcript `message.model` → `v_token_usage.model`; *`effort.level` on tool events and Stop, `SessionStart.model`, `PostModelSwitch`* | *`Thread.model` / `reasoningEffort`, `thread/settings/updated`* | *the assistant message's `modelID`, `variant`* |
+| Model / effort | `agent_turn.model` / `effort`: the Stop's `effort.level` and the transcript tail's newest `message.model`; transcript `message.model` → `v_token_usage.model`; *`SessionStart.model`, `PostModelSwitch`* | `agent_turn.model` / `effort`: `Thread.model` / `reasoningEffort` at open, moved by `thread/settings/updated` | `agent_turn.model` / `effort`: the bridge's Stop carries the last assistant message's `modelID` and `variant` |
 | Set at launch | `agentConfig.claude.model` → `--model`, `.effort` → `--effort` | `agentConfig.codex.model` → the open request's `model`, `.effort` → its `config.model_reasoning_effort` | `agentConfig.opencode.model` → `-m` |
 | Context fill, compaction | *the transcript tail's last usage; `PostCompact` `compact_summary`*; `PreCompact` resets the context baselines | *`thread/tokenUsage/updated` `last.totalTokens` / `modelContextWindow`; the `contextCompaction` item* | *the message's `tokens`; `session.compacted`* |
 | Tokens | OTLP and the transcript tail | `turn/completed` deltas | — (the bridge sends none) |

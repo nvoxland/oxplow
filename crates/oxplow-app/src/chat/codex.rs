@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use oxplow_domain::hook::TurnRun;
 use oxplow_harnesses::codex_app_server::{AppServer, ServerMessage};
 use parking_lot::Mutex;
 use serde_json::{json, Value};
@@ -60,6 +61,24 @@ struct State {
     asked: Option<String>,
     /// The thread is waiting on the person (the status was reported).
     waiting: bool,
+    /// The model and effort the thread has now: what it opened on, then
+    /// what its settings changes made them.
+    run: TurnRun,
+}
+
+/// The model and effort a thread opened on (`thread/start`, `resume` or
+/// `fork`'s result).
+fn thread_run(opened: &Value) -> TurnRun {
+    let text = |k: &str| {
+        opened
+            .pointer(&format!("/thread/{k}"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    };
+    TurnRun {
+        model: text("model"),
+        effort: text("reasoningEffort"),
+    }
 }
 
 /// One `tokenUsage` breakdown.
@@ -186,7 +205,11 @@ impl Connection for CodexConnection {
         {
             let _ = self.tx.send(Incoming::Named(name.to_string()));
         }
-        self.state.lock().thread = Some(thread.clone());
+        {
+            let mut state = self.state.lock();
+            state.thread = Some(thread.clone());
+            state.run = thread_run(&opened);
+        }
         let _ = self.opened.send(true);
         Ok(Opened {
             session_id: thread,
@@ -376,9 +399,20 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
                 _ => Ok(TurnEnd {
                     stop_reason: status.to_string(),
                     usage: tokens,
+                    run: (state.run != TurnRun::default()).then(|| state.run.clone()),
                 }),
             };
             vec![Incoming::PromptDone(done)]
+        }
+        "thread/settings/updated" => {
+            let setting = |k: &str| {
+                p.pointer(&format!("/threadSettings/{k}"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            };
+            state.run.model = setting("model").or(state.run.model.take());
+            state.run.effort = setting("effort").or(state.run.effort.take());
+            Vec::new()
         }
         "thread/name/updated" => p
             .get("threadName")
@@ -843,6 +877,61 @@ mod tests {
         };
         assert_eq!(status(&done), ToolStatus::Completed);
         assert_eq!(status(&started), ToolStatus::InProgress);
+    }
+
+    /// The thread opens on a model and effort; a settings change moves
+    /// either; the turn's end carries what they are then.
+    #[test]
+    fn a_turn_ends_on_the_model_and_effort_the_thread_has() {
+        let end_of = |state: &mut State| match on_notification(
+            "turn/completed",
+            &json!({"threadId": "t", "turn": {"id": "u", "status": "completed"}}),
+            state,
+        )
+        .remove(0)
+        {
+            Incoming::PromptDone(Ok(end)) => end.run,
+            _ => panic!("not a turn end"),
+        };
+        let run = |model: &str, effort: &str| {
+            Some(TurnRun {
+                model: Some(model.into()),
+                effort: Some(effort.into()),
+            })
+        };
+        let mut state = State::default();
+        // Nothing said yet.
+        assert_eq!(end_of(&mut state), None);
+
+        state.run =
+            thread_run(&json!({"thread": {"model": "gpt-5.6", "reasoningEffort": "medium"}}));
+        assert_eq!(end_of(&mut state), run("gpt-5.6", "medium"));
+
+        // A null effort (the model has none) leaves it unset.
+        state.run = thread_run(&json!({"thread": {"model": "gpt-5.6", "reasoningEffort": null}}));
+        assert_eq!(
+            end_of(&mut state),
+            Some(TurnRun {
+                model: Some("gpt-5.6".into()),
+                effort: None
+            })
+        );
+
+        let settings = |s: Value| json!({"threadId": "t", "threadSettings": s});
+        assert!(on_notification(
+            "thread/settings/updated",
+            &settings(json!({"model": "gpt-5.7", "effort": "high"})),
+            &mut state
+        )
+        .is_empty());
+        assert_eq!(end_of(&mut state), run("gpt-5.7", "high"));
+        // A change that names only one keeps the other.
+        on_notification(
+            "thread/settings/updated",
+            &settings(json!({"effort": "low"})),
+            &mut state,
+        );
+        assert_eq!(end_of(&mut state), run("gpt-5.7", "low"));
     }
 
     #[test]

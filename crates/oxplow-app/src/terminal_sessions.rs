@@ -368,6 +368,7 @@ impl TerminalSessionRegistry {
                         if let (Some(pane), Some(ingest)) = (agent, exits.get()) {
                             let exit = crate::hook_ingest::HookEnvelope {
                                 session_title: None,
+                                turn_run: None,
                                 kind: oxplow_domain::HookKind::SessionEnd,
                                 thread_id: Some(pane.thread),
                                 stream_id: None,

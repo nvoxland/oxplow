@@ -12,6 +12,7 @@ use oxplow_runtime::policy::PolicyDecision;
 use tracing::warn;
 
 use oxplow_domain::agent::tool::ToolUse;
+use oxplow_domain::hook::TurnRun;
 
 use super::conn::TurnTokens;
 use crate::hook_ingest::HookEnvelope;
@@ -42,14 +43,15 @@ pub trait ChatHost: Send + Sync + 'static {
         tool: &ToolUse,
         content: &serde_json::Value,
     );
-    /// The turn ended: record it, with its final answer and the counts the
-    /// agent reported.
+    /// The turn ended: record it, with its final answer and the counts,
+    /// model and effort the agent reported.
     async fn turn_ended(
         &self,
         thread: &ThreadId,
         session_id: &str,
         answer: Option<&str>,
         tokens: Option<&TurnTokens>,
+        run: Option<&TurnRun>,
     );
     /// The agent named the conversation.
     async fn named(&self, thread: &ThreadId, session_id: &str, title: &str);
@@ -100,6 +102,7 @@ impl ServicesChatHost {
     ) -> HookEnvelope {
         HookEnvelope {
             session_title: None,
+            turn_run: None,
             kind,
             thread_id: Some(*thread),
             stream_id: self.stream_id,
@@ -236,6 +239,7 @@ impl ChatHost for ServicesChatHost {
         session_id: &str,
         answer: Option<&str>,
         tokens: Option<&TurnTokens>,
+        run: Option<&TurnRun>,
     ) {
         let Some(svc) = self.svc.upgrade() else {
             return;
@@ -254,7 +258,8 @@ impl ChatHost for ServicesChatHost {
                 "cache_read": t.cache_read,
             });
         }
-        let env = self.envelope(HookKind::Stop, thread, session_id, body, None);
+        let mut env = self.envelope(HookKind::Stop, thread, session_id, body, None);
+        env.turn_run = run.cloned();
         if let Err(err) = svc.hook_ingest.ingest(env).await {
             warn!(?err, "acp: hook ingest failed");
         }
@@ -335,6 +340,7 @@ impl ChatHost for ServicesChatHost {
         };
         let env = HookEnvelope {
             session_title: None,
+            turn_run: None,
             kind: HookKind::Interrupt,
             thread_id: Some(*thread),
             stream_id: self.stream_id,

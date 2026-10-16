@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 
+use oxplow_domain::hook::TurnRun;
+
 use super::human_prompt::HumanPrompt;
 use super::model::{ChatUpdate, PermissionAnswer, PermissionAsk};
 
@@ -80,6 +82,8 @@ pub struct TurnEnd {
     pub stop_reason: String,
     /// Per-turn token counts, when the agent reports them.
     pub usage: Option<TurnTokens>,
+    /// The model and effort the turn ran on, when the agent reports them.
+    pub run: Option<TurnRun>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

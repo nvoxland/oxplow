@@ -798,13 +798,13 @@ impl Actor {
             self.cancel_pending();
             self.host.awaiting_user(self.thread(), None).await;
         }
-        let tokens = match &result {
-            Ok(end) => end.usage.clone(),
+        let (tokens, run) = match &result {
+            Ok(end) => (end.usage.clone(), end.run.clone()),
             Err(e) => {
                 self.push(ItemBody::Error {
                     message: format!("the prompt failed: {e}"),
                 });
-                None
+                (None, None)
             }
         };
         let answer = self.view.lock().transcript.last_answer();
@@ -814,6 +814,7 @@ impl Actor {
                 &self.session_id,
                 answer.as_deref(),
                 tokens.as_ref(),
+                run.as_ref(),
             )
             .await;
         self.set_status(ChatStatus::Idle);

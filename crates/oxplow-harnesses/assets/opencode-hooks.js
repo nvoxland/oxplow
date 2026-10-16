@@ -21,7 +21,8 @@
 ///                          reads)
 ///   event session.idle  -> Stop         (closes the turn; never refused;
 ///                          carries the agent's last message, so a reply
-///                          ending in a question sets waiting)
+///                          ending in a question sets waiting, and its
+///                          `model` / `variant`)
 ///   event permission.asked / question.asked
 ///                       -> Notification (a permission prompt, naming it) /
 ///                          PreToolUse of an `AskUserQuestion` call (the
@@ -128,19 +129,15 @@ export const OxplowHooks = async ({ client }) => {
       .toString(16)
       .slice(2, 10)}`;
 
-  // The text of the session's last assistant message: its text parts, in
-  // order. Empty when the session can't be read.
-  async function lastAssistantMessage(sessionID) {
+  // The session's last assistant message, or null when the session can't
+  // be read.
+  async function lastAssistant(sessionID) {
     try {
       const res = await client.session.messages({ path: { id: sessionID } });
       const messages = res && typeof res === "object" && "data" in res ? res.data : res;
-      const last = [...(messages || [])].reverse().find((m) => m?.info?.role === "assistant");
-      return (last?.parts || [])
-        .filter((p) => p && p.type === "text" && typeof p.text === "string")
-        .map((p) => p.text)
-        .join("\n");
+      return [...(messages || [])].reverse().find((m) => m?.info?.role === "assistant") ?? null;
     } catch {
-      return "";
+      return null;
     }
   }
 
@@ -240,9 +237,16 @@ export const OxplowHooks = async ({ client }) => {
       if (event.type !== "session.idle") return;
       const sessionID = props.sessionID;
       if (await isChildSession(sessionID)) return;
+      const last = await lastAssistant(sessionID);
+      // Its text parts, in order; the model and variant it ran on.
       await post("Stop", {
         session_id: sessionID,
-        last_assistant_message: await lastAssistantMessage(sessionID),
+        last_assistant_message: (last?.parts || [])
+          .filter((p) => p && p.type === "text" && typeof p.text === "string")
+          .map((p) => p.text)
+          .join("\n"),
+        model: last?.info?.modelID,
+        variant: last?.info?.variant,
       });
     },
   };

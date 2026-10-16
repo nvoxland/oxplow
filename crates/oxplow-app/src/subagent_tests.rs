@@ -16,6 +16,7 @@ fn envelope(
 ) -> HookEnvelope {
     HookEnvelope {
         session_title: None,
+        turn_run: None,
         kind,
         thread_id: Some(fx.thread),
         stream_id: None,

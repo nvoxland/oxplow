@@ -77,6 +77,7 @@ impl ChatHost for Host {
         _s: &str,
         answer: Option<&str>,
         tokens: Option<&TurnTokens>,
+        _run: Option<&oxplow_domain::hook::TurnRun>,
     ) {
         self.log.lock().push(format!(
             "turn_ended {}{}",

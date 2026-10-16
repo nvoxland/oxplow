@@ -6,5 +6,6 @@ SELECT t.id, t.thread_id, t.agent_session_id, t.prompt, t.answer, t.session_id, 
        CAST(CASE WHEN t.agent_session_id IS NULL THEN NULL ELSE lens_ref(
          'oxplow-foundation/session-transcript',
          'session', (SELECT s.ref FROM ref('agent_session') s WHERE s.id = t.agent_session_id),
-         'turn', 'turn:trn' || t.id) END AS TEXT) AS transcript_page
+         'turn', 'turn:trn' || t.id) END AS TEXT) AS transcript_page,
+       t.model, t.effort
   FROM source('agent_turn') t

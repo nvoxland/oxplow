@@ -932,6 +932,14 @@ it). `agent_turn` open/close log `agent.turn.started@1` /
 `event_log` has a `turn_id` index. `SqliteAgentTurnStore::
 stream_has_open_turn` answers "is an agent mid-turn on this worktree?".
 
+**Turns record the model and effort they ran on (V82).** Nullable TEXT
+`agent_turn.model` and `agent_turn.effort`, set by `close_turn_tx` from
+`TurnEnd.model` / `TurnEnd.effort` when the turn ends (they ride the Stop's
+`HookEnvelope.turn_run`) and published on `v_agent_turn`. A turn open, or
+whose harness said nothing (opencode when the bridge can't read its last
+message), has NULLs. The `AgentTurn` struct doesn't carry them: SQL reads
+them.
+
 **Effort↔snapshot linkage lives on the effort row.** There is no
 `effort_id` or `source` column on `snapshot` / `file_snapshot`
 themselves — the bracket is recorded by `effort.start_snapshot_id`
