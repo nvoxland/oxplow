@@ -325,7 +325,7 @@ async fn config_setters_round_trip() {
         commands::generated::set_agent_setting(
             app.state(),
             "claude".into(),
-            "model".into(),
+            "no_such_setting".into(),
             Some("x".into())
         )
         .await
