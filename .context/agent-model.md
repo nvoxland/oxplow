@@ -1173,6 +1173,40 @@ moves the item it picks to `in_progress`, so the effort links to it.
 Claude Code's `TaskCreate` is a within-turn planner and never mirrors
 oxplow's items.
 
+### Validated against, and what pins each scenario
+
+The session integration is checked against these versions: **Codex CLI
+0.162.1** (the 0.163 daemon was probed for "Codex: its TUI on a thread
+oxplow observes"), **Claude Code 2.1.301**, **opencode 1.17.4**; the
+recorded fixtures (`crates/oxplow-harnesses/fixtures/{claude,opencode}`,
+`crates/oxplow-app/tests/fixtures/codex/app-server.jsonl`) were taken at
+the versions current when recorded. A harness declares what it supports
+as features and answers "unsupported" for the rest
+(`a_built_in_harness_answers_unsupported_exactly_for_what_it_doesnt_declare`),
+so a failure is attributable to a declared capability, not assumed
+equivalence between tools.
+
+| Scenario | Pinned by |
+|---|---|
+| Native title changes | `a_slot_records_its_conversations_and_their_titles` (Claude's `session_title`); Codex's `thread/name/updated` in `a_prompt_in_the_tui_is_a_recorded_turn`, the name on resume in `a_new_thread_is_saved_so_the_tui_can_resume_it`; rename: `a_native_rename_is_a_thread_name_set` |
+| Binding changes (started, switched, forked, chosen) | `a_slots_bindings_are_its_conversations_in_order`, `a_person_resumes_a_chosen_conversation`, `a_fork_marks_the_next_launch`, `a_child_sessions_tool_hook_leaves_the_resume_pointer` |
+| Child-agent attribution | `its_subagents_are_read_from_their_hooks` (recorded `claude/subagent.jsonl`), `its_bridge_sends_the_call_id_the_exit_code_and_a_childs_parent` (opencode), `a_call_inside_a_subagent_call_is_the_subagents`, `a_background_subagent_hands_back_without_a_prompt` |
+| Unsupported capability | the conformance test above; `a_harness_without_a_list_says_so`; `a_native_rename_needs_the_feature_a_name_and_a_running_observer` |
+| Live client reconnect | `an_agent_session_is_reattached_not_spawned_again`; the pane's reopen (`terminalSession.test.ts`); Codex: `a_restarted_daemon_is_observed_again_on_the_next_open` |
+| Backend restart | `a_resumed_session_resets_a_turn_that_died_without_a_stop`, `a_restart_close_is_logged_as_recovery`, `a_process_exit_ends_its_session_once` (not yet end to end through a Codex launch) |
+| Lazy launch | `mayStartNow` (`terminalSession.test.ts`); `opening_adds_a_slot_and_undo_closes_it` (opening starts nothing) |
+| Deliberate stop | `stopping_marks_the_session_and_starting_clears_it`, `a_session_the_person_stopped_is_not_spawned`, `a_stop_by_the_person_is_marked_and_cleared` |
+| Missing vs inaccessible transcript | `a_missing_transcript_is_still_resumed_and_flagged`, `resume_state_reads_the_transcript_dir`, `an_unreadable_transcript_dir_is_unknown_not_missing` |
+| Custom config namespaces | `the_transcript_is_looked_for_in_the_effective_config_dir` (`CLAUDE_CONFIG_DIR`), `codex_home_follows_the_environment_when_set` (`CODEX_HOME`), `the_persons_mcp_servers_stay_unless_strict_is_asked_for` (`agentConfig.<harness>`) |
+| Native new / resume / fork | the harness fork tests (`a_fork_resumes_a_copy`, `a_fork_continues_a_copy`, `a_saved_conversation_resumes_or_forks_its_thread`), `a_person_opens_a_session_on_a_chosen_conversation` |
+| Duplicate ids | `a_conversation_bound_in_another_open_slot_is_found`, the refusals in `a_person_resumes_a_chosen_conversation` and `a_person_opens_a_session_on_a_chosen_conversation` |
+| Two-window tab context | `two_windows_each_report_their_own_page`, `tabs_are_listed_per_thread_with_selection_visibility_and_staleness` |
+| Stream / worktree assignment | `no_thread_edits_another_streams_worktree` (a thread never writes another stream's worktree, the primary checkout included), `an_agent_opens_in_its_own_stream_and_its_close_is_proposed` |
+| No terminal input from restore, metadata, tab discovery or handoff | `terminal_sessions_send_has_single_production_caller` and `no-agent-input-automation.test.ts`: the one way bytes reach a PTY is the person's keystrokes |
+
+Not yet covered end to end: a recorded Claude hook carrying
+`session_title`, and a restart through a real Codex launch (both filed).
+
 ### Agent status
 
 **Status is per agent session.** Each session has its newest

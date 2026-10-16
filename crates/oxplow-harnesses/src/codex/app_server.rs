@@ -33,8 +33,12 @@ pub fn control_socket(codex_home: &Path) -> PathBuf {
 
 /// Codex's home for the person whose home is `home`.
 pub fn codex_home(home: &Path) -> PathBuf {
-    std::env::var_os("CODEX_HOME")
-        .filter(|v| !v.is_empty())
+    codex_home_in(home, std::env::var_os("CODEX_HOME"))
+}
+
+/// [`codex_home`] given the value of `$CODEX_HOME`.
+fn codex_home_in(home: &Path, env: Option<std::ffi::OsString>) -> PathBuf {
+    env.filter(|v| !v.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".codex"))
 }
@@ -287,6 +291,8 @@ pub mod fake {
         push: broadcast::Sender<Value>,
         received: Arc<Mutex<Vec<Value>>>,
         arrived: Arc<tokio::sync::Notify>,
+        /// Set by [`Self::stop`]: the accept loop and every connection end.
+        down: tokio::sync::watch::Sender<bool>,
     }
 
     impl FakeAppServer {
@@ -304,15 +310,24 @@ pub mod fake {
             let arrived = Arc::new(tokio::sync::Notify::new());
             let answer: Arc<Answer> = Arc::new(answer);
             let (p, r, a) = (push.clone(), received.clone(), arrived.clone());
+            let (down, mut stopped) = tokio::sync::watch::channel(false);
+            let serving = down.subscribe();
             tokio::spawn(async move {
-                while let Ok((stream, _)) = listener.accept().await {
-                    tokio::spawn(serve(
-                        stream,
-                        answer.clone(),
-                        p.subscribe(),
-                        r.clone(),
-                        a.clone(),
-                    ));
+                loop {
+                    tokio::select! {
+                        accepted = listener.accept() => {
+                            let Ok((stream, _)) = accepted else { break };
+                            tokio::spawn(serve(
+                                stream,
+                                answer.clone(),
+                                p.subscribe(),
+                                r.clone(),
+                                a.clone(),
+                                serving.clone(),
+                            ));
+                        }
+                        _ = stopped.changed() => break,
+                    }
                 }
             });
             Self {
@@ -320,7 +335,14 @@ pub mod fake {
                 push,
                 received,
                 arrived,
+                down,
             }
+        }
+
+        /// The daemon goes away: it stops listening and drops every
+        /// client's connection.
+        pub fn stop(&self) {
+            let _ = self.down.send(true);
         }
 
         /// Send `message` (a notification or a request) to every client.
@@ -355,6 +377,7 @@ pub mod fake {
         mut push: broadcast::Receiver<Value>,
         received: Arc<Mutex<Vec<Value>>>,
         arrived: Arc<tokio::sync::Notify>,
+        mut down: tokio::sync::watch::Receiver<bool>,
     ) {
         let Ok(ws) = tokio_tungstenite::accept_async(stream).await else {
             return;
@@ -362,6 +385,7 @@ pub mod fake {
         let (mut sink, mut source) = ws.split();
         loop {
             tokio::select! {
+                _ = down.changed() => break,
                 frame = source.next() => {
                     let Some(Ok(Message::Text(text))) = frame else { break };
                     let Ok(v) = serde_json::from_str::<Value>(text.as_str()) else { continue };
@@ -494,5 +518,24 @@ mod tests {
             .unwrap();
         assert!(marker.exists(), "the daemon was started");
         assert!(err.contains("didn't come up"), "{err}");
+    }
+
+    /// A custom config namespace: `$CODEX_HOME` moves the daemon's socket
+    /// (and so the threads oxplow lists and opens) off the default; unset
+    /// or empty it is `~/.codex`.
+    #[test]
+    fn codex_home_follows_the_environment_when_set() {
+        let home = Path::new("/home/p");
+        assert_eq!(codex_home_in(home, None), Path::new("/home/p/.codex"));
+        assert_eq!(
+            codex_home_in(home, Some("".into())),
+            Path::new("/home/p/.codex")
+        );
+        let custom = codex_home_in(home, Some("/data/codex-work".into()));
+        assert_eq!(custom, Path::new("/data/codex-work"));
+        assert_eq!(
+            control_socket(&custom),
+            Path::new("/data/codex-work/app-server-control/app-server-control.sock")
+        );
     }
 }

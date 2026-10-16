@@ -1027,6 +1027,47 @@ mod codex {
         assert!(matches!(err, ChatError::NotOpen), "{err:?}");
     }
 
+    /// Codex's daemon going away ends the observer; the next open of the
+    /// session, against the daemon that came back, resumes the same thread
+    /// and observes it again, rather than staying dead or opening another.
+    #[tokio::test]
+    async fn a_restarted_daemon_is_observed_again_on_the_next_open() {
+        let (rig, fake) = open_codex(Host::default(), "thread/start").await;
+        assert!(rig.mgr.is_open(&session()));
+        fake.stop();
+        drop(fake);
+        let _ = std::fs::remove_file(
+            rig.dir
+                .path()
+                .join("app-server-control/app-server-control.sock"),
+        );
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while rig.mgr.is_open(&session()) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the observer ends with its daemon");
+        let back = daemon(rig.dir.path());
+        let thread = rig
+            .mgr
+            .open_codex(
+                rig.host.clone(),
+                spec(rig.dir.path()),
+                CodexOpen {
+                    socket: back.socket.clone(),
+                    program: None,
+                    method: "thread/resume".into(),
+                    params: json!({"threadId": THREAD, "cwd": rig.dir.path()}),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(thread, THREAD, "the same thread, not another");
+        assert!(rig.mgr.is_open(&session()));
+        assert!(methods(&back).contains(&"thread/resume".to_string()));
+    }
+
     /// Nothing here prompts the thread, and the TUI answers its own
     /// approvals: a request reaches no card and gets no answer from here.
     #[tokio::test]
