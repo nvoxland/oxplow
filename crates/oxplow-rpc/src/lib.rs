@@ -300,6 +300,7 @@ macro_rules! oxplow_command_table {
                 cancel_oauth_sign_in => $crate::commands::providers::cancel_oauth_sign_in { instance: String, name: String, sign_in: u32 } -> (),
                 complete_oauth_sign_in => $crate::commands::providers::complete_oauth_sign_in { instance: String, name: String, redirect: String } -> ::oxplow_app::providers::SignInCompletion,
                 report_tabs => $crate::commands::tabs::report_tabs { report: oxplow_app::client_reports::TabReport } -> (),
+                rename_native_conversation => $crate::commands::conversations::rename_native_conversation { session_id: String, name: String } -> (),
                 list_native_conversations => $crate::commands::conversations::list_native_conversations { session_id: String } -> Vec<$crate::commands::conversations::ListedConversation>,
                 // comments
                 list_comments_for_target => $crate::commands::comments::list_comments_for_target { target_kind: String, target_id: String } -> Vec<::oxplow_domain::CommentThread>,

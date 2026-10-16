@@ -474,7 +474,9 @@ One agent slot a person opened on a thread (V32; `ses<n>`, ref
   copied across) and `fork_next` (V78: the next launch forks the bound
   conversation instead of resuming it). `v_agent_session.display_name`
   is `title`, else `native_title`, else harness and opened date: the one
-  place a session is named.
+  place a session is named. Rename sets `title` (the alias; clearing it
+  falls back to `native_title`); naming the conversation in the harness is
+  a separate call where the harness has `native_rename`.
 - **Live identity:** `pid` is the OS pid of the process the daemon
   spawned for the session (`HookIngestService::record_agent_pid`, called
   at every spawn, so a restart overwrites it; also stamps `last_seen_at`).

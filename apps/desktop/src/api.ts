@@ -1375,6 +1375,12 @@ export async function renameAgentSession(sessionId: string, title: string): Prom
   await runCommand("oxplow.agent_session.rename", { session: agentSessionRef(sessionId), title });
 }
 
+/** Name the session's conversation in its harness's own UI (Codex's thread
+ *  list), where the harness can; oxplow's alias is `renameAgentSession`. */
+export async function renameNativeConversation(sessionId: string, name: string): Promise<void> {
+  unwrap(await commands.renameNativeConversation(sessionId, name));
+}
+
 export async function selectThread(streamId: string, threadId: string): Promise<ThreadState> {
   unwrap(await commands.selectThread({ streamId, threadId }));
   return getThreadState(streamId);

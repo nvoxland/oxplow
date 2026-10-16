@@ -44,3 +44,31 @@ test("Escape in any field cancels", () => {
   fireEvent.keyDown(view.getByTestId("p-body"), { key: "Escape" });
   expect(canceled).toBe(2);
 });
+
+// Rename's alias: clearing it is a choice (the native name shows again), so
+// a field may be optional; a toggle submits as "true" or "".
+test("an optional field may be empty, and a toggle submits its state", () => {
+  const submitted: Array<Record<string, string>> = [];
+  const view = render(
+    <InlinePromptStrip
+      testId="p"
+      message="M"
+      fields={[{ key: "title", initialValue: "alias", optional: true }]}
+      toggle={{ key: "native", label: "Also rename in Codex" }}
+      confirmLabel="Go"
+      onSubmit={(v) => void submitted.push(v)}
+      onCancel={() => {}}
+    />,
+  );
+  fireEvent.change(view.getByTestId("p-title"), { target: { value: "" } });
+  const submit = view.getByTestId("p-submit") as HTMLButtonElement;
+  expect(submit.disabled).toBe(false);
+  fireEvent.submit(submit.form!);
+  fireEvent.click(view.getByTestId("p-native"));
+  fireEvent.submit(submit.form!);
+  expect(submitted).toEqual([
+    { title: "", native: "" },
+    { title: "", native: "true" },
+  ]);
+  expect(view.getByText("Also rename in Codex")).toBeTruthy();
+});

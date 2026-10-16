@@ -435,16 +435,30 @@ verbs it has as features — `transcript` (`turns`), `telemetry`
 (`token_readings`), `runtime_text` (`refresh_text`), `subagents`
 (`prompt`, `subagent`), `conversation_list` (`conversations`: its saved
 conversations for a worktree), `conversation_fork` (a launch with
-`LaunchInput.fork` continues a copy) — and the two context channels,
+`LaunchInput.fork` continues a copy), `native_rename` (the person may name
+the conversation in the harness's own UI too; Codex's is `thread/name/set`
+on the observer's connection) — and the two context channels,
 `prompt_context` and `tool_context`. `session_title(body)` (Claude's
 `session_title` on a prompt) is the name the harness gives the session's
-conversation, written to `agent_session.native_title`. The UI reads each
+conversation, written to `agent_session.native_title`. **Two names.**
+`agent_session.title` is oxplow's alias (Rename sets it; clearing it gives
+the fallback back), `native_title` the harness's own; a tab shows
+`v_agent_session.display_name` (alias, else native, else harness and day).
+Rename can also name the conversation in the harness, only where it
+declares `native_rename`: the UI-only RPC `rename_native_conversation`
+runs `ChatManager::rename_native` → `Connection::rename` on the session's
+observer connection (an agent whose connection can't says so; a session
+whose observer isn't running is refused). The desktop does the alias first,
+then the native name; if the second fails it says the alias was saved
+and the harness didn't take the name (`sessionRename.ts`). The new name
+returns through `thread/name/updated` into `native_title` like any other.
+The UI reads each
 harness's features from `list_agent_harnesses` (`HarnessListing.features`):
 
 | Harness (key) | Features |
 |---|---|
 | Claude Code (`claude`) | terminal, permission_prompts, resume, transcript, telemetry, runtime_text, subagents, prompt_context, tool_context, conversation_list, conversation_fork |
-| Codex (`codex`) | terminal, permission_prompts, resume, runtime_text, conversation_list, conversation_fork |
+| Codex (`codex`) | terminal, permission_prompts, resume, runtime_text, conversation_list, conversation_fork, native_rename |
 | opencode (`opencode`) | terminal, resume, runtime_text, subagents, prompt_context, tool_context, conversation_list, conversation_fork |
 
 (`crates/oxplow-app/src/capabilities.rs`, the `harness(…)` built-ins.)

@@ -146,6 +146,7 @@ pub const BUILT_INS: &[BuiltIn] = &[
             "runtime_text",
             "conversation_list",
             "conversation_fork",
+            "native_rename",
         ],
     ),
     // Its bridge appends a prompt hook's context to the user's message and a

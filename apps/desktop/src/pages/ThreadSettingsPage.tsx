@@ -71,7 +71,7 @@ export function ThreadSettingsPage({ streamId, thread, onClose, onSaved }: Threa
             <Section title="Agent sessions">
               <Hint>
                 {sessions && sessions.length > 0
-                  ? `Open: ${sessions.map((s) => s.title || sessionLabel(harnesses, s)).join(", ")}. Each has its own tab; New session… on the thread's menu adds one.`
+                  ? `Open: ${sessions.map((s) => s.displayName || sessionLabel(harnesses, s)).join(", ")}. Each has its own tab; New session… on the thread's menu adds one.`
                   : "None open. New session… on the thread's menu starts one."}
               </Hint>
             </Section>

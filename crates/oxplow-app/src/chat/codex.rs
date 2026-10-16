@@ -189,6 +189,18 @@ impl Connection for CodexConnection {
         })
     }
 
+    /// The thread's name, as Codex's own thread list shows it.
+    async fn rename(&self, name: &str) -> Result<(), String> {
+        self.server
+            .request(
+                "thread/name/set",
+                json!({"threadId": self.thread(), "name": name}),
+            )
+            .await
+            .map(|_| ())
+            .map_err(|e| format!("Codex didn't take the name: {e}"))
+    }
+
     /// The person prompts in Codex's TUI; nothing here sends a turn.
     fn prompt(&self, _prompt: HumanPrompt, _writable: bool) -> Result<(), String> {
         Err("a Codex session is prompted in Codex's own TUI".into())

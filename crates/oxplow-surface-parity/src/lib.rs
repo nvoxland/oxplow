@@ -680,6 +680,10 @@ pub const MANIFEST: &[Capability] = &[
     // not an automation API — part of the no-automation guard (see
     // `.context/agent-model.md`).
     ui(
+        "rename_native_conversation",
+        "the person's rename of a session's conversation in its harness's own UI: never an automation API",
+    ),
+    ui(
         "open_terminal_session",
         "the person's terminal: never an automation API",
     ),

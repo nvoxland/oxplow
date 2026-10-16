@@ -32,6 +32,11 @@ pub trait Connection: Send + Sync + 'static {
     /// connection that confines its agent (Codex's sandbox) follows; one
     /// whose writes are gated as it asks has nothing to do.
     fn set_writable(&self, _writable: bool) {}
+    /// Name the agent's conversation (what its own UI lists it as). An
+    /// agent that can't says so.
+    async fn rename(&self, _name: &str) -> Result<(), String> {
+        Err("this agent can't rename its conversation".into())
+    }
 }
 
 /// A session that is up.

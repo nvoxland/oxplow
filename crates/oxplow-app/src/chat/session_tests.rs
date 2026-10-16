@@ -880,6 +880,7 @@ mod codex {
             "thread/start" => Ok(json!({"thread": {"id": THREAD, "name": null}})),
             "thread/resume" => Ok(json!({"thread": {"id": THREAD, "name": "Earlier work"}})),
             "thread/goal/set" | "thread/goal/clear" | "thread/settings/update" => Ok(json!({})),
+            "thread/name/set" => Ok(json!({})),
             other => Err(format!("no {other}")),
         })
     }
@@ -997,6 +998,33 @@ mod codex {
         })
         .await
         .unwrap();
+    }
+
+    /// The person's rename in oxplow reaches Codex as `thread/name/set` on
+    /// the observer's connection, naming the thread; a daemon that refuses
+    /// says why, and a session that isn't running can't be renamed.
+    #[tokio::test]
+    async fn a_native_rename_is_a_thread_name_set() {
+        let (rig, fake) = open_codex(Host::default(), "thread/start").await;
+        rig.mgr
+            .rename_native(&session(), "Login fix".into())
+            .await
+            .unwrap();
+        let sent = fake
+            .received()
+            .into_iter()
+            .find(|v| v["method"] == "thread/name/set")
+            .expect("the daemon was asked");
+        assert_eq!(
+            sent["params"],
+            json!({"threadId": THREAD, "name": "Login fix"})
+        );
+        let err = rig
+            .mgr
+            .rename_native(&oxplow_domain::AgentSessionId::new(404), "x".into())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ChatError::NotOpen), "{err:?}");
     }
 
     /// Nothing here prompts the thread, and the TUI answers its own

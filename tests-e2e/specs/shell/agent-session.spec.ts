@@ -1,4 +1,4 @@
-import { ipc } from "../../support/daemon.js";
+import { ipc, run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { searchLauncher } from "../../support/ui.js";
 
@@ -53,6 +53,27 @@ test("a session that can't launch shows why and offers a retry", async ({ fresh 
   await expect(ended).toContainText("Couldn't start the session");
   await expect(ended).toContainText("codex");
   await expect(page.getByTestId("terminal-retry")).toBeVisible();
+});
+
+/// A session's tab is named by the view's one rule: the person's alias, else
+/// the harness's name for the conversation, else the harness and the day.
+/// Clearing the alias gives the fallback back.
+test("a session's tab shows its alias, and its fallback once the alias is cleared", async ({ fresh }) => {
+  const { page, daemon } = fresh;
+  await ipc(daemon, "set_agents", { agents: ["terminal", "claude"] });
+  await page.goto("/");
+  await expect(page.getByTestId("page-new-session")).toBeVisible();
+  await page.getByTestId("new-session-agent").selectOption("claude");
+  await page.getByTestId("new-session-start").click();
+  const tab = page.locator('[data-testid^="center-tab-agent_session:"]').first();
+  await expect(tab).toBeVisible();
+  await expect(tab).toContainText(/claude \d{4}-\d{2}-\d{2}/i);
+  const id = ((await tab.getAttribute("data-testid")) ?? "").slice("center-tab-".length);
+  const rename = (title: string) => run(daemon, "oxplow.agent_session.rename", { session: id, title });
+  await rename("My review");
+  await expect(tab).toContainText("My review");
+  await rename("");
+  await expect(tab).toContainText(/claude \d{4}-\d{2}-\d{2}/i);
 });
 
 /// Search offers a command per enabled agent that starts it directly — the

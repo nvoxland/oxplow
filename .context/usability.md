@@ -321,7 +321,10 @@ Things I keep forgetting. Read this before adding any UI.
 - **Closing an agent session's tab is an inline confirm**, not an Undo
   toast: its × arms ("Close session") and the second click closes the
   session (`oxplow.agent_session.close`, destructive) — a stopped
-  process can't be undone. Rename… is on the tab's right-click menu.
+  process can't be undone. Rename… is on the tab's right-click menu; it sets
+  oxplow's name for the session (the strip says so, and what clearing it
+  falls back to — the harness's own name, shown as the placeholder), with
+  an "Also rename it in <harness>" box only where the harness can.
 - **Closing a dirty file tab** is fire-and-undo: the close completes
   immediately and a toast offers Undo (which restores both the saved
   buffer and the unsaved draft). See `App.tsx` →

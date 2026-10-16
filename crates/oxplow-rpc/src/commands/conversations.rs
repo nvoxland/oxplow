@@ -95,6 +95,49 @@ pub async fn list_native_conversations(
         .collect())
 }
 
+/// Name the session's conversation in its harness's own UI (Codex's
+/// thread list), when its harness can (feature `native_rename`) and its
+/// observer is running. A person's: the desktop's Rename calls it after
+/// `oxplow.agent_session.rename` set oxplow's alias, so a failure here
+/// leaves the alias saved and says the native name wasn't taken.
+pub async fn rename_native_conversation(
+    svc: &Services,
+    session_id: String,
+    name: String,
+) -> Result<(), IpcError> {
+    let id = AgentSessionId::try_from_str(&session_id)
+        .ok_or_else(|| IpcError::invalid(format!("{session_id:?} is not an agent session id")))?;
+    let session = svc
+        .agent_session_store
+        .get(&id)
+        .await?
+        .ok_or_else(|| IpcError::invalid(format!("no agent session {session_id}")))?;
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err(IpcError::invalid("name the conversation".to_string()));
+    }
+    let can = svc
+        .capabilities
+        .get("agent_harness", &session.harness)
+        .is_some_and(|i| i.features.get("native_rename").and_then(|v| v.as_bool()) == Some(true));
+    if !can {
+        return Err(IpcError::invalid(format!(
+            "`{}` can't rename its conversation; Rename sets oxplow's name for the session only",
+            session.harness
+        )));
+    }
+    svc.chat
+        .rename_native(&id, name)
+        .await
+        .map_err(|e| match e {
+            oxplow_app::chat::session::ChatError::NotOpen => IpcError::invalid(
+                "the session's conversation isn't being observed right now; open its tab and try again"
+                    .to_string(),
+            ),
+            other => IpcError::internal(other.to_string()),
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -111,6 +154,62 @@ mod tests {
         )
         .await
         .unwrap_err();
+        assert_eq!(err.code, "INVALID");
+    }
+
+    async fn session_of(ctx: &crate::RpcContext, harness: &str) -> String {
+        let stream = ctx.streams.ensure_primary().await.unwrap();
+        let thread = ctx
+            .threads
+            .selected_or_active(&stream.id)
+            .await
+            .unwrap()
+            .expect("the primary stream has a writer thread");
+        let out = crate::dispatch(
+            "run_command",
+            json!({ "id": "oxplow.agent_session.open", "input": {
+                "thread": oxplow_domain::refs::build::thread_ref(thread),
+                "harness": harness,
+            }, "confirmed": false }),
+            ctx,
+        )
+        .await
+        .unwrap();
+        out["result"]["id"].as_str().unwrap().to_string()
+    }
+
+    /// Only a harness that declares `native_rename` renames its
+    /// conversation; the others say Rename is oxplow's name only; Codex's
+    /// needs its observer running; a name is required.
+    #[tokio::test]
+    async fn a_native_rename_needs_the_feature_a_name_and_a_running_observer() {
+        let (ctx, _dir) = crate::test_support::services().await;
+        let rename = |session: &str, name: &str| {
+            crate::dispatch(
+                "rename_native_conversation",
+                json!({ "sessionId": session, "name": name }),
+                &ctx,
+            )
+        };
+        let claude = session_of(&ctx, "claude").await;
+        let err = rename(&claude, "x").await.unwrap_err();
+        assert_eq!(err.code, "INVALID");
+        assert!(err.message.contains("can't rename"), "{}", err.message);
+        let codex = session_of(&ctx, "codex").await;
+        let err = rename(&codex, "  ").await.unwrap_err();
+        assert!(
+            err.message.contains("name the conversation"),
+            "{}",
+            err.message
+        );
+        let err = rename(&codex, "Login fix").await.unwrap_err();
+        assert_eq!(err.code, "INVALID");
+        assert!(
+            err.message.contains("isn't being observed"),
+            "{}",
+            err.message
+        );
+        let err = rename("ses9999", "x").await.unwrap_err();
         assert_eq!(err.code, "INVALID");
     }
 }

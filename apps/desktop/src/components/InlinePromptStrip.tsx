@@ -8,6 +8,15 @@ export interface PromptField {
   placeholder?: string;
   /** A textarea: Enter is a newline, Cmd/Ctrl+Enter submits. */
   multiline?: boolean;
+  /** May be left empty (submits ""): clearing it is a choice. */
+  optional?: boolean;
+}
+
+/** A checkbox beside the fields; its submitted value is "true" or "". */
+export interface PromptToggle {
+  key: string;
+  label: string;
+  initial?: boolean;
 }
 
 /**
@@ -22,6 +31,7 @@ export interface PromptField {
 export function InlinePromptStrip({
   message,
   fields,
+  toggle,
   confirmLabel,
   onSubmit,
   onCancel,
@@ -31,6 +41,7 @@ export function InlinePromptStrip({
 }: {
   message: string;
   fields: PromptField[];
+  toggle?: PromptToggle;
   confirmLabel: string;
   onSubmit(values: Record<string, string>): void;
   onCancel(): void;
@@ -45,10 +56,11 @@ export function InlinePromptStrip({
   useEffect(() => {
     firstRef.current?.select();
   }, []);
+  const [toggled, setToggled] = useState(!!toggle?.initial);
   const trimmed = Object.fromEntries(fields.map((f) => [f.key, (values[f.key] ?? "").trim()]));
-  const ready = !busy && fields.every((f) => trimmed[f.key]!.length > 0);
+  const ready = !busy && fields.every((f) => f.optional || trimmed[f.key]!.length > 0);
   const submit = () => {
-    if (ready) onSubmit(trimmed);
+    if (ready) onSubmit(toggle ? { ...trimmed, [toggle.key]: toggled ? "true" : "" } : trimmed);
   };
   const onKeyDown = (field: PromptField) => (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
@@ -96,6 +108,17 @@ export function InlinePromptStrip({
             />
           );
         })}
+        {toggle ? (
+          <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--text-primary)" }}>
+            <input
+              type="checkbox"
+              data-testid={testId ? `${testId}-${toggle.key}` : undefined}
+              checked={toggled}
+              onChange={(e) => setToggled(e.target.checked)}
+            />
+            {toggle.label}
+          </label>
+        ) : null}
         <button type="button" onClick={onCancel} style={buttonStyle}>
           Cancel
         </button>

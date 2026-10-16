@@ -158,6 +158,11 @@ pub enum Command {
         option_id: Option<String>,
         reply: oneshot::Sender<Result<(), ChatError>>,
     },
+    /// Name the agent's conversation; the person asked.
+    Rename {
+        name: String,
+        reply: oneshot::Sender<Result<(), ChatError>>,
+    },
     Close,
 }
 
@@ -376,6 +381,9 @@ impl Actor {
                     self.writable = writable;
                     conn.set_writable(writable);
                 }
+            }
+            Command::Rename { name, reply } => {
+                let _ = reply.send(conn.rename(&name).await.map_err(ChatError::Agent));
             }
             Command::Close => {}
         }

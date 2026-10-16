@@ -400,6 +400,20 @@ impl ChatManager {
             .map_err(|_| ChatError::NotOpen)
     }
 
+    /// Name the session's agent conversation (what its own UI lists it
+    /// as), when its agent can; the person's rename asks for it.
+    pub async fn rename_native(
+        &self,
+        session: &AgentSessionId,
+        name: String,
+    ) -> Result<(), ChatError> {
+        let (reply, rx) = oneshot::channel();
+        self.commands(session)?
+            .send(Command::Rename { name, reply })
+            .map_err(|_| ChatError::NotOpen)?;
+        rx.await.map_err(|_| ChatError::NotOpen)?
+    }
+
     /// Tell every running session's connection what its thread may write
     /// now (a thread was promoted or demoted).
     pub fn sync_access(&self) {

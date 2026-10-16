@@ -7,6 +7,7 @@ import {
   openAgentSession,
   closeAgentSession,
   renameAgentSession,
+  renameNativeConversation,
   startAgentSession,
   stopAgentSession,
   getThreadState,
@@ -111,6 +112,7 @@ import { InlinePromptStrip } from "./components/InlinePromptStrip.js";
 import { reconcileSessionTabs } from "./tabs/sessionTabs.js";
 import { newThreadOpening, saveNewThreadSession } from "./newThreadSession.js";
 import { sessionLabel } from "./agentKinds.js";
+import { renameHint, renameSession } from "./sessionRename.js";
 import { useAgentHarnesses } from "./useAgentHarnesses.js";
 import { useThreadSessions } from "./agentSessions.js";
 import { rollUpAgentStatus, threadStatuses } from "./agentStatusRollup.js";
@@ -2549,7 +2551,7 @@ export function App() {
         const sessionId = (ref.payload as { sessionId: string }).sessionId;
         const session = selectedThreadSessions?.find((candidate) => candidate.id === sessionId) ?? null;
         const status = sessionStatuses[sessionId];
-        const label = session ? session.title || sessionLabel(harnesses, session) : "Agent";
+        const label = session ? session.displayName || sessionLabel(harnesses, session) : "Agent";
         return {
           id: ref.id,
           label,
@@ -3556,25 +3558,41 @@ export function App() {
                 else closePageTab(id);
               }}
               onReorder={handleReorderCenterTabs}
-              header={renamingSessionId ? (
-                <InlinePromptStrip
-                  testId="rename-session"
-                  message="Rename the agent session"
-                  confirmLabel="Rename"
-                  fields={[{
-                    key: "title",
-                    initialValue: selectedThreadSessions?.find((c) => c.id === renamingSessionId)?.title ?? "",
-                  }]}
-                  onCancel={() => setRenamingSessionId(null)}
-                  onSubmit={(values) => {
-                    const sessionId = renamingSessionId;
-                    setRenamingSessionId(null);
-                    void renameAgentSession(sessionId, values.title ?? "").catch((e: unknown) =>
-                      recordOpError({ label: "Rename session", message: e instanceof Error ? e.message : String(e) }),
-                    );
-                  }}
-                />
-              ) : undefined}
+              header={renamingSessionId ? (() => {
+                const renaming = selectedThreadSessions?.find((c) => c.id === renamingSessionId);
+                const harness = renaming ? harnesses.find((h) => h.id === renaming.harness) : undefined;
+                const harnessTitle = harness?.title ?? renaming?.harness ?? "the agent";
+                const hint = renameHint({
+                  title: renaming?.title ?? "",
+                  nativeTitle: renaming?.nativeTitle ?? "",
+                  displayName: renaming?.displayName ?? "",
+                  harnessTitle,
+                  nativeRename: !!harness?.features.includes("native_rename"),
+                });
+                return (
+                  <InlinePromptStrip
+                    testId="rename-session"
+                    message={hint.message}
+                    confirmLabel="Rename"
+                    fields={[{ key: "title", initialValue: renaming?.title ?? "", placeholder: hint.placeholder, optional: true }]}
+                    toggle={hint.toggleLabel ? { key: "native", label: hint.toggleLabel } : undefined}
+                    onCancel={() => setRenamingSessionId(null)}
+                    onSubmit={(values) => {
+                      const sessionId = renamingSessionId;
+                      setRenamingSessionId(null);
+                      void renameSession({
+                        alias: values.title ?? "",
+                        native: values.native === "true",
+                        harnessTitle,
+                        setAlias: (alias) => renameAgentSession(sessionId, alias),
+                        setNative: (name) => renameNativeConversation(sessionId, name),
+                      }).catch((e: unknown) =>
+                        recordOpError({ label: "Rename session", message: e instanceof Error ? e.message : String(e) }),
+                      );
+                    }}
+                  />
+                );
+              })() : undefined}
             />
           ) : <div style={{ padding: 12 }}>loading…</div>}
           {/* Generic comment layer for every plain-DOM page. Mounted once

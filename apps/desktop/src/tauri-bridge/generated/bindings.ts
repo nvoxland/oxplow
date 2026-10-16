@@ -259,6 +259,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	renameNativeConversation: (sessionId: string, name: string) => typedError<null, IpcError>(__TAURI_INVOKE("rename_native_conversation", { sessionId, name })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	setExtensionEnabled: (name: string, enabled: boolean) => typedError<Extension_Serialize[], IpcError>(__TAURI_INVOKE("set_extension_enabled", { name, enabled })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the

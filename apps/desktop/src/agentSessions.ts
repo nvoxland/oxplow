@@ -23,8 +23,13 @@ export interface AgentSessionRow {
   kind: string;
   /** The harness's key. */
   harness: string;
-  /** What the person called it; empty until renamed. */
+  /** What the person called it (oxplow's alias); empty until renamed. */
   title: string;
+  /** The name its harness gives the conversation; empty until it has one. */
+  nativeTitle: string;
+  /** What the tab says: the view's one rule (`v_agent_session.display_name`) —
+   *  the alias, else the native name, else the harness and the day. */
+  displayName: string;
   openedAt: string;
   /** The person stopped it, and hasn't started it again: its tab spawns
    *  nothing until they do. */
@@ -32,7 +37,7 @@ export interface AgentSessionRow {
 }
 
 const COLUMNS =
-  "s.ref, (SELECT t.ref FROM v_thread t WHERE t.id = s.thread_id) AS thread_ref, s.kind, s.harness, s.title, s.opened_at, s.stopped_by_user_at";
+  "s.ref, (SELECT t.ref FROM v_thread t WHERE t.id = s.thread_id) AS thread_ref, s.kind, s.harness, s.title, s.native_title, s.display_name, s.opened_at, s.stopped_by_user_at";
 
 export function agentSessionsFromResult(result: SqlQueryResult): AgentSessionRow[] {
   const at = (row: SqlCell[], name: string) => row[result.columns.indexOf(name)] ?? null;
@@ -42,6 +47,8 @@ export function agentSessionsFromResult(result: SqlQueryResult): AgentSessionRow
     kind: String(at(row, "kind")),
     harness: String(at(row, "harness")),
     title: String(at(row, "title") ?? ""),
+    nativeTitle: String(at(row, "native_title") ?? ""),
+    displayName: String(at(row, "display_name") ?? ""),
     openedAt: String(at(row, "opened_at")),
     stoppedByUser: at(row, "stopped_by_user_at") != null,
   }));
