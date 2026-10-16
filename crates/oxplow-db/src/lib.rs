@@ -109,9 +109,9 @@ pub use effort_store::{
 };
 pub use event_log_store::{anchors_for_thread_tx, DeadLetter, EventCtx, SqliteEventLogStore};
 pub use fact_store::{
-    BatchApply, BatchRows, CubeReadRow, Dimension, EffortMetricDelta, FactRow, FactSliceKey,
-    Measure, MetricCapture, MetricSpec, NewCubeRow, NewDimension, NewFact, NewMeasure,
-    NewMetricCapture, NewMetricSpec, SqliteFactStore, TestCaseResult, TestCaseStat,
+    BatchApply, BatchRows, CubeReadRow, Dimension, EffortCaptureGroup, EffortMetricDelta, FactRow,
+    FactSliceKey, Measure, MetricCapture, MetricSpec, NewCubeRow, NewDimension, NewFact,
+    NewMeasure, NewMetricCapture, NewMetricSpec, SqliteFactStore, TestCaseResult, TestCaseStat,
 };
 pub use git_store::{GitBranchRow, GitCommitFileRow, GitCommitRow, GitTagRow, SqliteGitStore};
 pub use page_ref_store::{PageRefEdge, PageRefStore, SourceSlice, SqlitePageRefStore};

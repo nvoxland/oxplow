@@ -368,6 +368,15 @@ fn row_to_spec(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricSpec> {
 // Capture (the context row)
 // ---------------------------------------------------------------------------
 
+/// An effort's captures of one producer and trigger.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffortCaptureGroup {
+    pub producer: String,
+    pub trigger: Option<String>,
+    pub count: i64,
+    pub max_id: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct MetricCapture {
     pub id: i64,
@@ -1864,6 +1873,83 @@ impl SqliteFactStore {
                 );
                 let mut stmt = conn.prepare(&sql)?;
                 let rows = stmt.query_map(params![effort_id], row_to_capture)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
+    /// What an effort holds, per producer and trigger: how many captures and
+    /// the newest id. An open effort holds thousands (a token report every
+    /// ~30 s); this is what a recompute asks first, so it reads rows only
+    /// for what moved.
+    pub async fn effort_capture_groups(
+        &self,
+        effort_id: i64,
+    ) -> Result<Vec<EffortCaptureGroup>, DomainError> {
+        self.db
+            .call(move |conn| {
+                let mut stmt = conn.prepare_cached(
+                    "SELECT producer, trigger, COUNT(*), MAX(id) FROM metric_capture
+                      WHERE effort_id = ?1 GROUP BY producer, trigger",
+                )?;
+                let rows = stmt.query_map(params![effort_id], |r| {
+                    Ok(EffortCaptureGroup {
+                        producer: r.get(0)?,
+                        trigger: r.get(1)?,
+                        count: r.get(2)?,
+                        max_id: r.get(3)?,
+                    })
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
+    /// The effort's captures by `producers` with an id after `after_id`,
+    /// oldest first (`after_id` 0: all of them).
+    pub async fn effort_captures_after(
+        &self,
+        effort_id: i64,
+        producers: Vec<String>,
+        after_id: i64,
+    ) -> Result<Vec<MetricCapture>, DomainError> {
+        if producers.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.db
+            .call(move |conn| {
+                let sql = format!(
+                    "SELECT {CAPTURE_COLS} FROM metric_capture
+                      WHERE effort_id = ?1 AND id > ?2
+                        AND producer IN (SELECT value FROM json_each(?3))
+                      ORDER BY captured_at ASC, id ASC"
+                );
+                let mut stmt = conn.prepare_cached(&sql)?;
+                let producers = serde_json::to_string(&producers).expect("producers serialize");
+                let rows =
+                    stmt.query_map(params![effort_id, after_id, producers], row_to_capture)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
+    /// The effort's captures with this `trigger` (a test, coverage or
+    /// analysis run), oldest first.
+    pub async fn effort_captures_by_trigger(
+        &self,
+        effort_id: i64,
+        trigger: &str,
+    ) -> Result<Vec<MetricCapture>, DomainError> {
+        let trigger = trigger.to_string();
+        self.db
+            .call(move |conn| {
+                let sql = format!(
+                    "SELECT {CAPTURE_COLS} FROM metric_capture
+                      WHERE effort_id = ?1 AND trigger = ?2
+                      ORDER BY captured_at ASC, id ASC"
+                );
+                let mut stmt = conn.prepare_cached(&sql)?;
+                let rows = stmt.query_map(params![effort_id, trigger], row_to_capture)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await

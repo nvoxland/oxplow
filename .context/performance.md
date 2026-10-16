@@ -82,6 +82,40 @@ Already fixed — **do not re-optimize these**:
 - `representative_facts_by_slice` was **38% of backend CPU** in a live capture;
   most calls no longer run it at all (tsk239/tsk242, below).
 
+## Open-effort evidence (2026-10-16)
+
+An effort open for days holds thousands of token reports (`otel-tokens`
+writes one per live agent about every 30 s; two efforts here held 13,459
+and 9,437 captures and 315,686 facts). The `effort_evidence` asset
+recomputes every open effort when the cube moves, and each report moved it,
+so each report meant reading the effort's whole history: `sample` put the
+daemon at 50–120% of a core with no turn in flight, in
+`refresh_effort_evidence` → `captures_for_effort` + `facts_for_captures`
+(`row_to_capture`, `fact_row_mapper`).
+
+What a recompute reads now:
+
+- **The effort's captures as groups** — `effort_capture_groups`: per
+  producer and trigger, the count and the newest id. A spec's memo key holds
+  the groups of the producers it reads, so a capture of any other producer
+  (all of an agent's work is stamped with the effort) leaves it as it was and
+  reads no rows.
+- **A `sum` spec folds** (`SumFold`): the total, the fact count and the
+  newest point of the reports covered so far, with how many there were. A new
+  report is read alone (`effort_captures_after`) and added; the fold starts
+  over if a covered capture is gone (the count before the old newest id no
+  longer matches) or the spec or the effort's window changed.
+- **Observations and coverage read only the effort's run captures**
+  (`effort_captures_by_trigger`), not every report.
+
+Measured (release, `a_long_open_effort_recomputes_in_milliseconds`,
+13,000 token reports of two facts each): reading the effort's captures and
+facts again **57.6 ms** (what each recompute did before, per effort, with
+twice the facts on the live database); a whole recompute after one more
+report **6.7 ms**. Pinned by `a_token_report_folds_into_the_total_without_
+rereading_the_effort` (one report reads one capture and two facts, and the
+fold equals a read from scratch) and `a_capture_nothing_reads_costs_no_reads`.
+
 ## oxplow-bundled's co-change pairs (P7.B5, 2026-10-02)
 
 The plan moved co-change out of core only if its SQL could be
