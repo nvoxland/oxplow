@@ -2989,8 +2989,14 @@ impl CollectionService {
 
     /// What `spec`'s delta for `effort` is computed from: the spec itself,
     /// the effort's span and start/end snapshots, its stream and claimed
-    /// files, its own captures, and the capture token of the producers of
-    /// the spec's source measure. `None` when that can't be named (a formula
+    /// files, the own captures it reads, and the capture token of the
+    /// producers of the spec's source measure. The own captures it reads are
+    /// those of the producers of its source measure (the run and window
+    /// families read their facts; the file family matches the effort's id on
+    /// those producers' captures) — except the coverage family, which reads
+    /// every one of the effort's test-run captures' detail. An agent's
+    /// token report, stamped to the open effort every few seconds, is
+    /// neither, so it recomputes none of them. `None` when that can't be named (a formula
     /// spec with no source measure): then it's always computed.
     async fn delta_inputs(
         &self,
@@ -3008,10 +3014,24 @@ impl CollectionService {
         let producers = self.facts.producers_for_measure(measure.id).await.ok()?;
         let token = self
             .facts
-            .capture_token_for_producers(producers)
+            .capture_token_for_producers(producers.clone())
             .await
             .ok()?;
-        let caps: Vec<i64> = effort_caps.iter().map(|c| c.id).collect();
+        let reads_all_runs = matches!(
+            crate::attribution::classify_effort_attribution(spec),
+            crate::attribution::EffortAttributionFamily::Coverage
+        );
+        let caps: Vec<i64> = effort_caps
+            .iter()
+            .filter(|c| {
+                if reads_all_runs {
+                    c.trigger.as_deref() == Some(RUN_TRIGGER)
+                } else {
+                    producers.contains(&c.producer)
+                }
+            })
+            .map(|c| c.id)
+            .collect();
         Some(format!(
             "{spec:?}|{:?}|{:?}|{:?}|{:?}|{stream:?}|{claimed:?}|{caps:?}|{token:?}",
             effort.started_at, effort.ended_at, effort.start_snapshot_id, effort.end_snapshot_id,
@@ -6095,6 +6115,68 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .started_at
+        }
+
+        /// The effort's own captures key a spec's memo only where its producers
+        /// wrote them: an agent's token report lands every few seconds,
+        /// stamped with the open effort, and must not recompute the specs of
+        /// other measures (the File family reloads whole capture histories).
+        #[tokio::test]
+        async fn an_effort_stamped_capture_recomputes_only_its_producers_specs() {
+            let h = build(None).await;
+            let effort = oxplow_domain::EffortId::try_from_str(&h.effort_id)
+                .unwrap()
+                .value();
+            let start = effort_start(&h, &h.effort_id).await;
+            let before = Timestamp::from_unix_ms(start.unix_ms() - 60_000);
+            let after = Timestamp::from_unix_ms(start.unix_ms() + 60_000);
+            let (m, facts) =
+                seed_file_gauge(&h, "oxplow.rust.unsafe_blocks", "lower-better", Some(0.0)).await;
+            claim(&h, &h.effort_id, "src/a.rs").await;
+            seed_gauge_capture(&facts, m, before, &[("src/a.rs", 2.0)]).await;
+            seed_gauge_capture(&facts, m, after, &[("src/a.rs", 3.0)]).await;
+            let computed = |svc: &CollectionService| {
+                svc.computed_deltas()
+                    .iter()
+                    .filter(|k| *k == "oxplow.rust.unsafe_blocks")
+                    .count()
+            };
+            h.service.effort_metric_deltas(&h.effort_id).await;
+            assert_eq!(computed(&h.service), 1);
+            // A token report from another producer, stamped to this effort.
+            let tokens = facts
+                .upsert_measure(oxplow_db::NewMeasure::new("acme.tokens", "tokens"))
+                .await
+                .unwrap();
+            let mut report = oxplow_db::NewMetricCapture::done(1, "otel-tokens", "otel");
+            report.effort_id = Some(effort);
+            facts
+                .record_facts(report, vec![oxplow_db::NewFact::new(tokens, 10.0)])
+                .await
+                .unwrap();
+            h.service.effort_metric_deltas(&h.effort_id).await;
+            assert_eq!(
+                computed(&h.service),
+                1,
+                "another producer's capture, though stamped to the effort"
+            );
+            // A capture of the spec's own producer, stamped to it, does.
+            let mut own = oxplow_db::NewMetricCapture::done(1, "test.gauge", "test");
+            own.effort_id = Some(effort);
+            own.captured_at = Some(after);
+            facts
+                .record_facts(
+                    own,
+                    vec![oxplow_db::NewFact {
+                        subject: Some("file:src/a.rs".into()),
+                        path: Some("src/a.rs".into()),
+                        ..oxplow_db::NewFact::new(m, 5.0)
+                    }],
+                )
+                .await
+                .unwrap();
+            h.service.effort_metric_deltas(&h.effort_id).await;
+            assert_eq!(computed(&h.service), 2, "a capture of its own producer");
         }
 
         /// A spec's delta is recomputed only when what it's computed from

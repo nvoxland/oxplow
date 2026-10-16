@@ -283,6 +283,25 @@ optimizing the computation itself. The memo key is then usually obvious and
 provably correct: `capture_id → captured_at` is a function, so memoizing on it
 is right **regardless of row order** — ordering only affects hit rate.
 
+## An effort's metric deltas, memoized by what each spec reads
+
+`CollectionService::effort_metric_deltas` computes one delta per metric
+spec for an effort; the `effort_evidence` asset recomputes them whenever
+the metric cube moves, which an agent's token report (an `otel-tokens`
+capture every 10–15 s, stamped with the open effort) does. `delta_memo`
+skips a spec whose inputs didn't move, so the key (`delta_inputs`) must hold
+only what the spec's delta can read: the spec, the effort's span, stream and
+claimed files, the capture token of the producers of its source measure, and
+**the effort's own captures of those producers** (the run and window
+families read their facts; the file family matches the effort's id on those
+producers' captures) — the coverage family instead its test-run captures. Keying
+on *all* the effort's captures made each token report invalidate every
+spec, including the file family, which reloads the producers' whole capture
+history and two whole-repo captures' facts: 10–20 s of CPU per recompute in
+a debug build, back to back. `an_effort_stamped_capture_recomputes_only_its_producers_specs`
+holds it: another producer's capture stamped to the effort recomputes
+nothing; one of the spec's own producers does.
+
 ## The renderer is not the problem (at idle)
 
 Every measurement above is of the Rust side. The renderer had never been
