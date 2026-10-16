@@ -15,6 +15,11 @@ use serde_json::{json, Value};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio_tungstenite::tungstenite::Message;
 
+/// The largest message the client reads. A resumed thread's answer
+/// carries its latest turns in full, tool output and patches included:
+/// tens of megabytes, past the websocket's default 16 MiB frame limit.
+const MAX_MESSAGE: usize = 256 << 20;
+
 /// How long `codex app-server daemon start` may take.
 const DAEMON_START: Duration = Duration::from_secs(30);
 
@@ -111,9 +116,13 @@ impl AppServer {
     async fn over(
         stream: tokio::net::UnixStream,
     ) -> Result<(Self, mpsc::UnboundedReceiver<ServerMessage>), String> {
-        let (ws, _) = tokio_tungstenite::client_async("ws://localhost/", stream)
-            .await
-            .map_err(|e| format!("Codex's app server refused the connection: {e}"))?;
+        let config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+            .max_message_size(Some(MAX_MESSAGE))
+            .max_frame_size(Some(MAX_MESSAGE));
+        let (ws, _) =
+            tokio_tungstenite::client_async_with_config("ws://localhost/", stream, Some(config))
+                .await
+                .map_err(|e| format!("Codex's app server refused the connection: {e}"))?;
         let (mut sink, mut source) = ws.split();
         let (out, mut outgoing) = mpsc::unbounded_channel::<Message>();
         let (messages, received) = mpsc::unbounded_channel();
@@ -434,6 +443,19 @@ mod tests {
         let answer = fake.wait_for(|v| v.get("id") == Some(&json!(7))).await;
         assert_eq!(answer["result"]["decision"], "decline");
         assert!(fake.received().iter().any(|v| v["method"] == "initialized"));
+    }
+
+    /// A resumed thread's answer runs to tens of megabytes (full turns
+    /// with their tools' output): one past the websocket's default 16 MiB
+    /// frame limit still arrives.
+    #[tokio::test]
+    async fn a_large_answer_arrives() {
+        let home = short_dir();
+        let big = "x".repeat(24 << 20);
+        let fake = FakeAppServer::start(home.path(), move |_, _| Ok(json!({ "big": big })));
+        let (server, _messages) = AppServer::connect(&fake.socket, None).await.unwrap();
+        let answer = server.request("thread/resume", json!({})).await.unwrap();
+        assert_eq!(answer["big"].as_str().map(str::len), Some(24 << 20));
     }
 
     /// Nothing listening and nothing to start it with is a clear error.

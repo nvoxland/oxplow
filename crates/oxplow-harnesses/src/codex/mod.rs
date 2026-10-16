@@ -29,8 +29,10 @@ use super::Named;
 
 pub(super) struct Codex(pub(super) Named);
 
-/// The turns a resumed thread brings back to show, newest first.
-const RESUMED_TURNS: u32 = 50;
+/// The turns a resumed thread brings back to show, newest first. Full
+/// turns run to megabytes each (their tools' output), so a page, not
+/// the history.
+const RESUMED_TURNS: u32 = 20;
 
 #[async_trait::async_trait]
 impl AgentHarness for Codex {
@@ -166,6 +168,9 @@ fn open_thread(input: &LaunchInput) -> (&'static str, Value) {
         }
         Some(Saved { id, fork: false }) => {
             params["threadId"] = json!(id);
+            // The page alone: `thread.turns` would carry the whole history
+            // again beside it.
+            params["excludeTurns"] = json!(true);
             params["initialTurnsPage"] =
                 json!({"itemsView": "full", "sortDirection": "desc", "limit": RESUMED_TURNS});
             ("thread/resume", params)
@@ -303,6 +308,7 @@ mod tests {
         assert_eq!(method, "thread/resume");
         assert_eq!(params["threadId"], "t-1");
         assert_eq!(params["initialTurnsPage"]["itemsView"], "full");
+        assert_eq!(params["excludeTurns"], true);
         assert!(params["config"]["mcp_servers"]["oxplow"].is_object());
         let l = launch_at_home(h.as_ref(), Some("t-1"), true, None);
         let (_, method, params) = opened(&l);

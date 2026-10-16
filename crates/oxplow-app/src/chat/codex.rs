@@ -448,7 +448,7 @@ fn item_updates(item: &Value, done: bool, streamed: &mut HashSet<String>) -> Vec
         }
         "userMessage" | "agentMessage" | "reasoning" | "plan" | "hookPrompt"
         | "contextCompaction" | "enteredReviewMode" | "exitedReviewMode" | "sleep" => Vec::new(),
-        _ => tool_call(item, id)
+        _ => tool_call(item, id, done)
             .into_iter()
             .map(ChatUpdate::ToolCall)
             .collect(),
@@ -457,13 +457,15 @@ fn item_updates(item: &Value, done: bool, streamed: &mut HashSet<String>) -> Vec
 
 /// A tool item as a tool call: its kind, title, input and (once it ends)
 /// output, in the protocol-neutral shape the session maps and records.
-fn tool_call(item: &Value, id: String) -> Option<ToolCall> {
+/// An item without a status of its own (a web search) is running until
+/// it is `done`.
+fn tool_call(item: &Value, id: String, done: bool) -> Option<ToolCall> {
     let s = |k: &str| item.get(k).and_then(Value::as_str).unwrap_or_default();
     let status = match s("status") {
         "completed" => ToolStatus::Completed,
         "failed" | "declined" => ToolStatus::Failed,
         "inProgress" => ToolStatus::InProgress,
-        _ if item.get("result").is_some_and(|r| !r.is_null()) => ToolStatus::Completed,
+        _ if done => ToolStatus::Completed,
         _ => ToolStatus::InProgress,
     };
     let mut call = ToolCall {
@@ -767,6 +769,21 @@ mod tests {
             .any(|i| matches!(i, Incoming::Named(n) if n == "Say hi")));
     }
 
+    /// A finished item that carries no status (a web search, an image
+    /// view) is done, not still running — a resumed thread's included.
+    #[test]
+    fn a_finished_item_without_a_status_is_completed() {
+        let search = json!({"type": "webSearch", "id": "w1", "query": "codex"});
+        let done = item_updates(&search, true, &mut HashSet::new());
+        let started = item_updates(&search, false, &mut HashSet::new());
+        let status = |u: &[ChatUpdate]| match &u[0] {
+            ChatUpdate::ToolCall(t) => t.status,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(status(&done), ToolStatus::Completed);
+        assert_eq!(status(&started), ToolStatus::InProgress);
+    }
+
     #[test]
     fn approvals_are_cards_and_their_answers_are_decisions() {
         let ask = approval(
@@ -808,6 +825,7 @@ mod tests {
         let call = tool_call(
             &json!({"type": "mcpToolCall", "id": "m1", "server": "oxplow", "tool": "oxplow_read", "status": "completed", "arguments": {"ref": "wiki:x"}, "result": {"content": []}}),
             "m1".into(),
+            true,
         )
         .unwrap();
         let used = super::super::mapping::tool_use(&call).unwrap();

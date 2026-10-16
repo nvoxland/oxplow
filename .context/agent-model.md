@@ -849,8 +849,10 @@ pins the shapes oxplow reads.
 the worktree skills and returns `LaunchSpec::CodexAppServer`: the socket
 under the person's home (none for a stream on another host: no launch),
 `codex` to start the daemon, and one request — `thread/start` for a new
-conversation, `thread/resume { threadId, initialTurnsPage: { itemsView:
-full, sortDirection: desc, limit: 50 } }` for the bound one, or
+conversation, `thread/resume { threadId, excludeTurns, initialTurnsPage: {
+itemsView: full, sortDirection: desc, limit: 20 } }` for the bound one (a
+page, not the history: full turns run to megabytes each, and the client
+reads messages up to 256 MiB, past the websocket's 16 MiB default), or
 `thread/fork { threadId }` — each with the worktree as `cwd`, oxplow's
 system prompt as `developerInstructions` and oxplow's MCP server in
 `config`. The thread's
