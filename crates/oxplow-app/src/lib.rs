@@ -55,6 +55,8 @@ pub mod contribution_health;
 pub mod credential_lint;
 pub mod daemon_supervisor;
 pub mod dashboard_tiles;
+#[cfg(test)]
+mod dashboards_reference_tests;
 pub mod diagnostics;
 pub mod duplication_scan;
 pub mod effect_triggers;
