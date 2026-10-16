@@ -44,6 +44,10 @@ pub enum HookKind {
     /// A subagent of the session finished (Claude's `SubagentStop`, or a
     /// hand-back).
     SubagentStop,
+    /// The harness summarized the session's context (Claude's
+    /// `PostCompact`; opencode's `session.compacted`, through its bridge;
+    /// Codex's `contextCompaction` item, from the chat host).
+    PostCompact,
 }
 
 #[derive(
@@ -103,14 +107,20 @@ pub struct AgentTurn {
     pub snapshot_id: Option<i64>,
 }
 
-/// What a turn ran on, as its harness reported it with the turn's end.
-/// Each part is `None` when the harness said nothing.
+/// What a turn ran on and how full its context was, as its harness
+/// reported it with the turn's end. Each part is `None` when the harness
+/// said nothing.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TurnRun {
     /// The model's id, as the harness names it.
     pub model: Option<String>,
     /// The reasoning effort, as the harness names it (`high`, `medium`, …).
     pub effort: Option<String>,
+    /// Tokens in the context when the turn ended: the input of its last
+    /// request, the cached part included.
+    pub context_tokens: Option<i64>,
+    /// The model's context window, in tokens.
+    pub context_window: Option<i64>,
 }
 
 /// How a turn ended (`agent.turn.ended`).

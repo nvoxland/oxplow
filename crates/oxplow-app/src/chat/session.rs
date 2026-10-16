@@ -509,6 +509,8 @@ impl Actor {
                     .plan_proposed(self.thread(), &self.session_id, &text)
                     .await
             }
+            Incoming::Compacted if self.replaying => {}
+            Incoming::Compacted => self.host.compacted(self.thread(), &self.session_id).await,
             Incoming::Permission { ask, reply } => {
                 let ask = *ask;
                 if self.replaying {

@@ -133,8 +133,10 @@ impl AgentHarness for Opencode {
         Some(tool)
     }
 
-    /// The bridge's Stop names the model and variant of the session's last
-    /// assistant message; a variant is opencode's reasoning effort.
+    /// The bridge's Stop names the model, variant and tokens of the
+    /// session's last assistant message; a variant is opencode's reasoning
+    /// effort, and the context it ended on is the input plus the cache's
+    /// reads and writes. The bridge has no window to name.
     async fn turn_run(&self, body: &serde_json::Value) -> Option<TurnRun> {
         let text = |k: &str| {
             body.get(k)
@@ -143,7 +145,19 @@ impl AgentHarness for Opencode {
                 .map(str::to_string)
         };
         let (model, effort) = (text("model"), text("variant"));
-        (model.is_some() || effort.is_some()).then_some(TurnRun { model, effort })
+        let count = |k: &str| {
+            body.pointer(&format!("/tokens/{k}"))
+                .and_then(|n| n.as_i64())
+        };
+        let context_tokens = count("input").map(|input| {
+            input + count("cache/read").unwrap_or(0) + count("cache/write").unwrap_or(0)
+        });
+        (model.is_some() || effort.is_some() || context_tokens.is_some()).then_some(TurnRun {
+            model,
+            effort,
+            context_tokens,
+            context_window: None,
+        })
     }
 
     async fn render(&self, answer: &HookAnswer) -> serde_json::Value {
@@ -446,7 +460,7 @@ process.env.OXPLOW_HOOK_BASE_URL = "http://hook.invalid";
 const messages = [
   {{ info: {{ role: "user" }}, parts: [{{ type: "text", text: "do it" }}] }},
   {{ info: {{ role: "assistant" }}, parts: [{{ type: "text", text: "first" }}] }},
-  {{ info: {{ role: "assistant", modelID: "gpt-5.6", variant: "high" }}, parts: [{{ type: "tool", tool: "bash" }}, {{ type: "text", text: "Which one" }}, {{ type: "text", text: "should I use?" }}] }},
+  {{ info: {{ role: "assistant", modelID: "gpt-5.6", variant: "high", tokens: {{ input: 100, output: 7, reasoning: 0, cache: {{ read: 4000, write: 50 }} }} }}, parts: [{{ type: "tool", tool: "bash" }}, {{ type: "text", text: "Which one" }}, {{ type: "text", text: "should I use?" }}] }},
 ];
 const hooks = await OxplowHooks({{ client: {{ session: {{
   get: async () => ({{ data: {{}} }}),
@@ -503,23 +517,70 @@ console.log(JSON.stringify({{ posts, prompt, tool }}));
             stop["payload"]["last_assistant_message"],
             "Which one\nshould I use?"
         );
-        // And the model and variant that message ran on.
+        // And the model, variant and token counts of that message.
         assert_eq!(stop["payload"]["model"], "gpt-5.6");
         assert_eq!(stop["payload"]["variant"], "high");
+        assert_eq!(stop["payload"]["tokens"]["cache"]["read"], 4000);
     }
 
-    /// A Stop's model and variant are the turn's model and effort.
+    /// The bridge forwards a session's compaction as a PostCompact. Run
+    /// under bun with `fetch` answering and a stubbed plugin client.
+    #[test]
+    fn its_bridge_reports_a_compaction() {
+        let dir = tempfile::tempdir().unwrap();
+        let driver = dir.path().join("drive.mjs");
+        let bridge =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/opencode-hooks.js");
+        std::fs::write(
+            &driver,
+            format!(
+                r#"import {{ OxplowHooks }} from {bridge};
+const posts = [];
+globalThis.fetch = async (url, init) => {{
+  posts.push({{ event: url.split("/").pop(), payload: JSON.parse(init.body) }});
+  return {{ json: async () => ({{}}) }};
+}};
+process.env.OXPLOW_HOOK_BASE_URL = "http://hook.invalid";
+const hooks = await OxplowHooks({{ client: {{ session: {{ get: async () => ({{ data: {{}} }}) }} }} }});
+await hooks.event({{ event: {{ type: "session.compacted", properties: {{ sessionID: "ses1" }} }} }});
+console.log(JSON.stringify(posts));
+"#,
+                bridge = serde_json::to_string(&format!("file://{}", bridge.display())).unwrap()
+            ),
+        )
+        .unwrap();
+        let out = std::process::Command::new("bun")
+            .arg(&driver)
+            .output()
+            .expect("bun runs the bridge (the repo's JS runtime)");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let posts: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(posts[0]["event"], "PostCompact");
+        assert_eq!(posts[0]["payload"]["session_id"], "ses1");
+    }
+
+    /// A Stop's model and variant are the turn's model and effort, and its
+    /// message's tokens (input, cache reads and writes) the context fill.
+    /// The bridge cannot say the window.
     #[test]
     fn a_stop_names_the_model_and_the_variant_as_the_effort() {
         let h = harness("oxplow:opencode", "opencode");
-        let run = crate::test_launch::block(
-            h.turn_run(&serde_json::json!({"model": "gpt-5.6", "variant": "high"})),
-        );
+        let run = crate::test_launch::block(h.turn_run(&serde_json::json!({
+            "model": "gpt-5.6",
+            "variant": "high",
+            "tokens": {"input": 100, "output": 7, "reasoning": 0, "cache": {"read": 4000, "write": 50}}
+        })));
         assert_eq!(
             run,
             Some(TurnRun {
                 model: Some("gpt-5.6".into()),
-                effort: Some("high".into())
+                effort: Some("high".into()),
+                context_tokens: Some(4150),
+                context_window: None,
             })
         );
         // A message with neither (the bridge couldn't read it) says nothing.

@@ -10,7 +10,7 @@
 //! - its **content**, for the kinds whose body no model holds: a file at a
 //!   revision (`file:src/a.rs@git:HEAD#L10-40`; the working tree when it
 //!   names none, in the stream asked for else the caller's), an event's
-//!   stored body (`event:<id>#input`, `#output`, `#prompt` or `#result`; the caller's
+//!   stored body (`event:<id>#input`, `#output`, `#prompt`, `#result` or `#summary`; the caller's
 //!   own stream's only), a model call's (`ai_call:<id>#request` or
 //!   `#response`; not one another agent's thread asked for), a lens's
 //!   definition.
@@ -343,9 +343,10 @@ async fn event_body(
         "output" => EventBodyKey::Output,
         "prompt" => EventBodyKey::Prompt,
         "result" => EventBodyKey::Result,
+        "summary" => EventBodyKey::Summary,
         other => {
             return Err(ReadError::Invalid(format!(
-                "an event's body is `#input`, `#output`, `#prompt` or `#result`; not `#{other}`"
+                "an event's body is `#input`, `#output`, `#prompt`, `#result` or `#summary`; not `#{other}`"
             )))
         }
     };

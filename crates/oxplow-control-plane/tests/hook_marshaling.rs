@@ -283,7 +283,7 @@ async fn a_stop_records_the_model_and_effort_the_turn_ran_on() {
     let transcript = dir.path().join("s1.jsonl");
     std::fs::write(
         &transcript,
-        "{\"type\":\"assistant\",\"message\":{\"model\":\"claude-opus-4-8\",\"usage\":{}}}\n",
+        "{\"type\":\"assistant\",\"message\":{\"model\":\"claude-opus-4-8\",\"usage\":{\"input_tokens\":10,\"cache_read_input_tokens\":40,\"cache_creation_input_tokens\":2}}}\n",
     )
     .unwrap();
     post_hook(
@@ -299,13 +299,42 @@ async fn a_stop_records_the_model_and_effort_the_turn_ran_on() {
     )
     .await;
     let out = oxplow_db::SemanticLayer::new(svc.db.clone())
-        .query_sql("SELECT model, effort FROM v_agent_turn", vec![], None)
+        .query_sql(
+            "SELECT model, effort, context_tokens, context_window FROM v_agent_turn",
+            vec![],
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(
         serde_json::to_value(&out.rows).unwrap(),
-        serde_json::json!([["claude-opus-4-8", "high"]])
+        serde_json::json!([["claude-opus-4-8", "high", 52, null]])
     );
+}
+
+/// Claude's PostCompact is acked and logged as the thread's context
+/// compacting, with its trigger.
+#[tokio::test]
+async fn a_post_compact_is_acked_and_logged() {
+    let (cp, svc, _root, _dir) = boot().await;
+    let tid = seed_thread(&svc).await;
+    let resp = post_hook(
+        &cp,
+        &svc,
+        "PostCompact",
+        tid,
+        serde_json::json!({ "session_id": "s1", "trigger": "manual", "compact_summary": "so far" }),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let logged = svc
+        .event_log_store
+        .recent("agent.context", Some(tid), None, 10)
+        .await
+        .unwrap();
+    assert_eq!(logged.len(), 1);
+    assert_eq!(logged[0].envelope.event_type, "agent.context.compacted");
+    assert_eq!(logged[0].envelope.payload["trigger"], "manual");
 }
 
 async fn session_of(services: &Services, thread_id: ThreadId) -> oxplow_domain::AgentSessionId {

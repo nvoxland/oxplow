@@ -236,8 +236,8 @@ impl AgentHarness for Claude {
             .map(str::to_string)
     }
 
-    /// A Stop's `effort.level`, and the model of the newest assistant line
-    /// in the transcript it points to.
+    /// A Stop's `effort.level`, and the model and context fill of the newest
+    /// assistant line in the transcript it points to.
     async fn turn_run(&self, body: &serde_json::Value) -> Option<TurnRun> {
         let effort = body
             .pointer("/effort/level")
@@ -247,14 +247,20 @@ impl AgentHarness for Claude {
             .get("transcript_path")
             .and_then(|p| p.as_str())
             .map(PathBuf::from);
-        let model = match path {
-            Some(path) => tokio::task::spawn_blocking(move || newest_model(&path))
+        let last = match path {
+            Some(path) => tokio::task::spawn_blocking(move || newest_assistant(&path))
                 .await
                 .ok()
                 .flatten(),
             None => None,
         };
-        (model.is_some() || effort.is_some()).then_some(TurnRun { model, effort })
+        let (model, context_tokens) = last.unzip();
+        (model.is_some() || effort.is_some()).then_some(TurnRun {
+            model,
+            effort,
+            context_tokens,
+            context_window: None,
+        })
     }
 
     /// `SubagentStart` / `SubagentStop` name it by `agent_id` / `agent_type`.
@@ -403,7 +409,8 @@ const PLUGIN_VERSION: &str = "0.0.0";
 /// Claude Code drops HTTP hooks for it ("HTTP hooks are not supported for
 /// SessionStart" in its debug log) — the session id comes from whichever
 /// hook fires next instead. `PreCompact` resets what the session was told
-/// (the next prompt carries its context again). Subagents are read; Claude's
+/// (the next prompt carries its context again); `PostCompact` is logged.
+/// Subagents are read; Claude's
 /// own task list is acked unread, and its payloads can be dumped
 /// (`OXPLOW_HOOK_DEBUG`) to learn their shapes.
 const HOOK_EVENTS: &[&str] = &[
@@ -420,6 +427,7 @@ const HOOK_EVENTS: &[&str] = &[
     "TaskCreated",
     "TaskCompleted",
     "PreCompact",
+    "PostCompact",
 ];
 
 /// Env vars the hooks header-interpolate from. Claude Code requires
@@ -717,13 +725,15 @@ fn transcripts(dir: &Path, limit: usize) -> io::Result<Vec<NativeConversation>> 
         .collect())
 }
 
-/// How much of a transcript's end is read for the model of its newest turn.
+/// How much of a transcript's end is read for its newest assistant line.
 const MODEL_WINDOW: u64 = 256 * 1024;
 
 /// The model of the newest assistant line among the transcript's last
-/// [`MODEL_WINDOW`] bytes (whole lines only). Claude's `<synthetic>`
-/// placeholder, which it writes for errors and interrupts, is no model.
-fn newest_model(path: &Path) -> Option<String> {
+/// [`MODEL_WINDOW`] bytes (whole lines only), and the tokens its request
+/// put in the context: input plus cache reads and writes. Claude's
+/// `<synthetic>` placeholder, which it writes for errors and interrupts, is
+/// no model.
+fn newest_assistant(path: &Path) -> Option<(String, i64)> {
     use std::io::{Read, Seek, SeekFrom};
     let mut f = fs::File::open(path).ok()?;
     let size = f.metadata().ok()?.len();
@@ -744,11 +754,18 @@ fn newest_model(path: &Path) -> Option<String> {
         .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
         .filter(|v| v.get("type").and_then(|t| t.as_str()) == Some("assistant"))
         .filter_map(|v| {
-            v.pointer("/message/model")
-                .and_then(|m| m.as_str())
-                .map(str::to_string)
+            let model = v.pointer("/message/model")?.as_str()?;
+            let count = |k: &str| {
+                v.pointer(&format!("/message/usage/{k}"))
+                    .and_then(|n| n.as_i64())
+                    .unwrap_or(0)
+            };
+            let context = count("input_tokens")
+                + count("cache_read_input_tokens")
+                + count("cache_creation_input_tokens");
+            Some((model.to_string(), context))
         })
-        .find(|m| m != "<synthetic>")
+        .find(|(model, _)| model != "<synthetic>")
 }
 
 /// The first and last [`SUMMARY_WINDOW`] bytes of a file of `size` bytes
@@ -1449,6 +1466,7 @@ mod tests {
             "TaskCreated",
             "TaskCompleted",
             "PreCompact",
+            "PostCompact",
             "Notification",
             "PermissionRequest",
         ] {
@@ -1512,20 +1530,25 @@ mod tests {
         .to_string()
     }
 
-    /// A Stop names the effort in its body and the model in the
-    /// transcript tail (its newest real assistant line); either is left
-    /// out when Claude doesn't give it.
+    /// A Stop names the effort in its body, and the transcript tail's newest
+    /// real assistant line the model and the context it ended on (the
+    /// input, cache reads and cache writes of its request); either is left
+    /// out when Claude doesn't give it. The window isn't in the transcript.
     #[test]
     fn a_stop_names_the_effort_and_the_transcript_names_the_model() {
         let h = harness("oxplow:claude-code", "claude");
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("t.jsonl");
-        let assistant = |model: &str| json!({"type":"assistant","message":{"model":model,"usage":{"input_tokens":1}}});
+        let assistant = |model: &str, input: u64| {
+            json!({"type":"assistant","message":{"model":model,"usage":{
+                "input_tokens":input,"cache_read_input_tokens":40_000,
+                "cache_creation_input_tokens":2_000,"output_tokens":9}}})
+        };
         let lines = [
-            assistant("claude-sonnet-5-5"),
-            assistant("claude-opus-4-8"),
+            assistant("claude-sonnet-5-5", 1),
+            assistant("claude-opus-4-8", 10_000),
             // Claude's own placeholder is no model the person chose.
-            assistant("<synthetic>"),
+            assistant("<synthetic>", 0),
         ]
         .map(|l| format!("{l}\n"))
         .concat();
@@ -1534,6 +1557,8 @@ mod tests {
         let run = crate::test_launch::block(h.turn_run(&stop)).unwrap();
         assert_eq!(run.model.as_deref(), Some("claude-opus-4-8"));
         assert_eq!(run.effort.as_deref(), Some("high"));
+        assert_eq!(run.context_tokens, Some(52_000));
+        assert_eq!(run.context_window, None);
 
         // No effort, no transcript: nothing to say.
         assert_eq!(crate::test_launch::block(h.turn_run(&json!({}))), None);

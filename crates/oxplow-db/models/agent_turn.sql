@@ -7,5 +7,5 @@ SELECT t.id, t.thread_id, t.agent_session_id, t.prompt, t.answer, t.session_id, 
          'oxplow-foundation/session-transcript',
          'session', (SELECT s.ref FROM ref('agent_session') s WHERE s.id = t.agent_session_id),
          'turn', 'turn:trn' || t.id) END AS TEXT) AS transcript_page,
-       t.model, t.effort
+       t.model, t.effort, t.context_tokens, t.context_window
   FROM source('agent_turn') t

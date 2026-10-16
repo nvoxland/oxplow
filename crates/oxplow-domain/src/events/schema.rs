@@ -156,6 +156,8 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<AgentSubagentFinished>()
             .expect("core type registers");
+        r.register::<AgentContextCompacted>()
+            .expect("core type registers");
         r.register::<AgentStatusChanged>()
             .expect("core type registers");
         r.register::<AgentPlanProposed>()
@@ -1205,6 +1207,33 @@ impl EventType for AgentSubagentFinished {
     type Payload = AgentSubagentFinishedV1;
 }
 
+/// `agent.context.compacted@1`: the agent's context was summarized to make
+/// room, so what it was told earlier is no longer in front of it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentContextCompactedV1 {
+    pub thread: String,
+    /// The session's turn open when it compacted, when one was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<String>,
+    /// What started it, as the harness names it (Claude's `auto` or
+    /// `manual`), when it says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<String>,
+    /// The summary the context was replaced with (Claude's
+    /// `compact_summary`), stored in `event_content`; read as
+    /// `event:<id>#summary`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<ContentRef>,
+}
+
+pub struct AgentContextCompacted;
+impl EventType for AgentContextCompacted {
+    const TYPE: &'static str = "agent.context.compacted";
+    const V: u32 = 1;
+    type Payload = AgentContextCompactedV1;
+}
+
 /// `agent.status.changed@1`: a thread's agent moved to another state.
 /// Logged on a transition only.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -2077,6 +2106,7 @@ mod tests {
         assert_eq!(
             versions,
             vec![
+                ("agent.context.compacted", 1),
                 ("agent.plan.proposed", 1),
                 ("agent.prompt.submitted", 1),
                 ("agent.session.ended", 1),

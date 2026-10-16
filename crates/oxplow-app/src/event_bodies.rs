@@ -24,6 +24,8 @@ pub enum EventBodyKey {
     Prompt,
     /// An `agent.subagent.finished`'s last message.
     Result,
+    /// An `agent.context.compacted`'s summary.
+    Summary,
 }
 
 impl EventBodyKey {
@@ -33,6 +35,7 @@ impl EventBodyKey {
             EventBodyKey::Output => "output",
             EventBodyKey::Prompt => "prompt",
             EventBodyKey::Result => "result",
+            EventBodyKey::Summary => "summary",
         }
     }
 }

@@ -53,11 +53,11 @@ use oxplow_db::event_log_store::{append_unique_tx, EventCtx};
 use oxplow_db::{event_content_store, Database};
 use oxplow_domain::agent::tool::{Subagent, ToolKind, ToolUse};
 use oxplow_domain::events::schema::{
-    AgentPlanProposed, AgentPlanProposedV1, AgentPromptSubmitted, AgentPromptSubmittedV1,
-    AgentSessionEnded, AgentSessionEndedV1, AgentSessionStarted, AgentSessionStartedV2,
-    AgentSubagentFinished, AgentSubagentFinishedV1, AgentSubagentStarted, AgentSubagentStartedV1,
-    AgentToolFinished, AgentToolFinishedV3, AgentToolRequested, AgentToolRequestedV3, ContentRef,
-    SubagentRef, ToolDecision as Decision,
+    AgentContextCompacted, AgentContextCompactedV1, AgentPlanProposed, AgentPlanProposedV1,
+    AgentPromptSubmitted, AgentPromptSubmittedV1, AgentSessionEnded, AgentSessionEndedV1,
+    AgentSessionStarted, AgentSessionStartedV2, AgentSubagentFinished, AgentSubagentFinishedV1,
+    AgentSubagentStarted, AgentSubagentStartedV1, AgentToolFinished, AgentToolFinishedV3,
+    AgentToolRequested, AgentToolRequestedV3, ContentRef, SubagentRef, ToolDecision as Decision,
 };
 use oxplow_domain::refs::build::{thread_ref, turn_ref};
 use oxplow_domain::{
@@ -716,6 +716,8 @@ fn record_tx(
                     .and_then(|u| serde_json::from_value(u.clone()).ok()),
                 model: env.turn_run.as_ref().and_then(|r| r.model.as_deref()),
                 effort: env.turn_run.as_ref().and_then(|r| r.effort.as_deref()),
+                context_tokens: env.turn_run.as_ref().and_then(|r| r.context_tokens),
+                context_window: env.turn_run.as_ref().and_then(|r| r.context_window),
                 ..TurnEnd::new(now, outcome)
             };
             applied.closed_turn = close_open_turns_tx(conn, ev, thread, slot, &end)?;
@@ -767,6 +769,29 @@ fn record_tx(
                     }
                 }
             }
+        }
+        // The context was summarized: logged, and nothing else moves.
+        HookKind::PostCompact => {
+            let turn = applied.turn.map(turn_ref);
+            let summary = body
+                .get("compact_summary")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .map(|text| event_content_store::put_text_tx(conn, "agent", text))
+                .transpose()?;
+            let env = ev
+                .typed::<AgentContextCompacted>(&AgentContextCompactedV1 {
+                    thread: thread_ref(thread),
+                    turn: turn.clone(),
+                    trigger: body
+                        .get("trigger")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                    summary,
+                })
+                .with_anchors(activity_anchors_tx(conn, thread, slot)?)
+                .with_subject([turn.unwrap_or_else(|| thread_ref(thread))]);
+            ev.append(conn, &env)?;
         }
         HookKind::SessionStart => {} // handled above
     }
@@ -1428,6 +1453,46 @@ mod tests {
             }),
             ..hook(kind, tid, Some(sid), json!({}))
         }
+    }
+
+    /// A compaction is logged on the open turn with its trigger and its
+    /// summary (kept by hash), changes no status, and one with no summary
+    /// or trigger is still a compaction.
+    #[tokio::test]
+    async fn a_compaction_is_logged_with_its_trigger_and_summary() {
+        let (svc, tid) = fixture().await;
+        svc.ingest(hook(
+            HookKind::UserPromptSubmit,
+            tid,
+            Some("h1"),
+            json!({"prompt": "go"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(hook(
+            HookKind::PostCompact,
+            tid,
+            Some("h1"),
+            json!({"trigger": "auto", "compact_summary": "We were fixing the build."}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(hook(HookKind::PostCompact, tid, Some("h1"), json!({})))
+            .await
+            .unwrap();
+        let events = logged(&svc).await;
+        let compacted = of_type(&events, "agent.context.compacted");
+        assert_eq!(compacted.len(), 2);
+        let first = &compacted[0].envelope.payload;
+        assert_eq!(first["trigger"], "auto");
+        assert!(first["turn"].as_str().unwrap().starts_with("turn:trn"));
+        assert_eq!(first["summary"]["size"], 25);
+        let bare = &compacted[1].envelope.payload;
+        assert!(bare.get("trigger").is_none() && bare.get("summary").is_none());
+        assert_eq!(
+            status(&svc, tid).await.map(|s| s.state),
+            Some(AgentStatusState::Running)
+        );
     }
 
     /// The subagent each finished tool call names.
@@ -2310,12 +2375,15 @@ mod tests {
             async move {
                 db.read(|c| {
                     c.query_row(
-                        "SELECT model, effort FROM v_agent_turn ORDER BY id DESC LIMIT 1",
+                        "SELECT model, effort, context_tokens, context_window
+                           FROM v_agent_turn ORDER BY id DESC LIMIT 1",
                         [],
                         |r| {
                             Ok((
                                 r.get::<_, Option<String>>(0)?,
                                 r.get::<_, Option<String>>(1)?,
+                                r.get::<_, Option<i64>>(2)?,
+                                r.get::<_, Option<i64>>(3)?,
                             ))
                         },
                     )
@@ -2331,13 +2399,20 @@ mod tests {
         let run = TurnRun {
             model: Some("claude-opus-4-8".into()),
             effort: Some("high".into()),
+            context_tokens: Some(52_000),
+            context_window: Some(200_000),
         };
         svc.ingest(envelope(HookKind::Stop, None, Some(run)))
             .await
             .unwrap();
         assert_eq!(
             ran_on().await,
-            (Some("claude-opus-4-8".into()), Some("high".into()))
+            (
+                Some("claude-opus-4-8".into()),
+                Some("high".into()),
+                Some(52_000),
+                Some(200_000)
+            )
         );
         // A harness that says nothing leaves both unset.
         svc.ingest(envelope(HookKind::UserPromptSubmit, Some("q"), None))
@@ -2346,7 +2421,7 @@ mod tests {
         svc.ingest(envelope(HookKind::Stop, None, None))
             .await
             .unwrap();
-        assert_eq!(ran_on().await, (None, None));
+        assert_eq!(ran_on().await, (None, None, None, None));
     }
 
     #[tokio::test]

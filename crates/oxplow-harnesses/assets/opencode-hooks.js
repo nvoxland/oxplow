@@ -22,7 +22,10 @@
 ///   event session.idle  -> Stop         (closes the turn; never refused;
 ///                          carries the agent's last message, so a reply
 ///                          ending in a question sets waiting, and its
-///                          `model` / `variant`)
+///                          `model` / `variant` / `tokens`)
+///   event session.compacted
+///                       -> PostCompact  (the session's context was
+///                          summarized)
 ///   event permission.asked / question.asked
 ///                       -> Notification (a permission prompt, naming it) /
 ///                          PreToolUse of an `AskUserQuestion` call (the
@@ -234,11 +237,15 @@ export const OxplowHooks = async ({ client }) => {
         });
         return;
       }
+      if (event.type === "session.compacted") {
+        await post("PostCompact", await whose(props.sessionID));
+        return;
+      }
       if (event.type !== "session.idle") return;
       const sessionID = props.sessionID;
       if (await isChildSession(sessionID)) return;
       const last = await lastAssistant(sessionID);
-      // Its text parts, in order; the model and variant it ran on.
+      // Its text parts, in order; the model, variant and tokens it ran on.
       await post("Stop", {
         session_id: sessionID,
         last_assistant_message: (last?.parts || [])
@@ -247,6 +254,7 @@ export const OxplowHooks = async ({ client }) => {
           .join("\n"),
         model: last?.info?.modelID,
         variant: last?.info?.variant,
+        tokens: last?.info?.tokens,
       });
     },
   };
