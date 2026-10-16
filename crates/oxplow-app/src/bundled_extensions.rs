@@ -2521,6 +2521,83 @@ mod tests {
         );
     }
 
+    /// Thread activity shows how full the context was when a turn ended
+    /// (with its window when the harness said it) and how often the turn
+    /// compacted it.
+    #[tokio::test]
+    async fn thread_activity_shows_the_context_fill_and_compactions() {
+        use oxplow_domain::hook::{HookKind, TurnRun};
+        let f = crate::test_fixtures::services_with_effort().await;
+        let thread = f.thread;
+        let hook = |kind, prompt: Option<&str>, payload: &str, turn_run| {
+            crate::hook_ingest::HookEnvelope {
+                session_title: None,
+                turn_run,
+                kind,
+                thread_id: Some(thread),
+                stream_id: None,
+                agent_session_id: None,
+                session_id: None,
+                payload_json: payload.into(),
+                prompt: prompt.map(str::to_string),
+                decision: None,
+                tool: None,
+                subagent: None,
+            }
+        };
+        let turn = |prompt: &'static str, window: Option<i64>, compactions: usize| {
+            let svc = f.svc.clone();
+            async move {
+                svc.hook_ingest
+                    .ingest(hook(HookKind::UserPromptSubmit, Some(prompt), "{}", None))
+                    .await
+                    .unwrap();
+                for _ in 0..compactions {
+                    svc.hook_ingest
+                        .ingest(hook(HookKind::PostCompact, None, "{}", None))
+                        .await
+                        .unwrap();
+                }
+                let run = TurnRun {
+                    context_tokens: Some(52_000),
+                    context_window: window,
+                    ..TurnRun::default()
+                };
+                svc.hook_ingest
+                    .ingest(hook(HookKind::Stop, None, "{}", Some(run)))
+                    .await
+                    .unwrap();
+            }
+        };
+        turn("with a window", Some(200_000), 1).await;
+        turn("without one", None, 0).await;
+        let rows = run_bundled_lens(
+            &f,
+            "oxplow-bundled/thread-activity",
+            &[("thread_id", f.thread.value())],
+        )
+        .await;
+        let got: Vec<(String, serde_json::Value, serde_json::Value)> = rows
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| {
+                (
+                    r[1].as_str().unwrap().to_string(),
+                    r[4].clone(),
+                    r[5].clone(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("without one".into(), "52k".into(), 0.into()),
+                ("with a window".into(), "52k of 200k (26%)".into(), 1.into()),
+            ]
+        );
+    }
+
     /// `session-files` groups an effort's files by the session that changed
     /// them, shared ones apart; the thread's activity names each turn's
     /// session.

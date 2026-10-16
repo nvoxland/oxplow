@@ -344,6 +344,10 @@ pub struct TurnEnd<'a> {
     pub model: Option<&'a str>,
     /// The reasoning effort it ran at, when its harness said.
     pub effort: Option<&'a str>,
+    /// Tokens in the context the turn ended on, when its harness said.
+    pub context_tokens: Option<i64>,
+    /// The size of that context's window, when its harness said.
+    pub context_window: Option<i64>,
 }
 
 impl TurnEnd<'_> {
@@ -356,6 +360,8 @@ impl TurnEnd<'_> {
             usage: None,
             model: None,
             effort: None,
+            context_tokens: None,
+            context_window: None,
         }
     }
 }
@@ -372,7 +378,7 @@ pub fn close_turn_tx(
     let closed: Option<(i64, Option<i64>)> = conn
         .query_row(
             "UPDATE agent_turn SET ended_at = ?2, answer = COALESCE(?3, answer),
-                    model = ?4, effort = ?5
+                    model = ?4, effort = ?5, context_tokens = ?6, context_window = ?7
               WHERE id = ?1 AND ended_at IS NULL
               RETURNING thread_id, agent_session_id",
             params![
@@ -380,7 +386,9 @@ pub fn close_turn_tx(
                 ts_to_string(end.at),
                 end.answer,
                 end.model,
-                end.effort
+                end.effort,
+                end.context_tokens,
+                end.context_window
             ],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
@@ -1096,8 +1104,9 @@ mod tests {
         }
     }
 
-    /// The model and effort a harness reported with the turn's end are on
-    /// the turn (and its model); a turn whose harness said nothing has none.
+    /// The model, effort and context fill a harness reported with the
+    /// turn's end are on the turn (and its model); a turn whose harness said
+    /// nothing has none.
     #[tokio::test]
     async fn a_turn_records_the_model_and_effort_it_ended_on() {
         let (db, tid) = fixture().await;
@@ -1126,6 +1135,8 @@ mod tests {
             let run = TurnEnd {
                 model: Some("claude-opus-4-8"),
                 effort: Some("high"),
+                context_tokens: Some(52_000),
+                context_window: Some(200_000),
                 ..TurnEnd::new(Timestamp::now(), TurnOutcome::Completed)
             };
             close_turn_tx(tx, &ev, with, &run)?;
@@ -1140,19 +1151,26 @@ mod tests {
         .await
         .unwrap();
         let conn = db.conn().unwrap();
-        let ran_on = |id: AgentTurnId| -> (Option<String>, Option<String>) {
+        type RanOn = (Option<String>, Option<String>, Option<i64>, Option<i64>);
+        let ran_on = |id: AgentTurnId| -> RanOn {
             conn.query_row(
-                "SELECT model, effort FROM v_agent_turn WHERE id = ?1",
+                "SELECT model, effort, context_tokens, context_window
+                   FROM v_agent_turn WHERE id = ?1",
                 params![id.value()],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .unwrap()
         };
         assert_eq!(
             ran_on(with),
-            (Some("claude-opus-4-8".into()), Some("high".into()))
+            (
+                Some("claude-opus-4-8".into()),
+                Some("high".into()),
+                Some(52_000),
+                Some(200_000)
+            )
         );
-        assert_eq!(ran_on(without), (None, None));
+        assert_eq!(ran_on(without), (None, None, None, None));
     }
 
     fn r_stream(db: &Database, t: ThreadId) -> i64 {

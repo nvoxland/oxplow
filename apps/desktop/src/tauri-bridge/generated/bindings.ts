@@ -2745,7 +2745,9 @@ export type EventBodyKey = "input" | "output" |
 /**  An `agent.prompt.submitted`'s text. */
 "prompt" | 
 /**  An `agent.subagent.finished`'s last message. */
-"result";
+"result" | 
+/**  An `agent.context.compacted`'s summary. */
+"summary";
 
 /**
  *  An event's public identity: a UUIDv7 in its canonical text form, so
@@ -3576,7 +3578,13 @@ export type HookKind =
  *  A subagent of the session finished (Claude's `SubagentStop`, or a
  *  hand-back).
  */
-"subagent_stop";
+"subagent_stop" | 
+/**
+ *  The harness summarized the session's context (Claude's
+ *  `PostCompact`; opencode's `session.compacted`, through its bridge;
+ *  Codex's `contextCompaction` item, from the chat host).
+ */
+"post_compact";
 
 /**
  *  The host a stream's worktree is on. Every stream is on the local machine

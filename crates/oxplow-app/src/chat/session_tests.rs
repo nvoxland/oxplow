@@ -93,6 +93,9 @@ impl ChatHost for Host {
     async fn plan_proposed(&self, _t: &ThreadId, _s: &str, text: &str) {
         self.log.lock().push(format!("plan {text}"));
     }
+    async fn compacted(&self, _t: &ThreadId, _s: &str) {
+        self.log.lock().push("compacted".into());
+    }
     async fn awaiting_user(&self, _t: &ThreadId, q: Option<String>) {
         self.log.lock().push(format!("awaiting {}", q.is_some()));
     }

@@ -55,6 +55,8 @@ pub trait ChatHost: Send + Sync + 'static {
     );
     /// The agent named the conversation.
     async fn named(&self, thread: &ThreadId, session_id: &str, title: &str);
+    /// The agent summarized its context to make room.
+    async fn compacted(&self, thread: &ThreadId, session_id: &str);
     /// A permission card is (or no longer is) waiting on the person.
     async fn awaiting_user(&self, thread: &ThreadId, question: Option<String>);
     /// The agent put a plan to the person. Recorded; nothing waits on it.
@@ -298,6 +300,20 @@ impl ChatHost for ServicesChatHost {
             }),
             ..Default::default()
         });
+        self.ingest(&svc, env).await;
+    }
+
+    async fn compacted(&self, thread: &ThreadId, session_id: &str) {
+        let Some(svc) = self.svc.upgrade() else {
+            return;
+        };
+        let env = self.envelope(
+            HookKind::PostCompact,
+            thread,
+            session_id,
+            serde_json::json!({}),
+            None,
+        );
         self.ingest(&svc, env).await;
     }
 

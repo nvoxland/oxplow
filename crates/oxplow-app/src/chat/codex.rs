@@ -62,7 +62,8 @@ struct State {
     /// The thread is waiting on the person (the status was reported).
     waiting: bool,
     /// The model and effort the thread has now: what it opened on, then
-    /// what its settings changes made them.
+    /// what its settings changes made them; and the context fill its last
+    /// `thread/tokenUsage/updated` said.
     run: TurnRun,
 }
 
@@ -78,6 +79,7 @@ fn thread_run(opened: &Value) -> TurnRun {
     TurnRun {
         model: text("model"),
         effort: text("reasoningEffort"),
+        ..TurnRun::default()
     }
 }
 
@@ -352,6 +354,13 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
                 vec![Incoming::Plan(text.to_string())]
             }
         }
+        // The thread's context was summarized. Codex has no prompt channel,
+        // so nothing of oxplow's own is re-sent after it.
+        "item/completed"
+            if p.pointer("/item/type").and_then(Value::as_str) == Some("contextCompaction") =>
+        {
+            vec![Incoming::Compacted]
+        }
         "item/started" | "item/completed" => p
             .get("item")
             .map(|item| item_updates(item, method == "item/completed", &mut state.streamed))
@@ -383,6 +392,8 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
             let size = p
                 .pointer("/tokenUsage/modelContextWindow")
                 .and_then(Value::as_u64);
+            state.run.context_tokens = used.and_then(|n| i64::try_from(n).ok());
+            state.run.context_window = size.and_then(|n| i64::try_from(n).ok());
             match (used, size) {
                 (Some(used), Some(size)) => update(ChatUpdate::Usage(ContextUsage {
                     used,
@@ -936,6 +947,7 @@ mod tests {
             Some(TurnRun {
                 model: Some(model.into()),
                 effort: Some(effort.into()),
+                ..TurnRun::default()
             })
         };
         let mut state = State::default();
@@ -952,7 +964,8 @@ mod tests {
             end_of(&mut state),
             Some(TurnRun {
                 model: Some("gpt-5.6".into()),
-                effort: None
+                effort: None,
+                ..TurnRun::default()
             })
         );
 
@@ -971,6 +984,41 @@ mod tests {
             &mut state,
         );
         assert_eq!(end_of(&mut state), run("gpt-5.7", "low"));
+    }
+
+    /// The last request's tokens are the context's fill and the model's
+    /// window its size; the turn's end carries both as they were last said.
+    #[test]
+    fn a_turn_ends_on_the_context_the_thread_has_filled() {
+        let mut state = State::default();
+        let usage = json!({"threadId": "t", "turnId": "u", "tokenUsage": {
+            "total": {"inputTokens": 900, "cachedInputTokens": 0, "outputTokens": 5, "totalTokens": 905},
+            "last": {"inputTokens": 300, "cachedInputTokens": 200, "outputTokens": 5, "totalTokens": 52_000},
+            "modelContextWindow": 200_000}});
+        on_notification("thread/tokenUsage/updated", &usage, &mut state);
+        let ended = on_notification(
+            "turn/completed",
+            &json!({"threadId": "t", "turn": {"id": "u", "status": "completed"}}),
+            &mut state,
+        )
+        .remove(0);
+        let Incoming::PromptDone(Ok(end)) = ended else {
+            panic!("not a turn end");
+        };
+        let run = end.run.unwrap();
+        assert_eq!(run.context_tokens, Some(52_000));
+        assert_eq!(run.context_window, Some(200_000));
+    }
+
+    /// A finished `contextCompaction` item is the thread's context being
+    /// summarized; one that only started is not yet.
+    #[test]
+    fn a_finished_compaction_item_is_reported() {
+        let mut state = State::default();
+        let item = json!({"threadId": "t", "turnId": "u", "item": {"type": "contextCompaction", "id": "c"}});
+        assert!(on_notification("item/started", &item, &mut state).is_empty());
+        let done = on_notification("item/completed", &item, &mut state);
+        assert!(matches!(done.as_slice(), [Incoming::Compacted]));
     }
 
     #[test]

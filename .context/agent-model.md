@@ -157,6 +157,16 @@ the session-context block off.
 prompt carries the session context and the decisions again. The baselines
 are in memory: a daemon restart costs at most one repeated block.
 
+A compaction is also logged, by every harness, as `agent.context.compacted@1`
+(`thread`, `turn` when one is open, `trigger`, `summary`): Claude Code's
+`PostCompact` (`trigger`, and `compact_summary`, kept as event content and
+read as `event:<id>#summary`), Codex's finished `contextCompaction` item
+(through the chat host; it names neither), and opencode's
+`session.compacted` (through the bridge; it names neither). The log is all
+that is done for Codex and opencode: **Codex has no prompt channel**, so
+its compaction resets no context baseline, and opencode's bridge posts no
+`PreCompact`. Thread Activity counts a turn's compactions.
+
 **Who else is in the worktree.** A stream's threads share its worktree,
 and any number of agents may work there at once — in one thread or
 several. The block names the others, so an agent knows it isn't alone:
@@ -260,7 +270,7 @@ model's row, `related` lists (a work item's links and comments, a
 commit's or an effort's files), and `content` for the kinds whose body no
 model holds — a file at a revision (`file:src/a.rs` is the working tree;
 `file:src/a.rs@git:HEAD#L10-40`; `@snap:<id>` a local-history snapshot),
-an event's stored body (`event:<id>#input`, `#output`, `#prompt`; the
+an event's stored body (`event:<id>#input`, `#output`, `#prompt`, `#summary`; the
 caller's own stream's events only), a recorded model call's bodies
 (`ai_call:<id>#request`, `#response`; any call but one another agent's
 thread asked for — an extension's, a collector's or a job's are the
@@ -521,7 +531,8 @@ one no longer offered is removed, a person's own stay.
   `claude` resolves. Its HTTP hooks (`HOOK_EVENTS`) are `PreToolUse`,
   `PostToolUse` (matcher `"*"`), `UserPromptSubmit`, `SessionStart`,
   `SessionEnd`, `Stop`, `Notification`, `SubagentStart`, `SubagentStop`,
-  `PreCompact`, plus `TaskCreated` / `TaskCompleted`, acked unread. Each
+  `PreCompact`, `PostCompact` (logged, see "Compaction"), plus `TaskCreated` /
+  `TaskCompleted`, acked unread. Each
   carries `Authorization: Bearer $OXPLOW_HOOK_TOKEN` (`allowedEnvVars`)
   with an 8 s client timeout, above the server's 5 s budget: a lower one
   made Claude Code discard answers the server was about to give. Its OTEL
@@ -548,7 +559,8 @@ one no longer offered is removed, a person's own stay.
   works; lowercase tool names and `filePath` become Claude's
   `Edit`/`Write`/… and `file_path`); `tool.execute.after` → `PostToolUse`
   (`callID` as `tool_use_id` so a call's two hooks pair, its bash tool's
-  `metadata.exit` as `exit_code`); `session.idle` → `Stop`. A child session (`parentID` set) posts no
+  `metadata.exit` as `exit_code`); `session.idle` → `Stop` (with the last assistant message's `model`, `variant` and `tokens`); `session.compacted` →
+  `PostCompact`. A child session (`parentID` set) posts no
   `UserPromptSubmit`/`Stop`; its tool hooks are posted as the parent's
   with `agent_id: <child>` and `agent_type: "task"`, read by
   `shared::subagent_of`, so the parent's resume id is never the child's.
@@ -842,7 +854,10 @@ Codex's `conn::Connection`, with no view. It:
   tokens (the change in the thread's cumulative counts: input less the
   cached input, cache reads separate) and the model and effort then
   (the open result's `thread.model` / `reasoningEffort`, moved by
-  `thread/settings/updated`'s `model` / `effort`); `thread/name/updated` → the
+  `thread/settings/updated`'s `model` / `effort`) and the context fill
+  (`thread/tokenUsage/updated`'s `last.totalTokens` and
+  `modelContextWindow`, last said); a finished `contextCompaction` item →
+  `agent.context.compacted` (`PostCompact`); `thread/name/updated` → the
   conversation's name (`HookIngestService::name_conversation`);
 - sends no turn and answers no request: approvals and questions are the
   TUI's (`prompt` refuses; `guard_tests::nothing_starts_a_codex_turn`
@@ -874,7 +889,8 @@ used.
 **Pitfalls.** `/new` in the TUI starts a thread with the TUI's own
 config, which oxplow doesn't bind: use Start Fresh. Collab agents
 (`collabAgentToolCall`) aren't subagents here, and a compaction
-(`thread/compacted`) doesn't reset the context baselines.
+(`thread/compacted`, the `contextCompaction` item) resets no context
+baseline (there is no prompt channel to re-send them on); it is only logged.
 
 ## Observing
 
@@ -963,7 +979,7 @@ one `HookEnvelope` to `HookIngestService::ingest`
 (`crates/oxplow-app/src/hook_ingest.rs`), and answers: context after a
 `PostToolUse` or a person's `UserPromptSubmit`, a deny, or an ack. An
 event it doesn't know is acked unread; `PreCompact` only resets the
-session's context baselines.
+session's context baselines, and `PostCompact` is logged (`agent.context.compacted`).
 
 **Which agent session a hook came from** (`agent_session_store::resolve_tx`,
 shared with OTLP exports), in order: the session the sender is (the
@@ -1000,8 +1016,14 @@ more than the stream would even when it's sometimes wrong.
   route asks the bearer's harness (`AgentHarness::turn_run(body)`: Claude's
   `effort.level` and the newest non-synthetic `message.model` among the
   transcript's last 256 KB; opencode's `model` / `variant`), and the chat
-  host sets it from the observer (Codex). A harness that says nothing
-  leaves NULLs.
+  host sets it from the observer (Codex). The same `TurnRun` carries the
+  **context fill** (`agent_turn.context_tokens` / `context_window`): Claude's
+  is the newest such assistant message's `input_tokens` plus cache reads
+  and writes (the window is not in the transcript, so NULL); Codex's the
+  last `thread/tokenUsage/updated`'s `last.totalTokens` and
+  `modelContextWindow`; opencode's the Stop's `tokens` (`input` plus
+  `cache.read` and `cache.write`; the bridge has no window, so NULL). A
+  harness that says nothing leaves NULLs.
 - **Status.** A status the hook sets (Running, Idle / AwaitingUser,
   Stopped) is logged as `agent.status.changed` when it differs from the
   newest logged one, read in the same transaction (`last_status_tx`). The
@@ -1215,7 +1237,7 @@ available from outside.
 | The plan | `ExitPlanMode` PreToolUse `tool_input.plan`, `planFilePath` → `agent.plan.proposed` | the `plan` item's text on `item/completed` → `agent.plan.proposed`; `turn/plan/updated` steps reach only the chat library | — (`plan_exit` carries no text, so none is recorded) |
 | Model / effort | `agent_turn.model` / `effort`: the Stop's `effort.level` and the transcript tail's newest `message.model`; transcript `message.model` → `v_token_usage.model`; *`SessionStart.model`, `PostModelSwitch`* | `agent_turn.model` / `effort`: `Thread.model` / `reasoningEffort` at open, moved by `thread/settings/updated` | `agent_turn.model` / `effort`: the bridge's Stop carries the last assistant message's `modelID` and `variant` |
 | Set at launch | `agentConfig.claude.model` → `--model`, `.effort` → `--effort` | `agentConfig.codex.model` → the open request's `model`, `.effort` → its `config.model_reasoning_effort` | `agentConfig.opencode.model` → `-m` |
-| Context fill, compaction | *the transcript tail's last usage; `PostCompact` `compact_summary`*; `PreCompact` resets the context baselines | *`thread/tokenUsage/updated` `last.totalTokens` / `modelContextWindow`; the `contextCompaction` item* | *the message's `tokens`; `session.compacted`* |
+| Context fill, compaction | `agent_turn.context_tokens` (window NULL): the transcript tail's newest assistant usage; `PostCompact` → `agent.context.compacted` (`trigger`, `compact_summary`); `PreCompact` resets the context baselines | `agent_turn.context_tokens` / `context_window`: `thread/tokenUsage/updated` `last.totalTokens` / `modelContextWindow`; the `contextCompaction` item → `agent.context.compacted` (resets nothing: no prompt channel) | `agent_turn.context_tokens` (window NULL): the Stop's `tokens`; `session.compacted` → `agent.context.compacted` |
 | Tokens | OTLP and the transcript tail | `turn/completed` deltas | — (the bridge sends none) |
 | Skills, commands | shipped (`--plugin-dir`; skills reload live) | shipped (`.agents/skills`) | shipped (plugin dir, inline `command`) |
 | Native worktrees | `--worktree`, subagent `isolation: worktree` → `<repo>/.claude/worktrees/<name>`; hook `cwd` follows | none (`cwd`, `runtimeWorkspaceRoots`) | none |

@@ -414,6 +414,7 @@ async fn handle_hook_inner(
             | "PermissionRequest"
             | "SubagentStart"
             | "SubagentStop"
+            | "PostCompact"
     ) {
         if event == "SessionStart" {
             ctx.services
@@ -425,6 +426,7 @@ async fn handle_hook_inner(
             "SessionEnd" => HookKind::SessionEnd,
             "SubagentStart" => HookKind::SubagentStart,
             "SubagentStop" => HookKind::SubagentStop,
+            "PostCompact" => HookKind::PostCompact,
             "PermissionRequest" => HookKind::PermissionRequest,
             _ => HookKind::Notification,
         };

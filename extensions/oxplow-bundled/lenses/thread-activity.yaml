@@ -1,11 +1,16 @@
 title: Thread Activity
-description: What a thread's agent did, turn by turn, under the effort each turn fell in — its prompt, the session it ran in, the model and effort it ran on, the files it touched, the test runs and the tokens — with the turns outside any effort (questions, talk) between them. Open an effort to rename it, link it to a task or close it.
+description: What a thread's agent did, turn by turn, under the effort each turn fell in — its prompt, the session it ran in, the model and effort it ran on, how full its context was and how often it compacted, the files it touched, the test runs and the tokens — with the turns outside any effort (questions, talk) between them. Open an effort to rename it, link it to a task or close it.
 params:
   - { name: thread_id, label: Thread }
 query: |
   WITH turns AS (
     SELECT t.id, t.ref, t.thread_id, t.agent_session_id, t.started_at, t.ended_at,
            nullif(trim(coalesce(t.model, '') || ' ' || coalesce(t.effort, '')), '') AS ran_on,
+           -- Tokens in the context at the turn's end, of the window when the harness gave one.
+           CASE WHEN t.context_tokens IS NULL THEN NULL
+                WHEN t.context_window IS NULL THEN (t.context_tokens / 1000) || 'k'
+                ELSE (t.context_tokens / 1000) || 'k of ' || (t.context_window / 1000) || 'k ('
+                     || (100 * t.context_tokens / t.context_window) || '%)' END AS context,
            trim(CASE WHEN instr(t.prompt, char(10)) > 0
                      THEN substr(t.prompt, 1, instr(t.prompt, char(10)) - 1)
                      ELSE t.prompt END) AS prompt,
@@ -22,6 +27,9 @@ query: |
          coalesce(nullif(u.prompt, ''), '(no prompt)') AS prompt,
          CASE WHEN u.agent_session_id IS NOT NULL THEN 'Session ' || u.agent_session_id END AS session,
          u.ran_on,
+         u.context,
+         (SELECT count(*) FROM v_event ev
+           WHERE ev.type = 'agent.context.compacted' AND ev.turn_id = u.id) AS compactions,
          (SELECT count(DISTINCT c.path) FROM v_tool_call c WHERE c.turn_id = u.id AND c.path IS NOT NULL) AS files,
          (SELECT count(*) FROM v_test_run r WHERE r.turn_id = u.id) AS runs,
          (SELECT sum(k.input_tokens + k.output_tokens + k.cache_creation_input_tokens + k.cache_read_input_tokens)
@@ -31,13 +39,15 @@ query: |
          e.ref AS effort_ref
   FROM turns u
   LEFT JOIN v_effort e ON e.id = u.effort_id
-  ORDER BY u.started_at DESC
+  ORDER BY u.started_at DESC, u.id DESC
 viz: list
 group: { by: section, link: { kind: page, from: effort_ref } }
 columns:
   - { key: prompt, label: Turn, link: { kind: page, from: turn_ref } }
   - { key: session, label: Session }
   - { key: ran_on, label: Model }
+  - { key: context, label: Context }
+  - { key: compactions, label: Compacted }
   - { key: files, label: Files }
   - { key: runs, label: Runs }
   - { key: tokens, label: Tokens }

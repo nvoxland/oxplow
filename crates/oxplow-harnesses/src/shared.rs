@@ -157,6 +157,7 @@ fn event_name(kind: HookKind) -> &'static str {
         HookKind::PlanProposed => "PlanProposed",
         HookKind::SubagentStart => "SubagentStart",
         HookKind::SubagentStop => "SubagentStop",
+        HookKind::PostCompact => "PostCompact",
     }
 }
 

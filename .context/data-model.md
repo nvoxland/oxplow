@@ -946,6 +946,15 @@ them.
 the turn and the open effort; `v_agent_plan` (a model over `event_log`, no
 table, no migration) reads it. Whether the person accepted the plan is not
 recorded. See `agent-model.md` "Plans".
+**Turns record how full the context was (V83).** Nullable INTEGER
+`agent_turn.context_tokens` and `agent_turn.context_window`, set by
+`close_turn_tx` from `TurnEnd.context_tokens` / `context_window` (the same
+`HookEnvelope.turn_run`, so the same path as the model) and published on
+`v_agent_turn` (version 6). `context_tokens` is the input of the turn's last
+request, cache reads and writes included; `context_window` the model's
+window. Claude Code and opencode give no window, so it is NULL there; a
+turn open, or whose harness said nothing, has NULLs. A compaction is an
+event, `agent.context.compacted@1`, not a column.
 
 **Effort↔snapshot linkage lives on the effort row.** There is no
 `effort_id` or `source` column on `snapshot` / `file_snapshot`

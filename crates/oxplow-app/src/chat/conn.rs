@@ -74,6 +74,9 @@ pub enum Incoming {
     /// The agent put a plan to the person (Codex's completed `plan` item).
     /// Recorded; whether the person accepts it is not observable.
     Plan(String),
+    /// The agent summarized its context to make room (Codex's
+    /// `contextCompaction` item). Observed only.
+    Compacted,
     /// The turn in flight finished (or failed).
     PromptDone(Result<TurnEnd, String>),
 }
