@@ -250,6 +250,48 @@ mod tests {
         }
     }
 
+    /// A harness's worktree sits inside a checkout
+    /// (`<repo>/.claude/worktrees/<name>`). Not adopted, it is part of the
+    /// tree around it: its stream's agent edits it, another stream's can't.
+    /// Adopted as a stream of its own, it belongs to that stream alone,
+    /// though the primary's root is a prefix of its path.
+    #[test]
+    fn a_worktree_inside_a_checkout_belongs_to_the_deepest_stream() {
+        let native = "/proj/.claude/worktrees/x/src/a.rs";
+        // Not adopted: the primary's agent edits it; a worktree stream's can't.
+        assert_eq!(
+            decide_at("/proj", "/proj-wt", IntentKind::WorktreeWrite, &[native]),
+            PolicyDecision::Allow
+        );
+        assert_eq!(
+            layer(&decide_in_worktree(&[native])),
+            Some(DenyLayer::WriteGuard)
+        );
+        // Adopted as the stream at `/proj/.claude/worktrees/x`: its own
+        // agent edits it, the primary's can't.
+        let adopted = [std::path::PathBuf::from("/proj/.claude/worktrees/x")];
+        fn facts<'a>(own: &'a str, others: &'a [std::path::PathBuf]) -> PolicyFacts<'a> {
+            PolicyFacts {
+                worktree_root: Path::new(own),
+                other_roots: others,
+                project_dir: Path::new("/proj"),
+            }
+        }
+        let paths = vec![native.to_string()];
+        let intent = ToolIntent {
+            label: "Edit",
+            kind: IntentKind::WorktreeWrite,
+            paths: &paths,
+        };
+        let primary = decide_tool(&intent, &facts("/proj", &adopted));
+        assert_eq!(layer(&primary), Some(DenyLayer::WriteGuard), "{primary:?}");
+        let own = [std::path::PathBuf::from("/proj")];
+        assert_eq!(
+            decide_tool(&intent, &facts("/proj/.claude/worktrees/x", &own)),
+            PolicyDecision::Allow
+        );
+    }
+
     #[test]
     fn dot_dot_and_symlinks_cant_smuggle_a_path_into_another_streams_tree() {
         let dir = tempfile::tempdir().unwrap();

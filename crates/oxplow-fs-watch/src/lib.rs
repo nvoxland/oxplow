@@ -1002,6 +1002,32 @@ mod tests {
         assert!(!filter.ignore(config, false) && !filter.ignore_in_trees(config, false));
     }
 
+    /// A harness's worktree inside the checkout (Claude's
+    /// `.claude/worktrees/<name>`, a checkout of its own with a `.git`
+    /// file) is out of the stream's scans when git's exclude names it, and
+    /// in them when nothing does: the same rule as any other path.
+    #[test]
+    fn a_native_worktree_follows_git_s_exclude() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        let tree = root.join(".claude/worktrees/x");
+        std::fs::create_dir_all(root.join(".git/info")).unwrap();
+        std::fs::create_dir_all(tree.join("src")).unwrap();
+        std::fs::write(tree.join(".git"), "gitdir: ../../../.git/worktrees/x\n").unwrap();
+        let none = Vec::<String>::new;
+        let inside = Path::new(".claude/worktrees/x/src/a.rs");
+        let filter = WorkspaceFilter::build(&root, none(), none(), None);
+        assert!(!filter.ignore(inside, false), "nothing excludes it");
+        assert!(!filter.ignore(Path::new(".claude/worktrees/x"), true));
+
+        std::fs::write(root.join(".git/info/exclude"), ".claude/worktrees/\n").unwrap();
+        let filter = WorkspaceFilter::build(&root, none(), none(), None);
+        assert!(filter.ignore(inside, false));
+        assert!(filter.ignore_in_trees(inside, false));
+        assert!(filter.ignore(Path::new(".claude/worktrees/x"), true));
+        assert!(!filter.ignore(Path::new("src/a.rs"), false));
+    }
+
     #[test]
     fn should_ignore_filters_oxplow_and_git() {
         // Always-on: anything under `.oxplow/` except `.oxplow/wiki/`,

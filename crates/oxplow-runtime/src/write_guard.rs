@@ -33,17 +33,28 @@ pub fn wiki_page_reason(raw_path: Option<&str>, project_dir: Option<&Path>) -> O
 /// Why an agent may not write `path` (absolute, already normalized), when
 /// it falls in another stream's worktree: one of `other_roots`, and not
 /// the thread's own `worktree_root` (a worktree stream's tree may sit
-/// inside the primary checkout's).
+/// inside the primary checkout's: the deepest tree holding the path owns it).
 pub fn foreign_worktree_reason(
     path: &str,
     worktree_root: &Path,
     other_roots: &[PathBuf],
 ) -> Option<String> {
     let p = Path::new(path);
-    if !p.is_absolute() || p.starts_with(worktree_root) {
+    if !p.is_absolute() {
         return None;
     }
-    let root = other_roots.iter().find(|root| p.starts_with(root))?;
+    // A stream's tree can sit inside another's (a worktree adopted from
+    // `<repo>/.claude/worktrees/<name>`): a path belongs to the deepest
+    // root that holds it.
+    let root = other_roots
+        .iter()
+        .filter(|root| p.starts_with(root))
+        .max_by_key(|root| root.components().count())?;
+    if p.starts_with(worktree_root)
+        && worktree_root.components().count() >= root.components().count()
+    {
+        return None;
+    }
     Some(format!(
         "path `{path}` is in another stream's worktree (`{}`). A thread may edit only \
          its own stream's worktree; do this from that stream's thread, or record it \

@@ -208,6 +208,35 @@ mod tests {
     use super::*;
     use crate::test_fixtures::{commit_all, services_with_effort};
 
+    /// A harness's own worktree inside the checkout
+    /// (`<repo>/.claude/worktrees/<name>`) is a git worktree like any
+    /// other: no stream uses it, so it is offered for adoption.
+    #[tokio::test]
+    async fn a_native_worktree_inside_the_checkout_is_adoptable() {
+        let f = services_with_effort().await;
+        let svc = &f.svc;
+        let ws = svc.layout.project_dir.clone();
+        std::fs::write(ws.join("a.txt"), "one\n").unwrap();
+        commit_all(&ws, "c1");
+        let native = ws.join(".claude/worktrees/x");
+        std::fs::create_dir_all(native.parent().unwrap()).unwrap();
+        let made = std::process::Command::new("git")
+            .args(["worktree", "add", "-q", "-b", "native-x"])
+            .arg(&native)
+            .current_dir(&ws)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let offered = adoptable_workspaces(svc).await.unwrap();
+        let canon = |p: &std::path::Path| std::fs::canonicalize(p).unwrap();
+        assert!(
+            offered
+                .iter()
+                .any(|w| canon(std::path::Path::new(&w.path)) == canon(&native)),
+            "{offered:?}"
+        );
+    }
+
     /// P5.B4 (tsk523): the stream reads name versions as revisions — the
     /// head, a commit's detail, blame of the working file, a merge base.
     #[tokio::test]

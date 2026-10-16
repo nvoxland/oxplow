@@ -1371,6 +1371,45 @@ mod tests {
             .unwrap());
     }
 
+    /// A harness's worktree inside the checkout
+    /// (`.claude/worktrees/<name>`) is claimed like any path of the stream
+    /// until git's exclude names it; then it's no one's.
+    #[tokio::test]
+    async fn an_edit_in_a_native_worktree_follows_git_s_exclude() {
+        let (svc, tid, effort_store, project, captures) = fixture_with_lifecycle().await;
+        let item = "work_item:test:12".to_string();
+        let open = open_effort(&svc, &effort_store, &item, tid).await;
+        let edited = ".claude/worktrees/x/src/a.rs";
+        let none = Vec::<String>::new;
+        captures.set_workspace_filter(oxplow_fs_watch::WorkspaceFilter::for_project(
+            project.path(),
+            none(),
+            none(),
+        ));
+        assert!(svc
+            .claim_open_effort_file(&tid, edited, None)
+            .await
+            .unwrap());
+        std::fs::create_dir_all(project.path().join(".git/info")).unwrap();
+        std::fs::write(
+            project.path().join(".git/info/exclude"),
+            ".claude/worktrees/\n",
+        )
+        .unwrap();
+        captures.set_workspace_filter(oxplow_fs_watch::WorkspaceFilter::for_project(
+            project.path(),
+            none(),
+            none(),
+        ));
+        assert!(!svc
+            .claim_open_effort_file(&tid, ".claude/worktrees/x/src/b.rs", None)
+            .await
+            .unwrap());
+        let files = effort_store.list_files(&open.id).await.unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, edited);
+    }
+
     #[tokio::test]
     async fn claim_open_effort_file_claims_on_open_effort_and_is_idempotent() {
         // Auto-claim (PostToolUse path) records a effort_file on the

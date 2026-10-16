@@ -1226,8 +1226,18 @@ available from outside.
 - **Native worktrees.** Claude Code's `.claude/worktrees/<name>` sits in
   the checkout, so under isolation it is the stream's own tree: oxplow
   neither adopts nor refuses it, and an edit there is claimed like any
-  edit in the stream's worktree. A person can adopt it as a stream like
-  any git worktree (`oxplow.stream.adopt_worktree`).
+  edit in the stream's worktree, unless git's exclude (`.git/info/exclude`
+  or a `.gitignore`) names it: then the scans and the claims leave it out,
+  as for any ignored path. Another stream's agent can't edit it. A person
+  can adopt it as a stream like any git worktree
+  (`oxplow.stream.adopt_worktree` lists it). Adopted, it belongs to that
+  stream alone: the write guard gives a path to the deepest stream tree
+  that holds it (`foreign_worktree_reason`), so the enclosing checkout's
+  agent can't edit it. Pinned by
+  `a_worktree_inside_a_checkout_belongs_to_the_deepest_stream`,
+  `a_native_worktree_follows_git_s_exclude`,
+  `an_edit_in_a_native_worktree_follows_git_s_exclude`,
+  `a_native_worktree_inside_the_checkout_is_adoptable`.
 - **Rewind.** Three different things: `conversation_fork` copies a
   conversation (files untouched); `oxplow.snapshot.restore_file`
   restores one file from oxplow's snapshots; a harness's rewind restores
