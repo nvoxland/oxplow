@@ -98,6 +98,15 @@ MCP tools are gone). It reads with `oxplow_query_sql` over `v_dashboard` and
 `v_dashboard_item`. A query tile's `sql` is checked before it is stored, so a tile
 that saves runs; deleting a dashboard is a person's.
 
+What an agent is taught is the `oxplow-extension` skill's `dashboards`
+reference (`crates/oxplow-agent-text/assets/skills/oxplow-extension/references/dashboards.md`):
+choosing between `oxplow_show_lens`, a lens, a dashboard, a custom
+component and a snapshot for outside oxplow (no live connector exists
+yet); every tile kind with its options; and adapting HTML made elsewhere
+into a sandboxed component. Its examples run in
+`crates/oxplow-app/src/dashboards_reference_tests.rs`, read out of the
+reference file, so the text can't drift from what the commands accept.
+
 ## UI (tsk141 — Phase 3)
 
 Two page kinds, wired per `.context/pages-and-tabs.md`'s "adding a tab kind"
