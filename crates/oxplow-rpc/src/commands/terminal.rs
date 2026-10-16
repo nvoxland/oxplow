@@ -208,15 +208,16 @@ pub async fn open_terminal_session(
                 session.harness
             ))
         })?;
-    // A harness without a prompt channel hears who else is in the worktree
-    // only here, as the launch saw it.
-    let others =
-        oxplow_app::agent_context::others_in_worktree(ctx, stream.id, Some(session.id)).await;
+    // A harness without a prompt channel hears who else is in the worktree,
+    // and how many handoffs wait for its thread, only here, as the launch
+    // saw them.
+    let around =
+        oxplow_app::agent_context::surroundings(ctx, stream.id, thread.id, Some(session.id)).await;
     let prompt = assemble_system_prompt(
         &config,
         &stream,
         Some(&thread),
-        &others,
+        &around,
         &declared,
         &oxplow_app::capabilities::agent_text(ctx),
     );

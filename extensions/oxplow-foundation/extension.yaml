@@ -521,6 +521,25 @@ commands:
     op: save
     invokers: { human: true, agent: true, lens: true }
     example: {"stream": "stream:str1", "path": "src/main.rs", "content": "fn main() {\n    println!(\"hello\");\n}\n"}
+  # handoffs.write
+  - name: handoff.send
+    summary: "Hand work to another open thread (any stream's): what it is and what its agent needs to know, and the work item it hands over, if any. The thread's agent is given it at its next prompt; the person sees it at once. Nothing wakes an agent. Returns the handoff and `link_warnings`."
+    scope: handoffs.write
+    op: send
+    invokers: { human: true, agent: true, lens: true }
+    example: {"to_thread": "thread:thr4", "work_item": "work_item:oxplow:tsk12", "body": "The parser fix is in; the remaining failure is the timezone case in [[src/dates.rs]]."}
+  - name: handoff.resolve
+    summary: "Take or decline a handoff to your thread. Taking one moves its work item onto your thread. Its sender reads the note."
+    scope: handoffs.write
+    op: resolve
+    invokers: { human: true, agent: true, lens: true }
+    example: {"handoff": "handoff:hnd3", "outcome": "taken"}
+  - name: handoff.settle
+    summary: "Record how a handoff ended: `taken` or `declined` (its recipient; `oxplow.handoff.resolve` also moves its work item), `withdrawn` (its sender), each only while open; `open` again undoes it."
+    scope: handoffs.write
+    op: settle
+    invokers: { human: true, agent: true, lens: true }
+    example: {"handoff": "handoff:hnd3", "state": "withdrawn", "note": "Fixed it here after all."}
   # hints.write
   - name: hint.dismiss
     summary: "Dismiss a hint raised to the person (a `v_agent_nudge` row with audience `person`)."

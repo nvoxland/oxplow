@@ -120,7 +120,9 @@ effect_source, provider_source}`, `Actor::source()`) and read with
 revisioned, provider_scoped, wikilink_prefixes }` and
 `KindRegistry` (`register` refuses a collision; `validate` checks a ref's
 kind, id shape and whether it may carry `@rev`). `core_kinds()` registers
-the §4.2 vocabulary plus `finding`, `thread_note` and `run` (a work
+the §4.2 vocabulary plus `finding`, `thread_note`, `handoff` (work
+handed between threads, `handoff:hnd<n>`, owned by `v_handoff.ref`; it
+opens its recipient thread) and `run` (a work
 item's comment has no kind of its own: its mentions are its item's
 edges). Only
 `work_item` is provider-scoped in P1 (`oxplow:tsk42`,
@@ -195,7 +197,7 @@ the id as the grammar escapes it, and the kind names are constants
   `page_ref(name, query)`, `extension_page_ref`;
 - catalog: `metric_ref`, `model_ref`, `extension_ref`, `command_ref`,
   `config_ref`, `finding_ref`, `collector_ref`;
-- review and runs: `thread_note_ref`, `agent_session_ref`, `run_ref`,
+- review and runs: `thread_note_ref`, `handoff_ref`, `agent_session_ref`, `run_ref`,
   `proposal_ref`, `claim_ref`, `decision_ref`.
 
 Readers: `parse_as::<T>(r, kind)` (the id parsed as `T`), `id_of(r, kind)`
@@ -285,8 +287,8 @@ A hit carries the `ref` it found (`work_item:oxplow:tsk7`,
 any ref. Core's feeds carry their stream (a project-wide kind, none) and
 aren't bounded; an extension's are project-global and bounded. Core
 searches `work_item` (its comments follow its body), `comment`,
-`thread_note`, `wiki`, `thread`, `agent_session`, `turn`, `effort`,
-`decision`, `commit`, `lens` and `dashboard`. **The newer feeds include
+`thread_note`, `handoff`, `wiki`, `thread`, `agent_session`, `turn`,
+`effort`, `decision`, `commit`, `lens` and `dashboard`. **The newer feeds include
 archived work** — closed and archived threads, their sessions, turns,
 efforts and decisions are found, since finding last month's work is the
 point; the older four still skip an archived stream (below). What each

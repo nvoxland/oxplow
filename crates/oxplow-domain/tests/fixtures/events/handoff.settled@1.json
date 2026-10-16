@@ -1,0 +1,6 @@
+{
+  "handoff": "handoff:hnd4",
+  "state": "taken",
+  "from_thread": "thread:thr1",
+  "to_thread": "thread:thr4"
+}

@@ -6,7 +6,7 @@
 //! and cleared it) leaves every unsaved row without its edges, and a
 //! writer's bug leaves drift. This restates every work item (from the
 //! work-item interface, the same core its pump consumer runs), effort,
-//! finding and thread-note slice from its row on boot, so the graph is its
+//! finding, thread-note and handoff slice from its row on boot, so the graph is its
 //! sources' again — which is why it stays (tsk920): it is the graph's
 //! one repair path.
 //!
@@ -32,15 +32,16 @@
 //! the wiki watcher's initial scan and the commit indexer's boot
 //! pass already hit those paths. This module only covers the
 //! kinds whose data lives entirely in SQLite (work items, efforts,
-//! findings, thread notes).
+//! findings, thread notes, handoffs).
 
 use std::sync::Arc;
 
 use oxplow_db::page_ref_projections::{finding_edges, note_edges, KIND_FINDING, KIND_THREAD_NOTE};
 use oxplow_db::{
-    SourceSlice, SqliteCodeQualityStore, SqliteEffortStore, SqlitePageRefStore,
+    SourceSlice, SqliteCodeQualityStore, SqliteEffortStore, SqliteHandoffStore, SqlitePageRefStore,
     SqliteThreadNoteStore,
 };
+use oxplow_domain::refs::kind::HANDOFF as KIND_HANDOFF;
 use oxplow_domain::vocabulary::VocabularyHandle;
 
 /// Counts of rows touched per kind. Logged at INFO so the boot
@@ -51,6 +52,7 @@ pub struct BackfillCounts {
     pub efforts: usize,
     pub findings: usize,
     pub notes: usize,
+    pub handoffs: usize,
 }
 
 /// Sources restated per transaction.
@@ -193,6 +195,7 @@ pub struct Sources {
     pub efforts: Arc<SqliteEffortStore>,
     pub findings: Arc<SqliteCodeQualityStore>,
     pub thread_notes: Arc<SqliteThreadNoteStore>,
+    pub handoffs: Arc<SqliteHandoffStore>,
 }
 
 /// Project every existing row into `page_ref`. Idempotent.
@@ -206,6 +209,7 @@ pub async fn run(
         efforts,
         findings: findings_store,
         thread_notes,
+        handoffs,
     } = sources;
     let mut counts = BackfillCounts::default();
     let vocabulary = vocabulary.current();
@@ -260,6 +264,18 @@ pub async fn run(
             })
             .collect();
         counts.notes = write_batched(&page_refs, "notes", slices).await;
+    }
+
+    // 2b. Handoffs — one source per row, parsed from its body, as a note.
+    if let Ok(rows) = handoffs.list_all_for_backfill().await {
+        let slices = rows
+            .into_iter()
+            .map(|(id, body)| {
+                let edges = note_edges(kinds, KIND_HANDOFF, &id, &body);
+                slice(KIND_HANDOFF, id, None, edges)
+            })
+            .collect();
+        counts.handoffs = write_batched(&page_refs, "handoffs", slices).await;
     }
 
     // 3. Findings — one edge per row.
@@ -376,6 +392,7 @@ mod tests {
                 efforts: Arc::new(SqliteEffortStore::new(db.clone())),
                 findings: findings_store,
                 thread_notes: Arc::new(SqliteThreadNoteStore::new(db.clone())),
+                handoffs: Arc::new(SqliteHandoffStore::new(db.clone())),
             },
         )
         .await;
@@ -563,6 +580,7 @@ mod tests {
                 efforts: Arc::new(SqliteEffortStore::new(db.clone())),
                 findings: Arc::new(SqliteCodeQualityStore::new(db.clone())),
                 thread_notes: Arc::new(SqliteThreadNoteStore::new(db.clone())),
+                handoffs: Arc::new(SqliteHandoffStore::new(db.clone())),
             },
         )
         .await;

@@ -687,6 +687,21 @@ allocates an empty note first and the subagent fills in its body with
 `oxplow.knowledge.update_note`. The orchestrator reads them
 back via `oxplow_query_sql` over `v_thread_note` or `listThreadNotes(threadId)` (UI).
 
+### `handoff` (`handoff_store.rs`, V84)
+
+Work handed from one thread to another (`oxplow.handoff.*`,
+[agent-model.md](./agent-model.md) "Handoffs and native messaging"):
+`from_thread_id`, `from_session_id` (NULL for a person or an effect),
+`from_actor` (CHECK `user` / `agent` / `effect` / `job` / `system`),
+`to_thread_id` (CHECK it isn't the sender's), `work_item` (a ref),
+`body`, `sent_at`, `delivered_at` + `delivered_to_session_id` (stamped by
+`SqliteHandoffStore::take_for_prompt` when a prompt in the recipient
+thread carries it), `state` (CHECK `open` / `taken` / `declined` /
+`withdrawn`), `settled_at`, `settled_by_session_id`, `note`. Sessions
+are `ON DELETE SET NULL`, threads `CASCADE`. Its ref is `handoff:hnd<n>`;
+its body's `[[…]]` links are `page_ref` edges from `handoff`, restated
+by the boot repair like a note's. Read as `v_handoff`.
+
 ### `effort` — `EffortStore` (`crates/oxplow-db/src/effort_store.rs`)
 
 **V5 (inferred work tracking, [work-tracking.md](./work-tracking.md)).**

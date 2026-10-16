@@ -38,6 +38,7 @@ pub const CORE_NAMESPACES: &[&str] = &[
     "effort",
     "work_item",
     "knowledge",
+    "handoff",
     "test",
     "code",
     "command",
@@ -205,6 +206,8 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<KnowledgePageRecorded>()
             .expect("core type registers");
+        r.register::<HandoffSent>().expect("core type registers");
+        r.register::<HandoffSettled>().expect("core type registers");
         r.register::<KnowledgeNoteWritten>()
             .expect("core type registers");
         r.register::<KnowledgeNoteDeleted>()
@@ -2005,6 +2008,50 @@ impl EventType for KnowledgeNoteDeleted {
     type Payload = KnowledgeNoteDeletedV2;
 }
 
+/// `handoff.sent@1`: work was handed from one thread to another
+/// (`oxplow.handoff.send`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HandoffSentV1 {
+    /// `handoff:hnd<n>`.
+    pub handoff: String,
+    /// The sending thread (`thread:thr<n>`).
+    pub from_thread: String,
+    /// The receiving thread (`thread:thr<n>`).
+    pub to_thread: String,
+    /// The work item it hands over, when it names one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_item: Option<String>,
+}
+
+pub struct HandoffSent;
+impl EventType for HandoffSent {
+    const TYPE: &'static str = "handoff.sent";
+    const V: u32 = 1;
+    type Payload = HandoffSentV1;
+}
+
+/// `handoff.settled@1`: a handoff's state moved (`oxplow.handoff.settle`):
+/// taken or declined by its recipient, withdrawn by its sender, or open
+/// again (an undo).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HandoffSettledV1 {
+    /// `handoff:hnd<n>`.
+    pub handoff: String,
+    /// `open`, `taken`, `declined` or `withdrawn`.
+    pub state: String,
+    pub from_thread: String,
+    pub to_thread: String,
+}
+
+pub struct HandoffSettled;
+impl EventType for HandoffSettled {
+    const TYPE: &'static str = "handoff.settled";
+    const V: u32 = 1;
+    type Payload = HandoffSettledV1;
+}
+
 /// `knowledge.comment.written@1`: a comment (a threaded annotation on a
 /// page) was created or changed — a reply, its intent, status or anchor
 /// (P7.B6).
@@ -2142,6 +2189,8 @@ mod tests {
                 ("effort.opened", 2),
                 ("effort.retitled", 1),
                 ("file.saved", 1),
+                ("handoff.sent", 1),
+                ("handoff.settled", 1),
                 ("knowledge.comment.deleted", 1),
                 ("knowledge.comment.written", 1),
                 ("knowledge.note.deleted", 2),

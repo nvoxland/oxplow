@@ -102,10 +102,11 @@ harness only delivers them.
 | Piece | What | Where it comes from |
 |---|---|---|
 | Preamble | How to work in oxplow: nothing to file, end with the question, reading the errors a person saw, the references oxplow puts in a prompt (`@<path>`, `[oxplow ref …]`, `[oxplow work_item: …]`, `[oxplow lens …]`) | `oxplow_agent_text::WORKING_IN_OXPLOW` (`crates/oxplow-agent-text/assets/working-in-oxplow.md`) |
-| Launch prompt | The preamble; the session context only for a harness without `prompt_context`; the thread's and stream's custom prompts; `agentPromptAppend`; the testing hint (`testing.agentHint`); the skill index only for a harness without `runtime_text` | `agent_prompt::assemble_system_prompt(config, stream, thread, others, harness, skills)`, given the session's declared harness (`crates/oxplow-app/src/agent_prompt.rs`) |
+| Launch prompt | The preamble; the session context only for a harness without `prompt_context`; the thread's and stream's custom prompts; `agentPromptAppend`; the testing hint (`testing.agentHint`); the skill index only for a harness without `runtime_text` | `agent_prompt::assemble_system_prompt(config, stream, thread, around, harness, skills)`, given the session's declared harness (`crates/oxplow-app/src/agent_prompt.rs`) |
 | Skills | Core's (`oxplow-runtime`, `-wiki-capture`, `-mermaid`, `-collection`, `-metrics`, `-extension`, `-codebase`) and the active extensions' | `AgentText` (`oxplow_agent_text::core_text` + `capabilities::agent_text`) |
 | Slash commands | Core's (`review-comments`, `configure`, `new-metric`) and the active extensions' | Same |
-| Session context | Stream, worktree, branch, thread, the other live agents in the worktree | Prompt-time context |
+| Session context | Stream, worktree, branch, thread, the other live agents in the worktree, the count of open handoffs to the thread | Prompt-time context |
+| Handoffs | Work another thread handed this one, once, at the first prompt that takes it ("Handoffs and native messaging") | Prompt-time context |
 | Decisions | The open effort's recorded ones | Prompt-time context |
 | Nudges | Advisory hints, the collection nudge | Prompt- or tool-time context ("Nudge persistence") |
 | Server instructions | What oxplow knows, writes are commands, answer with `oxplow_show_lens` | MCP `get_info` ("The agent's tools") |
@@ -1279,13 +1280,12 @@ available from outside.
 
 ### Handoffs and native messaging
 
-**Decided (2026-10-16), not built.** Work moving between threads is a
-**record oxplow keeps, never a message it delivers.** Today the person
-carries a result from one terminal to another, or agents use their
-harness's own messaging, which oxplow doesn't see, which nobody
-acknowledges, and which wakes the recipient at the sender's choice. The
-design gives that move one durable, visible fact, and leaves every
-transport native.
+Work moving between threads is a **record oxplow keeps, never a message
+it delivers.** Without it the person carries a result from one terminal
+to another, or agents use their harness's own messaging, which oxplow
+doesn't see, which nobody acknowledges, and which wakes the recipient at
+the sender's choice. A handoff gives that move one durable, visible fact,
+and every transport stays native.
 
 What the harnesses offer (Claude Code 2.1.301, Codex 0.163, opencode
 1.17.4; "wakes" is: starts a turn, so it spends that session's quota):
@@ -1304,40 +1304,71 @@ Every path that puts words in front of a model wakes it. The ones that
 don't are context channels, which wait for a turn someone else starts.
 None is cross-thread, visible to the person, and acknowledged.
 
-**The design:**
+**The record** (`crates/oxplow-app/src/commands/handoff.rs`,
+`oxplow_db::handoff_store`, `v_handoff`, ref `handoff:hnd<n>`):
 
-- **A `handoff` entity** (`handoff:hnd<n>`): from a thread (and the
-  agent session, or the person; the actor, never an input), to an open
-  **thread** (never a session: the thread outlives processes; another
-  stream's is allowed, a handoff isn't a write into its worktree), an
-  optional work item, a Markdown body with checked `[[…]]` links, a
-  `delivered_at` stamp, and a state: `open`, `taken`, `declined`,
-  `withdrawn`. Commands `oxplow.handoff.send`, `.resolve { outcome:
-  taken | declined, note? }`, `.withdraw`; `v_handoff`; searchable.
-  Taking one with an item moves the item onto the recipient thread in
-  the same run, so ownership keeps one home (the item's thread).
-- **Thread notes stay as they are.** They were the candidate carrier
-  and don't fit: a note belongs to its writer's thread, has no
-  recipient, state or delivery stamp, and the Explore hand-back already
-  relies on that.
-- **When the recipient sees it:** its agent at the start of its next
-  prompt (a `<handoffs>` block in `prompt_context`, which stamps
-  `delivered_at`; never at a tool hook, so it doesn't interleave with
-  work in progress; Codex at launch until it has a context channel);
-  the person at once (the thread's Handoffs panel, a count in the
-  Navigator, a Waiting on Me row when no agent is live there). Later
-  sessions see a one-line count in the session context, not the
-  bodies again.
-- **Nothing wakes a model.** oxplow never opens an inbox socket, a
-  channel, `prompt_async` or `turn/start`: those are Drive on an
-  interactive surface ("Key invariant"). A source guard will pin that
-  handoff delivery lives only in `prompt_context`. Restarts lose
-  nothing: the record and its stamps are in the database.
-- **Native messaging stays native, and is observed:** Claude Code's
-  inbound cross-session message as its own kind of prompt (not the
-  person's words, like a subagent's hand-back); Codex's collab agents as
-  subagents. oxplow doesn't read Claude's team mailboxes (not a
-  documented interface).
+- **From** a thread: an agent's own (naming another is refused), an
+  effect's event's, or the one a person names; the session and the actor
+  kind are the actor's, never an input. **To** an open thread, never a
+  session (the thread outlives its processes), any stream's: a handoff
+  is knowledge, not a write into that worktree. To the sender's own
+  thread is refused ("a note is for that"). An optional **work item** on
+  the active list (a loose id is canonicalised), and a Markdown **body**
+  whose `[[…]]` links are `page_ref` edges, checked like a note's
+  (`link_warnings`) and restated by the boot repair. Searchable
+  (`v_search_handoff`, under the recipient's stream).
+- **Commands**, all `Record` and open to every invoker (scope
+  `handoffs.write`): `oxplow.handoff.send { to_thread, body, work_item?,
+  from_thread? }` logs `handoff.sent@1`, not undoable.
+  `oxplow.handoff.settle { handoff, state, note? }` is the record of how
+  it ended — `taken` / `declined` by the recipient thread, `withdrawn` by
+  the sender, each only while `open`, and `open` again by whoever settled
+  it — logging `handoff.settled@1`, undone by the state it replaced.
+  `oxplow.handoff.resolve { handoff, outcome: taken | declined, note? }`
+  is how a recipient takes one: a native composite that checks the same
+  rule (`may_settle`) against the run's actor before it composes, so a
+  stranger's run moves nothing, then composes `oxplow.work_item.move`
+  onto the recipient thread (when taking an item not there yet, on a
+  list declaring `lists`) and the settle. Ownership stays the item's
+  thread. A list's verbs run outside the transaction, so a take that
+  moves an item runs as steps and has no undo; the recipient reopens it
+  with `settle { state: open }`. A decline undoes.
+- **Thread notes stay as they are.** They were the candidate carrier and
+  don't fit: a note belongs to its writer's thread, has no recipient,
+  state or delivery stamp, and the Explore hand-back relies on that.
+
+**When the recipient sees it.** Its agent: at the start of its next
+prompt. `AgentContext::prompt_context` takes the thread's open,
+undelivered handoffs (`SqliteHandoffStore::take_for_prompt`, which
+stamps `delivered_at` and `delivered_to_session_id` in the same
+transaction) and puts them in a `<handoffs>` block after the session
+context: each one's ref, the sender's thread and session (or "the
+person"), when, its item's quoted title, the body up to
+`HANDOFF_BODY_IN_CONTEXT` characters with its ref for the rest, and how
+to resolve it. Never with a tool call: a handoff is a unit of work, not
+a nudge, and mustn't land in the middle of other work. The session
+context counts the thread's open ones (`- **Open handoffs to this
+thread:** N`, `agent_context::surroundings`), so a later session or a
+restart learns of them without the bodies again. A harness without a
+prompt channel (Codex) gets only that count, in its launch prompt. The
+person: at once (the UI is a separate piece of work).
+
+**Nothing wakes a model.** oxplow never opens an inbox socket, a channel,
+a server prompt or `turn/start` for a handoff: those are Drive on an
+interactive surface ("Key invariant").
+`source_guards::a_handoff_reaches_an_agent_only_at_its_prompt` pins
+that `take_for_prompt` has one caller and that no production code names
+`prompt_async`, Claude Code's channels, or its inbox socket (outside the
+harness that scrubs it from a child's environment). A restart loses
+nothing: the record and its stamps are in the database. Pinned by the
+`commands::handoff` tests and
+`a_handoff_reaches_the_recipients_next_prompt_once`.
+
+**Native messaging stays native, and is observed:** Claude Code's inbound
+cross-session message as its own kind of prompt (not the person's
+words, like a subagent's hand-back), and Codex's collab agents as
+subagents, are planned; neither is built. oxplow doesn't read Claude's
+team mailboxes (not a documented interface).
 
 Cross-thread ownership and duplicate work are visibility, not gates
 ([work-tracking.md](./work-tracking.md) "Cross-thread ownership").

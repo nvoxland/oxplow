@@ -219,6 +219,8 @@ pub const CONFIG: &str = "config";
 pub const FINDING: &str = "finding";
 pub const THREAD_NOTE: &str = "thread_note";
 pub const AGENT_SESSION: &str = "agent_session";
+/// Work handed from one thread to another (`handoff.id`).
+pub const HANDOFF: &str = "handoff";
 /// A user-created dashboard (`dashboard.id`).
 pub const DASHBOARD: &str = "dashboard";
 /// A subagent of an agent session: `ses<n>/<the harness's id for it>`.
@@ -276,6 +278,8 @@ pub fn core_kinds() -> KindRegistry {
         KindSpec::new(THREAD_NOTE, &prefixed("not")),
         // An agent slot opened on a thread (`agent_session.id`).
         KindSpec::new(AGENT_SESSION, &prefixed("ses")),
+        // Work handed from one thread to another (`handoff.id`).
+        KindSpec::new(HANDOFF, &prefixed("hnd")),
         // A user-created dashboard (`dashboard.id`).
         KindSpec::new(DASHBOARD, &prefixed("dsh")),
         // A subagent of an agent session (`ses3/agent-7f`).

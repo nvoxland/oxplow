@@ -11,7 +11,9 @@
 
 use std::str::FromStr;
 
-use crate::ids::{AgentSessionId, AgentTurnId, CommentId, EffortId, NoteId, StreamId, ThreadId};
+use crate::ids::{
+    AgentSessionId, AgentTurnId, CommentId, EffortId, HandoffId, NoteId, StreamId, ThreadId,
+};
 use crate::refs::grammar::{CanonicalRef, RefParseError};
 use crate::refs::kind as k;
 
@@ -270,6 +272,11 @@ pub fn thread_note_ref(id: NoteId) -> String {
     of(k::THREAD_NOTE, &id.to_string())
 }
 
+/// Work handed from one thread to another (`handoff.id`).
+pub fn handoff_ref(id: HandoffId) -> String {
+    of(k::HANDOFF, &id.to_string())
+}
+
 /// An agent slot on a thread (`agent_session.id`).
 pub fn agent_session_ref(id: AgentSessionId) -> String {
     of(k::AGENT_SESSION, &id.to_string())
@@ -516,6 +523,7 @@ mod tests {
             finding_ref("f"),
             thread_note_ref(NoteId::new(1)),
             agent_session_ref(AgentSessionId::new(1)),
+            handoff_ref(HandoffId::new(1)),
             dashboard_ref(crate::DashboardId::new(1)),
             subagent_ref(AgentSessionId::new(1), "a"),
             run_ref(1),

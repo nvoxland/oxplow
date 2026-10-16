@@ -1,6 +1,6 @@
 ---
 name: oxplow-runtime
-description: Oxplow efforts, all optional — how oxplow tracks your work on its own, when reporting is worth it, the effort.* commands, decisions, stating and reading claims, and the command bus. Loads on the oxplow `run_command` tool with effort.* or oxplow.knowledge.add_note, and on v_effort.
+description: Oxplow efforts, all optional — how oxplow tracks your work on its own, when reporting is worth it, the effort.* commands, decisions, stating and reading claims, handoffs between threads, and the command bus. Loads on the oxplow `run_command` tool with effort.*, oxplow.handoff.* or oxplow.knowledge.add_note, and on v_effort or v_handoff.
 ---
 
 # Your work in oxplow
@@ -17,6 +17,10 @@ finish.
 - **Waiting on the person.** When you need their answer, end your reply
   with the question. oxplow shows your thread as waiting on them. This is
   the one way to ask; nothing else is needed.
+- **Handoffs.** Work another thread hands you arrives at the start of a
+  prompt in a `<handoffs>` block. Take it on or decline it with
+  `oxplow.handoff.resolve`; to hand work to another thread, see
+  `references/commands.md`. Nothing wakes the other agent.
 - **Hints.** oxplow may add short guidance to your next prompt or tool
   result (work grown large with nothing committed, metric movement). Each
   is advisory.
@@ -65,5 +69,6 @@ Alerts. Tell them what you proposed and why; don't run it again or look
 for another way to make the change.
 
 `references/commands.md`: project config keys (`oxplow.config.*`, and which
-need confirmation), the families of commands, and offloading a read-heavy
-question to an Explore subagent through a note.
+need confirmation), the families of commands, offloading a read-heavy
+question to an Explore subagent through a note, and handing work to
+another thread.

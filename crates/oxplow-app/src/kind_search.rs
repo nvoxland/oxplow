@@ -1245,6 +1245,30 @@ mod core_tests {
         .await;
     }
 
+    /// A handoff is found by its body, under its recipient's stream.
+    #[tokio::test]
+    async fn a_handoff_is_found_by_its_body() {
+        let (svc, _dir) = services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let from = crate::test_fixtures::new_thread(&svc, stream.id, "A").await;
+        let to = crate::test_fixtures::new_thread(&svc, stream.id, "B").await;
+        change_loop(&svc);
+        run(
+            &svc,
+            crate::commands::handoff::SEND,
+            serde_json::json!({
+                "from_thread": oxplow_domain::refs::build::thread_ref(from.id),
+                "to_thread": oxplow_domain::refs::build::thread_ref(to.id),
+                "body": "the sprocket half is yours",
+            }),
+        )
+        .await;
+        eventually("the handoff is found", || {
+            found(&svc, "sprocket", Some(stream.id), "handoff")
+        })
+        .await;
+    }
+
     /// Thread notes and comments: written, replied to, gone when deleted.
     #[tokio::test]
     async fn notes_and_comments_are_indexed() {

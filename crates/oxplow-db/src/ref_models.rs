@@ -132,6 +132,11 @@ pub const CORE_KINDS: &[CoreKind] = &[
         .owned("v_thread_note", "body")
         .page(Page::Column(&["thread_ref"]))
         .searched("v_search_thread_note"),
+    // A handoff lives in its recipient thread's handoffs.
+    kind(k::HANDOFF)
+        .owned("v_handoff", "body")
+        .page(Page::Column(&["to_thread_ref"]))
+        .searched("v_search_handoff"),
     kind(k::AGENT_SESSION)
         .owned("v_agent_session", "display_name")
         .opens()

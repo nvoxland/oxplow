@@ -38,6 +38,7 @@ pub mod extension_state_store;
 mod fact_chain;
 pub mod fact_store;
 pub mod git_store;
+pub mod handoff_store;
 pub mod models;
 pub mod page_ref_projections;
 pub mod page_ref_store;
@@ -114,6 +115,7 @@ pub use fact_store::{
     NewMeasure, NewMetricCapture, NewMetricSpec, SqliteFactStore, TestCaseResult, TestCaseStat,
 };
 pub use git_store::{GitBranchRow, GitCommitFileRow, GitCommitRow, GitTagRow, SqliteGitStore};
+pub use handoff_store::SqliteHandoffStore;
 pub use page_ref_store::{PageRefEdge, PageRefStore, SourceSlice, SqlitePageRefStore};
 pub use panel_layout_store::{PanelPlacement, SqlitePanelLayoutStore};
 pub use proposal_store::{NewProposal, Proposal, ProposalDecision, SqliteProposalStore};

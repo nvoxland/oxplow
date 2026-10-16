@@ -114,6 +114,7 @@ describe("core kinds a search hit can be", () => {
       dashboard: "dashboard",
       lens: "lens",
       thread_note: "note",
+      handoff: "handoff",
       comment: "comment",
       work_item: "work item",
       wiki: "wiki page",

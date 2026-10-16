@@ -257,6 +257,13 @@ pub const SCOPES: &[Scope] = &[
         summary: "Write files in a worktree (restore one from a snapshot).",
     },
     Scope {
+        id: "handoffs.write",
+        access: Access::Record,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Hand work from one thread to another, and settle a handoff: take, decline or withdraw it.",
+    },
+    Scope {
         id: "hints.write",
         access: Access::Record,
         host: Host::Daemon,
