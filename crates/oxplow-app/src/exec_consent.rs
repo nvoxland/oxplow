@@ -1331,6 +1331,124 @@ mod tests {
         assert!(!changed.approved);
     }
 
+    /// A project extension with one policy script, on disk, and its listed
+    /// program (the extensions are read from disk each time, as boot does).
+    fn policy(dir: &Path, body: &str) -> (Vec<crate::extensions::Extension>, ProjectProgram) {
+        let ext = dir.join("oxplow/extensions/acme");
+        std::fs::create_dir_all(ext.join("policies")).unwrap();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: acme\nsharing: private\nintent:\n  purpose: a policy\n  examples: [{ name: a }]\nimplementations:\n  - { capability: effort_policy, id: tidy, entry: policies/tidy.star, needs: [sql.read] }\n",
+        )
+        .unwrap();
+        std::fs::write(ext.join("policies/tidy.star"), body).unwrap();
+        let extensions = crate::extensions::load_extensions(dir);
+        let home = tempfile::tempdir().unwrap();
+        let program = list(&store(home.path(), dir), dir, &extensions)
+            .into_iter()
+            .find(|p| p.kind == ProgramKind::EffortPolicy)
+            .expect("the policy script is listed");
+        (extensions, program)
+    }
+
+    /// Approval is of the version the person reviewed: approving the one a
+    /// listing showed, after the program changed, is refused and approves
+    /// nothing; the version the listing shows now is approved.
+    #[test]
+    fn approving_a_version_that_has_since_changed_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let st = store(home.path(), dir.path());
+        let (_, seen) = policy(
+            dir.path(),
+            "def transform(x):\n    return {\"skip\": \"a\"}\n",
+        );
+        let seen = seen.version.clone().unwrap();
+        let (extensions, changed) = policy(
+            dir.path(),
+            "def transform(x):\n    return {\"skip\": \"b\"}\n",
+        );
+        assert_ne!(changed.version.as_deref(), Some(seen.as_str()));
+        let err = approve_program(
+            &st,
+            dir.path(),
+            &extensions,
+            ProgramKind::EffortPolicy,
+            "acme/tidy",
+            &seen,
+        )
+        .unwrap_err();
+        assert!(err.contains("changed since you reviewed it"), "{err}");
+        let listed = |extensions: &[crate::extensions::Extension]| {
+            list(&st, dir.path(), extensions)
+                .into_iter()
+                .find(|p| p.kind == ProgramKind::EffortPolicy)
+                .unwrap()
+        };
+        assert!(!listed(&extensions).approved, "nothing was approved");
+        approve_program(
+            &st,
+            dir.path(),
+            &extensions,
+            ProgramKind::EffortPolicy,
+            "acme/tidy",
+            changed.version.as_deref().unwrap(),
+        )
+        .unwrap();
+        assert!(listed(&extensions).approved);
+    }
+
+    /// Revoking by name takes an approval back: the listing shows it
+    /// unapproved with when it was revoked; a name that isn't listed is an
+    /// error.
+    #[test]
+    fn revoking_through_the_listing_takes_the_approval_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let st = store(home.path(), dir.path());
+        let (extensions, program) = policy(
+            dir.path(),
+            "def transform(x):\n    return {\"skip\": \"a\"}\n",
+        );
+        approve_program(
+            &st,
+            dir.path(),
+            &extensions,
+            ProgramKind::EffortPolicy,
+            "acme/tidy",
+            program.version.as_deref().unwrap(),
+        )
+        .unwrap();
+        let row = |extensions: &[crate::extensions::Extension]| {
+            list(&st, dir.path(), extensions)
+                .into_iter()
+                .find(|p| p.kind == ProgramKind::EffortPolicy)
+                .unwrap()
+        };
+        assert!(row(&extensions).approved);
+        revoke_program(&st, dir.path(), &[], ProgramKind::EffortPolicy, "acme/tidy").unwrap_err();
+        revoke_program(
+            &st,
+            dir.path(),
+            &extensions,
+            ProgramKind::EffortPolicy,
+            "acme/tidy",
+        )
+        .unwrap();
+        let revoked = row(&extensions);
+        assert!(!revoked.approved);
+        assert!(revoked.revoked_at.is_some(), "{revoked:?}");
+        let err = revoke_program(
+            &st,
+            dir.path(),
+            &extensions,
+            ProgramKind::EffortPolicy,
+            "acme/nope",
+        )
+        .unwrap_err();
+        assert!(err.contains("acme/nope"), "{err}");
+    }
+
     /// A store outside `dir`'s project tree, with an in-memory keychain.
     fn store(home: &Path, project: &Path) -> ApprovalStore {
         ApprovalStore::at(
