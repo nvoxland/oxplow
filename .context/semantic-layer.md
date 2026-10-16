@@ -659,6 +659,7 @@ and `v_model_test` are the catalog of all of them:
 | `v_effort_file` | files each effort changed, with change kind, `source` (`claimed` by an edit tool or `observed` changing in one of its thread's turns, v2) and the effort's `work_item` |
 | `v_work_item_comment` | comments on the active list's items (`v_task_note` was removed) |
 | `v_thread_note` | a thread's notes (`oxplow.knowledge.add_note`; V24) |
+| `v_handoff` | work handed from one thread to another (`oxplow.handoff.*`; V84): sender thread and session, recipient thread, work item, body, `delivered_at` (stamped at the recipient's next prompt), `state` `open` / `taken` / `declined` / `withdrawn`; `v_search_handoff` is its search feed |
 | `v_work_item_link` | typed links between the active list's items (`v_task_link` was removed) |
 | `v_agent_turn` | human prompt → agent answer, per thread (V74), with the snapshots the turn started and ended at (`start_snapshot_id`, `snapshot_id`: what the turn changed; V98/V99) |
 | `v_token_usage` | model tokens per thread / effort / model, with each turn's prompt (V74, `prompt` V82) |

@@ -37,11 +37,22 @@ pub struct OtherAgent {
 /// The visible Oxplow session-context note: the stream, worktree, branch
 /// and thread the agent works in, and the other live agents sharing that
 /// worktree (`others`; the line is left out when there are none).
+/// What the session context says about the agent's surroundings: the
+/// other live agents in its worktree, and the open handoffs to its thread
+/// (a later session learns of them by their count; the first prompt that
+/// takes one carries its body).
+#[derive(Debug, Clone, Default)]
+pub struct Surroundings {
+    pub others: Vec<OtherAgent>,
+    pub open_handoffs: usize,
+}
+
 pub fn build_session_context_block(
     stream: &Stream,
     thread: Option<&Thread>,
-    others: &[OtherAgent],
+    around: &Surroundings,
 ) -> String {
+    let others = &around.others;
     let mut s = String::from(
         "<session-context>\n## Oxplow session context\n\n\
          Oxplow is providing the agent's current workspace assignment. This note is refreshed after a session restart or when the assignment changes.\n\n",
@@ -70,6 +81,12 @@ pub fn build_session_context_block(
             named.join("; ")
         ));
     }
+    if around.open_handoffs > 0 {
+        s.push_str(&format!(
+            "- **Open handoffs to this thread:** {} (`v_handoff`)\n",
+            around.open_handoffs
+        ));
+    }
     s.push_str("</session-context>");
     s
 }
@@ -81,14 +98,14 @@ pub fn build_session_context_block(
 /// What the harness delivers decides two parts: the `<session-context>`
 /// block is here only when no prompt hook can carry it (`prompt_context`;
 /// otherwise the first prompt's context does, and both would send it
-/// twice) — and then it is frozen as the launch saw it, `others` included —
+/// twice) — and then it is frozen as the launch saw it, `around` included —
 /// and the skills are indexed here for `oxplow_get_skill` only when the
 /// harness ships no skill files (`runtime_text`).
 pub fn assemble_system_prompt(
     config: &OxplowConfig,
     stream: &Stream,
     thread: Option<&Thread>,
-    others: &[OtherAgent],
+    around: &Surroundings,
     harness: &crate::capabilities::Implementation,
     skills: &oxplow_domain::agent::text::AgentText,
 ) -> String {
@@ -96,7 +113,7 @@ pub fn assemble_system_prompt(
     out.push_str(oxplow_agent_text::WORKING_IN_OXPLOW.trim());
     out.push_str("\n\n");
     if !harness.has_feature(crate::agent_context::PROMPT_CONTEXT) {
-        out.push_str(&build_session_context_block(stream, thread, others));
+        out.push_str(&build_session_context_block(stream, thread, around));
         out.push_str("\n\n");
     }
     if let Some(t) = thread {
@@ -188,7 +205,7 @@ mod tests {
             config,
             stream,
             Some(&thread()),
-            &[],
+            &Surroundings::default(),
             h,
             &oxplow_agent_text::core_text(),
         )
@@ -265,7 +282,8 @@ mod tests {
 
     #[test]
     fn session_context_includes_stream_and_thread_metadata() {
-        let block = build_session_context_block(&stream(), Some(&thread()), &[]);
+        let block =
+            build_session_context_block(&stream(), Some(&thread()), &Surroundings::default());
         assert!(block.contains("## Oxplow session context"));
         assert!(block.contains("**Stream:** oxplow (`str1`)"));
         assert!(block.contains("**Worktree:** `/repo`"));
@@ -344,11 +362,14 @@ mod tests {
     /// and thread, on one line.
     #[test]
     fn others_in_the_worktree_are_named() {
-        let others = [
-            other("Login fix", "codex", 2, "thread 2"),
-            other("claude 2026-10-16", "claude", 1, "explore"),
-        ];
-        let block = build_session_context_block(&stream(), Some(&thread()), &others);
+        let around = Surroundings {
+            others: vec![
+                other("Login fix", "codex", 2, "thread 2"),
+                other("claude 2026-10-16", "claude", 1, "explore"),
+            ],
+            open_handoffs: 0,
+        };
+        let block = build_session_context_block(&stream(), Some(&thread()), &around);
         assert!(
             block.contains(
                 "- **Also in this worktree:** Login fix (`codex`, thread thread 2 (`thr2`)); \
@@ -360,7 +381,8 @@ mod tests {
 
     #[test]
     fn no_line_when_alone() {
-        let block = build_session_context_block(&stream(), Some(&thread()), &[]);
+        let block =
+            build_session_context_block(&stream(), Some(&thread()), &Surroundings::default());
         assert!(!block.contains("Also in this worktree"), "{block}");
     }
 

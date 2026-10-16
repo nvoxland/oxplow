@@ -30,6 +30,7 @@ import {
   FileText,
   Folder,
   FolderTree,
+  Forward,
   Gauge,
   GitBranch,
   GitCommit,
@@ -130,6 +131,8 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return MessagesSquare;
     case "thread_note":
       return StickyNote;
+    case "handoff":
+      return Forward;
     case "comment":
       return MessageSquareText;
     case "decision":

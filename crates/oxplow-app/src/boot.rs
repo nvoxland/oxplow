@@ -466,6 +466,7 @@ pub async fn run_boot_orchestration(
             efforts: state.effort_store.clone(),
             findings: state.code_quality_store.clone(),
             thread_notes: state.thread_note_store.clone(),
+            handoffs: state.handoff_store.clone(),
         };
         tokio::spawn(async move {
             if !crate::page_ref_backfill::needs_repair(&db).await {

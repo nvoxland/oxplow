@@ -942,6 +942,43 @@ fn nothing_in_core_drives_an_agent() {
     assert_eq!(offenders, Vec::<String>::new());
 }
 
+/// A handoff is a record, never a message oxplow delivers
+/// (`.context/agent-model.md` "Handoffs and native messaging"): it reaches
+/// an agent only in the context of a prompt someone else started. So the
+/// store's take has one caller, the prompt context, and nothing in
+/// production code names a surface that would wake an agent with it — a
+/// harness's server prompt (opencode's `prompt_async`), Claude Code's
+/// channels, or its inbox socket outside the harness that scrubs it from a
+/// child's environment.
+#[test]
+fn a_handoff_reaches_an_agent_only_at_its_prompt() {
+    const TAKE: &str = "take_for_prompt(";
+    const TAKERS: &[&str] = &[
+        "crates/oxplow-db/src/handoff_store.rs",
+        "crates/oxplow-app/src/agent_context.rs",
+    ];
+    const WAKING: &[&str] = &[
+        "prompt_async",
+        "claude/channel",
+        "CLAUDE_CODE_MESSAGING_SOCKET",
+    ];
+    const SCRUBS_THE_SOCKET: &str = "crates/oxplow-harnesses/src/claude.rs";
+    let mut offenders = Vec::new();
+    for (path, text) in production_sources() {
+        for line in text.lines().filter(|l| !l.trim_start().starts_with("//")) {
+            if line.contains(TAKE) && !TAKERS.contains(&path.as_str()) {
+                offenders.push(format!("{path}: takes handoffs outside the prompt context"));
+            }
+            for w in WAKING {
+                if line.contains(w) && !(path == SCRUBS_THE_SOCKET && w.starts_with("CLAUDE_")) {
+                    offenders.push(format!("{path}: names `{w}`"));
+                }
+            }
+        }
+    }
+    assert_eq!(offenders, Vec::<String>::new());
+}
+
 /// Where oxplow's own task list — one implementation of the work-item
 /// interface (`.context/work-items.md`) — may be named in production
 /// code: its crate (`crates/oxplow-tasks`, all of it) and the files listed

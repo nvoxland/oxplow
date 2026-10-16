@@ -776,6 +776,18 @@
   tests:
     - { not_null: ref }
     - { unique: ref }
+- name: search_handoff
+  version: 1
+  description: "What site search indexes for each handoff: the `handoff` kind's index is restated from these rows when they change."
+  columns:
+    - { name: "ref", type: "TEXT", doc: "The handoff's canonical ref (`handoff:hnd<n>`): what a hit opens." }
+    - { name: "title", type: "TEXT", doc: "Empty: a handoff has no title." }
+    - { name: "body", type: "TEXT", doc: "The handoff's markdown." }
+    - { name: "stream_id", type: "TEXT", doc: "Its recipient thread's stream (`str1`)." }
+    - { name: "version", type: "TEXT", doc: "Changes whenever the row's text does; a recompute reads the text of rows whose version moved only (when it was sent; a body is not edited)." }
+  tests:
+    - { not_null: ref }
+    - { unique: ref }
 - name: search_thread_note
   version: 4
   description: "What site search indexes for each thread note: the `thread_note` kind's index is restated from these rows when they change."
@@ -1480,6 +1492,33 @@
   tests:
     - { not_null: id }
     - { unique: id }
+- name: handoff
+  version: 1
+  description: "Work handed from one thread to another (`oxplow.handoff.send`; ref `handoff:hnd<n>`): who sent it, the thread it is for, the work item it hands over, when the recipient's agent was given it, and how it ended. A record oxplow keeps, never a message it delivers: the recipient's agent is given it at its next prompt."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Handoff id (`hnd<n>`)." }
+    - { name: "ref", type: "TEXT", doc: "`handoff:hnd<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it." }
+    - { name: "from_thread_id", type: "INTEGER", doc: "The thread that sent it." }
+    - { name: "from_thread_ref", type: "TEXT", doc: "That thread's ref (`thread:thr<n>`)." }
+    - { name: "from_session_id", type: "INTEGER", doc: "The agent session that sent it; NULL when a person or an effect did." }
+    - { name: "from_session_ref", type: "TEXT", doc: "That session's ref (`agent_session:ses<n>`)." }
+    - { name: "from_actor", type: "TEXT", doc: "Who sent it: `user`, `agent`, `effect`, `job` or `system` (the actor, never an input)." }
+    - { name: "to_thread_id", type: "INTEGER", doc: "The thread it is for (never a session: the thread outlives its processes)." }
+    - { name: "to_thread_ref", type: "TEXT", doc: "That thread's ref: where a handoff opens." }
+    - { name: "work_item", type: "TEXT", doc: "The work item it hands over (a `work_item:` ref), when it names one; taking the handoff moves the item onto the recipient thread." }
+    - { name: "body", type: "TEXT", doc: "Markdown body." }
+    - { name: "sent_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "delivered_at", type: "TEXT", doc: "When a prompt in the recipient thread carried it to its agent; NULL until then." }
+    - { name: "delivered_to_session_id", type: "INTEGER", doc: "The agent session that prompt was in." }
+    - { name: "state", type: "TEXT", doc: "`open`, `taken`, `declined` (by the recipient) or `withdrawn` (by the sender)." }
+    - { name: "settled_at", type: "TEXT", doc: "When it was taken, declined or withdrawn; NULL while open." }
+    - { name: "settled_by_session_id", type: "INTEGER", doc: "The agent session that settled it; NULL for a person." }
+    - { name: "note", type: "TEXT", doc: "What its settler said, when anything." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+    - { relationships: { column: from_thread_id, to: thread, field: id } }
+    - { relationships: { column: to_thread_id, to: thread, field: id } }
 - name: thread_note
   version: 3
   description: "A thread's notes: the capture pad an agent writes as it works (`oxplow.knowledge.add_note`; ref `thread_note:not<n>`)."

@@ -227,7 +227,7 @@ pub mod workspace_files;
 pub mod workspace_watch;
 pub mod worktrees;
 
-pub use agent_prompt::{build_session_context_block, OtherAgent};
+pub use agent_prompt::{build_session_context_block, OtherAgent, Surroundings};
 pub use events::{event_channels, EventBus, OxplowEvent, WorkspaceChangeKind};
 pub use hook_ingest::{
     HookEnvelope, HookIngestError, HookIngestService, IngestOutcome, ToolDecision,
@@ -550,6 +550,8 @@ pub struct Services {
     pub agent_session_store: Arc<SqliteAgentSessionStore>,
     pub task_store: Arc<SqliteTaskStore>,
     pub thread_note_store: Arc<SqliteThreadNoteStore>,
+    /// Work handed between threads (`.context/agent-model.md` "Handoffs").
+    pub handoff_store: Arc<oxplow_db::SqliteHandoffStore>,
     /// The event log (`.context/data-model.md` "event_log"). Producers
     /// append inside their own transaction via `event_log_store::append_tx`;
     /// this handle is for reads and the pump.
@@ -1021,6 +1023,7 @@ impl Services {
         let comment_store = Arc::new(SqliteCommentStore::new(db.clone(), vocabulary.clone()));
         let task_store = Arc::new(SqliteTaskStore::new(db.clone()));
         let thread_note_store = Arc::new(SqliteThreadNoteStore::new(db.clone()));
+        let handoff_store = Arc::new(oxplow_db::SqliteHandoffStore::new(db.clone()));
         let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), vocabulary.clone()));
         let extension_activation = Arc::new(extension_activation::ExtensionActivation::new());
         let sql = sql_gateway::SqlGateway::new(db.clone())
@@ -1575,6 +1578,10 @@ impl Services {
             },
         ))
         .chain(commands::note::ops(link_deps.clone()))
+        .chain(commands::handoff::ops(
+            link_deps.clone(),
+            work_items.clone(),
+        ))
         .chain(commands::stream::ops(commands::stream::StreamDeps {
             streams: streams.clone(),
             snapshot_captures: snapshot_captures.clone(),
@@ -1897,6 +1904,7 @@ impl Services {
             agent_session_store,
             task_store,
             thread_note_store,
+            handoff_store,
             event_log_store,
             sql,
             model_watermarks,
@@ -2421,6 +2429,11 @@ mod tests {
                 "extensions.check/review",
                 "extensions.check/validate",
                 "files.write/save",
+                // Each side settles only its own side of a handoff
+                // (`may_settle`), checked before a take composes its move.
+                "handoffs.write/resolve",
+                "handoffs.write/send",
+                "handoffs.write/settle",
                 // Intent on the extension's own declared jobs; running one
                 // needs the job's own current approval.
                 "jobs.read/snapshot",
@@ -2502,6 +2515,8 @@ mod tests {
                 // The bundled extension's script commands compose their
                 // calls per input.
                 "oxplow.effort.infer_reasoning",
+                // Taking a handoff moves its work item, then settles it.
+                "oxplow.handoff.resolve",
                 "oxplow.review.accept",
                 "oxplow.review.request_changes",
                 "oxplow.work.clear_finished",

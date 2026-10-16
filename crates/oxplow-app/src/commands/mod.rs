@@ -29,6 +29,7 @@ pub mod extension_install;
 pub mod extension_jobs;
 pub mod extension_state;
 pub mod file;
+pub mod handoff;
 pub mod hint;
 pub mod lens;
 pub mod lsp;

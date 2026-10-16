@@ -1,7 +1,8 @@
 //! The context oxplow hands an agent, shared by every transport (tsk334,
 //! P3.8): the `<session-context>` block (deduped per session — it names
 //! the other live agents in the worktree, so it changes as they come and
-//! go), prompt advisories and the open effort's decisions on a prompt; the
+//! go), the open handoffs to the thread no agent was given yet, prompt
+//! advisories and the open effort's decisions on a prompt; the
 //! thread's undelivered nudges after a tool call. What an agent *did* is
 //! recorded elsewhere — the hook ingest logs `agent.*` events and pump
 //! reactors record from them (`tool_call_reactors`, `post_tool_reactors`,
@@ -19,7 +20,7 @@ use oxplow_domain::{AgentSessionId, StreamId, ThreadId};
 use parking_lot::Mutex;
 use tracing::warn;
 
-use crate::agent_prompt::{build_session_context_block, OtherAgent};
+use crate::agent_prompt::{build_session_context_block, OtherAgent, Surroundings};
 use crate::Services;
 
 /// The last context block per agent session.
@@ -110,6 +111,7 @@ impl AgentContext {
         let ctx_block = self
             .refreshed_session_context(svc, thread_id, session_id, agent_session)
             .await;
+        let handoffs_block = handoffs(svc, *thread_id, agent_session).await;
         // Prompt advisories land as nudges beside any a turn's end or a
         // late tool call left; the prompt carries them all.
         crate::advisories::for_thread(
@@ -123,7 +125,7 @@ impl AgentContext {
         let decisions_block = self
             .refreshed_decisions_context(svc, thread_id, session_id)
             .await;
-        let combined: String = [ctx_block, advisory_block, decisions_block]
+        let combined: String = [ctx_block, handoffs_block, advisory_block, decisions_block]
             .into_iter()
             .flatten()
             .collect::<Vec<_>>()
@@ -152,8 +154,8 @@ impl AgentContext {
             .await
             .ok()
             .flatten()?;
-        let others = others_in_worktree(svc, stream.id, agent_session).await;
-        let block = build_session_context_block(&stream, Some(&thread), &others);
+        let around = surroundings(svc, stream.id, thread.id, agent_session).await;
+        let block = build_session_context_block(&stream, Some(&thread), &around);
         self.should_emit(session_id, &block).then_some(block)
     }
 
@@ -236,6 +238,122 @@ async fn undelivered(svc: &Services, thread_id: &ThreadId) -> Option<String> {
     };
     let text: Vec<String> = nudges.into_iter().map(|n| n.message).collect();
     (!text.is_empty()).then(|| text.join("\n\n"))
+}
+
+/// Characters of a handoff's body its prompt carries; the rest is read
+/// through its ref.
+pub const HANDOFF_BODY_IN_CONTEXT: usize = 1_500;
+
+/// The open handoffs to `thread` no agent was given yet, as one
+/// `<handoffs>` block, stamped delivered to `session`: each reaches the
+/// thread's agents once, at the first prompt that takes it — never with a
+/// tool call, so it doesn't land in the middle of other work.
+async fn handoffs(
+    svc: &Services,
+    thread: ThreadId,
+    session: Option<AgentSessionId>,
+) -> Option<String> {
+    use oxplow_db::semantic_layer::SqlCell;
+    let taken = match svc.handoff_store.take_for_prompt(thread, session).await {
+        Ok(t) if !t.is_empty() => t,
+        Ok(_) => return None,
+        Err(err) => {
+            warn!(?err, "taking the thread's handoffs failed");
+            return None;
+        }
+    };
+    // How the person sees each: its sender's thread and session, its item.
+    let labels: HashMap<String, (String, Option<String>, Option<String>)> = match svc
+        .sql
+        .query_sql(
+            "SELECT h.ref, t.title, s.display_name, w.title
+               FROM v_handoff h
+               JOIN v_thread t ON t.id = h.from_thread_id
+               LEFT JOIN v_agent_session s ON s.id = h.from_session_id
+               LEFT JOIN v_work_item w ON w.ref = h.work_item
+              WHERE h.to_thread_id = ?1",
+            vec![SqlCell::Int(thread.value())],
+            None,
+        )
+        .await
+    {
+        Ok(out) => {
+            let text = |c: &SqlCell| match c {
+                SqlCell::Text(t) => Some(t.clone()),
+                _ => None,
+            };
+            out.rows
+                .iter()
+                .filter_map(|r| Some((text(&r[0])?, (text(&r[1])?, text(&r[2]), text(&r[3])))))
+                .collect()
+        }
+        Err(err) => {
+            warn!(?err, "reading the handoffs' senders failed");
+            HashMap::new()
+        }
+    };
+    let mut s = String::from(
+        "<handoffs>\nWork handed to this thread. When you take one on or decline it, say so with \
+         `oxplow.handoff.resolve { handoff, outcome: taken | declined, note? }`: taking one \
+         moves its work item onto this thread, and its sender reads the note.\n",
+    );
+    for h in taken {
+        let r = oxplow_domain::refs::build::handoff_ref(h.id);
+        let (from_title, from_name, item_title) = labels.get(&r).cloned().unwrap_or_default();
+        let by = from_name.unwrap_or_else(|| "the person".into());
+        let item = item_title
+            .map(|t| format!("; work item \"{t}\""))
+            .unwrap_or_default();
+        s.push_str(&format!(
+            "\n- `{r}` from thread {from_title} (`{}`), by {by}, {}{item}:\n",
+            h.from_thread_id, h.sent_at
+        ));
+        let body: String = h.body.chars().take(HANDOFF_BODY_IN_CONTEXT).collect();
+        for line in body.lines() {
+            s.push_str("  ");
+            s.push_str(line);
+            s.push('\n');
+        }
+        if h.body.chars().count() > HANDOFF_BODY_IN_CONTEXT {
+            s.push_str(&format!("  … (the rest: `oxplow_read {r}`)\n"));
+        }
+    }
+    s.push_str("</handoffs>");
+    Some(s)
+}
+
+/// What the session context says around the agent: the other live agents
+/// in its stream's worktree but `except` (the asking session), and the
+/// open handoffs to its thread.
+pub async fn surroundings(
+    svc: &Services,
+    stream: StreamId,
+    thread: ThreadId,
+    except: Option<AgentSessionId>,
+) -> Surroundings {
+    use oxplow_db::semantic_layer::SqlCell;
+    let open_handoffs = match svc
+        .sql
+        .query_sql(
+            "SELECT count(*) FROM v_handoff WHERE to_thread_id = ?1 AND state = 'open'",
+            vec![SqlCell::Int(thread.value())],
+            None,
+        )
+        .await
+    {
+        Ok(out) => match out.rows.first().and_then(|r| r.first()) {
+            Some(SqlCell::Int(n)) => usize::try_from(*n).unwrap_or(0),
+            _ => 0,
+        },
+        Err(err) => {
+            warn!(?err, "counting the thread's open handoffs failed");
+            0
+        }
+    };
+    Surroundings {
+        others: others_in_worktree(svc, stream, except).await,
+        open_handoffs,
+    }
 }
 
 /// The live agents in stream `stream`'s worktree but `except` (the asking
@@ -360,6 +478,84 @@ mod tests {
             theirs_ctx.contains(&format!("thread Thread (`{}`)", fx.thread)),
             "{theirs_ctx}"
         );
+    }
+
+    /// A handoff to a thread reaches its agent once, at the next prompt —
+    /// stamped delivered to that session — and never with a tool call. The
+    /// session context counts the thread's open handoffs for later
+    /// sessions, which get the count, not the body again.
+    #[tokio::test]
+    async fn a_handoff_reaches_the_recipients_next_prompt_once() {
+        use oxplow_domain::Actor;
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &*fx.svc;
+        let to =
+            crate::test_fixtures::new_thread(svc, oxplow_domain::StreamId::new(1), "them").await;
+        let theirs = crate::test_fixtures::open_session(svc, to.id).await;
+        let send = |body: &'static str| {
+            svc.commands.run(
+                &Actor::Human,
+                crate::commands::handoff::SEND,
+                serde_json::json!({
+                    "from_thread": oxplow_domain::refs::build::thread_ref(fx.thread),
+                    "to_thread": oxplow_domain::refs::build::thread_ref(to.id),
+                    "body": body,
+                }),
+                false,
+            )
+        };
+        send("the parser half is yours").await.unwrap();
+        let ctx = AgentContext::default();
+
+        assert!(ctx.post_tool_context(svc, &to.id, None).await.is_none());
+        let first = ctx
+            .prompt_context(svc, &to.id, Some("s1"), Some(theirs), None)
+            .await
+            .unwrap();
+        assert!(first.contains("<handoffs>"), "{first}");
+        assert!(first.contains("the parser half is yours"), "{first}");
+        assert!(first.contains("from thread Thread"), "{first}");
+        assert!(first.contains("oxplow.handoff.resolve"), "{first}");
+        assert!(
+            first.contains("- **Open handoffs to this thread:** 1"),
+            "{first}"
+        );
+        let delivered: Option<i64> = svc
+            .db
+            .read(|tx| {
+                tx.query_row("SELECT delivered_to_session_id FROM handoff", [], |r| {
+                    r.get(0)
+                })
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(delivered, Some(theirs.value()));
+
+        let again = ctx
+            .prompt_context(svc, &to.id, Some("s1"), Some(theirs), None)
+            .await
+            .unwrap_or_default();
+        assert!(!again.contains("<handoffs>"), "{again}");
+
+        // A later session (a restart) learns of it by the count alone.
+        let later = AgentContext::default()
+            .prompt_context(svc, &to.id, Some("s2"), Some(theirs), None)
+            .await
+            .unwrap();
+        assert!(!later.contains("the parser half is yours"), "{later}");
+        assert!(
+            later.contains("- **Open handoffs to this thread:** 1"),
+            "{later}"
+        );
+
+        // A tool call carries none, even one sent since.
+        send("and the lexer").await.unwrap();
+        let tool = ctx
+            .post_tool_context(svc, &to.id, None)
+            .await
+            .unwrap_or_default();
+        assert!(!tool.contains("and the lexer"), "{tool}");
     }
 
     /// Alone in the worktree, the context has no such line.
