@@ -1230,6 +1230,7 @@ mod tests {
         let f = crate::test_fixtures::services_with_effort().await;
         let hook = |kind, payload: serde_json::Value| crate::hook_ingest::HookEnvelope {
             session_title: None,
+            turn_run: None,
             kind,
             thread_id: Some(f.thread),
             stream_id: None,
@@ -2409,6 +2410,7 @@ mod tests {
                     svc.hook_ingest
                         .ingest(crate::hook_ingest::HookEnvelope {
                             session_title: None,
+                            turn_run: None,
                             kind,
                             thread_id: Some(thread),
                             stream_id: None,

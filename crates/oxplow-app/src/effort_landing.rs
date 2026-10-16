@@ -295,6 +295,7 @@ mod tests {
             .hook_ingest
             .ingest(crate::hook_ingest::HookEnvelope {
                 session_title: None,
+                turn_run: None,
                 kind: oxplow_domain::hook::HookKind::UserPromptSubmit,
                 thread_id: Some(f.thread),
                 stream_id: None,
@@ -324,6 +325,7 @@ mod tests {
         let root = f.svc.layout.project_dir.clone();
         let submit = |kind| crate::hook_ingest::HookEnvelope {
             session_title: None,
+            turn_run: None,
             kind,
             thread_id: Some(f.thread),
             stream_id: None,

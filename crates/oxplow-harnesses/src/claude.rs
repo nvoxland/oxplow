@@ -39,6 +39,7 @@ use oxplow_domain::agent::observe::{
 use oxplow_domain::agent::text::AgentText;
 use oxplow_domain::agent::tool::{Subagent, ToolUse};
 use oxplow_domain::events::schema::TokenKind;
+use oxplow_domain::hook::TurnRun;
 
 use super::shared::{
     claude_shaped_tool_use, in_shell, program_and_guard, resume_or_fresh, runtime, setting,
@@ -233,6 +234,27 @@ impl AgentHarness for Claude {
             .map(str::trim)
             .filter(|t| !t.is_empty())
             .map(str::to_string)
+    }
+
+    /// A Stop's `effort.level`, and the model of the newest assistant line
+    /// in the transcript it points to.
+    async fn turn_run(&self, body: &serde_json::Value) -> Option<TurnRun> {
+        let effort = body
+            .pointer("/effort/level")
+            .and_then(|l| l.as_str())
+            .map(str::to_string);
+        let path = body
+            .get("transcript_path")
+            .and_then(|p| p.as_str())
+            .map(PathBuf::from);
+        let model = match path {
+            Some(path) => tokio::task::spawn_blocking(move || newest_model(&path))
+                .await
+                .ok()
+                .flatten(),
+            None => None,
+        };
+        (model.is_some() || effort.is_some()).then_some(TurnRun { model, effort })
     }
 
     /// `SubagentStart` / `SubagentStop` name it by `agent_id` / `agent_type`.
@@ -693,6 +715,40 @@ fn transcripts(dir: &Path, limit: usize) -> io::Result<Vec<NativeConversation>> 
             }
         })
         .collect())
+}
+
+/// How much of a transcript's end is read for the model of its newest turn.
+const MODEL_WINDOW: u64 = 256 * 1024;
+
+/// The model of the newest assistant line among the transcript's last
+/// [`MODEL_WINDOW`] bytes (whole lines only). Claude's `<synthetic>`
+/// placeholder, which it writes for errors and interrupts, is no model.
+fn newest_model(path: &Path) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = fs::File::open(path).ok()?;
+    let size = f.metadata().ok()?.len();
+    let start = size.saturating_sub(MODEL_WINDOW);
+    f.seek(SeekFrom::Start(start)).ok()?;
+    let mut tail = Vec::new();
+    f.read_to_end(&mut tail).ok()?;
+    let text = String::from_utf8_lossy(&tail);
+    // Up to the last newline: a half-written line is left alone, and so is
+    // a first line the window cut.
+    let (complete, _) = text.rsplit_once('\n')?;
+    let mut lines = complete.lines();
+    if start > 0 {
+        lines.next();
+    }
+    lines
+        .rev()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|v| v.get("type").and_then(|t| t.as_str()) == Some("assistant"))
+        .filter_map(|v| {
+            v.pointer("/message/model")
+                .and_then(|m| m.as_str())
+                .map(str::to_string)
+        })
+        .find(|m| m != "<synthetic>")
 }
 
 /// The first and last [`SUMMARY_WINDOW`] bytes of a file of `size` bytes
@@ -1454,6 +1510,35 @@ mod tests {
             },
         })
         .to_string()
+    }
+
+    /// A Stop names the effort in its body and the model in the
+    /// transcript tail (its newest real assistant line); either is left
+    /// out when Claude doesn't give it.
+    #[test]
+    fn a_stop_names_the_effort_and_the_transcript_names_the_model() {
+        let h = harness("oxplow:claude-code", "claude");
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("t.jsonl");
+        let assistant = |model: &str| json!({"type":"assistant","message":{"model":model,"usage":{"input_tokens":1}}});
+        let lines = [
+            assistant("claude-sonnet-5-5"),
+            assistant("claude-opus-4-8"),
+            // Claude's own placeholder is no model the person chose.
+            assistant("<synthetic>"),
+        ]
+        .map(|l| format!("{l}\n"))
+        .concat();
+        fs::write(&path, format!("{lines}half a li")).unwrap();
+        let stop = json!({"effort":{"level":"high"},"transcript_path":path});
+        let run = crate::test_launch::block(h.turn_run(&stop)).unwrap();
+        assert_eq!(run.model.as_deref(), Some("claude-opus-4-8"));
+        assert_eq!(run.effort.as_deref(), Some("high"));
+
+        // No effort, no transcript: nothing to say.
+        assert_eq!(crate::test_launch::block(h.turn_run(&json!({}))), None);
+        let missing = json!({"transcript_path": tmp.path().join("gone.jsonl")});
+        assert_eq!(crate::test_launch::block(h.turn_run(&missing)), None);
     }
 
     #[test]

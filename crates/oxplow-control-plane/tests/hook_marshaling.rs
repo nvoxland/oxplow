@@ -266,6 +266,48 @@ async fn a_stop_is_never_refused_and_keeps_the_final_message() {
     );
 }
 
+/// A Claude Stop's `effort.level` and its transcript's model end up on the
+/// turn it closes.
+#[tokio::test]
+async fn a_stop_records_the_model_and_effort_the_turn_ran_on() {
+    let (cp, svc, _root, dir) = boot().await;
+    let tid = seed_thread(&svc).await;
+    post_hook(
+        &cp,
+        &svc,
+        "UserPromptSubmit",
+        tid,
+        serde_json::json!({ "prompt": "do the thing", "session_id": "s1" }),
+    )
+    .await;
+    let transcript = dir.path().join("s1.jsonl");
+    std::fs::write(
+        &transcript,
+        "{\"type\":\"assistant\",\"message\":{\"model\":\"claude-opus-4-8\",\"usage\":{}}}\n",
+    )
+    .unwrap();
+    post_hook(
+        &cp,
+        &svc,
+        "Stop",
+        tid,
+        serde_json::json!({
+            "session_id": "s1",
+            "effort": { "level": "high" },
+            "transcript_path": transcript,
+        }),
+    )
+    .await;
+    let out = oxplow_db::SemanticLayer::new(svc.db.clone())
+        .query_sql("SELECT model, effort FROM v_agent_turn", vec![], None)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&out.rows).unwrap(),
+        serde_json::json!([["claude-opus-4-8", "high"]])
+    );
+}
+
 async fn session_of(services: &Services, thread_id: ThreadId) -> oxplow_domain::AgentSessionId {
     services
         .agent_session_store

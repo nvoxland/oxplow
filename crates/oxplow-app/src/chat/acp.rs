@@ -343,6 +343,7 @@ impl Connection for AcpConnection {
                         cache_read: u.cached_read_tokens.unwrap_or(0),
                         cache_write: u.cached_write_tokens.unwrap_or(0),
                     }),
+                    run: None,
                 });
                 let _ = tx.send(Incoming::PromptDone(done));
                 Ok(())

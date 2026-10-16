@@ -65,7 +65,7 @@ use oxplow_domain::{
 };
 
 use crate::events::{EventBus, OxplowEvent};
-use oxplow_domain::hook::TurnOutcome;
+use oxplow_domain::hook::{TurnOutcome, TurnRun};
 
 /// The Stop-body key a transport puts a turn's own token counts under
 /// (ACP's prompt response); they ride `agent.turn.ended@2 { usage }`.
@@ -128,6 +128,12 @@ pub struct HookEnvelope {
     #[serde(skip)]
     #[specta(skip)]
     pub session_title: Option<String>,
+    /// A `Stop`'s model and effort, as its harness read them (the hook
+    /// route, with the bearer's harness; the chat host, from the agent's
+    /// own reports). In-process only.
+    #[serde(skip)]
+    #[specta(skip)]
+    pub turn_run: Option<TurnRun>,
 }
 
 #[derive(Debug, Error)]
@@ -691,6 +697,8 @@ fn record_tx(
                 usage: body
                     .get(TURN_USAGE_KEY)
                     .and_then(|u| serde_json::from_value(u.clone()).ok()),
+                model: env.turn_run.as_ref().and_then(|r| r.model.as_deref()),
+                effort: env.turn_run.as_ref().and_then(|r| r.effort.as_deref()),
                 ..TurnEnd::new(now, outcome)
             };
             applied.closed_turn = close_open_turns_tx(conn, ev, thread, slot, &end)?;
@@ -1281,6 +1289,7 @@ mod tests {
     ) -> HookEnvelope {
         HookEnvelope {
             session_title: None,
+            turn_run: None,
             kind,
             thread_id: Some(tid),
             stream_id: None,
@@ -1433,6 +1442,7 @@ mod tests {
         let (svc, tid) = fixture().await;
         let prompt = |id: &str, title: Option<&str>| HookEnvelope {
             session_title: title.map(str::to_string),
+            turn_run: None,
             ..hook(
                 HookKind::UserPromptSubmit,
                 tid,
@@ -2204,6 +2214,7 @@ mod tests {
         };
         let envelope = |kind, prompt: Option<&str>| HookEnvelope {
             session_title: None,
+            turn_run: None,
             kind,
             thread_id: Some(tid),
             stream_id: None,
@@ -2227,11 +2238,75 @@ mod tests {
         assert!(again.closed_turn.is_none());
     }
 
+    /// The model and effort the sender read from a Stop (its harness's
+    /// mapping, or the chat host's) are on the turn it closes.
+    #[tokio::test]
+    async fn a_stop_records_the_model_and_effort_on_its_turn() {
+        let (svc, tid) = fixture().await;
+        let envelope = |kind, prompt: Option<&str>, turn_run| HookEnvelope {
+            session_title: None,
+            turn_run,
+            kind,
+            thread_id: Some(tid),
+            stream_id: None,
+            agent_session_id: None,
+            session_id: None,
+            payload_json: "{}".into(),
+            prompt: prompt.map(str::to_string),
+            decision: None,
+            tool: None,
+            subagent: None,
+        };
+        let ran_on = || {
+            let db = svc.db.clone();
+            async move {
+                db.read(|c| {
+                    c.query_row(
+                        "SELECT model, effort FROM v_agent_turn ORDER BY id DESC LIMIT 1",
+                        [],
+                        |r| {
+                            Ok((
+                                r.get::<_, Option<String>>(0)?,
+                                r.get::<_, Option<String>>(1)?,
+                            ))
+                        },
+                    )
+                    .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+            }
+        };
+        svc.ingest(envelope(HookKind::UserPromptSubmit, Some("p"), None))
+            .await
+            .unwrap();
+        let run = TurnRun {
+            model: Some("claude-opus-4-8".into()),
+            effort: Some("high".into()),
+        };
+        svc.ingest(envelope(HookKind::Stop, None, Some(run)))
+            .await
+            .unwrap();
+        assert_eq!(
+            ran_on().await,
+            (Some("claude-opus-4-8".into()), Some("high".into()))
+        );
+        // A harness that says nothing leaves both unset.
+        svc.ingest(envelope(HookKind::UserPromptSubmit, Some("q"), None))
+            .await
+            .unwrap();
+        svc.ingest(envelope(HookKind::Stop, None, None))
+            .await
+            .unwrap();
+        assert_eq!(ran_on().await, (None, None));
+    }
+
     #[tokio::test]
     async fn user_prompt_opens_turn_and_marks_running() {
         let (svc, tid) = fixture().await;
         let env = HookEnvelope {
             session_title: None,
+            turn_run: None,
             kind: HookKind::UserPromptSubmit,
             thread_id: Some(tid),
             stream_id: None,
@@ -2257,6 +2332,7 @@ mod tests {
         // Open a turn first.
         let prompt_env = HookEnvelope {
             session_title: None,
+            turn_run: None,
             kind: HookKind::UserPromptSubmit,
             thread_id: Some(tid),
             stream_id: None,
@@ -2271,6 +2347,7 @@ mod tests {
         svc.ingest(prompt_env).await.unwrap();
         let stop = HookEnvelope {
             session_title: None,
+            turn_run: None,
             kind: HookKind::Stop,
             thread_id: Some(tid),
             stream_id: None,
@@ -2293,6 +2370,7 @@ mod tests {
         let (svc, tid) = fixture().await;
         svc.ingest(HookEnvelope {
             session_title: None,
+            turn_run: None,
             kind: HookKind::UserPromptSubmit,
             thread_id: Some(tid),
             stream_id: None,
@@ -2308,6 +2386,7 @@ mod tests {
         .unwrap();
         svc.ingest(HookEnvelope {
             session_title: None,
+            turn_run: None,
             kind: HookKind::Interrupt,
             thread_id: Some(tid),
             stream_id: None,
@@ -2348,6 +2427,7 @@ mod tests {
         let svc = svc.with_turn_snapshots(takes.clone());
         svc.ingest(HookEnvelope {
             session_title: None,
+            turn_run: None,
             kind: HookKind::UserPromptSubmit,
             thread_id: Some(tid),
             stream_id: None,
@@ -2363,6 +2443,7 @@ mod tests {
         .unwrap();
         let stop = svc.ingest(HookEnvelope {
             session_title: None,
+            turn_run: None,
             kind: HookKind::Stop,
             thread_id: Some(tid),
             stream_id: None,
@@ -2394,6 +2475,7 @@ mod tests {
         let (svc, tid) = fixture().await;
         let hook = |kind, prompt: Option<&str>, payload: serde_json::Value| HookEnvelope {
             session_title: None,
+            turn_run: None,
             kind,
             thread_id: Some(tid),
             stream_id: None,
@@ -2444,6 +2526,7 @@ mod tests {
         let (svc, tid) = fixture().await;
         svc.ingest(HookEnvelope {
             session_title: None,
+            turn_run: None,
             kind: HookKind::Stop,
             thread_id: Some(tid),
             stream_id: None,
@@ -2467,6 +2550,7 @@ mod tests {
         let (svc, tid) = fixture().await;
         svc.ingest(HookEnvelope {
             session_title: None,
+            turn_run: None,
             kind: HookKind::UserPromptSubmit,
             thread_id: None,
             stream_id: None,
@@ -2492,6 +2576,7 @@ mod tests {
         for prompt in ["first", "mid-turn re-prompt"] {
             svc.ingest(HookEnvelope {
                 session_title: None,
+                turn_run: None,
                 kind: HookKind::UserPromptSubmit,
                 thread_id: Some(tid),
                 stream_id: None,

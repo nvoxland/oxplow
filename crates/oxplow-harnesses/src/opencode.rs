@@ -15,6 +15,7 @@ use oxplow_domain::agent::harness::{
 use oxplow_domain::agent::observe::HookAnswer;
 use oxplow_domain::agent::text::AgentText;
 use oxplow_domain::agent::tool::{ToolKind, ToolUse};
+use oxplow_domain::hook::TurnRun;
 
 use super::shared::{
     claude_shaped_tool_use, in_shell, program_and_guard, resume_or_fresh, runtime, shell_escape,
@@ -130,6 +131,19 @@ impl AgentHarness for Opencode {
             tool.paths = super::shared::patch_paths(&body["tool_input"]);
         }
         Some(tool)
+    }
+
+    /// The bridge's Stop names the model and variant of the session's last
+    /// assistant message; a variant is opencode's reasoning effort.
+    async fn turn_run(&self, body: &serde_json::Value) -> Option<TurnRun> {
+        let text = |k: &str| {
+            body.get(k)
+                .and_then(|v| v.as_str())
+                .filter(|v| !v.is_empty())
+                .map(str::to_string)
+        };
+        let (model, effort) = (text("model"), text("variant"));
+        (model.is_some() || effort.is_some()).then_some(TurnRun { model, effort })
     }
 
     async fn render(&self, answer: &HookAnswer) -> serde_json::Value {
@@ -432,7 +446,7 @@ process.env.OXPLOW_HOOK_BASE_URL = "http://hook.invalid";
 const messages = [
   {{ info: {{ role: "user" }}, parts: [{{ type: "text", text: "do it" }}] }},
   {{ info: {{ role: "assistant" }}, parts: [{{ type: "text", text: "first" }}] }},
-  {{ info: {{ role: "assistant" }}, parts: [{{ type: "tool", tool: "bash" }}, {{ type: "text", text: "Which one" }}, {{ type: "text", text: "should I use?" }}] }},
+  {{ info: {{ role: "assistant", modelID: "gpt-5.6", variant: "high" }}, parts: [{{ type: "tool", tool: "bash" }}, {{ type: "text", text: "Which one" }}, {{ type: "text", text: "should I use?" }}] }},
 ];
 const hooks = await OxplowHooks({{ client: {{ session: {{
   get: async () => ({{ data: {{}} }}),
@@ -488,6 +502,30 @@ console.log(JSON.stringify({{ posts, prompt, tool }}));
         assert_eq!(
             stop["payload"]["last_assistant_message"],
             "Which one\nshould I use?"
+        );
+        // And the model and variant that message ran on.
+        assert_eq!(stop["payload"]["model"], "gpt-5.6");
+        assert_eq!(stop["payload"]["variant"], "high");
+    }
+
+    /// A Stop's model and variant are the turn's model and effort.
+    #[test]
+    fn a_stop_names_the_model_and_the_variant_as_the_effort() {
+        let h = harness("oxplow:opencode", "opencode");
+        let run = crate::test_launch::block(
+            h.turn_run(&serde_json::json!({"model": "gpt-5.6", "variant": "high"})),
+        );
+        assert_eq!(
+            run,
+            Some(TurnRun {
+                model: Some("gpt-5.6".into()),
+                effort: Some("high".into())
+            })
+        );
+        // A message with neither (the bridge couldn't read it) says nothing.
+        assert_eq!(
+            crate::test_launch::block(h.turn_run(&serde_json::json!({"model": ""}))),
+            None
         );
     }
 

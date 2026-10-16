@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use super::observe::{HookAnswer, OtlpRecord, Prompt, TokenReading, Turn};
 use super::text::AgentText;
 use super::tool::{Subagent, ToolUse};
+use crate::hook::TurnRun;
 use crate::ids::{AgentSessionId, StreamId, ThreadId};
 
 /// The session a launch is for.
@@ -298,6 +299,11 @@ pub trait AgentHarness: Send + Sync {
     /// The name a hook body gives the session's conversation, when it
     /// gives one.
     fn session_title(&self, _body: &serde_json::Value) -> Option<String> {
+        None
+    }
+    /// The model and effort a `Stop` hook's turn ran on, when its body (or
+    /// what it points to) says; a harness that doesn't leaves them unset.
+    async fn turn_run(&self, _body: &serde_json::Value) -> Option<TurnRun> {
         None
     }
 }

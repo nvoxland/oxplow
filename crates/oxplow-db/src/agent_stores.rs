@@ -340,6 +340,10 @@ pub struct TurnEnd<'a> {
     pub transcript_path: Option<&'a str>,
     /// Counts the harness reported with the turn (ACP).
     pub usage: Option<oxplow_domain::events::schema::TurnUsage>,
+    /// The model the turn ran on, when its harness said.
+    pub model: Option<&'a str>,
+    /// The reasoning effort it ran at, when its harness said.
+    pub effort: Option<&'a str>,
 }
 
 impl TurnEnd<'_> {
@@ -350,6 +354,8 @@ impl TurnEnd<'_> {
             answer: None,
             transcript_path: None,
             usage: None,
+            model: None,
+            effort: None,
         }
     }
 }
@@ -365,10 +371,17 @@ pub fn close_turn_tx(
 ) -> Result<Option<ThreadId>, DomainError> {
     let closed: Option<(i64, Option<i64>)> = conn
         .query_row(
-            "UPDATE agent_turn SET ended_at = ?2, answer = COALESCE(?3, answer)
+            "UPDATE agent_turn SET ended_at = ?2, answer = COALESCE(?3, answer),
+                    model = ?4, effort = ?5
               WHERE id = ?1 AND ended_at IS NULL
               RETURNING thread_id, agent_session_id",
-            params![id.value(), ts_to_string(end.at), end.answer],
+            params![
+                id.value(),
+                ts_to_string(end.at),
+                end.answer,
+                end.model,
+                end.effort
+            ],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()
@@ -1081,6 +1094,65 @@ mod tests {
             assert_eq!(stream_anchor, Some(stream.value()));
             assert_eq!(session_anchor, Some(session.value()));
         }
+    }
+
+    /// The model and effort a harness reported with the turn's end are on
+    /// the turn (and its model); a turn whose harness said nothing has none.
+    #[tokio::test]
+    async fn a_turn_records_the_model_and_effort_it_ended_on() {
+        let (db, tid) = fixture().await;
+        let store = SqliteAgentTurnStore::new(db.clone());
+        let mut ids = Vec::new();
+        for prompt in ["with", "without"] {
+            let turn = AgentTurn {
+                id: AgentTurnId::placeholder(),
+                thread_id: tid,
+                agent_session_id: None,
+                prompt: prompt.into(),
+                answer: None,
+                session_id: None,
+                started_at: Timestamp::now(),
+                ended_at: None,
+                start_snapshot_id: None,
+                snapshot_id: None,
+            };
+            ids.push(store.open(&turn).await.unwrap());
+        }
+        let (with, without) = (ids[0], ids[1]);
+        let vocabulary = store.vocabulary.clone();
+        db.transaction(move |tx| {
+            let vocabulary = vocabulary.current();
+            let ev = EventCtx::system(&vocabulary, "hook_ingest");
+            let run = TurnEnd {
+                model: Some("claude-opus-4-8"),
+                effort: Some("high"),
+                ..TurnEnd::new(Timestamp::now(), TurnOutcome::Completed)
+            };
+            close_turn_tx(tx, &ev, with, &run)?;
+            close_turn_tx(
+                tx,
+                &ev,
+                without,
+                &TurnEnd::new(Timestamp::now(), TurnOutcome::Completed),
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let conn = db.conn().unwrap();
+        let ran_on = |id: AgentTurnId| -> (Option<String>, Option<String>) {
+            conn.query_row(
+                "SELECT model, effort FROM v_agent_turn WHERE id = ?1",
+                params![id.value()],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            ran_on(with),
+            (Some("claude-opus-4-8".into()), Some("high".into()))
+        );
+        assert_eq!(ran_on(without), (None, None));
     }
 
     fn r_stream(db: &Database, t: ThreadId) -> i64 {

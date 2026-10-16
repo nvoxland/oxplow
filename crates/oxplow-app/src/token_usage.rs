@@ -750,6 +750,7 @@ mod tests {
     fn stop(thread: ThreadId, body: serde_json::Value) -> crate::HookEnvelope {
         crate::HookEnvelope {
             session_title: None,
+            turn_run: None,
             kind: oxplow_domain::HookKind::Stop,
             thread_id: Some(thread),
             stream_id: None,
@@ -767,6 +768,7 @@ mod tests {
         svc.hook_ingest
             .ingest(crate::HookEnvelope {
                 session_title: None,
+                turn_run: None,
                 kind: oxplow_domain::HookKind::UserPromptSubmit,
                 thread_id: Some(thread),
                 stream_id: None,

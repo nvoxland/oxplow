@@ -449,6 +449,7 @@ async fn handle_hook_inner(
         };
         let envelope = HookEnvelope {
             session_title: None,
+            turn_run: None,
             kind,
             thread_id,
             stream_id,
@@ -511,6 +512,16 @@ async fn handle_hook_inner(
             .and_then(|h| h.session_title(body))
     });
 
+    // The model and effort a Stop's turn ran on, as the bearer's harness
+    // reads them.
+    let turn_run = match (kind, body_value.as_ref()) {
+        (HookKind::Stop, Some(body)) => match ctx.services.harnesses.get(&principal.harness) {
+            Ok(h) => h.turn_run(body).await,
+            Err(_) => None,
+        },
+        _ => None,
+    };
+
     // A tool hook's call in oxplow's vocabulary, as the bearer's harness
     // maps its body: what the policy, the ingest and the context read.
     let tool = match (kind, body_value.as_ref()) {
@@ -531,6 +542,7 @@ async fn handle_hook_inner(
             // the runtime did.
             let envelope = HookEnvelope {
                 session_title: None,
+                turn_run: None,
                 kind,
                 thread_id,
                 stream_id,
@@ -563,6 +575,7 @@ async fn handle_hook_inner(
 
     let envelope = HookEnvelope {
         session_title,
+        turn_run,
         kind,
         thread_id,
         stream_id,
