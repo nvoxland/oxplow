@@ -1129,7 +1129,7 @@ Landed:
 | producer | where | facts |
 |---|---|---|
 | tokens — OTEL (tsk22, P10.M2) | the `token_usage.otlp` consumer (`token_usage.rs::record_reported`) over `agent.tokens.reported`, which the control-plane `POST /v1/metrics` OTLP receiver logs (`otlp_ingest.rs`) | PER-KIND facts on `oxplow.tokens` (one input + one output per model, sliced by the `oxplow.token_kind` dim), producer `otel-tokens`, one capture per export keyed by its event (`otel-tokens:<event id>`; a retransmit logs no second event). The capture carries the event's anchors: the thread (the exporter's session bearer), its stream, the turn the export measured and the effort open during it. `agent.tokens.total` sums both kinds; input/output specs filter by `token_kind`. **Source of the token facts** — see [OTEL token tracking](#otel-token-tracking-tsk22) |
-| prompt-cache tokens (tsk73) | same ingest, same capture | Cache kinds (Claude `cacheRead`/`cacheCreation`, Codex `cached_input` → cache_read) land on **`oxplow.cache_tokens`** — a SEPARATE measure, because `agent.tokens.total` is an unfiltered sum over `oxplow.tokens` and cache facts there would silently change its meaning. Plus one per-model **`oxplow.cache_usage`** ratio fact per export: `num = cache_read`, `den = input + cache_read + cache_creation` (prompt-side; output can't be cached) — non-additive, so the cross-time collapse is the cumulative Σn/Σd hit ratio (`agent.tokens.cache_hit_pct`). An export with NO cache telemetry emits no ratio fact (an agent that doesn't report cache reads as "no data", not 0%). **Token-denominated only — never dollars**: the API returns token counts; a locally maintained price table is invalid by construction (Claude Code's OTEL `cost.usage` *estimate* would be the only defensible future dollar source, not ingested today) |
+| prompt-cache tokens (tsk73) | same ingest, same capture | Cache kinds (Claude `cacheRead`/`cacheCreation`) land on **`oxplow.cache_tokens`** — a SEPARATE measure, because `agent.tokens.total` is an unfiltered sum over `oxplow.tokens` and cache facts there would silently change its meaning. Plus one per-model **`oxplow.cache_usage`** ratio fact per export: `num = cache_read`, `den = input + cache_read + cache_creation` (prompt-side; output can't be cached) — non-additive, so the cross-time collapse is the cumulative Σn/Σd hit ratio (`agent.tokens.cache_hit_pct`). An export with NO cache telemetry emits no ratio fact (an agent that doesn't report cache reads as "no data", not 0%). **Token-denominated only — never dollars**: the API returns token counts; a locally maintained price table is invalid by construction (Claude Code's OTEL `cost.usage` *estimate* would be the only defensible future dollar source, not ingested today) |
 | effort token spend (tsk73) | `effort_service.rs::project_effort_lifecycle_metrics` (a close-time sub-producer) | one **`oxplow.effort_tokens`** fact per closed effort: Σ of ALL token kinds from its effort-stamped otel captures (num=value/den=1, non-additive → `task.tokens` reads the MEAN tokens per close — the cost of a unit of work, in tokens). No fact when the effort has no token captures (unmetered ≠ zero) |
 | wasted tokens (tsk77) | close-time producer + `collection.rs::record_token_waste_for_reverts` (fires on any landed commit incl. `git revert`, via `detect_git_revert` — revert never says "commit") | **`oxplow.token_waste`** is an append-only ratio measure with two writers: a metered CLOSE emits (num 0, den = the effort's spend, value 0) — rides inside the effort_tokens gate since the denominator IS that spend — and a detected revert emits (num = spend, den 0, value = spend) for the ONE closed effort whose window contains the reverted commit (`This reverts commit <sha>` trailers in HEAD; 0/ambiguous candidates → no attribution; idempotency key `token-waste:<effort>` → one waste fact per effort ever; commit times are seconds-granular so containment spans the whole second). `task.tokens.wasted` = SUM over values (closes are 0); `task.tokens.wasted_pct` = ratio Σn/Σd = wasted ÷ all metered spend. V1 is coarse: one reverted commit flags the effort's FULL spend. Pre-V61 closes never entered the denominator |
 | effort steering (tsk76) | same close-time producer | one **`oxplow.effort_steering`** fact per closed effort (num=value/den=1, non-additive → `task.steering` reads the MEAN per close — the autonomy number, lower = more autonomous): user prompt submissions (`agent_turn` rows opened in the effort window, newest-1000 scan) + Stop-hook nudges (Σ of the effort's `oxplow.nudge` facts) + non-`agent`-authored comment threads opened in the effort's thread during the window. **Zero IS emitted** — a fully autonomous effort is real data. Interrupts are NOT counted (nothing records them yet). Needs `with_steering_sources` (agent-turn + comment stores) wired, as boot does |
@@ -1169,8 +1169,7 @@ summed every assistant line) and was Claude-only + format-fragile.
   window_end? }`** in one transaction — deduped by a hash of the body, so an
   SDK retransmit logs nothing; an export for a thread that isn't there
   (deleted, or never) logs nothing, as a hook for one doesn't. The body is
-  untrusted (tsk925): a negative count is dropped and Codex's `input −
-  cached` / `output + reasoning` saturate rather than overflow. It is
+  untrusted (tsk925): a negative count is dropped. It is
   anchored to the thread, its stream, **the
   turn the export measured**, and the effort open during that turn (tsk900).
   A Claude export is stamped with when it was *collected* (delta
@@ -1179,7 +1178,7 @@ summed every assistant line) and was Claude-only + format-fragile.
   that spent the tokens: the export goes to the turn whose span overlaps the
   window most, the earlier on a tie (`agent_stores::turn_for_window_tx`); with
   none overlapping, the newest started before the window's end
-  (`turn_at_tx`). A Codex log record's window is its own time. The effort is
+  (`turn_at_tx`). The effort is
   the one whose span overlaps that turn's, when exactly one does
   (`effort_during_turn_tx`) — not the one open as the export arrives. An
   export that doesn't say when is the open turn's and the open effort's.
@@ -1197,35 +1196,17 @@ summed every assistant line) and was Claude-only + format-fragile.
   - **Claude** — `claude_code.token.usage` **counter** (delta temporality → each
     export is the increment), `type ∈ {input,output,cacheRead,cacheCreation}`
     (the cache kinds on their own measure, tsk73);
-  - **Codex** — its `codex.sse_event` **log event** with
-    `event.kind=response.completed` (tsk27, confirmed against Codex 0.142.0 via
-    the tsk25 diagnostic — Codex points its single OTLP endpoint at us and sends
-    token counts as **logs**, not a metric). Counts are per-request, so new
-    input = `input_token_count − cached_token_count`, output =
-    `output_token_count + reasoning_token_count`; `model` reads the record then
-    the resource. `decode_token_export` tries metrics-decode then logs-decode, so
-    one endpoint accepts both agents. (A speculative `codex.turn.token_usage`
-    *metric* mapper also exists, unemitted by 0.142.0 — kept as a defensive
-    path.)
+  - **Codex** exports nothing: its tokens come from its thread's
+    `tokenUsage` and ride the turn's Stop ([agent-model.md](./agent-model.md)
+    "Codex: an app-server client").
 - **Launch wiring:** per-agent, injected by each harness's `launch`:
   - **Claude** (`otel_env` in its harness, env — Claude has OTEL env support):
     `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_METRICS_EXPORTER=otlp`,
     `http/protobuf`, `OTEL_EXPORTER_OTLP_ENDPOINT` = the control-plane
     `otlp_base_url` (base; SDK appends `/v1/metrics`) threaded via
     `PluginRuntime`, + the session's bearer.
-  - **Codex** (`otel_overrides` in its harness, `--config otel.*` — Codex has NO OTEL env
-    vars): `otel.exporter.otlp-http.endpoint` = the **full** `<base>/v1/metrics`
-    URL, `protocol="binary"` (protobuf), the session's bearer in the
-    exporter's `headers` map.
   - **opencode** is not auto-instrumented (a user's own OTEL plugin pointed at
     the receiver still works).
-  > **Codex confirmed live (tsk27):** a real Codex 0.142.0 run (via the tsk25
-  > diagnostic) showed the `--config otel.exporter.otlp-http.*` injection works
-  > (its exports reach us with the `X-Oxplow-*` headers), and that Codex's token
-  > counts arrive as the `response.completed` **log event** — not the metric we
-  > first guessed. `input_token_count` is the full request context (mostly
-  > cache-read on later turns), hence the `input − cached` mapping. Claude's
-  > metric path was confirmed live in the same run.
   > **Diagnostic (tsk25/26):** set `OXPLOW_OTLP_DEBUG=<file>` before launching
   > oxplow — the receiver appends a decoded dump of every OTLP export (metrics
   > AND logs: names/event-kinds + attributes) to that file

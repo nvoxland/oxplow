@@ -13,18 +13,21 @@ use oxplow_runtime::policy::{DenyLayer, PolicyDecision};
 use parking_lot::Mutex;
 use tokio::sync::broadcast;
 
+use super::conn::TurnTokens;
 use super::host::AcpHost;
 use super::manager::AcpManager;
 use super::model::PermissionAnswer;
 use super::session::{AcpError, AcpEvent, AcpEventBody, AcpStatus, SessionSpec};
 use super::transcript::ItemBody;
-use super::wire::{McpHttp, TurnTokens};
+use super::wire::{AcpOpen, McpHttp};
 use oxplow_domain::agent::tool::{ToolKind as Kind, ToolUse};
 
 #[derive(Default)]
 struct Host {
     /// Deny every worktree write with this reason.
     deny_writes: Option<String>,
+    /// The thread isn't its stream's writer.
+    read_only: bool,
     context: Option<String>,
     log: Mutex<Vec<String>>,
 }
@@ -61,6 +64,9 @@ impl AcpHost for Host {
     async fn session_started(&self, _t: &ThreadId, s: &str) {
         self.log.lock().push(format!("started {s}"));
     }
+    async fn writable(&self, _t: &ThreadId) -> bool {
+        !self.read_only
+    }
     async fn prompt_context(&self, _t: &ThreadId, _s: &str) -> Option<String> {
         self.context.clone()
     }
@@ -85,6 +91,9 @@ impl AcpHost for Host {
             answer.map(|a| format!(" answer={a}")).unwrap_or_default()
         ));
     }
+    async fn named(&self, _t: &ThreadId, _s: &str, title: &str) {
+        self.log.lock().push(format!("named {title}"));
+    }
     async fn awaiting_user(&self, _t: &ThreadId, q: Option<String>) {
         self.log.lock().push(format!("awaiting {}", q.is_some()));
     }
@@ -108,14 +117,18 @@ fn spec(cwd: &std::path::Path) -> SessionSpec {
         thread_id: thread(),
         agent: "fake".into(),
         cwd: cwd.to_path_buf(),
+    }
+}
+
+fn acp_open() -> AcpOpen {
+    AcpOpen {
+        agent: "fake".into(),
         mcp: vec![McpHttp {
             name: "oxplow".into(),
             url: "http://127.0.0.1:1/mcp".into(),
             headers: vec![("Authorization".into(), "Bearer t".into())],
         }],
-        resume_session_id: None,
-        system_prompt: None,
-        system_prompt_via_meta: false,
+        ..AcpOpen::default()
     }
 }
 
@@ -131,7 +144,7 @@ async fn open_with(
     host: Host,
     fake: Shared,
     opts: FakeOptions,
-    spec_fn: impl FnOnce(&mut SessionSpec),
+    open_fn: impl FnOnce(&mut AcpOpen),
     dir: tempfile::TempDir,
 ) -> (Rig, Result<(), AcpError>) {
     let mgr = AcpManager::new();
@@ -143,9 +156,11 @@ async fn open_with(
         let _ = oxplow_acp_fake::serve(ar, aw, f, opts).await;
     });
     let (cr, cw) = tokio::io::split(client);
-    let mut s = spec(dir.path());
-    spec_fn(&mut s);
-    let r = mgr.open_with_io(host.clone(), s, cw, cr).await;
+    let mut open = acp_open();
+    open_fn(&mut open);
+    let r = mgr
+        .open_with_io(host.clone(), spec(dir.path()), open, cw, cr)
+        .await;
     // After open: the startup `Idle` must not read as a finished turn.
     let events = mgr.subscribe();
     (
@@ -650,7 +665,13 @@ async fn each_open_is_a_new_generation_and_its_events_say_so() {
     let (cr, cw) = tokio::io::split(client);
     first
         .mgr
-        .open_with_io(first.host.clone(), spec(first.dir.path()), cw, cr)
+        .open_with_io(
+            first.host.clone(),
+            spec(first.dir.path()),
+            acp_open(),
+            cw,
+            cr,
+        )
         .await
         .unwrap();
     let g2 = first.mgr.transcript(&session(), 0).unwrap().generation;
@@ -690,8 +711,8 @@ async fn concurrent_opens_start_one_agent() {
     let (r1, w1) = transport();
     let (r2, w2) = transport();
     let (a, b) = tokio::join!(
-        mgr.open_with_io(host.clone(), spec(dir.path()), w1, r1),
-        mgr.open_with_io(host.clone(), spec(dir.path()), w2, r2),
+        mgr.open_with_io(host.clone(), spec(dir.path()), acp_open(), w1, r1),
+        mgr.open_with_io(host.clone(), spec(dir.path()), acp_open(), w2, r2),
     );
     a.unwrap();
     b.unwrap();
@@ -727,7 +748,7 @@ async fn close_is_immediate_and_a_replaced_sessions_teardown_records_nothing() {
     });
     let (cr, cw) = tokio::io::split(client);
     rig.mgr
-        .open_with_io(rig.host.clone(), spec(rig.dir.path()), cw, cr)
+        .open_with_io(rig.host.clone(), spec(rig.dir.path()), acp_open(), cw, cr)
         .await
         .unwrap();
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -837,4 +858,267 @@ async fn a_write_completed_after_a_reject_is_flagged() {
         .items()
         .iter()
         .any(|b| matches!(b, ItemBody::Bypass { .. })));
+}
+
+// ---------------------------------------------------------------------
+// A Codex thread on a scripted app-server daemon.
+// ---------------------------------------------------------------------
+
+mod codex {
+    use super::*;
+    use crate::acp::codex::CodexOpen;
+    use oxplow_harnesses::codex_app_server::fake::FakeAppServer;
+    use serde_json::json;
+
+    const THREAD: &str = "thr-x";
+
+    /// A daemon whose `thread/start` opens `thr-x` and whose
+    /// `thread/resume` brings back one earlier turn.
+    fn daemon(home: &std::path::Path) -> FakeAppServer {
+        FakeAppServer::start(home, |method, _| match method {
+            "thread/start" => Ok(json!({"thread": {"id": THREAD, "name": null}})),
+            "thread/resume" => Ok(json!({
+                "thread": {"id": THREAD, "name": "Earlier work"},
+                "initialTurnsPage": {"data": [{"id": "u0", "status": "completed", "items": [
+                    {"type": "userMessage", "id": "m0", "content": [{"type": "text", "text": "before"}]},
+                    {"type": "commandExecution", "id": "e0", "command": "ls", "status": "completed", "exitCode": 0, "commandActions": [{"type": "listFiles", "command": "ls"}], "aggregatedOutput": "a\n"},
+                    {"type": "agentMessage", "id": "a0", "text": "listed"}
+                ]}]}
+            })),
+            "turn/start" => Ok(json!({"turn": {"id": "u1"}})),
+            "turn/interrupt" => Ok(json!({})),
+            other => Err(format!("no {other}")),
+        })
+    }
+
+    async fn open_codex(host: Host, method: &str) -> (Rig, FakeAppServer) {
+        // Short: a unix socket's path has a length limit.
+        let dir = tempfile::Builder::new().tempdir_in("/tmp").unwrap();
+        let fake = daemon(dir.path());
+        let mgr = AcpManager::new();
+        let host = Arc::new(host);
+        mgr.open_codex(
+            host.clone(),
+            spec(dir.path()),
+            CodexOpen {
+                socket: fake.socket.clone(),
+                program: None,
+                method: method.into(),
+                params: json!({"cwd": dir.path()}),
+            },
+        )
+        .await
+        .unwrap();
+        let events = mgr.subscribe();
+        (
+            Rig {
+                mgr,
+                fake: Shared::default(),
+                events,
+                host,
+                dir,
+            },
+            fake,
+        )
+    }
+
+    fn note(method: &str, params: serde_json::Value) -> serde_json::Value {
+        let mut params = params;
+        params["threadId"] = json!(THREAD);
+        json!({"method": method, "params": params})
+    }
+
+    /// A person's prompt is a `turn/start` carrying the context block and
+    /// their text; the thread's items stream into the transcript, a
+    /// finished command is recorded, and `turn/completed` ends the turn
+    /// with its tokens. Another thread's notifications don't pass.
+    #[tokio::test]
+    async fn a_prompt_is_a_turn_and_its_items_are_recorded() {
+        let (mut rig, fake) = open_codex(
+            Host {
+                context: Some("CTX".into()),
+                ..Host::default()
+            },
+            "thread/start",
+        )
+        .await;
+        assert_eq!(rig.host.log(), ["started thr-x"]);
+        rig.prompt("list the files").await;
+        let start = fake.wait_for(|v| v["method"] == "turn/start").await;
+        assert_eq!(start["params"]["threadId"], THREAD);
+        let texts: Vec<&str> = start["params"]["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["text"].as_str().unwrap())
+            .collect();
+        assert_eq!(texts.last(), Some(&"list the files"));
+        assert!(texts[0].contains("CTX"));
+        fake.push(note("turn/started", json!({"turn": {"id": "u1"}})));
+        // The echo of our own prompt adds nothing.
+        fake.push(note("item/completed", json!({"item": {"type": "userMessage", "id": "m1", "content": [{"type": "text", "text": "CTX\n\nlist the files"}]}})));
+        fake.push(json!({"method": "item/agentMessage/delta", "params": {"threadId": "other", "itemId": "z", "delta": "NOT OURS"}}));
+        fake.push(note("item/completed", json!({"item": {"type": "commandExecution", "id": "e1", "command": "/bin/zsh -lc ls", "status": "completed", "exitCode": 0, "commandActions": [{"type": "unknown", "command": "ls"}], "aggregatedOutput": "a\n"}})));
+        fake.push(note(
+            "item/agentMessage/delta",
+            json!({"itemId": "a1", "delta": "done"}),
+        ));
+        fake.push(note(
+            "item/completed",
+            json!({"item": {"type": "agentMessage", "id": "a1", "text": "done"}}),
+        ));
+        fake.push(note("thread/tokenUsage/updated", json!({"tokenUsage": {
+            "total": {"inputTokens": 100, "cachedInputTokens": 60, "cacheWriteInputTokens": 0, "outputTokens": 7, "totalTokens": 107},
+            "last": {"inputTokens": 100, "cachedInputTokens": 60, "cacheWriteInputTokens": 0, "outputTokens": 7, "totalTokens": 107},
+            "modelContextWindow": 1000}})));
+        fake.push(note(
+            "turn/completed",
+            json!({"turn": {"id": "u1", "status": "completed"}}),
+        ));
+        rig.wait_status(AcpStatus::Idle).await;
+        assert_eq!(rig.agent_text(), ["done"]);
+        let users = rig
+            .items()
+            .into_iter()
+            .filter(|b| matches!(b, ItemBody::User { .. }))
+            .count();
+        assert_eq!(users, 1);
+        assert_eq!(
+            rig.host.log()[1..],
+            [
+                "turn_started list the files",
+                "tool shell",
+                "turn_ended 40/7 answer=done"
+            ]
+        );
+        assert_eq!(
+            rig.mgr
+                .transcript(&session(), 0)
+                .unwrap()
+                .usage
+                .unwrap()
+                .used,
+            107
+        );
+    }
+
+    /// An approval is a card that waits for the person; their answer goes
+    /// back as the request's decision, and Stop answers `cancel`.
+    #[tokio::test]
+    async fn an_approval_waits_for_the_person_and_answers_their_decision() {
+        let (mut rig, fake) = open_codex(Host::default(), "thread/start").await;
+        rig.prompt("delete it").await;
+        fake.wait_for(|v| v["method"] == "turn/start").await;
+        fake.push(note("turn/started", json!({"turn": {"id": "u1"}})));
+        fake.push(json!({"id": 41, "method": "item/commandExecution/requestApproval", "params": {
+            "threadId": THREAD, "turnId": "u1", "itemId": "e9", "command": "rm x", "startedAtMs": 1}}));
+        rig.wait_status(AcpStatus::AwaitingPermission).await;
+        let request_id = rig
+            .items()
+            .into_iter()
+            .find_map(|b| match b {
+                ItemBody::Permission { request_id, .. } => Some(request_id),
+                _ => None,
+            })
+            .unwrap();
+        rig.mgr
+            .respond_permission(&session(), request_id, Some("decline".into()))
+            .await
+            .unwrap();
+        let answer = fake.wait_for(|v| v["id"] == 41).await;
+        assert_eq!(answer["result"]["decision"], "decline");
+        fake.push(
+            json!({"id": 42, "method": "item/fileChange/requestApproval", "params": {
+            "threadId": THREAD, "turnId": "u1", "itemId": "p9", "startedAtMs": 2}}),
+        );
+        rig.wait_status(AcpStatus::AwaitingPermission).await;
+        rig.mgr.cancel(&session()).unwrap();
+        let answer = fake.wait_for(|v| v["id"] == 42).await;
+        assert_eq!(answer["result"]["decision"], "cancel");
+        fake.wait_for(|v| v["method"] == "turn/interrupt").await;
+        // A request no card can show is refused, not left waiting.
+        fake.push(json!({"id": 43, "method": "item/tool/requestUserInput", "params": {"threadId": THREAD, "itemId": "q"}}));
+        let refused = fake.wait_for(|v| v["id"] == 43).await;
+        assert!(refused["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("requestUserInput"));
+    }
+
+    /// A prompt the person typed into Codex's own TUI on the thread is
+    /// recorded as theirs, and its turn ends like any other.
+    #[tokio::test]
+    async fn a_prompt_from_codexs_own_tui_is_the_persons() {
+        let (mut rig, fake) = open_codex(Host::default(), "thread/start").await;
+        fake.push(note("turn/started", json!({"turn": {"id": "u2"}})));
+        fake.push(note("item/completed", json!({"item": {"type": "userMessage", "id": "m2", "content": [{"type": "text", "text": "from the tui"}]}})));
+        rig.wait_status(AcpStatus::Running).await;
+        fake.push(note(
+            "item/completed",
+            json!({"item": {"type": "agentMessage", "id": "a2", "text": "ok"}}),
+        ));
+        fake.push(note(
+            "turn/completed",
+            json!({"turn": {"id": "u2", "status": "completed"}}),
+        ));
+        rig.wait_status(AcpStatus::Idle).await;
+        assert_eq!(
+            rig.host.log()[1..],
+            ["turn_started from the tui", "turn_ended  answer=ok"]
+        );
+        fake.push(note(
+            "thread/name/updated",
+            json!({"threadName": "TUI work"}),
+        ));
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !rig.host.log().contains(&"named TUI work".to_string()) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    /// A thread that isn't its stream's writer opens and prompts its
+    /// thread read-only, so Codex can't write the shared worktree; a
+    /// writer's is sandboxed to the worktree.
+    #[tokio::test]
+    async fn the_sandbox_follows_the_threads_write_access() {
+        let (rig, fake) = open_codex(
+            Host {
+                read_only: true,
+                ..Host::default()
+            },
+            "thread/start",
+        )
+        .await;
+        let start = fake.wait_for(|v| v["method"] == "thread/start").await;
+        assert_eq!(start["params"]["sandbox"], "read-only");
+        rig.prompt("look around").await;
+        let turn = fake.wait_for(|v| v["method"] == "turn/start").await;
+        assert_eq!(turn["params"]["sandboxPolicy"], json!({"type": "readOnly"}));
+
+        let (rig, fake) = open_codex(Host::default(), "thread/start").await;
+        let start = fake.wait_for(|v| v["method"] == "thread/start").await;
+        assert_eq!(start["params"]["sandbox"], "workspace-write");
+        rig.prompt("change it").await;
+        let turn = fake.wait_for(|v| v["method"] == "turn/start").await;
+        assert_eq!(
+            turn["params"]["sandboxPolicy"],
+            json!({"type": "workspaceWrite"})
+        );
+    }
+
+    /// A resumed thread's turns come back as the transcript, recording
+    /// nothing, and its name with them.
+    #[tokio::test]
+    async fn a_resumed_thread_replays_its_turns_and_records_nothing() {
+        let (rig, _fake) = open_codex(Host::default(), "thread/resume").await;
+        let items = rig.items();
+        assert!(matches!(&items[0], ItemBody::User { text, .. } if text == "before"));
+        assert!(matches!(&items[1], ItemBody::Tool { call } if call.title == "ls"));
+        assert_eq!(rig.agent_text(), ["listed"]);
+        // Named once the session it names is recorded.
+        assert_eq!(rig.host.log(), ["started thr-x", "named Earlier work"]);
+    }
 }

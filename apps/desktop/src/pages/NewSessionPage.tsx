@@ -29,7 +29,7 @@ export function NewSessionPage({ thread, harnesses, onStart, onNoSession }: NewS
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [remember, setRemember] = useState(false);
-  const acpEnabled = harnesses.some((h) => h.enabled && h.chat);
+  const acpEnabled = harnesses.some((h) => h.enabled && h.acpAgent);
   useEffect(() => {
     if (!acpEnabled) return;
     void listAcpAgents()

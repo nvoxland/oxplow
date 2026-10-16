@@ -74,9 +74,10 @@ export function AgentSessionPage({
       </Page>
     );
   }
-  // ACP sessions talk to their agent as a structured conversation, not a
-  // terminal. Keyed on the session like the terminal below.
-  if (session.harness === "acp") {
+  // A chat session (an ACP agent, a Codex thread) talks to its agent as a
+  // structured conversation, not a terminal. Keyed on the session like the
+  // terminal below.
+  if (session.kind === "chat") {
     return (
       <Page testId="page-agent" showNavBar={false} showHeader={false}>
         <AcpAgentView

@@ -14,6 +14,7 @@ use oxplow_app::acp::host::ServicesAcpHost;
 use oxplow_app::acp::manager::Launch;
 use oxplow_app::acp::session::{AcpEventBody, AcpStatus, SessionSpec};
 use oxplow_app::acp::transcript::ItemBody;
+use oxplow_app::acp::wire::AcpOpen;
 use oxplow_app::Services;
 use oxplow_db::semantic_layer::SqlCell;
 use oxplow_domain::stores::{AgentSessionStore, AgentTurnStore, StreamStore, ThreadStore};
@@ -136,10 +137,6 @@ fn spec(
         thread_id: thread,
         agent: "fake".into(),
         cwd: root.to_path_buf(),
-        mcp: vec![],
-        resume_session_id: None,
-        system_prompt: None,
-        system_prompt_via_meta: false,
     }
 }
 
@@ -169,7 +166,13 @@ async fn open_session_in_process(
     let (cr, cw) = tokio::io::split(client);
     let host = Arc::new(ServicesAcpHost::new(svc, Some(StreamId::new(1)), session));
     svc.acp
-        .open_with_io(host, spec(session, thread, root), cw, cr)
+        .open_with_io(
+            host,
+            spec(session, thread, root),
+            AcpOpen::default(),
+            cw,
+            cr,
+        )
         .await
         .unwrap();
 }
@@ -384,6 +387,7 @@ async fn the_agent_process_runs_and_a_crash_stops_the_thread() {
                 args: vec![],
                 env: vec![],
                 env_remove: vec![],
+                open: AcpOpen::default(),
             },
         )
         .await

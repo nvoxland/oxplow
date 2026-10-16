@@ -86,6 +86,7 @@ tokio = { workspace = true, features = ["test-util"] }
 # A fake AI provider API for the tests that call a model.
 oxplow-ai-fake = { workspace = true }
 oxplow-acp-fake = { workspace = true }
+oxplow-harnesses = { workspace = true, features = ["fake-app-server"] }
 oxplow-provider-fake = { workspace = true }
 oxplow-harness-fake = { workspace = true }
 # The stand-in OAuth server the sign-in tests run against.

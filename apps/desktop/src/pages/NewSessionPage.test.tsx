@@ -9,8 +9,8 @@ afterEach(cleanup);
 
 const thread = { id: "thr1", title: "Fix the cart" } as unknown as Thread;
 const harnesses: HarnessListing[] = [
-  { id: "claude", title: "Claude", chat: false, enabled: true, settings: [] },
-  { id: "codex", title: "Codex", chat: false, enabled: true, settings: [] },
+  { id: "claude", title: "Claude", acpAgent: false, enabled: true, settings: [] },
+  { id: "codex", title: "Codex", acpAgent: false, enabled: true, settings: [] },
 ];
 
 function renderPicker() {

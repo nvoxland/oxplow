@@ -43,9 +43,9 @@ pub struct HarnessListing {
     /// Its key (what `agents:` and a session's `harness` name).
     pub id: String,
     pub title: String,
-    /// It runs an ACP agent in a chat (a structured transcript), so a
-    /// session of it names one.
-    pub chat: bool,
+    /// A session of it runs one of the project's ACP agents, and names
+    /// it.
+    pub acp_agent: bool,
     /// The project enables it (`agents:` names it, or names none).
     pub enabled: bool,
     /// The settings it reads from its `agentConfig` entry.
@@ -73,7 +73,6 @@ pub fn listing(
     capabilities: &crate::capabilities::CapabilityRegistry,
     agents: &[String],
 ) -> Vec<HarnessListing> {
-    use oxplow_domain::agent::harness::Transcript;
     let mut all = registry.all();
     all.sort_by_key(|h| {
         agents
@@ -85,7 +84,7 @@ pub fn listing(
         .map(|h| HarnessListing {
             id: h.id().to_string(),
             title: h.title().to_string(),
-            chat: h.interact().transcript == Transcript::Structured,
+            acp_agent: h.interact().acp_agent,
             enabled: agents.is_empty() || agents.iter().any(|a| a == h.id()),
             settings: h
                 .settings()
@@ -298,6 +297,7 @@ mod tests {
             &r,
             &[
                 declared("agent_harness", "claude", "oxplow:claude-code"),
+                declared("agent_harness", "codex", "oxplow:codex-cli"),
                 declared("agent_harness", "acp", "oxplow:acp"),
             ],
         );
@@ -305,16 +305,25 @@ mod tests {
             let agents: Vec<String> = agents.iter().map(|a| a.to_string()).collect();
             listing(&r, &no_capabilities(), &agents)
                 .into_iter()
-                .map(|h| (h.id, h.chat, h.enabled))
+                .map(|h| (h.id, h.acp_agent, h.enabled))
                 .collect::<Vec<_>>()
         };
+        // Codex is a chat too, of its own thread: no ACP agent to name.
         assert_eq!(
             rows(&[]),
-            [("claude".into(), false, true), ("acp".into(), true, true)]
+            [
+                ("claude".into(), false, true),
+                ("codex".into(), false, true),
+                ("acp".into(), true, true)
+            ]
         );
         assert_eq!(
             rows(&["acp"]),
-            [("acp".into(), true, true), ("claude".into(), false, false)]
+            [
+                ("acp".into(), true, true),
+                ("claude".into(), false, false),
+                ("codex".into(), false, false)
+            ]
         );
     }
 

@@ -289,8 +289,6 @@ pub(crate) async fn launch_session(
 ) -> Result<Launch, IpcError> {
     let identity = identity_env(endpoints, stream.id, thread.id, session.id);
     let text = oxplow_app::capabilities::agent_text(ctx);
-    let executable = std::env::current_exe()
-        .map_err(|e| IpcError::internal(format!("the oxplow binary: {e}")))?;
     // The harness looks for its saved conversations under the home of the
     // machine the agent runs on: this one's only when the stream is local.
     let home = (stream.host == oxplow_domain::HostId::LOCAL)
@@ -312,7 +310,6 @@ pub(crate) async fn launch_session(
             fork: session.fork_next,
             text,
             config: config.clone(),
-            oxplow_executable: executable,
             home,
             search_path: oxplow_app::agent_path::search_path(),
         })

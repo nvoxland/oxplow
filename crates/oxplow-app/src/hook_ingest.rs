@@ -313,6 +313,29 @@ impl HookIngestService {
         Ok(())
     }
 
+    /// Name agent session `session`'s conversation `title`, as its harness
+    /// named it outside a hook (a Codex thread's name), while the session
+    /// is still bound to conversation `native_id`.
+    pub async fn name_conversation(
+        &self,
+        session: oxplow_domain::AgentSessionId,
+        native_id: String,
+        title: String,
+    ) -> Result<(), HookIngestError> {
+        self.db
+            .transaction(move |tx| {
+                oxplow_db::agent_session_store::set_native_title_tx(
+                    tx,
+                    session,
+                    &native_id,
+                    &title,
+                    Timestamp::now(),
+                )
+            })
+            .await?;
+        Ok(())
+    }
+
     /// Log and announce an agent session's status outside a hook (the ACP
     /// session's permission cards). `session` resolves as a hook's does.
     pub async fn set_status(

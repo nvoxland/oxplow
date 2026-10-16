@@ -13,7 +13,7 @@ use tracing::warn;
 
 use oxplow_domain::agent::tool::ToolUse;
 
-use super::wire::TurnTokens;
+use super::conn::TurnTokens;
 use crate::hook_ingest::HookEnvelope;
 use crate::Services;
 
@@ -30,6 +30,9 @@ pub trait AcpHost: Send + Sync + 'static {
     ) -> PolicyDecision;
     /// A session is up (new or loaded): remember it for the next resume.
     async fn session_started(&self, thread: &ThreadId, session_id: &str);
+    /// Whether the thread may write its worktree now (it is its stream's
+    /// writer).
+    async fn writable(&self, thread: &ThreadId) -> bool;
     /// Context to attach to the person's next prompt.
     async fn prompt_context(&self, thread: &ThreadId, session_id: &str) -> Option<String>;
     async fn turn_started(&self, thread: &ThreadId, session_id: &str, prompt: &str);
@@ -51,6 +54,8 @@ pub trait AcpHost: Send + Sync + 'static {
         answer: Option<&str>,
         tokens: Option<&TurnTokens>,
     );
+    /// The agent named the conversation.
+    async fn named(&self, thread: &ThreadId, session_id: &str, title: &str);
     /// A permission card is (or no longer is) waiting on the person.
     async fn awaiting_user(&self, thread: &ThreadId, question: Option<String>);
     /// The agent went away mid-session.
@@ -179,6 +184,20 @@ impl AcpHost for ServicesAcpHost {
         self.ingest(&svc, env).await;
     }
 
+    /// Unknown reads as read-only.
+    async fn writable(&self, thread: &ThreadId) -> bool {
+        use oxplow_domain::stores::ThreadStore as _;
+        let Some(svc) = self.svc.upgrade() else {
+            return false;
+        };
+        svc.thread_store
+            .get(thread)
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|t| t.status.is_writer())
+    }
+
     async fn prompt_context(&self, thread: &ThreadId, session_id: &str) -> Option<String> {
         let svc = self.svc.upgrade()?;
         let harness = self.harness(&svc).await;
@@ -249,6 +268,19 @@ impl AcpHost for ServicesAcpHost {
         let env = self.envelope(HookKind::Stop, thread, session_id, body, None);
         if let Err(err) = svc.hook_ingest.ingest(env).await {
             warn!(?err, "acp: hook ingest failed");
+        }
+    }
+
+    async fn named(&self, _thread: &ThreadId, session_id: &str, title: &str) {
+        let Some(svc) = self.svc.upgrade() else {
+            return;
+        };
+        if let Err(err) = svc
+            .hook_ingest
+            .name_conversation(self.session, session_id.to_string(), title.to_string())
+            .await
+        {
+            warn!(?err, "acp: naming the conversation failed");
         }
     }
 

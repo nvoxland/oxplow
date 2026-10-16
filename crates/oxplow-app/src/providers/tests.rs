@@ -6780,7 +6780,6 @@ fn launch_input(
         fork: false,
         text: Default::default(),
         config: json!({}),
-        oxplow_executable: "/bin/false".into(),
         home: None,
         search_path,
     }

@@ -66,9 +66,9 @@ test("a thread with no agent session shows the picker, with no prompts", () => {
     <NewSessionPage
       thread={thread}
       harnesses={[
-        { id: "claude", title: "Claude", chat: false, enabled: true },
-        { id: "codex", title: "Codex", chat: false, enabled: true },
-        { id: "opencode", title: "OpenCode", chat: false, enabled: false },
+        { id: "claude", title: "Claude", acpAgent: false, enabled: true },
+        { id: "codex", title: "Codex", acpAgent: false, enabled: true },
+        { id: "opencode", title: "OpenCode", acpAgent: false, enabled: false },
       ]}
       onStart={async () => {}}
       onNoSession={async () => {}}

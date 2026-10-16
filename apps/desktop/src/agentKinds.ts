@@ -2,8 +2,8 @@ import type { AcpAgentListing, HarnessListing } from "./tauri-bridge/generated/b
 
 /// The agent harnesses come from the backend (`listAgentHarnesses`): the
 /// ones the project's extensions declare, in priority order, each with its
-/// title, whether the project enables it, and whether it runs an ACP agent
-/// in a chat. Nothing here names a harness.
+/// title, whether the project enables it, and whether a session of it runs
+/// one of the project's ACP agents. Nothing here names a harness.
 
 /// A harness as a person reads it: its title, else its key.
 export function harnessLabel(harnesses: HarnessListing[], id: string): string {
@@ -18,19 +18,19 @@ export function sessionLabel(harnesses: HarnessListing[], session: { harness: st
 }
 
 export interface AgentChoice {
-  /// `<harness>`, or `<harness>:<acp agent>` for a chat harness.
+  /// `<harness>`, or `<harness>:<acp agent>` for a harness that runs one.
   value: string;
   label: string;
 }
 
 /// The session picker's choices: each enabled harness, in priority order,
-/// and for a chat harness one per ACP agent, flagged when it can't start
-/// yet.
+/// and for a harness that runs ACP agents one per agent, flagged when it
+/// can't start yet.
 export function agentChoices(harnesses: HarnessListing[], acpAgents: AcpAgentListing[]): AgentChoice[] {
   return harnesses
     .filter((h) => h.enabled)
     .flatMap((h): AgentChoice[] => {
-      if (!h.chat) return [{ value: h.id, label: h.title }];
+      if (!h.acpAgent) return [{ value: h.id, label: h.title }];
       return acpAgents.map((a) => {
         const note = !a.resolvedPath ? " (not installed)" : !a.approved ? " (needs approval)" : "";
         return { value: `${h.id}:${a.name}`, label: `${h.title} · ${a.name}${note}` };

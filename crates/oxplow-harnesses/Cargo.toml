@@ -11,8 +11,14 @@ async-trait = { workspace = true }
 oxplow-domain = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+futures = { workspace = true }
 tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
 oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
+
+[features]
+# `codex::app_server::fake`: a scripted app server for other crates' tests.
+fake-app-server = []
 
 [dev-dependencies]
 oxplow-agent-text = { workspace = true }

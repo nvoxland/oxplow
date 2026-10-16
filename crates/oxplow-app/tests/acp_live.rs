@@ -18,6 +18,7 @@ use oxplow_app::acp::host::ServicesAcpHost;
 use oxplow_app::acp::manager::Launch;
 use oxplow_app::acp::session::{AcpEventBody, AcpStatus, SessionSpec};
 use oxplow_app::acp::transcript::ItemBody;
+use oxplow_app::acp::wire::AcpOpen;
 use oxplow_app::Services;
 
 #[tokio::test]
@@ -71,16 +72,13 @@ async fn a_real_adapter_answers_a_prompt() {
                 thread_id: thread,
                 agent: "live".into(),
                 cwd: root.clone(),
-                mcp: vec![],
-                resume_session_id: None,
-                system_prompt: None,
-                system_prompt_via_meta: false,
             },
             Launch {
                 program: program.into(),
                 args: words.map(str::to_string).collect(),
                 env: vec![],
                 env_remove: vec![],
+                open: AcpOpen::default(),
             },
         )
         .await

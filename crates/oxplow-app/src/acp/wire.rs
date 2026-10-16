@@ -1,10 +1,13 @@
 //! The only module that names `agent-client-protocol` schema types. It
 //! converts them to and from `model.rs`, so the pinned SDK (`=2.2.0`, a
 //! young 2.x) can change without touching the rest of `acp/`. It also owns
-//! the connection ([`run`], [`AgentConn`], [`Incoming`]).
+//! the ACP connection ([`run`], [`AcpConnection`]).
 
 use agent_client_protocol::schema::v1 as sdk;
 
+use super::conn::{
+    Connection, Incoming, Opened, PermissionReply, ReadReply, TurnEnd, TurnTokens, WriteReply,
+};
 use super::model::{
     AcpUpdate, ContextUsage, PermissionAnswer, PermissionAsk, PermissionKind, PermissionOption,
     PlanEntry, PlanStatus, ToolCall, ToolCallPatch, ToolDiff, ToolKind, ToolStatus,
@@ -180,7 +183,7 @@ fn block_text(b: &sdk::ContentBlock) -> String {
     }
 }
 
-fn cap(s: &str) -> String {
+pub(super) fn cap(s: &str) -> String {
     if s.len() <= MAX_TEXT {
         return s.to_string();
     }
@@ -191,7 +194,7 @@ fn cap(s: &str) -> String {
     format!("{}… [truncated]", &s[..end])
 }
 
-fn cap_value(v: serde_json::Value) -> serde_json::Value {
+pub(super) fn cap_value(v: serde_json::Value) -> serde_json::Value {
     match &v {
         serde_json::Value::String(s) if s.len() > MAX_TEXT => serde_json::Value::String(cap(s)),
         serde_json::Value::String(_) => v,
@@ -204,59 +207,11 @@ fn cap_value(v: serde_json::Value) -> serde_json::Value {
 // The connection: the SDK's client role, fenced behind oxplow types.
 // ---------------------------------------------------------------------
 
-/// What the agent sends us, in arrival order. Every handler only forwards
-/// onto one channel, so the session sees updates, requests and the
-/// prompt's result in the order they came off the wire.
-pub enum Incoming {
-    Update {
-        session_id: String,
-        update: AcpUpdate,
-    },
-    Permission {
-        session_id: String,
-        ask: Box<PermissionAsk>,
-        reply: PermissionReply,
-    },
-    WriteFile {
-        session_id: String,
-        path: std::path::PathBuf,
-        content: String,
-        reply: WriteReply,
-    },
-    ReadFile {
-        session_id: String,
-        path: std::path::PathBuf,
-        line: Option<u32>,
-        limit: Option<u32>,
-        reply: ReadReply,
-    },
-    /// The in-flight prompt finished (or failed).
-    PromptDone(Result<TurnEnd, String>),
-}
-
-/// How a turn ended.
-#[derive(Debug, Clone, PartialEq)]
-pub struct TurnEnd {
-    /// `end_turn`, `cancelled`, `max_tokens`, `refusal`, …
-    pub stop_reason: String,
-    /// Per-turn token counts, when the agent reports them.
-    pub usage: Option<TurnTokens>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct TurnTokens {
-    pub input: u64,
-    pub output: u64,
-    pub cache_read: u64,
-    pub cache_write: u64,
-}
-
 /// What `initialize` told us about the agent.
 #[derive(Debug, Clone, PartialEq)]
-pub struct AgentInfo {
-    pub load_session: bool,
-    pub mcp_http: bool,
-    pub name: Option<String>,
+struct AgentInfo {
+    load_session: bool,
+    mcp_http: bool,
 }
 
 /// oxplow's MCP server as an HTTP MCP entry for `session/new|load`.
@@ -267,50 +222,30 @@ pub struct McpHttp {
     pub headers: Vec<(String, String)>,
 }
 
-pub struct PermissionReply(agent_client_protocol::Responder<sdk::RequestPermissionResponse>);
-
-impl PermissionReply {
-    pub fn answer(self, a: &PermissionAnswer) {
-        let _ = self.0.respond(permission_response(a));
-    }
-}
-
-pub struct WriteReply(agent_client_protocol::Responder<sdk::WriteTextFileResponse>);
-
-impl WriteReply {
-    pub fn ok(self) {
-        let _ = self.0.respond(sdk::WriteTextFileResponse::new());
-    }
-    /// Refuse the write; `reason` reaches the model as the error message.
-    pub fn deny(self, reason: &str) {
-        let _ = self.0.respond_with_error(agent_client_protocol::Error::new(
-            -32000,
-            reason.to_string(),
-        ));
-    }
-}
-
-pub struct ReadReply(agent_client_protocol::Responder<sdk::ReadTextFileResponse>);
-
-impl ReadReply {
-    pub fn ok(self, content: String) {
-        let _ = self.0.respond(sdk::ReadTextFileResponse::new(content));
-    }
-    pub fn err(self, message: &str) {
-        let _ = self.0.respond_with_error(agent_client_protocol::Error::new(
-            -32000,
-            message.to_string(),
-        ));
-    }
+/// How an ACP session opens.
+#[derive(Debug, Clone, Default)]
+pub struct AcpOpen {
+    /// The `acpAgents` name, for errors.
+    pub agent: String,
+    pub mcp: Vec<McpHttp>,
+    /// The agent session's last ACP session, loaded instead of starting
+    /// fresh when the agent supports `session/load`.
+    pub resume_session_id: Option<String>,
+    pub system_prompt: Option<String>,
+    /// Pass the system prompt as `_meta.systemPrompt.append` on
+    /// `session/new` (the Claude adapter) instead of ahead of the first
+    /// prompt.
+    pub system_prompt_via_meta: bool,
 }
 
 type Tx = tokio::sync::mpsc::UnboundedSender<Incoming>;
 
-/// The client side of one agent connection.
-#[derive(Clone)]
-pub struct AgentConn {
+/// The client side of one ACP agent connection.
+pub struct AcpConnection {
     conn: agent_client_protocol::ConnectionTo<agent_client_protocol::Agent>,
     tx: Tx,
+    open: AcpOpen,
+    session_id: std::sync::OnceLock<String>,
 }
 
 fn err_text(e: agent_client_protocol::Error) -> String {
@@ -337,91 +272,62 @@ fn mcp_json(servers: &[McpHttp]) -> serde_json::Value {
     )
 }
 
-impl AgentConn {
-    /// `initialize`: fs read/write offered, no terminal.
-    pub async fn initialize(&self) -> Result<AgentInfo, String> {
-        let req: sdk::InitializeRequest = from_json(serde_json::json!({
-            "protocolVersion": 1,
-            "clientCapabilities": {
-                "fs": {"readTextFile": true, "writeTextFile": true},
-                "terminal": false
-            },
-            "clientInfo": {"name": "oxplow", "version": env!("CARGO_PKG_VERSION")}
-        }))?;
-        let r = self
-            .conn
-            .send_request(req)
-            .block_task()
-            .await
-            .map_err(err_text)?;
-        Ok(AgentInfo {
-            load_session: r.agent_capabilities.load_session,
-            mcp_http: r.agent_capabilities.mcp_capabilities.http,
-            name: r.agent_info.map(|i| i.name),
+#[async_trait::async_trait]
+impl Connection for AcpConnection {
+    /// `initialize`, then `session/load` of the saved session when the
+    /// agent supports it (its replay arrives as updates first), else
+    /// `session/new`.
+    /// Its writes are gated as it asks (`fs/write_text_file`, permission
+    /// requests), so `writable` changes nothing here.
+    async fn open(&self, cwd: &std::path::Path, _writable: bool) -> Result<Opened, String> {
+        let info = self.initialize().await?;
+        if !self.open.mcp.is_empty() && !info.mcp_http {
+            return Err(format!(
+                "ACP agent '{}' can't use HTTP MCP servers, and oxplow's tools reach ACP agents over HTTP MCP",
+                self.open.agent
+            ));
+        }
+        let saved = self
+            .open
+            .resume_session_id
+            .clone()
+            .filter(|s| !s.is_empty());
+        if let (Some(id), true) = (saved, info.load_session) {
+            match self.load_session(&id, cwd).await {
+                Ok(()) => {
+                    let _ = self.session_id.set(id.clone());
+                    return Ok(Opened {
+                        session_id: id,
+                        preamble: None,
+                    });
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "acp: session/load failed; starting a new session")
+                }
+            }
+        }
+        let meta = match (&self.open.system_prompt, self.open.system_prompt_via_meta) {
+            (Some(sp), true) => Some(serde_json::json!({"systemPrompt": {"append": sp}})),
+            _ => None,
+        };
+        let id = self.new_session(cwd, meta).await?;
+        let _ = self.session_id.set(id.clone());
+        Ok(Opened {
+            session_id: id,
+            preamble: (!self.open.system_prompt_via_meta)
+                .then(|| self.open.system_prompt.clone())
+                .flatten(),
         })
     }
 
-    pub async fn new_session(
-        &self,
-        cwd: &std::path::Path,
-        mcp: &[McpHttp],
-        meta: Option<serde_json::Value>,
-    ) -> Result<String, String> {
-        let mut v = serde_json::json!({"cwd": cwd, "mcpServers": mcp_json(mcp)});
-        if let Some(m) = meta {
-            v["_meta"] = m;
-        }
-        let req: sdk::NewSessionRequest = from_json(v)?;
-        let r = self
-            .conn
-            .send_request(req)
-            .block_task()
-            .await
-            .map_err(err_text)?;
-        Ok(r.session_id.0.to_string())
-    }
-
-    /// `session/load`. The agent replays the history as updates BEFORE this
-    /// returns; they arrive on the incoming channel first.
-    pub async fn load_session(
-        &self,
-        session_id: &str,
-        cwd: &std::path::Path,
-        mcp: &[McpHttp],
-    ) -> Result<(), String> {
-        let req: sdk::LoadSessionRequest = from_json(serde_json::json!({
-            "sessionId": session_id,
-            "cwd": cwd,
-            "mcpServers": mcp_json(mcp),
-        }))?;
-        // Ordered: the response is queued behind the replayed updates.
-        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
-        self.conn
-            .send_request(req)
-            .on_receiving_result(async move |r| {
-                let _ = done_tx.send(r.map(|_| ()).map_err(err_text));
-                Ok(())
-            })
-            .map_err(err_text)?;
-        done_rx
-            .await
-            .map_err(|_| "connection closed during session/load".to_string())?
-    }
-
-    /// Send a person's prompt. The result arrives as
-    /// [`Incoming::PromptDone`], after every update of the turn.
-    pub fn prompt(
-        &self,
-        session_id: &str,
-        p: super::human_prompt::HumanPrompt,
-    ) -> Result<(), String> {
+    fn prompt(&self, p: super::human_prompt::HumanPrompt, _writable: bool) -> Result<(), String> {
         let blocks: Vec<serde_json::Value> = p
             .blocks()
             .iter()
             .map(|t| serde_json::json!({"type": "text", "text": t}))
             .collect();
         let req: sdk::PromptRequest = from_json(serde_json::json!({
-            "sessionId": session_id,
+            "sessionId": self.session_id(),
             "prompt": blocks,
         }))?;
         let tx = self.tx.clone();
@@ -446,28 +352,106 @@ impl AgentConn {
             .map_err(err_text)
     }
 
-    pub fn cancel(&self, session_id: &str) {
-        if let Ok(n) =
-            from_json::<sdk::CancelNotification>(serde_json::json!({"sessionId": session_id}))
-        {
+    fn cancel(&self) {
+        if let Ok(n) = from_json::<sdk::CancelNotification>(
+            serde_json::json!({"sessionId": self.session_id()}),
+        ) {
             let _ = self.conn.send_notification(n);
         }
     }
 
-    /// Resolves when the agent's output reaches EOF (it exited).
-    pub async fn closed(&self) {
+    /// The agent's output reached EOF (it exited).
+    async fn closed(&self) {
         self.conn.incoming_closed().await;
     }
 }
 
+impl AcpConnection {
+    fn session_id(&self) -> &str {
+        self.session_id
+            .get()
+            .map(String::as_str)
+            .unwrap_or_default()
+    }
+
+    /// `initialize`: fs read/write offered, no terminal.
+    async fn initialize(&self) -> Result<AgentInfo, String> {
+        let req: sdk::InitializeRequest = from_json(serde_json::json!({
+            "protocolVersion": 1,
+            "clientCapabilities": {
+                "fs": {"readTextFile": true, "writeTextFile": true},
+                "terminal": false
+            },
+            "clientInfo": {"name": "oxplow", "version": env!("CARGO_PKG_VERSION")}
+        }))?;
+        let r = self
+            .conn
+            .send_request(req)
+            .block_task()
+            .await
+            .map_err(err_text)?;
+        Ok(AgentInfo {
+            load_session: r.agent_capabilities.load_session,
+            mcp_http: r.agent_capabilities.mcp_capabilities.http,
+        })
+    }
+
+    async fn new_session(
+        &self,
+        cwd: &std::path::Path,
+        meta: Option<serde_json::Value>,
+    ) -> Result<String, String> {
+        let mut v = serde_json::json!({"cwd": cwd, "mcpServers": mcp_json(&self.open.mcp)});
+        if let Some(m) = meta {
+            v["_meta"] = m;
+        }
+        let req: sdk::NewSessionRequest = from_json(v)?;
+        let r = self
+            .conn
+            .send_request(req)
+            .block_task()
+            .await
+            .map_err(err_text)?;
+        Ok(r.session_id.0.to_string())
+    }
+
+    /// `session/load`. The agent replays the history as updates BEFORE this
+    /// returns; they arrive on the incoming channel first.
+    async fn load_session(&self, session_id: &str, cwd: &std::path::Path) -> Result<(), String> {
+        let req: sdk::LoadSessionRequest = from_json(serde_json::json!({
+            "sessionId": session_id,
+            "cwd": cwd,
+            "mcpServers": mcp_json(&self.open.mcp),
+        }))?;
+        // Ordered: the response is queued behind the replayed updates.
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        self.conn
+            .send_request(req)
+            .on_receiving_result(async move |r| {
+                let _ = done_tx.send(r.map(|_| ()).map_err(err_text));
+                Ok(())
+            })
+            .map_err(err_text)?;
+        done_rx
+            .await
+            .map_err(|_| "connection closed during session/load".to_string())?
+    }
+}
+
+fn agent_error(message: String) -> agent_client_protocol::Error {
+    agent_client_protocol::Error::new(-32000, message)
+}
+
 /// Run a client connection over `write`/`read` (the agent's stdin and
-/// stdout). `main` gets the connection and the incoming channel; the
-/// connection lives until `main` returns.
-pub async fn run<W, R, F, Fut>(write: W, read: R, main: F) -> Result<(), String>
+/// stdout), opening as `open` says. `main` gets the connection and the
+/// incoming channel; the connection lives until `main` returns.
+pub async fn run<W, R, F, Fut>(write: W, read: R, open: AcpOpen, main: F) -> Result<(), String>
 where
     W: tokio::io::AsyncWrite + Send + 'static,
     R: tokio::io::AsyncRead + Send + 'static,
-    F: FnOnce(AgentConn, tokio::sync::mpsc::UnboundedReceiver<Incoming>) -> Fut + Send + 'static,
+    F: FnOnce(std::sync::Arc<AcpConnection>, tokio::sync::mpsc::UnboundedReceiver<Incoming>) -> Fut
+        + Send
+        + 'static,
     Fut: std::future::Future<Output = ()> + Send + 'static,
 {
     use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -479,21 +463,18 @@ where
         .name("oxplow")
         .on_receive_notification(
             async move |n: sdk::SessionNotification, _cx| {
-                let _ = t1.send(Incoming::Update {
-                    session_id: n.session_id.0.to_string(),
-                    update: update(n.update),
-                });
+                let _ = t1.send(Incoming::Update(Box::new(update(n.update))));
                 Ok(())
             },
             agent_client_protocol::on_receive_notification!(),
         )
         .on_receive_request(
             async move |r: sdk::RequestPermissionRequest, responder, _cx| {
-                let session_id = r.session_id.0.to_string();
                 let _ = t2.send(Incoming::Permission {
-                    session_id,
                     ask: Box::new(permission_ask(r)),
-                    reply: PermissionReply(responder),
+                    reply: PermissionReply::new(move |a| {
+                        let _ = responder.respond(permission_response(a));
+                    }),
                 });
                 Ok(())
             },
@@ -502,10 +483,14 @@ where
         .on_receive_request(
             async move |r: sdk::WriteTextFileRequest, responder, _cx| {
                 let _ = t3.send(Incoming::WriteFile {
-                    session_id: r.session_id.0.to_string(),
                     path: r.path,
                     content: r.content,
-                    reply: WriteReply(responder),
+                    reply: WriteReply::new(move |done| {
+                        let _ = match done {
+                            Ok(()) => responder.respond(sdk::WriteTextFileResponse::new()),
+                            Err(reason) => responder.respond_with_error(agent_error(reason)),
+                        };
+                    }),
                 });
                 Ok(())
             },
@@ -514,18 +499,30 @@ where
         .on_receive_request(
             async move |r: sdk::ReadTextFileRequest, responder, _cx| {
                 let _ = t4.send(Incoming::ReadFile {
-                    session_id: r.session_id.0.to_string(),
                     path: r.path,
                     line: r.line,
                     limit: r.limit,
-                    reply: ReadReply(responder),
+                    reply: ReadReply::new(move |read| {
+                        let _ = match read {
+                            Ok(content) => {
+                                responder.respond(sdk::ReadTextFileResponse::new(content))
+                            }
+                            Err(message) => responder.respond_with_error(agent_error(message)),
+                        };
+                    }),
                 });
                 Ok(())
             },
             agent_client_protocol::on_receive_request!(),
         )
         .connect_with(transport, async move |conn| {
-            main(AgentConn { conn, tx }, rx).await;
+            let connection = std::sync::Arc::new(AcpConnection {
+                conn,
+                tx,
+                open,
+                session_id: std::sync::OnceLock::new(),
+            });
+            main(connection, rx).await;
             Ok(())
         })
         .await

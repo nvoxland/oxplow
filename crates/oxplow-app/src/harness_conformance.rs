@@ -150,6 +150,17 @@ async fn run(
                 );
             }
         }
+        // The bearer rides the request that opens the thread, over the
+        // daemon's socket: never a command line.
+        Ok(LaunchSpec::CodexAppServer { program, .. }) => {
+            if program.is_some_and(|p| p.to_string_lossy().contains(BEARER)) {
+                fail(
+                    "a_launch_keeps_the_bearer_in_its_env",
+                    "the session's bearer is in the daemon's program, which any process can list"
+                        .into(),
+                );
+            }
+        }
     }
 }
 
@@ -188,7 +199,6 @@ async fn scratch_launch(
         fork: false,
         text: Default::default(),
         config: config.clone(),
-        oxplow_executable: "/bin/false".into(),
         home: Some(root),
         search_path: search_path.to_vec(),
     };
@@ -240,6 +250,7 @@ mod tests {
             fn interact(&self) -> Interact {
                 Interact {
                     transcript: Transcript::Terminal,
+                    acp_agent: false,
                 }
             }
             async fn launch(&self, input: &LaunchInput) -> Result<Launch, HarnessError> {

@@ -14,6 +14,10 @@ mod text_contract;
 
 use std::sync::Arc;
 
+/// The client of Codex's app-server daemon its sessions are spoken to
+/// through.
+pub use codex::app_server as codex_app_server;
+
 use oxplow_domain::agent::acp_adapter::AcpAdapter;
 use oxplow_domain::agent::harness::AgentHarness;
 
@@ -172,6 +176,27 @@ mod test_launch {
         )
     }
 
+    /// `h` launched as [`launch_in`], with the person's home at
+    /// `<project>/home`, forking `resume` when `fork`.
+    pub fn launch_at_home(
+        h: &dyn AgentHarness,
+        resume: Option<&str>,
+        fork: bool,
+        system_prompt: Option<&str>,
+    ) -> Launched {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        run(
+            h,
+            resume,
+            fork,
+            system_prompt,
+            &serde_json::json!({}),
+            Some(&home),
+            dir,
+        )
+    }
+
     /// `h` launched to fork saved conversation `resume`, as [`launch_in`].
     pub fn launch_fork(h: &dyn AgentHarness, resume: &str) -> Launched {
         run(
@@ -259,7 +284,6 @@ mod test_launch {
             fork,
             text: oxplow_agent_text::core_text(),
             config: config.clone(),
-            oxplow_executable: "/bin/oxplow".into(),
             home: home.map(Path::to_path_buf),
             search_path: vec![agents],
         }))?;

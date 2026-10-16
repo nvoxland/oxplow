@@ -1,6 +1,6 @@
 //! The real harnesses' recorded sessions, replayed: each fixture under
 //! `crates/oxplow-harnesses/fixtures/<harness>/` is one session of Claude
-//! Code, Codex or opencode as `OXPLOW_HOOK_DEBUG` recorded it (paths
+//! Code or opencode as `OXPLOW_HOOK_DEBUG` recorded it (paths
 //! written `<ROOT>`, `<HOME>`, `<TMP>`). Every hook is posted, in order,
 //! to a live control plane's hook route as a session of that harness, so
 //! the harness's own mapping and answers run as they do for a real agent,
@@ -170,11 +170,6 @@ async fn resume_of(r: &Replayed) -> String {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_recorded_claude_code_session_is_recorded_canonically() {
     replay("claude/hooks.jsonl", "claude", "claude.txt").await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_recorded_codex_session_is_recorded_canonically() {
-    replay("codex/hooks.jsonl", "codex", "codex.txt").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

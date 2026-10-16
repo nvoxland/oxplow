@@ -41,6 +41,7 @@ impl AgentHarness for Acp {
     fn interact(&self) -> Interact {
         Interact {
             transcript: Transcript::Structured,
+            acp_agent: true,
         }
     }
 

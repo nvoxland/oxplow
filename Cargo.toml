@@ -65,6 +65,7 @@ unwrap_used = "warn"
 # Async runtime
 tokio = { version = "1.53", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt", "codec"] }
+tokio-tungstenite = "0.30"
 url = "2.5"
 futures = "0.3"
 async-trait = "0.1"

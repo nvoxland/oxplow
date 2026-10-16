@@ -3609,10 +3609,10 @@ export type HarnessListing = {
 	id: string,
 	title: string,
 	/**
-	 *  It runs an ACP agent in a chat (a structured transcript), so a
-	 *  session of it names one.
+	 *  A session of it runs one of the project's ACP agents, and names
+	 *  it.
 	 */
-	chat: boolean,
+	acpAgent: boolean,
 	/**  The project enables it (`agents:` names it, or names none). */
 	enabled: boolean,
 	/**  The settings it reads from its `agentConfig` entry. */

@@ -1,9 +1,10 @@
-//! The ONLY way to make a prompt for an ACP agent (tsk281).
+//! The ONLY way to make a prompt for a chat session's agent (an ACP
+//! agent, a Codex thread).
 //!
 //! oxplow never writes to an agent on its own: a prompt exists only
 //! because a person pressed Enter. [`HumanPrompt`] has a private field and
 //! one constructor, [`compose`], which the session calls only from the
-//! human's submit path; `wire::AgentConn::prompt` accepts nothing else.
+//! human's submit path; `conn::Connection::prompt` accepts nothing else.
 //! The source-scan guard in `acp/guard_tests.rs` pins who may call
 //! `compose` and who may name the SDK's prompt request.
 

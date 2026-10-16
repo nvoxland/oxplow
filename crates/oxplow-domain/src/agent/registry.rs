@@ -166,6 +166,7 @@ mod tests {
         fn interact(&self) -> Interact {
             Interact {
                 transcript: Transcript::Terminal,
+                acp_agent: false,
             }
         }
         async fn launch(&self, _: &LaunchInput) -> Result<Launch, HarnessError> {

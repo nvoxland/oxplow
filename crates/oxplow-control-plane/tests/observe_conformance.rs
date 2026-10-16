@@ -144,7 +144,6 @@ async fn a_session_of(
             fork: false,
             text: AgentText::default(),
             config: serde_json::json!({}),
-            oxplow_executable: "/bin/false".into(),
             home: None,
             search_path: vec![bin_dir],
         })

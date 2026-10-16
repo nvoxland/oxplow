@@ -1,7 +1,8 @@
-//! One ACP agent session: an actor task that owns the connection and
-//! turns protocol traffic into transcript items, policy decisions and
-//! recording. The manager (`manager.rs`) holds only its command sender
-//! and the shared [`SessionView`].
+//! One chat session: an actor task that owns the agent's connection (an
+//! ACP agent's, a Codex thread's: [`Connection`]) and turns its traffic
+//! into transcript items, policy decisions and recording. The manager
+//! (`manager.rs`) holds only its command sender and the shared
+//! [`SessionView`].
 //!
 //! The rules it keeps (see `.context/agent-model.md` → "ACP agents"):
 //! - it sends a prompt only for [`Command::Prompt`], which comes only from
@@ -10,7 +11,10 @@
 //! - a tool call the policy denies is rejected without asking; anything
 //!   else waits on the person, with no timeout and no "always allow" for
 //!   writes;
-//! - a `session/load` replay rebuilds the transcript and records nothing.
+//! - a replay (`session/load`, a resumed thread's turns) rebuilds the
+//!   transcript and records nothing;
+//! - a person's prompt typed elsewhere on the same conversation (Codex's
+//!   own TUI on the thread) is recorded as theirs.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -22,20 +26,19 @@ use oxplow_runtime::policy::PolicyDecision;
 use parking_lot::Mutex;
 use serde::Serialize;
 use tokio::sync::{broadcast, mpsc, oneshot};
-use tracing::warn;
 
 use super::host::AcpHost;
 
 /// What a write oxplow makes for an ACP agent (`fs/write_text_file`) is
 /// called, where a person reads it and in the record.
 const FS_WRITE: &str = "fs/write_text_file";
+use super::conn::{Connection, Incoming, PermissionReply, TurnEnd};
 use super::mapping;
 use super::model::{
     AcpUpdate, ContextUsage, PermissionAnswer, PermissionKind, PermissionOption, ToolCall,
     ToolStatus,
 };
 use super::transcript::{ItemBody, Transcript, TranscriptItem};
-use super::wire::{AgentConn, Incoming, McpHttp, PermissionReply, TurnEnd};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -79,7 +82,7 @@ pub struct AcpEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AcpError {
-    #[error("no ACP agent is running for this session")]
+    #[error("no agent is running for this session")]
     NotOpen,
     #[error("the agent is still working on the last prompt; wait for it or stop it")]
     TurnInFlight,
@@ -93,24 +96,17 @@ pub enum AcpError {
     Agent(String),
 }
 
-/// How to start the session.
+/// The session a chat runs. How its agent opens is its connection's.
 #[derive(Debug, Clone)]
 pub struct SessionSpec {
     /// The agent session it runs.
     pub session_id: oxplow_domain::AgentSessionId,
     pub thread_id: ThreadId,
-    /// The `acpAgents` name.
+    /// What runs it, as a person names it: the `acpAgents` name, or the
+    /// harness's.
     pub agent: String,
+    /// Its worktree.
     pub cwd: PathBuf,
-    pub mcp: Vec<McpHttp>,
-    /// The agent session's last ACP session, loaded instead of starting fresh when
-    /// the agent supports `session/load`.
-    pub resume_session_id: Option<String>,
-    pub system_prompt: Option<String>,
-    /// Pass the system prompt as `_meta.systemPrompt.append` on
-    /// `session/new` (the Claude adapter) instead of ahead of the first
-    /// prompt.
-    pub system_prompt_via_meta: bool,
 }
 
 /// What the manager and the UI read without a round trip to the actor.
@@ -195,6 +191,9 @@ pub(super) struct Actor {
     /// The system prompt, when it rides the first prompt.
     pending_system_prompt: Option<String>,
     replaying: bool,
+    /// A name the agent gave the conversation while it replayed, recorded
+    /// once the session is.
+    replayed_name: Option<String>,
 }
 
 impl Actor {
@@ -223,6 +222,7 @@ impl Actor {
             fs_written: HashSet::new(),
             pending_system_prompt: None,
             replaying: false,
+            replayed_name: None,
         }
     }
 
@@ -263,12 +263,12 @@ impl Actor {
     /// `ready` learns whether it started.
     pub(super) async fn run(
         mut self,
-        conn: AgentConn,
+        conn: Arc<dyn Connection>,
         mut incoming: mpsc::UnboundedReceiver<Incoming>,
         mut commands: mpsc::UnboundedReceiver<Command>,
         ready: oneshot::Sender<Result<(), AcpError>>,
     ) {
-        if let Err(e) = self.start(&conn, &mut incoming).await {
+        if let Err(e) = self.start(conn.as_ref(), &mut incoming).await {
             self.push(ItemBody::Error { message: e.clone() });
             self.set_status(AcpStatus::Stopped);
             self.emit(AcpEventBody::Closed {
@@ -289,7 +289,7 @@ impl Actor {
                 },
                 cmd = commands.recv() => match cmd {
                     None | Some(Command::Close) => break None,
-                    Some(cmd) => self.on_command(&conn, cmd).await,
+                    Some(cmd) => self.on_command(conn.as_ref(), cmd).await,
                 },
                 _ = &mut closed => {
                     // Deliver what arrived before the EOF first.
@@ -305,58 +305,33 @@ impl Actor {
 
     async fn start(
         &mut self,
-        conn: &AgentConn,
+        conn: &dyn Connection,
         incoming: &mut mpsc::UnboundedReceiver<Incoming>,
     ) -> Result<(), String> {
-        let info = conn.initialize().await?;
-        if !self.spec.mcp.is_empty() && !info.mcp_http {
-            return Err(format!(
-                "ACP agent '{}' can't use HTTP MCP servers, and oxplow's tools reach ACP agents over HTTP MCP",
-                self.spec.agent
-            ));
+        let writable = self.host.writable(self.thread()).await;
+        self.replaying = true;
+        let opened = conn.open(&self.spec.cwd, writable).await;
+        while let Ok(msg) = incoming.try_recv() {
+            self.on_incoming(msg).await;
         }
-        let cwd = self.spec.cwd.clone();
-        let mut loaded = None;
-        if let Some(id) = self
-            .spec
-            .resume_session_id
-            .clone()
-            .filter(|s| !s.is_empty())
-        {
-            if info.load_session {
-                self.replaying = true;
-                let r = conn.load_session(&id, &cwd, &self.spec.mcp).await;
-                while let Ok(msg) = incoming.try_recv() {
-                    self.on_incoming(msg).await;
-                }
-                self.replaying = false;
-                match r {
-                    Ok(()) => loaded = Some(id),
-                    Err(e) => warn!(error = %e, "acp: session/load failed; starting a new session"),
-                }
-            }
+        self.replaying = false;
+        let opened = opened?;
+        self.pending_system_prompt = opened.preamble;
+        self.session_id = opened.session_id.clone();
+        self.view.lock().session_id = Some(opened.session_id.clone());
+        self.host
+            .session_started(self.thread(), &opened.session_id)
+            .await;
+        if let Some(title) = self.replayed_name.take() {
+            self.host
+                .named(self.thread(), &opened.session_id, &title)
+                .await;
         }
-        let session_id = match loaded {
-            Some(id) => id,
-            None => {
-                let meta = match (&self.spec.system_prompt, self.spec.system_prompt_via_meta) {
-                    (Some(sp), true) => Some(serde_json::json!({"systemPrompt": {"append": sp}})),
-                    _ => None,
-                };
-                if !self.spec.system_prompt_via_meta {
-                    self.pending_system_prompt = self.spec.system_prompt.clone();
-                }
-                conn.new_session(&cwd, &self.spec.mcp, meta).await?
-            }
-        };
-        self.session_id = session_id.clone();
-        self.view.lock().session_id = Some(session_id.clone());
-        self.host.session_started(self.thread(), &session_id).await;
         self.set_status(AcpStatus::Idle);
         Ok(())
     }
 
-    async fn on_command(&mut self, conn: &AgentConn, cmd: Command) {
+    async fn on_command(&mut self, conn: &dyn Connection, cmd: Command) {
         match cmd {
             Command::Prompt { text, reply } => {
                 let r = self.prompt(conn, text).await;
@@ -364,7 +339,7 @@ impl Actor {
             }
             Command::Cancel => {
                 if self.turn.is_some() {
-                    conn.cancel(&self.session_id);
+                    conn.cancel();
                 }
                 // The protocol wants every open permission request
                 // answered `cancelled` once the client cancels.
@@ -391,7 +366,7 @@ impl Actor {
     }
 
     /// The person's prompt: the one place a prompt is built and sent.
-    async fn prompt(&mut self, conn: &AgentConn, text: String) -> Result<(), AcpError> {
+    async fn prompt(&mut self, conn: &dyn Connection, text: String) -> Result<(), AcpError> {
         if self.turn.is_some() {
             return Err(AcpError::TurnInFlight);
         }
@@ -421,13 +396,28 @@ impl Actor {
             .await;
         self.fs_written.clear();
         self.turn = Some(text);
-        if let Err(e) = conn.prompt(&self.session_id, hp) {
+        let writable = self.host.writable(self.thread()).await;
+        if let Err(e) = conn.prompt(hp, writable) {
             self.turn = None;
             self.push(ItemBody::Error { message: e.clone() });
             return Err(AcpError::Agent(e));
         }
         self.set_status(AcpStatus::Running);
         Ok(())
+    }
+
+    /// A person's prompt sent from another client of the conversation.
+    async fn external_prompt(&mut self, text: String) {
+        self.push(ItemBody::User {
+            text: text.clone(),
+            context: None,
+        });
+        self.host
+            .turn_started(self.thread(), &self.session_id, &text)
+            .await;
+        self.fs_written.clear();
+        self.turn = Some(text);
+        self.set_status(AcpStatus::Running);
     }
 
     async fn respond(
@@ -495,8 +485,14 @@ impl Actor {
             self.host.activity(self.thread());
         }
         match msg {
-            Incoming::Update { update, .. } => self.on_update(update).await,
-            Incoming::Permission { ask, reply, .. } => {
+            Incoming::Update(update) => self.on_update(*update).await,
+            Incoming::Named(title) if self.replaying => self.replayed_name = Some(title),
+            Incoming::Named(title) => {
+                self.host
+                    .named(self.thread(), &self.session_id, &title)
+                    .await
+            }
+            Incoming::Permission { ask, reply } => {
                 let ask = *ask;
                 if self.replaying {
                     reply.answer(&PermissionAnswer::Cancelled);
@@ -585,7 +581,6 @@ impl Actor {
                 path,
                 content,
                 reply,
-                ..
             } => {
                 let path = match self.confined(&path) {
                     Ok(p) => p,
@@ -645,7 +640,6 @@ impl Actor {
                 line,
                 limit,
                 reply,
-                ..
             } => {
                 let path = match self.confined(&path) {
                     Ok(p) => p,
@@ -700,10 +694,15 @@ impl Actor {
     }
 
     async fn on_update(&mut self, update: AcpUpdate) {
-        // The person's prompt is already an item (pushed when it was
-        // sent); a live echo of it would be appended to it. User chunks
-        // belong to a `session/load` replay.
-        if !self.replaying && matches!(update, AcpUpdate::UserChunk(_)) {
+        if let (false, AcpUpdate::UserChunk(text)) = (self.replaying, &update) {
+            // The person's prompt from here is already an item (pushed
+            // when it was sent); a live echo of it would be appended to
+            // it. One with no turn in flight is a prompt the person typed
+            // into another client of the same conversation: theirs, and
+            // the turn it starts is recorded as any other.
+            if self.turn.is_none() {
+                self.external_prompt(text.clone()).await;
+            }
             return;
         }
         let tool_id = match &update {

@@ -24,7 +24,7 @@ export function reconcileSessionTabs(tabs: TabRef[], openSessions: ReadonlyArray
 /** What a new thread opens with, by the person's `newThreadSession`: `ask`
  *  opens the session picker, `none` nothing, and an agent
  *  (`<harness>` / `<harness>:<acp agent>`) starts that agent's session —
- *  unless it can't start any more (disabled, gone, or a chat harness
+ *  unless it can't start any more (disabled, gone, or an ACP harness
  *  without its agent), when it asks instead. */
 export function newThreadTabs(
   setting: string,
@@ -35,6 +35,6 @@ export function newThreadTabs(
   if (setting === "ask") return ask;
   const start = parseAgentChoice(setting);
   const harness = harnesses.find((h) => h.id === start.harness && h.enabled);
-  if (!harness || harness.chat !== (start.acpAgent !== null)) return ask;
+  if (!harness || harness.acpAgent !== (start.acpAgent !== null)) return ask;
   return { tabs: [], start };
 }

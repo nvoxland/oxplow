@@ -1,5 +1,5 @@
-//! Source-scan guard (tsk281): oxplow never synthesizes agent input. A
-//! prompt reaches an ACP agent only because a person submitted it, so the
+//! Source-scan guard: oxplow never synthesizes agent input. A prompt
+//! reaches a chat session's agent only because a person submitted it, so the
 //! code that can build or send one is pinned here. `HumanPrompt` enforces
 //! the same at the type level; this catches a new path around it (a raw
 //! `session/prompt`, a second builder, a new caller of the submit path).
@@ -87,6 +87,17 @@ fn only_wire_names_the_sdk_prompt_request() {
     assert_eq!(
         files_containing(&lines, "PromptRequest"),
         vec!["crates/oxplow-app/src/acp/wire.rs"]
+    );
+}
+
+/// A Codex turn starts only from the connection's `prompt`, which takes a
+/// `HumanPrompt`.
+#[test]
+fn only_the_codex_connection_starts_a_turn() {
+    let lines = source_lines();
+    assert_eq!(
+        files_containing(&lines, "\"turn/start\""),
+        vec!["crates/oxplow-app/src/acp/codex.rs"]
     );
 }
 

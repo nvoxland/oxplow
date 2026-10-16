@@ -18,10 +18,6 @@ fn main() {
         println!("{text}");
         return;
     }
-    if let Some(event) = oxplow_control_plane::hook_client::event_arg(std::env::args().skip(1)) {
-        oxplow_control_plane::hook_client::run_blocking(&event);
-        return;
-    }
     if let Some(args) = extension_args() {
         std::process::exit(extension_cli::run(&args));
     }

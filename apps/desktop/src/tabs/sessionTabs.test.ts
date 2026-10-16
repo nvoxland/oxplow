@@ -47,12 +47,12 @@ test("reconciling never brings the picker back", () => {
 const harness = (id: string, over: Partial<HarnessListing> = {}): HarnessListing => ({
   id,
   title: id,
-  chat: false,
+  acpAgent: false,
   enabled: true,
   settings: [],
   ...over,
 });
-const harnesses = [harness("claude"), harness("acp", { chat: true }), harness("codex", { enabled: false })];
+const harnesses = [harness("claude"), harness("acp", { acpAgent: true }), harness("codex", { enabled: false })];
 
 /** A new thread follows the person's `newThreadSession`: ask opens the
  *  picker, none opens nothing, an agent starts it. */

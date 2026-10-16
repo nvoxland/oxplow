@@ -4777,6 +4777,7 @@ name = "oxplow-harnesses"
 version = "0.7.0"
 dependencies = [
  "async-trait",
+ "futures",
  "oxplow-agent-text",
  "oxplow-domain",
  "oxplow-workspace-hack",
@@ -4784,6 +4785,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tokio-tungstenite 0.30.0",
 ]
 
 [[package]]

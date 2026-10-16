@@ -51,7 +51,8 @@ consumer. It's mounted by two page renderers:
 
 - `apps/desktop/src/pages/AgentPage.tsx` — an agent session's tab,
   `paneTarget` the session id (`ses3`). The backend spawns the session's
-  harness CLI (Claude, Codex or opencode).
+  harness CLI (Claude or opencode; a chat session, ACP or Codex, renders
+  `AcpAgentView` instead).
 - `apps/desktop/src/pages/TerminalPage.tsx` — the "Terminal" Page (rail
   entry + `indexRef("terminal")`). Hosts **multiple** shells: it mounts
   one `TerminalPane` per terminal, stacked and toggled `display:none`
@@ -138,14 +139,14 @@ no `||`). The pane is told what happened:
 worktree (`AgentHarness::conversations`: Claude's transcripts under its
 config dir, named by their last `custom-title` / `ai-title` record with the
 first thing the person typed; opencode's `session list --format json`;
-Codex's app server `thread/list`). `list_native_conversations` (UI-only)
+Codex's daemon's `thread/list`). `list_native_conversations` (UI-only)
 adds whether the session is on each and the other open session on one.
 `ConversationPicker` (opened by the banner's Choose another, or the agent
 tab's **Switch Conversation…** / **Fork Conversation…**) shows them —
 title, else first prompt, else id; ↑/↓, Enter, Escape — and runs
 `oxplow.agent_session.resume_conversation` (refused for one open in
 another session, naming it; undo goes back) or `fork_conversation` (the
-next launch forks it: `--resume <id> --fork-session`, `codex fork`,
+next launch forks it: `--resume <id> --fork-session`, Codex's `thread/fork`,
 `opencode -s <id> --fork`; a `conversation_fork` harness). Both stop the
 running process; the page bumps the pane's `restartKey`, and the pane
 opens the session again once that process has exited.

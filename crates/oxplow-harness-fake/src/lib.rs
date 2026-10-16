@@ -45,6 +45,7 @@ impl AgentHarness for FakeHarness {
     fn interact(&self) -> Interact {
         Interact {
             transcript: Transcript::Terminal,
+            acp_agent: false,
         }
     }
 

@@ -1,6 +1,7 @@
-//! Every open ACP session, by agent session. Holds only each session's command
-//! sender and shared view; the actor (`session.rs`) owns the connection.
-//! Events for every session go out on one broadcast channel.
+//! Every open chat session, by agent session: an ACP agent's or a Codex
+//! thread's. Holds only each session's command sender and shared view; the
+//! actor (`session.rs`) owns the connection. Events for every session go
+//! out on one broadcast channel.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -14,13 +15,15 @@ use serde::Serialize;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
+use super::codex::{CodexConnection, CodexOpen};
+use super::conn::{Connection, Incoming};
 use super::host::AcpHost;
 use super::model::ContextUsage;
 use super::session::{AcpError, AcpEvent, AcpStatus, Actor, Command, SessionSpec, SessionView};
 use super::transcript::TranscriptItem;
-use super::wire;
+use super::wire::{self, AcpOpen};
 
-/// The program to run for an agent.
+/// The ACP agent's program to run.
 #[derive(Debug, Clone)]
 pub struct Launch {
     /// Absolute path.
@@ -30,6 +33,7 @@ pub struct Launch {
     /// What it must not inherit from oxplow's environment
     /// (`agent_path::not_inherited`).
     pub env_remove: Vec<String>,
+    pub open: AcpOpen,
 }
 
 /// A session as the UI reads it.
@@ -160,8 +164,8 @@ impl AcpManager {
         }
     }
 
-    /// Start the agent process and its session. An agent already running
-    /// for the session is kept (`Ok`).
+    /// Start the ACP agent's process and its session. An agent already
+    /// running for the session is kept (`Ok`).
     pub async fn open(
         &self,
         host: Arc<dyn AcpHost>,
@@ -210,16 +214,44 @@ impl AcpManager {
                 }
             });
         }
-        self.start(host, spec, reservation, stdin, stdout, Some(child))
-            .await
+        self.start_acp(
+            host,
+            spec,
+            reservation,
+            launch.open,
+            (stdin, stdout, Some(child)),
+        )
+        .await
     }
 
-    /// Run a session over an existing transport (tests, the in-process
-    /// fake). `write` is the agent's input, `read` its output.
+    /// Open the session's thread on Codex's app-server daemon. A session
+    /// already running is kept (`Ok`).
+    pub async fn open_codex(
+        &self,
+        host: Arc<dyn AcpHost>,
+        spec: SessionSpec,
+        open: CodexOpen,
+    ) -> Result<(), AcpError> {
+        let Some(reservation) = self.reserve(&spec) else {
+            return Ok(());
+        };
+        let (conn, incoming) = match CodexConnection::connect(open).await {
+            Ok(c) => c,
+            Err(e) => {
+                self.release(&reservation.session, reservation.generation);
+                return Err(AcpError::Agent(e));
+            }
+        };
+        self.start(host, spec, reservation, conn, incoming).await
+    }
+
+    /// Run an ACP session over an existing transport (tests, the
+    /// in-process fake). `write` is the agent's input, `read` its output.
     pub async fn open_with_io<W, R>(
         &self,
         host: Arc<dyn AcpHost>,
         spec: SessionSpec,
+        open: AcpOpen,
         write: W,
         read: R,
     ) -> Result<(), AcpError>
@@ -230,7 +262,8 @@ impl AcpManager {
         let Some(reservation) = self.reserve(&spec) else {
             return Ok(());
         };
-        self.start(host, spec, reservation, write, read, None).await
+        self.start_acp(host, spec, reservation, open, (write, read, None))
+            .await
     }
 
     fn generation(&self) -> u64 {
@@ -238,14 +271,16 @@ impl AcpManager {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
 
-    async fn start<W, R>(
+    /// Run the ACP connection over `io` — the agent's input, its output,
+    /// and its process when oxplow spawned it — with the session's actor
+    /// on it.
+    async fn start_acp<W, R>(
         &self,
         host: Arc<dyn AcpHost>,
         spec: SessionSpec,
         reservation: Reservation,
-        write: W,
-        read: R,
-        child: Option<tokio::process::Child>,
+        open: AcpOpen,
+        (write, read, child): (W, R, Option<tokio::process::Child>),
     ) -> Result<(), AcpError>
     where
         W: AsyncWrite + Send + 'static,
@@ -261,7 +296,7 @@ impl AcpManager {
         let actor = Actor::new(spec, host, view.clone(), self.events.clone(), current);
         let teardown = actor.teardown_handle();
         tokio::spawn(async move {
-            let r = wire::run(write, read, move |conn, incoming| {
+            let r = wire::run(write, read, open, move |conn, incoming| {
                 actor.run(conn, incoming, cmd_rx, ready_tx)
             })
             .await;
@@ -278,7 +313,43 @@ impl AcpManager {
             // Dropping the child kills it (`kill_on_drop`).
             drop(child);
         });
-        match ready_rx.await {
+        Self::ready(ready_rx, &view).await
+    }
+
+    /// Run the session's actor on an open connection.
+    async fn start(
+        &self,
+        host: Arc<dyn AcpHost>,
+        spec: SessionSpec,
+        reservation: Reservation,
+        conn: Arc<dyn Connection>,
+        incoming: mpsc::UnboundedReceiver<Incoming>,
+    ) -> Result<(), AcpError> {
+        let Reservation {
+            commands: cmd_rx,
+            view,
+            current,
+            ..
+        } = reservation;
+        let (ready_tx, ready_rx) = oneshot::channel();
+        let actor = Actor::new(spec, host, view.clone(), self.events.clone(), current);
+        let teardown = actor.teardown_handle();
+        tokio::spawn(async move {
+            actor.run(conn, incoming, cmd_rx, ready_tx).await;
+            teardown
+                .run(Some("the agent connection ended".to_string()))
+                .await;
+        });
+        Self::ready(ready_rx, &view).await
+    }
+
+    /// Whether the session started: the actor's word, else the agent's
+    /// last stderr lines.
+    async fn ready(
+        ready: oneshot::Receiver<Result<(), AcpError>>,
+        view: &Mutex<SessionView>,
+    ) -> Result<(), AcpError> {
+        match ready.await {
             Ok(r) => r,
             Err(_) => {
                 let tail = view.lock().stderr_tail.join("\n");

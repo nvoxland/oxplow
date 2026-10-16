@@ -16,12 +16,12 @@ const acp = (name: string, over: Partial<AcpAgentListing> = {}): AcpAgentListing
 const harness = (id: string, title: string, over: Partial<HarnessListing> = {}): HarnessListing => ({
   id,
   title,
-  chat: false,
+  acpAgent: false,
   enabled: true,
   ...over,
 });
 
-const harnesses = [harness("claude", "Claude"), harness("acp", "ACP", { chat: true }), harness("codex", "Codex", { enabled: false })];
+const harnesses = [harness("claude", "Claude"), harness("acp", "ACP", { acpAgent: true }), harness("codex", "Codex", { enabled: false })];
 
 test("each enabled harness is a choice, in order; a chat harness is one per ACP agent, flagged when it can't start", () => {
   const choices = agentChoices(harnesses, [

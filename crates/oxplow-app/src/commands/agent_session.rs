@@ -183,17 +183,17 @@ fn choose_agent(
                     "a `{}` session runs {}",
                     k.as_str(),
                     if k == SessionKind::Chat {
-                        "an ACP agent"
+                        "a harness shown in oxplow's chat"
                     } else {
-                        "a terminal harness, not ACP"
+                        "a terminal harness"
                     }
                 ),
             ));
         }
         _ => {}
     }
-    let acp_agent = match (kind, input.acp_agent.clone()) {
-        (SessionKind::Chat, Some(name)) => {
+    let acp_agent = match (harness.interact().acp_agent, input.acp_agent.clone()) {
+        (true, Some(name)) => {
             if crate::acp::agents::find(adapters, config, &name).is_none() {
                 return Err(invalid(
                     "/acp_agent",
@@ -202,13 +202,13 @@ fn choose_agent(
             }
             Some(name)
         }
-        (SessionKind::Chat, None) if input.harness.is_none() => Some(
+        (true, None) if input.harness.is_none() => Some(
             crate::acp::agents::default_agent(adapters, config)
                 .ok_or_else(|| invalid("/acp_agent", "there are no ACP agents"))?,
         ),
-        (SessionKind::Chat, None) => return Err(invalid("/acp_agent", "an ACP session needs one")),
-        (_, Some(_)) => return Err(invalid("/acp_agent", "only an ACP session names one")),
-        (_, None) => None,
+        (true, None) => return Err(invalid("/acp_agent", "an ACP session needs one")),
+        (false, Some(_)) => return Err(invalid("/acp_agent", "only an ACP session names one")),
+        (false, None) => None,
     };
     Ok((key, kind, acp_agent))
 }

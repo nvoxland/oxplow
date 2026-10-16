@@ -20,6 +20,9 @@ use crate::ids::{AgentSessionId, StreamId, ThreadId};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Interact {
     pub transcript: Transcript,
+    /// Its sessions each name one of the project's ACP agents
+    /// (`agent_session.acp_agent`), the program its launch runs.
+    pub acp_agent: bool,
 }
 
 /// What the person reads.
@@ -27,7 +30,7 @@ pub struct Interact {
 pub enum Transcript {
     /// The harness's own terminal.
     Terminal,
-    /// oxplow's structured transcript (an ACP agent's).
+    /// oxplow's structured transcript (an ACP agent's, a Codex thread's).
     Structured,
 }
 
@@ -74,8 +77,6 @@ pub struct LaunchInput {
     /// The harness's configuration (`agentConfig.<harness>`), or for an
     /// ACP agent its adapter's resolved program.
     pub config: serde_json::Value,
-    /// The oxplow binary, for a harness whose hooks are commands.
-    pub oxplow_executable: PathBuf,
     /// The person's home, where a harness keeps its own sessions.
     pub home: Option<PathBuf>,
     /// Where programs are looked for, in order: the PATH and the
@@ -112,9 +113,10 @@ pub struct RuntimeRoots {
     pub workspaces: Vec<PathBuf>,
 }
 
-/// How the session's process is started. On the wire, `{ "kind": "pty",
-/// "command", "env" }` or `{ "kind": "acp", "program", "args", "env",
-/// "system_prompt_via_meta" }`.
+/// How the session's agent is reached. On the wire, `{ "kind": "pty",
+/// "command", "env" }`, `{ "kind": "acp", "program", "args", "env",
+/// "system_prompt_via_meta" }` or `{ "kind": "codex_app_server", "socket",
+/// "program", "method", "params" }`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LaunchSpec {
@@ -137,6 +139,17 @@ pub enum LaunchSpec {
         /// `session/new` rather than ahead of the first prompt.
         #[serde(default)]
         system_prompt_via_meta: bool,
+    },
+    /// A thread on Codex's shared app-server daemon, opened over its
+    /// control socket with one request (`thread/start`, `thread/resume` or
+    /// `thread/fork` and its params, which carry the session's bearer).
+    CodexAppServer {
+        /// The daemon's control socket.
+        socket: PathBuf,
+        /// `codex`, which starts the daemon when it isn't running.
+        program: Option<PathBuf>,
+        method: String,
+        params: serde_json::Value,
     },
 }
 
@@ -345,7 +358,6 @@ mod tests {
             fork: false,
             text: AgentText::default(),
             config: serde_json::json!({"model": "x"}),
-            oxplow_executable: "/bin/oxplow".into(),
             home: None,
             search_path: vec!["/opt/bin".into()],
         };

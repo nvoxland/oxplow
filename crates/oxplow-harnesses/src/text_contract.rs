@@ -1,15 +1,18 @@
 //! The text contract's launch half (`.context/agent-model.md` "What every
-//! agent is told"): a launch of every terminal harness delivers oxplow's
-//! system prompt, every skill and every slash command to where its agent
-//! reads them — its command line, its environment, or a file it was
-//! pointed at. Hook context is the other half: a harness declares the
+//! agent is told"): a launch of every built-in harness but ACP's (whose
+//! agent is the project's program) delivers oxplow's system prompt, every
+//! skill and every slash command to where its agent reads them — its
+//! command line, its environment, the request that opens its thread, or a
+//! file it was pointed at. Hook context is the other half: a harness declares the
 //! channels its hooks deliver (`prompt_context`, `tool_context`) and core
 //! sends nothing through one it lacks (`oxplow_app::agent_context`).
 
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use crate::test_launch::{harness, launch_in, pty};
+use oxplow_domain::agent::harness::LaunchSpec;
+
+use crate::test_launch::{harness, launch_at_home};
 
 /// What a harness's launch doesn't deliver yet, each a gap to close (and
 /// then drop from here): `(harness, what)`.
@@ -17,11 +20,12 @@ const KNOWN_GAPS: &[(&str, &str)] = &[];
 
 const SYSTEM_PROMPT: &str = "OXPLOW-TEXT-CONTRACT-SYSTEM-PROMPT";
 
-/// Every string a launch hands its agent: the command line, each env
-/// value, each file it wrote under the project's runtime or the worktree —
-/// and, for any of them that is JSON, every string inside it (opencode's
-/// inline config carries its commands).
-fn delivered(project: &Path, workspace: &Path, command: &str, env: &[&str]) -> Vec<String> {
+/// Every string a launch hands its agent: what its spec carries (a PTY's
+/// command line and env values, an app-server thread's opening request),
+/// each file it wrote under the project's runtime or the worktree — and,
+/// for any of them that is JSON, every string inside it (opencode's inline
+/// config carries its commands).
+fn delivered(project: &Path, workspace: &Path, spec: &LaunchSpec) -> Vec<String> {
     fn walk(dir: &Path, out: &mut Vec<String>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
@@ -43,8 +47,13 @@ fn delivered(project: &Path, workspace: &Path, command: &str, env: &[&str]) -> V
             _ => {}
         }
     }
-    let mut out = vec![command.to_string()];
-    out.extend(env.iter().map(|v| v.to_string()));
+    let mut out = match spec {
+        LaunchSpec::Pty { command, env } => std::iter::once(command.clone())
+            .chain(env.iter().map(|(_, v)| v.clone()))
+            .collect(),
+        LaunchSpec::CodexAppServer { params, .. } => vec![params.to_string()],
+        LaunchSpec::Acp { .. } => panic!("an ACP agent's program is the project's"),
+    };
     walk(&project.join(".oxplow/runtime"), &mut out);
     walk(workspace, &mut out);
     let json: Vec<String> = out
@@ -63,18 +72,11 @@ fn delivered(project: &Path, workspace: &Path, command: &str, env: &[&str]) -> V
 /// What of the contract a launch of `h` leaves out.
 fn missing(entry: &str, id: &str) -> BTreeSet<(String, String)> {
     let h = harness(entry, id);
-    let launched = launch_in(
-        h.as_ref(),
-        None,
-        Some(SYSTEM_PROMPT),
-        &serde_json::json!({}),
-    );
-    let (command, env) = pty(&launched.launch);
+    let launched = launch_at_home(h.as_ref(), None, false, Some(SYSTEM_PROMPT));
     let haystack = delivered(
         &launched.project,
         &launched.workspace,
-        command,
-        &env.values().copied().collect::<Vec<_>>(),
+        &launched.launch.spec,
     );
     let reaches = |needle: &str| haystack.iter().any(|text| text.contains(needle));
     let text = oxplow_agent_text::core_text();
@@ -102,7 +104,7 @@ fn missing(entry: &str, id: &str) -> BTreeSet<(String, String)> {
 }
 
 #[test]
-fn every_terminal_harness_delivers_the_prompt_skills_and_commands() {
+fn every_harness_delivers_the_prompt_skills_and_commands() {
     let mut gaps = BTreeSet::new();
     for (entry, id) in [
         ("oxplow:claude-code", "claude"),

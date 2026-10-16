@@ -7,8 +7,8 @@ import { NewThreadSessionSetting } from "./NewThreadSessionSetting.js";
 afterEach(cleanup);
 
 const harnesses: HarnessListing[] = [
-  { id: "claude", title: "Claude", chat: false, enabled: true, settings: [] },
-  { id: "codex", title: "Codex", chat: false, enabled: false, settings: [] },
+  { id: "claude", title: "Claude", acpAgent: false, enabled: true, settings: [] },
+  { id: "codex", title: "Codex", acpAgent: false, enabled: false, settings: [] },
 ];
 
 /** Ask, No session, then each agent a session can start with; a change

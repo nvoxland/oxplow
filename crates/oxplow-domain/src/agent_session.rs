@@ -235,7 +235,10 @@ mod tests {
     /// a terminal.
     #[test]
     fn a_structured_harness_is_a_chat_and_the_rest_are_terminals() {
-        let interact = |transcript| Interact { transcript };
+        let interact = |transcript| Interact {
+            transcript,
+            acp_agent: false,
+        };
         assert_eq!(
             SessionKind::default_for(interact(Transcript::Structured)),
             SessionKind::Chat

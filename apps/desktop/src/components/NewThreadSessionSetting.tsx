@@ -21,7 +21,7 @@ export function NewThreadSessionSetting({
   const [choice, setChoice] = useState<string | null>(null);
   const [acpAgents, setAcpAgents] = useState<AcpAgentListing[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const acpEnabled = harnesses.some((h) => h.enabled && h.chat);
+  const acpEnabled = harnesses.some((h) => h.enabled && h.acpAgent);
   useEffect(() => {
     void read()
       .then(setChoice)

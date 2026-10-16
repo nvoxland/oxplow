@@ -1,4 +1,5 @@
-//! Cores for the `acp` command module: an ACP agent session's agent.
+//! Cores for the `acp` command module: a chat session's agent (an ACP
+//! agent, a Codex thread).
 //!
 //! Every command here is UI-only (`ui(...)` in the surface-parity table),
 //! so none can become an MCP tool. In particular `acp_prompt` is the
@@ -8,10 +9,11 @@
 
 use std::sync::Arc;
 
+use oxplow_app::acp::codex::CodexOpen;
 use oxplow_app::acp::host::ServicesAcpHost;
 use oxplow_app::acp::manager::{AcpSnapshot, Launch};
 use oxplow_app::acp::session::{AcpError, SessionSpec};
-use oxplow_app::acp::wire::McpHttp;
+use oxplow_app::acp::wire::{AcpOpen, McpHttp};
 use oxplow_app::acp::{agents, manager::AcpManager};
 use oxplow_app::Services;
 use oxplow_domain::agent::acp_adapter::SystemPromptVia;
@@ -36,9 +38,10 @@ fn snapshot(
         .ok_or_else(|| acp_err(AcpError::NotOpen))
 }
 
-/// Start ACP agent session `session_id`'s agent (or keep the running one)
-/// and return its state. Loads the session's last ACP session when the
-/// agent supports it.
+/// Start chat session `session_id`'s agent (or keep the running one) and
+/// return its state: an ACP agent's program, or its thread on Codex's
+/// app-server daemon, as its harness's launch says. Continues the
+/// session's saved conversation when it has one.
 pub async fn acp_open_session(
     ctx: &RpcContext,
     session_id: AgentSessionId,
@@ -58,10 +61,9 @@ pub async fn acp_open_session(
             "agent session {session_id} is closed"
         )));
     }
-    let (name, resume) = match (session.kind, session.acp_agent.clone()) {
-        (SessionKind::Chat, Some(name)) => (name, session.resume_session_id.clone()),
-        _ => return Err(IpcError::invalid("this session doesn't run an ACP agent")),
-    };
+    if session.kind != SessionKind::Chat {
+        return Err(IpcError::invalid("this session isn't a chat"));
+    }
     let thread = svc
         .thread_store
         .get(&session.thread_id)
@@ -79,34 +81,6 @@ pub async fn acp_open_session(
         .read()
         .map(|c| c.clone())
         .map_err(|_| IpcError::internal("config lock poisoned"))?;
-    let project_dir = svc.layout.project_dir.clone();
-    let agent = agents::find(&svc.acp_adapters, &config, &name)
-        .ok_or_else(|| IpcError::invalid(format!("no ACP agent named '{name}' is configured")))?;
-    // Checked where it runs: script args are read from the stream's worktree.
-    let cwd = std::path::PathBuf::from(&stream.worktree_path);
-    if !agents::may_start(&svc.approvals, &project_dir, &cwd, &agent) {
-        return Err(IpcError::invalid(format!(
-            "ACP agent '{name}' is a project program; approve it in Settings → Data → Programs first"
-        )));
-    }
-    let program =
-        agents::resolve_command(&project_dir, &agent.program.command).ok_or_else(|| {
-            IpcError::invalid(format!(
-                "'{}' isn't installed (ACP agent '{name}')",
-                agent.program.command
-            ))
-        })?;
-
-    // The session's bearer is the whole of who its MCP calls come from.
-    let endpoints = crate::commands::terminal::session_endpoints(ctx, &session, &thread)?;
-    let mcp = vec![McpHttp {
-        name: "oxplow".into(),
-        url: endpoints.mcp_endpoint_url.clone(),
-        headers: vec![(
-            "Authorization".into(),
-            format!("Bearer {}", endpoints.hook_token),
-        )],
-    }];
     let harness = svc
         .harnesses
         .get(session.harness.as_str())
@@ -127,14 +101,29 @@ pub async fn acp_open_session(
         &declared,
         &oxplow_app::capabilities::agent_text(ctx),
     );
-    // The ACP agent's program, as this project resolves it: the harness's
-    // launch makes it the session's process.
-    let program = serde_json::json!({
-        "program": program,
-        "args": agent.program.args,
-        "env": agent.program.env.clone().into_iter().collect::<Vec<_>>(),
-        "systemPromptViaMeta": agent.system_prompt == SystemPromptVia::Meta,
-    });
+    let cwd = std::path::PathBuf::from(&stream.worktree_path);
+    // An ACP agent's program, as this project resolves it, is the
+    // harness's config; any other harness reads its own `agentConfig`.
+    let (name, launch_config) = if harness.interact().acp_agent {
+        let name = session
+            .acp_agent
+            .clone()
+            .ok_or_else(|| IpcError::invalid("this session names no ACP agent"))?;
+        let program = acp_program(ctx, &config, &cwd, &name)?;
+        (name, program)
+    } else {
+        (
+            harness.title().to_string(),
+            config
+                .agent_config
+                .get(&session.harness)
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({})),
+        )
+    };
+
+    // The session's bearer is the whole of who its MCP calls come from.
+    let endpoints = crate::commands::terminal::session_endpoints(ctx, &session, &thread)?;
     let launch = crate::commands::terminal::launch_session(
         ctx,
         harness.as_ref(),
@@ -142,38 +131,103 @@ pub async fn acp_open_session(
         &session,
         &thread,
         &stream,
-        None,
-        &program,
+        Some(&system_prompt),
+        &launch_config,
     )
     .await?;
-    let LaunchSpec::Acp {
-        program,
-        args,
-        env,
-        system_prompt_via_meta,
-    } = launch.spec
-    else {
-        return Err(IpcError::invalid("this session doesn't run an ACP agent"));
-    };
     let spec = SessionSpec {
         session_id,
         thread_id: thread.id,
-        agent: name,
-        cwd: std::path::PathBuf::from(&stream.worktree_path),
-        mcp,
-        resume_session_id: Some(resume).filter(|s| !s.is_empty()),
-        system_prompt: Some(system_prompt),
-        system_prompt_via_meta,
-    };
-    let launch = Launch {
-        program,
-        args,
-        env,
-        env_remove: oxplow_app::agent_path::not_inherited(&svc.harnesses),
+        agent: name.clone(),
+        cwd,
     };
     let host = Arc::new(ServicesAcpHost::new(svc, Some(stream.id), session_id));
-    svc.acp.open(host, spec, launch).await.map_err(acp_err)?;
+    match launch.spec {
+        LaunchSpec::Acp {
+            program,
+            args,
+            env,
+            system_prompt_via_meta,
+        } => {
+            let open = AcpOpen {
+                agent: name,
+                mcp: vec![McpHttp {
+                    name: "oxplow".into(),
+                    url: endpoints.mcp_endpoint_url.clone(),
+                    headers: vec![(
+                        "Authorization".into(),
+                        format!("Bearer {}", endpoints.hook_token),
+                    )],
+                }],
+                resume_session_id: Some(session.resume_session_id.clone())
+                    .filter(|s| !s.is_empty()),
+                system_prompt: Some(system_prompt),
+                system_prompt_via_meta,
+            };
+            let launch = Launch {
+                program,
+                args,
+                env,
+                env_remove: oxplow_app::agent_path::not_inherited(&svc.harnesses),
+                open,
+            };
+            svc.acp.open(host, spec, launch).await.map_err(acp_err)?;
+        }
+        LaunchSpec::CodexAppServer {
+            socket,
+            program,
+            method,
+            params,
+        } => {
+            let open = CodexOpen {
+                socket,
+                program,
+                method,
+                params,
+            };
+            svc.acp
+                .open_codex(host, spec, open)
+                .await
+                .map_err(acp_err)?;
+        }
+        LaunchSpec::Pty { .. } => {
+            return Err(IpcError::invalid("this session runs in a terminal"));
+        }
+    }
     snapshot(&svc.acp, &session_id, 0)
+}
+
+/// ACP agent `name`'s program, as the project resolves it for the
+/// worktree `cwd`, in the shape the `acp` harness's launch reads.
+fn acp_program(
+    ctx: &RpcContext,
+    config: &oxplow_config::OxplowConfig,
+    cwd: &std::path::Path,
+    name: &str,
+) -> Result<serde_json::Value, IpcError> {
+    let svc = &ctx.services;
+    let project_dir = svc.layout.project_dir.clone();
+    let agent = agents::find(&svc.acp_adapters, config, name)
+        .ok_or_else(|| IpcError::invalid(format!("no ACP agent named '{name}' is configured")))?;
+    // Checked where it runs: script args are read from the stream's worktree.
+    if !agents::may_start(&svc.approvals, &project_dir, cwd, &agent) {
+        return Err(IpcError::invalid(format!(
+            "ACP agent '{name}' is a project program; approve it in Settings → Data → Programs first"
+        )));
+    }
+    let program =
+        agents::resolve_command(&project_dir, &agent.program.command).ok_or_else(|| {
+            IpcError::invalid(format!(
+                "'{}' isn't installed (ACP agent '{name}')",
+                agent.program.command
+            ))
+        })?;
+    Ok(serde_json::json!({
+        "program": program,
+        "args": agent.program.args,
+        "env": agent.program.env.clone().into_iter().collect::<Vec<_>>(),
+        "systemPromptViaMeta": agent.system_prompt == SystemPromptVia::Meta,
+    }))
 }
 
 /// What the person typed in the prompt box. The one path by which a
@@ -239,7 +293,11 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(err.message.contains("no ACP agent"), "{}", err.message);
+        assert!(
+            err.message.contains("no agent is running"),
+            "{}",
+            err.message
+        );
         let t = crate::dispatch(
             "acp_transcript",
             json!({"sessionId": "ses1", "sinceSeq": 0}),
@@ -251,7 +309,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn opening_a_terminal_session_as_acp_is_refused() {
+    async fn opening_a_terminal_session_as_a_chat_is_refused() {
         let (ctx, _dir) = crate::test_support::services().await;
         let stream = ctx.streams.ensure_primary().await.unwrap();
         let thread = ctx
@@ -274,10 +332,6 @@ mod tests {
         let err = crate::dispatch("acp_open_session", json!({"sessionId": session}), &ctx)
             .await
             .unwrap_err();
-        assert!(
-            err.message.contains("doesn't run an ACP agent"),
-            "{}",
-            err.message
-        );
+        assert!(err.message.contains("isn't a chat"), "{}", err.message);
     }
 }

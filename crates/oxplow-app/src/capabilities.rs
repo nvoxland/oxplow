@@ -133,17 +133,17 @@ pub const BUILT_INS: &[BuiltIn] = &[
             "conversation_fork",
         ],
     ),
+    // A client of Codex's app-server daemon: its thread in oxplow's chat,
+    // approvals as cards, context on the person's next prompt.
     harness(
         "oxplow:codex-cli",
         "Codex",
         &[
-            "terminal",
+            "structured_transcript",
+            "permission_prompts",
             "resume",
-            "telemetry",
             "runtime_text",
-            "subagents",
             "prompt_context",
-            "tool_context",
             "conversation_list",
             "conversation_fork",
         ],

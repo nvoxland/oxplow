@@ -105,6 +105,7 @@ impl CapabilityHost for HarnessHost {
                 } else {
                     Transcript::Terminal
                 },
+                acp_agent: false,
             },
             data,
             verbs,

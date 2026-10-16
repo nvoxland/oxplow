@@ -482,7 +482,7 @@ pub(crate) mod tests {
     use opentelemetry_proto::tonic::common::v1::AnyValue;
     use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
     use opentelemetry_proto::tonic::metrics::v1::{
-        Histogram, HistogramDataPoint, Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics,
+        Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics,
     };
     use oxplow_domain::events::schema::TokenKind;
 
@@ -518,6 +518,7 @@ pub(crate) mod tests {
         fn interact(&self) -> oxplow_domain::agent::harness::Interact {
             oxplow_domain::agent::harness::Interact {
                 transcript: oxplow_domain::agent::harness::Transcript::Terminal,
+                acp_agent: false,
             }
         }
         async fn launch(
@@ -586,16 +587,6 @@ pub(crate) mod tests {
             key: k.into(),
             value: Some(AnyValue {
                 value: Some(any_value::Value::StringValue(v.into())),
-            }),
-            ..Default::default()
-        }
-    }
-
-    fn kv_int(k: &str, v: i64) -> KeyValue {
-        KeyValue {
-            key: k.into(),
-            value: Some(AnyValue {
-                value: Some(any_value::Value::IntValue(v)),
             }),
             ..Default::default()
         }
@@ -717,57 +708,6 @@ pub(crate) mod tests {
     }
 
     /// A histogram's sum is its value.
-    #[test]
-    fn a_histogram_export_reads_its_sums() {
-        let hp = |token_type: &str, sum: f64| HistogramDataPoint {
-            attributes: vec![kv("token_type", token_type)],
-            sum: Some(sum),
-            ..Default::default()
-        };
-        let body = metrics(
-            vec![],
-            vec![Metric {
-                name: "codex.turn.token_usage".into(),
-                data: Some(metric::Data::Histogram(Histogram {
-                    data_points: vec![hp("input", 100.0), hp("reasoning_output", 30.0)],
-                    ..Default::default()
-                })),
-                ..Default::default()
-            }],
-        );
-        let r = readings(&body);
-        assert_eq!(sum_of(&r, TokenKind::Input), 100);
-        assert_eq!(sum_of(&r, TokenKind::Output), 30);
-    }
-
-    /// A body that isn't metrics is read as logs, ints and numeric strings
-    /// alike, timed by the record; a log event with no counts is none.
-    #[test]
-    fn a_logs_export_reads_through_the_harnesses() {
-        let rec = LogRecord {
-            time_unix_nano: 5,
-            attributes: vec![
-                kv("event.kind", "response.completed"),
-                kv_int("input_token_count", 113690),
-                kv_int("cached_token_count", 2432),
-                kv("output_token_count", "254"),
-                kv("model", "gpt-5.5"),
-            ],
-            ..Default::default()
-        };
-        let r = readings(&logs(vec![rec]));
-        assert_eq!(sum_of(&r, TokenKind::Input), 111258);
-        assert_eq!(sum_of(&r, TokenKind::Output), 254);
-        assert!(r
-            .iter()
-            .all(|r| r.at_unix_nano == 5 && r.model == "gpt-5.5"));
-        let other = LogRecord {
-            attributes: vec![kv("event.name", "codex.api_request")],
-            ..Default::default()
-        };
-        assert_eq!(decode(&logs(vec![other]), &harnesses()), None);
-    }
-
     /// No harness registered reads no counts.
     #[test]
     fn with_no_harness_an_export_reads_as_none() {
