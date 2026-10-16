@@ -30,7 +30,6 @@ import {
   type ChatViewState,
 } from "./chatTranscript.js";
 import { EmptyState } from "../Prompts/EmptyState.js";
-import { TerminalPane } from "../TerminalPane.js";
 
 
 interface Props {
@@ -46,9 +45,6 @@ interface Props {
   onOpenSettings?(): void;
   /** Open a page (an answer's links). */
   onOpenPage?(ref: TabRef): void;
-  /** The harness has a view of its own on the session's saved
-   *  conversation (Codex's TUI): the header offers it under this label. */
-  nativeViewLabel?: string;
 }
 
 /**
@@ -60,15 +56,12 @@ interface Props {
  * oxplow never sends the agent anything on its own: only the person's
  * Enter sends (see ChatPromptBox).
  */
-export function ChatAgentView({ thread, sessionId, worktreePath, visible, onOpenDiff, onOpenFile, onOpenSettings, onOpenPage, nativeViewLabel }: Props) {
+export function ChatAgentView({ thread, sessionId, worktreePath, visible, onOpenDiff, onOpenFile, onOpenSettings, onOpenPage }: Props) {
   const threadId = thread.id;
   const [state, setState] = useState<ChatViewState>(initialState);
   const [openError, setOpenError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  // The harness's own view under the transcript. Hiding it detaches the
-  // pane; the process it runs stays (`native:<ses>` reattaches).
-  const [nativeOpen, setNativeOpen] = useState(false);
   const headSeq = useRef(0);
   headSeq.current = state.headSeq;
 
@@ -175,17 +168,6 @@ export function ChatAgentView({ thread, sessionId, worktreePath, visible, onOpen
             Context {pct}%
           </span>
         )}
-        {nativeViewLabel && (
-          <button
-            type="button"
-            data-testid="acp-native-view"
-            aria-pressed={nativeOpen}
-            onClick={() => setNativeOpen((open) => !open)}
-            style={smallButton}
-          >
-            {nativeViewLabel}
-          </button>
-        )}
         {state.status === "stopped" && (
           <button type="button" data-testid="acp-restart" onClick={() => void open()} style={smallButton} disabled={opening}>
             {opening ? "Starting…" : "Restart"}
@@ -220,15 +202,6 @@ export function ChatAgentView({ thread, sessionId, worktreePath, visible, onOpen
         onError={report}
         starting={opening || state.status === "starting"}
       />
-
-      {nativeViewLabel && nativeOpen && (
-        <div
-          data-testid="acp-native-view-pane"
-          style={{ flex: "0 0 45%", minHeight: 160, display: "flex", flexDirection: "column", borderTop: "1px solid var(--border-subtle)" }}
-        >
-          <TerminalPane paneTarget={`native:${sessionId}`} visible={visible} startOnActivate worktreePath={worktreePath} />
-        </div>
-      )}
 
       {state.status === "stopped" && state.closedReason && (
         <div style={{ ...notice("var(--text-muted)"), margin: "0 10px 6px" }}>

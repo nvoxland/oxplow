@@ -366,7 +366,6 @@ macro_rules! oxplow_command_table {
                 respond_lsp_apply_edit => $crate::commands::lsp::respond_lsp_apply_edit { token: u32, applied: bool, failure_reason: Option<String> } -> (),
                 // terminal (open_terminal_session stays Tauri-only: PluginRuntimeState)
                 forward_terminal_input => $crate::commands::terminal::forward_terminal_input { session_id: String, message: String } -> (),
-                open_native_view => $crate::commands::terminal::open_native_view { session_id: String, cols: u16, rows: u16 } -> ::oxplow_app::terminal_sessions::AttachResult,
                 close_terminal_session => $crate::commands::terminal::close_terminal_session { session_id: String } -> (),
                 terminal_session_cwd => $crate::commands::terminal::terminal_session_cwd { session_id: String } -> Option<String>,
                 terminate_terminal_session => $crate::commands::terminal::terminate_terminal_session { session_id: String } -> (),

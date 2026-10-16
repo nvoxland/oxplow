@@ -90,15 +90,12 @@ fn only_wire_names_the_sdk_prompt_request() {
     );
 }
 
-/// A Codex turn starts only from the connection's `prompt`, which takes a
-/// `HumanPrompt`.
+/// Nothing in production starts a Codex turn: the person prompts in
+/// Codex's own TUI, and oxplow only observes the thread.
 #[test]
-fn only_the_codex_connection_starts_a_turn() {
+fn nothing_starts_a_codex_turn() {
     let lines = source_lines();
-    assert_eq!(
-        files_containing(&lines, "\"turn/start\""),
-        vec!["crates/oxplow-app/src/chat/codex.rs"]
-    );
+    assert!(files_containing(&lines, "\"turn/start\"").is_empty());
 }
 
 #[test]

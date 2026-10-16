@@ -207,10 +207,7 @@ function buildBridge() {
       cols: number,
       rows: number,
     ): Promise<{ sessionId: string; replayB64: string; launch: "reattached" | "started" | "resumed" }> => {
-      // `native:<ses>`: a chat session's harness-own view, a PTY of its own.
-      const result = paneTarget.startsWith("native:")
-        ? unwrap(await commands.openNativeView(paneTarget.slice("native:".length), cols, rows))
-        : unwrap(await commands.openTerminalSession(paneTarget, cols, rows));
+      const result = unwrap(await commands.openTerminalSession(paneTarget, cols, rows));
       return { sessionId: result.sessionId, replayB64: result.replayB64, launch: result.launch };
     },
     /// The live terminal of an agent session, without starting one: `null`

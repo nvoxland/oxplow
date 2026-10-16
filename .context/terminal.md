@@ -51,8 +51,9 @@ consumer. It's mounted by two page renderers:
 
 - `apps/desktop/src/pages/AgentPage.tsx` — an agent session's tab,
   `paneTarget` the session id (`ses3`). The backend spawns the session's
-  harness CLI (Claude or opencode; a chat session, ACP or Codex, renders
-  `ChatAgentView` instead).
+  harness CLI (Claude, opencode, or Codex's TUI on the thread oxplow
+  opened on its daemon; an ACP chat session renders `ChatAgentView`
+  instead).
 - `apps/desktop/src/pages/TerminalPage.tsx` — the "Terminal" Page (rail
   entry + `indexRef("terminal")`). Hosts **multiple** shells: it mounts
   one `TerminalPane` per terminal, stacked and toggled `display:none`
@@ -329,18 +330,6 @@ now passes the hook's `guard`, which suppresses the passive closes
   list so the resulting unmount kills the shell. Stream switches and
   closing the whole Terminal page tab unmount with the flag false →
   detach, so those shells survive and reattach.
-
-## A chat session's own view (`native:<ses>`)
-
-A chat session whose harness has a UI of its own (Codex's TUI on the
-daemon's thread; `.context/agent-model.md` "Open in Codex") opens it in a
-`TerminalPane` with pane target `native:<ses>`. `api.openTerminalSession`
-sends a `native:` target to the `open_native_view` RPC instead of
-`open_terminal_session`: the PTY is registered under the key
-`native:<ses>`, so reopening attaches the live one, and the pane unmounting
-only detaches (`closeTerminalSession`), never terminating it. It carries no
-interrupt, comment or start/stop controls — it is a view, not the session's
-agent pane (`<ses>`).
 
 ## File-path link provider
 

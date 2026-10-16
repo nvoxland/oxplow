@@ -214,17 +214,23 @@ mod tests {
     use crate::test_fixtures::services_with_effort;
 
     /// Every built-in harness keeps the floor: run over each as any
-    /// harness is (the ACP one launches the program its config names).
+    /// harness is (the ACP one launches the program its config names), its
+    /// CLI where oxplow looks.
     #[tokio::test]
     async fn every_built_in_harness_passes() {
         let fx = services_with_effort().await;
+        let bin = tempfile::tempdir().unwrap();
+        for program in ["claude", "codex", "opencode"] {
+            std::fs::write(bin.path().join(program), "").unwrap();
+        }
+        let search_path = [bin.path().to_path_buf()];
         for id in ["claude", "codex", "opencode", "acp"] {
             let config = if id == "acp" {
                 json!({ "program": "/bin/true" })
             } else {
                 json!({})
             };
-            let run = suite(&fx.svc, id, &config, &[]).await;
+            let run = suite(&fx.svc, id, &config, &search_path).await;
             assert!(run.findings.is_empty(), "{id}: {:#?}", run.findings);
         }
     }

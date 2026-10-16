@@ -138,7 +138,8 @@ step). `AgentContext::prompt_context` / `post_tool_context`
 give nothing for a channel it lacks (`agent_context::carries`; a hook from
 no session is answered), so nothing meant for its agent is taken: nudges
 wait in the store. Claude Code and opencode declare both; an ACP agent
-and Codex declare `prompt_context` only.
+declares `prompt_context` only, and Codex neither (its TUI owns the
+prompt).
 
 **Once, then on change.** On every prompt, `prompt_context` builds the
 `<session-context>` block and the decisions block and sends each only
@@ -179,9 +180,9 @@ approval, since no prompt comes between; nudges wait for the next call.
 | Skills | Plugin dir `.oxplow/runtime/claude-plugin/skills/` (`--plugin-dir`) | The worktree's `.agents/skills/<name>/` | `.oxplow/runtime/opencode-plugin/skills/`, named by the config's `skills.paths` | The index in the prompt + `oxplow_get_skill` |
 | Slash commands | Plugin `commands/`, run as `/oxplow:<name>` | A skill per command, `oxplow-<name>`, run as `$oxplow-<name>` | Inline config `command` key, run as `/oxplow-<name>` | Not delivered |
 | Hooks | HTTP hooks (`hooks.json`) | None: the thread's notifications, in-process (`ServicesChatHost`) | A JS bridge plugin posting Claude-shaped bodies | In-process (`ServicesChatHost`), no hook route |
-| Context channels | Both, as `additionalContext` | Prompt only: a visible leading block on the person's next prompt | Prompt: a `synthetic` text part on the user's message; tool: appended to the tool's result | Prompt only: a visible leading block on the person's next prompt |
+| Context channels | Both, as `additionalContext` | None: the session context rides the system prompt | Prompt: a `synthetic` text part on the user's message; tool: appended to the tool's result | Prompt only: a visible leading block on the person's next prompt |
 | Token capture | OTEL metrics + the transcript's turns | The thread's `tokenUsage` across the turn | None | The prompt response's `usage` |
-| Final message | Stop's `last_assistant_message` | The transcript's last agent message on the Stop body | The bridge reads the session's last assistant message onto `Stop` | The transcript's last agent message on the Stop body |
+| Final message | Stop's `last_assistant_message` | The turn's last agent message on the Stop body | The bridge reads the session's last assistant message onto `Stop` | The transcript's last agent message on the Stop body |
 
 Codex finds skills only beside the directory it runs in (`skills.config`
 entries don't add one, and a plugin must be installed into `~/.codex`),
@@ -409,8 +410,9 @@ transcript_missing }`. The spec is `LaunchSpec::Pty { command, env }` (a
 shell command and the env the spawn sets — anything secret goes in `env`,
 never `command`), `LaunchSpec::Acp { program, args, env,
 system_prompt_via_meta }`, or `LaunchSpec::CodexAppServer { socket,
-program, method, params }` (the request that opens a thread on Codex's
-daemon, "Codex: an app-server client"). The built-ins live in `crates/oxplow-harnesses/`
+program, method, params, attach }` (the request that opens a thread on
+Codex's daemon, and the TUI's argv that attaches to it, "Codex: its TUI
+on a thread oxplow observes"). The built-ins live in `crates/oxplow-harnesses/`
 (`claude.rs`, `codex/`, `opencode.rs`, `acp.rs`; shell quoting and
 shared runtime writers in `shared.rs`) and depend only on the domain;
 core's text lives in `oxplow-agent-text`. The one caller is
@@ -436,8 +438,7 @@ verbs it has as features — `transcript` (`turns`), `telemetry`
 (`token_readings`), `runtime_text` (`refresh_text`), `subagents`
 (`prompt`, `subagent`), `conversation_list` (`conversations`: its saved
 conversations for a worktree), `conversation_fork` (a launch with
-`LaunchInput.fork` continues a copy), `native_view` (`native_view`: a shell
-command showing a saved conversation in the harness's own UI) — and the two context channels,
+`LaunchInput.fork` continues a copy) — and the two context channels,
 `prompt_context` and `tool_context`. `session_title(body)` (Claude's
 `session_title` on a prompt) is the name the harness gives the session's
 conversation, written to `agent_session.native_title`. The UI reads each
@@ -446,7 +447,7 @@ harness's features from `list_agent_harnesses` (`HarnessListing.features`):
 | Harness (key) | Features |
 |---|---|
 | Claude Code (`claude`) | terminal, permission_prompts, resume, transcript, telemetry, runtime_text, subagents, prompt_context, tool_context, conversation_list, conversation_fork |
-| Codex (`codex`) | structured_transcript, permission_prompts, resume, runtime_text, prompt_context, conversation_list, conversation_fork, native_view |
+| Codex (`codex`) | terminal, permission_prompts, resume, runtime_text, conversation_list, conversation_fork |
 | opencode (`opencode`) | terminal, resume, runtime_text, subagents, prompt_context, tool_context, conversation_list, conversation_fork |
 | ACP agent (`acp`) | structured_transcript, permission_prompts, resume, prompt_context |
 
@@ -509,10 +510,10 @@ one no longer offered is removed, a person's own stay.
   made Claude Code discard answers the server was about to give. Its OTEL
   env points the metrics exporter at `/v1/metrics` with the bearer in
   `OTEL_EXPORTER_OTLP_HEADERS` (10 s interval).
-- **Codex** keeps nothing under `.oxplow/runtime/` and runs no process
-  of oxplow's: its launch is the request that opens the session's thread
-  on Codex's shared daemon ("Codex: an app-server client"), its MCP
-  server and system prompt in the thread's own config. Its skills (and
+- **Codex** keeps nothing under `.oxplow/runtime/`: its launch is the
+  request that opens the session's thread on Codex's shared daemon, its
+  MCP server and system prompt in the thread's own config, and the TUI
+  that attaches to it ("Codex: its TUI on a thread oxplow observes"). Its skills (and
   commands, as skills) go to the worktree's `.agents/skills/`
   (`shared::write_worktree_skills`).
 - **opencode** writes `.oxplow/runtime/opencode-plugin/`
@@ -813,128 +814,119 @@ the browser suite drives it end to end
 suite"). `tests/acp_live.rs` is `#[ignore]`d: `OXPLOW_ACP_LIVE_CMD="<adapter
 command>" cargo test -p oxplow-app --test acp_live -- --ignored`.
 
-### Codex: an app-server client
+### Codex: its TUI on a thread oxplow observes
 
-A Codex session is a chat: oxplow is a client of Codex's shared
-app-server daemon, the way Codex's own TUI and its IDE extension are, so
-the session's thread is one Codex itself knows — `codex agents` lists it,
-and the person can attach Codex's TUI to it (`codex resume <id>`) beside
-oxplow's view.
+A Codex session is Codex's own TUI in the session's terminal, on a thread
+of Codex's shared app-server daemon that oxplow opens first and keeps
+observing. Because the thread lives on the daemon, `codex agents`, the
+Codex app and other Codex TUIs see it like any other; because oxplow
+opened it, it carries oxplow's MCP server and system prompt.
 
-**Why not a terminal.** A `codex` started with any `--config` override
-runs embedded, never on the daemon, so oxplow's hooks, MCP server and
-exporter overrides kept its sessions out of everything else that reads
-the daemon; and Codex's command-line hooks now need a trust review
-before they run. The daemon's API takes what oxplow needs per thread
-instead: `thread/start { cwd, sandbox, config, developerInstructions }`,
-where `config.mcp_servers.oxplow` (an HTTP server with the session's
-bearer as a literal `Authorization` header) reaches oxplow, and the
-person's own `~/.codex/config.toml` stays theirs. (A per-thread
-`config.hooks` doesn't apply, so there are no hooks: oxplow observes the
-thread's notifications.)
+**Why this shape.** A `codex` started with any `--config` override runs
+embedded, never on the daemon, and its command-line hooks need a trust
+review before they run, so the old way (hooks, MCP server and exporter as
+overrides) kept sessions off the daemon. The daemon's API takes what
+oxplow needs per thread instead: `thread/start { cwd, sandbox, config,
+developerInstructions }`, where `config.mcp_servers.oxplow` (an HTTP
+server with the session's bearer as a literal `Authorization` header)
+reaches oxplow and the person's own `~/.codex/config.toml` stays theirs.
+A per-thread `config.hooks` doesn't apply, so there are no hooks: oxplow
+reads the thread's notifications. Probed on the 0.163 daemon:
+
+- `codex resume <id>` attaches to a thread another client holds, without
+  forking, and the thread keeps the config it was opened with. A TUI
+  resuming a thread **no client holds** re-applies the TUI's own config,
+  dropping oxplow's MCP server — so oxplow opens and holds the thread
+  before the TUI attaches, and keeps holding it after the TUI exits.
+- A client-started thread has no rollout until something persists it,
+  and `codex resume` needs one: `thread/goal/set` writes it
+  (`thread/settings/update` doesn't).
+- `codex --remote unix://… -c …` starts a thread on the daemon but
+  doesn't carry the overrides to it, so the TUI can't bring oxplow's
+  config itself.
+- Each resume writes a history segment whose `session_meta` names the
+  thread as its parent; those are not threads (resuming one has "no
+  rollout").
 
 **The client.** `oxplow_harnesses::codex_app_server` is JSON-RPC over a
 websocket on the daemon's control socket,
 `$CODEX_HOME/app-server-control/app-server-control.sock` (`$CODEX_HOME`
 defaulting to `~/.codex`); when nothing answers it runs `codex app-server
 daemon start` once. Each user opens its own connection: a session's
-thread (`oxplow_app::chat::codex`), one `thread/list` for the conversation
-picker. The handshake is `initialize { clientInfo: oxplow, capabilities:
-{ experimentalApi } }` then `initialized`; the protocol is marked
-experimental, and the recorded fixture
-(`crates/oxplow-app/tests/fixtures/codex/app-server.jsonl`, 0.163.0)
-pins the shapes oxplow reads.
+observer (`oxplow_app::chat::codex`), one `thread/list` for the
+conversation picker. The handshake is `initialize { clientInfo: oxplow,
+capabilities: { experimentalApi } }` then `initialized`; the client reads
+messages up to 256 MiB (a thread's answers run past the websocket's
+16 MiB default). The protocol is marked experimental, and the recorded
+fixture (`crates/oxplow-app/tests/fixtures/codex/app-server.jsonl`,
+0.163.0) pins the shapes oxplow reads.
 
 **Launch.** The harness (`crates/oxplow-harnesses/src/codex/`) writes
 the worktree skills and returns `LaunchSpec::CodexAppServer`: the socket
 under the person's home (none for a stream on another host: no launch),
-`codex` to start the daemon, and one request — `thread/start` for a new
-conversation, `thread/resume { threadId, excludeTurns, initialTurnsPage: {
-itemsView: full, sortDirection: desc, limit: 20 } }` for the bound one (a
-page, not the history: full turns run to megabytes each, and the client
-reads messages up to 256 MiB, past the websocket's 16 MiB default), or
-`thread/fork { threadId }` — each with the worktree as `cwd`, oxplow's
-system prompt as `developerInstructions` and oxplow's MCP server in
-`config`. The thread's
-id is the session's resume id. `chat_open_session` sends it through
-`ChatManager::open_codex`.
+`codex` to start the daemon, the request that opens the thread —
+`thread/start` for a new conversation, `thread/resume { threadId,
+excludeTurns }` for the bound one, `thread/fork { threadId }` — each with
+the worktree as `cwd`, oxplow's system prompt as `developerInstructions`
+and oxplow's MCP server in `config`; and `attach`, the TUI's argv
+(`<codex> resume --cd <worktree>`, no `-c`: an override runs it
+embedded). No `codex` where oxplow looks is a launch error.
+`open_terminal_session` opens the observer (`ChatManager::open_codex`,
+which keeps one already running and answers its thread's id), then
+spawns the session's PTY as any agent pane, running `attach` with the
+thread id appended. The thread's id is the session's resume id.
 
-**The session.** The chat session's actor (`chat/session.rs`) runs over a
-`conn::Connection`: ACP's (`wire.rs`) or Codex's (`codex.rs`), each
-delivering the same `Incoming` messages in order. Codex's connection:
+**The observer.** The chat session's actor (`chat/session.rs`) over
+Codex's `conn::Connection`, with no view. It:
 
+- persists a new thread before answering (`thread/goal/set` then
+  `thread/goal/clear`), so the TUI can resume it;
 - passes only messages naming its thread (the daemon also sends a
   client what concerns other threads, Codex's title-generation thread
-  among them), holding them until the thread is open so a resume's
-  replay comes first;
-- maps items to the transcript: `userMessage` → the user item,
-  `agentMessage` deltas and `reasoning` summary deltas → agent and
-  thought text (a completed item doesn't repeat what streamed),
+  among them);
+- records what the person does in the TUI: a `userMessage` with no turn
+  in flight is their prompt (`external_prompt`, a `UserPromptSubmit`);
   `commandExecution` → a tool call (read when every parsed action is a
   read, search when they're searches or listings, else execute; the
-  model's command, not its shell wrapper; `exit_code` and output once it
-  ends), `fileChange` → an edit (delete, move) of its paths with the
-  unified diff as text, `mcpToolCall` → `mcp__<server>__<tool>`,
-  `webSearch` → fetch, anything else → other; `turn/plan/updated` → the
-  plan; `thread/tokenUsage/updated` → the context meter;
-- ends a turn on `turn/completed` (a failed one is an error), with the
-  turn's tokens as the change in the thread's cumulative counts (input
-  less the cached input; cache reads separate);
-- reports `thread/name/updated` (and a resumed thread's name, once the
-  session is recorded) as the conversation's name
-  (`HookIngestService::name_conversation`);
-- shows `item/commandExecution/requestApproval` and
-  `item/fileChange/requestApproval` as permission cards — Allow
-  (`accept`), Allow for this session (`acceptForSession`), Deny
-  (`decline`); Stop answers `cancel` — through the same policy check and
-  person-only answer as an ACP request. Any other server request
-  (`item/tool/requestUserInput`, `item/permissions/requestApproval`) is
-  refused with an error rather than left waiting;
-- sends the person's prompt as `turn/start { threadId, input,
-  sandboxPolicy }` (one text input per `HumanPrompt` block) and Stop as
-  `turn/interrupt`.
+  model's command, not its shell wrapper; `exit_code` once it ends),
+  `fileChange` → an edit (delete, move) of its paths, `mcpToolCall` →
+  `mcp__<server>__<tool>`, `webSearch` → fetch, anything else → other;
+  `turn/completed` → the Stop with its last agent message and the turn's
+  tokens (the change in the thread's cumulative counts: input less the
+  cached input, cache reads separate); `thread/name/updated` → the
+  conversation's name (`HookIngestService::name_conversation`);
+- sends no turn and answers no request: approvals and questions are the
+  TUI's (`prompt` refuses; `guard_tests::nothing_starts_a_codex_turn`
+  finds no `"turn/start"` in production code).
+
+It stays open when the TUI exits (the PTY's exit ingests the
+`SessionEnd`), so a reopened TUI attaches to a held thread; it closes
+with the session or its thread (`SessionProcesses::kill`). After an
+oxplow restart the next open resumes the thread with `config` again
+(a loaded thread no client holds takes it).
 
 **The sandbox is the write guard.** No hook runs before a Codex edit, so
-the thread's access is Codex's sandbox: the open request and every
-`turn/start` carry `workspace-write` for the stream's writer thread and
-`read-only` for any other (`ChatHost::writable`, asked each time, so a
-promotion or demotion takes effect on the next prompt). A turn's sandbox
-holds for the turns after it, Codex's TUI's included. An approval Codex
-asks for still goes through the policy, and an edit that completes
-without one is checked after the fact (the bypass banner).
+the thread's access is Codex's sandbox: the open request carries
+`workspace-write` for the stream's writer thread and `read-only` for any
+other (`ChatHost::writable`). After any `oxplow.thread.*` command
+(`chat::access`, a pump consumer on `command.executed`) every running
+session re-reads its access, and a changed one is sent as
+`thread/settings/update { sandboxPolicy }` — only a change, since one
+restarts the thread's MCP servers. It holds for the turns after it, the
+TUI's included.
 
-A prompt the person types into Codex's TUI on the same thread arrives as
-a `userMessage` with no turn of oxplow's in flight: the actor records it
-as the person's and the turn it starts like any other
-(`external_prompt`). Approvals follow the person's Codex config (their
-`approvals_reviewer` may answer before a card would show).
+**No context channel.** The TUI owns the prompt, so Codex declares no
+`prompt_context` / `tool_context`: what it is told comes in the system
+prompt at open (the session context included,
+`assemble_system_prompt`) and through oxplow's tools. The daemon's
+`thread/inject_items` (appending to the model's history without a turn)
+is the candidate for a mid-session channel; it is experimental and not
+used.
 
-**Guards.** `"turn/start"` appears only in `chat/codex.rs`
-(`guard_tests::only_the_codex_connection_starts_a_turn`), whose
-`prompt` takes only a `HumanPrompt`.
-
-**Not yet.** Collab agents (`collabAgentToolCall`) aren't subagents
-here; a compaction (`thread/compacted`) doesn't reset the context
-baselines; turns another client ran while oxplow was down are shown by
-the next resume but not recorded.
-
-**Open in Codex.** A chat session whose harness declares the feature
-`native_view` and whose slot is bound to a saved conversation shows an
-"Open in Codex" button in its header (`ChatAgentView`, label "Open in
-<harness title>"). It toggles a `TerminalPane` under the transcript with
-pane target `native:<ses>`, which the desktop opens through the UI-only
-RPC `open_native_view { sessionId, cols, rows }`. The core refuses what
-isn't a chat session, a harness without the verb (`AgentHarness::native_view`,
-default unsupported) and a slot with no saved conversation; otherwise
-the harness answers the command, Codex's `codex resume --cd <worktree>
-<thread id>` (the program as resolved, every argument shell-escaped, run
-as `sh -lc "cd <worktree> && exec …"`), and the PTY is spawned under the
-key `native:<ses>` — a second open reattaches the live one. No `-c` /
-`--config` override: one would make Codex run embedded instead of
-attaching to the daemon's thread. The pane's keystrokes are the person's,
-through the same `forward_terminal_input` path (the no-automation
-guards hold: oxplow types nothing into it), and hiding the pane detaches
-it without killing the process.
+**Pitfalls.** `/new` in the TUI starts a thread with the TUI's own
+config, which oxplow doesn't bind: use Start Fresh. Collab agents
+(`collabAgentToolCall`) aren't subagents here, and a compaction
+(`thread/compacted`) doesn't reset the context baselines.
 
 ## Observing
 
@@ -954,7 +946,7 @@ it names (`paths`), a shell call's `command`, a short `detail`, the
   `patchText`). opencode's `apply_patch` → `edit` of every file the
   patch names (`shared::patch_paths`). An ACP agent's calls and a Codex
   thread's items are mapped by `chat::mapping` (Codex's onto ACP's tool
-  kinds first, "Codex: an app-server client").
+  kinds first, "Codex: its TUI on a thread oxplow observes").
 - **Where.** The hook route maps a PreToolUse / PostToolUse body with the
   bearer's harness before the policy runs and hands the call to the
   ingest (`HookEnvelope.tool`); the ACP host does the same with its

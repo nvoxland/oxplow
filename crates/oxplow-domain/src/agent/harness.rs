@@ -140,9 +140,12 @@ pub enum LaunchSpec {
         #[serde(default)]
         system_prompt_via_meta: bool,
     },
-    /// A thread on Codex's shared app-server daemon, opened over its
-    /// control socket with one request (`thread/start`, `thread/resume` or
-    /// `thread/fork` and its params, which carry the session's bearer).
+    /// Codex's TUI in a PTY on a thread of Codex's shared app-server
+    /// daemon. oxplow opens the thread first, over the daemon's control
+    /// socket with one request (`thread/start`, `thread/resume` or
+    /// `thread/fork` and its params, which carry the session's bearer), and
+    /// stays subscribed to observe it; then the PTY runs `attach` with the
+    /// thread's id appended.
     CodexAppServer {
         /// The daemon's control socket.
         socket: PathBuf,
@@ -150,6 +153,8 @@ pub enum LaunchSpec {
         program: Option<PathBuf>,
         method: String,
         params: serde_json::Value,
+        /// The TUI's argv, its program first, without the thread id.
+        attach: Vec<String>,
     },
 }
 
@@ -322,20 +327,6 @@ pub trait AgentHarness: Send + Sync {
         Err(HarnessError::Unsupported {
             harness: self.title().to_string(),
             what: "list its saved conversations".into(),
-        })
-    }
-    /// A shell command that shows saved conversation `conversation` in the
-    /// harness's own UI, attached to the same conversation oxplow's session
-    /// is on (feature `native_view`); a harness without it is
-    /// [`HarnessError::Unsupported`]. Run as a PTY's command.
-    async fn native_view(
-        &self,
-        _query: &ConversationQuery,
-        _conversation: &str,
-    ) -> Result<String, HarnessError> {
-        Err(HarnessError::Unsupported {
-            harness: self.title().to_string(),
-            what: "show a conversation in its own UI".into(),
         })
     }
     /// The name a hook body gives the session's conversation, when it

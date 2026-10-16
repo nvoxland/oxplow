@@ -1,15 +1,17 @@
-//! A thread on Codex's app-server daemon as a chat session's agent
-//! (`.context/agent-model.md` "Codex: an app-server client"). The harness
-//! says how the thread opens (`LaunchSpec::CodexAppServer`); this is the
-//! client: it opens the thread over its own connection to the daemon, maps
-//! the thread's notifications and approval requests into [`Incoming`]
-//! messages, and sends the person's prompts as `turn/start`.
+//! oxplow's observer of a Codex session's thread on Codex's app-server
+//! daemon (`.context/agent-model.md` "Codex: its TUI on a thread oxplow
+//! observes"). The harness says how the thread opens
+//! (`LaunchSpec::CodexAppServer`); this opens it over its own connection
+//! to the daemon — before Codex's TUI attaches, so the thread keeps the
+//! MCP server and system prompt oxplow gave it — and maps its
+//! notifications into [`Incoming`] messages. It never sends a turn: the
+//! person types into the TUI, and every prompt arrives as the thread's
+//! user message, which the session records as theirs. Approvals are the
+//! TUI's to show; this answers no request.
 //!
 //! The daemon sends a client what concerns every thread it subscribed to
 //! and some that it didn't (Codex's title-generation thread), so only
-//! messages naming this session's thread pass. A prompt typed into
-//! Codex's own TUI on the same thread arrives as its user message with no
-//! turn of ours in flight: the session records it as the person's.
+//! messages naming this session's thread pass.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -21,11 +23,10 @@ use parking_lot::Mutex;
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, watch};
 
-use super::conn::{Connection, Incoming, Opened, PermissionReply, TurnEnd, TurnTokens};
+use super::conn::{Connection, Incoming, Opened, TurnEnd, TurnTokens};
 use super::human_prompt::HumanPrompt;
 use super::model::{
-    ChatUpdate, ContextUsage, PermissionAnswer, PermissionAsk, PermissionKind, PermissionOption,
-    PlanEntry, PlanStatus, ToolCall, ToolCallPatch, ToolKind, ToolStatus,
+    ChatUpdate, ContextUsage, PlanEntry, PlanStatus, ToolCall, ToolKind, ToolStatus,
 };
 use crate::acp::wire::{cap, cap_value};
 
@@ -38,18 +39,15 @@ pub struct CodexOpen {
     pub params: Value,
 }
 
-/// The options of a Codex approval, its decisions as their ids. No
-/// option is "cancel": answering a card with none (Stop) is.
-const ACCEPT: &str = "accept";
-const ACCEPT_FOR_SESSION: &str = "acceptForSession";
-const DECLINE: &str = "decline";
+/// What a new thread's goal is set to, and cleared from, to write its
+/// rollout: a thread nothing has persisted can't be resumed, and Codex's
+/// TUI attaches by resuming.
+const PERSIST_GOAL: &str = "oxplow opened this thread";
 
 #[derive(Default)]
 struct State {
     /// The thread's id, once open: the filter on what passes.
     thread: Option<String>,
-    /// The turn in flight, which an interrupt names.
-    turn: Option<String>,
     /// Agent messages and reasoning that arrived as deltas: their
     /// completed item repeats the text.
     streamed: HashSet<String>,
@@ -107,8 +105,8 @@ pub struct CodexConnection {
     open: CodexOpen,
     tx: mpsc::UnboundedSender<Incoming>,
     state: Arc<Mutex<State>>,
-    /// Set once the thread is open (and its replay sent): the pump holds
-    /// what arrives until then, so the replay comes first.
+    /// Set once the thread is open: the pump holds what arrives until it
+    /// knows the thread's id.
     opened: watch::Sender<bool>,
 }
 
@@ -128,21 +126,34 @@ impl CodexConnection {
             state: Arc::default(),
             opened,
         });
-        tokio::spawn(pump(messages, opened_rx, server, tx, conn.state.clone()));
+        tokio::spawn(pump(messages, opened_rx, tx, conn.state.clone()));
         Ok((conn, rx))
     }
 
     fn thread(&self) -> String {
         self.state.lock().thread.clone().unwrap_or_default()
     }
+
+    /// Write thread `thread`'s rollout: setting its goal does, and clearing
+    /// it leaves none behind.
+    async fn persist(&self, thread: &str) -> Result<(), String> {
+        let persist = |params| self.server.request("thread/goal/set", params);
+        persist(json!({"threadId": thread, "objective": PERSIST_GOAL}))
+            .await
+            .map_err(|e| format!("saving the new thread: {e}"))?;
+        self.server
+            .request("thread/goal/clear", json!({"threadId": thread}))
+            .await
+            .map_err(|e| format!("saving the new thread: {e}"))?;
+        Ok(())
+    }
 }
 
 #[async_trait]
 impl Connection for CodexConnection {
     /// The harness's request (`thread/start`, `thread/resume`,
-    /// `thread/fork`), sandboxed to what the thread may do. A resumed
-    /// thread's latest turns come back with it and are replayed, oldest
-    /// first.
+    /// `thread/fork`), sandboxed to what the thread may do. A new thread is
+    /// persisted at once, so Codex's TUI can resume it.
     async fn open(&self, _cwd: &Path, writable: bool) -> Result<Opened, String> {
         let mut params = self.open.params.clone();
         params["sandbox"] = json!(if writable {
@@ -160,24 +171,8 @@ impl Connection for CodexConnection {
             .and_then(Value::as_str)
             .ok_or("Codex opened no thread")?
             .to_string();
-        let mut turns: Vec<&Value> = opened
-            .pointer("/initialTurnsPage/data")
-            .and_then(Value::as_array)
-            .map(|t| t.iter().collect())
-            .unwrap_or_default();
-        // The page is newest first.
-        turns.reverse();
-        for turn in turns {
-            for item in turn
-                .get("items")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-            {
-                for u in item_updates(item, true, &mut HashSet::new()) {
-                    let _ = self.tx.send(Incoming::Update(Box::new(u)));
-                }
-            }
+        if self.open.method == "thread/start" {
+            self.persist(&thread).await?;
         }
         if let Some(name) = opened
             .pointer("/thread/name")
@@ -194,42 +189,30 @@ impl Connection for CodexConnection {
         })
     }
 
-    /// A `turn/start` whose sandbox is what the thread may do now (a
-    /// thread promoted or demoted since the last turn): it holds for the
-    /// turns after it too, Codex's TUI's included.
-    fn prompt(&self, prompt: HumanPrompt, writable: bool) -> Result<(), String> {
-        let input: Vec<Value> = prompt
-            .blocks()
-            .iter()
-            .map(|t| json!({"type": "text", "text": t}))
-            .collect();
-        let (server, tx) = (self.server.clone(), self.tx.clone());
+    /// The person prompts in Codex's TUI; nothing here sends a turn.
+    fn prompt(&self, _prompt: HumanPrompt, _writable: bool) -> Result<(), String> {
+        Err("a Codex session is prompted in Codex's own TUI".into())
+    }
+
+    /// The TUI stops its own turns.
+    fn cancel(&self) {}
+
+    /// The thread's sandbox for the turns from now on — the TUI's included
+    /// — to what the thread may do: the write guard, as the thread is
+    /// promoted or demoted.
+    fn set_writable(&self, writable: bool) {
         let sandbox = if writable {
             json!({"type": "workspaceWrite"})
         } else {
             json!({"type": "readOnly"})
         };
-        let params = json!({"threadId": self.thread(), "input": input, "sandboxPolicy": sandbox});
-        tokio::spawn(async move {
-            // The turn's end is `turn/completed`; only a refusal ends it here.
-            if let Err(e) = server.request("turn/start", params).await {
-                let _ = tx.send(Incoming::PromptDone(Err(e)));
-            }
-        });
-        Ok(())
-    }
-
-    fn cancel(&self) {
-        let Some(turn) = self.state.lock().turn.clone() else {
-            return;
-        };
         let (server, params) = (
             self.server.clone(),
-            json!({"threadId": self.thread(), "turnId": turn}),
+            json!({"threadId": self.thread(), "sandboxPolicy": sandbox}),
         );
         tokio::spawn(async move {
-            if let Err(e) = server.request("turn/interrupt", params).await {
-                tracing::warn!(error = %e, "codex: interrupting the turn failed");
+            if let Err(e) = server.request("thread/settings/update", params).await {
+                tracing::warn!(error = %e, "codex: setting the thread's sandbox failed");
             }
         });
     }
@@ -243,7 +226,6 @@ impl Connection for CodexConnection {
 async fn pump(
     mut messages: mpsc::UnboundedReceiver<ServerMessage>,
     mut opened: watch::Receiver<bool>,
-    server: AppServer,
     tx: mpsc::UnboundedSender<Incoming>,
     state: Arc<Mutex<State>>,
 ) {
@@ -258,38 +240,15 @@ async fn pump(
         if !ours {
             continue;
         }
-        for incoming in on_message(message, &server, &mut state.lock()) {
+        // A request (an approval, a question) is the TUI's to answer.
+        let ServerMessage::Notification { method, params } = message else {
+            continue;
+        };
+        for incoming in on_notification(&method, &params, &mut state.lock()) {
             if tx.send(incoming).is_err() {
                 return;
             }
         }
-    }
-}
-
-fn on_message(message: ServerMessage, server: &AppServer, state: &mut State) -> Vec<Incoming> {
-    match message {
-        ServerMessage::Notification { method, params } => on_notification(&method, &params, state),
-        ServerMessage::Request { id, method, params } => match approval(&method, &params) {
-            Some(ask) => {
-                let server = server.clone();
-                vec![Incoming::Permission {
-                    ask: Box::new(ask),
-                    reply: PermissionReply::new(move |a| {
-                        let decision = match a {
-                            PermissionAnswer::Selected { option_id } => option_id.as_str(),
-                            PermissionAnswer::Cancelled => "cancel",
-                        };
-                        let _ = server.respond(&id, json!({"decision": decision}));
-                    }),
-                }]
-            }
-            None => {
-                // Nothing a person here can answer: say so rather than
-                // leave the thread waiting.
-                let _ = server.refuse(&id, &format!("oxplow doesn't answer `{method}`"));
-                Vec::new()
-            }
-        },
     }
 }
 
@@ -312,13 +271,6 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
             update(ChatUpdate::ThoughtChunk(text_of(p, "delta")))
         }
         "turn/plan/updated" => update(ChatUpdate::Plan(plan(p))),
-        "turn/started" => {
-            state.turn = p
-                .pointer("/turn/id")
-                .and_then(Value::as_str)
-                .map(str::to_string);
-            Vec::new()
-        }
         "thread/tokenUsage/updated" => {
             let total = p.pointer("/tokenUsage/total").and_then(Counts::of);
             let last = p.pointer("/tokenUsage/last").and_then(Counts::of);
@@ -345,7 +297,6 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
             }
         }
         "turn/completed" => {
-            state.turn = None;
             let tokens = match (state.tokens_now, state.tokens_at_turn_start) {
                 (Some(now), Some(start)) => Some(now.since(start).tokens()),
                 _ => None,
@@ -598,55 +549,6 @@ fn tool_call(item: &Value, id: String, done: bool) -> Option<ToolCall> {
     Some(call)
 }
 
-/// An approval request as a permission card; `None` for a request oxplow
-/// doesn't show.
-fn approval(method: &str, p: &Value) -> Option<PermissionAsk> {
-    let item = p.get("itemId").and_then(Value::as_str)?.to_string();
-    let reason = p.get("reason").and_then(Value::as_str);
-    let tool = match method {
-        "item/commandExecution/requestApproval" => {
-            let command = p
-                .get("command")
-                .and_then(Value::as_str)
-                .unwrap_or("a command");
-            ToolCallPatch {
-                id: item,
-                title: Some(match reason {
-                    Some(r) => format!("{command} ({r})"),
-                    None => command.to_string(),
-                }),
-                kind: Some(ToolKind::Execute),
-                raw_input: Some(json!({"command": command, "cwd": p.get("cwd")})),
-                ..ToolCallPatch::default()
-            }
-        }
-        "item/fileChange/requestApproval" => ToolCallPatch {
-            id: item,
-            kind: Some(ToolKind::Edit),
-            title: reason.map(|r| format!("Edit files ({r})")),
-            ..ToolCallPatch::default()
-        },
-        _ => return None,
-    };
-    let option = |id: &str, name: &str, kind| PermissionOption {
-        id: id.into(),
-        name: name.into(),
-        kind,
-    };
-    Some(PermissionAsk {
-        tool,
-        options: vec![
-            option(ACCEPT, "Allow", PermissionKind::AllowOnce),
-            option(
-                ACCEPT_FOR_SESSION,
-                "Allow for this session",
-                PermissionKind::AllowAlways,
-            ),
-            option(DECLINE, "Deny", PermissionKind::RejectOnce),
-        ],
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -782,35 +684,6 @@ mod tests {
         };
         assert_eq!(status(&done), ToolStatus::Completed);
         assert_eq!(status(&started), ToolStatus::InProgress);
-    }
-
-    #[test]
-    fn approvals_are_cards_and_their_answers_are_decisions() {
-        let ask = approval(
-            "item/commandExecution/requestApproval",
-            &json!({"threadId": "t", "turnId": "u", "itemId": "exec-1", "command": "rm -rf /x", "cwd": "/w", "reason": "outside the sandbox", "startedAtMs": 1}),
-        )
-        .unwrap();
-        assert_eq!(ask.tool.id, "exec-1");
-        assert_eq!(ask.tool.kind, Some(ToolKind::Execute));
-        assert_eq!(
-            ask.tool.title.as_deref(),
-            Some("rm -rf /x (outside the sandbox)")
-        );
-        assert_eq!(
-            ask.options
-                .iter()
-                .map(|o| o.id.as_str())
-                .collect::<Vec<_>>(),
-            [ACCEPT, ACCEPT_FOR_SESSION, DECLINE]
-        );
-        let edit = approval(
-            "item/fileChange/requestApproval",
-            &json!({"threadId": "t", "turnId": "u", "itemId": "p-1", "startedAtMs": 1}),
-        )
-        .unwrap();
-        assert_eq!(edit.tool.kind, Some(ToolKind::Edit));
-        assert!(approval("item/tool/requestUserInput", &json!({"itemId": "x"})).is_none());
     }
 
     #[test]

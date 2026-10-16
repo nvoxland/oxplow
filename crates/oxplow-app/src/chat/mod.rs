@@ -9,6 +9,7 @@
 //! into policy intents and canonical events, `transcript` holds the
 //! conversation.
 
+pub mod access;
 pub mod codex;
 pub mod conn;
 pub mod host;

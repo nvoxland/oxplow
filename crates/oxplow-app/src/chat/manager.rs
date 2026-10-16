@@ -224,25 +224,31 @@ impl ChatManager {
         .await
     }
 
-    /// Open the session's thread on Codex's app-server daemon. A session
-    /// already running is kept (`Ok`).
+    /// Open the session's thread on Codex's app-server daemon and observe
+    /// it; its id, what Codex's TUI attaches to. A session already running
+    /// is kept, and its thread's id answered.
     pub async fn open_codex(
         &self,
         host: Arc<dyn ChatHost>,
         spec: SessionSpec,
         open: CodexOpen,
-    ) -> Result<(), ChatError> {
-        let Some(reservation) = self.reserve(&spec) else {
-            return Ok(());
-        };
-        let (conn, incoming) = match CodexConnection::connect(open).await {
-            Ok(c) => c,
-            Err(e) => {
-                self.release(&reservation.session, reservation.generation);
-                return Err(ChatError::Agent(e));
-            }
-        };
-        self.start(host, spec, reservation, conn, incoming).await
+    ) -> Result<String, ChatError> {
+        let session = spec.session_id;
+        if let Some(reservation) = self.reserve(&spec) {
+            let (conn, incoming) = match CodexConnection::connect(open).await {
+                Ok(c) => c,
+                Err(e) => {
+                    self.release(&reservation.session, reservation.generation);
+                    return Err(ChatError::Agent(e));
+                }
+            };
+            self.start(host, spec, reservation, conn, incoming).await?;
+        }
+        self.sessions
+            .lock()
+            .get(&session)
+            .and_then(|h| h.view.lock().session_id.clone())
+            .ok_or(ChatError::NotOpen)
     }
 
     /// Run an ACP session over an existing transport (tests, the
@@ -392,6 +398,14 @@ impl ChatManager {
         self.commands(session)?
             .send(Command::Cancel)
             .map_err(|_| ChatError::NotOpen)
+    }
+
+    /// Tell every running session's connection what its thread may write
+    /// now (a thread was promoted or demoted).
+    pub fn sync_access(&self) {
+        for h in self.sessions.lock().values().filter(|h| h.alive()) {
+            let _ = h.commands.send(Command::SyncAccess);
+        }
     }
 
     /// Answer a permission card; `option_id: None` cancels it.

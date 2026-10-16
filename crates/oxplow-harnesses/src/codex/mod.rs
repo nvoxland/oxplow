@@ -1,12 +1,13 @@
-//! The `codex` harness: a thread on Codex's shared app-server daemon, in
-//! oxplow's chat (`.context/agent-model.md` "Codex: an app-server
-//! client"). Its launch is one request that opens the thread — started,
-//! resumed or forked — with oxplow's MCP server (the session's bearer as a
-//! header) and system prompt in the thread's own config; oxplow speaks to
-//! it as a client of the daemon, so `codex agents`, Codex's own TUI
-//! (`codex resume <id>`) and its other clients see the same thread. Its
-//! skills are the one thing on disk: Codex finds them only beside the
-//! directory it runs in, so they're in the worktree's `.agents/skills/`.
+//! The `codex` harness: Codex's own TUI on a thread of its shared
+//! app-server daemon (`.context/agent-model.md` "Codex: its TUI on a
+//! thread oxplow observes"). Its launch is the request that opens the
+//! thread — started, resumed or forked — with oxplow's MCP server (the
+//! session's bearer as a header) and system prompt in the thread's own
+//! config, and the TUI's argv that attaches to it: oxplow opens the thread
+//! and stays subscribed, then the TUI resumes it, so `codex agents` and
+//! Codex's other clients see the same thread. Its skills are the one thing
+//! on disk: Codex finds them only beside the directory it runs in, so
+//! they're in the worktree's `.agents/skills/`.
 
 pub mod app_server;
 
@@ -22,17 +23,12 @@ use oxplow_domain::agent::tool::ToolUse;
 use serde_json::{json, Value};
 
 use super::shared::{
-    in_shell, program_and_guard, refresh_worktree_skills, runtime, saved, shell_escape,
-    toml_string, write_worktree_skills, Saved, METADATA_TIMEOUT,
+    refresh_worktree_skills, runtime, saved, toml_string, write_worktree_skills, Saved,
+    METADATA_TIMEOUT,
 };
 use super::Named;
 
 pub(super) struct Codex(pub(super) Named);
-
-/// The turns a resumed thread brings back to show, newest first. Full
-/// turns run to megabytes each (their tools' output), so a page, not
-/// the history.
-const RESUMED_TURNS: u32 = 20;
 
 #[async_trait::async_trait]
 impl AgentHarness for Codex {
@@ -46,7 +42,7 @@ impl AgentHarness for Codex {
 
     fn interact(&self) -> Interact {
         Interact {
-            transcript: Transcript::Structured,
+            transcript: Transcript::Terminal,
             acp_agent: false,
         }
     }
@@ -57,15 +53,26 @@ impl AgentHarness for Codex {
                 "a Codex session runs on this machine's Codex app server, and this stream isn't on this machine".into(),
             )
         })?;
+        let program = input.resolve_program("codex").ok_or_else(|| {
+            HarnessError::Unavailable("`codex` isn't installed where oxplow looks".into())
+        })?;
         write_worktree_skills(&input.workspace, &skills_and_commands(&input.text))
             .map_err(runtime)?;
         let (method, params) = open_thread(input);
+        // No `-c` override: one runs Codex embedded instead of attaching.
+        let attach = vec![
+            program.clone(),
+            "resume".into(),
+            "--cd".into(),
+            input.workspace.to_string_lossy().into_owned(),
+        ];
         Ok(Launch {
             spec: LaunchSpec::CodexAppServer {
                 socket: app_server::control_socket(&app_server::codex_home(home)),
-                program: input.resolve_program("codex").map(PathBuf::from),
+                program: Some(PathBuf::from(program)),
                 method: method.into(),
                 params,
+                attach,
             },
             transcript_missing: false,
         })
@@ -106,25 +113,6 @@ impl AgentHarness for Codex {
             })?
             .map_err(HarnessError::Unavailable)?;
         Ok(threads_of(&listed))
-    }
-
-    /// Codex's own TUI attached to the daemon's thread: `codex resume` with
-    /// `--cd` for the worktree. No `-c` override, which would run it
-    /// embedded instead of attaching.
-    async fn native_view(
-        &self,
-        query: &ConversationQuery,
-        conversation: &str,
-    ) -> Result<String, HarnessError> {
-        let cwd = query.cwd.to_string_lossy();
-        let (program, guard) =
-            program_and_guard(query.resolve_program("codex").as_deref(), "codex");
-        let resume = format!(
-            "exec {program} resume --cd {} {}",
-            shell_escape(&cwd),
-            shell_escape(conversation)
-        );
-        Ok(in_shell(&cwd, &guard, &resume))
     }
 
     /// It posts no hooks: its calls arrive as the thread's items, mapped
@@ -168,11 +156,9 @@ fn open_thread(input: &LaunchInput) -> (&'static str, Value) {
         }
         Some(Saved { id, fork: false }) => {
             params["threadId"] = json!(id);
-            // The page alone: `thread.turns` would carry the whole history
-            // again beside it.
+            // Its metadata alone: the TUI shows its history, and the whole
+            // of it runs to tens of megabytes.
             params["excludeTurns"] = json!(true);
-            params["initialTurnsPage"] =
-                json!({"itemsView": "full", "sortDirection": "desc", "limit": RESUMED_TURNS});
             ("thread/resume", params)
         }
     }
@@ -298,8 +284,9 @@ mod tests {
         assert!(params.get("threadId").is_none());
     }
 
-    /// A saved conversation is resumed with its latest turns to show, or
-    /// forked; neither starts a new thread.
+    /// A saved conversation is resumed (its metadata alone: nothing
+    /// replays it, the TUI shows it) or forked; neither starts a new
+    /// thread.
     #[test]
     fn a_saved_conversation_resumes_or_forks_its_thread() {
         let h = harness("oxplow:codex-cli", "codex");
@@ -307,8 +294,8 @@ mod tests {
         let (_, method, params) = opened(&l);
         assert_eq!(method, "thread/resume");
         assert_eq!(params["threadId"], "t-1");
-        assert_eq!(params["initialTurnsPage"]["itemsView"], "full");
         assert_eq!(params["excludeTurns"], true);
+        assert!(params.get("initialTurnsPage").is_none());
         assert!(params["config"]["mcp_servers"]["oxplow"].is_object());
         let l = launch_at_home(h.as_ref(), Some("t-1"), true, None);
         let (_, method, params) = opened(&l);
@@ -405,68 +392,36 @@ mod tests {
         drop(fake);
     }
 
-    /// Its own view of a conversation attaches to the daemon's thread:
-    /// `codex resume --cd <cwd> <id>` in the worktree, the program as
-    /// resolved, everything shell-escaped, and no `-c` override (one would
-    /// run Codex embedded instead of attaching).
-    #[tokio::test]
-    async fn its_native_view_is_codex_resume_on_the_thread() {
-        let bin = tempfile::tempdir().unwrap();
-        std::fs::write(bin.path().join("codex"), "").unwrap();
+    /// The TUI attaches to the daemon's thread oxplow opened: `codex
+    /// resume --cd <wt>` by the resolved program, the thread id appended by
+    /// the opener, and no `-c` override (one would run Codex embedded
+    /// instead of attaching).
+    #[test]
+    fn the_tui_attaches_to_the_opened_thread() {
         let h = harness("oxplow:codex-cli", "codex");
-        let query = ConversationQuery {
-            cwd: "/repo/it's wt".into(),
-            home: None,
-            search_path: vec![bin.path().to_path_buf()],
-            limit: 1,
+        let l = launch_at_home(h.as_ref(), Some("t-1"), false, None);
+        let LaunchSpec::CodexAppServer { attach, .. } = &l.launch.spec else {
+            panic!("not an app-server launch")
         };
-        let cmd = h.native_view(&query, "thr-1; rm -rf /").await.unwrap();
-        let program = bin.path().join("codex");
-        let cwd = "/repo/it's wt";
-        let want = crate::shared::in_shell(
-            cwd,
-            "",
-            &format!(
-                "exec {} resume --cd {} {}",
-                crate::shared::shell_escape(&program.to_string_lossy()),
-                crate::shared::shell_escape(cwd),
-                crate::shared::shell_escape("thr-1; rm -rf /"),
-            ),
-        );
-        assert_eq!(cmd, want);
-        for flag in [" -c ", "--config", "--remote"] {
-            assert!(!cmd.contains(flag), "{flag}: {cmd}");
-        }
-        // Without Codex on the path, the launch says so rather than failing blind.
-        let none = ConversationQuery {
-            search_path: vec![],
-            ..query
-        };
-        let cmd = h.native_view(&none, "t1").await.unwrap();
-        assert!(cmd.contains("not found on PATH"), "{cmd}");
+        let wt = l.workspace.to_string_lossy().into_owned();
+        assert!(attach[0].ends_with("/opt/agents/codex"), "{attach:?}");
+        assert_eq!(attach[1..], ["resume", "--cd", wt.as_str()]);
+        assert!(!attach
+            .iter()
+            .any(|a| a == "-c" || a.starts_with("--config")));
     }
 
-    /// The other harnesses have no view of their own to attach.
-    #[tokio::test]
-    async fn the_others_have_no_native_view() {
-        let query = ConversationQuery {
-            cwd: "/repo".into(),
-            home: None,
-            search_path: vec![],
-            limit: 1,
-        };
-        for (entry, id) in [
-            ("oxplow:claude-code", "claude"),
-            ("oxplow:opencode", "opencode"),
-        ] {
-            assert!(matches!(
-                super::super::built_in(entry, id, id)
-                    .unwrap()
-                    .native_view(&query, "c1")
-                    .await,
-                Err(HarnessError::Unsupported { .. })
-            ));
-        }
+    /// Without `codex` where oxplow looks there is no TUI to run.
+    #[test]
+    fn no_codex_installed_cant_launch() {
+        let h = harness("oxplow:codex-cli", "codex");
+        let err = crate::test_launch::try_launch_at_home_without(h.as_ref(), "codex")
+            .err()
+            .unwrap();
+        assert!(
+            matches!(&err, HarnessError::Unavailable(m) if m.contains("codex")),
+            "{err}"
+        );
     }
 
     #[test]

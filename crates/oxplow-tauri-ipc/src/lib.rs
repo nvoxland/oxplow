@@ -303,7 +303,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::chat_transcript,
             commands::generated::chat_close_session,
             commands::generated::forward_terminal_input,
-            commands::generated::open_native_view,
             commands::generated::close_terminal_session,
             commands::generated::terminal_session_cwd,
             commands::generated::terminate_terminal_session,

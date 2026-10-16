@@ -1198,7 +1198,7 @@ summed every assistant line) and was Claude-only + format-fragile.
     (the cache kinds on their own measure, tsk73);
   - **Codex** exports nothing: its tokens come from its thread's
     `tokenUsage` and ride the turn's Stop ([agent-model.md](./agent-model.md)
-    "Codex: an app-server client").
+    "Codex: its TUI on a thread oxplow observes").
 - **Launch wiring:** per-agent, injected by each harness's `launch`:
   - **Claude** (`otel_env` in its harness, env — Claude has OTEL env support):
     `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_METRICS_EXPORTER=otlp`,

@@ -28,6 +28,10 @@ pub trait Connection: Send + Sync + 'static {
     fn cancel(&self);
     /// Resolves when the agent has gone away.
     async fn closed(&self);
+    /// The thread may now write its worktree, or no longer may: a
+    /// connection that confines its agent (Codex's sandbox) follows; one
+    /// whose writes are gated as it asks has nothing to do.
+    fn set_writable(&self, _writable: bool) {}
 }
 
 /// A session that is up.

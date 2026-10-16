@@ -53,6 +53,7 @@ pub const CORE_CONSUMERS: &[&str] = &[
     "advisories.turn_end",
     "capabilities.agent_text",
     "change.analyze",
+    "chat.access",
     "collection",
     "collection.run_reports",
     "config.extensions",

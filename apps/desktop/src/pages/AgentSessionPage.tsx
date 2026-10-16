@@ -30,7 +30,6 @@ interface AgentSessionPageProps {
   canChooseConversation?: boolean;
   /** A chat session whose harness has a view of its own on its saved
    *  conversation: the label of the button that opens it. */
-  nativeViewLabel?: string;
   /** The conversation picker open over the terminal, if one is. */
   picker?: PickerMode | null;
   /** Open (a mode) or close (`null`) the conversation picker. */
@@ -54,7 +53,6 @@ export function AgentSessionPage({
   onOpenSettings,
   onOpenPage,
   canChooseConversation,
-  nativeViewLabel,
   picker,
   onPicker,
 }: AgentSessionPageProps) {
@@ -94,7 +92,6 @@ export function AgentSessionPage({
           onOpenFile={onOpenFile ? (p) => onOpenFile(p) : undefined}
           onOpenSettings={onOpenSettings}
           onOpenPage={onOpenPage}
-          nativeViewLabel={nativeViewLabel}
         />
       </Page>
     );

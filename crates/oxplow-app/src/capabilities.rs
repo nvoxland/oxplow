@@ -133,20 +133,19 @@ pub const BUILT_INS: &[BuiltIn] = &[
             "conversation_fork",
         ],
     ),
-    // A client of Codex's app-server daemon: its thread in oxplow's chat,
-    // approvals as cards, context on the person's next prompt.
+    // Codex's TUI on a thread of its daemon that oxplow opens and
+    // observes: its approvals are the TUI's, and nothing reaches it
+    // mid-session (the TUI owns the prompt).
     harness(
         "oxplow:codex-cli",
         "Codex",
         &[
-            "structured_transcript",
+            "terminal",
             "permission_prompts",
             "resume",
             "runtime_text",
-            "prompt_context",
             "conversation_list",
             "conversation_fork",
-            "native_view",
         ],
     ),
     // Its bridge appends a prompt hook's context to the user's message and a

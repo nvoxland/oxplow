@@ -427,7 +427,6 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
             "tool_context",
             "conversation_list",
             "conversation_fork",
-            "native_view",
         ],
         provider: Some(&AGENT_HARNESS),
     },

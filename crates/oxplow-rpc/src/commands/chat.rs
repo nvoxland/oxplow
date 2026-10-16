@@ -11,7 +11,6 @@ use std::sync::Arc;
 
 use oxplow_app::acp::agents;
 use oxplow_app::acp::wire::{AcpOpen, McpHttp};
-use oxplow_app::chat::codex::CodexOpen;
 use oxplow_app::chat::host::ServicesChatHost;
 use oxplow_app::chat::manager::ChatManager;
 use oxplow_app::chat::manager::{ChatSnapshot, Launch};
@@ -174,24 +173,7 @@ pub async fn chat_open_session(
             };
             svc.chat.open(host, spec, launch).await.map_err(chat_err)?;
         }
-        LaunchSpec::CodexAppServer {
-            socket,
-            program,
-            method,
-            params,
-        } => {
-            let open = CodexOpen {
-                socket,
-                program,
-                method,
-                params,
-            };
-            svc.chat
-                .open_codex(host, spec, open)
-                .await
-                .map_err(chat_err)?;
-        }
-        LaunchSpec::Pty { .. } => {
+        LaunchSpec::Pty { .. } | LaunchSpec::CodexAppServer { .. } => {
             return Err(IpcError::invalid("this session runs in a terminal"));
         }
     }

@@ -121,6 +121,19 @@ mod test_launch {
         super::built_in(entry, id, id).expect("a built-in harness")
     }
 
+    /// What a test launch varies; the rest is fixed (session ses3 on
+    /// thread thr2 of stream str1, a scratch project).
+    #[derive(Default)]
+    struct Run<'a> {
+        resume: Option<&'a str>,
+        fork: bool,
+        system_prompt: Option<&'a str>,
+        config: Option<&'a serde_json::Value>,
+        home: Option<&'a Path>,
+        /// Programs left off the search path.
+        without: &'a [&'a str],
+    }
+
     /// `h` launched for session ses3 (thread thr2, stream str1) in a scratch
     /// project, its programs resolved under `/opt/agents`.
     pub fn launch_in(
@@ -129,7 +142,16 @@ mod test_launch {
         system_prompt: Option<&str>,
         config: &serde_json::Value,
     ) -> Launched {
-        launch_full(h, resume, system_prompt, config, None)
+        run(
+            h,
+            Run {
+                resume,
+                system_prompt,
+                config: Some(config),
+                ..Run::default()
+            },
+            tempfile::tempdir().unwrap(),
+        )
     }
 
     /// As [`launch_in`], with a home `setup` prepares (given it and the
@@ -146,34 +168,16 @@ mod test_launch {
             setup(home.path(), &workspace);
             run(
                 h,
-                Some(resume),
-                false,
-                None,
-                &serde_json::json!({}),
-                Some(home.path()),
+                Run {
+                    resume: Some(resume),
+                    home: Some(home.path()),
+                    ..Run::default()
+                },
                 dir,
             )
         };
         drop(home);
         launched
-    }
-
-    fn launch_full(
-        h: &dyn AgentHarness,
-        resume: Option<&str>,
-        system_prompt: Option<&str>,
-        config: &serde_json::Value,
-        home: Option<&Path>,
-    ) -> Launched {
-        run(
-            h,
-            resume,
-            false,
-            system_prompt,
-            config,
-            home,
-            tempfile::tempdir().unwrap(),
-        )
     }
 
     /// `h` launched as [`launch_in`], with the person's home at
@@ -188,11 +192,32 @@ mod test_launch {
         let home = dir.path().join("home");
         run(
             h,
-            resume,
-            fork,
-            system_prompt,
-            &serde_json::json!({}),
-            Some(&home),
+            Run {
+                resume,
+                fork,
+                system_prompt,
+                home: Some(&home),
+                ..Run::default()
+            },
+            dir,
+        )
+    }
+
+    /// `h` launched as [`launch_at_home`] with `bin` nowhere oxplow looks,
+    /// for a launch that is refused.
+    pub fn try_launch_at_home_without(
+        h: &dyn AgentHarness,
+        bin: &str,
+    ) -> Result<Launched, oxplow_domain::agent::harness::HarnessError> {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        try_run(
+            h,
+            Run {
+                home: Some(&home),
+                without: &[bin],
+                ..Run::default()
+            },
             dir,
         )
     }
@@ -201,11 +226,11 @@ mod test_launch {
     pub fn launch_fork(h: &dyn AgentHarness, resume: &str) -> Launched {
         run(
             h,
-            Some(resume),
-            true,
-            None,
-            &serde_json::json!({}),
-            None,
+            Run {
+                resume: Some(resume),
+                fork: true,
+                ..Run::default()
+            },
             tempfile::tempdir().unwrap(),
         )
     }
@@ -218,34 +243,21 @@ mod test_launch {
     ) -> Result<Launched, oxplow_domain::agent::harness::HarnessError> {
         try_run(
             h,
-            None,
-            false,
-            None,
-            config,
-            None,
+            Run {
+                config: Some(config),
+                ..Run::default()
+            },
             tempfile::tempdir().unwrap(),
         )
     }
 
-    fn run(
-        h: &dyn AgentHarness,
-        resume: Option<&str>,
-        fork: bool,
-        system_prompt: Option<&str>,
-        config: &serde_json::Value,
-        home: Option<&Path>,
-        dir: tempfile::TempDir,
-    ) -> Launched {
-        try_run(h, resume, fork, system_prompt, config, home, dir).expect("it launches")
+    fn run(h: &dyn AgentHarness, r: Run<'_>, dir: tempfile::TempDir) -> Launched {
+        try_run(h, r, dir).expect("it launches")
     }
 
     fn try_run(
         h: &dyn AgentHarness,
-        resume: Option<&str>,
-        fork: bool,
-        system_prompt: Option<&str>,
-        config: &serde_json::Value,
-        home: Option<&Path>,
+        r: Run<'_>,
         dir: tempfile::TempDir,
     ) -> Result<Launched, oxplow_domain::agent::harness::HarnessError> {
         let project = dir.path().to_path_buf();
@@ -267,7 +279,9 @@ mod test_launch {
         let agents = project.join("opt/agents");
         std::fs::create_dir_all(&agents).unwrap();
         for bin in ["claude", "codex", "opencode"] {
-            std::fs::write(agents.join(bin), "").unwrap();
+            if !r.without.contains(&bin) {
+                std::fs::write(agents.join(bin), "").unwrap();
+            }
         }
         let launch = block(h.launch(&LaunchInput {
             session: SessionIds {
@@ -279,12 +293,12 @@ mod test_launch {
             project_dir: project.clone(),
             endpoints,
             identity_env: identity,
-            system_prompt: system_prompt.map(str::to_string),
-            resume: resume.map(str::to_string),
-            fork,
+            system_prompt: r.system_prompt.map(str::to_string),
+            resume: r.resume.map(str::to_string),
+            fork: r.fork,
             text: oxplow_agent_text::core_text(),
-            config: config.clone(),
-            home: home.map(Path::to_path_buf),
+            config: r.config.cloned().unwrap_or_else(|| serde_json::json!({})),
+            home: r.home.map(Path::to_path_buf),
             search_path: vec![agents],
         }))?;
         Ok(Launched {

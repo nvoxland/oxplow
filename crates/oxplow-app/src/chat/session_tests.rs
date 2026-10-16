@@ -26,8 +26,8 @@ use oxplow_domain::agent::tool::{ToolKind as Kind, ToolUse};
 struct Host {
     /// Deny every worktree write with this reason.
     deny_writes: Option<String>,
-    /// The thread isn't its stream's writer.
-    read_only: bool,
+    /// The thread isn't its stream's writer (flipped to demote it).
+    read_only: std::sync::atomic::AtomicBool,
     context: Option<String>,
     log: Mutex<Vec<String>>,
 }
@@ -65,7 +65,7 @@ impl ChatHost for Host {
         self.log.lock().push(format!("started {s}"));
     }
     async fn writable(&self, _t: &ThreadId) -> bool {
-        !self.read_only
+        !self.read_only.load(std::sync::atomic::Ordering::SeqCst)
     }
     async fn prompt_context(&self, _t: &ThreadId, _s: &str) -> Option<String> {
         self.context.clone()
@@ -869,24 +869,17 @@ mod codex {
     use crate::chat::codex::CodexOpen;
     use oxplow_harnesses::codex_app_server::fake::FakeAppServer;
     use serde_json::json;
+    use std::sync::atomic::Ordering;
 
     const THREAD: &str = "thr-x";
 
     /// A daemon whose `thread/start` opens `thr-x` and whose
-    /// `thread/resume` brings back one earlier turn.
+    /// `thread/resume` opens it named.
     fn daemon(home: &std::path::Path) -> FakeAppServer {
         FakeAppServer::start(home, |method, _| match method {
             "thread/start" => Ok(json!({"thread": {"id": THREAD, "name": null}})),
-            "thread/resume" => Ok(json!({
-                "thread": {"id": THREAD, "name": "Earlier work"},
-                "initialTurnsPage": {"data": [{"id": "u0", "status": "completed", "items": [
-                    {"type": "userMessage", "id": "m0", "content": [{"type": "text", "text": "before"}]},
-                    {"type": "commandExecution", "id": "e0", "command": "ls", "status": "completed", "exitCode": 0, "commandActions": [{"type": "listFiles", "command": "ls"}], "aggregatedOutput": "a\n"},
-                    {"type": "agentMessage", "id": "a0", "text": "listed"}
-                ]}]}
-            })),
-            "turn/start" => Ok(json!({"turn": {"id": "u1"}})),
-            "turn/interrupt" => Ok(json!({})),
+            "thread/resume" => Ok(json!({"thread": {"id": THREAD, "name": "Earlier work"}})),
+            "thread/goal/set" | "thread/goal/clear" | "thread/settings/update" => Ok(json!({})),
             other => Err(format!("no {other}")),
         })
     }
@@ -897,18 +890,20 @@ mod codex {
         let fake = daemon(dir.path());
         let mgr = ChatManager::new();
         let host = Arc::new(host);
-        mgr.open_codex(
-            host.clone(),
-            spec(dir.path()),
-            CodexOpen {
-                socket: fake.socket.clone(),
-                program: None,
-                method: method.into(),
-                params: json!({"cwd": dir.path()}),
-            },
-        )
-        .await
-        .unwrap();
+        let thread = mgr
+            .open_codex(
+                host.clone(),
+                spec(dir.path()),
+                CodexOpen {
+                    socket: fake.socket.clone(),
+                    program: None,
+                    method: method.into(),
+                    params: json!({"cwd": dir.path()}),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(thread, THREAD);
         let events = mgr.subscribe();
         (
             Rig {
@@ -928,35 +923,40 @@ mod codex {
         json!({"method": method, "params": params})
     }
 
-    /// A person's prompt is a `turn/start` carrying the context block and
-    /// their text; the thread's items stream into the transcript, a
-    /// finished command is recorded, and `turn/completed` ends the turn
-    /// with its tokens. Another thread's notifications don't pass.
-    #[tokio::test]
-    async fn a_prompt_is_a_turn_and_its_items_are_recorded() {
-        let (mut rig, fake) = open_codex(
-            Host {
-                context: Some("CTX".into()),
-                ..Host::default()
-            },
-            "thread/start",
-        )
-        .await;
-        assert_eq!(rig.host.log(), ["started thr-x"]);
-        rig.prompt("list the files").await;
-        let start = fake.wait_for(|v| v["method"] == "turn/start").await;
-        assert_eq!(start["params"]["threadId"], THREAD);
-        let texts: Vec<&str> = start["params"]["input"]
-            .as_array()
-            .unwrap()
+    fn methods(fake: &FakeAppServer) -> Vec<String> {
+        fake.received()
             .iter()
-            .map(|i| i["text"].as_str().unwrap())
-            .collect();
-        assert_eq!(texts.last(), Some(&"list the files"));
-        assert!(texts[0].contains("CTX"));
+            .filter_map(|v| v["method"].as_str().map(str::to_string))
+            .collect()
+    }
+
+    /// A new thread is saved before the TUI attaches (its goal set and
+    /// cleared writes its rollout, which `codex resume` needs); a resumed
+    /// one already has one.
+    #[tokio::test]
+    async fn a_new_thread_is_saved_so_the_tui_can_resume_it() {
+        let (_rig, fake) = open_codex(Host::default(), "thread/start").await;
+        let sent = methods(&fake);
+        let start = sent.iter().position(|m| m == "thread/start").unwrap();
+        assert_eq!(
+            sent[start..start + 3],
+            ["thread/start", "thread/goal/set", "thread/goal/clear"]
+        );
+        let (rig, fake) = open_codex(Host::default(), "thread/resume").await;
+        assert!(!methods(&fake).iter().any(|m| m.starts_with("thread/goal")));
+        // Named once the session it names is recorded.
+        assert_eq!(rig.host.log(), ["started thr-x", "named Earlier work"]);
+    }
+
+    /// A prompt the person types into Codex's TUI is recorded as theirs:
+    /// its items stream into the record, a finished command is a tool
+    /// call, and `turn/completed` ends the turn with its tokens. Another
+    /// thread's notifications don't pass.
+    #[tokio::test]
+    async fn a_prompt_in_the_tui_is_a_recorded_turn() {
+        let (mut rig, fake) = open_codex(Host::default(), "thread/start").await;
         fake.push(note("turn/started", json!({"turn": {"id": "u1"}})));
-        // The echo of our own prompt adds nothing.
-        fake.push(note("item/completed", json!({"item": {"type": "userMessage", "id": "m1", "content": [{"type": "text", "text": "CTX\n\nlist the files"}]}})));
+        fake.push(note("item/completed", json!({"item": {"type": "userMessage", "id": "m1", "content": [{"type": "text", "text": "list the files"}]}})));
         fake.push(json!({"method": "item/agentMessage/delta", "params": {"threadId": "other", "itemId": "z", "delta": "NOT OURS"}}));
         fake.push(note("item/completed", json!({"item": {"type": "commandExecution", "id": "e1", "command": "/bin/zsh -lc ls", "status": "completed", "exitCode": 0, "commandActions": [{"type": "unknown", "command": "ls"}], "aggregatedOutput": "a\n"}})));
         fake.push(note(
@@ -975,14 +975,9 @@ mod codex {
             "turn/completed",
             json!({"turn": {"id": "u1", "status": "completed"}}),
         ));
+        rig.wait_status(ChatStatus::Running).await;
         rig.wait_status(ChatStatus::Idle).await;
         assert_eq!(rig.agent_text(), ["done"]);
-        let users = rig
-            .items()
-            .into_iter()
-            .filter(|b| matches!(b, ItemBody::User { .. }))
-            .count();
-        assert_eq!(users, 1);
         assert_eq!(
             rig.host.log()[1..],
             [
@@ -990,81 +985,6 @@ mod codex {
                 "tool shell",
                 "turn_ended 40/7 answer=done"
             ]
-        );
-        assert_eq!(
-            rig.mgr
-                .transcript(&session(), 0)
-                .unwrap()
-                .usage
-                .unwrap()
-                .used,
-            107
-        );
-    }
-
-    /// An approval is a card that waits for the person; their answer goes
-    /// back as the request's decision, and Stop answers `cancel`.
-    #[tokio::test]
-    async fn an_approval_waits_for_the_person_and_answers_their_decision() {
-        let (mut rig, fake) = open_codex(Host::default(), "thread/start").await;
-        rig.prompt("delete it").await;
-        fake.wait_for(|v| v["method"] == "turn/start").await;
-        fake.push(note("turn/started", json!({"turn": {"id": "u1"}})));
-        fake.push(json!({"id": 41, "method": "item/commandExecution/requestApproval", "params": {
-            "threadId": THREAD, "turnId": "u1", "itemId": "e9", "command": "rm x", "startedAtMs": 1}}));
-        rig.wait_status(ChatStatus::AwaitingPermission).await;
-        let request_id = rig
-            .items()
-            .into_iter()
-            .find_map(|b| match b {
-                ItemBody::Permission { request_id, .. } => Some(request_id),
-                _ => None,
-            })
-            .unwrap();
-        rig.mgr
-            .respond_permission(&session(), request_id, Some("decline".into()))
-            .await
-            .unwrap();
-        let answer = fake.wait_for(|v| v["id"] == 41).await;
-        assert_eq!(answer["result"]["decision"], "decline");
-        fake.push(
-            json!({"id": 42, "method": "item/fileChange/requestApproval", "params": {
-            "threadId": THREAD, "turnId": "u1", "itemId": "p9", "startedAtMs": 2}}),
-        );
-        rig.wait_status(ChatStatus::AwaitingPermission).await;
-        rig.mgr.cancel(&session()).unwrap();
-        let answer = fake.wait_for(|v| v["id"] == 42).await;
-        assert_eq!(answer["result"]["decision"], "cancel");
-        fake.wait_for(|v| v["method"] == "turn/interrupt").await;
-        // A request no card can show is refused, not left waiting.
-        fake.push(json!({"id": 43, "method": "item/tool/requestUserInput", "params": {"threadId": THREAD, "itemId": "q"}}));
-        let refused = fake.wait_for(|v| v["id"] == 43).await;
-        assert!(refused["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("requestUserInput"));
-    }
-
-    /// A prompt the person typed into Codex's own TUI on the thread is
-    /// recorded as theirs, and its turn ends like any other.
-    #[tokio::test]
-    async fn a_prompt_from_codexs_own_tui_is_the_persons() {
-        let (mut rig, fake) = open_codex(Host::default(), "thread/start").await;
-        fake.push(note("turn/started", json!({"turn": {"id": "u2"}})));
-        fake.push(note("item/completed", json!({"item": {"type": "userMessage", "id": "m2", "content": [{"type": "text", "text": "from the tui"}]}})));
-        rig.wait_status(ChatStatus::Running).await;
-        fake.push(note(
-            "item/completed",
-            json!({"item": {"type": "agentMessage", "id": "a2", "text": "ok"}}),
-        ));
-        fake.push(note(
-            "turn/completed",
-            json!({"turn": {"id": "u2", "status": "completed"}}),
-        ));
-        rig.wait_status(ChatStatus::Idle).await;
-        assert_eq!(
-            rig.host.log()[1..],
-            ["turn_started from the tui", "turn_ended  answer=ok"]
         );
         fake.push(note(
             "thread/name/updated",
@@ -1079,46 +999,78 @@ mod codex {
         .unwrap();
     }
 
-    /// A thread that isn't its stream's writer opens and prompts its
-    /// thread read-only, so Codex can't write the shared worktree; a
-    /// writer's is sandboxed to the worktree.
+    /// Nothing here prompts the thread, and the TUI answers its own
+    /// approvals: a request reaches no card and gets no answer from here.
     #[tokio::test]
-    async fn the_sandbox_follows_the_threads_write_access() {
-        let (rig, fake) = open_codex(
-            Host {
-                read_only: true,
-                ..Host::default()
-            },
-            "thread/start",
-        )
-        .await;
-        let start = fake.wait_for(|v| v["method"] == "thread/start").await;
-        assert_eq!(start["params"]["sandbox"], "read-only");
-        rig.prompt("look around").await;
-        let turn = fake.wait_for(|v| v["method"] == "turn/start").await;
-        assert_eq!(turn["params"]["sandboxPolicy"], json!({"type": "readOnly"}));
-
+    async fn it_neither_prompts_nor_answers_requests() {
         let (rig, fake) = open_codex(Host::default(), "thread/start").await;
-        let start = fake.wait_for(|v| v["method"] == "thread/start").await;
-        assert_eq!(start["params"]["sandbox"], "workspace-write");
-        rig.prompt("change it").await;
-        let turn = fake.wait_for(|v| v["method"] == "turn/start").await;
-        assert_eq!(
-            turn["params"]["sandboxPolicy"],
-            json!({"type": "workspaceWrite"})
-        );
+        let err = rig
+            .mgr
+            .submit_human_prompt(&session(), "hi".into())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Codex's own TUI"), "{err}");
+        fake.push(json!({"id": 41, "method": "item/commandExecution/requestApproval", "params": {
+            "threadId": THREAD, "turnId": "u1", "itemId": "e9", "command": "rm x", "startedAtMs": 1}}));
+        // A notification behind it: once it has arrived, so had the request.
+        fake.push(note("thread/name/updated", json!({"threadName": "after"})));
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !rig.host.log().contains(&"named after".to_string()) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(!fake.received().iter().any(|v| v["id"] == 41));
+        assert!(!rig
+            .items()
+            .iter()
+            .any(|b| matches!(b, ItemBody::Permission { .. })));
+        assert!(!methods(&fake).iter().any(|m| m == "turn/start"));
     }
 
-    /// A resumed thread's turns come back as the transcript, recording
-    /// nothing, and its name with them.
+    /// The thread opens sandboxed to what it may write, and follows a
+    /// promotion or demotion — only a change, since a sandbox change
+    /// restarts the thread's MCP servers.
     #[tokio::test]
-    async fn a_resumed_thread_replays_its_turns_and_records_nothing() {
-        let (rig, _fake) = open_codex(Host::default(), "thread/resume").await;
-        let items = rig.items();
-        assert!(matches!(&items[0], ItemBody::User { text, .. } if text == "before"));
-        assert!(matches!(&items[1], ItemBody::Tool { call } if call.title == "ls"));
-        assert_eq!(rig.agent_text(), ["listed"]);
-        // Named once the session it names is recorded.
-        assert_eq!(rig.host.log(), ["started thr-x", "named Earlier work"]);
+    async fn the_sandbox_follows_the_threads_write_access() {
+        let host = Host::default();
+        host.read_only.store(true, Ordering::SeqCst);
+        let (rig, fake) = open_codex(host, "thread/start").await;
+        let start = fake.wait_for(|v| v["method"] == "thread/start").await;
+        assert_eq!(start["params"]["sandbox"], "read-only");
+        rig.mgr.sync_access();
+        rig.host.read_only.store(false, Ordering::SeqCst);
+        rig.mgr.sync_access();
+        let update = fake
+            .wait_for(|v| v["method"] == "thread/settings/update")
+            .await;
+        assert_eq!(update["params"]["threadId"], THREAD);
+        assert_eq!(
+            update["params"]["sandboxPolicy"],
+            json!({"type": "workspaceWrite"})
+        );
+        rig.mgr.sync_access();
+        rig.host.read_only.store(true, Ordering::SeqCst);
+        rig.mgr.sync_access();
+        let updates = || {
+            fake.received()
+                .into_iter()
+                .filter(|v| v["method"] == "thread/settings/update")
+                .collect::<Vec<_>>()
+        };
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while updates().len() < 2 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let updates = updates();
+        assert_eq!(updates.len(), 2, "one per change");
+        assert_eq!(
+            updates[1]["params"]["sandboxPolicy"],
+            json!({"type": "readOnly"})
+        );
     }
 }
