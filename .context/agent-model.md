@@ -436,7 +436,8 @@ verbs it has as features — `transcript` (`turns`), `telemetry`
 (`token_readings`), `runtime_text` (`refresh_text`), `subagents`
 (`prompt`, `subagent`), `conversation_list` (`conversations`: its saved
 conversations for a worktree), `conversation_fork` (a launch with
-`LaunchInput.fork` continues a copy) — and the two context channels,
+`LaunchInput.fork` continues a copy), `native_view` (`native_view`: a shell
+command showing a saved conversation in the harness's own UI) — and the two context channels,
 `prompt_context` and `tool_context`. `session_title(body)` (Claude's
 `session_title` on a prompt) is the name the harness gives the session's
 conversation, written to `agent_session.native_title`. The UI reads each
@@ -445,7 +446,7 @@ harness's features from `list_agent_harnesses` (`HarnessListing.features`):
 | Harness (key) | Features |
 |---|---|
 | Claude Code (`claude`) | terminal, permission_prompts, resume, transcript, telemetry, runtime_text, subagents, prompt_context, tool_context, conversation_list, conversation_fork |
-| Codex (`codex`) | structured_transcript, permission_prompts, resume, runtime_text, prompt_context, conversation_list, conversation_fork |
+| Codex (`codex`) | structured_transcript, permission_prompts, resume, runtime_text, prompt_context, conversation_list, conversation_fork, native_view |
 | opencode (`opencode`) | terminal, resume, runtime_text, subagents, prompt_context, tool_context, conversation_list, conversation_fork |
 | ACP agent (`acp`) | structured_transcript, permission_prompts, resume, prompt_context |
 
@@ -913,8 +914,25 @@ as the person's and the turn it starts like any other
 **Not yet.** Collab agents (`collabAgentToolCall`) aren't subagents
 here; a compaction (`thread/compacted`) doesn't reset the context
 baselines; turns another client ran while oxplow was down are shown by
-the next resume but not recorded; "Open in terminal" (Codex's TUI on the
-thread in a plain PTY) isn't offered yet.
+the next resume but not recorded.
+
+**Open in Codex.** A chat session whose harness declares the feature
+`native_view` and whose slot is bound to a saved conversation shows an
+"Open in Codex" button in its header (`ChatAgentView`, label "Open in
+<harness title>"). It toggles a `TerminalPane` under the transcript with
+pane target `native:<ses>`, which the desktop opens through the UI-only
+RPC `open_native_view { sessionId, cols, rows }`. The core refuses what
+isn't a chat session, a harness without the verb (`AgentHarness::native_view`,
+default unsupported) and a slot with no saved conversation; otherwise
+the harness answers the command, Codex's `codex resume --cd <worktree>
+<thread id>` (the program as resolved, every argument shell-escaped, run
+as `sh -lc "cd <worktree> && exec …"`), and the PTY is spawned under the
+key `native:<ses>` — a second open reattaches the live one. No `-c` /
+`--config` override: one would make Codex run embedded instead of
+attaching to the daemon's thread. The pane's keystrokes are the person's,
+through the same `forward_terminal_input` path (the no-automation
+guards hold: oxplow types nothing into it), and hiding the pane detaches
+it without killing the process.
 
 ## Observing
 

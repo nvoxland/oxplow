@@ -2617,6 +2617,11 @@ export function App() {
               onOpenSettings={() => handleOpenPage(indexRef("settings"))}
               onOpenPage={handleOpenPage}
               canChooseConversation={!!session && harnessFeatures(session.harness).includes("conversation_list")}
+              nativeViewLabel={
+                session && session.resumeId && harnessFeatures(session.harness).includes("native_view")
+                  ? `Open in ${harnesses.find((h) => h.id === session.harness)?.title ?? session.harness}`
+                  : undefined
+              }
               picker={conversationPicker?.sessionId === sessionId ? conversationPicker.mode : null}
               onPicker={(mode) => setConversationPicker(mode ? { sessionId, mode } : null)}
             />

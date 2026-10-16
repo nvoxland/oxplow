@@ -1111,6 +1111,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	openNativeView: (sessionId: string, cols: number, rows: number) => typedError<AttachResult, IpcError>(__TAURI_INVOKE("open_native_view", { sessionId, cols, rows })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	closeTerminalSession: (sessionId: string) => typedError<null, IpcError>(__TAURI_INVOKE("close_terminal_session", { sessionId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the

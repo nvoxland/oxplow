@@ -22,8 +22,8 @@ use oxplow_domain::agent::tool::ToolUse;
 use serde_json::{json, Value};
 
 use super::shared::{
-    refresh_worktree_skills, runtime, saved, toml_string, write_worktree_skills, Saved,
-    METADATA_TIMEOUT,
+    in_shell, program_and_guard, refresh_worktree_skills, runtime, saved, shell_escape,
+    toml_string, write_worktree_skills, Saved, METADATA_TIMEOUT,
 };
 use super::Named;
 
@@ -104,6 +104,25 @@ impl AgentHarness for Codex {
             })?
             .map_err(HarnessError::Unavailable)?;
         Ok(threads_of(&listed))
+    }
+
+    /// Codex's own TUI attached to the daemon's thread: `codex resume` with
+    /// `--cd` for the worktree. No `-c` override, which would run it
+    /// embedded instead of attaching.
+    async fn native_view(
+        &self,
+        query: &ConversationQuery,
+        conversation: &str,
+    ) -> Result<String, HarnessError> {
+        let cwd = query.cwd.to_string_lossy();
+        let (program, guard) =
+            program_and_guard(query.resolve_program("codex").as_deref(), "codex");
+        let resume = format!(
+            "exec {program} resume --cd {} {}",
+            shell_escape(&cwd),
+            shell_escape(conversation)
+        );
+        Ok(in_shell(&cwd, &guard, &resume))
     }
 
     /// It posts no hooks: its calls arrive as the thread's items, mapped
@@ -378,6 +397,70 @@ mod tests {
             Err(HarnessError::Unavailable(_))
         ));
         drop(fake);
+    }
+
+    /// Its own view of a conversation attaches to the daemon's thread:
+    /// `codex resume --cd <cwd> <id>` in the worktree, the program as
+    /// resolved, everything shell-escaped, and no `-c` override (one would
+    /// run Codex embedded instead of attaching).
+    #[tokio::test]
+    async fn its_native_view_is_codex_resume_on_the_thread() {
+        let bin = tempfile::tempdir().unwrap();
+        std::fs::write(bin.path().join("codex"), "").unwrap();
+        let h = harness("oxplow:codex-cli", "codex");
+        let query = ConversationQuery {
+            cwd: "/repo/it's wt".into(),
+            home: None,
+            search_path: vec![bin.path().to_path_buf()],
+            limit: 1,
+        };
+        let cmd = h.native_view(&query, "thr-1; rm -rf /").await.unwrap();
+        let program = bin.path().join("codex");
+        let cwd = "/repo/it's wt";
+        let want = crate::shared::in_shell(
+            cwd,
+            "",
+            &format!(
+                "exec {} resume --cd {} {}",
+                crate::shared::shell_escape(&program.to_string_lossy()),
+                crate::shared::shell_escape(cwd),
+                crate::shared::shell_escape("thr-1; rm -rf /"),
+            ),
+        );
+        assert_eq!(cmd, want);
+        for flag in [" -c ", "--config", "--remote"] {
+            assert!(!cmd.contains(flag), "{flag}: {cmd}");
+        }
+        // Without Codex on the path, the launch says so rather than failing blind.
+        let none = ConversationQuery {
+            search_path: vec![],
+            ..query
+        };
+        let cmd = h.native_view(&none, "t1").await.unwrap();
+        assert!(cmd.contains("not found on PATH"), "{cmd}");
+    }
+
+    /// The other harnesses have no view of their own to attach.
+    #[tokio::test]
+    async fn the_others_have_no_native_view() {
+        let query = ConversationQuery {
+            cwd: "/repo".into(),
+            home: None,
+            search_path: vec![],
+            limit: 1,
+        };
+        for (entry, id) in [
+            ("oxplow:claude-code", "claude"),
+            ("oxplow:opencode", "opencode"),
+        ] {
+            assert!(matches!(
+                super::super::built_in(entry, id, id)
+                    .unwrap()
+                    .native_view(&query, "c1")
+                    .await,
+                Err(HarnessError::Unsupported { .. })
+            ));
+        }
     }
 
     #[test]

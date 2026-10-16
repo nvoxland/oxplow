@@ -9,7 +9,8 @@ use oxplow_app::config_service::read_config;
 use oxplow_app::terminal_sessions::{agent_pane_key, AttachResult, SpawnRequest};
 use oxplow_app::Services;
 use oxplow_domain::agent::harness::{
-    AgentHarness, Endpoints, Launch, LaunchInput, LaunchSpec, SessionIds,
+    AgentHarness, ConversationQuery, Endpoints, HarnessError, Launch, LaunchInput, LaunchSpec,
+    SessionIds,
 };
 use oxplow_domain::agent_session::{AgentSession, SessionKind};
 use oxplow_domain::stores::{AgentSessionStore, StreamStore, ThreadStore};
@@ -267,6 +268,87 @@ pub async fn open_terminal_session(
         )
         .await?;
     Ok(result)
+}
+
+/// The pane key of a chat session's native view (`native:ses3`).
+fn native_pane_key(session: AgentSessionId) -> String {
+    format!("native:{session}")
+}
+
+/// Open (or reattach to) the harness's own UI on a chat session's saved
+/// conversation — Codex's TUI attached to the thread oxplow's chat is on —
+/// in a PTY of its own, under `native:<ses>`. A person's view only: it
+/// types nothing, and the pane's keystrokes are the person's
+/// ([`forward_terminal_input`]). Needs a chat session whose harness has a
+/// view of its own (`native_view`) and a conversation it is bound to.
+pub async fn open_native_view(
+    svc: &Services,
+    session_id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<AttachResult, IpcError> {
+    let id = AgentSessionId::try_from_str(&session_id)
+        .ok_or_else(|| IpcError::invalid(format!("{session_id:?} is not an agent session id")))?;
+    let session = svc
+        .agent_session_store
+        .get(&id)
+        .await?
+        .ok_or_else(|| IpcError::invalid(format!("no agent session {session_id}")))?;
+    if !session.is_open() || session.kind != SessionKind::Chat {
+        return Err(IpcError::invalid(format!(
+            "agent session {id} is not an open chat session; a terminal session is its own view"
+        )));
+    }
+    if session.resume_session_id.is_empty() {
+        return Err(IpcError::invalid(format!(
+            "agent session {id} has no saved conversation yet to show"
+        )));
+    }
+    let thread = svc
+        .thread_store
+        .get(&session.thread_id)
+        .await?
+        .ok_or_else(IpcError::not_found)?;
+    let stream = svc
+        .stream_store
+        .get(&thread.stream_id)
+        .await?
+        .ok_or_else(IpcError::not_found)?;
+    let harness = svc
+        .harnesses
+        .get(session.harness.as_str())
+        .map_err(|e| IpcError::invalid(e.to_string()))?;
+    let cwd = std::path::PathBuf::from(&stream.worktree_path);
+    let query = ConversationQuery {
+        cwd: cwd.clone(),
+        home: (stream.host == oxplow_domain::HostId::LOCAL)
+            .then(|| std::env::var_os("HOME").map(std::path::PathBuf::from))
+            .flatten(),
+        search_path: oxplow_app::agent_path::search_path(),
+        limit: 1,
+    };
+    let command = harness
+        .native_view(&query, &session.resume_session_id)
+        .await
+        .map_err(|e| match e {
+            HarnessError::Unsupported { .. } => IpcError::invalid(e.to_string()),
+            other => IpcError::internal(other.to_string()),
+        })?;
+    let env_remove = oxplow_app::agent_path::not_inherited(&svc.harnesses);
+    Ok(svc
+        .terminal_sessions
+        .attach_or_create(native_pane_key(id), cols.max(20), rows.max(5), |c, r| {
+            SpawnRequest {
+                command: "sh".into(),
+                args: vec!["-lc".into(), command],
+                cwd,
+                env: oxplow_app::agent_path::base_pty_env(),
+                env_remove,
+                cols: c,
+                rows: r,
+            }
+        })
+        .await?)
 }
 
 /// Launch agent session `session` (its thread and stream given) through
@@ -622,6 +704,98 @@ mod tests {
 
         // Clean up the spawned PTY so the test doesn't leak a child.
         let _ = ctx.terminal_sessions.close(first_id).await;
+    }
+
+    /// Turn the first session into the kind of chat session `harness`
+    /// runs, bound to saved conversation `conversation` (none: unbound).
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test setup: no command turns a terminal session into a chat one"
+    )]
+    async fn make_chat(
+        ctx: &crate::RpcContext,
+        harness: &str,
+        conversation: &str,
+    ) -> oxplow_domain::AgentSessionId {
+        let id = first_session(ctx).await.id;
+        let sql = format!(
+            "UPDATE agent_session SET kind = 'chat', harness = '{harness}', resume_session_id = '{conversation}' WHERE id = {}",
+            id.value()
+        );
+        ctx.db
+            .transaction(move |tx| {
+                tx.execute_batch(&sql).map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        id
+    }
+
+    async fn native(
+        ctx: &crate::RpcContext,
+        session: oxplow_domain::AgentSessionId,
+    ) -> Result<serde_json::Value, IpcError> {
+        crate::dispatch(
+            "open_native_view",
+            json!({ "sessionId": session.to_string(), "cols": 80, "rows": 24 }),
+            ctx,
+        )
+        .await
+    }
+
+    /// Only a chat session on a harness with a view of its own, bound to a
+    /// saved conversation, has one to open.
+    #[tokio::test]
+    async fn a_native_view_is_refused_without_a_chat_a_view_or_a_conversation() {
+        let (ctx, _dir) = services().await;
+        // A terminal session has its own pane.
+        let terminal = first_session(&ctx).await.id;
+        let err = native(&ctx, terminal).await.unwrap_err();
+        assert_eq!(err.code, "INVALID");
+        assert!(err.message.contains("chat"), "{}", err.message);
+        // A chat session whose harness has no view of its own.
+        let acp = make_chat(&ctx, "acp", "c1").await;
+        let err = native(&ctx, acp).await.unwrap_err();
+        assert_eq!(err.code, "INVALID");
+        assert!(err.message.contains("own UI"), "{}", err.message);
+        // One that has, but no saved conversation yet.
+        let unbound = make_chat(&ctx, "codex", "").await;
+        let err = native(&ctx, unbound).await.unwrap_err();
+        assert_eq!(err.code, "INVALID");
+        assert!(
+            err.message.contains("saved conversation"),
+            "{}",
+            err.message
+        );
+        let err = crate::dispatch(
+            "open_native_view",
+            json!({ "sessionId": "ses9999", "cols": 80, "rows": 24 }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "INVALID");
+    }
+
+    /// Opening it again attaches the live one: one PTY under
+    /// `native:<ses>`, never a second.
+    #[tokio::test]
+    async fn a_native_view_attaches_one_terminal_per_session() {
+        let (ctx, _dir) = services().await;
+        let session = make_chat(&ctx, "codex", "thr-1").await;
+        let first = native(&ctx, session).await.unwrap();
+        let second = native(&ctx, session).await.unwrap();
+        let id = first["sessionId"].as_str().unwrap().to_string();
+        assert_eq!(second["sessionId"].as_str().unwrap(), id);
+        assert_eq!(
+            ctx.terminal_sessions
+                .session_id_for_key(&format!("native:{session}"))
+                .await
+                .as_deref(),
+            Some(id.as_str())
+        );
+        let _ = ctx.terminal_sessions.close(&id).await;
     }
 
     #[tokio::test]

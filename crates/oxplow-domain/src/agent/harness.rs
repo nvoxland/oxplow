@@ -324,6 +324,20 @@ pub trait AgentHarness: Send + Sync {
             what: "list its saved conversations".into(),
         })
     }
+    /// A shell command that shows saved conversation `conversation` in the
+    /// harness's own UI, attached to the same conversation oxplow's session
+    /// is on (feature `native_view`); a harness without it is
+    /// [`HarnessError::Unsupported`]. Run as a PTY's command.
+    async fn native_view(
+        &self,
+        _query: &ConversationQuery,
+        _conversation: &str,
+    ) -> Result<String, HarnessError> {
+        Err(HarnessError::Unsupported {
+            harness: self.title().to_string(),
+            what: "show a conversation in its own UI".into(),
+        })
+    }
     /// The name a hook body gives the session's conversation, when it
     /// gives one.
     fn session_title(&self, _body: &serde_json::Value) -> Option<String> {

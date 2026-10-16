@@ -714,6 +714,10 @@ pub const MANIFEST: &[Capability] = &[
         "the person's terminal: never an automation API",
     ),
     ui(
+        "open_native_view",
+        "the person's view of a chat session's conversation in the harness's own UI: never an automation API",
+    ),
+    ui(
         "forward_terminal_input",
         "the human's keystroke and paste transport: oxplow never synthesizes agent input",
     ),

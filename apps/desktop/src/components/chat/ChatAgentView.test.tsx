@@ -85,6 +85,15 @@ mock.module("../Wiki/MarkdownView.js", () => ({
   },
 }));
 
+// The harness's own view is a terminal pane; its xterm isn't under test.
+const panes: string[] = [];
+mock.module("../TerminalPane.js", () => ({
+  TerminalPane: (props: { paneTarget: string }) => {
+    panes.push(props.paneTarget);
+    return <div data-testid="native-pane">{props.paneTarget}</div>;
+  },
+}));
+
 const { ChatAgentView } = await import("./ChatAgentView.js");
 
 const thread = { id: "thr1" } as unknown as Thread;
@@ -106,6 +115,30 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("ChatAgentView", () => {
+  // A harness with a view of its own (Codex's TUI) on the saved
+  // conversation: a header button toggles its terminal under the
+  // transcript, keyed `native:<session>`. Hiding detaches; it kills nothing.
+  test("a harness with its own view offers it in the header and toggles its pane", async () => {
+    panes.length = 0;
+    const view = render(<ChatAgentView thread={thread} sessionId="ses5" visible={true} nativeViewLabel="Open in Codex" />);
+    const button = (await waitFor(() => view.getByTestId("acp-native-view"))) as HTMLButtonElement;
+    expect(button.textContent).toBe("Open in Codex");
+    expect(view.queryByTestId("native-pane")).toBeNull();
+    fireEvent.click(button);
+    await waitFor(() => expect(view.getByTestId("native-pane").textContent).toBe("native:ses5"));
+    // The transcript and the prompt box stay.
+    expect(view.getByTestId("acp-transcript")).toBeTruthy();
+    expect(view.getByTestId("acp-prompt-input")).toBeTruthy();
+    fireEvent.click(view.getByTestId("acp-native-view"));
+    expect(view.queryByTestId("native-pane")).toBeNull();
+  });
+
+  test("without a view of its own (or a saved conversation) there is no button", async () => {
+    const view = render(<ChatAgentView thread={thread} sessionId="ses5" visible={true} />);
+    await waitFor(() => view.getByTestId("acp-transcript"));
+    expect(view.queryByTestId("acp-native-view")).toBeNull();
+  });
+
   test("typing in the prompt box doesn't re-render the transcript", async () => {
     const view = render(<ChatAgentView thread={thread} sessionId="ses5" visible={true} />);
     await waitFor(() => expect(view.getByTestId("acp-transcript").textContent).toContain("done"));

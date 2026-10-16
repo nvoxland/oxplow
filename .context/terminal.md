@@ -330,6 +330,18 @@ now passes the hook's `guard`, which suppresses the passive closes
   closing the whole Terminal page tab unmount with the flag false →
   detach, so those shells survive and reattach.
 
+## A chat session's own view (`native:<ses>`)
+
+A chat session whose harness has a UI of its own (Codex's TUI on the
+daemon's thread; `.context/agent-model.md` "Open in Codex") opens it in a
+`TerminalPane` with pane target `native:<ses>`. `api.openTerminalSession`
+sends a `native:` target to the `open_native_view` RPC instead of
+`open_terminal_session`: the PTY is registered under the key
+`native:<ses>`, so reopening attaches the live one, and the pane unmounting
+only detaches (`closeTerminalSession`), never terminating it. It carries no
+interrupt, comment or start/stop controls — it is a view, not the session's
+agent pane (`<ses>`).
+
 ## File-path link provider
 
 `apps/desktop/src/terminal-link-provider.ts` exports two pieces:
