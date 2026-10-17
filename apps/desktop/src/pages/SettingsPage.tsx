@@ -11,6 +11,7 @@ import {
 import { insertIntoAgent } from "../agent-input-bus.js";
 import type { EffectiveSetting } from "../tauri-bridge/generated/bindings.js";
 import { askToChange, groupSettings, matchesSearch, valueText } from "./settingsModel.js";
+import { Section } from "../kit/index.js";
 import { Page } from "../tabs/Page.js";
 import { LspServersSection } from "../components/LspServersSection.js";
 import { ExtensionsSection } from "../components/ExtensionsSection.js";
@@ -453,26 +454,6 @@ const linkButtonStyle: CSSProperties = {
   cursor: "pointer",
   fontSize: "var(--text-xs)",
 };
-
-function Section({ title, id, children }: { title: string; id?: string; children: React.ReactNode }) {
-  return (
-    <section id={id} style={{ marginBottom: 28 }}>
-      <h2
-        style={{
-          fontSize: 11,
-          fontWeight: 600,
-          color: "var(--text-secondary)",
-          textTransform: "uppercase",
-          letterSpacing: 0.4,
-          margin: "0 0 6px",
-        }}
-      >
-        {title}
-      </h2>
-      {children}
-    </section>
-  );
-}
 
 function Hint({ children }: { children: React.ReactNode }) {
   return (

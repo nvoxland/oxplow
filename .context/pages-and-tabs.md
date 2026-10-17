@@ -252,6 +252,11 @@ stylesheet, `crates/oxplow-daemon/assets/oxplow-kit.css`, which the app
 imports (`main.tsx`) and custom components link, so a core page, a lens
 and a sandboxed component look alike. A page composes the kit; a new local
 section, table, filter list or "Loading…" line is a review finding.
+Settings, Stream and Thread settings, Alerts, Go To and the wiki page list
+draw their parts with the kit `Section` (no local copies): a page's action
+is a `PageAction` on its section (Alerts' "Clear failed operations" is
+`action-clear-ops`), and the Settings index scrolls to a section by its
+`data-section` id.
 
 | Archetype | When | Core form | Extension form |
 |---|---|---|---|

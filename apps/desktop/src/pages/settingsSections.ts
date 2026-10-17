@@ -51,5 +51,7 @@ export function onSettingsSection(listener: (id: string) => void): () => void {
 
 /** Scroll section `id` into view, if it's on the page. */
 export function scrollToSettingsSection(id: string): void {
-  document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  document
+    .querySelector(`[data-section="${id}"]`)
+    ?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
