@@ -426,8 +426,9 @@ removed in v13 — use the task log as the source of truth instead.
 
 `closed_at` (migration v44, nullable TEXT) — set means the thread is
 closed. A closed thread sits hidden from the rail; it surfaces only on the **Closed Threads**
-page (`apps/desktop/src/pages/ClosedThreadsPage.tsx`), which lists each closed
-thread with its tasks (read-only) and a Reopen action. `oxplow.thread.reopen` clears
+page (`page:oxplow-foundation/closed-threads`, the foundation's `closed-threads`
+lens over `v_thread`), which lists each closed thread with the work it
+finished (counts by state) and a Reopen row action. `oxplow.thread.reopen` clears
 `closed_at` and the thread returns to the rail as an open tab.
 `ThreadStore.list()` already filters closed threads out, so every
 existing surface (rail, work panel, dispatch) treats them as gone

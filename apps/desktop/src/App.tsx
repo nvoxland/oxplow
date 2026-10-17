@@ -134,10 +134,7 @@ import { getPageDetailStore } from "./tabs/openPageDetail.js";
 import { ExploreDataPage } from "./pages/ExploreDataPage.js";
 import { CatalogPage } from "./pages/CatalogPage.js";
 import { BoardPage } from "./pages/BoardPage.js";
-import { ProblemsPage } from "./pages/ProblemsPage.js";
 import { ExtensionPageView } from "./pages/ExtensionPageView.js";
-import { SymbolsPage } from "./pages/SymbolsPage.js";
-import { ClosedThreadsPage } from "./pages/ClosedThreadsPage.js";
 import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
 import { WorkItemPage } from "./pages/WorkItemPage.js";
 import { WikiPage } from "./pages/WikiPage.js";
@@ -3030,21 +3027,6 @@ export function App() {
           render: () => <DashboardsIndexPage onOpenPage={nav.navOpen} />,
         };
       },
-      problems: (ref, nav) => ({
-        id: ref.id,
-        label: "Problems",
-        closable: true,
-        render: () => (stream ? <ProblemsPage streamId={stream.id} onOpenPage={nav.navOpen} /> : null),
-      }),
-      symbols: (ref, nav) => {
-        const path = (ref.payload as { path?: string | null } | null)?.path ?? null;
-        return {
-          id: ref.id,
-          label: path ? `Symbols — ${path.split("/").pop()}` : "Symbols",
-          closable: true,
-          render: () => (stream ? <SymbolsPage streamId={stream.id} path={path} onOpenPage={nav.navOpen} /> : null),
-        };
-      },
       // A symbol opens its file at its line (openSymbol); it's never a tab.
       symbol: () => null,
       board: (ref, nav) => ({
@@ -3105,14 +3087,6 @@ export function App() {
       "tasks": workPage,
       "done-work": workPage,
       "backlog": workPage,
-      "closed-threads": (ref, nav) => {
-        return {
-          id: ref.id,
-          label: "Closed Threads",
-          closable: true,
-          render: () => <ClosedThreadsPage stream={stream} />,
-        };
-      },
       "external-url": (ref, nav) => {
         const externalUrl = (ref.payload as { url?: string } | null)?.url ?? "";
         let label = externalUrl;

@@ -58,7 +58,6 @@ export type RoutePageKind =
   | "new-task"
   | "stream-settings"
   | "thread-settings"
-  | "closed-threads"
   | "alerts"
   | "external-url"
   | "metrics-recorded"
@@ -66,9 +65,7 @@ export type RoutePageKind =
   | "dashboards"
   | "explore-data"
   | "catalog"
-  | "board"
-  | "problems"
-  | "symbols";
+  | "board";
 
 /** An extension's page (`page:<extension>/<page>`, P6.G2): a lens
  *  shown full-page. Not a named route — its name is the extension's. */

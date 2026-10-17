@@ -1404,15 +1404,6 @@ export async function closeThread(streamId: string, threadId: string): Promise<T
   return getThreadState(streamId);
 }
 
-export async function reopenThread(streamId: string, threadId: string): Promise<ThreadState> {
-  await runCommand("oxplow.thread.reopen", { thread: threadRef(threadId) });
-  return getThreadState(streamId);
-}
-
-export async function listClosedThreads(streamId: string): Promise<Thread[]> {
-  return unwrap(await commands.listClosedThreads(streamId));
-}
-
 export async function renameThread(_streamId: string, threadId: string, title: string): Promise<Thread> {
   return (await runCommand("oxplow.thread.rename", { thread: threadRef(threadId), title })).result as Thread;
 }

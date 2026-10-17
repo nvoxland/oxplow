@@ -1,7 +1,6 @@
 import type { TabRef } from "../../tabs/tabState.js";
 import {
   backlogRef,
-  closedThreadsRef,
   dashboardRef,
   dashboardsRef,
   doneWorkRef,
@@ -9,7 +8,6 @@ import {
   indexRef,
   tasksRef,
   uncommittedChangesRef,
-  symbolsRef,
 } from "../../tabs/pageRefs.js";
 
 /**
@@ -66,8 +64,6 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
     },
     { id: "board", label: "Board", ref: indexRef("board"), category: "Work", keywords: "kanban columns state work items" },
     { id: "files", label: "Files", ref: indexRef("files"), category: "Code" },
-    { id: "problems", label: "Problems", ref: indexRef("problems"), category: "Code", keywords: "diagnostics errors warnings lsp compiler" },
-    { id: "symbols", label: "Symbols", ref: symbolsRef(), category: "Code", keywords: "outline functions classes definitions lsp" },
     { id: "git-dashboard", label: "Git", ref: gitDashboardRef(), category: "Git" },
     { id: "git-history", label: "Git History", ref: indexRef("git-history"), category: "Git" },
     { id: "uncommitted-changes", label: "Uncommitted", ref: uncommittedChangesRef(), category: "Git" },
@@ -81,7 +77,6 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
     { id: "dashboards", label: "Dashboards", ref: dashboardsRef(), category: "Data", keywords: "custom metric tiles lens" },
     { id: "catalog", label: "Catalog", ref: indexRef("catalog"), category: "System", keywords: "ask prompts questions what can i help data config" },
     { id: "terminal", label: "Terminal", ref: indexRef("terminal"), category: "System" },
-    { id: "closed-threads", label: "Closed Threads", ref: closedThreadsRef(), category: "System" },
     { id: "settings", label: "Settings", ref: indexRef("settings"), category: "System" },
   ];
 }

@@ -16,12 +16,9 @@ import {
   Activity,
   Bell,
   Bot,
-  Archive,
   BarChart3,
   BookOpen,
   Columns3,
-  TriangleAlert,
-  ListTree,
   Braces,
   CheckCheck,
   CheckSquare,
@@ -118,10 +115,6 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return BookOpen;
     case "board":
       return Columns3;
-    case "problems":
-      return TriangleAlert;
-    case "symbols":
-      return ListTree;
     case "symbol":
       return Braces;
 
@@ -147,8 +140,6 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return CheckCheck;
     case "backlog":
       return Inbox;
-    case "closed-threads":
-      return Archive;
     case "wiki-index":
       return Library;
     case "files":
@@ -234,8 +225,6 @@ export function pageKindLabel(kind: string): string {
       return "note";
     case "new-session":
       return "new session";
-    case "closed-threads":
-      return "threads";
     case "lens":
       return "lens";
     case "explore-data":

@@ -56,7 +56,7 @@ pub async fn get_thread_state(
     stream_id: StreamId,
 ) -> Result<ThreadState, IpcError> {
     // The stream's open threads: a closed one is history, listed on the
-    // Closed Threads page (`list_closed_threads`), not in the nav.
+    // Closed Threads page, not in the nav.
     let threads: Vec<Thread> = svc
         .thread_store
         .list_for_stream(&stream_id)

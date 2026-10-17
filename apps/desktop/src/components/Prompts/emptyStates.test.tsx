@@ -11,7 +11,6 @@ import type { Stream, Thread } from "../../api.js";
 const realApi = await import("../../api.js");
 mock.module("../../api.js", () => ({
   ...realApi,
-  listClosedThreads: async () => [],
   subscribeOxplowEvents: () => () => {},
   listRecentPageVisits: async () => [],
   topVisitedPages: async () => [],
@@ -22,7 +21,6 @@ mock.module("../../api.js", () => ({
 }));
 
 const { BacklinksList } = await import("../../tabs/BacklinksList.js");
-const { ClosedThreadsPage } = await import("../../pages/ClosedThreadsPage.js");
 const { DashboardPage } = await import("../../pages/DashboardPage.js");
 const { MetricsPage } = await import("../../pages/MetricsPage.js");
 const { NewSessionPage } = await import("../../pages/NewSessionPage.js");
@@ -36,12 +34,6 @@ test("an empty backlinks list is an EmptyState", () => {
   const { container } = render(<BacklinksList entries={[]} onOpenPage={() => {}} />);
   const empty = container.querySelector('[data-testid="backlinks-list-empty"]');
   expect(empty?.hasAttribute("data-empty-state")).toBe(true);
-});
-
-test("no closed threads is an EmptyState", async () => {
-  const { container } = render(<ClosedThreadsPage stream={stream} onAfterReopen={() => {}} />);
-  await waitFor(() => expect(container.textContent).toContain("No closed threads"));
-  expect(emptyStates(container).length).toBe(1);
 });
 
 test("the Go To page's empty sections are EmptyStates", async () => {
