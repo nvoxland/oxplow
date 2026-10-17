@@ -9,7 +9,7 @@ import {
   type WikiFreshnessLevel,
   type WikiFreshnessSummary,
 } from "./wikiFreshness.js";
-import { MarkdownView, preprocessWikilinks, postprocessWikilinks } from "./MarkdownView.js";
+import { preprocessWikilinks, postprocessWikilinks } from "./MarkdownView.js";
 import { useWorkListProfile } from "../../useWorkListProfile.js";
 import { workItemRefOfMention } from "../../workItems.js";
 import { contextNodeProps } from "../Comments/contextNodes.js";
@@ -64,7 +64,7 @@ export function WikiPageTab({
   onOpenCommit,
   onOpenExternalUrl,
 }: Props) {
-  const { summary, body, setDraft, notFound, loadError } = controller;
+  const { body, setDraft, notFound, loadError } = controller;
   // Pre-process `[[ ]]` wikilinks into standard markdown links before
   // handing the body to Tiptap; post-process back to `[[ ]]` form on
   // commit so the on-disk file keeps its authored shape.

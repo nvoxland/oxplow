@@ -40,7 +40,6 @@ import {
   type MetricSpec,
   type SeriesPoint,
 } from "./metricsSql.js";
-import { normalizeSnapshotId } from "./effort-snapshot.js";
 import { IpcCallError, ipcErrorCode, ipcErrorField, ipcErrorMessage } from "./ipc-error.js";
 import type {
   AiSettings,

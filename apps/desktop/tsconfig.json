@@ -14,6 +14,9 @@
     "noUncheckedIndexedAccess": false,
     "noImplicitAny": false,
     "strictNullChecks": false,
+    // An unused import or local fails the typecheck. (noUnusedParameters
+    // stays off: 44 callbacks take arguments they ignore.)
+    "noUnusedLocals": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,

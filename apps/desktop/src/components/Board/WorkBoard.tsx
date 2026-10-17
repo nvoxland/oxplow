@@ -26,7 +26,6 @@ import {
   type WorkItem,
   type WorkItemScope,
 } from "../../workItems.js";
-import { personCommands } from "../../personCommands.js";
 import { recordOpError } from "../opErrorsStore.js";
 import { refCommandMenuItems, useRefOffers } from "../refCommands.js";
 import { useContextMenu } from "../useRowContextMenu.js";
