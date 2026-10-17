@@ -25,7 +25,7 @@ pub enum HookAnswer {
 
 /// What a prompt hook (`UserPromptSubmit`) is, as its harness reads it.
 /// On the wire, `{ "kind": "person", "text" }` or `{ "kind": "handback",
-/// "subagent" }`.
+/// "subagent" }` or `{ "kind": "peer_message", "from" }`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Prompt {
@@ -37,6 +37,11 @@ pub enum Prompt {
     Handback {
         subagent: crate::agent::tool::Subagent,
     },
+    /// Another agent session's message to this one (Claude Code's
+    /// cross-session message, which arrives as a prompt): the agent acts
+    /// on it, and it is not a person's words. `from` is the sender's own
+    /// name for its session.
+    PeerMessage { from: String },
 }
 
 /// Summed usage across a chunk of transcript.

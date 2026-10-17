@@ -190,6 +190,7 @@ mod tests {
             }),
             tool: crate::test_fixtures::claude_tool(kind, &body),
             subagent: None,
+            peer: None,
         }
     }
 

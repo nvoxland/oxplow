@@ -1,5 +1,5 @@
 title: Thread Activity
-description: What a thread's agent did, turn by turn, under the effort each turn fell in — its prompt, the session it ran in, the model and effort it ran on, how full its context was and how often it compacted, the files it touched, the test runs and the tokens — with the turns outside any effort (questions, talk) between them. Open an effort to rename it, link it to a task or close it.
+description: What a thread's agent did, turn by turn, under the effort each turn fell in — its prompt (or the other agent session whose message opened it), the session it ran in, the model and effort it ran on, how full its context was and how often it compacted, the files it touched, the test runs and the tokens — with the turns outside any effort (questions, talk) between them. Open an effort to rename it, link it to a task or close it.
 params:
   - { name: thread_id, label: Thread }
 query: |
@@ -11,6 +11,7 @@ query: |
                 WHEN t.context_window IS NULL THEN (t.context_tokens / 1000) || 'k'
                 ELSE (t.context_tokens / 1000) || 'k of ' || (t.context_window / 1000) || 'k ('
                      || (100 * t.context_tokens / t.context_window) || '%)' END AS context,
+           t.from_peer,
            trim(CASE WHEN instr(t.prompt, char(10)) > 0
                      THEN substr(t.prompt, 1, instr(t.prompt, char(10)) - 1)
                      ELSE t.prompt END) AS prompt,
@@ -24,7 +25,9 @@ query: |
     WHERE t.thread_id = :thread_id
   )
   SELECT coalesce(e.title, CASE WHEN u.effort_id IS NULL THEN 'Between efforts' ELSE 'Work' END) AS section,
-         coalesce(nullif(u.prompt, ''), '(no prompt)') AS prompt,
+         coalesce(nullif(u.prompt, ''),
+                  CASE WHEN u.from_peer IS NOT NULL THEN 'Message from ' || u.from_peer END,
+                  '(no prompt)') AS prompt,
          CASE WHEN u.agent_session_id IS NOT NULL THEN 'Session ' || u.agent_session_id END AS session,
          u.ran_on,
          u.context,

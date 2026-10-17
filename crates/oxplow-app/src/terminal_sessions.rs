@@ -379,6 +379,7 @@ impl TerminalSessionRegistry {
                                 decision: None,
                                 tool: None,
                                 subagent: None,
+                                peer: None,
                             };
                             if let Err(err) = ingest.ingest(exit).await {
                                 warn!(?err, "recording an agent's exit failed");

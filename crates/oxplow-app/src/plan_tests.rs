@@ -21,6 +21,7 @@ fn envelope(fx: &EffortFixture, kind: HookKind, body: serde_json::Value) -> Hook
         decision: None::<ToolDecision>,
         tool: crate::test_fixtures::claude_tool(kind, &body),
         subagent: None,
+        peer: None,
     }
 }
 

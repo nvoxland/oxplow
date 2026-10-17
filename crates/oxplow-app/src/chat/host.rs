@@ -127,6 +127,7 @@ impl ServicesChatHost {
             decision: None,
             tool: None,
             subagent: None,
+            peer: None,
         }
     }
 
@@ -428,6 +429,7 @@ impl ChatHost for ServicesChatHost {
             decision: None,
             tool: None,
             subagent: None,
+            peer: None,
         };
         // Its open turn ends interrupted; the agent is gone either way, so
         // the session reads stopped even when no turn was running.

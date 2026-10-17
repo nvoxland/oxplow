@@ -462,6 +462,7 @@ async fn handle_hook_inner(
             decision: None,
             tool,
             subagent,
+            peer: None,
         };
         let harness = match ctx.services.hook_ingest.ingest(envelope).await {
             Ok(outcome) => outcome.harness,
@@ -490,18 +491,19 @@ async fn handle_hook_inner(
     // What a prompt hook is, as the bearer's harness reads it: a person's
     // prompt, or a subagent handing its report back (no prompt; the
     // subagent).
-    let (prompt, handback) = match (kind, body_value.as_ref()) {
+    let (prompt, handback, peer) = match (kind, body_value.as_ref()) {
         (HookKind::UserPromptSubmit, Some(body)) => {
             match ctx.services.harnesses.get(&principal.harness) {
                 Ok(h) => match h.prompt(body).await {
-                    Some(Prompt::Person { text }) => (Some(text), None),
-                    Some(Prompt::Handback { subagent }) => (None, Some(subagent)),
-                    None => (None, None),
+                    Some(Prompt::Person { text }) => (Some(text), None, None),
+                    Some(Prompt::Handback { subagent }) => (None, Some(subagent), None),
+                    Some(Prompt::PeerMessage { from }) => (None, None, Some(from)),
+                    None => (None, None, None),
                 },
-                Err(_) => (None, None),
+                Err(_) => (None, None, None),
             }
         }
-        _ => (None, None),
+        _ => (None, None, None),
     };
 
     // The name the bearer's harness gives the session's conversation, when
@@ -558,6 +560,7 @@ async fn handle_hook_inner(
                 }),
                 tool: tool.clone(),
                 subagent: None,
+                peer: None,
             };
             let harness = match ctx.services.hook_ingest.ingest(envelope).await {
                 Ok(outcome) => outcome.harness,
@@ -591,6 +594,7 @@ async fn handle_hook_inner(
         }),
         tool: tool.clone(),
         subagent: handback.clone(),
+        peer,
     };
 
     let envelope_for_resume = envelope.clone();

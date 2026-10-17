@@ -1251,6 +1251,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
+            peer: None,
         };
         use oxplow_domain::hook::HookKind;
         f.svc
@@ -2617,6 +2618,7 @@ mod tests {
                     decision: None,
                     tool: crate::test_fixtures::claude_tool(kind, &body),
                     subagent: None,
+                    peer: None,
                 })
                 .await
                 .unwrap();
@@ -2660,6 +2662,7 @@ mod tests {
                             decision: None,
                             tool: None,
                             subagent: None,
+                            peer: None,
                         })
                         .await
                         .unwrap();
@@ -2725,6 +2728,7 @@ mod tests {
                 decision: None,
                 tool: None,
                 subagent: None,
+                peer: None,
             }
         };
         let turn = |prompt: &'static str, window: Option<i64>, compactions: usize| {

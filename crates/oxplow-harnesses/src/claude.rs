@@ -195,6 +195,9 @@ impl AgentHarness for Claude {
     /// `<agent-message from="<agent_id>">`: not a person's words.
     async fn prompt(&self, body: &serde_json::Value) -> Option<Prompt> {
         let text = body.get("prompt")?.as_str()?;
+        if let Some(from) = peer_message_from(text) {
+            return Some(Prompt::PeerMessage { from: from.into() });
+        }
         Some(match handback_from(text) {
             Some(id) => Prompt::Handback {
                 subagent: Subagent {
@@ -279,6 +282,22 @@ fn handback_from(text: &str) -> Option<&str> {
     rest.split_once('"')
         .map(|(id, _)| id)
         .filter(|id| !id.is_empty())
+}
+
+/// Who sent a cross-session message: the prompt is one wrapped in
+/// `<cross-session-message from="<socket>" from-name="<session name>" …>`.
+/// The sender's session name, else its socket.
+fn peer_message_from(text: &str) -> Option<&str> {
+    let (tag, _) = text
+        .strip_prefix("<cross-session-message")?
+        .split_once('>')?;
+    let attr = |name: &str| {
+        let (_, rest) = tag.split_once(&format!(" {name}=\""))?;
+        rest.split_once('"')
+            .map(|(value, _)| value)
+            .filter(|value| !value.is_empty())
+    };
+    attr("from-name").or_else(|| attr("from"))
 }
 
 /// Its `claude_code.token.usage` counter (delta temporality): the `type`
@@ -884,6 +903,41 @@ fn resume_state(config_dir: &Path, cwd: &str, session_id: &str) -> ResumeState {
 
 #[cfg(test)]
 mod tests {
+
+    /// Another Claude Code session's message arrives as a prompt wrapped in
+    /// `<cross-session-message from=… from-name=…>` (the recorded
+    /// `claude/peer_message.jsonl`): the sender's session name, else its
+    /// socket, and not a person's words.
+    #[test]
+    fn a_peers_message_is_not_a_persons_prompt() {
+        use oxplow_domain::agent::observe::Prompt;
+        let h = harness("oxplow:claude-code", "claude");
+        let named = serde_json::json!({
+            "prompt": "<cross-session-message from=\"uds:/tmp/cc-socks/21663.sock\" from-name=\"oxplow-main\" from-mode=\"prompting\">\nhi\n</cross-session-message>"
+        });
+        assert_eq!(
+            crate::test_launch::block(h.prompt(&named)),
+            Some(Prompt::PeerMessage {
+                from: "oxplow-main".into()
+            })
+        );
+        let unnamed = serde_json::json!({
+            "prompt": "<cross-session-message from=\"uds:/tmp/cc-socks/21663.sock\">\nhi\n</cross-session-message>"
+        });
+        assert_eq!(
+            crate::test_launch::block(h.prompt(&unnamed)),
+            Some(Prompt::PeerMessage {
+                from: "uds:/tmp/cc-socks/21663.sock".into()
+            })
+        );
+        // A person quoting one is still a person.
+        let quoted =
+            serde_json::json!({ "prompt": "what is a <cross-session-message from=\"x\">?" });
+        assert!(matches!(
+            crate::test_launch::block(h.prompt(&quoted)),
+            Some(Prompt::Person { .. })
+        ));
+    }
 
     /// A background subagent, as Claude Code 2026-10 posts it (the
     /// recorded `claude/subagent.jsonl`): its tool calls carry its

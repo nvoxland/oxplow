@@ -85,7 +85,7 @@
     - { unique: id }
     - { relationships: { column: agent_session_id, to: agent_session, field: id } }
 - name: agent_turn
-  version: 6
+  version: 7
   description: "Agent turns: each human prompt and the agent's answer, per thread and agent session. start_snapshot_id → snapshot_id is what the turn changed (the snapshot the worktree was at when it opened and when it ended)."
   columns:
     - { name: "id", type: "INTEGER", doc: "Turn id." }
@@ -104,6 +104,7 @@
     - { name: "effort", type: "TEXT", doc: "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)" }
     - { name: "context_tokens", type: "INTEGER", doc: "Tokens in the agent's context when the turn ended (input plus cache reads and writes of the turn's last request), as its harness reported it with the turn's end; NULL while running, or when the harness said nothing. (v6)" }
     - { name: "context_window", type: "INTEGER", doc: "The size of the model's context window, in tokens, as its harness reported it; NULL while running, or when it said nothing (Claude Code never does). context_tokens / context_window is how full the context was. (v6)" }
+    - { name: "from_peer", type: "TEXT", doc: "Who opened the turn when it has no prompt of a person's: the name the other agent session gave itself (Claude Code's cross-session message, `agent.peer_message.received`). NULL for a turn a person's prompt opened, and for any other. (v7)" }
   tests:
     - { not_null: id }
     - { unique: id }

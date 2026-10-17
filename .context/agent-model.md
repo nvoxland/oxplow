@@ -1423,11 +1423,22 @@ nothing: the record and its stamps are in the database. Pinned by the
 `a_handoff_reaches_the_recipients_next_prompt_once`.
 
 **Native messaging stays native, and is observed:** Claude Code's inbound
-cross-session message as its own kind of prompt (not the person's
-words, like a subagent's hand-back), and Codex's collab agents as
-subagents (built, "Collab agents are subagents"), are planned or built:
-the inbound message is not. oxplow doesn't read Claude's
-team mailboxes (not a documented interface).
+cross-session message arrives as a prompt wrapped in
+`<cross-session-message from="<socket>" from-name="<session name>" …>`.
+The Claude harness's `prompt` reads it as `Prompt::PeerMessage { from }`
+(the session name, else the socket), not the person's words, as it reads
+a subagent's hand-back. The control plane passes it as
+`HookEnvelope.peer`; the ingest opens a turn with an empty prompt when
+none is open (none if one is), logs `agent.peer_message.received@1
+{ thread, turn, from }` (no `agent.prompt.submitted`) and sets the
+session running. `v_agent_turn.from_peer` names the sender of a turn it
+opened, and Thread Activity titles that turn "Message from …". Pinned by
+`a_peers_message_opens_a_turn_with_no_prompt`, `a_peers_message_is_not_a_persons_prompt`
+and the recorded `claude/peer_message.jsonl`
+(`a_recorded_claude_code_peer_message_opens_a_turn_of_its_own`). Codex's
+collab agents are subagents ("Collab agents are subagents"). Observe
+only: oxplow never sends a peer message and doesn't read Claude's team
+mailboxes (not a documented interface).
 
 Cross-thread ownership and duplicate work are visibility, not gates
 ([work-tracking.md](./work-tracking.md) "Cross-thread ownership").

@@ -793,7 +793,7 @@ fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
         ),
         ("agent_harness", "prompt") => (
             "What a prompt hook's body is (feature `subagents`): { prompt: { kind: person, text } | \
-             { kind: handback, subagent: { id, kind? } } } — null for a body with no prompt."
+             { kind: handback, subagent: { id, kind? } } | { kind: peer_message, from } } — null for a body with no prompt."
                 .into(),
             json!({ "type": "object", "required": ["body"],
                     "properties": { "body": { "type": "object" } } }),

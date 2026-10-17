@@ -127,6 +127,7 @@ mod tests {
                 decision: None::<ToolDecision>,
                 tool: crate::test_fixtures::claude_tool(HookKind::PostToolUse, &body),
                 subagent: None,
+                peer: None,
             })
             .await
             .unwrap();
@@ -187,6 +188,7 @@ mod tests {
                     decision: None,
                     tool: None,
                     subagent: None,
+                    peer: None,
                 })
                 .await
                 .unwrap();

@@ -163,6 +163,7 @@ pub(crate) mod tests {
             decision: None,
             tool: None,
             subagent: None,
+            peer: None,
         }
     }
 

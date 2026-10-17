@@ -53,11 +53,12 @@ use oxplow_db::event_log_store::{append_unique_tx, EventCtx};
 use oxplow_db::{event_content_store, Database};
 use oxplow_domain::agent::tool::{Subagent, ToolKind, ToolUse};
 use oxplow_domain::events::schema::{
-    AgentContextCompacted, AgentContextCompactedV1, AgentPlanProposed, AgentPlanProposedV1,
-    AgentPromptSubmitted, AgentPromptSubmittedV1, AgentSessionEnded, AgentSessionEndedV1,
-    AgentSessionStarted, AgentSessionStartedV2, AgentSubagentFinished, AgentSubagentFinishedV1,
-    AgentSubagentStarted, AgentSubagentStartedV1, AgentToolFinished, AgentToolFinishedV3,
-    AgentToolRequested, AgentToolRequestedV3, ContentRef, SubagentRef, ToolDecision as Decision,
+    AgentContextCompacted, AgentContextCompactedV1, AgentPeerMessageReceived,
+    AgentPeerMessageReceivedV1, AgentPlanProposed, AgentPlanProposedV1, AgentPromptSubmitted,
+    AgentPromptSubmittedV1, AgentSessionEnded, AgentSessionEndedV1, AgentSessionStarted,
+    AgentSessionStartedV2, AgentSubagentFinished, AgentSubagentFinishedV1, AgentSubagentStarted,
+    AgentSubagentStartedV1, AgentToolFinished, AgentToolFinishedV3, AgentToolRequested,
+    AgentToolRequestedV3, ContentRef, SubagentRef, ToolDecision as Decision,
 };
 use oxplow_domain::refs::build::{thread_ref, turn_ref};
 use oxplow_domain::{
@@ -124,6 +125,11 @@ pub struct HookEnvelope {
     #[serde(skip)]
     #[specta(skip)]
     pub subagent: Option<Subagent>,
+    /// On a `UserPromptSubmit` with no `prompt`: the name of the other
+    /// agent session whose message this prompt is. In-process only.
+    #[serde(skip)]
+    #[specta(skip)]
+    pub peer: Option<String>,
     /// The name its harness gives the session's conversation, when the
     /// hook says (Claude's `session_title` on a prompt). In-process only.
     #[serde(skip)]
@@ -583,6 +589,30 @@ fn record_tx(
             }
             if let Some(subagent) = &env.subagent {
                 log_subagent_tx(conn, ev, thread, slot, session, subagent, None)?;
+            }
+            status = Some((AgentStatusState::Running, None));
+        }
+        // Another session's message: the agent goes on working on it — a
+        // turn, if none is open, with no person's prompt — and it is
+        // logged with who sent it.
+        HookKind::UserPromptSubmit if env.prompt.is_none() && env.peer.is_some() => {
+            if applied.turn.is_none() {
+                applied.turn = Some(open_turn_tx(conn, ev, thread, slot, "", session, now)?);
+                applied.opened_turn = true;
+            }
+            if let Some(from) = &env.peer {
+                let envelope = ev
+                    .typed::<AgentPeerMessageReceived>(&AgentPeerMessageReceivedV1 {
+                        thread: thread_ref(thread),
+                        turn: applied.turn.map(turn_ref),
+                        from: from.clone(),
+                    })
+                    .with_anchors(activity_anchors_tx(conn, thread, slot)?)
+                    .with_subject([applied
+                        .turn
+                        .map(turn_ref)
+                        .unwrap_or_else(|| thread_ref(thread))]);
+                ev.append(conn, &envelope)?;
             }
             status = Some((AgentStatusState::Running, None));
         }
@@ -1376,6 +1406,7 @@ mod tests {
             decision: None,
             tool: crate::test_fixtures::claude_tool(kind, &body),
             subagent: None,
+            peer: None,
         }
     }
 
@@ -1747,6 +1778,60 @@ mod tests {
             status(&svc, tid).await.map(|s| s.state),
             Some(AgentStatusState::Idle)
         );
+    }
+
+    /// Another session's message is no person's prompt: it opens a turn
+    /// with none, is logged with its sender, and ends with the Stop like
+    /// any turn. One arriving in an open turn opens none.
+    #[tokio::test]
+    async fn a_peers_message_opens_a_turn_with_no_prompt() {
+        let (svc, tid) = fixture().await;
+        let peer = |from: &str| HookEnvelope {
+            prompt: None,
+            peer: Some(from.into()),
+            ..hook(HookKind::UserPromptSubmit, tid, Some("h1"), json!({}))
+        };
+        svc.ingest(peer("oxplow-main")).await.unwrap();
+        assert_eq!(
+            status(&svc, tid).await.map(|s| s.state),
+            Some(AgentStatusState::Running)
+        );
+        let all = turns(&svc).list_for_thread(&tid, 10).await.unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].prompt, "");
+        svc.ingest(peer("oxplow-other")).await.unwrap();
+        assert_eq!(
+            turns(&svc).list_for_thread(&tid, 10).await.unwrap().len(),
+            1
+        );
+        svc.ingest(hook(
+            HookKind::Stop,
+            tid,
+            Some("h1"),
+            json!({"last_assistant_message": "done"}),
+        ))
+        .await
+        .unwrap();
+        let events = logged(&svc).await;
+        assert!(of_type(&events, "agent.prompt.submitted").is_empty());
+        let received = of_type(&events, "agent.peer_message.received");
+        assert_eq!(received.len(), 2);
+        assert_eq!(received[0].envelope.payload["from"], "oxplow-main");
+        assert_eq!(received[1].envelope.payload["from"], "oxplow-other");
+        assert_eq!(
+            received[0].envelope.payload["turn"],
+            received[1].envelope.payload["turn"]
+        );
+        // The turn says where it came from.
+        let from: Option<String> = svc
+            .db
+            .read(|c| {
+                c.query_row("SELECT from_peer FROM v_agent_turn", [], |r| r.get(0))
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(from.as_deref(), Some("oxplow-main"));
     }
 
     /// Two sessions in one thread run their own turns: a Stop in one
@@ -2338,6 +2423,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
+            peer: None,
         };
         svc.ingest(envelope(HookKind::UserPromptSubmit, Some("p")))
             .await
@@ -2369,6 +2455,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
+            peer: None,
         };
         let ran_on = || {
             let db = svc.db.clone();
@@ -2440,6 +2527,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
+            peer: None,
         };
         svc.ingest(env).await.unwrap();
         // Spot-check via stores.
@@ -2466,6 +2554,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
+            peer: None,
         };
         svc.ingest(prompt_env).await.unwrap();
         let stop = HookEnvelope {
@@ -2481,6 +2570,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
+            peer: None,
         };
         svc.ingest(stop).await.unwrap();
         assert!(turns(&svc).list_open(&tid).await.unwrap().is_empty());
@@ -2504,6 +2594,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
+            peer: None,
         })
         .await
         .unwrap();
@@ -2520,6 +2611,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
+            peer: None,
         })
         .await
         .unwrap();
@@ -2561,6 +2653,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
+            peer: None,
         })
         .await
         .unwrap();
@@ -2577,6 +2670,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
+            peer: None,
         });
         // The caller gives up while the take is under way: the ingest's
         // future is dropped.
@@ -2609,6 +2703,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
+            peer: None,
         };
         svc.ingest(hook(HookKind::UserPromptSubmit, Some("p"), json!({})))
             .await
@@ -2660,6 +2755,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
+            peer: None,
         })
         .await
         .unwrap();
@@ -2684,6 +2780,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
+            peer: None,
         })
         .await
         .unwrap();
@@ -2710,6 +2807,7 @@ mod tests {
                 decision: None,
                 tool: None,
                 subagent: None,
+                peer: None,
             })
             .await
             .unwrap();

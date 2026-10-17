@@ -265,3 +265,24 @@ async fn a_recorded_claude_code_subagent_is_attributed() {
     );
     assert_eq!(resume_of(&r).await, "56cfaf9b-c90e-4ffd-9689-bd94f89e2426");
 }
+
+/// Another Claude Code session's message, recorded: a turn with no
+/// person's prompt, logged with the sender's session name, answered like
+/// any turn.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recorded_claude_code_peer_message_opens_a_turn_of_its_own() {
+    let r = replayed("claude/peer_message.jsonl", "claude").await;
+    assert!(events_of(&r, "agent.prompt.submitted").await.is_empty());
+    let received = events_of(&r, "agent.peer_message.received").await;
+    assert_eq!(received.len(), 1);
+    assert_eq!(received[0]["from"], "oxplow-main");
+    let turns = r
+        .svc
+        .agent_turn_store
+        .list_for_thread(&r.thread, 10)
+        .await
+        .unwrap();
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0].prompt, "");
+    assert_eq!(turns[0].answer.as_deref(), Some("Marked it done."));
+}

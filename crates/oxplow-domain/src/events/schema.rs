@@ -157,6 +157,8 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<AgentSubagentFinished>()
             .expect("core type registers");
+        r.register::<AgentPeerMessageReceived>()
+            .expect("core type registers");
         r.register::<AgentContextCompacted>()
             .expect("core type registers");
         r.register::<AgentStatusChanged>()
@@ -1210,6 +1212,28 @@ impl EventType for AgentSubagentFinished {
     type Payload = AgentSubagentFinishedV1;
 }
 
+/// `agent.peer_message.received@1`: another agent session's message
+/// reached the thread's agent as a prompt (Claude Code's cross-session
+/// message). Observed only: oxplow never sends one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentPeerMessageReceivedV1 {
+    pub thread: String,
+    /// The turn it opened, or the one it arrived in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<String>,
+    /// The sender's own name for its session (its socket when it has no
+    /// name).
+    pub from: String,
+}
+
+pub struct AgentPeerMessageReceived;
+impl EventType for AgentPeerMessageReceived {
+    const TYPE: &'static str = "agent.peer_message.received";
+    const V: u32 = 1;
+    type Payload = AgentPeerMessageReceivedV1;
+}
+
 /// `agent.context.compacted@1`: the agent's context was summarized to make
 /// room, so what it was told earlier is no longer in front of it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -2154,6 +2178,7 @@ mod tests {
             versions,
             vec![
                 ("agent.context.compacted", 1),
+                ("agent.peer_message.received", 1),
                 ("agent.plan.proposed", 1),
                 ("agent.prompt.submitted", 1),
                 ("agent.session.ended", 1),

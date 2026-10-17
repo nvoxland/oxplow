@@ -273,7 +273,8 @@ pub trait AgentHarness: Send + Sync {
         Vec::new()
     }
     /// What its prompt hook's body is: a person's prompt (its `prompt`
-    /// text, the default) or a subagent's hand-back; `None` for a body
+    /// text, the default), a subagent's hand-back or another session's
+    /// message; `None` for a body
     /// with no prompt.
     async fn prompt(&self, body: &serde_json::Value) -> Option<Prompt> {
         body.get("prompt")
