@@ -438,9 +438,13 @@ impl CommandUi {
                     );
                 }
             }
+            // A whole `{{result.<field>}}` is a ref the result names: there
+            // is nothing to check until it has run.
             let sample =
                 crate::template::splice::<()>(open, |_| Ok("1".into())).unwrap_or_default();
-            if crate::refs::grammar::CanonicalRef::parse(&sample).is_err() {
+            if whole_placeholder(open).is_none()
+                && crate::refs::grammar::CanonicalRef::parse(&sample).is_err()
+            {
                 return bad("open_after", format!("`{open}` isn't a ref to open"));
             }
         }
@@ -1115,6 +1119,8 @@ mod tests {
             json!({ "label": "Commit…", "form": "commit" }),
             json!({ "label": "New", "open_after": "page:custom-dashboard?id={{result.id}}" }),
             json!({ "label": "New", "open_after": "agent_session:{{result.id}}" }),
+            // A result field that is itself the ref to open.
+            json!({ "label": "New", "open_after": "{{result.page}}" }),
             json!({ "label": "Save", "menu": { "bar": "file", "order": 1 } }),
         ] {
             assert_eq!(ui(good.clone()).problem(), None, "{good}");
@@ -1189,6 +1195,11 @@ mod tests {
         assert_eq!(
             ui(json!({ "label": "New" })).open_after_for(&json!({})),
             Ok(None)
+        );
+        let whole = ui(json!({ "label": "New", "open_after": "{{result.page}}" }));
+        assert_eq!(
+            whole.open_after_for(&json!({ "page": "wiki:lib" })),
+            Ok(Some("wiki:lib".to_string()))
         );
     }
 

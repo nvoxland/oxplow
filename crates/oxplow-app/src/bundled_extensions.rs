@@ -66,6 +66,9 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-foundation", "lenses/thread-sessions.yaml"),
             ext_file!("oxplow-foundation", "lenses/thread-work.yaml"),
             ext_file!("oxplow-foundation", "lenses/wiki-freshness.yaml"),
+            ext_file!("oxplow-foundation", "lenses/wiki-index.yaml"),
+            ext_file!("oxplow-foundation", "lenses/wiki-pages.yaml"),
+            ext_file!("oxplow-foundation", "lenses/wiki-visited.yaml"),
             ext_file!("oxplow-foundation", "lenses/work-next.yaml"),
             ext_file!("oxplow-foundation", "collectors/clojure/defn_count.star"),
             ext_file!("oxplow-foundation", "collectors/code/doc_coverage.star"),
@@ -2300,6 +2303,7 @@ mod tests {
             ("hook-events", "oxplow-foundation/hook-events"),
             ("done-work", "oxplow-foundation/done-work"),
             ("wiki-freshness", "oxplow-foundation/wiki-freshness"),
+            ("wiki-index", "oxplow-foundation/wiki-index"),
         ] {
             assert!(pages.contains(&(page, lens)), "{page}: {pages:?}");
         }
@@ -2569,6 +2573,61 @@ mod tests {
         assert_eq!(texts(&rows, 1), ["lib — 0 of 1 stale"], "{rows}");
         assert_eq!(texts(&rows, 2), ["src/a.rs"], "{rows}");
         assert_eq!(texts(&rows, 4), ["✓ fresh"], "{rows}");
+    }
+
+    /// The wiki index: pages not visited, newest first; a filter finds the
+    /// pages whose title or body holds it, with the text around the match;
+    /// the visited ones list apart.
+    #[tokio::test]
+    async fn the_wiki_index_lists_visited_pages_apart_and_filters_by_title_or_body() {
+        use oxplow_db::analytics_stores::PageVisitStore;
+        use oxplow_db::SqlCell::Text;
+        let f = crate::test_fixtures::services_with_effort().await;
+        for (slug, body) in [
+            ("alpha", "# Alpha\n\nThe quick brown fox jumps.\n"),
+            ("beta", "# Beta\n\nNothing here.\n"),
+            ("gamma", "# Gamma\n\nA lazy dog sleeps.\n"),
+        ] {
+            f.svc
+                .commands
+                .run(
+                    &oxplow_domain::Actor::Human,
+                    crate::knowledge::WRITE_PAGE,
+                    serde_json::json!({ "slug": slug, "body": body }),
+                    true,
+                )
+                .await
+                .unwrap();
+        }
+        let thread = f.thread.to_string();
+        f.svc
+            .page_visit_store
+            .record("wiki", "wiki:beta", Some("Beta"), None, Some(&thread))
+            .await
+            .unwrap();
+        let filter = |q: &str| {
+            vec![
+                ("stream_id", oxplow_db::SqlCell::Int(1)),
+                ("filter", Text(q.into())),
+            ]
+        };
+        let pages = |q: String| {
+            let f = &f;
+            async move { run_bundled_lens_with(f, "oxplow-foundation/wiki-pages", &filter(&q)).await }
+        };
+        let rows = pages(String::new()).await;
+        let mut slugs = texts(&rows, 0);
+        slugs.sort();
+        assert_eq!(slugs, ["alpha", "gamma"], "{rows}");
+        let rows = pages("LAZY".into()).await;
+        assert_eq!(texts(&rows, 0), ["gamma"], "{rows}");
+        assert!(texts(&rows, 3)[0].contains("lazy dog"), "{rows}");
+        let rows = pages("beta".into()).await;
+        assert_eq!(texts(&rows, 0), ["beta"], "{rows}");
+        let rows = run_bundled_lens_with(&f, "oxplow-foundation/wiki-visited", &filter("")).await;
+        assert_eq!(texts(&rows, 0), ["beta"], "{rows}");
+        let rows = run_bundled_lens_with(&f, "oxplow-foundation/wiki-visited", &filter("x")).await;
+        assert!(texts(&rows, 0).is_empty(), "{rows}");
     }
 
     /// Finished items come newest first by when they closed, even within

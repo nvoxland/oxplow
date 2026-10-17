@@ -161,7 +161,6 @@ export function newSessionRef(): TabRef {
 export type IndexKind =
   | "tasks"
   | "backlog"
-  | "wiki-index"
   | "files"
   | "comments"
   | "alerts"
@@ -457,7 +456,6 @@ const ROUTES: Record<RoutePageKind, (params: URLSearchParams) => TabRef | null> 
   "new-session": () => newSessionRef(),
   tasks: () => indexRef("tasks"),
   backlog: () => indexRef("backlog"),
-  "wiki-index": () => indexRef("wiki-index"),
   files: () => indexRef("files"),
   comments: () => indexRef("comments"),
   "local-history": () => indexRef("local-history"),

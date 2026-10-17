@@ -1503,8 +1503,6 @@ export async function listRecentRemoteBranches(
   return unwrap(await commands.gitListRecentRemoteBranches(limit ?? null));
 }
 
-export type UsageRollup = import("./tauri-bridge/generated/bindings.js").UsageRollup;
-
 /** Write a wiki page — the `oxplow.knowledge.write_page` command (P5.C3): the
  *  row, its links and the file, in one audited run. Every `[[link]]` must
  *  resolve (a dangling one is refused, named). `verifiedRefs` are files
@@ -1629,46 +1627,6 @@ export async function recordUsage(input: {
   unwrap(await commands.recordUsage(input.kind, JSON.stringify(input)));
 }
 
-export async function listRecentUsage(input: {
-  kind: string;
-  streamId?: string | null;
-  threadId?: string | null;
-  limit?: number;
-  since?: string;
-}): Promise<UsageRollup[]> {
-  return unwrap(
-    await commands.listRecentUsageRollup(
-      input.kind,
-      input.streamId ?? null,
-      input.limit ?? 50,
-    ),
-  );
-}
-
-// `list_frequent_usage` on the Rust side currently returns PageVisit
-// rows (count-ordered page-visit aggregates), not usage-event rollups
-// — different table, different shape. No renderer code calls this
-// helper today; keep the surface but route it through the same rollup
-// endpoint as listRecentUsage so the type matches what the existing
-// callers expect when one shows up. Order-by-count would need a
-// dedicated `list_frequent_usage_rollup` Rust command; not building
-// that until there's a caller to motivate it.
-export async function listFrequentUsage(input: {
-  kind: string;
-  streamId?: string | null;
-  threadId?: string | null;
-  limit?: number;
-  since?: string;
-}): Promise<UsageRollup[]> {
-  return unwrap(
-    await commands.listRecentUsageRollup(
-      input.kind,
-      input.streamId ?? null,
-      input.limit ?? 50,
-    ),
-  );
-}
-
 /** Call `onChange` whenever a commit names one of `models` — how a view
  *  re-reads what it shows, whoever wrote it. */
 function onModelsChanged(models: readonly string[], onChange: () => void): () => void {
@@ -1682,11 +1640,6 @@ function onModelsChanged(models: readonly string[], onChange: () => void): () =>
       onChange();
     }
   });
-}
-
-/** Re-read usage whenever a use is recorded (`v_usage_event`). */
-export function subscribeUsageEvents(onChange: () => void): () => void {
-  return onModelsChanged(["v_usage_event"], onChange);
 }
 
 export async function listBackgroundTasks(): Promise<BackgroundTask[]> {

@@ -1786,8 +1786,8 @@ Current write hookpoints (all in `apps/desktop/src/App.tsx`, all pass both
 `streamId` and `threadId`):
 
 - `wiki-note` — `handleOpenNote` records a visit when a note becomes
-  the active center tab. Drives the Notes pane's "Recently visited"
-  section via `listRecentUsage({ kind: "wiki-note", … })`.
+  the active center tab. Nothing reads it any more: the Wiki page's
+  "Recently visited" is the `wiki-visited` lens over `v_page_visit`.
 - `editor-file` — `handleOpenFile` records a visit when a file
   becomes the active center tab. Not yet surfaced in UI; collected
   for future "recent files" / "files this thread cares about" views.

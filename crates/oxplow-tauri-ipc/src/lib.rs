@@ -199,7 +199,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::forget_page,
             // usage
             commands::generated::record_usage,
-            commands::generated::list_recent_usage_rollup,
             // code quality (duplication only — metrics scan retired, tsk229)
             // snapshots
             commands::generated::list_file_snapshots,

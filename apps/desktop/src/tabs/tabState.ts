@@ -39,7 +39,6 @@ export type RoutePageKind =
   | "duplicate-block"
   | "tasks"
   | "backlog"
-  | "wiki-index"
   | "files"
   | "comments"
   | "local-history"

@@ -610,22 +610,11 @@ reaches the frontend as `number`:
 
 `UsageStore` (`crates/oxplow-db/src/analytics_stores.rs`) records `(kind, key,
 event)` rows with optional `stream_id` and a 30s coalesce window. The
-runtime exposes four read methods + one writer over IPC:
+runtime exposes one writer over IPC; the rows are read through `v_usage_event`:
 
 - `recordUsage({ kind, key, event?, streamId?, threadId? })`
-- `listRecentUsage({ kind, streamId?, threadId?, limit?, since? })` —
-  most-recent keys aggregated by `key`, returning
-  `{ key, last_at, count }[]`. Pass `streamId` to scope to one
-  workspace, `threadId` to scope to one thread, or both to
-  intersect.
-- `listFrequentUsage({ kind, streamId?, threadId?, limit?, since? })`
-  — same shape ranked by count.
-- `listCurrentlyOpenUsage({ kind, streamId?, threadId? })` — keys
-  whose latest event is `"open"` with no later `"close"`. Returns
-  `[]` for kinds that don't emit close events yet.
 
-Subscribe in the UI via `subscribeUsageEvents(fn, { kind })`. The bus
-event is `usage.recorded` with `{ kind, key, streamId, threadId }`.
+The bus event is `usage.recorded` with `{ kind, key, streamId, threadId }`.
 
 Active write hookpoints (all in `apps/desktop/src/App.tsx`, all pass both
 `streamId` and the active `threadId` so per-stream and per-thread

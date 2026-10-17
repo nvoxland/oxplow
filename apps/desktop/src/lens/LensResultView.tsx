@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState, type CSSProperties, type ReactNode } from "react";
-import { lensActionForm, lensForm, lensText, runLensAction, submitLensForm, type LensRun, type SqlCell } from "../api.js";
+import { commandOpenAfter, lensActionForm, lensForm, lensText, runLensAction, submitLensForm, type LensRun, type SqlCell } from "../api.js";
 import { Slideover } from "../components/Slideover.js";
 import type { FormStart } from "../tauri-bridge/generated/bindings.js";
 import type { LensAction } from "../tauri-bridge/generated/bindings.js";
@@ -57,7 +57,7 @@ import { Facts } from "../kit/Facts.js";
 import { Stat } from "../kit/Stat.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 import { showToast } from "../components/toastStore.js";
-import { addLensToContext, copyLens, performLensAction, rowRecord } from "./lensActions.js";
+import { addLensToContext, copyLens, openAfterAction, performLensAction, rowRecord } from "./lensActions.js";
 import { LensIcon, lensIcon, toneColor } from "./lensIcons.js";
 import { setContextRefDrag } from "../agent-context-dnd.js";
 
@@ -127,9 +127,20 @@ interface LensResultViewProps {
   onCustomReady?(): void;
 }
 
+/** Where a command's `ui.open_after` page opens from a lens: in the page
+ *  the lens is on, else the window. */
+function useOpenAfter() {
+  const nav = useOptionalPageNavigation();
+  return {
+    openAfter: commandOpenAfter,
+    openPage: (page: string) => void (nav?.openRef ?? openRefInWindow)(page, {}),
+  };
+}
+
 /** Pressing a lens's actions, with the confirmation a command may ask
  *  for held until the person answers. */
 function useLensActions(run: LensRun, streamId: string | null) {
+  const openAfter = useOpenAfter();
   const [busy, setBusy] = useState<string | null>(null);
   const [pending, setPending] = useState<{ action: LensAction; row: Record<string, SqlCell> | null } | null>(null);
   // A form action pressed: its form is open until it runs or is closed.
@@ -138,6 +149,7 @@ function useLensActions(run: LensRun, streamId: string | null) {
     runLensAction,
     toast: (message: string) => showToast({ message }),
     recordError: (label: string, message: string) => recordOpError({ label, message }),
+    ...openAfter,
   };
   const press = async (action: LensAction, row: Record<string, SqlCell> | null, confirmed: boolean) => {
     setBusy(action.id);
@@ -621,9 +633,13 @@ function ActionForm({
 }) {
   const { action, row } = pressed;
   const [start, setStart] = useState<FormStart | null>(null);
+  const openAfter = useOpenAfter();
   const form = useFormSubmit(
     action.label,
-    (input, confirmed) => runLensAction(run.lens.id, action.id, run.params, row, streamId, confirmed, input),
+    async (input, confirmed) => {
+      const outcome = await runLensAction(run.lens.id, action.id, run.params, row, streamId, confirmed, input);
+      await openAfterAction(action, outcome, { ...openAfter, recordError: (label, message) => recordOpError({ label, message }) });
+    },
     onClose,
   );
   const rowKey = JSON.stringify(row);

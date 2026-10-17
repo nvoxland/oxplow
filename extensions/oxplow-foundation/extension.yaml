@@ -134,6 +134,7 @@ pages:
   - { id: symbols, title: Symbols, icon: list-tree, category: Code, lens: symbols }
   - { id: hook-events, title: Hook Events, icon: activity, category: Activity, lens: hook-events }
   - { id: done-work, title: Done Work, icon: circle-check, category: Work, lens: done-work }
+  - { id: wiki-index, title: Wiki, icon: book-open, category: Knowledge, lens: wiki-index }
   - { id: wiki-freshness, title: Wiki Freshness, icon: book-open, category: Knowledge, lens: wiki-freshness }
   - { id: closed-threads, title: Closed Threads, icon: archive, category: System, lens: closed-threads }
 ui:
@@ -651,6 +652,7 @@ commands:
     scope: knowledge.write
     op: write_page
     invokers: { human: true, agent: true, lens: true }
+    ui: { label: "New Wiki Page…", group: Knowledge, keywords: [wiki, page, note, write], form: "page:oxplow-foundation/wiki-index", open_after: "{{result.page}}" }
     example: {"slug": "auth-flow", "title": "Auth flow", "body": "# Auth flow\n\nThe callback validates `next` before redirecting. See [[src/auth.rs]].", "verified_refs": ["src/auth.rs"]}
   # lenses.read
   - name: lens.run

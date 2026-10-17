@@ -1,0 +1,20 @@
+title: Recently visited wiki pages
+description: The wiki pages opened most recently in the stream, newest first. Empty while a filter is set (the pages list shows the matches).
+needs: [knowledge]
+params:
+  - { name: stream_id }
+  - { name: filter, label: Search titles + bodies, default: "" }
+query: |
+  SELECT p.slug, p.title, max(v.visited_at) AS visited_at
+  FROM v_page_visit v
+  JOIN v_thread t ON t.id = v.thread_id
+  JOIN v_knowledge_page p ON p.ref = v.page_id
+  WHERE v.page_kind = 'wiki' AND t.stream_id = :stream_id AND :filter = ''
+  GROUP BY p.slug
+  ORDER BY visited_at DESC
+  LIMIT 32
+columns:
+  - { key: title, label: Page, link: { kind: wiki, from: slug } }
+  - { key: visited_at, label: Visited, format: relative, width: 120 }
+empty: No wiki pages visited yet.
+hidden: true

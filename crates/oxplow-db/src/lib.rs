@@ -79,7 +79,7 @@ pub use analytics_stores::{
     CodeQualityFinding, CodeQualityScan, CodeQualityScanStatus, FileSnapshot, PageVisit,
     PageVisitStore, Snapshot, SnapshotChangeEntry, SnapshotContentRef, SnapshotOp, SnapshotStats,
     SnapshotStorage, SqliteCodeQualityStore, SqlitePageVisitStore, SqliteSnapshotStore,
-    SqliteUsageStore, StampedSnapshot, TakeOutcome, TakeRecord, UsageEvent, UsageRollup,
+    SqliteUsageStore, StampedSnapshot, TakeOutcome, TakeRecord, UsageEvent,
 };
 pub use capability_store::{CapabilityProvider, SqliteCapabilityStore};
 pub use change_store::{

@@ -315,18 +315,6 @@ pub struct UsageEvent {
     pub occurred_at: Timestamp,
 }
 
-/// Per-key aggregation of usage events. Returned by
-/// `SqliteUsageStore::list_recent_rollup` for callers that want
-/// "most-recently-touched X" lists rather than the raw event log
-/// (e.g. the WikiActivityBar's recent-files strip).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-pub struct UsageRollup {
-    pub kind: String,
-    pub key: String,
-    pub last_at: Timestamp,
-    pub count: u32,
-}
-
 #[derive(Clone)]
 pub struct SqliteUsageStore {
     db: Database,
@@ -359,83 +347,6 @@ impl SqliteUsageStore {
                     payload_json,
                     occurred_at: now,
                 })
-            })
-            .await
-    }
-
-    /// Group recent events of a single `kind` by the per-row key
-    /// extracted from `payload_json`. The extraction tries the same
-    /// candidate fields that `commands::usage::extract_key` does
-    /// (`key` → `slug` → `path` → `id` → `itemId` / `item_id` →
-    /// `noteId` / `note_id`); rows whose payload yields no key are
-    /// dropped. When `stream_id` is `Some`, only events whose payload
-    /// includes that `streamId` (or `stream_id`) are counted.
-    pub async fn list_recent_rollup(
-        &self,
-        kind: &str,
-        stream_id: Option<&str>,
-        limit: usize,
-    ) -> Result<Vec<UsageRollup>, DomainError> {
-        let kind = kind.to_string();
-        let stream_id = stream_id.map(|s| s.to_string());
-        self.db
-            .call(move |conn| {
-                // COALESCE over the canonical key fields a payload
-                // names its thing by (`key`, `slug`, `path`, `id`, …).
-                let stream_filter = if stream_id.is_some() {
-                    "AND COALESCE(json_extract(payload_json, '$.streamId'), \
-                                  json_extract(payload_json, '$.stream_id')) = ?3"
-                } else {
-                    ""
-                };
-                let sql = format!(
-                    "SELECT \
-                       COALESCE( \
-                         json_extract(payload_json, '$.key'), \
-                         json_extract(payload_json, '$.slug'), \
-                         json_extract(payload_json, '$.path'), \
-                         json_extract(payload_json, '$.id'), \
-                         json_extract(payload_json, '$.itemId'), \
-                         json_extract(payload_json, '$.item_id'), \
-                         json_extract(payload_json, '$.noteId'), \
-                         json_extract(payload_json, '$.note_id') \
-                       ) AS key, \
-                       MAX(occurred_at) AS last_at, \
-                       COUNT(*) AS cnt \
-                     FROM usage_event \
-                     WHERE kind = ?1 {stream_filter} \
-                     GROUP BY key \
-                     HAVING key IS NOT NULL AND key != '' \
-                     ORDER BY last_at DESC \
-                     LIMIT ?2"
-                );
-                let mut stmt = conn.prepare(&sql)?;
-                let map_err = |e: DomainError| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        0,
-                        rusqlite::types::Type::Text,
-                        Box::new(e),
-                    )
-                };
-                let collect = |row: &rusqlite::Row| -> rusqlite::Result<UsageRollup> {
-                    let key: String = row.get(0)?;
-                    let last_at: String = row.get(1)?;
-                    let cnt: i64 = row.get(2)?;
-                    Ok(UsageRollup {
-                        kind: kind.clone(),
-                        key,
-                        last_at: string_to_ts(&last_at).map_err(map_err)?,
-                        count: cnt.max(0) as u32,
-                    })
-                };
-                let rows: Vec<UsageRollup> = if let Some(sid) = stream_id.as_deref() {
-                    stmt.query_map(params![kind, limit as i64, sid], collect)?
-                        .collect::<rusqlite::Result<Vec<_>>>()?
-                } else {
-                    stmt.query_map(params![kind, limit as i64], collect)?
-                        .collect::<rusqlite::Result<Vec<_>>>()?
-                };
-                Ok(rows)
             })
             .await
     }
@@ -3597,77 +3508,6 @@ mod tests {
         let recent = store.list_recent(10).await.unwrap();
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0].kind, "agent_turn_started");
-    }
-
-    #[tokio::test]
-    async fn usage_rollup_groups_by_key_and_orders_by_recency() {
-        let store = SqliteUsageStore::new(Database::in_memory());
-        // Two hits on a.ts in stream s-1, one on b.ts (s-1), one on
-        // c.ts in a different stream s-2 (must be filtered out).
-        for path in ["a.ts", "a.ts", "b.ts"] {
-            store
-                .record(
-                    "editor-file",
-                    serde_json::json!({"path": path, "streamId": "s-1"}),
-                )
-                .await
-                .unwrap();
-        }
-        store
-            .record(
-                "editor-file",
-                serde_json::json!({"path": "c.ts", "streamId": "s-2"}),
-            )
-            .await
-            .unwrap();
-        // A different kind in the same stream — must not appear.
-        store
-            .record("wiki", serde_json::json!({"slug": "z", "streamId": "s-1"}))
-            .await
-            .unwrap();
-
-        let rollup = store
-            .list_recent_rollup("editor-file", Some("s-1"), 10)
-            .await
-            .unwrap();
-        assert_eq!(rollup.len(), 2);
-        // b.ts was inserted last → most recent → first.
-        assert_eq!(rollup[0].key, "b.ts");
-        assert_eq!(rollup[0].count, 1);
-        assert_eq!(rollup[1].key, "a.ts");
-        assert_eq!(rollup[1].count, 2);
-        for r in &rollup {
-            assert_eq!(r.kind, "editor-file");
-        }
-
-        // Without stream filter: c.ts also shows up.
-        let global = store
-            .list_recent_rollup("editor-file", None, 10)
-            .await
-            .unwrap();
-        assert_eq!(global.len(), 3);
-    }
-
-    #[tokio::test]
-    async fn usage_rollup_drops_rows_with_no_extractable_key() {
-        let store = SqliteUsageStore::new(Database::in_memory());
-        store
-            .record("editor-file", serde_json::json!({"streamId": "s-1"}))
-            .await
-            .unwrap();
-        store
-            .record(
-                "editor-file",
-                serde_json::json!({"path": "real.ts", "streamId": "s-1"}),
-            )
-            .await
-            .unwrap();
-        let rollup = store
-            .list_recent_rollup("editor-file", Some("s-1"), 10)
-            .await
-            .unwrap();
-        assert_eq!(rollup.len(), 1);
-        assert_eq!(rollup[0].key, "real.ts");
     }
 
     #[tokio::test]

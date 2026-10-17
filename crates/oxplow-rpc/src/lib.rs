@@ -311,7 +311,6 @@ macro_rules! oxplow_command_table {
                 forget_page => $crate::commands::page_visit::forget_page { page_kind: String, page_id: String } -> (),
                 // usage
                 record_usage => $crate::commands::usage::record_usage { kind: String, payload_json: String } -> ::oxplow_db::UsageEvent,
-                list_recent_usage_rollup => $crate::commands::usage::list_recent_usage_rollup { kind: String, stream_id: Option<String>, limit: u32 } -> Vec<::oxplow_db::UsageRollup>,
                 // git
                 git_resolve_commit_ref_labels => $crate::commands::git::git_resolve_commit_ref_labels { shas: Vec<String> } -> ::std::collections::HashMap<String, Vec<::oxplow_app::vcs::CommitRefLabel>>,
                 git_list_recent_remote_branches => $crate::commands::git::git_list_recent_remote_branches { limit: Option<u32> } -> Vec<::oxplow_app::vcs::RemoteBranchEntry>,

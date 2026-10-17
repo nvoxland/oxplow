@@ -18,6 +18,10 @@ export interface LensActionDeps {
   ): Promise<CommandOutcome>;
   toast(message: string): void;
   recordError(label: string, message: string): void;
+  /** The page the command opens after a run with `result` (its
+   *  `ui.open_after`, bound by the server), or null. */
+  openAfter(command: string, result: unknown): Promise<string | null>;
+  openPage(page: string): void;
 }
 
 /** What pressing an action came to: it ran, the command asks the person
@@ -43,13 +47,30 @@ export async function performLensAction(
   deps: LensActionDeps,
 ): Promise<LensActionOutcome> {
   try {
-    await deps.runLensAction(run.lens.id, action.id, run.params, row, streamId, confirmed);
+    const outcome = await deps.runLensAction(run.lens.id, action.id, run.params, row, streamId, confirmed);
     deps.toast(`${action.label}: done.`);
+    await openAfterAction(action, outcome, deps);
     return "done";
   } catch (e) {
     if (!confirmed && needsConfirmation(e)) return "needs-confirmation";
     deps.recordError(action.label, e instanceof Error ? e.message : String(e));
     return "failed";
+  }
+}
+
+/** A command that declares where a person goes after it (`ui.open_after`)
+ *  takes them there from a lens action too, as it does from a command
+ *  offer. A page the result can't name is the action's failure. */
+export async function openAfterAction(
+  action: Pick<LensAction, "label" | "command">,
+  outcome: CommandOutcome,
+  deps: Pick<LensActionDeps, "openAfter" | "openPage" | "recordError">,
+): Promise<void> {
+  try {
+    const page = await deps.openAfter(action.command, outcome.result);
+    if (page) deps.openPage(page);
+  } catch (e) {
+    deps.recordError(action.label, e instanceof Error ? e.message : String(e));
   }
 }
 

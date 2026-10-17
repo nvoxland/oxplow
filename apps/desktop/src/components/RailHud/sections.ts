@@ -68,7 +68,6 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
     { id: "local-history", label: "Local History", ref: indexRef("local-history"), category: "Activity" },
     { id: "comments", label: "Comments Dashboard", ref: indexRef("comments"), category: "Activity" },
     { id: "dashboard-visits", label: "Go To", ref: dashboardRef("visits"), category: "Activity" },
-    { id: "wiki-index", label: "Wiki", ref: indexRef("wiki-index"), category: "Knowledge" },
     { id: "explore-data", label: "Explore Data", ref: indexRef("explore-data"), category: "Data", keywords: "sql query schema semantic layer lens" },
     { id: "metrics-recorded", label: "Metrics", ref: indexRef("metrics-recorded"), category: "Data", keywords: "recorded catalog" },
     { id: "dashboards", label: "Dashboards", ref: dashboardsRef(), category: "Data", keywords: "custom metric tiles lens" },

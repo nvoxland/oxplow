@@ -49,7 +49,6 @@ describe("pageKindIconComponent", () => {
       "uncommitted-changes",
       "tasks",
       "backlog",
-      "wiki-index",
       "files",
       "local-history",
       "git-history",

@@ -119,7 +119,6 @@ import { rollUpAgentStatus, threadStatuses } from "./agentStatusRollup.js";
 import { TerminalPage } from "./pages/TerminalPage.js";
 import { FilesPage } from "./pages/FilesPage.js";
 import { DirectoryPage } from "./pages/DirectoryPage.js";
-import { WikiIndexPage } from "./pages/WikiIndexPage.js";
 import { TasksPage } from "./pages/TasksPage.js";
 import { BacklogPage } from "./pages/BacklogPage.js";
 import { CommentsInboxPage } from "./pages/CommentsInboxPage.js";
@@ -2487,8 +2486,6 @@ export function App() {
       navOpenDiff: (spec: DiffSpec, siblings?: import("./tabs/PageNavigationContext.js").NavSiblings) => void;
       navRevealCommit: (sha: string) => void;
     };
-    const activeRef = refFromTabId(centerActive);
-    const activeWikiSlug = activeRef?.kind === "wiki" ? (activeRef.payload as { slug: string }).slug : null;
     const workPage = (ref: TabRef, nav: SlotNav): CenterTab | null => {
       const sharedProps = {
         thread: selectedThread,
@@ -2959,20 +2956,6 @@ export function App() {
               onDeletePath={handleDeletePath}
               onToggleGenerated={handleToggleGenerated}
               commitRequest={commitFilesRequest}
-            />
-          ),
-        };
-      },
-      "wiki-index": (ref, nav) => {
-        return {
-          id: ref.id,
-          label: "Wiki",
-          closable: true,
-          render: () => (
-            <WikiIndexPage
-              stream={stream}
-              selectedSlug={activeWikiSlug}
-              onOpenWikiPage={handleOpenWiki}
             />
           ),
         };

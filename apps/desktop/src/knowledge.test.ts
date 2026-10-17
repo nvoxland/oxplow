@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { SearchHit, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
-import { freshnessFromResult, knowledgeIsNone, NO_KNOWLEDGE_STORE, pagesFromResult, searchHitsOf } from "./knowledge.js";
+import { freshnessFromResult, knowledgeIsNone, NO_KNOWLEDGE_STORE, pagesFromResult } from "./knowledge.js";
 
 const result = (columns: string[], rows: SqlQueryResult["rows"]): SqlQueryResult =>
   ({ columns, rows, truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} }) as unknown as SqlQueryResult;
@@ -38,14 +38,6 @@ test("freshness reads v_knowledge_ref rows", () => {
     { path: "src/a.rs", pinned_snapshot_id: 3, pinned_vcs_rev: "abc", pinned_vcs_rev_exact: true, latest_snapshot_id: 5, stale: true },
     { path: "src/b.rs", pinned_snapshot_id: null, pinned_vcs_rev: null, pinned_vcs_rev_exact: false, latest_snapshot_id: null, stale: false },
   ]);
-});
-
-test("title and body search is the site search's wiki hits", () => {
-  const hits = [
-    { kind: "wiki", ref: "wiki:auth", stream_id: null, title: "Auth", snippet: "…login…", score: 1 },
-    { kind: "work_item", ref: "work_item:oxplow:tsk1", stream_id: null, title: "x", snippet: "", score: 1 },
-  ] as SearchHit[];
-  expect(searchHitsOf(hits)).toEqual([{ slug: "auth", title: "Auth", snippet: "…login…" }]);
 });
 
 // Knowledge is none when its active row is `none`; nothing listed yet is not none.

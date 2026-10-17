@@ -1684,6 +1684,14 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   toolbar is hidden. It needs the lens to have `group`, isn't a row
   action, and binds only `{{param.x}}`; a group with no rows shows no
   heading, so neither its action.
+  An action's command may declare where a person goes after it
+  (`ui.open_after`, commands.md "Offering a command to a person"): the
+  lens page opens that page once the action — plain or form — ran, bound
+  by the server from the run's result (`command_open_after`) exactly as
+  a command offer does (`lensActions.openAfterAction`). A result that
+  can't name the page is the action's recorded failure.
+  `oxplow.knowledge.write_page` declares one (the page it wrote), so the
+  Wiki page's "+ New" opens the new page.
 - `alert`: a row-count or threshold condition that shows a panel badge
   (nudging the agent is what advisories are for).
 

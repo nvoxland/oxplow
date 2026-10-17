@@ -36,7 +36,6 @@ import {
   History,
   Inbox,
   LayoutDashboard,
-  Library,
   type LucideIcon,
   MessageSquareText,
   MessagesSquare,
@@ -136,8 +135,6 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return CheckSquare;
     case "backlog":
       return Inbox;
-    case "wiki-index":
-      return Library;
     case "files":
       return FolderTree;
     case "comments":
@@ -248,8 +245,6 @@ export function pageKindLabel(kind: string): string {
       return "lens";
     case "explore-data":
       return "explore data";
-    case "wiki-index":
-      return "wiki";
     case "local-history":
       return "local history";
     case "local-history-full":

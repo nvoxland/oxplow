@@ -1,0 +1,11 @@
+title: Wiki
+description: The project's wiki pages — the recently visited, then the rest by when they changed; a search lists the pages whose title or body matches.
+needs: [knowledge]
+params:
+  - { name: stream_id }
+  - { name: filter, label: Search titles + bodies, default: "" }
+viz: document
+sections:
+  - { id: visited, title: Recently visited, lens: wiki-visited }
+  - { id: pages, title: Wiki pages, lens: wiki-pages }
+hidden: true

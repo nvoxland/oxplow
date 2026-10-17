@@ -2,14 +2,14 @@
  * Knowledge pages (the wiki) read through the models (P6.E2,
  * `.context/knowledge.md`): `v_knowledge_page` for the index,
  * `v_knowledge_body` for a page's markdown, `v_knowledge_ref` for its
- * freshness, and the site `search` (`kinds: ["wiki"]`) for finding one.
+ * freshness.
  * Writes are `knowledge.*` commands (`writeWikiPage`).
  */
-import { querySql, searchSite } from "./api.js";
-import { parseRef, wikiRef } from "./refs/ref.js";
+import { querySql } from "./api.js";
+import { wikiRef } from "./refs/ref.js";
 import { unionReads } from "./lens/lensRerun.js";
 import type { CapabilityProvider } from "./workItems.js";
-import type { Reads, SearchHit, SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
+import type { Reads, SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
 /** One file ref of a page and whether its file drifted since it was
  *  pinned (`v_knowledge_ref`). */
@@ -37,13 +37,6 @@ export interface WikiPageSummary {
   stale_ref_count: number;
   /** Every ref it links to (`file:src/a.rs`, `wiki:other`). */
   outbound_refs: string[];
-}
-
-/** A search hit on a page. */
-export interface WikiPageSearchHit {
-  slug: string;
-  title: string;
-  snippet: string;
 }
 
 // Every read returns what it read (`reads`); a consumer re-runs it through
@@ -124,15 +117,6 @@ export async function readWikiFreshness(slug: string): Promise<{ rows: WikiRefFr
     10_000,
   );
   return { rows: freshnessFromResult(res), reads: res.reads };
-}
-
-export function searchHitsOf(hits: SearchHit[]): WikiPageSearchHit[] {
-  return hits.filter((h) => h.kind === "wiki").map((h) => ({ slug: parseRef(h.ref)?.id ?? "", title: h.title, snippet: h.snippet }));
-}
-
-/** Pages whose title or body matches `query` (the site search). */
-export async function searchWikiPages(query: string, limit = 30): Promise<WikiPageSearchHit[]> {
-  return searchHitsOf(await searchSite(query, null, ["wiki"], limit));
 }
 
 /** What the wiki's surfaces say when knowledge's active row is `none`. */

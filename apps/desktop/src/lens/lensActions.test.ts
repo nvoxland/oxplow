@@ -2,12 +2,12 @@ import { expect, test } from "bun:test";
 
 import { IpcCallError } from "../ipc-error.js";
 import type { LensAction, LensRun } from "../tauri-bridge/generated/bindings.js";
-import { addLensToContext, copyLens, performLensAction, rowRecord, type LensActionDeps } from "./lensActions.js";
+import { addLensToContext, copyLens, openAfterAction, performLensAction, rowRecord, type LensActionDeps } from "./lensActions.js";
 
 const run = { lens: { id: "acme/prs" }, params: { repo: "x" } } as unknown as LensRun;
 const action: LensAction = { id: "finish", label: "Finish", command: "oxplow.work_item.transition", input: {}, row: false };
 
-function deps(fail?: Error) {
+function deps(fail?: Error, openPage: string | null = null) {
   const log: string[] = [];
   const d: LensActionDeps = {
     runLensAction: async (id, a, params, row, streamId, confirmed) => {
@@ -17,6 +17,11 @@ function deps(fail?: Error) {
     },
     toast: (m) => log.push(`toast ${m}`),
     recordError: (label, m) => log.push(`error ${label}: ${m}`),
+    openAfter: async (command, result) => {
+      log.push(`open_after ${command} ${JSON.stringify(result)}`);
+      return openPage;
+    },
+    openPage: (page) => log.push(`open ${page}`),
   };
   return { d, log };
 }
@@ -24,7 +29,29 @@ function deps(fail?: Error) {
 test("an action runs its command with the run's params and row", async () => {
   const { d, log } = deps();
   expect(await performLensAction(action, run, { id: 7 }, "str1", false, d)).toBe("done");
-  expect(log).toEqual([`run acme/prs finish {"repo":"x"} {"id":7} str1 false`, "toast Finish: done."]);
+  expect(log).toEqual([
+    `run acme/prs finish {"repo":"x"} {"id":7} str1 false`,
+    "toast Finish: done.",
+    "open_after oxplow.work_item.transition {}",
+  ]);
+});
+
+test("an action whose command names a page to open opens it once it ran", async () => {
+  const { d, log } = deps(undefined, "wiki:lib");
+  expect(await performLensAction(action, run, null, null, false, d)).toBe("done");
+  expect(log.slice(-2)).toEqual([`open_after oxplow.work_item.transition {}`, "open wiki:lib"]);
+});
+
+test("a command that names no page opens nothing, and a refusal to bind is recorded", async () => {
+  const quiet = deps();
+  await openAfterAction(action, { result: {}, audit_id: 1, event_id: null, inverse: null }, quiet.d);
+  expect(quiet.log).toEqual([`open_after ${action.command} {}`]);
+  const { d, log } = deps();
+  d.openAfter = async () => {
+    throw new Error("its result has no `page` to open");
+  };
+  await openAfterAction(action, { result: {}, audit_id: 1, event_id: null, inverse: null }, d);
+  expect(log).toEqual([`error Finish: its result has no \`page\` to open`]);
 });
 
 test("a command that asks returns needs-confirmation, then runs confirmed", async () => {

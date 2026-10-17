@@ -522,11 +522,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listRecentUsageRollup: (kind: string, streamId: string | null, limit: number) => typedError<UsageRollup[], IpcError>(__TAURI_INVOKE("list_recent_usage_rollup", { kind, streamId, limit })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listFileSnapshots: (path: string) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_file_snapshots", { path })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -6537,19 +6532,6 @@ export type UsageEvent = {
 	kind: string,
 	payload_json: string,
 	occurred_at: Timestamp,
-};
-
-/**
- *  Per-key aggregation of usage events. Returned by
- *  `SqliteUsageStore::list_recent_rollup` for callers that want
- *  "most-recently-touched X" lists rather than the raw event log
- *  (e.g. the WikiActivityBar's recent-files strip).
- */
-export type UsageRollup = {
-	kind: string,
-	key: string,
-	last_at: Timestamp,
-	count: number,
 };
 
 /**  One working copy of the repository (feature `isolated_workspaces`). */

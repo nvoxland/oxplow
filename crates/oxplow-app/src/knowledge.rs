@@ -1876,6 +1876,69 @@ mod tests {
         assert!(err.to_string().contains("no page `nope`"), "{err}");
     }
 
+    /// Writing a page names the page a person goes to next: the ref the
+    /// write's result carries (`ui.open_after`), which a lens action's
+    /// form honors like a command offer does.
+    #[tokio::test]
+    async fn writing_a_page_opens_that_page_after() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let out = run(
+            &fx,
+            WRITE_PAGE,
+            json!({ "slug": "fresh", "body": "# Fresh\n" }),
+        )
+        .await
+        .unwrap();
+        let spec = fx
+            .svc
+            .commands
+            .list(&Actor::Human)
+            .into_iter()
+            .find(|s| s.id == WRITE_PAGE)
+            .unwrap();
+        assert_eq!(
+            spec.ui.unwrap().open_after_for(&out.result),
+            Ok(Some("wiki:fresh".to_string()))
+        );
+    }
+
+    /// The wiki index needs a knowledge store: with none chosen it does
+    /// not run, and says what it needs.
+    #[tokio::test]
+    async fn the_wiki_index_lens_needs_a_knowledge_store() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let layer = crate::sql_gateway::SqlGateway::new(fx.svc.db.clone());
+        let lens = |fx: &crate::test_fixtures::EffortFixture| {
+            let layer = layer.clone();
+            let catalog = fx.svc.extension_catalog.clone();
+            let root = dir(fx);
+            let svc = fx.svc.clone();
+            async move {
+                let ctx = crate::extensions::lens_context(&svc, None, None).await;
+                crate::extensions::run_lens(
+                    &layer,
+                    &catalog,
+                    &root,
+                    "oxplow-foundation/wiki-pages",
+                    Default::default(),
+                    &ctx,
+                )
+                .await
+                .unwrap()
+            }
+        };
+        choose(&fx, "oxplow").await;
+        assert!(lens(&fx).await.inactive.is_none());
+        choose(&fx, "none").await;
+        let run = lens(&fx).await;
+        let inactive = run.inactive.expect("no store, no run");
+        assert!(
+            inactive.message.contains("Knowledge"),
+            "{}",
+            inactive.message
+        );
+    }
+
     /// A page an agent's command writes is marked touched by its thread.
     #[tokio::test]
     async fn a_written_page_is_attributed_to_the_writing_thread() {

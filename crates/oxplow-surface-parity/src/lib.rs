@@ -503,7 +503,6 @@ pub const MANIFEST: &[Capability] = &[
         "record_usage",
         "records the person's use of oxplow, as they work",
     ),
-    model("list_recent_usage_rollup", &["v_usage_event"]),
     // ---- snapshots (UI presentation helpers) ----
     model("list_wiki_slugs_for_snapshots", &["v_snapshot_file"]),
     ui(
