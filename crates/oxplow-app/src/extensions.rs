@@ -294,6 +294,11 @@ pub struct LensForm {
     /// and are submitted with them. None: every field.
     #[serde(default)]
     pub fields: Option<Vec<String>>,
+    /// Fields picked from a list: each names a lens (`<extension>/<slug>`)
+    /// run with the form's params, whose rows are the choices (`value`,
+    /// `label`, optional `group`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub choices: BTreeMap<String, String>,
 }
 
 /// Serialize a JSON value with its numbers as plain numbers, so a YAML
@@ -633,6 +638,10 @@ pub struct LensAction {
     /// Fields of a form action the person sees but can't change: their
     /// values are `input`'s, imposed again when it runs (an item's `ref`).
     pub fixed: Vec<String>,
+    /// A form action's fields picked from a list: each names a lens
+    /// (`<extension>/<slug>`) run with the lens's params, whose rows are
+    /// the choices (`value`, `label`, optional `group`).
+    pub choices: BTreeMap<String, String>,
 }
 
 /// The `{{param.x}}` / `{{row.x}}` placeholders in `input`, as
@@ -671,6 +680,10 @@ struct ActionFile {
     /// editable).
     #[serde(default)]
     fixed: Vec<String>,
+    /// A form action's fields picked from a list: field → the lens whose
+    /// rows are its choices.
+    #[serde(default)]
+    choices: BTreeMap<String, String>,
 }
 
 /// Parse a lens's `actions:`: each `{ id, label, command, input?, row? }`.
@@ -720,6 +733,12 @@ fn parse_actions(
                 f.id
             ));
         }
+        if !f.choices.is_empty() && !f.form {
+            return Err(format!(
+                "actions: `{}`: `choices` is for a form action (`form: true`)",
+                f.id
+            ));
+        }
         if let Some(missing) = f.fixed.iter().find(|k| input.get(k.as_str()).is_none()) {
             return Err(format!(
                 "actions: `{}`: fixed field `{missing}` needs a value in `input`",
@@ -760,6 +779,7 @@ fn parse_actions(
             group: f.group,
             form: f.form,
             fixed: f.fixed,
+            choices: f.choices,
         });
     }
     Ok(out)
@@ -2574,7 +2594,9 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     let components: Vec<String> = ext.custom_components.iter().map(|c| c.id.clone()).collect();
     let mut bad = Vec::new();
     for l in &ext.lenses {
-        if let Some(problem) = shape_problem(l, &ids, &components) {
+        if let Some(problem) =
+            shape_problem(l, &ids, &components).or_else(|| choices_problem(l, &ids))
+        {
             ext.errors.push(format!("{}: {problem}", l.path));
             bad.push(l.id.clone());
         }
@@ -2916,6 +2938,30 @@ fn parse_panels(
 /// Why `lens` can't render with its viz, if it can't.
 /// A grid's problem, if any: it names children, and each one in its own
 /// extension exists. It needs no `query` — it renders no rows of its own.
+/// A form's or a form action's `choices` naming a lens of this extension
+/// that isn't there.
+fn choices_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
+    let mine = |c: &&String| {
+        c.split_once('/').map(|(e, _)| e) == Some(lens.extension.as_str())
+            && !ids_in_extension.contains(c)
+    };
+    lens.form
+        .iter()
+        .flat_map(|f| f.choices.values())
+        .find(mine)
+        .map(|c| format!("form: choices lens `{c}` isn't in this extension's lenses/"))
+        .or_else(|| {
+            lens.actions.iter().find_map(|a| {
+                a.choices.values().find(mine).map(|c| {
+                    format!(
+                        "actions: `{}`: choices lens `{c}` isn't in this extension's lenses/",
+                        a.id
+                    )
+                })
+            })
+        })
+}
+
 fn grid_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
     if lens.children.is_empty() {
         return Some("viz `grid` needs `children: [lens, ...]`".into());

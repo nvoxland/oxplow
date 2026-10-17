@@ -1673,6 +1673,16 @@ export type CheckReport_Serialize = {
 	profiles: string[],
 };
 
+/**
+ *  One choice for a form field: the value it submits, what the person
+ *  reads, and the heading it sits under.
+ */
+export type Choice = {
+	value: string,
+	label: string,
+	group: string | null,
+};
+
 /**  How a client authenticates to a token endpoint. */
 export type ClientAuth = "basic" | "post";
 
@@ -3425,6 +3435,8 @@ export type FormStart = {
 	values: unknown,
 	fixed: string[],
 	fields: string[] | null,
+	/**  Fields picked from a list, with their choices. */
+	choices: { [key in string]: Choice[] },
 };
 
 /**
@@ -3924,6 +3936,12 @@ export type LensAction = {
 	 *  values are `input`'s, imposed again when it runs (an item's `ref`).
 	 */
 	fixed: string[],
+	/**
+	 *  A form action's fields picked from a list: each names a lens
+	 *  (`<extension>/<slug>`) run with the lens's params, whose rows are
+	 *  the choices (`value`, `label`, optional `group`).
+	 */
+	choices: { [key in string]: string },
 };
 
 /**
@@ -4012,6 +4030,12 @@ export type LensForm_Deserialize = {
 	 *  and are submitted with them. None: every field.
 	 */
 	fields?: string[] | null,
+	/**
+	 *  Fields picked from a list: each names a lens (`<extension>/<slug>`)
+	 *  run with the form's params, whose rows are the choices (`value`,
+	 *  `label`, optional `group`).
+	 */
+	choices?: { [key in string]: string },
 };
 
 /**  `form` viz: the command it submits and the values it starts from. */
@@ -4029,6 +4053,12 @@ export type LensForm_Serialize = {
 	 *  and are submitted with them. None: every field.
 	 */
 	fields: string[] | null,
+	/**
+	 *  Fields picked from a list: each names a lens (`<extension>/<slug>`)
+	 *  run with the form's params, whose rows are the choices (`value`,
+	 *  `label`, optional `group`).
+	 */
+	choices?: { [key in string]: string },
 };
 
 /**

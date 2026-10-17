@@ -128,6 +128,10 @@ metrics:
   - {"key":"oxplow.analysis.warnings","title":"Analysis warnings","sourceMeasure":"oxplow.lint_hit","aggregation":"count","filter":{"severity":"warning"},"unit":"count","direction":"lower-better","displayKind":"gauge","category":"static-quality","description":"Static-analysis warnings in the latest run.","sliceableDims":["oxplow.branch","oxplow.vcs_rev"]}
   - {"key":"work.tasks_completed","title":"Tasks completed","entity":"v_work_item","where":"state = 'done'","time":"closed_at","aggregation":"count","unit":"tasks","category":"operational","description":"Work items done, by the day they were closed."}
   - {"key":"work.open_tasks","title":"Open tasks","entity":"v_work_item","where":"state IN ('todo', 'in_progress', 'blocked')","aggregation":"count","unit":"tasks","category":"operational","description":"Work items ready, in progress or blocked, captured over time."}
+ui:
+  slots:
+    - { slot: thread.plan.header, lens: thread-handoffs-in }
+    - { slot: thread.plan.header, lens: thread-handoffs-out }
 commands:
   # agent_input.write — the window's; a person's only (oxplow never types for the agent).
   - name: agent.draft
@@ -527,6 +531,7 @@ commands:
     scope: handoffs.write
     op: send
     invokers: { human: true, agent: true, lens: true }
+    ui: { label: "Hand Off Work…", group: Threads, keywords: [handoff, delegate, give], about: thread, form: "lens:oxplow-foundation/hand-off" }
     example: {"to_thread": "thread:thr4", "work_item": "work_item:oxplow:tsk12", "body": "The parser fix is in; the remaining failure is the timezone case in [[src/dates.rs]]."}
   - name: handoff.resolve
     summary: "Take or decline a handoff to your thread. Taking one moves its work item onto your thread. Its sender reads the note."

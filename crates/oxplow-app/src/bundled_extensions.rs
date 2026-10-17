@@ -46,9 +46,14 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-foundation", "lenses/effort-files.yaml"),
             ext_file!("oxplow-foundation", "lenses/effort-summary.yaml"),
             ext_file!("oxplow-foundation", "lenses/file-history.yaml"),
+            ext_file!("oxplow-foundation", "lenses/hand-off.yaml"),
+            ext_file!("oxplow-foundation", "lenses/handoff-items.yaml"),
+            ext_file!("oxplow-foundation", "lenses/handoff-recipients.yaml"),
             ext_file!("oxplow-foundation", "lenses/recent-commits.yaml"),
             ext_file!("oxplow-foundation", "lenses/session-transcript.yaml"),
             ext_file!("oxplow-foundation", "lenses/snapshots.yaml"),
+            ext_file!("oxplow-foundation", "lenses/thread-handoffs-in.yaml"),
+            ext_file!("oxplow-foundation", "lenses/thread-handoffs-out.yaml"),
             ext_file!("oxplow-foundation", "lenses/thread-notes.yaml"),
             ext_file!("oxplow-foundation", "lenses/thread-sessions.yaml"),
             ext_file!("oxplow-foundation", "lenses/thread-work.yaml"),
@@ -1280,6 +1285,48 @@ mod tests {
             .unwrap();
         let rows = run_bundled_lens(&f, "oxplow-bundled/waiting-on-me", &[]).await;
         assert!(waiting(rows).is_empty());
+    }
+
+    /// Work handed to a thread with no agent session open there is the
+    /// person's move: Waiting on Me lists it until an agent is there.
+    #[tokio::test]
+    async fn waiting_on_me_lists_handoffs_no_agent_is_there_for() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let to =
+            crate::test_fixtures::new_thread(&f.svc, oxplow_domain::StreamId::new(1), "Docs").await;
+        f.svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                crate::commands::handoff::SEND,
+                serde_json::json!({
+                    "from_thread": oxplow_domain::refs::build::thread_ref(f.thread),
+                    "to_thread": oxplow_domain::refs::build::thread_ref(to.id),
+                    "body": "the docs half is yours",
+                }),
+                false,
+            )
+            .await
+            .unwrap();
+        let handed = |rows: serde_json::Value| {
+            rows.as_array()
+                .unwrap()
+                .iter()
+                .filter(|r| r[0] == "Handed to a thread with no agent")
+                .map(|r| (r[1].clone(), r[3].clone()))
+                .collect::<Vec<_>>()
+        };
+        let rows = run_bundled_lens(&f, "oxplow-bundled/waiting-on-me", &[]).await;
+        assert_eq!(
+            handed(rows),
+            vec![(
+                serde_json::json!("the docs half is yours"),
+                serde_json::json!("Docs")
+            )]
+        );
+        crate::test_fixtures::open_session(&f.svc, to.id).await;
+        let rows = run_bundled_lens(&f, "oxplow-bundled/waiting-on-me", &[]).await;
+        assert!(handed(rows).is_empty());
     }
 
     /// What Deviated: the effort's files outside the area its task names.

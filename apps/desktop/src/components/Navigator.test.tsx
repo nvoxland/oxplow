@@ -492,3 +492,30 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
     (getByTestId("navigator-thread-row-thr1").querySelector("[data-glyph]") as HTMLElement).dataset.glyph,
   ).toBe("thread");
 });
+
+// --- Open handoffs: a count on the thread's row ---------------------------
+
+test("a thread's row counts its open handoffs, naming the newest sender", () => {
+  const { getByTestId, queryByTestId } = render(
+    <Navigator
+      streams={[STREAM]}
+      currentStreamId="str1"
+      threadStates={THREAD_STATES}
+      streamStatuses={{}}
+      agentStatuses={{}}
+      openHandoffs={{ thr2: { count: 2, newestFrom: "Writer" } }}
+      enabledAgents={["claude"]}
+      onSwitchStream={NOOP_ASYNC}
+      onSelectThread={NOOP_ASYNC}
+      onCreateThread={NOOP_ASYNC}
+      vcsEnabled
+    />,
+  );
+  openOverlay(getByTestId);
+  const badge = getByTestId("navigator-thread-row-thr2-handoffs");
+  expect(badge.textContent).toBe("2");
+  expect(badge.getAttribute("title")).toBe(
+    "2 open handoffs; the newest from Writer",
+  );
+  expect(queryByTestId("navigator-thread-row-thr1-handoffs")).toBeNull();
+});

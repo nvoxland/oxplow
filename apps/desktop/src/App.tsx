@@ -1,4 +1,5 @@
 import { useRefKindsLoader } from "./refKinds.js";
+import { useOpenHandoffs } from "./handoffs.js";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 import {
@@ -309,6 +310,7 @@ export function App() {
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   // The conversation picker open over a session's terminal, and for what.
   const [conversationPicker, setConversationPicker] = useState<{ sessionId: string; mode: PickerMode } | null>(null);
+  const openHandoffs = useOpenHandoffs();
   const { statuses: agentStatuses, questions: agentQuestions } = useMemo(
     () => threadStatuses(Object.values(sessionStatuses)),
     [sessionStatuses],
@@ -3476,6 +3478,7 @@ export function App() {
           streamStatuses={streamStatuses}
           agentStatuses={agentStatuses}
           agentQuestions={agentQuestions}
+          openHandoffs={openHandoffs}
           onSwitchStream={handleSwitch}
           onSelectThread={handleSelectThread}
           onCreateThread={async (streamId, title) => {

@@ -57,6 +57,7 @@ pub struct SendInput {
     pub to_thread: String,
     /// What is handed over and what the recipient needs to know (markdown;
     /// `[[…]]` links are checked).
+    #[schemars(extend("contentMediaType" = "text/markdown"))]
     pub body: String,
     /// The work item it hands over (`work_item:oxplow:tsk12`, or a loose
     /// id): taking the handoff moves it onto the recipient thread.

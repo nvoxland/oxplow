@@ -1350,8 +1350,29 @@ a nudge, and mustn't land in the middle of other work. The session
 context counts the thread's open ones (`- **Open handoffs to this
 thread:** N`, `agent_context::surroundings`), so a later session or a
 restart learns of them without the bodies again. A harness without a
-prompt channel (Codex) gets only that count, in its launch prompt. The
-person: at once (the UI is a separate piece of work).
+prompt channel (Codex) gets only that count, in its launch prompt.
+
+The person: at once, through the foundation extension (core's own, so a
+project with `oxplow-bundled` off still has it):
+
+- **Hand Off Work…** is `oxplow.handoff.send`'s `ui` (`about: thread`),
+  so it is on a thread's page and at the end of its Navigator menu. Its
+  form is the `hand-off` lens (`viz: form`, `from_thread` fixed to the
+  thread), which picks the recipient and the item from lists (`choices`:
+  the `handoff-recipients` and `handoff-items` lenses) and takes the body
+  as Markdown.
+- The thread's Tasks page shows **Handoffs to This Thread** (Take,
+  Decline… with a note) and **Handoffs From This Thread** (Withdraw) in
+  its `thread.plan.header` strip, open ones first, settled ones for a
+  week.
+- The Navigator counts each thread's open inbound handoffs beside its
+  title (`useOpenHandoffs`), the newest sender in the tooltip.
+- oxplow-bundled's Waiting on Me lists an open handoff to a thread with
+  no agent session open there: the person's move. Agent status is not
+  touched; it stays derived from agent activity.
+
+`tests-e2e/specs/work/handoff.spec.ts` drives it: hand off from the
+thread's menu, see it on the other thread, take it, the item moves.
 
 **Nothing wakes a model.** oxplow never opens an inbox socket, a channel,
 a server prompt or `turn/start` for a handoff: those are Drive on an

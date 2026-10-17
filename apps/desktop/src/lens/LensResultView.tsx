@@ -585,6 +585,7 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
         initial={start.values}
         fields={start.fields ?? undefined}
         fixed={start.fixed}
+        choices={start.choices}
         serverErrors={form.serverErrors}
         submitLabel={run.lens.title}
         busy={form.busy}
@@ -650,6 +651,7 @@ function ActionForm({
           schema={start.command.input_schema as Record<string, unknown>}
           initial={start.values}
           fixed={start.fixed}
+          choices={start.choices}
           serverErrors={form.serverErrors}
           submitLabel={action.label.replace(/…$/, "")}
           busy={form.busy}

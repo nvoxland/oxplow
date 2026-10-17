@@ -136,7 +136,9 @@ export function MenuList({ items, header, onAction, minWidth = 220 }: MenuListPr
               onClick={async () => {
                 if (!item.enabled) return;
                 if (hasSubmenu) {
-                  setOpenSubmenuId((prev) => (prev === item.id ? null : item.id));
+                  // Open, never toggle: a mouse's hover opened it already,
+                  // and its click mustn't close it again.
+                  setOpenSubmenuId(item.id);
                   return;
                 }
                 try {

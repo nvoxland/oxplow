@@ -9,7 +9,7 @@
 
 export type Schema = Record<string, unknown>;
 
-export type FieldKind = "text" | "integer" | "number" | "boolean" | "enum" | "strings" | "object" | "json";
+export type FieldKind = "text" | "markdown" | "integer" | "number" | "boolean" | "enum" | "strings" | "object" | "json";
 
 export interface Field {
   /** Dotted path from the root object (`a.b`). */
@@ -71,7 +71,7 @@ function kindOf(s: Schema, root: Schema): FieldKind {
   if (Array.isArray(s.enum) && s.enum.every((v) => typeof v === "string")) return "enum";
   switch (typeOf(s)) {
     case "string":
-      return "text";
+      return s.contentMediaType === "text/markdown" ? "markdown" : "text";
     case "integer":
       return "integer";
     case "number":

@@ -160,3 +160,57 @@ test("a server error for a field that isn't shown appears once above the submit 
   expect(getByTestId("f-form-error").textContent).toContain("unknown");
   expect((getByTestId("f-submit") as HTMLButtonElement).disabled).toBe(false);
 });
+
+const handoff = {
+  type: "object",
+  required: ["to_thread", "body"],
+  properties: {
+    to_thread: { type: "string" },
+    body: { type: "string", contentMediaType: "text/markdown" },
+  },
+};
+
+test("a markdown field is a text area: Enter adds a line, Cmd/Ctrl+Enter submits", () => {
+  const submitted: unknown[] = [];
+  const { getByTestId } = render(
+    <SchemaForm
+      schema={handoff}
+      initial={{ to_thread: "thread:thr2" }}
+      onSubmit={(v) => submitted.push(v)}
+      testIdPrefix="f"
+    />,
+  );
+  const body = getByTestId("f-body");
+  expect(body.tagName).toBe("TEXTAREA");
+  fireEvent.change(body, { target: { value: "line one" } });
+  fireEvent.keyDown(body, { key: "Enter" });
+  expect(submitted).toEqual([]);
+  fireEvent.keyDown(body, { key: "Enter", metaKey: true });
+  expect(submitted).toEqual([{ to_thread: "thread:thr2", body: "line one" }]);
+});
+
+test("a field with choices is a select of their labels, under their groups", () => {
+  const submitted: unknown[] = [];
+  const { getByTestId } = render(
+    <SchemaForm
+      schema={handoff}
+      initial={{ body: "yours" }}
+      choices={{
+        to_thread: [
+          { value: "thread:thr2", label: "Parser", group: "oxplow" },
+          { value: "thread:thr5", label: "Docs", group: "Bugfixes" },
+        ],
+      }}
+      onSubmit={(v) => submitted.push(v)}
+      testIdPrefix="f"
+    />,
+  );
+  const select = getByTestId("f-to_thread") as HTMLSelectElement;
+  expect(select.tagName).toBe("SELECT");
+  const groups = Array.from(select.querySelectorAll("optgroup")).map((g) => g.label);
+  expect(groups).toEqual(["oxplow", "Bugfixes"]);
+  expect(Array.from(select.options).map((o) => o.textContent)).toEqual(["Choose…", "Parser", "Docs"]);
+  fireEvent.change(select, { target: { value: "thread:thr5" } });
+  fireEvent.submit(getByTestId("f"));
+  expect(submitted).toEqual([{ to_thread: "thread:thr5", body: "yours" }]);
+});

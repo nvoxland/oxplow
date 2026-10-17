@@ -1599,7 +1599,12 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   fields? }`; no `query` needed: one, if given, prefills from its first
   row; `fixed` fields show their `defaults` value and can't be changed —
   it's imposed again on submit, so an item's `ref` stays its own;
-  `fields` lists which to show, the rest keep their starting values) or
+  `fields` lists which to show, the rest keep their starting values;
+  `choices` maps a field to a lens of the extension, `<ext>/<slug>`, run
+  with the form's params (those it declares), whose rows are the field's
+  choices — `value`, `label`, optional `group` — shown as a select under
+  group headings; a choices lens the extension doesn't have is a load
+  error) or
   `custom` (`custom: {
   component, props? }`, one of the extension's `custom_components`; see
   "Custom components"). Each component names the columns it draws from in
@@ -1659,13 +1664,14 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   (`columns` entry for `tree.label`), so its `link`, `icon` and `tone`
   apply.
 - `actions`: commands the lens offers, `{ id, label, command, input?,
-  row?, group?, form?, fixed? }`, with `{{param.x}}` / `{{row.x}}` placeholders; run as the lens
+  row?, group?, form?, fixed?, choices? }`, with `{{param.x}}` / `{{row.x}}` placeholders; run as the lens
   for whoever pressed, so they grant no power. `form: true` opens the
   command's form instead of running (a slideover: `lens_action_form`
   gives the command and the bound `input` as starting values); what the
   person fills in runs (`oxplow_run_lens_action`'s `input`, taken only by a form
   action), its `fixed` fields put back to the bound values (an `Edit…`
-  row action keeps the row's `ref`). A refusal naming a field (`INVALID`
+  row action keeps the row's `ref`); a form action's `choices` are a
+  form lens's (above). A refusal naming a field (`INVALID`
   with `field`, carried over IPC on `IpcError.field`) shows under that
   field, in a form lens too. `group: <value>` puts the
   action in that group's heading (matched against the group's value as

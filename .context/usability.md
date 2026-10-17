@@ -68,6 +68,10 @@ Things I keep forgetting. Read this before adding any UI.
   Otherwise any event that re-reads — an approval, a config change
   elsewhere, a health record — silently drops unsaved input, and the next
   action sends the old value.
+- **A command's form follows its input schema** (`SchemaForm`): a
+  string declared `contentMediaType: text/markdown` is a text area where
+  Enter adds a line and Cmd/Ctrl+Enter submits; a field a lens gives
+  `choices` is a select of their labels, under their groups.
 - **Never call `window.prompt()`.** The Tauri webview blocks it —
   it returns `null` synchronously without
   showing anything, so any code path gated on its return value
@@ -256,7 +260,9 @@ Things I keep forgetting. Read this before adding any UI.
   apply). A row's right-click menu: Ask About This, the lens's row
   actions, then a separator and one submenu per `ui.group` with the
   commands about the row's ref (`refCommandMenuItems`). A Board card:
-  Move To, then the same tail. Each runs as any offer does (asking first
+  Move To, then the same tail. The Navigator's thread menu ends with the
+  same tail, the commands about that thread. A submenu opens on hover
+  and on click; a click never closes the one its hover opened. Each runs as any offer does (asking first
   when the command asks). Testids: `page-nav-commands`,
   `page-nav-command-<command id>`, `menu-item-ref-commands-<group>`,
   `menu-item-ref-command-<command id>`.

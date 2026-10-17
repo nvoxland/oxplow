@@ -693,6 +693,13 @@
             "type": "string"
           },
           "default": null
+        },
+        "choices": {
+          "description": "Fields picked from a list: each names a lens (`<extension>/<slug>`)\nrun with the form's params, whose rows are the choices (`value`,\n`label`, optional `group`).",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false
@@ -811,6 +818,14 @@
             "type": "string"
           },
           "default": []
+        },
+        "choices": {
+          "description": "A form action's fields picked from a list: field → the lens whose\nrows are its choices.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
         }
       },
       "additionalProperties": false,

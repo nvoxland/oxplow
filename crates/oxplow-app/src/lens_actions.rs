@@ -135,6 +135,78 @@ pub struct FormStart {
     pub values: Value,
     pub fixed: Vec<String>,
     pub fields: Option<Vec<String>>,
+    /// Fields picked from a list, with their choices.
+    pub choices: BTreeMap<String, Vec<Choice>>,
+}
+
+/// One choice for a form field: the value it submits, what the person
+/// reads, and the heading it sits under.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, specta::Type)]
+pub struct Choice {
+    pub value: String,
+    pub label: String,
+    pub group: Option<String>,
+}
+
+/// Each field's choices: its lens run with the form's params (those it
+/// declares), its rows' `value`, `label` and `group`.
+async fn choices_for(
+    svc: &crate::Services,
+    lens_root: &Path,
+    choices: &BTreeMap<String, String>,
+    params: &BTreeMap<String, SqlCell>,
+    ctx: &extensions::LensContext,
+) -> Result<BTreeMap<String, Vec<Choice>>, CommandError> {
+    let mut out = BTreeMap::new();
+    for (field, lens_id) in choices {
+        let lens = svc
+            .extension_catalog
+            .find_lens(lens_root, lens_id)
+            .map_err(CommandError::from)?;
+        let given: BTreeMap<String, SqlCell> = params
+            .iter()
+            .filter(|(name, _)| lens.params.iter().any(|p| &p.name == *name))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let run = extensions::run_lens(
+            &svc.sql,
+            &svc.extension_catalog,
+            lens_root,
+            lens_id,
+            given,
+            ctx,
+        )
+        .await
+        .map_err(CommandError::from)?;
+        let col = |name: &str| run.result.columns.iter().position(|c| c == name);
+        let (Some(value), Some(label)) = (col("value"), col("label")) else {
+            return Err(CommandError::Invalid {
+                field: Some(format!("/{field}")),
+                message: format!("choices lens `{lens_id}` needs `value` and `label` columns"),
+            });
+        };
+        let group = col("group");
+        let text = |c: &SqlCell| match c {
+            SqlCell::Text(t) => Some(t.clone()),
+            SqlCell::Int(i) => Some(i.to_string()),
+            SqlCell::Real(r) => Some(r.to_string()),
+            _ => None,
+        };
+        let rows = run
+            .result
+            .rows
+            .iter()
+            .filter_map(|r| {
+                Some(Choice {
+                    value: text(&r[value])?,
+                    label: text(&r[label])?,
+                    group: group.and_then(|g| text(&r[g])),
+                })
+            })
+            .collect();
+        out.insert(field.clone(), rows);
+    }
+    Ok(out)
 }
 
 /// `given` (what a person filled in, a map) laid over `start`, with the
@@ -188,6 +260,7 @@ pub async fn action_form(
             let params =
                 extensions::resolve_params(&lens, &call.params, ctx).map_err(CommandError::from)?;
             let values = bind_input(&action.input, &params, call.row.as_ref())?;
+            let choices = choices_for(svc, lens_root, &action.choices, &params, ctx).await?;
             let command =
                 svc.commands
                     .spec(&action.command)
@@ -199,6 +272,7 @@ pub async fn action_form(
                 values,
                 fixed: action.fixed,
                 fields: None,
+                choices,
             })
         })
         .await
@@ -266,11 +340,13 @@ async fn form_start_unpinned(
             }
         }
     }
+    let choices = choices_for(svc, lens_root, &form.choices, &run.params, ctx).await?;
     Ok(FormStart {
         command,
         values: Value::Object(values),
         fixed: form.fixed,
         fields: form.fields,
+        choices,
     })
 }
 
@@ -861,6 +937,54 @@ actions:
         .await
         .unwrap_err();
         assert!(err.to_string().contains("no form action"), "{err}");
+    }
+
+    /// The foundation's hand-off form starts from its thread, fixed, and
+    /// picks the recipient from the other open threads and the item from
+    /// its thread's open items — each field's choices from its lens.
+    #[tokio::test]
+    async fn the_hand_off_form_picks_from_its_choices() {
+        let (fx, root) = fixture().await;
+        let other =
+            crate::test_fixtures::new_thread(&fx.svc, oxplow_domain::StreamId::new(1), "Docs")
+                .await;
+        let closed =
+            crate::test_fixtures::new_thread(&fx.svc, oxplow_domain::StreamId::new(1), "Old").await;
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.thread.close",
+                json!({ "thread": oxplow_domain::refs::build::thread_ref(closed.id) }),
+                false,
+            )
+            .await
+            .unwrap();
+        let me = oxplow_domain::refs::build::thread_ref(fx.thread);
+        let start = form_start(
+            &fx.svc,
+            &root,
+            "oxplow-foundation/hand-off",
+            BTreeMap::from([("ref".to_string(), SqlCell::Text(me.clone()))]),
+            &extensions::LensContext::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(start.command.id, "oxplow.handoff.send");
+        assert_eq!(start.values["from_thread"], json!(me));
+        assert_eq!(start.fixed, vec!["from_thread".to_string()]);
+        let recipients: Vec<(&str, &str)> = start.choices["to_thread"]
+            .iter()
+            .map(|c| (c.value.as_str(), c.label.as_str()))
+            .collect();
+        let other_ref = oxplow_domain::refs::build::thread_ref(other.id);
+        assert_eq!(recipients, vec![(other_ref.as_str(), "Docs")]);
+        assert!(start.choices["to_thread"][0].group.is_some());
+        let items: Vec<&str> = start.choices["work_item"]
+            .iter()
+            .map(|c| c.value.as_str())
+            .collect();
+        assert_eq!(items, vec![work_item_ref(fx.task)]);
     }
 
     /// A form lens's fixed fields keep their `defaults` on submit, and its

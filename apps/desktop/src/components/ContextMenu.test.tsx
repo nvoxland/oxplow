@@ -29,3 +29,20 @@ test("a submenu escapes its list's scroll box, beside its item", () => {
   expect(box.style.position).toBe("fixed");
   expect(box.contains(getByTestId("menu-item-mark.red"))).toBe(true);
 });
+
+/** A mouse reaches a submenu's item before it clicks it: the hover opens
+ *  the submenu, and the click keeps it open rather than closing it. */
+test("a click after the hover that opened a submenu keeps it open", () => {
+  const { getByTestId, queryByTestId } = render(
+    <MenuList
+      items={[
+        { id: "threads", label: "Threads", enabled: true, submenu: [{ id: "threads.hand-off", label: "Hand Off Work…", enabled: true }] },
+      ]}
+    />,
+  );
+  const item = getByTestId("menu-item-threads");
+  fireEvent.mouseEnter(item.parentElement!);
+  expect(queryByTestId("menu-item-threads.hand-off")).not.toBeNull();
+  fireEvent.click(item);
+  expect(queryByTestId("menu-item-threads.hand-off")).not.toBeNull();
+});

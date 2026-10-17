@@ -12,6 +12,14 @@ import { useEffect, useMemo, useState } from "react";
 
 import { draftsFrom, fieldsOf, valueOf, type Drafts, type Field, type Schema } from "./schemaFormModel.js";
 
+/** One choice for a field picked from a list: what it submits, what the
+ *  person reads, and the heading it sits under. */
+export interface FieldChoice {
+  value: string;
+  label: string;
+  group?: string | null;
+}
+
 export interface SchemaFormProps {
   schema: Schema;
   /** The value the fields start from (and Escape returns to). */
@@ -35,6 +43,9 @@ export interface SchemaFormProps {
    *  that isn't shown appears once above the submit button. They never
    *  disable submit. */
   serverErrors?: Record<string, string>;
+  /** Top-level fields picked from a list: a select of these choices
+   *  instead of the field's own input. */
+  choices?: Record<string, FieldChoice[]>;
 }
 
 export function SchemaForm({
@@ -48,6 +59,7 @@ export function SchemaForm({
   fields: shown,
   fixed,
   serverErrors,
+  choices,
 }: SchemaFormProps) {
   // Keyed on content: a host re-reading its data passes fresh copies of
   // the same schema and starting value, and that mustn't throw away what
@@ -88,13 +100,16 @@ export function SchemaForm({
   const shownPaths = new Set(rendered.map((f) => f.path));
   const stray = live.filter(([name]) => !shownPaths.has(name));
   const firstEditable = rendered.findIndex((f) => !fixedSet.has(f.path));
+  const submit = () => {
+    if (onSubmit && valid && !busy) onSubmit(value);
+  };
   return (
     <form
       data-testid={testIdPrefix}
       style={{ display: "flex", flexDirection: "column", gap: 8 }}
       onSubmit={(e) => {
         e.preventDefault();
-        if (onSubmit && valid && !busy) onSubmit(value);
+        submit();
       }}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
@@ -118,6 +133,8 @@ export function SchemaForm({
               autoFocus={i === firstEditable && onSubmit !== undefined}
               testIdPrefix={testIdPrefix}
               fixed={fixedSet.has(f.path)}
+              choices={choices?.[f.path]}
+              onSubmitShortcut={submit}
             />
             {server !== undefined && errors[f.path] === undefined ? (
               <span data-testid={`${testIdPrefix}-${f.path}-error`} style={errorStyle}>
@@ -153,6 +170,8 @@ function FieldInput({
   autoFocus,
   testIdPrefix,
   fixed,
+  choices,
+  onSubmitShortcut,
 }: {
   field: Field;
   drafts: Drafts;
@@ -161,6 +180,8 @@ function FieldInput({
   autoFocus: boolean;
   testIdPrefix: string;
   fixed: boolean;
+  choices?: FieldChoice[];
+  onSubmitShortcut?(): void;
 }) {
   const id = `${testIdPrefix}-${f.path}`;
   if (f.kind === "object") {
@@ -187,7 +208,7 @@ function FieldInput({
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <span style={labelStyle}>{f.label}</span>
-        <span data-testid={`${id}-fixed`} style={{ fontFamily: f.kind === "text" ? undefined : "var(--font-mono)", whiteSpace: "pre-wrap" }}>
+        <span data-testid={`${id}-fixed`} style={{ fontFamily: f.kind === "text" || f.kind === "markdown" ? undefined : "var(--font-mono)", whiteSpace: "pre-wrap" }}>
           {raw}
         </span>
       </div>
@@ -201,7 +222,9 @@ function FieldInput({
     </label>
   );
   let input;
-  switch (f.kind) {
+  if (choices) {
+    input = <ChoiceSelect id={id} value={raw} required={f.required} autoFocus={autoFocus} choices={choices} onChange={(v) => onEdit(f.path, v)} />;
+  } else switch (f.kind) {
     case "boolean":
       return (
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -227,6 +250,26 @@ function FieldInput({
             </option>
           ))}
         </select>
+      );
+      break;
+    case "markdown":
+      input = (
+        <textarea
+          id={id}
+          data-testid={id}
+          value={raw}
+          autoFocus={autoFocus}
+          rows={Math.min(12, Math.max(4, raw.split("\n").length))}
+          onChange={(e) => onEdit(f.path, e.target.value)}
+          onKeyDown={(e) => {
+            // Enter adds a line; Cmd/Ctrl+Enter submits (usability.md, Forms).
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              onSubmitShortcut?.();
+            }
+          }}
+          style={inputStyle}
+        />
       );
       break;
     case "strings":
@@ -284,3 +327,48 @@ const fieldsetStyle: CSSProperties = {
   flexDirection: "column",
   gap: 8,
 };
+
+/** A field picked from a list: its choices, under their groups' headings
+ *  in the order the groups first appear. */
+function ChoiceSelect({
+  id,
+  value,
+  required,
+  autoFocus,
+  choices,
+  onChange,
+}: {
+  id: string;
+  value: string;
+  required: boolean;
+  autoFocus: boolean;
+  choices: FieldChoice[];
+  onChange(value: string): void;
+}) {
+  const groups: { name: string | null; items: FieldChoice[] }[] = [];
+  for (const c of choices) {
+    const name = c.group ?? null;
+    const last = groups.at(-1);
+    if (last && last.name === name) last.items.push(c);
+    else groups.push({ name, items: [c] });
+  }
+  const option = (c: FieldChoice) => (
+    <option key={c.value} value={c.value}>
+      {c.label}
+    </option>
+  );
+  return (
+    <select id={id} data-testid={id} value={value} autoFocus={autoFocus} onChange={(e) => onChange(e.target.value)}>
+      <option value="">{required ? "Choose…" : "—"}</option>
+      {groups.map((g, i) =>
+        g.name === null ? (
+          g.items.map(option)
+        ) : (
+          <optgroup key={`${g.name}-${i}`} label={g.name}>
+            {g.items.map(option)}
+          </optgroup>
+        ),
+      )}
+    </select>
+  );
+}
