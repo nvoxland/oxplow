@@ -19,6 +19,7 @@ import {
 } from "../../api.js";
 import { decodeWorkItemDrag, dragHasWorkItems } from "../../agent-context-dnd.js";
 import { WORK_ITEM_DRAG_MIME } from "../../dragMimes.js";
+import { useListNav } from "../../kit/index.js";
 import { ContextMenu } from "../ContextMenu.js";
 import { showToast } from "../toastStore.js";
 import type { MenuItem } from "../../menu.js";
@@ -46,7 +47,7 @@ function statusOrderRank(state: CanonicalState): number {
 }
 
 /** A keyboard picker: the state, or one of the list's own fields. */
-type KbPickerKind = { kind: "state" } | { kind: "field"; field: FieldDecl };
+export type KbPickerKind = { kind: "state" } | { kind: "field"; field: FieldDecl };
 
 const mention = (item: WorkItem) =>
   formatContextMention({ kind: "work_item", ref: item.ref, title: item.title, state: item.state });
@@ -702,7 +703,7 @@ export function PlanPane({
  * commits, Escape cancels. Mouse click on a row also commits. Kept in-line
  * in this file rather than extracted because nothing else uses it.
  */
-function KeyboardValuePicker({
+export function KeyboardValuePicker({
   picker,
   item,
   onPick,
@@ -716,31 +717,26 @@ function KeyboardValuePicker({
   const options: readonly string[] = picker.kind === "state" ? CANONICAL_STATES : picker.field.values;
   const current = picker.kind === "state" ? item.state : String(item.native[picker.field.name] ?? "");
   const initialIdx = Math.max(0, options.indexOf(current as string));
-  const [idx, setIdx] = useState(initialIdx);
-
+  // The one list contract (kit `useListNav`); the overlay holds focus, so a
+  // key goes to it, and the cursor starts on the current value.
+  const nav = useListNav({
+    count: options.length,
+    onPick: (i) => onPick(options[i]!),
+    onEscape: onClose,
+    id: "value-picker",
+  });
+  const { cursor: idx, setCursor: setIdx } = nav;
+  const overlayRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        setIdx((prev) => Math.min(prev + 1, options.length - 1));
-      } else if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setIdx((prev) => Math.max(prev - 1, 0));
-      } else if (event.key === "Enter") {
-        event.preventDefault();
-        onPick(options[idx]!);
-      } else if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [idx, options, onPick, onClose]);
+    setIdx(initialIdx);
+    overlayRef.current?.focus();
+    // On open only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
-    <div style={kbPickerOverlayStyle} onClick={onClose}>
-      <div style={kbPickerStyle} onClick={(event) => event.stopPropagation()}>
+    <div ref={overlayRef} tabIndex={-1} style={kbPickerOverlayStyle} onClick={onClose} {...nav.keyProps}>
+      <div style={kbPickerStyle} onClick={(event) => event.stopPropagation()} {...nav.listProps}>
         <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--border)", fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.6 }}>
           {picker.kind === "state" ? "Set state" : `Set ${picker.field.title.toLowerCase()}`}
           <span style={{ float: "right", fontFamily: "ui-monospace, monospace" }}>↑↓ · Enter · Esc</span>
@@ -751,7 +747,7 @@ function KeyboardValuePicker({
             return (
               <div
                 key={option}
-                onMouseEnter={() => setIdx(i)}
+                {...nav.optionProps(i)}
                 onClick={() => onPick(option)}
                 style={{
                   padding: "5px 10px",

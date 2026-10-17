@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { MetricCatalogEntry } from "../../api.js";
+import { useListNav } from "../../kit/index.js";
 import { flattenPickerRows, pickerSections } from "./metricPicker.js";
 
 const PANEL_W = 340;
@@ -37,7 +38,6 @@ export function MetricPickerPanel({
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
-  const [cursor, setCursor] = useState(0);
   const [pos, setPos] = useState(anchor);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -45,6 +45,15 @@ export function MetricPickerPanel({
 
   const sections = useMemo(() => pickerSections(catalog, query), [catalog, query]);
   const rows = useMemo(() => flattenPickerRows(sections), [sections]);
+  const { cursor, setCursor, inputProps, listProps, optionProps } = useListNav({
+    count: rows.length,
+    onPick: (i) => {
+      const row = rows[i];
+      if (row) onPick(row.key);
+    },
+    onEscape: onClose,
+    id: "metric-picker",
+  });
 
   // Clamp into the viewport — the same rule ContextMenu applies, so the panel
   // can't hang off an edge when opened near one.
@@ -63,11 +72,6 @@ export function MetricPickerPanel({
     inputRef.current?.focus();
   }, []);
 
-  // A narrowed list can leave the cursor past the end.
-  useEffect(() => {
-    setCursor((c) => (c >= rows.length ? 0 : c));
-  }, [rows.length]);
-
   // Keep the highlighted row in view as the cursor moves.
   useEffect(() => {
     const key = rows[cursor]?.key;
@@ -83,36 +87,12 @@ export function MetricPickerPanel({
     return () => window.removeEventListener("mousedown", onDown);
   }, [onClose]);
 
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      onClose();
-      return;
-    }
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setCursor((c) => (rows.length ? (c + 1) % rows.length : 0));
-      return;
-    }
-    if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setCursor((c) => (rows.length ? (c - 1 + rows.length) % rows.length : 0));
-      return;
-    }
-    if (e.key === "Enter") {
-      e.preventDefault();
-      const row = rows[cursor];
-      if (row) onPick(row.key);
-    }
-  };
-
   let rowIndex = -1;
 
   return (
     <div
       ref={rootRef}
       data-testid="metric-picker"
-      onKeyDown={onKeyDown}
       style={{
         position: "fixed",
         left: pos.x,
@@ -132,6 +112,7 @@ export function MetricPickerPanel({
       <div style={{ padding: 8, borderBottom: "1px solid var(--border-subtle)" }}>
         <input
           ref={inputRef}
+          {...inputProps}
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
@@ -153,7 +134,7 @@ export function MetricPickerPanel({
         />
       </div>
 
-      <div style={{ overflowY: "auto", flex: 1, padding: "4px 0" }}>
+      <div style={{ overflowY: "auto", flex: 1, padding: "4px 0" }} {...listProps}>
         {rows.length === 0 ? (
           <div style={{ padding: "12px 12px", fontSize: 13, opacity: 0.6 }} data-testid="metric-picker-empty">
             No metrics match “{query}”.
@@ -196,8 +177,8 @@ export function MetricPickerPanel({
                       else rowRefs.current.delete(e.key);
                     }}
                     type="button"
+                    {...optionProps(rowIndex)}
                     onClick={() => onPick(e.key)}
-                    onMouseEnter={() => setCursor(rows.findIndex((r) => r.key === e.key))}
                     data-testid={`metric-picker-row-${e.key}`}
                     title={e.key}
                     style={{

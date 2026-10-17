@@ -262,6 +262,13 @@ and a metric's recordings, a model's documented columns). A row built in a
 loop that opens a page takes its click from `routeDispatch(ref, ctxNav,
 options)` + `routeHandlers(dispatch)` (`tabs/RouteLink.tsx`, the same
 dispatch `useRouteDispatch` memoizes), not a hook per row.
+Every list driven by ↑/↓/Enter/Escape uses `useListNav` (usability.md
+"Keyboard"): the conversation picker, the dashboard's metric picker, the
+Plan keyboard value picker and the launcher. The launcher adds Tab (next
+section), Home and End to it and leaves out the pointer-moves-the-cursor
+part (it scrolls the cursor's row into view, which a hovering pointer would
+fight). The New Session page's earlier-sessions list is the one remaining
+copy.
 A time said as "how long ago" is `formatRelative` (`components/format.ts`;
 `formatRelativeSeconds` for a unix time): the launcher, the wiki list, a
 comment's time and the task panel use it, not their own copies.
