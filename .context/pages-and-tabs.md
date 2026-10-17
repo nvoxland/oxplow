@@ -257,6 +257,9 @@ draw their parts with the kit `Section` (no local copies): a page's action
 is a `PageAction` on its section (Alerts' "Clear failed operations" is
 `action-clear-ops`), and the Settings index scrolls to a section by its
 `data-section` id.
+A time said as "how long ago" is `formatRelative` (`components/format.ts`;
+`formatRelativeSeconds` for a unix time): the launcher, the wiki list, a
+comment's time and the task panel use it, not their own copies.
 
 | Archetype | When | Core form | Extension form |
 |---|---|---|---|

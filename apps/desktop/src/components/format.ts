@@ -173,6 +173,11 @@ export function formatRelative(at: string, now: number = Date.now()): string {
   return formatDateOnly(at);
 }
 
+/** [`formatRelative`] of a unix time in seconds. */
+export function formatRelativeSeconds(unixSeconds: number, now: number = Date.now()): string {
+  return formatRelative(new Date(unixSeconds * 1000).toISOString(), now);
+}
+
 /** A whole number with separators: `12,345`. */
 export function formatInteger(n: number): string {
   return Math.round(n).toLocaleString();

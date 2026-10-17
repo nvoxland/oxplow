@@ -21,6 +21,7 @@ import { logUi } from "../../logger.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
 import { formatContextMention } from "../../agent-context-ref.js";
+import { formatRelative } from "../format.js";
 import { ContextMenu } from "../ContextMenu.js";
 import { useRouteDispatch } from "../../tabs/RouteLink.js";
 import { wikiPageRef } from "../../tabs/pageRefs.js";
@@ -598,22 +599,6 @@ function NoteRow({
       >⋯</button>
     </div>
   );
-}
-
-function formatRelative(iso: string): string {
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return "";
-  const diff = Date.now() - t;
-  if (diff < 60_000) return "just now";
-  const min = Math.floor(diff / 60_000);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const d = Math.floor(hr / 24);
-  if (d < 7) return `${d}d ago`;
-  if (d < 30) return `${Math.floor(d / 7)}w ago`;
-  if (d < 365) return `${Math.floor(d / 30)}mo ago`;
-  return `${Math.floor(d / 365)}y ago`;
 }
 
 /** Allow only the `<mark>…</mark>` tags FTS5 wraps around matches; HTML-escape everything else. */

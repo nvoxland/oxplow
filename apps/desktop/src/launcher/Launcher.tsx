@@ -5,6 +5,7 @@ import type { RecentProjectView } from "../tauri-bridge/generated/bindings.js";
 import { connectRemote, parseRemoteInput, probeRemoteDaemon } from "../tauri-bridge/transport.js";
 import { pickFolder } from "../tauri-bridge/nativeDialog.js";
 import { useContextMenu, useRowContextMenu } from "../components/useRowContextMenu.js";
+import { formatRelativeSeconds } from "../components/format.js";
 import { logUi } from "../logger.js";
 import {
   forgetRemote,
@@ -272,7 +273,7 @@ function RemoteConnectSection() {
                 <span style={rowTitleStyle}>{r.base}</span>
               </button>
               <div style={rowMetaStyle}>
-                <span style={rowTimeStyle}>{formatRelative(Math.floor(r.lastConnectedAt / 1000))}</span>
+                <span style={rowTimeStyle}>{formatRelativeSeconds(Math.floor(r.lastConnectedAt / 1000))}</span>
               </div>
             </li>
           ))}
@@ -332,24 +333,11 @@ function RecentRow({
       </button>
       <div style={rowMetaStyle}>
         {!project.exists ? <span style={missingBadgeStyle}>missing</span> : null}
-        <span style={rowTimeStyle}>{formatRelative(project.lastOpenedAt)}</span>
+        <span style={rowTimeStyle}>{formatRelativeSeconds(project.lastOpenedAt)}</span>
       </div>
       {cm.menu}
     </li>
   );
-}
-
-/// Compact "x ago" rendering of a unix-seconds timestamp.
-function formatRelative(unixSeconds: number): string {
-  const deltaSec = Math.max(0, Math.floor(Date.now() / 1000) - unixSeconds);
-  if (deltaSec < 60) return "just now";
-  const min = Math.floor(deltaSec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const days = Math.floor(hr / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(unixSeconds * 1000).toLocaleDateString();
 }
 
 const rootStyle: React.CSSProperties = {

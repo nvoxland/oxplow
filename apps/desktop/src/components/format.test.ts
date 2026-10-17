@@ -4,6 +4,8 @@ import {
   formatMetricValue,
   formatMetricValueExact,
   formatDurationMs,
+  formatRelative,
+  formatRelativeSeconds,
 } from "./format.js";
 
 describe("formatDateOnly", () => {
@@ -77,5 +79,24 @@ describe("formatMetricValue (tsk114)", () => {
   });
   test("non-finite values pass through instead of formatting garbage", () => {
     expect(formatMetricValue(Number.NaN)).toBe("NaN");
+  });
+});
+
+// The one "how long ago": every surface that says it uses these.
+describe("formatRelative", () => {
+  const now = Date.parse("2026-10-10T12:00:00Z");
+  const ago = (ms: number) => new Date(now - ms).toISOString();
+  test("says how long ago, coarsest unit that fits", () => {
+    expect(formatRelative(ago(20_000), now)).toBe("just now");
+    expect(formatRelative(ago(5 * 60_000), now)).toBe("5 min ago");
+    expect(formatRelative(ago(3 * 3_600_000), now)).toBe("3 h ago");
+    expect(formatRelative(ago(2 * 86_400_000), now)).toBe("2 d ago");
+  });
+  test("a time that isn't one comes back as given, and a time in the future is just now", () => {
+    expect(formatRelative("whenever", now)).toBe("whenever");
+    expect(formatRelative(ago(-60_000), now)).toBe("just now");
+  });
+  test("a unix-seconds time reads the same way", () => {
+    expect(formatRelativeSeconds((now - 3 * 3_600_000) / 1000, now)).toBe("3 h ago");
   });
 });
