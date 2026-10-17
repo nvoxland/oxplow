@@ -85,7 +85,16 @@ export function SchemaForm({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the content
   const initialDrafts = useMemo(() => draftsFrom(fields, initial ?? {}), [fields, initialText]);
   const [drafts, setDrafts] = useState<Drafts>(initialDrafts);
-  useEffect(() => setDrafts(initialDrafts), [initialDrafts]);
+  // A different schema or starting value starts the drafts over — in the
+  // render that sees it, not an effect after it: an effect on mount ran
+  // after the person's first keystroke whenever the scheduler was behind,
+  // and put the starting value back over it.
+  const startKey = `${schemaText}\n${initialText}`;
+  const [startedFrom, setStartedFrom] = useState(startKey);
+  if (startedFrom !== startKey) {
+    setStartedFrom(startKey);
+    setDrafts(initialDrafts);
+  }
   const { value, errors } = valueOf(fields, drafts);
   const valid = Object.keys(errors).length === 0;
   const edit = (path: string, raw: string) => {
