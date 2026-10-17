@@ -22,7 +22,9 @@ import {
 import { Sparkline } from "../components/Sparkline.js";
 import { metricRef } from "../tabs/pageRefs.js";
 import { Page } from "../tabs/Page.js";
-import { useRouteDispatch } from "../tabs/RouteLink.js";
+import { routeDispatch, routeHandlers } from "../tabs/RouteLink.js";
+import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
+import { DataTable, type DataColumn } from "../kit/index.js";
 import type { NavSiblings } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { buildMetricSections } from "./metricCategories.js";
@@ -50,7 +52,7 @@ import {
  *  only source that knows about `use:`); `def` is the seeded spec, which carries
  *  the presentation metadata (unit, direction, thresholds) and is null when the
  *  metric was explicitly disabled and its spec pruned. */
-type Row = {
+export type Row = {
   key: string;
   title: string;
   category: string | null;
@@ -70,87 +72,138 @@ const SLICE_TOP_N = 3;
 
 
 
-/** One metric row: title · trend sparkline · latest value. A `<tr>`
- *  that adopts browser-style click via `useRouteDispatch` (plain → detail
- *  in-tab, modifier/middle/right → new tab). */
-function MetricRow({
-  row,
+/** One line of the metrics table: a metric (opens its page), or, when the
+ *  list is sliced, beneath it a line per top group, a note that it isn't
+ *  sliced, or a count of the groups left out. */
+export type Line =
+  | { kind: "metric"; key: string; row: Row }
+  | { kind: "none"; key: string; slice: string }
+  | { kind: "group"; key: string; group: string; samples: SeriesPoint[]; latest: SeriesPoint; color?: string; unit?: string | null }
+  | { kind: "more"; key: string; hidden: number };
+
+/** A metric's lines: itself, then its slices. */
+export function metricLines(row: Row, slice: string | null): Line[] {
+  const { def, latest } = row;
+  const color = def && latest ? metricStatusColor(def, latest.value) : undefined;
+  const { shown, hidden } = sliceGroups(row.grouped, SLICE_TOP_N);
+  return [
+    { kind: "metric", key: row.key, row },
+    // A group is a value of the dimension, not a metric, so it opens no page.
+    ...(slice && def && shown.length === 0 ? [{ kind: "none" as const, key: `${row.key}/none`, slice }] : []),
+    ...shown.map((g) => ({
+      kind: "group" as const,
+      key: `${row.key}/${g.group}`,
+      group: g.group,
+      samples: g.samples,
+      latest: g.latest,
+      color,
+      unit: def?.unit,
+    })),
+    ...(hidden > 0 ? [{ kind: "more" as const, key: `${row.key}/more`, hidden }] : []),
+  ];
+}
+
+const trend = (samples: SeriesPoint[], color?: string) => (
+  <Sparkline
+    values={samples
+      .slice()
+      .reverse()
+      .map((s) => s.value)}
+    color={color}
+  />
+);
+
+const metricColumns: DataColumn<Line>[] = [
+  {
+    key: "title",
+    label: "Metric",
+    render: (l) => {
+      switch (l.kind) {
+        case "metric":
+          return <strong>{l.row.title}</strong>;
+        case "none":
+          return <span className="ox-muted">Not sliced by {l.slice}</span>;
+        case "group":
+          return <span className="ox-muted">{l.group}</span>;
+        case "more":
+          return <span className="ox-muted">+ {l.hidden} more</span>;
+      }
+    },
+  },
+  {
+    key: "trend",
+    label: "Trend",
+    width: 120,
+    render: (l) => {
+      if (l.kind === "metric") {
+        const color = l.row.def && l.row.latest ? metricStatusColor(l.row.def, l.row.latest.value) : undefined;
+        return trend(l.row.samples, color);
+      }
+      return l.kind === "group" ? trend(l.samples, l.color) : null;
+    },
+  },
+  {
+    key: "value",
+    label: "Latest",
+    width: 140,
+    render: (l) => {
+      if (l.kind === "metric") {
+        const { def, latest } = l.row;
+        const color = def && latest ? metricStatusColor(def, latest.value) : undefined;
+        return <strong style={{ color }}>{latest ? formatMetricValue(latest.value, def?.unit) : "—"}</strong>;
+      }
+      return l.kind === "group" ? formatMetricValue(l.latest.value, l.unit) : null;
+    },
+    title: (l) =>
+      l.kind === "metric"
+        ? l.row.latest
+          ? formatMetricValueExact(l.row.latest.value, l.row.def?.unit)
+          : undefined
+        : l.kind === "group"
+          ? formatMetricValueExact(l.latest.value, l.unit)
+          : undefined,
+  },
+];
+
+/** One group of the metrics list as a table: a row opens the metric's page
+ *  (browser-style: plain → in this tab, modifier/middle/right → a new one). */
+function MetricsTable({
+  entries,
+  slice,
   onOpenPage,
   siblings,
-  slice,
 }: {
-  row: Row;
-  onOpenPage?: (ref: TabRef) => void;
-  siblings?: NavSiblings;
-  /** The dimension the list is sliced by (its label), when it is. */
+  entries: Row[];
   slice: string | null;
+  onOpenPage?: (ref: TabRef) => void;
+  siblings: { entries: NavSiblings["entries"]; indexByKey: ReadonlyMap<string, number> };
 }) {
-  const { def, latest, samples } = row;
-  // Colored by where the latest value stands against the metric's target.
-  const color = def && latest ? metricStatusColor(def, latest.value) : undefined;
-  const unit = def?.unit;
-  const { handlers } = useRouteDispatch(metricRef(row.key), { onNavigate: onOpenPage, siblings });
-  const { shown, hidden } = useMemo(() => sliceGroups(row.grouped, SLICE_TOP_N), [row.grouped]);
-  const quiet = { padding: "2px 8px 2px 24px", fontSize: 12, opacity: 0.6 } as const;
+  const ctxNav = useOptionalPageNavigation();
+  const lines = useMemo(() => entries.flatMap((row) => metricLines(row, slice)), [entries, slice]);
   return (
-    <>
-      <tr
-        onClick={handlers.onClick}
-        onAuxClick={handlers.onAuxClick}
-        onContextMenu={handlers.onContextMenu}
-        style={{ borderTop: "1px solid var(--border, #2a2a2a)", cursor: "pointer" }}
-      >
-        <td style={{ padding: "6px 8px", fontWeight: 600 }}>{row.title}</td>
-        <td style={{ padding: "6px 8px" }}>
-          <Sparkline
-            values={samples
-              .slice()
-              .reverse()
-              .map((s) => s.value)}
-            color={color}
-          />
-        </td>
-        <td
-          style={{ padding: "6px 8px", fontWeight: 600, color }}
-          title={latest ? formatMetricValueExact(latest.value, unit) : undefined}
-        >
-          {latest ? formatMetricValue(latest.value, unit) : "—"}
-        </td>
-      </tr>
-      {/* Sliced: the top groups, each its own latest value and trend. A group
-          is a value of the dimension, not a metric, so it doesn't open a page. */}
-      {slice && def && shown.length === 0 ? (
-        <tr data-testid="recorded-slice-none">
-          <td colSpan={3} style={quiet}>
-            Not sliced by {slice}
-          </td>
-        </tr>
-      ) : null}
-      {shown.map((g) => (
-        <tr key={g.group} data-testid="recorded-slice-group">
-          <td style={{ padding: "2px 8px 2px 24px", fontSize: 12 }}>{g.group}</td>
-          <td style={{ padding: "2px 8px" }}>
-            <Sparkline
-              values={g.samples
-                .slice()
-                .reverse()
-                .map((s) => s.value)}
-              color={color}
-            />
-          </td>
-          <td style={{ padding: "2px 8px", fontSize: 12 }} title={formatMetricValueExact(g.latest.value, unit)}>
-            {formatMetricValue(g.latest.value, unit)}
-          </td>
-        </tr>
-      ))}
-      {hidden > 0 ? (
-        <tr data-testid="recorded-slice-more">
-          <td colSpan={3} style={quiet}>
-            + {hidden} more
-          </td>
-        </tr>
-      ) : null}
-    </>
+    <DataTable
+      header={false}
+      columns={metricColumns}
+      rows={lines}
+      rowKey={(l) => l.key}
+      rowProps={(l) => {
+        if (l.kind === "metric") {
+          const handlers = routeHandlers(
+            routeDispatch(metricRef(l.row.key), ctxNav, {
+              onNavigate: onOpenPage,
+              siblings: {
+                entries: siblings.entries,
+                index: siblings.indexByKey.get(l.row.key) ?? 0,
+                title: "Metrics",
+              },
+            }),
+          );
+          return { className: "ox-clickable", ...handlers };
+        }
+        const testId = { none: "recorded-slice-none", group: "recorded-slice-group", more: "recorded-slice-more" }[l.kind];
+        return { className: "ox-inert", "data-testid": testId };
+      }}
+    />
   );
 }
 
@@ -428,29 +481,12 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
                 title={group.label}
                 count={group.entries.length}
               >
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
-                  <colgroup>
-                    <col />
-                    {/* sparkline, then the value that terminates it */}
-                    <col style={{ width: 120 }} />
-                    <col style={{ width: 140 }} />
-                  </colgroup>
-                  <tbody>
-                    {group.entries.map((row) => (
-                      <MetricRow
-                        key={row.key}
-                        row={row}
-                        slice={sliceBy ? (dimensions.find((d) => d.key === sliceBy)?.label ?? sliceBy) : null}
-                        onOpenPage={onOpenPage}
-                        siblings={{
-                          entries: siblings.entries,
-                          index: siblings.indexByKey.get(row.key) ?? 0,
-                          title: "Metrics",
-                        }}
-                      />
-                    ))}
-                  </tbody>
-                </table>
+                <MetricsTable
+                  entries={group.entries}
+                  slice={sliceBy ? (dimensions.find((d) => d.key === sliceBy)?.label ?? sliceBy) : null}
+                  onOpenPage={onOpenPage}
+                  siblings={siblings}
+                />
               </CollapsibleSection>
             ))}
           </>

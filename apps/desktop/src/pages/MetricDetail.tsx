@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 
 import type { MetricSpec, SeriesPoint } from "../api.js";
 import { formatMetricValue, formatMetricValueExact } from "../components/format.js";
+import { DataTable, type DataColumn } from "../kit/index.js";
 import {
   RANGE_PRESETS,
   type TimeRange,
@@ -164,23 +165,19 @@ export function MetricControls({
 const PAGE_SIZE = 25;
 
 /** One recordings-table row: one capture of the metric. */
-function RecordingRow({ s, unit }: { s: SeriesPoint; unit?: string | null }) {
-  return (
-    <tr style={{ borderTop: "1px solid var(--border, #2a2a2a)" }}>
-      <td style={{ padding: "4px 8px", whiteSpace: "nowrap" }}>{new Date(String(s.captured_at)).toLocaleString()}</td>
-      <td style={{ padding: "4px 8px", textAlign: "right", fontWeight: 600 }}>{fmt(s.value, unit)}</td>
-      <td style={{ padding: "4px 8px", fontFamily: "monospace", fontSize: 11 }}>{s.branch ?? "—"}</td>
-      <td style={{ padding: "4px 8px", fontFamily: "monospace", fontSize: 11 }}>
-        {s.vcs_rev ? s.vcs_rev.slice(0, 8) : "—"}
-      </td>
-      <td
-        style={{ padding: "4px 8px", opacity: s.provenance === "observed" ? 0.6 : 1 }}
-        title={s.source ?? undefined}
-      >
-        {s.provenance === "observed" ? "observed" : `⚠ ${s.provenance ?? "?"}`}
-      </td>
-    </tr>
-  );
+function recordingColumns(unit?: string | null): DataColumn<SeriesPoint>[] {
+  return [
+    { key: "time", label: "Time", render: (s) => new Date(String(s.captured_at)).toLocaleString() },
+    { key: "value", label: "Value", numeric: true, render: (s) => <strong>{fmt(s.value, unit)}</strong> },
+    { key: "branch", label: "Branch", render: (s) => <code>{s.branch ?? "—"}</code> },
+    { key: "version", label: "Version", render: (s) => <code>{s.vcs_rev ? s.vcs_rev.slice(0, 8) : "—"}</code> },
+    {
+      key: "trust",
+      label: "Trust",
+      title: (s) => s.source ?? undefined,
+      render: (s) => (s.provenance === "observed" ? "observed" : `⚠ ${s.provenance ?? "?"}`),
+    },
+  ];
 }
 
 /** The actual recordings — every sample, newest first, paginated. */
@@ -201,22 +198,12 @@ export function RecordingsTable({ samples, unit }: { samples: SeriesPoint[]; uni
   } as const;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }} data-testid="metric-recordings">
-        <thead>
-          <tr style={{ textAlign: "left", opacity: 0.6 }}>
-            <th style={{ padding: "4px 8px" }}>Time</th>
-            <th style={{ padding: "4px 8px", textAlign: "right" }}>Value</th>
-            <th style={{ padding: "4px 8px" }}>Branch</th>
-            <th style={{ padding: "4px 8px" }}>Version</th>
-            <th style={{ padding: "4px 8px" }}>Trust</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((s) => (
-            <RecordingRow key={s.capture_id} s={s} unit={unit} />
-          ))}
-        </tbody>
-      </table>
+      <DataTable
+        testId="metric-recordings"
+        columns={recordingColumns(unit)}
+        rows={rows}
+        rowKey={(s) => s.capture_id}
+      />
       {samples.length > PAGE_SIZE ? (
         <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }} data-testid="recordings-pager">
           <button type="button" style={btn} disabled={cur === 0} onClick={() => setPage(cur - 1)}>

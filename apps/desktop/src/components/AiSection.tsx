@@ -39,6 +39,7 @@ import { InlineConfirm } from "./InlineConfirm.js";
 import { recordOpError } from "./opErrorsStore.js";
 import { showToast } from "./toastStore.js";
 import { EmptyState } from "./Prompts/EmptyState.js";
+import { DataTable, type DataColumn } from "../kit/index.js";
 
 export function AiSection() {
   const [settings, setSettings] = useState<AiSettings | null>(null);
@@ -94,42 +95,12 @@ export function AiSection() {
           No calls in the last 7 days.
         </div>
       ) : (
-        <table style={tableStyle} data-testid="ai-usage">
-          <thead>
-            <tr>
-              <th style={thStyle}>Role</th>
-              <th style={thStyle}>Caller</th>
-              <th style={thNumStyle}>Calls</th>
-              <th style={thNumStyle}>Failed</th>
-              <th style={thNumStyle}>Tokens In</th>
-              <th style={thNumStyle}>Tokens Out</th>
-              <th style={thStyle}>Last</th>
-            </tr>
-          </thead>
-          <tbody>
-            {usage.map((u) => (
-              <tr key={`${u.role}/${u.caller}`}>
-                <td style={tdStyle}>{u.role}</td>
-                <td style={tdStyle}>
-                  <code>{u.caller}</code>
-                </td>
-                <td style={tdNumStyle} title={formatMetricValueExact(u.calls)}>
-                  {formatMetricValue(u.calls)}
-                </td>
-                <td style={tdNumStyle} title={formatMetricValueExact(u.failed)}>
-                  {formatMetricValue(u.failed)}
-                </td>
-                <td style={tdNumStyle} title={formatMetricValueExact(u.inputTokens)}>
-                  {formatMetricValue(u.inputTokens)}
-                </td>
-                <td style={tdNumStyle} title={formatMetricValueExact(u.outputTokens)}>
-                  {formatMetricValue(u.outputTokens)}
-                </td>
-                <td style={tdStyle}>{u.lastAt ? new Date(u.lastAt).toLocaleString() : ""}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable
+          testId="ai-usage"
+          columns={usageColumns}
+          rows={usage}
+          rowKey={(u) => `${u.role}/${u.caller}`}
+        />
       )}
     </div>
   );
@@ -407,8 +378,17 @@ const subheadStyle: CSSProperties = { fontSize: "var(--text-sm)", margin: "12px 
 const listStyle: CSSProperties = { listStyle: "none", margin: "0 0 8px", padding: 0 };
 const rowStyle: CSSProperties = { padding: "6px 0", borderBottom: "1px solid var(--border-subtle)", fontSize: "var(--text-sm)" };
 const formStyle: CSSProperties = { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 6 };
-const tableStyle: CSSProperties = { borderCollapse: "collapse", fontSize: "var(--text-xs)", width: "100%" };
-const thStyle: CSSProperties = { textAlign: "left", padding: "4px 8px 4px 0", color: "var(--text-secondary)", fontWeight: 500 };
-const thNumStyle: CSSProperties = { ...thStyle, textAlign: "right" };
-const tdStyle: CSSProperties = { padding: "4px 8px 4px 0", borderTop: "1px solid var(--border-subtle)" };
-const tdNumStyle: CSSProperties = { ...tdStyle, textAlign: "right", fontVariantNumeric: "tabular-nums" };
+
+const count = (n: number) => formatMetricValue(n);
+const exact = (n: number) => formatMetricValueExact(n);
+
+/** The recent calls table: what each role and caller used. */
+const usageColumns: DataColumn<UsageRow>[] = [
+  { key: "role", label: "Role", render: (u) => u.role },
+  { key: "caller", label: "Caller", render: (u) => <code>{u.caller}</code> },
+  { key: "calls", label: "Calls", numeric: true, render: (u) => count(u.calls), title: (u) => exact(u.calls) },
+  { key: "failed", label: "Failed", numeric: true, render: (u) => count(u.failed), title: (u) => exact(u.failed) },
+  { key: "in", label: "Tokens In", numeric: true, render: (u) => count(u.inputTokens), title: (u) => exact(u.inputTokens) },
+  { key: "out", label: "Tokens Out", numeric: true, render: (u) => count(u.outputTokens), title: (u) => exact(u.outputTokens) },
+  { key: "last", label: "Last", render: (u) => (u.lastAt ? new Date(u.lastAt).toLocaleString() : "") },
+];

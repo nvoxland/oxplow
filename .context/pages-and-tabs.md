@@ -257,6 +257,11 @@ draw their parts with the kit `Section` (no local copies): a page's action
 is a `PageAction` on its section (Alerts' "Clear failed operations" is
 `action-clear-ops`), and the Settings index scrolls to a section by its
 `data-section` id.
+Core tables are `DataTable` too (AI usage, Data entities, the Metrics list
+and a metric's recordings, a model's documented columns). A row built in a
+loop that opens a page takes its click from `routeDispatch(ref, ctxNav,
+options)` + `routeHandlers(dispatch)` (`tabs/RouteLink.tsx`, the same
+dispatch `useRouteDispatch` memoizes), not a hook per row.
 A time said as "how long ago" is `formatRelative` (`components/format.ts`;
 `formatRelativeSeconds` for a unix time): the launcher, the wiki list, a
 comment's time and the task panel use it, not their own copies.
