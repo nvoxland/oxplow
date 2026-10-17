@@ -37,7 +37,6 @@ export type RoutePageKind =
   | "diff"
   | "diff-view"
   | "duplicate-block"
-  | "wiki-freshness"
   | "tasks"
   | "backlog"
   | "wiki-index"

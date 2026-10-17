@@ -1300,10 +1300,11 @@ Skill prompt at `crates/oxplow-agent-text/assets/skills/oxplow-wiki-capture/SKIL
 **User-facing Freshness view.** `v_knowledge_ref` (read by
 `knowledge.ts`'s `readWikiFreshness`) joins `page_ref` with the latest
 primary-stream `file_snapshot` per target path, a `stale` flag per ref.
-`WikiFreshnessPage` renders
-the table with per-ref + per-page "Mark verified" buttons, which
-re-write the page with those refs in `verified_refs`
-(`oxplow.knowledge.write_page`). The wiki page chrome adds a `Freshness (N stale)` action
+The foundation's `wiki-freshness` lens
+(`page:oxplow-foundation/wiki-freshness?slug=<slug>`) shows
+the table with per-ref + per-page "Mark verified" actions, which run
+`oxplow.knowledge.verify_refs` (re-writing the page with those refs in
+`verified_refs`). The wiki page chrome adds a `Freshness (N stale)` action
 chip that routes to the page.
 
 Every stored `(source_kind, source_id)` / `(target_kind, target_id)`

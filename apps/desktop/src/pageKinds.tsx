@@ -83,8 +83,6 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return Copy;
     case "wiki":
       return BookOpen;
-    case "wiki-freshness":
-      return Gauge;
     case "work_item":
     // Comment anchors and the rail's finished list still say `task`.
     case "task":

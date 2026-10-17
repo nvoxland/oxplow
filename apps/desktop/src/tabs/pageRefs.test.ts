@@ -96,7 +96,7 @@ describe("pageRefs", () => {
 
   test("routes with a subject carry it as query params", () => {
     expect(dashboardRef("visits").id).toBe("page:dashboard?variant=visits");
-    expect(wikiFreshnessRef("data-model").id).toBe("page:wiki-freshness?slug=data-model");
+    expect(wikiFreshnessRef("data-model").id).toBe("page:oxplow-foundation/wiki-freshness?slug=data-model");
     expect(customDashboardRef("dsh3").id).toBe("page:custom-dashboard?id=dsh3");
     expect(streamSettingsRef("str1").id).toBe("page:stream-settings?stream=str1");
     expect(threadSettingsRef("thr1").id).toBe("page:thread-settings?thread=thr1");

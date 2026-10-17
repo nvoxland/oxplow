@@ -267,7 +267,7 @@ export function symbolRef(ref: string): TabRef {
 }
 
 export function wikiFreshnessRef(slug: string): TabRef {
-  return route("wiki-freshness", { slug }, { slug });
+  return extPageRef("oxplow-foundation", "wiki-freshness", { slug });
 }
 
 /** One user-created dashboard. The dashboard id (`dsh<n>`) rides in
@@ -502,7 +502,6 @@ const ROUTES: Record<RoutePageKind, (params: URLSearchParams) => TabRef | null> 
       rightPath: r.path, rightStart: r.start, rightEnd: r.end, rightVersion: r.version,
     });
   },
-  "wiki-freshness": (p) => (p.get("slug") ? wikiFreshnessRef(p.get("slug")!) : null),
   "custom-dashboard": (p) => (p.get("id") ? customDashboardRef(p.get("id")!) : null),
   dashboard: (p) => (p.get("variant") === "visits" ? dashboardRef("visits") : null),
   "stream-settings": (p) => (p.get("stream") ? streamSettingsRef(p.get("stream")!) : null),

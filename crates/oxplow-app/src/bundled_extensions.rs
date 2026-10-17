@@ -65,6 +65,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-foundation", "lenses/thread-notes.yaml"),
             ext_file!("oxplow-foundation", "lenses/thread-sessions.yaml"),
             ext_file!("oxplow-foundation", "lenses/thread-work.yaml"),
+            ext_file!("oxplow-foundation", "lenses/wiki-freshness.yaml"),
             ext_file!("oxplow-foundation", "lenses/work-next.yaml"),
             ext_file!("oxplow-foundation", "collectors/clojure/defn_count.star"),
             ext_file!("oxplow-foundation", "collectors/code/doc_coverage.star"),
@@ -2298,6 +2299,7 @@ mod tests {
             ("closed-threads", "oxplow-foundation/closed-threads"),
             ("hook-events", "oxplow-foundation/hook-events"),
             ("done-work", "oxplow-foundation/done-work"),
+            ("wiki-freshness", "oxplow-foundation/wiki-freshness"),
         ] {
             assert!(pages.contains(&(page, lens)), "{page}: {pages:?}");
         }
@@ -2538,6 +2540,35 @@ mod tests {
             ["Edit · src/a.rs · failed", "Edit · src/a.rs"],
             "{rows}"
         );
+    }
+
+    /// Wiki freshness lists the files a page cites under a heading that
+    /// counts the stale ones.
+    #[tokio::test]
+    async fn the_wiki_freshness_lens_lists_a_pages_cited_files() {
+        use oxplow_db::SqlCell::Text;
+        let f = crate::test_fixtures::services_with_effort().await;
+        std::fs::create_dir_all(f._dir.path().join("src")).unwrap();
+        std::fs::write(f._dir.path().join("src/a.rs"), "v1").unwrap();
+        f.svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                crate::knowledge::WRITE_PAGE,
+                serde_json::json!({ "slug": "lib", "body": "# Lib\n\nsee [[src/a.rs]]\n" }),
+                true,
+            )
+            .await
+            .unwrap();
+        let rows = run_bundled_lens_with(
+            &f,
+            "oxplow-foundation/wiki-freshness",
+            &[("slug", Text("lib".into()))],
+        )
+        .await;
+        assert_eq!(texts(&rows, 1), ["lib — 0 of 1 stale"], "{rows}");
+        assert_eq!(texts(&rows, 2), ["src/a.rs"], "{rows}");
+        assert_eq!(texts(&rows, 4), ["✓ fresh"], "{rows}");
     }
 
     /// Finished items come newest first by when they closed, even within

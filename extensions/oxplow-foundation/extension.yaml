@@ -134,6 +134,7 @@ pages:
   - { id: symbols, title: Symbols, icon: list-tree, category: Code, lens: symbols }
   - { id: hook-events, title: Hook Events, icon: activity, category: Activity, lens: hook-events }
   - { id: done-work, title: Done Work, icon: circle-check, category: Work, lens: done-work }
+  - { id: wiki-freshness, title: Wiki Freshness, icon: book-open, category: Knowledge, lens: wiki-freshness }
   - { id: closed-threads, title: Closed Threads, icon: archive, category: System, lens: closed-threads }
 ui:
   slots:

@@ -1,0 +1,27 @@
+title: Wiki freshness
+description: The files a wiki page cites, each with the snapshot it was pinned to and whether the file has changed since. Mark verified re-pins a file you re-read against the page.
+params:
+  - { name: slug, label: Wiki page (its slug) }
+query: |
+  SELECT p.slug,
+         p.slug || ' — ' || sum(r.stale) OVER () || ' of ' || count(*) OVER () || ' stale' AS heading,
+         r.path,
+         CASE WHEN r.pinned_snapshot_id IS NULL THEN '—' ELSE 's-' || r.pinned_snapshot_id END
+           || CASE WHEN r.pinned_vcs_rev IS NULL THEN ''
+                   ELSE ' ' || CASE WHEN r.pinned_vcs_rev_exact THEN '=' ELSE '~' END || ' ' || substr(r.pinned_vcs_rev, 1, 8) END AS pinned,
+         CASE WHEN r.stale THEN '⚠ stale' ELSE '✓ fresh' END AS status,
+         CASE WHEN r.stale THEN 'warning' ELSE 'success' END AS tone
+  FROM v_knowledge_page p
+  JOIN v_knowledge_ref r ON r.page = p.ref
+  WHERE p.slug = :slug
+  ORDER BY r.path
+group: { by: heading, link: { kind: wiki, from: slug } }
+columns:
+  - { key: path, label: File, link: { kind: file } }
+  - { key: pinned, label: Captured snapshot }
+  - { key: status, label: Status, tone: tone, width: 100 }
+actions:
+  - { id: verify-all, label: Mark all verified, command: oxplow.knowledge.verify_refs, input: { slug: "{{param.slug}}" } }
+  - { id: verify, label: Mark verified, command: oxplow.knowledge.verify_refs, input: { slug: "{{param.slug}}", refs: ["{{row.path}}"] }, row: true }
+empty: This page cites no files.
+hidden: true

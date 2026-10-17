@@ -137,7 +137,6 @@ import { ExtensionPageView } from "./pages/ExtensionPageView.js";
 import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
 import { WorkItemPage } from "./pages/WorkItemPage.js";
 import { WikiPage } from "./pages/WikiPage.js";
-import { WikiFreshnessPage } from "./pages/WikiFreshnessPage.js";
 import { DashboardPage } from "./pages/DashboardPage.js";
 import { StreamSettingsPage } from "./pages/StreamSettingsPage.js";
 import { ThreadSettingsPage } from "./pages/ThreadSettingsPage.js";
@@ -3136,16 +3135,6 @@ export function App() {
               onOpenExternalUrl={handleOpenExternalUrl}
             />
           ) : null,
-        };
-      },
-      "wiki-freshness": (ref, nav) => {
-        const slug = (ref.payload as { slug?: string } | null)?.slug ?? "";
-        const freshnessNavOpen = (newRef: TabRef) => handleNavigateInTab(ref.id, newRef);
-        return {
-          id: ref.id,
-          label: `Freshness — ${slug}`,
-          closable: true,
-          render: () => <WikiFreshnessPage slug={slug} onOpenPage={freshnessNavOpen} />,
         };
       },
       dir: (ref, nav) => {
