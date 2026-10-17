@@ -1479,6 +1479,26 @@ nothing: the record and its stamps are in the database. Pinned by the
 `commands::handoff` tests and
 `a_handoff_reaches_the_recipients_next_prompt_once`.
 
+**How a Claude Code session is addressed** (checked 2026-10-16, Claude
+Code 2.1.301). `SendMessage { to }` takes the session's **name** as
+`ListAgents` prints it (`oxplow-main [9f6722]`: name, then a six-hex
+`[ref]` that is needed only when two rows share a name, as two `slopp`
+sessions do). It takes no pid. Each session binds an inbox socket,
+`/tmp/cc-socks/<pid>.sock`, where `<pid>` is its `claude` process: the
+agent's own environment says so (`CLAUDE_CODE_MESSAGING_SOCKET`, which
+oxplow scrubs from a child's), and it is the pid oxplow records for the
+session (`agent_session.pid`), so `uds:/tmp/cc-socks/<pid>.sock` is
+derivable without asking the agent. An inbound message names its sender
+twice, `from="uds:/tmp/cc-socks/<pid>.sock"` and
+`from-name="<name>"` (the name `ListAgents` shows); Claude Code's own
+instructions to reply are to copy `from` as `to`, so the socket form is an
+address too (documented, not exercised here). A name is not an identity:
+it can repeat and the person can change it, and nothing in a hook body
+carries it. What oxplow can learn today: the socket (from the pid) always,
+the name only from a message the session receives from that sender
+(`Prompt::PeerMessage { from }`). Learning a session's own name is still
+open (no hook field was found).
+
 **Native messaging stays native, and is observed:** Claude Code's inbound
 cross-session message arrives as a prompt wrapped in
 `<cross-session-message from="<socket>" from-name="<session name>" …>`.
