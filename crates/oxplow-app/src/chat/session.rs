@@ -199,6 +199,9 @@ pub(super) struct Actor {
     /// A name the agent gave the conversation while it replayed, recorded
     /// once the session is.
     replayed_name: Option<String>,
+    /// A turn ended or the context was summarized since the context was
+    /// last offered to the agent's channel (`inject_context`).
+    inject_due: bool,
 }
 
 impl Actor {
@@ -228,6 +231,7 @@ impl Actor {
             pending_system_prompt: None,
             replaying: false,
             replayed_name: None,
+            inject_due: false,
         }
     }
 
@@ -283,13 +287,19 @@ impl Actor {
             return;
         }
         let _ = ready.send(Ok(()));
+        self.inject_context(conn.as_ref()).await;
 
         let closed = conn.closed();
         tokio::pin!(closed);
         let reason = loop {
             tokio::select! {
                 msg = incoming.recv() => match msg {
-                    Some(msg) => self.on_incoming(msg).await,
+                    Some(msg) => {
+                        self.on_incoming(msg).await;
+                        if self.inject_due {
+                            self.inject_context(conn.as_ref()).await;
+                        }
+                    }
                     None => break Some("the agent connection closed".to_string()),
                 },
                 cmd = commands.recv() => match cmd {
@@ -333,6 +343,29 @@ impl Actor {
         }
         self.set_status(ChatStatus::Idle);
         Ok(())
+    }
+
+    /// Context for an agent whose person prompts it in its own UI, through
+    /// its history instead of a prompt: what a prompt would have carried
+    /// (the session context when it changed, handoffs, nudges, decisions).
+    /// Only while no turn runs: an item injected into one lengthens it.
+    /// A turn ending or a compaction brings it due again, so a change
+    /// reaches the agent before the person's next prompt.
+    async fn inject_context(&mut self, conn: &dyn Connection) {
+        self.inject_due = false;
+        if self.turn.is_some() || !conn.can_inject() {
+            return;
+        }
+        let Some(context) = self
+            .host
+            .prompt_context(self.thread(), &self.session_id)
+            .await
+        else {
+            return;
+        };
+        if let Err(e) = conn.inject(&context).await {
+            tracing::warn!(error = %e, "context not delivered to the agent");
+        }
     }
 
     async fn on_command(&mut self, conn: &dyn Connection, cmd: Command) {
@@ -536,7 +569,10 @@ impl Actor {
                     .await
             }
             Incoming::Compacted if self.replaying => {}
-            Incoming::Compacted => self.host.compacted(self.thread(), &self.session_id).await,
+            Incoming::Compacted => {
+                self.host.compacted(self.thread(), &self.session_id).await;
+                self.inject_due = true;
+            }
             Incoming::Permission { ask, reply } => {
                 let ask = *ask;
                 if self.replaying {
@@ -827,6 +863,7 @@ impl Actor {
     async fn on_turn_end(&mut self, result: Result<TurnEnd, String>) {
         // The turn is over (its prompt is on the `agent_turn` row).
         self.turn.take();
+        self.inject_due = true;
         // Clear the cards' "awaiting you" BEFORE the Stop is ingested, so
         // the Stop decides the status from the turn's final message.
         if !self.pending.is_empty() {

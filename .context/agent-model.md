@@ -137,8 +137,10 @@ step). `AgentContext::prompt_context` / `post_tool_context`
 (`crates/oxplow-app/src/agent_context.rs`) take the session's harness and
 give nothing for a channel it lacks (`agent_context::carries`; a hook from
 no session is answered), so nothing meant for its agent is taken: nudges
-wait in the store. Claude Code and opencode declare both; Codex neither (its TUI owns the
-prompt).
+wait in the store. Claude Code and opencode declare both; Codex declares
+`prompt_context` only, delivered as items injected into its thread's
+history between turns ("Codex: its TUI on a thread oxplow observes",
+"Context between turns"), since its TUI owns the prompt.
 
 **Once, then on change.** On every prompt, `prompt_context` builds the
 `<session-context>` block and the decisions block and sends each only
@@ -164,9 +166,10 @@ A compaction is also logged, by every harness, as `agent.context.compacted@1`
 read as `event:<id>#summary`), Codex's finished `contextCompaction` item
 (through the chat host; it names neither), and opencode's
 `session.compacted` (through the bridge; it names neither). The log is all
-that is done for Codex and opencode: **Codex has no prompt channel**, so
-its compaction resets no context baseline, and opencode's bridge posts no
-`PreCompact`. Thread Activity counts a turn's compactions.
+that is done for opencode, whose bridge posts no `PreCompact`. Codex's
+compaction also resets the session's baselines (`ChatHost::compacted`),
+and the context is injected again once no turn runs. Thread Activity
+counts a turn's compactions.
 
 **Who else is in the worktree.** A stream's threads share its worktree,
 and any number of agents may work there at once — in one thread or
@@ -181,8 +184,8 @@ the view stays the one place a session is named), and the asking session
 is left out by its row id (the hook's `agent_session_id`, the chat host's
 session, the launch's row). Nothing in the line is for the agent to act
 on: no pid, no session id. An agent arriving or leaving changes the
-block, so the next prompt carries it; a harness without a prompt channel
-(Codex) has only what its launch saw.
+block, so the next prompt carries it; Codex has no prompt, so the change
+is injected when its turn ends.
 
 ### Per-harness delivery
 
@@ -192,7 +195,7 @@ block, so the next prompt carries it; a harness without a prompt channel
 | Skills | Plugin dir `.oxplow/runtime/claude-plugin/skills/` (`--plugin-dir`) | The worktree's `.agents/skills/<name>/` | `.oxplow/runtime/opencode-plugin/skills/`, named by the config's `skills.paths` |
 | Slash commands | Plugin `commands/`, run as `/oxplow:<name>` | A skill per command, `oxplow-<name>`, run as `$oxplow-<name>` | Inline config `command` key, run as `/oxplow-<name>` |
 | Hooks | HTTP hooks (`hooks.json`) | None: the thread's notifications, in-process (`ServicesChatHost`) | A JS bridge plugin posting Claude-shaped bodies |
-| Context channels | Both, as `additionalContext` | None: the session context rides the system prompt | Prompt: a `synthetic` text part on the user's message; tool: appended to the tool's result |
+| Context channels | Both, as `additionalContext` | Prompt context only, as a developer item injected into the thread between turns (`thread/inject_items`); no tool channel | Prompt: a `synthetic` text part on the user's message; tool: appended to the tool's result |
 | Token capture | OTEL metrics + the transcript's turns | The thread's `tokenUsage` across the turn | None |
 | Final message | Stop's `last_assistant_message` | The turn's last agent message on the Stop body | The bridge reads the session's last assistant message onto `Stop` |
 
@@ -879,18 +882,53 @@ A thread the TUI starts itself (`/new`, or a switch of its own) runs on
 the TUI's own config and is outside oxplow: it is the person's Codex
 session, and oxplow leaves it alone.
 
-**No context channel.** The TUI owns the prompt, so Codex declares no
-`prompt_context` / `tool_context`: what it is told comes in the system
-prompt at open (the session context included,
-`assemble_system_prompt`) and through oxplow's tools. The daemon's
-`thread/inject_items` (appending to the model's history without a turn)
-is the candidate for a mid-session channel; it is experimental and not
-used.
+**Context between turns.** The TUI owns the prompt, so oxplow cannot
+put context on one. Codex declares `prompt_context` all the same, and
+delivers it through the daemon's `thread/inject_items`, which appends a
+developer-role message to the thread's history. Checked live on the
+0.163 daemon (a CLI 0.162.1 thread), so it is context and not Drive:
+
+- on an idle thread it starts no turn and spends no tokens (no
+  `turn/started`, no `thread/tokenUsage/updated` after it); it answers
+  `{}`;
+- a pending approval stays pending: the request is not answered or
+  changed, and the person's prompt in the TUI is untouched;
+- the agent reads it at its next turn (the `developer` and `user` roles
+  both work; oxplow uses `developer`), and it survives
+  `thread/compact/start` and a `thread/resume`;
+- **during a turn it is read as more input**: injected right after
+  `turn/started`, the person's turn answered "unknown", then answered
+  again with the injected text, in the same turn. So the timing rule is:
+  inject only while no turn runs.
+
+The session actor (`chat/session.rs`, `inject_context`) therefore asks
+`AgentContext::prompt_context` — the same "once, then on change"
+baselines, the `<handoffs>` block and its `delivered_at` stamp, nudges
+and decisions — and injects what it returns (`Connection::inject`) at
+three moments, each only when the connection says it can
+(`Connection::can_inject`: the thread runs no turn, read from
+`turn/started` / `turn/completed`; and the daemon knows the method, else
+the first refusal, "unknown variant", turns it off for the connection):
+when the session opens, when a turn ends, and after a compaction
+(`ChatHost::compacted` resets the baselines; a compaction inside a turn
+waits for that turn's end). A change while no turn runs (a new neighbour,
+a new assignment) therefore reaches the agent at the end of the next
+turn, one turn behind a hook-based harness; there is no event to inject
+on while the thread is idle. The launch prompt's `developerInstructions`
+leave the session context out (the harness declares `prompt_context`);
+the first injection carries it. An injection that fails is logged and
+lost: the baseline is already taken, and a handoff stamped delivered
+stays so.
+
+Pinned by `context_is_injected_between_turns_never_during_one` (a
+scripted daemon), `a_recorded_inject_starts_no_turn_and_waits_for_none`
+(`tests/fixtures/codex/inject.jsonl`, recorded on the live daemon),
+`nothing_is_injected_into_a_running_turn`, and the source guard
+`only_the_codex_connection_injects_context` (the drive guards stay:
+`nothing_starts_a_codex_turn`).
 
 **Pitfalls.** `/new` in the TUI starts a thread with the TUI's own
-config, which oxplow doesn't bind: use Start Fresh. A compaction
-(`thread/compacted`, the `contextCompaction` item) resets no context
-baseline (there is no prompt channel to re-send them on); it is only logged.
+config, which oxplow doesn't bind: use Start Fresh.
 
 **Collab agents are subagents** (feature `subagents`). A Codex thread can
 spawn child agents, each its own thread on the daemon, and the daemon
@@ -1386,8 +1424,9 @@ to resolve it. Never with a tool call: a handoff is a unit of work, not
 a nudge, and mustn't land in the middle of other work. The session
 context counts the thread's open ones (`- **Open handoffs to this
 thread:** N`, `agent_context::surroundings`), so a later session or a
-restart learns of them without the bodies again. A harness without a
-prompt channel (Codex) gets only that count, in its launch prompt.
+restart learns of them without the bodies again. Codex gets the whole
+block too, injected between turns (the same `take_for_prompt` stamps it
+at that moment, not at a prompt).
 
 The person: at once, through the foundation extension (core's own, so a
 project with `oxplow-bundled` off still has it):

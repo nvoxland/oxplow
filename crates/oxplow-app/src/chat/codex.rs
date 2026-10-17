@@ -68,6 +68,10 @@ struct State {
     /// what its settings changes made them; and the context fill its last
     /// `thread/tokenUsage/updated` said.
     run: TurnRun,
+    /// A turn of the thread is running (`turn/started` to `turn/completed`).
+    running: bool,
+    /// The daemon doesn't know `thread/inject_items`.
+    inject_unsupported: bool,
 }
 
 /// One child agent, as far as it has been seen.
@@ -251,9 +255,46 @@ impl Connection for CodexConnection {
     /// The TUI stops its own turns.
     fn cancel(&self) {}
 
+    /// The daemon takes `thread/inject_items`, and no turn is running.
+    fn can_inject(&self) -> bool {
+        let state = self.state.lock();
+        !state.running && !state.inject_unsupported
+    }
+
+    /// A developer item in the thread's history: it starts no turn and
+    /// spends no tokens by itself, answers no pending approval or question,
+    /// and the agent reads it at its next turn (it survives a compaction
+    /// and a resume). Sent only when no turn runs (`can_inject`): during
+    /// one the daemon takes it as more input and the turn answers again.
+    async fn inject(&self, text: &str) -> Result<(), String> {
+        let item = json!({
+            "type": "message",
+            "role": "developer",
+            "content": [{"type": "input_text", "text": text}],
+        });
+        self.server
+            .request(
+                "thread/inject_items",
+                json!({"threadId": self.thread(), "items": [item]}),
+            )
+            .await
+            .map(|_| ())
+            .map_err(|e| {
+                if inject_unsupported(&e) {
+                    self.state.lock().inject_unsupported = true;
+                }
+                format!("Codex didn't take the context: {e}")
+            })
+    }
+
     async fn closed(&self) {
         self.server.closed().await;
     }
+}
+
+/// Whether a daemon's error says it has no `thread/inject_items`.
+fn inject_unsupported(error: &str) -> bool {
+    error.contains("unknown variant")
 }
 
 /// Every message for the thread, in order, once it is open.
@@ -579,7 +620,12 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
                 _ => Vec::new(),
             }
         }
+        "turn/started" => {
+            state.running = true;
+            Vec::new()
+        }
         "turn/completed" => {
+            state.running = false;
             let tokens = match (state.tokens_now, state.tokens_at_turn_start) {
                 (Some(now), Some(start)) => Some(now.since(start).tokens()),
                 _ => None,
@@ -1014,6 +1060,91 @@ mod tests {
             ],
             "start, the child's command, finish, in order; the wait is the parent's own call"
         );
+    }
+
+    /// The recorded inject (`tests/fixtures/codex/inject.jsonl`, the 0.163
+    /// daemon): a developer item appended to an idle thread starts nothing
+    /// and says nothing; the person's prompt is the next turn; the
+    /// compaction after it is a turn of its own. The connection may inject
+    /// only while no turn runs.
+    #[test]
+    fn a_recorded_inject_starts_no_turn_and_waits_for_none() {
+        let mut lines = include_str!("../../tests/fixtures/codex/inject.jsonl").lines();
+        let _header = lines.next();
+        let first: Value = serde_json::from_str(lines.next().unwrap()).unwrap();
+        let thread = first["params"]["thread"]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let mut state = State {
+            thread: Some(thread),
+            ..State::default()
+        };
+        let mut log: Vec<String> = Vec::new();
+        for line in lines {
+            let v: Value = serde_json::from_str(line).unwrap();
+            let Some(method) = v.get("method").and_then(Value::as_str) else {
+                log.push(
+                    v.get("sent")
+                        .and_then(Value::as_str)
+                        .unwrap_or("answered")
+                        .to_string(),
+                );
+                continue;
+            };
+            let message = ServerMessage::Notification {
+                method: method.into(),
+                params: v["params"].clone(),
+            };
+            let incoming = on_message(&message, &mut state);
+            let kind = if incoming.iter().any(|i| matches!(i, Incoming::Compacted)) {
+                "compacted"
+            } else if incoming
+                .iter()
+                .any(|i| matches!(i, Incoming::PromptDone(_)))
+            {
+                "done"
+            } else {
+                continue;
+            };
+            log.push(format!("{kind} running={}", state.running));
+        }
+        assert_eq!(
+            log,
+            [
+                "thread/inject_items",
+                "answered",
+                "done running=false",
+                "thread/compact/start",
+                "compacted running=true",
+                "done running=false",
+            ],
+            "the turn ends with nothing running; the compaction is inside a running turn"
+        );
+        assert!(!state.running);
+    }
+
+    /// Between `turn/started` and `turn/completed` the connection must not
+    /// inject, and a daemon that doesn't know the method is remembered.
+    #[test]
+    fn nothing_is_injected_into_a_running_turn() {
+        let mut state = State {
+            thread: Some("t".into()),
+            ..State::default()
+        };
+        assert!(!state.running);
+        on_notification("turn/started", &json!({"threadId": "t"}), &mut state);
+        assert!(state.running);
+        on_notification(
+            "turn/completed",
+            &json!({"threadId": "t", "turn": {"status": "completed"}}),
+            &mut state,
+        );
+        assert!(!state.running);
+        assert!(inject_unsupported(
+            "`thread/inject_items`: Invalid request: unknown variant `thread/inject_items`"
+        ));
+        assert!(!inject_unsupported("`thread/inject_items`: no such thread"));
     }
 
     fn note(method: &str, params: Value) -> ServerMessage {

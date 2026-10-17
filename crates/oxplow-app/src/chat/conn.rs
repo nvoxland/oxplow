@@ -27,6 +27,19 @@ pub trait Connection: Send + Sync + 'static {
     fn cancel(&self);
     /// Resolves when the agent has gone away.
     async fn closed(&self);
+    /// Whether context can be appended to the agent's history right now
+    /// without starting anything: the agent has such a channel and no turn
+    /// is running. A context item arriving during a turn is read as more
+    /// input and lengthens it, so the session injects only when this holds.
+    fn can_inject(&self) -> bool {
+        false
+    }
+    /// Append `text` to the agent's model-visible history as context. It
+    /// starts no turn and answers nothing; the agent reads it at its next
+    /// turn.
+    async fn inject(&self, _text: &str) -> Result<(), String> {
+        Err("this agent takes no injected context".into())
+    }
     /// Name the agent's conversation (what its own UI lists it as). An
     /// agent that can't says so.
     async fn rename(&self, _name: &str) -> Result<(), String> {

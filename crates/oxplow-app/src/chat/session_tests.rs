@@ -896,6 +896,7 @@ mod codex {
             "thread/resume" => Ok(json!({"thread": {"id": THREAD, "name": "Earlier work"}})),
             "thread/goal/set" | "thread/goal/clear" => Ok(json!({})),
             "thread/name/set" => Ok(json!({})),
+            "thread/inject_items" => Ok(json!({})),
             other => Err(format!("no {other}")),
         })
     }
@@ -962,6 +963,72 @@ mod codex {
         assert!(!methods(&fake).iter().any(|m| m.starts_with("thread/goal")));
         // Named once the session it names is recorded.
         assert_eq!(rig.host.log(), ["started thr-x", "named Earlier work"]);
+    }
+
+    /// How many context items the daemon was given so far.
+    fn injected(fake: &FakeAppServer) -> usize {
+        methods(fake)
+            .iter()
+            .filter(|m| *m == "thread/inject_items")
+            .count()
+    }
+
+    /// Wait until `n` items have been injected (and a moment longer, so a
+    /// further one would show).
+    async fn injected_is(fake: &FakeAppServer, n: usize) {
+        for _ in 0..100 {
+            if injected(fake) >= n {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(injected(fake), n);
+    }
+
+    /// A Codex thread has no prompt to carry context, so the session
+    /// appends it to the thread's history: once at open, again when a turn
+    /// ends, and after a compaction — never while a turn runs, where the
+    /// daemon would read it as more input.
+    #[tokio::test]
+    async fn context_is_injected_between_turns_never_during_one() {
+        let (mut rig, fake) = open_codex(
+            Host {
+                context: Some("<session-context>x</session-context>".into()),
+                ..Host::default()
+            },
+            "thread/start",
+        )
+        .await;
+        injected_is(&fake, 1).await;
+        let sent = fake
+            .received()
+            .into_iter()
+            .find(|v| v["method"] == "thread/inject_items")
+            .unwrap();
+        assert_eq!(sent["params"]["threadId"], THREAD);
+        assert_eq!(sent["params"]["items"][0]["role"], "developer");
+        assert_eq!(
+            sent["params"]["items"][0]["content"][0]["text"],
+            "<session-context>x</session-context>"
+        );
+
+        // A turn in the TUI that compacts: nothing goes in until it ends.
+        fake.push(note("turn/started", json!({"turn": {"id": "u1"}})));
+        fake.push(note("item/completed", json!({"item": {"type": "userMessage", "id": "m1", "content": [{"type": "text", "text": "go"}]}})));
+        fake.push(note(
+            "item/completed",
+            json!({"item": {"type": "contextCompaction", "id": "c1"}}),
+        ));
+        rig.wait_status(ChatStatus::Running).await;
+        injected_is(&fake, 1).await;
+        fake.push(note(
+            "turn/completed",
+            json!({"turn": {"id": "u1", "status": "completed"}}),
+        ));
+        rig.wait_status(ChatStatus::Idle).await;
+        injected_is(&fake, 2).await;
+        assert!(rig.host.log().contains(&"compacted".to_string()));
     }
 
     /// A prompt the person types into Codex's TUI is recorded as theirs:

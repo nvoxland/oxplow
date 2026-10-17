@@ -134,8 +134,9 @@ pub const BUILT_INS: &[BuiltIn] = &[
         ],
     ),
     // Codex's TUI on a thread of its daemon that oxplow opens and
-    // observes: its approvals are the TUI's, and nothing reaches it
-    // mid-session (the TUI owns the prompt).
+    // observes: its approvals are the TUI's, and the TUI owns the prompt,
+    // so context reaches it as items injected into the thread's history
+    // between turns (`prompt_context`), never as a prompt.
     harness(
         "oxplow:codex-cli",
         "Codex",
@@ -145,6 +146,7 @@ pub const BUILT_INS: &[BuiltIn] = &[
             "resume",
             "runtime_text",
             "subagents",
+            "prompt_context",
             "conversation_list",
             "conversation_fork",
             "native_rename",

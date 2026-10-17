@@ -346,6 +346,9 @@ impl ChatHost for ServicesChatHost {
         let Some(svc) = self.svc.upgrade() else {
             return;
         };
+        // What the agent was told went with the context: the next offer
+        // carries the session context and the decisions again.
+        svc.agent_context.reset_session(Some(session_id));
         let env = self.envelope(
             HookKind::PostCompact,
             thread,

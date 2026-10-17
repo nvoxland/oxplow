@@ -98,6 +98,18 @@ fn nothing_starts_a_codex_turn() {
     assert!(files_containing(&lines, "\"turn/start\"").is_empty());
 }
 
+/// The one way context reaches a Codex thread mid-session is an item
+/// appended to its history, from the Codex connection; it starts no turn,
+/// and the session sends it only while none runs.
+#[test]
+fn only_the_codex_connection_injects_context() {
+    let lines = source_lines();
+    assert_eq!(
+        files_containing(&lines, "\"thread/inject_items\""),
+        vec!["crates/oxplow-app/src/chat/codex.rs"]
+    );
+}
+
 #[test]
 fn no_code_sends_a_raw_session_prompt() {
     let lines = source_lines();
