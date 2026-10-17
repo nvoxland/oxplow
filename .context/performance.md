@@ -442,6 +442,21 @@ Pinned by `an_interactive_write_goes_ahead_of_queued_background_writes`
 (a 700 ms holder and twenty queued writers: the interactive one waited
 2.9–4.0 s without the yield, under 1.3 s with it).
 
+## The window's stall detector reports only a window that was drawing (2026-10-17, tsk1423)
+
+WKWebView has no long-task observer, so `logger.ts` detects a frozen main
+thread by timer drift: a tick every second, and a `main thread stalled`
+WARN when one arrives a second or more late. macOS throttles a covered or
+background window's timers to about one every 2 s and still reports its
+document visible, so every tick of such a window looked like a ~1000 ms
+stall: 7,417 WARNs on 2026-10-16, one every ~4 s for hours, each with a
+`blockedMs` of 1001–1194. The detector now also asks whether the window was
+drawing (`framesRanSince`: a `requestAnimationFrame` frame ran no earlier
+than a tick before the previous tick); the browser runs no frame callbacks
+for a window it isn't drawing, while a real block starts after frames were
+running. A hidden document (`visibilitychange`) is still discounted. At
+most one tick right after a window is covered can still report.
+
 ## Daemon transport: what a loopback HTTP hop costs (tsk255)
 
 Measured for the daemon-backed shell epic ([[tsk254]]), from **inside the real

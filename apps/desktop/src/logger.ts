@@ -37,18 +37,38 @@ export interface StallEval {
 /**
  * Pure stall decision for one watchdog tick. `blockedMs` is how much
  * longer than expected the tick took; it's a stall only when that
- * exceeds the threshold AND the document wasn't hidden during the gap
- * (backgrounded windows throttle timers, which would otherwise look like
- * a multi-second freeze).
+ * exceeds the threshold, the document wasn't hidden during the gap, AND
+ * the window was drawing (`rendering`). Backgrounded and covered windows
+ * throttle timers (macOS runs them every ~2 s and still calls the
+ * document visible), which would otherwise look like a freeze on every
+ * tick: a window that draws no frames isn't blocked, it isn't running.
  */
 export function evaluateStall(opts: {
   actualElapsedMs: number;
   expectedMs: number;
   thresholdMs: number;
   wasHidden: boolean;
+  rendering: boolean;
 }): StallEval {
   const blockedMs = opts.actualElapsedMs - opts.expectedMs;
-  return { stalled: !opts.wasHidden && blockedMs >= opts.thresholdMs, blockedMs };
+  return { stalled: !opts.wasHidden && opts.rendering && blockedMs >= opts.thresholdMs, blockedMs };
+}
+
+/**
+ * Whether the window was drawing when the gap that just ended began: a
+ * frame ran no earlier than one tick of `slackMs` before the previous
+ * tick. A real block starts after frames were running, so its last frame
+ * sits at the previous tick; a throttled window's last frame is as old as
+ * the moment it was covered. `lastFrameAt` is null where there are no
+ * frame callbacks to ask (assume it draws).
+ */
+export function framesRanSince(opts: {
+  lastFrameAt: number | null;
+  previousTickAt: number;
+  slackMs: number;
+}): boolean {
+  if (opts.lastFrameAt === null) return true;
+  return opts.lastFrameAt >= opts.previousTickAt - opts.slackMs;
 }
 
 // --- Self-timed operations --------------------------------------------
@@ -155,6 +175,19 @@ function startStallWatchdog(): () => void {
   let consecutiveStalls = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
+  // The last animation frame, to tell a blocked window from one that isn't
+  // drawing (covered, hidden, asleep): the browser runs no frame callbacks
+  // for those.
+  const raf = (globalThis as { requestAnimationFrame?: (cb: () => void) => number }).requestAnimationFrame;
+  const caf = (globalThis as { cancelAnimationFrame?: (id: number) => void }).cancelAnimationFrame;
+  let lastFrameAt: number | null = raf ? Date.now() : null;
+  let frame: number | null = null;
+  const onFrame = () => {
+    lastFrameAt = Date.now();
+    frame = raf!.call(globalThis, onFrame);
+  };
+  if (raf) frame = raf.call(globalThis, onFrame);
+
   const onVisibility = () => {
     // Latch hidden-ness so a gap that spanned any hidden interval is
     // discounted even if the doc is visible again by the next tick.
@@ -170,6 +203,7 @@ function startStallWatchdog(): () => void {
       expectedMs: STALL_TICK_MS,
       thresholdMs: STALL_THRESHOLD_MS,
       wasHidden,
+      rendering: framesRanSince({ lastFrameAt, previousTickAt: lastTick, slackMs: STALL_TICK_MS }),
     });
     lastTick = now;
     wasHidden = docHidden();
@@ -193,6 +227,8 @@ function startStallWatchdog(): () => void {
   return () => {
     if (timer != null) globalThis.clearTimeout(timer);
     timer = null;
+    if (frame !== null) caf?.call(globalThis, frame);
+    frame = null;
     doc?.removeEventListener?.("visibilitychange", onVisibility);
   };
 }

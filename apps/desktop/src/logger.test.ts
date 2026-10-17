@@ -39,7 +39,7 @@ function installFakeWindow(): Map<string, Set<Listener>> {
   return listeners;
 }
 
-const { installUiLogging, uninstallUiLogging, evaluateStall, isSlowOperation, timed, describeLoafScripts } =
+const { installUiLogging, uninstallUiLogging, evaluateStall, framesRanSince, isSlowOperation, timed, describeLoafScripts } =
   await import("./logger.js");
 
 afterEach(() => {
@@ -84,26 +84,52 @@ test("uninstall before install is a safe no-op", () => {
 });
 
 test("evaluateStall: a normal tick (elapsed ≈ expected) is not a stall", () => {
-  const r = evaluateStall({ actualElapsedMs: 1010, expectedMs: 1000, thresholdMs: 1000, wasHidden: false });
+  const r = evaluateStall({ actualElapsedMs: 1010, expectedMs: 1000, thresholdMs: 1000, wasHidden: false, rendering: true });
   expect(r.stalled).toBe(false);
   expect(r.blockedMs).toBe(10);
 });
 
 test("evaluateStall: a long drift while visible is a stall, blockedMs = drift", () => {
-  const r = evaluateStall({ actualElapsedMs: 2840, expectedMs: 1000, thresholdMs: 1000, wasHidden: false });
+  const r = evaluateStall({ actualElapsedMs: 2840, expectedMs: 1000, thresholdMs: 1000, wasHidden: false, rendering: true });
   expect(r.stalled).toBe(true);
   expect(r.blockedMs).toBe(1840);
 });
 
 test("evaluateStall: drift below the threshold is not a stall", () => {
-  const r = evaluateStall({ actualElapsedMs: 1900, expectedMs: 1000, thresholdMs: 1000, wasHidden: false });
+  const r = evaluateStall({ actualElapsedMs: 1900, expectedMs: 1000, thresholdMs: 1000, wasHidden: false, rendering: true });
   expect(r.stalled).toBe(false);
 });
 
 test("evaluateStall: a hidden window never counts as a stall (timer throttling)", () => {
-  const r = evaluateStall({ actualElapsedMs: 60_000, expectedMs: 1000, thresholdMs: 1000, wasHidden: true });
+  const r = evaluateStall({ actualElapsedMs: 60_000, expectedMs: 1000, thresholdMs: 1000, wasHidden: true, rendering: true });
   expect(r.stalled).toBe(false);
   expect(r.blockedMs).toBe(59_000);
+});
+
+// tsk1423: macOS throttles a covered or background window's timers to one
+// per ~2 s and still calls its document visible, so every tick looked like
+// a ~1000 ms stall (thousands of WARNs a day). A window that is drawing no
+// frames isn't blocked, it isn't running; a real block in a window that was
+// drawing still reports.
+test("evaluateStall: throttled timers in a window drawing no frames are not a stall", () => {
+  const r = evaluateStall({ actualElapsedMs: 2100, expectedMs: 1000, thresholdMs: 1000, wasHidden: false, rendering: false });
+  expect(r.stalled).toBe(false);
+  expect(r.blockedMs).toBe(1100);
+});
+
+test("evaluateStall: a real block in a window that was drawing still reports", () => {
+  const r = evaluateStall({ actualElapsedMs: 2100, expectedMs: 1000, thresholdMs: 1000, wasHidden: false, rendering: true });
+  expect(r.stalled).toBe(true);
+});
+
+test("framesRanSince: a frame at or after the previous tick (less a tick of slack) means it was drawing", () => {
+  // Drawing right up to the block: the last frame is just before the tick that started it.
+  expect(framesRanSince({ lastFrameAt: 5_990, previousTickAt: 6_000, slackMs: 1000 })).toBe(true);
+  expect(framesRanSince({ lastFrameAt: 6_500, previousTickAt: 6_000, slackMs: 1000 })).toBe(true);
+  // The last frame is minutes old: covered, hidden or asleep.
+  expect(framesRanSince({ lastFrameAt: 1_000, previousTickAt: 6_000, slackMs: 1000 })).toBe(false);
+  // No frame callbacks on this platform: assume it draws.
+  expect(framesRanSince({ lastFrameAt: null, previousTickAt: 6_000, slackMs: 1000 })).toBe(true);
 });
 
 test("isSlowOperation: at or above the threshold is slow, below is not", () => {
