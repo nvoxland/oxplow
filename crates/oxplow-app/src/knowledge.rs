@@ -48,6 +48,7 @@ pub const WRITE_PAGE: &str = "oxplow.knowledge.write_page";
 pub const DELETE_PAGE: &str = "oxplow.knowledge.delete_page";
 pub const LINK: &str = "oxplow.knowledge.link";
 pub const RESYNC: &str = "oxplow.knowledge.resync";
+pub const VERIFY_REFS: &str = "oxplow.knowledge.verify_refs";
 
 /// A page's ref: `wiki:<slug>`.
 pub fn page_ref(slug: &str) -> String {
@@ -876,6 +877,18 @@ pub struct WritePageInput {
     pub removed_refs: Vec<String>,
 }
 
+/// Re-pin a page's refs.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VerifyRefsInput {
+    /// The page (its slug).
+    pub slug: String,
+    /// The files you re-read against the page as it stands: their pins move
+    /// to now. Omit for every file the page cites.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refs: Option<Vec<String>>,
+}
+
 /// Delete a page.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -999,6 +1012,50 @@ fn call(invocation: &Invocation) -> PageCall<'_> {
     }
 }
 
+/// Write a page through the active store, checked against core's record
+/// and recorded as the store kept it.
+async fn write_page(
+    t: &KnowledgeTarget,
+    invocation: Invocation,
+    input: WritePageInput,
+) -> Result<HandlerOutput, CommandError> {
+    let slug = slug_of(&input.slug)?.to_string();
+    let mut body = strip_body_version_literals(&input.body);
+    if let Some(title) = &input.title {
+        body = with_title(&body, title);
+    }
+    {
+        let (t2, slug, body) = (t.clone(), slug.clone(), body.clone());
+        let (verified, removed) = (input.verified_refs.clone(), input.removed_refs.clone());
+        check(t, move |conn, vocabulary| {
+            links_resolve(&t2, conn, &vocabulary.kinds, &slug, &body)?;
+            refs_borne_out(&parse_refs(&body), &verified, &removed)
+        })
+        .await?;
+    }
+    let draft = PageDraft {
+        slug: slug.clone(),
+        title: input.title.clone(),
+        body,
+        verified_refs: input.verified_refs.clone(),
+        removed_refs: input.removed_refs.clone(),
+    };
+    match store(&t)?.write_page(&call(&invocation), &draft).await? {
+        None => Ok(untracked(&slug)),
+        Some(kept) => {
+            record(
+                t,
+                invocation.actor(),
+                &slug,
+                kept,
+                input.verified_refs,
+                input.removed_refs,
+            )
+            .await
+        }
+    }
+}
+
 /// The page commands: each is checked against core's record (the slug,
 /// every link it adds, the refs it verifies or removes), then dispatched
 /// to the active store, and what the store kept is recorded the same way
@@ -1010,41 +1067,55 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
         let t = t.clone();
         Box::pin(async move {
             let input: WritePageInput = parse(input)?;
+            write_page(&t, invocation, input).await
+        }) as crate::commands::ExternalFuture
+    }));
+
+    let t = target.clone();
+    let verify_refs = Handler::External(Arc::new(move |invocation: Invocation, input| {
+        let t = t.clone();
+        Box::pin(async move {
+            let input: VerifyRefsInput = parse(input)?;
             let slug = slug_of(&input.slug)?.to_string();
-            let mut body = strip_body_version_literals(&input.body);
-            if let Some(title) = &input.title {
-                body = with_title(&body, title);
-            }
-            {
-                let (t2, slug, body) = (t.clone(), slug.clone(), body.clone());
-                let (verified, removed) = (input.verified_refs.clone(), input.removed_refs.clone());
-                check(&t, move |conn, vocabulary| {
-                    links_resolve(&t2, conn, &vocabulary.kinds, &slug, &body)?;
-                    refs_borne_out(&parse_refs(&body), &verified, &removed)
+            let page = page_ref(&slug);
+            let (body, pinned) = {
+                let slug = slug.clone();
+                t.db.read(move |conn| {
+                    Ok((|| {
+                        let Some(body) = recorded_body_tx(conn, &slug)? else {
+                            return Err(invalid("/slug", format!("no page `{slug}`")));
+                        };
+                        let mut stmt = conn
+                            .prepare(
+                                "SELECT path FROM v_knowledge_ref WHERE page = ?1 ORDER BY path",
+                            )
+                            .map_err(|e| CommandError::Failed {
+                                message: e.to_string(),
+                            })?;
+                        let paths = stmt
+                            .query_map([&page], |r| r.get::<_, String>(0))
+                            .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+                            .map_err(|e| CommandError::Failed {
+                                message: e.to_string(),
+                            })?;
+                        Ok((body, paths))
+                    })())
                 })
-                .await?;
-            }
-            let draft = PageDraft {
-                slug: slug.clone(),
-                title: input.title.clone(),
-                body,
-                verified_refs: input.verified_refs.clone(),
-                removed_refs: input.removed_refs.clone(),
+                .await
+                .map_err(CommandError::from)??
             };
-            match store(&t)?.write_page(&call(&invocation), &draft).await? {
-                None => Ok(untracked(&slug)),
-                Some(kept) => {
-                    record(
-                        &t,
-                        invocation.actor(),
-                        &slug,
-                        kept,
-                        input.verified_refs,
-                        input.removed_refs,
-                    )
-                    .await
-                }
-            }
+            write_page(
+                &t,
+                invocation,
+                WritePageInput {
+                    slug,
+                    title: None,
+                    body,
+                    verified_refs: input.refs.unwrap_or(pinned),
+                    removed_refs: Vec::new(),
+                },
+            )
+            .await
         }) as crate::commands::ExternalFuture
     }));
 
@@ -1185,6 +1256,13 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
             schema::<WritePageInput>(),
             false,
             write,
+        ),
+        Op::new(
+            "knowledge.write",
+            "verify_refs",
+            schema::<VerifyRefsInput>(),
+            false,
+            verify_refs,
         ),
         Op::new(
             "knowledge.write",
@@ -1746,6 +1824,56 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(refs, ("src/lib.rs".to_string(), 0));
+    }
+
+    /// `verify_refs` re-pins the refs it names — all of the page's when it
+    /// names none — against the body the page already has.
+    #[tokio::test]
+    async fn verify_refs_repins_the_named_refs_or_all_of_them() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        std::fs::create_dir_all(dir(&fx).join("src")).unwrap();
+        for f in ["a.rs", "b.rs"] {
+            std::fs::write(dir(&fx).join("src").join(f), "v1").unwrap();
+        }
+        snapshot_with(&fx, "src/a.rs").await;
+        snapshot_with(&fx, "src/b.rs").await;
+        run(
+            &fx,
+            WRITE_PAGE,
+            json!({ "slug": "lib", "body": "# Lib\n\nsee [[src/a.rs]] and [[src/b.rs]]\n" }),
+        )
+        .await
+        .unwrap();
+        snapshot_with(&fx, "src/a.rs").await;
+        snapshot_with(&fx, "src/b.rs").await;
+        assert_eq!(stale_ref_count(&fx, "wiki:lib").await, 2);
+
+        run(
+            &fx,
+            VERIFY_REFS,
+            json!({ "slug": "lib", "refs": ["src/a.rs"] }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(stale_ref_count(&fx, "wiki:lib").await, 1);
+
+        run(&fx, VERIFY_REFS, json!({ "slug": "lib" }))
+            .await
+            .unwrap();
+        assert_eq!(stale_ref_count(&fx, "wiki:lib").await, 0);
+
+        let err = run(
+            &fx,
+            VERIFY_REFS,
+            json!({ "slug": "lib", "refs": ["src/zzz.rs"] }),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("verified_refs"), "{err}");
+        let err = run(&fx, VERIFY_REFS, json!({ "slug": "nope" }))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("no page `nope`"), "{err}");
     }
 
     /// A page an agent's command writes is marked touched by its thread.

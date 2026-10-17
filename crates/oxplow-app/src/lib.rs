@@ -2465,6 +2465,7 @@ mod tests {
                 "knowledge.write/resync",
                 "knowledge.write/update_comment",
                 "knowledge.write/update_note",
+                "knowledge.write/verify_refs",
                 "knowledge.write/write_page",
                 "lenses.read/run",
                 "lenses.show/show",

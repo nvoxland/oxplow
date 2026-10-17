@@ -639,6 +639,12 @@ commands:
     op: update_note
     invokers: { human: true, agent: true, lens: true }
     example: {"note": "thread_note:not7", "body": "The redirect loop comes from the stale `next` parameter; see [[auth-flow]]."}
+  - name: knowledge.verify_refs
+    summary: "Re-pin a page's files to now without rewriting it: `refs` are the files you re-read against the page as it stands (all of the page's files when omitted). The page is the one core records; a file the page does not cite is refused."
+    scope: knowledge.write
+    op: verify_refs
+    invokers: { human: true, agent: true, lens: true }
+    example: {"slug": "auth-flow", "refs": ["src/auth.rs"]}
   - name: knowledge.write_page
     summary: "Write a knowledge (wiki) page: its body, every [[link]] resolving, and the files you re-read against it (verified_refs) or took out (removed_refs)."
     scope: knowledge.write
