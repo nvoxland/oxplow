@@ -11,14 +11,14 @@ query: |
       AND (:path = '' OR path = :path)
       AND (:filter = '' OR name LIKE '%' || replace(replace(replace(:filter, '\', '\\'), '%', '\%'), '_', '\_') || '%' ESCAPE '\')
     ORDER BY path, line, col LIMIT 5000)
-  SELECT 'file:' || path AS id, NULL AS parent, path AS label, path, 1 AS line
+  SELECT path AS id, NULL AS parent, path AS label, path, 1 AS line
   FROM matched WHERE :path = '' GROUP BY path
   UNION ALL
   SELECT s.ref, coalesce(
            (SELECT min(p.ref) FROM matched p
             WHERE p.path = s.path AND s.container IS NOT NULL
               AND CASE WHEN p.container IS NULL THEN p.name ELSE p.container || '::' || p.name END = s.container),
-           CASE WHEN :path = '' THEN 'file:' || s.path END),
+           CASE WHEN :path = '' THEN s.path END),
          s.kind || ' ' || s.name || CASE WHEN s.signature IS NULL THEN '' ELSE '(' || s.signature || ')' END,
          s.path, s.line
   FROM matched s

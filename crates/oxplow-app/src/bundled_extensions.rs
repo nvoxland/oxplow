@@ -2403,7 +2403,10 @@ mod tests {
         assert_eq!(texts(&all, 2), ["w.py", "class Widget", "method spin"]);
         // `Widget` is the method's parent; the file is the class's.
         assert_eq!(texts(&all, 1)[2], texts(&all, 0)[1]);
-        assert_eq!(texts(&all, 1)[1], "file:w.py");
+        // A file's node is its path (a tree id, not a ref); the class's
+        // parent is that node.
+        assert_eq!(texts(&all, 1)[1], "w.py");
+        assert_eq!(texts(&all, 0)[0], "w.py");
         let found = run("", "spi").await;
         assert_eq!(texts(&found, 2), ["w.py", "method spin"]);
         let outline = run("w.py", "").await;
