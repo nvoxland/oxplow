@@ -442,21 +442,21 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
   // Flat where another tab sits next to it; the last rounds the bottom.
   expect(writer.style.borderRadius).toBe("0px");
   expect(queued.style.borderRadius).toBe("0px 0px 6px");
-  expect(writer.style.borderWidth).toBe("1px 1px 0px 0px");
-  expect(queued.style.borderWidth).toBe("1px 1px 1px 0px");
+  expect(writer.style.borderWidth).toBe("2px 1px 0px 0px");
+  expect(queued.style.borderWidth).toBe("2px 1px 1px 0px");
   // A marked thread is not outlined like the selection: a corner fold in
   // its mark's colour sits in its top-left corner, at the window's edge;
   // an unmarked thread has none.
   const mark = writer.querySelector("[data-testid=navigator-thread-mark]") as HTMLElement;
   expect(mark.getAttribute("title")).toBe("Marked amber");
   expect(mark.style.color).toBe("var(--thread-mark-amber)");
-  expect(mark.style.top).toBe("-1px");
+  expect(mark.style.top).toBe("-2px");
   expect(mark.style.left).toBe("0px");
   expect(queued.querySelector("[data-testid=navigator-thread-mark]")).toBeNull();
-  // A dark cut in the background's colour falls between stacked tabs; the
-  // outer right and bottom edges keep their frame.
+  // A grey divider in the guide line's colour falls between stacked tabs;
+  // the outer right and bottom edges keep their frame.
   // (The DOM folds the left side, equal to the right, away.)
-  expect(writer.style.borderColor).toBe("var(--surface-app) var(--border-strong) var(--border-strong)");
+  expect(writer.style.borderColor).toBe("var(--text-muted) var(--border-strong) var(--border-strong)");
   expect(queued.style.borderColor).toBe(writer.style.borderColor);
   // The column behind the tabs is one colour: the app's.
   expect(getByTestId("navigator-strip").style.background).toBe("var(--surface-app)");
@@ -467,6 +467,10 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
   expect(guide("navigator-strip-stream-str1")).toBe("stream");
   expect(guide("navigator-strip-thread-thr1")).toBe("mid");
   expect(guide("navigator-strip-thread-thr2")).toBe("last");
+  // The guide runs flush with the stream tab's right edge.
+  const guideLine = getByTestId("navigator-strip-stream-str1").querySelector("[data-guide] > span") as HTMLElement;
+  const streamGlyph = getByTestId("navigator-strip-stream-str1").querySelector("[data-glyph]") as HTMLElement;
+  expect(Number.parseInt(guideLine.style.right)).toBe(40 - Number.parseInt(streamGlyph.style.width));
 
   // No line between the strip and the HUD rail.
   expect(getByTestId("navigator-strip").style.borderRightWidth).toBe("");

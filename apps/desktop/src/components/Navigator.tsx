@@ -1002,12 +1002,12 @@ function IconCell({
         backgroundColor: "var(--surface-card)",
         color: "var(--text-primary)",
         // Each tab draws its top edge, and the last also its bottom. The
-        // top edge is a dark cut in the background's colour, so a dark
-        // line falls between two light tabs (a lighter one vanished at
-        // this size); the right and bottom keep the frame.
-        borderWidth: isLast ? "1px 1px 1px 0" : "1px 1px 0 0",
+        // top edge is a 2px divider in the guide line's grey, so it stands
+        // out between two tabs (a 1px frame-coloured one vanished at this
+        // size); the right and bottom keep the frame.
+        borderWidth: isLast ? `${THREAD_DIVIDER}px 1px 1px 0` : `${THREAD_DIVIDER}px 1px 0 0`,
         borderStyle: "solid",
-        borderColor: "var(--surface-app) var(--border-strong) var(--border-strong) var(--border-strong)",
+        borderColor: "var(--text-muted) var(--border-strong) var(--border-strong) var(--border-strong)",
         fontSize: THREAD_LETTER_FONT,
         fontWeight: 600,
       };
@@ -1104,7 +1104,7 @@ function MarkFold({ mark }: { mark: ThreadMark }) {
       title={`Marked ${mark}`}
       style={{
         position: "absolute",
-        top: -1,
+        top: -THREAD_DIVIDER,
         left: 0,
         display: "flex",
         color: markColour(mark),
@@ -1232,11 +1232,13 @@ const STRIP_WIDTH = 40;
 const ICON_COLUMN = STRIP_WIDTH;
 const SELECTION_BAR = 3;
 // The tabs come out of the window's left edge. The guide line runs down the
-// column's right, this far from it; the stream's tab reaches over it and a
-// thread's ends short of it (a tick joins them).
-const GUIDE_RIGHT = 4;
+// column's right, flush with the stream tab's right edge; a thread's tab
+// ends short of it (a tick joins them).
 const STREAM_RIGHT = 2;
-const THREAD_RIGHT = 12;
+const GUIDE_RIGHT = STREAM_RIGHT;
+const THREAD_RIGHT = 9;
+// The divider drawn along a thread tab's top, between stacked tabs.
+const THREAD_DIVIDER = 2;
 const STRIP_PADDING_Y = 6;
 const ROW_HEIGHT = 36;
 const GAP_HEIGHT = 14;
