@@ -644,6 +644,15 @@ exists but the file is gone, so a failed resume can say why ("Resume
 outcomes" in [terminal.md](./terminal.md)). An absent project dir, or a
 stream on another host (no `HOME` passed), reads as unknown.
 
+What can be resumed is listed two ways, both UI-only reads of
+`AgentHarness::conversations` (`session_history::harness_conversations`):
+for an open session, `list_native_conversations` (the picker's "Choosing
+another conversation"); for a thread with no session in hand,
+`list_earlier_sessions` (the New Session page, "Earlier sessions"), which
+adds the stream's closed sessions and says per row whether taking it
+reopens, resumes (`agent_session.open { resume }`), switches to a tab or
+does nothing. Nothing is adopted until a person picks a row.
+
 ### The chat machinery (a library): protocol mapping and transcript
 
 **The SDK is pinned (`agent-client-protocol = "=2.2.0"`) and fenced.**

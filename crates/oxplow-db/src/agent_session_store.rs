@@ -98,6 +98,46 @@ pub fn list_open_for_thread_tx(
     )
 }
 
+/// Every session (open or closed) of the stream's threads, oldest first.
+pub fn list_for_stream_tx(
+    conn: &Connection,
+    stream: oxplow_domain::StreamId,
+) -> Result<Vec<AgentSession>, DomainError> {
+    query(
+        conn,
+        "WHERE thread_id IN (SELECT id FROM threads WHERE stream_id = ?1)
+         ORDER BY opened_at, id",
+        [stream.value()],
+    )
+}
+
+/// How many turns each session ran and the last thing the person said in
+/// it, for the sessions of `ids`; a session with no turn has no entry.
+pub fn turn_summaries_tx(
+    conn: &Connection,
+    ids: &[AgentSessionId],
+) -> Result<std::collections::HashMap<AgentSessionId, (i64, Option<String>)>, DomainError> {
+    let mut out = std::collections::HashMap::new();
+    let mut stmt = conn
+        .prepare(
+            "SELECT count(*),
+                    (SELECT t2.prompt FROM agent_turn t2
+                      WHERE t2.agent_session_id = ?1 AND t2.prompt <> ''
+                      ORDER BY t2.id DESC LIMIT 1)
+               FROM agent_turn WHERE agent_session_id = ?1",
+        )
+        .map_err(map_sql_err)?;
+    for id in ids {
+        let (turns, last): (i64, Option<String>) = stmt
+            .query_row([id.value()], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map_err(map_sql_err)?;
+        if turns > 0 {
+            out.insert(*id, (turns, last));
+        }
+    }
+    Ok(out)
+}
+
 /// The thread's most recently opened session that is still open.
 pub fn newest_open_for_thread_tx(
     conn: &Connection,

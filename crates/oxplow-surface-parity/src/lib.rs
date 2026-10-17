@@ -259,6 +259,10 @@ pub const MANIFEST: &[Capability] = &[
         "a harness's saved conversations, for the person choosing one to resume or fork (their selection)",
     ),
     ui(
+        "list_earlier_sessions",
+        "a thread's earlier sessions and saved conversations, for the person choosing one to bring back (their selection)",
+    ),
+    ui(
         "report_tabs",
         "the tabs a window shows, which an agent reads with `list_tabs` and `get_open_page`",
     ),

@@ -34,7 +34,11 @@ pages are THE shell.
   agent starts its session — or asks, if it can't start any more. The
   picker is an ordinary tab after that: its × closes it for good, and
   closing a thread's last session leaves its other tabs (or home), not
-  the picker. The picker's **No Session in This Thread** closes it, and
+  the picker. It also lists the thread's **earlier sessions** (closed
+  ones and every agent's saved conversations for the worktree); taking one
+  closes the picker and activates that session's tab. A closed session's
+  ref (a search hit) opens its transcript lens, not a missing tab. The
+  picker's **No Session in This Thread** closes it, and
   its **Remember this for new threads** checkbox saves the choice (the
   agent started, or `none`) as `newThreadSession`; Settings → Agents has
   the same choice ("New threads start with",
@@ -170,7 +174,7 @@ moved into the project DB and started fresh again) — see the decision in [refs
 | symbols | `page:symbols[?path=<p>]` — one file's outline, or the project's symbols (filtered), from the tree-sitter index | `page:symbols?path=src/lib.rs` |
 | symbol | `symbol:<path>/<id>` (`v_symbol.ref`, `symbolRef(ref)`) — no revision in the id; never a tab: opening one (`handleOpenPage`, or in-tab navigation) resolves it (`resolve_symbol`) and opens its file at the name's line (`openSymbol`). A pinned one (`@snap:<id>` / `@git:<sha>`) opens the file viewer at that revision; if the version is gone it shows a notice and opens the current symbol | `symbol:src/lib.rs/Widget::spin` |
 | agent_session | `agent_session:<ses id>` (`agentSessionRef(id)`, pinned) — an open agent session's terminal | `agent_session:ses3` |
-| new-session | `page:new-session` (`newSessionRef()`) — the session picker | `page:new-session` |
+| new-session | `page:new-session` (`newSessionRef()`) — the session picker: the Start row, then **Earlier sessions** (a filter and the thread's closed sessions and saved conversations, `list_earlier_sessions`; ↑/↓/Enter/Escape from the filter; a row reopens, resumes or shows its session by the action the backend chose — `terminal.md` "Earlier sessions") | `page:new-session` |
 | index routes | `page:<kind>` — `tasks`, `done-work`, `backlog`, `archived`, `wiki-index`, `files`, `comments`, `local-history(-full\|-by-commit-full)`, `git-history`, `git-dashboard`, `uncommitted-changes`, `hook-events`, `terminal`, `settings`, `metrics-recorded`, `dashboards`, `explore-data`, `catalog`, `board`, `problems`, `closed-threads`, `new-stream`, `new-task` | `page:tasks` |
 | diff | `page:diff?path=<p>&left=<ver>&right=<ver>[&label=<l>]` (versions `disk` / `ref:<x>` / `snap:<id>`; `diffRef(spec)` / `computeDiffId(spec)` — `revealLine` is not in the id, so re-clicking reuses the tab) | `page:diff?path=src/a.ts&left=ref:abc&right=disk` |
 | diff-view | `page:diff-view?snapshot=<N>` \| `?effort=<effortId>` \| `?start=<tok>&end=<tok>` (endpoint tokens `s<snapshotId>` / `c<sha>` / `w` / `none`) | `page:diff-view?effort=eff42` |

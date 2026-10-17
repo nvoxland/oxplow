@@ -302,6 +302,7 @@ macro_rules! oxplow_command_table {
                 report_tabs => $crate::commands::tabs::report_tabs { report: oxplow_app::client_reports::TabReport } -> (),
                 rename_native_conversation => $crate::commands::conversations::rename_native_conversation { session_id: String, name: String } -> (),
                 list_native_conversations => $crate::commands::conversations::list_native_conversations { session_id: String } -> Vec<$crate::commands::conversations::ListedConversation>,
+                list_earlier_sessions => $crate::commands::conversations::list_earlier_sessions { thread_id: String } -> ::oxplow_app::session_history::EarlierSessions,
                 // comments
                 list_comments_for_target => $crate::commands::comments::list_comments_for_target { target_kind: String, target_id: String } -> Vec<::oxplow_domain::CommentThread>,
                 list_comments_for_stream => $crate::commands::comments::list_comments_for_stream { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::CommentThread>,

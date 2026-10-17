@@ -188,6 +188,7 @@ pub mod services;
 #[cfg(test)]
 mod services_tests;
 pub mod session_auth;
+pub mod session_history;
 pub mod session_outcome;
 pub mod snapshot_capture;
 pub mod snapshot_capture_registry;
