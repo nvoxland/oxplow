@@ -1040,7 +1040,7 @@ async fn write_page(
         verified_refs: input.verified_refs.clone(),
         removed_refs: input.removed_refs.clone(),
     };
-    match store(&t)?.write_page(&call(&invocation), &draft).await? {
+    match store(t)?.write_page(&call(&invocation), &draft).await? {
         None => Ok(untracked(&slug)),
         Some(kept) => {
             record(
