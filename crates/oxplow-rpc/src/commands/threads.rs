@@ -28,13 +28,6 @@ pub async fn list_agent_harnesses(
     ))
 }
 
-pub async fn list_closed_threads(
-    svc: &Services,
-    stream_id: StreamId,
-) -> Result<Vec<Thread>, IpcError> {
-    Ok(svc.threads.list_closed(&stream_id).await?)
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct SelectThreadRequest {
     #[serde(rename = "streamId")]

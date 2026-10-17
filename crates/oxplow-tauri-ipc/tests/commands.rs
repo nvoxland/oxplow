@@ -73,15 +73,6 @@ async fn list_threads_empty_for_unknown_stream() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_closed_threads_empty_for_unknown_stream() {
-    let app = TestApp::build().await;
-    let threads = commands::generated::list_closed_threads(app.state(), StreamId::new(999999))
-        .await
-        .unwrap();
-    assert!(threads.is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_recent_page_visits_empty_for_fresh_project() {
     let app = TestApp::build().await;
     let v = commands::generated::list_recent_page_visits(app.state(), 10, None)
