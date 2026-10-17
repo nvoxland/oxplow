@@ -7,7 +7,6 @@ import {
   markThread,
   createThread,
   openAgentSession,
-  closeAgentSession,
   renameAgentSession,
   renameNativeConversation,
   startAgentSession,
@@ -195,7 +194,7 @@ import { openRef as openRefAt, setWindowRefOpener } from "./tabs/openRef.js";
 import { usePersonCommands } from "./personCommandsStore.js";
 import { personCommands } from "./personCommands.js";
 import { getUiClientId, logUi, setUiLogContext } from "./logger.js";
-import { streamRef } from "./refs/ref.js";
+import { agentSessionRef as agentSessionTarget, streamRef } from "./refs/ref.js";
 
 // Cap on concurrent file tabs in the center. Intellij uses ~10 by default;
 // when this is exceeded, the oldest-touched tab without unsaved changes is
@@ -2573,7 +2572,6 @@ export function App() {
           label,
           closable: true,
           pinned: true,
-          closeConfirm: "Close session",
           agentStatus: status?.status ?? "waiting",
           question: status?.question,
           contextMenu: [
@@ -3566,14 +3564,17 @@ export function App() {
                 }
                 else if (id.startsWith("diff:")) closeDiffTab(id);
                 else if (pageKindOf(id) === "agent_session") {
-                  // Closing a session's tab closes the session (the strip
-                  // armed it first); its tab goes when its row closes.
+                  // Closing a session's tab closes the session at once, its
+                  // toast offering Undo (it reopens on the saved
+                  // conversation); its tab goes when its row closes.
                   const ref = refFromTabId(id);
                   const sessionId = (ref?.payload as { sessionId?: string } | undefined)?.sessionId;
                   if (sessionId) {
-                    void closeAgentSession(sessionId, true).catch((e: unknown) =>
-                      recordOpError({ label: "Close session", message: e instanceof Error ? e.message : String(e) }),
-                    );
+                    const session = selectedThreadSessions?.find((c) => c.id === sessionId);
+                    const name = session ? session.displayName || sessionLabel(harnesses, session) : "session";
+                    void personCommands.run(`Close ${name}`, "oxplow.agent_session.close", {
+                      session: agentSessionTarget(sessionId),
+                    });
                   }
                 }
                 else closePageTab(id);

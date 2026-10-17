@@ -2402,8 +2402,11 @@ mod tests {
         assert_eq!(
             services.commands.open_ops(),
             [
+                // A close is undone by reopening: the conversation is kept.
+                "agent_sessions.write/close",
                 "agent_sessions.write/open",
                 "agent_sessions.write/rename",
+                "agent_sessions.write/reopen",
                 "agent_text.read/skill",
                 "ai.compute/decide",
                 "ai.compute/summarize",

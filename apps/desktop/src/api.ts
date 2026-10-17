@@ -1327,12 +1327,6 @@ export async function openAgentSession(
   ).result as AgentSessionRecord;
 }
 
-/** Close an agent session: its process stops. Destructive — the caller
- *  has the person confirm first (`confirmed`). */
-export async function closeAgentSession(sessionId: string, confirmed: boolean): Promise<void> {
-  await runCommand("oxplow.agent_session.close", { session: agentSessionRef(sessionId) }, confirmed);
-}
-
 /** The person stops an agent: its process ends, the slot and saved
  *  conversation stay, and nothing spawns it again until `startAgentSession`. */
 export async function stopAgentSession(sessionId: string): Promise<void> {

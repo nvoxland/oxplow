@@ -216,6 +216,24 @@ pub fn close_tx(
     Ok(n == 1)
 }
 
+/// Reopen slot `id` that a person closed (`closed`): its close is undone.
+/// False when it is open, or closed for another reason (its thread's or
+/// stream's close, which reopening that undoes).
+pub fn reopen_tx(
+    conn: &Connection,
+    id: AgentSessionId,
+    now: Timestamp,
+) -> Result<bool, DomainError> {
+    let n = conn
+        .execute(
+            "UPDATE agent_session SET closed_at = NULL, closed_reason = NULL, updated_at = ?2
+              WHERE id = ?1 AND closed_at IS NOT NULL AND closed_reason = 'closed'",
+            params![id.value(), ts_to_string(now)],
+        )
+        .map_err(map_sql_err)?;
+    Ok(n == 1)
+}
+
 /// Bind the slot to native conversation `native_id`, which it resumes
 /// from now on: its open binding ends, one with `origin` opens, the
 /// previous conversation's native title goes (never copied across) and a
