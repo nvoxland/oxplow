@@ -211,10 +211,86 @@ pub struct Database {
     /// Bounds how many DB tasks are dispatched to the blocking pool at once,
     /// sized to the connection pool (tsk131).
     gate: Arc<Semaphore>,
+    /// Background work (anything not run for a request a person waits on)
+    /// takes one of these before the gate, so it can never hold every
+    /// connection: the rest are the person's.
+    background: Arc<Semaphore>,
+    /// Interactive write transactions waiting for, or holding, the write
+    /// lock. Background writers let them go first.
+    interactive_writers: Arc<std::sync::atomic::AtomicUsize>,
     /// How many write transactions are open on this handle right now.
     writing: Arc<std::sync::atomic::AtomicUsize>,
     /// Which tables commits touched, published after each call (P4.6).
     changes: Arc<crate::changes::Changes>,
+}
+
+/// How many connections background work may hold at once: all but two,
+/// so a request a person waits on never queues for a connection behind it
+/// (a one-connection pool, a test's, shares it).
+fn background_permits(pool: usize) -> usize {
+    pool.saturating_sub(2).max(1)
+}
+
+tokio::task_local! {
+    /// Set while a request a person waits on runs (`interactive`).
+    static INTERACTIVE: ();
+}
+
+/// Run `work` as a request a person is waiting on (the UI's IPC): its
+/// database work isn't limited like background work's, and its write
+/// transactions go ahead of the background's. Everything else — the event
+/// pump, a startup sweep, a scan — is background, and yields.
+pub async fn interactive<F: std::future::Future>(work: F) -> F::Output {
+    INTERACTIVE.scope((), work).await
+}
+
+fn is_interactive() -> bool {
+    INTERACTIVE.try_with(|_| ()).is_ok()
+}
+
+/// The longest a background write waits for interactive ones to finish
+/// before it goes ahead anyway: a steady stream of them can't starve it.
+const MAX_YIELD: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// What a database call holds while it runs: a slot of the gate and, for
+/// background work, of its share of it.
+pub(crate) struct DbPermit {
+    _gate: OwnedSemaphorePermit,
+    _background: Option<OwnedSemaphorePermit>,
+    /// An interactive write: counted while it waits and runs.
+    interactive_write: Option<InteractiveWrite>,
+    waiting: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl DbPermit {
+    /// Let interactive write transactions go first: a background writer
+    /// waits (up to [`MAX_YIELD`]) while one is waiting or running.
+    fn yield_to_interactive(&self) {
+        if self.interactive_write.is_some() {
+            return;
+        }
+        let started = std::time::Instant::now();
+        while self.waiting.load(std::sync::atomic::Ordering::Acquire) > 0
+            && started.elapsed() < MAX_YIELD
+        {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+}
+
+struct InteractiveWrite(Arc<std::sync::atomic::AtomicUsize>);
+
+impl InteractiveWrite {
+    fn enter(count: &Arc<std::sync::atomic::AtomicUsize>) -> Self {
+        count.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        Self(count.clone())
+    }
+}
+
+impl Drop for InteractiveWrite {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
 }
 
 /// Per-connection setup, run by the pool for every connection it opens.
@@ -323,6 +399,8 @@ impl Database {
             pool: Arc::new(pool),
             memo: Arc::new(QueryMemo::default()),
             gate: Arc::new(Semaphore::new(permits)),
+            background: Arc::new(Semaphore::new(background_permits(permits))),
+            interactive_writers: Arc::default(),
             writing: Arc::default(),
             changes,
         })
@@ -363,6 +441,8 @@ impl Database {
             pool: Arc::new(pool),
             memo: Arc::new(QueryMemo::default()),
             gate: Arc::new(Semaphore::new(permits)),
+            background: Arc::new(Semaphore::new(background_permits(permits))),
+            interactive_writers: Arc::default(),
             writing: Arc::default(),
             changes,
         })
@@ -392,6 +472,8 @@ impl Database {
             pool: Arc::new(pool),
             memo: Arc::new(QueryMemo::default()),
             gate: Arc::new(Semaphore::new(permits)),
+            background: Arc::new(Semaphore::new(background_permits(permits))),
+            interactive_writers: Arc::default(),
             writing: Arc::default(),
             changes,
         }
@@ -418,12 +500,41 @@ impl Database {
         self.writing.load(std::sync::atomic::Ordering::Acquire)
     }
 
-    async fn db_permit(&self) -> Result<OwnedSemaphorePermit, oxplow_domain::DomainError> {
-        self.gate
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| oxplow_domain::DomainError::Storage("db gate closed".into()))
+    async fn db_permit(&self) -> Result<DbPermit, oxplow_domain::DomainError> {
+        self.permit(false).await
+    }
+
+    /// A slot for a write transaction: counted as interactive while it
+    /// waits when it runs for a request a person waits on.
+    async fn write_permit(&self) -> Result<DbPermit, oxplow_domain::DomainError> {
+        self.permit(true).await
+    }
+
+    async fn permit(&self, writing: bool) -> Result<DbPermit, oxplow_domain::DomainError> {
+        let closed = |_| oxplow_domain::DomainError::Storage("db gate closed".into());
+        let interactive = is_interactive();
+        // Visible to background writers from the moment it asks, not when
+        // it gets a slot.
+        let interactive_write =
+            (interactive && writing).then(|| InteractiveWrite::enter(&self.interactive_writers));
+        let background = if interactive {
+            None
+        } else {
+            Some(
+                self.background
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(closed)?,
+            )
+        };
+        let gate = self.gate.clone().acquire_owned().await.map_err(closed)?;
+        Ok(DbPermit {
+            _gate: gate,
+            _background: background,
+            interactive_write,
+            waiting: self.interactive_writers.clone(),
+        })
     }
 
     /// The shared memo cells (see [`QueryMemo`]). Scoped to this `Database`,
@@ -487,6 +598,7 @@ impl Database {
         let db = self.clone();
         let out = tokio::task::spawn_blocking(move || {
             let _permit = permit; // held for the duration of the DB work
+            _permit.yield_to_interactive();
             db.with_conn(f)
         })
         .await
@@ -509,6 +621,7 @@ impl Database {
         let db = self.clone();
         let out = tokio::task::spawn_blocking(move || {
             let _permit = permit;
+            _permit.yield_to_interactive();
             let mut conn = db
                 .conn()
                 .map_err(|e| oxplow_domain::DomainError::Storage(format!("pool: {e}")))?;
@@ -623,27 +736,38 @@ impl Database {
     ///
     /// Event-bus emits, page_ref projections, and snapshot requests
     /// belong AFTER this returns, never inside `f`.
-    pub async fn transaction<R, F>(&self, f: F) -> Result<R, oxplow_domain::DomainError>
+    #[track_caller]
+    pub fn transaction<R, F>(
+        &self,
+        f: F,
+    ) -> impl std::future::Future<Output = Result<R, oxplow_domain::DomainError>> + '_
     where
         F: Fn(&rusqlite::Transaction<'_>) -> Result<R, oxplow_domain::DomainError> + Send + 'static,
         R: Send + 'static,
     {
-        self.write_transaction(move |tx| f(tx).map_err(TxError::Storage), true)
-            .await
-            .map_err(TxError::<std::convert::Infallible>::into_storage)
+        let caller = std::panic::Location::caller();
+        async move {
+            self.write_transaction(caller, move |tx| f(tx).map_err(TxError::Storage), true)
+                .await
+                .map_err(TxError::<std::convert::Infallible>::into_storage)
+        }
     }
 
     /// [`Self::transaction`] whose closure may end it with a reason of its
     /// own (`TxError::Aborted`): rolled back, never retried, handed back
     /// as given — so a caller needn't smuggle its reason out through a
     /// side channel. A `TxError::Storage` that is busy is retried, as ever.
-    pub async fn transaction_or<R, A, F>(&self, f: F) -> Result<R, TxError<A>>
+    #[track_caller]
+    pub fn transaction_or<R, A, F>(
+        &self,
+        f: F,
+    ) -> impl std::future::Future<Output = Result<R, TxError<A>>> + '_
     where
         F: Fn(&rusqlite::Transaction<'_>) -> Result<R, TxError<A>> + Send + 'static,
         R: Send + 'static,
         A: Send + 'static,
     {
-        self.write_transaction(f, true).await
+        self.write_transaction(std::panic::Location::caller(), f, true)
     }
 
     /// Run a publication transaction on the database worker. Unlike
@@ -667,10 +791,11 @@ impl Database {
             std::time::Duration::from_millis(50),
             std::time::Duration::from_millis(200),
         ];
-        let permit = self.db_permit().await.map_err(TxError::Storage)?;
+        let permit = self.write_permit().await.map_err(TxError::Storage)?;
         let db = self.clone();
         let out = tokio::task::spawn_blocking(move || {
             let _permit = permit;
+            _permit.yield_to_interactive();
             let _writing = WritingGuard::enter(&db.writing);
             let _flush_changes = PublicationChangeFlush(db.changes.clone());
             let mut attempt: u32 = 0;
@@ -749,42 +874,60 @@ impl Database {
     /// [`Self::transaction`], always rolled back: what `f` would do, with
     /// the write lock and the busy retry of a real run, and nothing kept.
     /// A command's dry run (a proposal's preview) runs its handler here.
-    pub async fn rehearse<R, F>(&self, f: F) -> Result<R, oxplow_domain::DomainError>
+    #[track_caller]
+    pub fn rehearse<R, F>(
+        &self,
+        f: F,
+    ) -> impl std::future::Future<Output = Result<R, oxplow_domain::DomainError>> + '_
     where
         F: Fn(&rusqlite::Transaction<'_>) -> Result<R, oxplow_domain::DomainError> + Send + 'static,
         R: Send + 'static,
     {
-        self.write_transaction(move |tx| f(tx).map_err(TxError::Storage), false)
-            .await
-            .map_err(TxError::<std::convert::Infallible>::into_storage)
+        let caller = std::panic::Location::caller();
+        async move {
+            self.write_transaction(caller, move |tx| f(tx).map_err(TxError::Storage), false)
+                .await
+                .map_err(TxError::<std::convert::Infallible>::into_storage)
+        }
     }
 
     /// [`Self::rehearse`] whose closure may end it with a reason of its own,
     /// as [`Self::transaction_or`].
-    pub async fn rehearse_or<R, A, F>(&self, f: F) -> Result<R, TxError<A>>
+    #[track_caller]
+    pub fn rehearse_or<R, A, F>(
+        &self,
+        f: F,
+    ) -> impl std::future::Future<Output = Result<R, TxError<A>>> + '_
     where
         F: Fn(&rusqlite::Transaction<'_>) -> Result<R, TxError<A>> + Send + 'static,
         R: Send + 'static,
         A: Send + 'static,
     {
-        self.write_transaction(f, false).await
+        self.write_transaction(std::panic::Location::caller(), f, false)
     }
 
-    async fn write_transaction<R, A, F>(&self, f: F, commit: bool) -> Result<R, TxError<A>>
+    async fn write_transaction<R, A, F>(
+        &self,
+        caller: &'static std::panic::Location<'static>,
+        f: F,
+        commit: bool,
+    ) -> Result<R, TxError<A>>
     where
         F: Fn(&rusqlite::Transaction<'_>) -> Result<R, TxError<A>> + Send + 'static,
         R: Send + 'static,
         A: Send + 'static,
     {
+        let queued = std::time::Instant::now();
         const MAX_ATTEMPTS: u32 = 3;
         const BACKOFF: [std::time::Duration; 2] = [
             std::time::Duration::from_millis(50),
             std::time::Duration::from_millis(200),
         ];
-        let permit = self.db_permit().await.map_err(TxError::Storage)?;
+        let permit = self.write_permit().await.map_err(TxError::Storage)?;
         let db = self.clone();
         let out = tokio::task::spawn_blocking(move || {
             let _permit = permit;
+            _permit.yield_to_interactive();
             let _writing = WritingGuard::enter(&db.writing);
             let mut attempt: u32 = 0;
             loop {
@@ -803,12 +946,14 @@ impl Database {
                     .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                     .map_err(sql)
                     .and_then(|tx| {
+                        let locked = std::time::Instant::now();
                         let value = f(&tx)?;
                         if commit {
                             tx.commit().map_err(sql)?;
                         } else {
                             tx.rollback().map_err(sql)?;
                         }
+                        note_write(caller, queued, locked);
                         Ok(value)
                     });
                 match outcome {
@@ -829,6 +974,29 @@ impl Database {
         });
         self.changes.flush();
         out?
+    }
+}
+
+/// A write that waited, or held the write lock, past this is logged.
+const SLOW_WRITE: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Say so when a write transaction was slow: `queued` is when its caller
+/// asked, `locked` when it had the write lock. Every other writer, and
+/// every request that writes (a stream switch), waits behind the holder.
+fn note_write(
+    caller: &std::panic::Location<'_>,
+    queued: std::time::Instant,
+    locked: std::time::Instant,
+) {
+    let held = locked.elapsed();
+    let waited = locked.saturating_duration_since(queued);
+    if held >= SLOW_WRITE || waited >= SLOW_WRITE {
+        tracing::warn!(
+            caller = %format_args!("{}:{}", caller.file(), caller.line()),
+            waited_ms = waited.as_millis() as u64,
+            held_ms = held.as_millis() as u64,
+            "slow database write"
+        );
     }
 }
 
@@ -1107,6 +1275,78 @@ pub(crate) fn with_foreign_keys_off(
 
 #[cfg(test)]
 mod tests {
+
+    /// A person's write (a stream switch) doesn't queue behind the
+    /// background's: with one writer holding the lock and a crowd of
+    /// background writers behind it, an interactive one gets the lock as
+    /// soon as the holder lets go, instead of whenever SQLite's busy wait
+    /// happens to favour it (tsk1422: a switch waited minutes behind a
+    /// startup's writes).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn an_interactive_write_goes_ahead_of_queued_background_writes() {
+        use std::time::{Duration, Instant};
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(dir.path().join("t.sqlite")).unwrap();
+        db.transaction(|tx| {
+            tx.execute("CREATE TABLE lane_test (n INTEGER)", [])
+                .map_err(map_sql_err)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let write = |db: Database, hold: u64| {
+            tokio::spawn(async move {
+                db.transaction(move |tx| {
+                    tx.execute("INSERT INTO lane_test (n) VALUES (1)", [])
+                        .map_err(map_sql_err)?;
+                    std::thread::sleep(Duration::from_millis(hold));
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            })
+        };
+        // One holds the lock for a while; twenty background writers queue.
+        let mut background = vec![write(db.clone(), 700)];
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        for _ in 0..20 {
+            background.push(write(db.clone(), 150));
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let asked = Instant::now();
+        interactive(db.transaction(|tx| {
+            tx.execute("INSERT INTO lane_test (n) VALUES (2)", [])
+                .map_err(map_sql_err)?;
+            Ok(())
+        }))
+        .await
+        .unwrap();
+        let took = asked.elapsed();
+        assert!(
+            took < Duration::from_millis(1300),
+            "the interactive write waited {took:?}: behind the holder (700 ms) and no queue"
+        );
+        for b in background {
+            b.await.unwrap();
+        }
+        let count: i64 = db
+            .read(|tx| {
+                tx.query_row("SELECT count(*) FROM lane_test", [], |r| r.get(0))
+                    .map_err(map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(count, 22, "nothing a background writer did was lost");
+    }
+
+    /// Background work leaves connections for the person's requests.
+    #[test]
+    fn background_work_never_holds_every_connection() {
+        assert_eq!(background_permits(8), 6);
+        assert_eq!(background_permits(2), 1);
+        assert_eq!(background_permits(1), 1);
+    }
     use super::*;
 
     /// A write transaction counts as open exactly while its closure runs

@@ -125,7 +125,9 @@ async fn ipc_handler(
     body: Option<Json<serde_json::Value>>,
 ) -> Response {
     let args = body.map(|Json(v)| v).unwrap_or(serde_json::Value::Null);
-    let result = oxplow_rpc::dispatch(&name, args, &state.ctx).await;
+    // A request the UI makes is one a person waits on: its database work
+    // isn't held back by background work's (`oxplow_db::interactive`).
+    let result = oxplow_db::interactive(oxplow_rpc::dispatch(&name, args, &state.ctx)).await;
     // Single source of truth for the `{status, data|error}` shape — the
     // Tauri path reaches the byte-identical envelope via typedError +
     // the shared IpcError. See oxplow_rpc::envelope.

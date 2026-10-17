@@ -228,12 +228,15 @@ impl StreamStore for SqliteStreamStore {
 
     async fn set_current(&self, id: Option<&StreamId>) -> Result<(), DomainError> {
         let id = id.cloned();
+        // A write transaction, so a switch the person makes goes ahead of
+        // the background's writers instead of queueing behind them.
         self.db
-            .call(move |conn| {
-                conn.execute(
+            .transaction(move |tx| {
+                tx.execute(
                     "UPDATE runtime_state SET current_stream_id = ?1 WHERE id = 1",
                     params![id.as_ref().map(|s| s.value())],
-                )?;
+                )
+                .map_err(crate::database::map_sql_err)?;
                 Ok(())
             })
             .await

@@ -269,6 +269,20 @@ crate::Json)]` on a `Value` field; it exports as TS `unknown`, and the
 caller narrows it. (The LSP RPCs still pass JSON strings from before;
 C5 moves them.)
 
+## Interactive and background database work
+
+The database has one write lock and a pool of 8 connections. A request a
+person waits on (every `/ipc` call the UI makes) runs inside
+`oxplow_db::interactive`; its write transactions go ahead of background
+writers (the event pump, startup sweeps, scans, anything spawned), which
+yield to them for up to 1.5 s, and background work can't take the last two
+connection slots. A command whose latency a person feels and that writes
+must write through `Database::transaction` (not `call`), or it is not
+counted. `slow database write` in the daemon log names a transaction (file
+and line) that waited or held the lock past 250 ms. Measurement:
+[performance.md](./performance.md) "A switch during startup waited on the
+write lock".
+
 ## Event bus
 
 **The bus is the renderer's channel and nothing else** (P7.B6,

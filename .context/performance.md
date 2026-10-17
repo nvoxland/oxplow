@@ -400,6 +400,48 @@ asserted confidently (by me) *before* measuring, and was wrong.
   (It stays formally unmeasured: mounting it needs `agentStatus === "working"`,
   and no write command sets agent status.)
 
+## A switch during startup waited on the write lock (measured 2026-10-17, tsk1422)
+
+**Symptom.** For the first minutes after a restart the person couldn't
+switch stream or thread; the window's priority lane didn't help.
+
+**Method.** A copy of the live database (`sqlite3 .backup`, 1.3 GB, 206 k
+`page_ref` rows) under a debug `oxplow-daemon` with the page-ref repair and
+the search assets forced to rebuild, and a probe calling `switch_stream`
+and `list_streams` once a second. Reads (`list_streams`,
+`get_thread_state`, `query_sql`, `list_extensions`) stayed at a few ms the
+whole time at 100–130% CPU. **`switch_stream` — a write — took up to 4.2 s**
+(the first run, before any change) while the startup work ran.
+
+**The wait.** A write waits for SQLite's one write lock. Its holders
+during startup are the snapshot take, the page-ref repair's batches, asset
+rebuilds and the event pump's consumers, each holding it for 0.3–1.2 s (a
+debug build); behind them queue dozens more writers, and SQLite's busy wait
+isn't a queue: a waiter wins the lock when its poll happens to land after a
+release, so a switch lost to writers that arrived after it, one hold after
+another. Every queued writer also held one of the pool's 8 connection
+slots, so a request that needed a slot queued behind them. It isn't CPU
+(reads were fast), a generation pin or an asset lock. Found with a log of
+slow writes (`slow database write`, with the caller's file and line, the
+time it waited for the lock and the time it held it; either past 250 ms).
+
+**Fix.** `Database` knows which work a person waits on:
+`oxplow_db::interactive(…)` scopes a request (the daemon's `/ipc` handler
+wraps every call). In that scope a write transaction is counted from the
+moment it asks, and every background writer waits for the count to reach
+zero before it takes the lock (at most 1.5 s, so a steady stream of
+interactive writes can't starve it). Background work also takes one of
+`pool − 2` slots before the gate, so two connections are always the
+person's. `switch_stream` writes through a transaction, so it is
+interactive; it now waits at most for the one holder that has the lock
+(0.5–0.7 s in the same debug repro, from 2.4–4.2 s). A background writer
+that holds the lock longer than a second still delays a switch by what is
+left of its hold; the repair already writes in batches
+(`page_ref_backfill`), the snapshot take is one transaction by design.
+Pinned by `an_interactive_write_goes_ahead_of_queued_background_writes`
+(a 700 ms holder and twenty queued writers: the interactive one waited
+2.9–4.0 s without the yield, under 1.3 s with it).
+
 ## Daemon transport: what a loopback HTTP hop costs (tsk255)
 
 Measured for the daemon-backed shell epic ([[tsk254]]), from **inside the real
