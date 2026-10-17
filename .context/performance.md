@@ -432,8 +432,14 @@ moment it asks, and every background writer waits for the count to reach
 zero before it takes the lock (at most 1.5 s, so a steady stream of
 interactive writes can't starve it). Background work also takes one of
 `pool − 2` slots before the gate, so two connections are always the
-person's. `switch_stream` writes through a transaction, so it is
-interactive; it now waits at most for the one holder that has the lock
+person's. Any write a request makes counts, whichever API it goes through
+(the busy handler counts a request's call as it starts to wait for the
+lock); a background writer yields, then waits up to 30 s, so it is never
+refused for it. Opening the database also retries a locked file (the
+instance being replaced, still winding down; this was the cause of
+`a_restart_replays_an_idempotent_job_that_was_running` failing with
+"database is locked" in a full run: its second `Database::open` met the
+first instance's writers). `switch_stream` is interactive; it now waits at most for the one holder that has the lock
 (0.5–0.7 s in the same debug repro, from 2.4–4.2 s). A background writer
 that holds the lock longer than a second still delays a switch by what is
 left of its hold; the repair already writes in batches

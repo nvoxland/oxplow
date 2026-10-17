@@ -255,6 +255,7 @@ const MAX_YIELD: std::time::Duration = std::time::Duration::from_millis(1500);
 /// What a database call holds while it runs: a slot of the gate and, for
 /// background work, of its share of it.
 pub(crate) struct DbPermit {
+    interactive: bool,
     _gate: OwnedSemaphorePermit,
     _background: Option<OwnedSemaphorePermit>,
     /// An interactive write: counted while it waits and runs.
@@ -293,6 +294,107 @@ impl Drop for InteractiveWrite {
     }
 }
 
+/// How many times opening retries a locked database (250 ms apart).
+const OPEN_RETRIES: u32 = 20;
+
+/// How long a request a person waits on waits for the write lock before
+/// giving up with `Busy`.
+const INTERACTIVE_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+/// How long background work waits for it: longer, since it yields to the
+/// person's writes and must not fail because it did.
+const BACKGROUND_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// What the SQLite busy handler on this thread needs to know about the
+/// call running on it: set for the length of a database call
+/// ([`LockWait::enter`]). A plain `fn` is all SQLite's handler can be, so
+/// the call's state rides the thread.
+struct LockWait {
+    interactive: bool,
+    waiting: Arc<std::sync::atomic::AtomicUsize>,
+    /// Counted as an interactive writer from the first time it waits.
+    counted: Option<InteractiveWrite>,
+    started: Option<std::time::Instant>,
+}
+
+thread_local! {
+    static LOCK_WAIT: std::cell::RefCell<Option<LockWait>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Keeps a call's [`LockWait`] on its thread while it runs.
+struct LockWaitScope;
+
+impl LockWaitScope {
+    fn enter(permit: &DbPermit) -> Self {
+        LOCK_WAIT.with(|l| {
+            *l.borrow_mut() = Some(LockWait {
+                interactive: permit.interactive,
+                waiting: permit.waiting.clone(),
+                counted: None,
+                started: None,
+            });
+        });
+        Self
+    }
+}
+
+impl Drop for LockWaitScope {
+    fn drop(&mut self) {
+        LOCK_WAIT.with(|l| *l.borrow_mut() = None);
+    }
+}
+
+/// SQLite's busy handler (installed on every connection): called each time
+/// a statement finds the database locked, `count` times so far for it.
+/// Returns whether to try again. A call made for a request a person waits
+/// on is counted as an interactive writer while it waits — whichever API
+/// it wrote through, and only when it actually has to wait — so background
+/// writers stand aside for it; background work waits its turn, for longer
+/// than the person's does.
+fn busy_handler(count: i32) -> bool {
+    LOCK_WAIT.with(|l| {
+        let mut l = l.borrow_mut();
+        let Some(wait) = l.as_mut() else {
+            // Not inside a database call (a connection used on its own):
+            // the old fixed wait.
+            if count > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            return count < 1000;
+        };
+        if count == 0 {
+            wait.started = Some(std::time::Instant::now());
+        }
+        let started = *wait.started.get_or_insert_with(std::time::Instant::now);
+        let limit = if wait.interactive {
+            INTERACTIVE_LOCK_WAIT
+        } else {
+            BACKGROUND_LOCK_WAIT
+        };
+        if started.elapsed() >= limit {
+            return false;
+        }
+        if wait.interactive {
+            if wait.counted.is_none() {
+                wait.counted = Some(InteractiveWrite::enter(&wait.waiting));
+            }
+        } else {
+            // Stand aside while a person's write is waiting, up to a cap.
+            let yielded = std::time::Instant::now();
+            while wait.waiting.load(std::sync::atomic::Ordering::Acquire) > 0
+                && yielded.elapsed() < MAX_YIELD
+            {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(if count < 10 {
+            1
+        } else {
+            4
+        }));
+        true
+    })
+}
+
 /// Per-connection setup, run by the pool for every connection it opens.
 ///
 /// Everything here is connection-local and lock-free. `journal_mode` is
@@ -302,6 +404,9 @@ impl Drop for InteractiveWrite {
 fn init_connection(c: &Connection) -> rusqlite::Result<()> {
     c.pragma_update(None, "foreign_keys", "ON")?;
     c.pragma_update(None, "synchronous", "NORMAL")?;
+    // Waiting for the write lock is ours, not SQLite's fixed timeout
+    // (`busy_handler`): a person's write goes ahead of the background's.
+    c.busy_handler(Some(busy_handler))?;
     // The hot metric store paths use `prepare_cached` (tsk112);
     // rusqlite's default LRU is 16 statements, small enough that the
     // build/read mix would thrash it and re-parse anyway.
@@ -433,7 +538,21 @@ impl Database {
             .map_err(DbInitError::Pool)?;
 
         let mut conn = pool.get().map_err(DbInitError::Pool)?;
-        migrate_and_compile(&mut conn)?;
+        // Another handle on the file — the instance this one replaces, still
+        // winding down — may hold the write lock or a schema read just now:
+        // migrating is repeatable, so wait it out rather than fail to start.
+        let mut attempt = 0;
+        loop {
+            match migrate_and_compile(&mut conn) {
+                Err(DbInitError::Models(m) | DbInitError::Migration(m))
+                    if attempt < OPEN_RETRIES && m.contains("locked") =>
+                {
+                    attempt += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                }
+                done => break done?,
+            }
+        }
         info!("oxplow db opened at {}", path.as_ref().display());
 
         let permits = pool.max_size() as usize;
@@ -530,6 +649,7 @@ impl Database {
         };
         let gate = self.gate.clone().acquire_owned().await.map_err(closed)?;
         Ok(DbPermit {
+            interactive,
             _gate: gate,
             _background: background,
             interactive_write,
@@ -599,6 +719,7 @@ impl Database {
         let out = tokio::task::spawn_blocking(move || {
             let _permit = permit; // held for the duration of the DB work
             _permit.yield_to_interactive();
+            let _wait = LockWaitScope::enter(&_permit);
             db.with_conn(f)
         })
         .await
@@ -622,6 +743,7 @@ impl Database {
         let out = tokio::task::spawn_blocking(move || {
             let _permit = permit;
             _permit.yield_to_interactive();
+            let _wait = LockWaitScope::enter(&_permit);
             let mut conn = db
                 .conn()
                 .map_err(|e| oxplow_domain::DomainError::Storage(format!("pool: {e}")))?;
@@ -796,6 +918,7 @@ impl Database {
         let out = tokio::task::spawn_blocking(move || {
             let _permit = permit;
             _permit.yield_to_interactive();
+            let _wait = LockWaitScope::enter(&_permit);
             let _writing = WritingGuard::enter(&db.writing);
             let _flush_changes = PublicationChangeFlush(db.changes.clone());
             let mut attempt: u32 = 0;
@@ -928,6 +1051,7 @@ impl Database {
         let out = tokio::task::spawn_blocking(move || {
             let _permit = permit;
             _permit.yield_to_interactive();
+            let _wait = LockWaitScope::enter(&_permit);
             let _writing = WritingGuard::enter(&db.writing);
             let mut attempt: u32 = 0;
             loop {
@@ -1338,6 +1462,113 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count, 22, "nothing a background writer did was lost");
+    }
+
+    /// The same for a write made through `Database::call`, whatever the
+    /// API: counted as an interactive writer when it has to wait.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn an_interactive_call_write_goes_ahead_of_queued_background_writes() {
+        use std::time::{Duration, Instant};
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(dir.path().join("t.sqlite")).unwrap();
+        db.transaction(|tx| {
+            tx.execute("CREATE TABLE lane_test (n INTEGER)", [])
+                .map_err(map_sql_err)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let write = |db: Database, hold: u64| {
+            tokio::spawn(async move {
+                db.transaction(move |tx| {
+                    tx.execute("INSERT INTO lane_test (n) VALUES (1)", [])
+                        .map_err(map_sql_err)?;
+                    std::thread::sleep(Duration::from_millis(hold));
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            })
+        };
+        let mut background = vec![write(db.clone(), 700)];
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        for _ in 0..20 {
+            background.push(write(db.clone(), 150));
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let asked = Instant::now();
+        interactive(db.call(|conn| {
+            conn.execute("INSERT INTO lane_test (n) VALUES (2)", [])?;
+            Ok(())
+        }))
+        .await
+        .unwrap();
+        let took = asked.elapsed();
+        assert!(
+            took < Duration::from_millis(1300),
+            "the interactive call write waited {took:?}"
+        );
+        for b in background {
+            b.await.unwrap();
+        }
+    }
+
+    /// Standing aside for a person's write never fails a background one:
+    /// it waits its turn, and every one of them lands.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_background_writer_that_yields_is_never_refused() {
+        use std::time::Duration;
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(dir.path().join("t.sqlite")).unwrap();
+        db.transaction(|tx| {
+            tx.execute("CREATE TABLE lane_test (n INTEGER)", [])
+                .map_err(map_sql_err)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        // A steady run of person's writes, each holding the lock a while,
+        // under a background `call` write and a background transaction.
+        let people: Vec<_> = (0..12)
+            .map(|_| {
+                let db = db.clone();
+                tokio::spawn(interactive(async move {
+                    db.transaction(|tx| {
+                        tx.execute("INSERT INTO lane_test (n) VALUES (2)", [])
+                            .map_err(map_sql_err)?;
+                        std::thread::sleep(Duration::from_millis(300));
+                        Ok(())
+                    })
+                    .await
+                    .unwrap();
+                }))
+            })
+            .collect();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let by_call = db.call(|conn| {
+            conn.execute("INSERT INTO lane_test (n) VALUES (1)", [])?;
+            Ok(())
+        });
+        let by_transaction = db.transaction(|tx| {
+            tx.execute("INSERT INTO lane_test (n) VALUES (1)", [])
+                .map_err(map_sql_err)?;
+            Ok(())
+        });
+        let (a, b) = tokio::join!(by_call, by_transaction);
+        a.expect("the background call write is not refused");
+        b.expect("the background transaction is not refused");
+        for p in people {
+            p.await.unwrap();
+        }
+        let count: i64 = db
+            .read(|tx| {
+                tx.query_row("SELECT count(*) FROM lane_test", [], |r| r.get(0))
+                    .map_err(map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(count, 14);
     }
 
     /// Background work leaves connections for the person's requests.

@@ -276,9 +276,13 @@ person waits on (every `/ipc` call the UI makes) runs inside
 `oxplow_db::interactive`; its write transactions go ahead of background
 writers (the event pump, startup sweeps, scans, anything spawned), which
 yield to them for up to 1.5 s, and background work can't take the last two
-connection slots. A command whose latency a person feels and that writes
-must write through `Database::transaction` (not `call`), or it is not
-counted. `slow database write` in the daemon log names a transaction (file
+connection slots. Every write a request makes counts, through whichever
+API (`transaction`, `call`, `call_mut`): waiting for the write lock is
+SQLite's busy handler (`busy_handler` in `database.rs`, installed on every
+connection, its call's state kept in a thread-local), and a request's call
+is counted as an interactive writer from the first time it has to wait.
+Background work waits its turn for up to 30 s (a person's request: 5 s), so
+yielding never turns into `Busy`. `slow database write` in the daemon log names a transaction (file
 and line) that waited or held the lock past 250 ms. Measurement:
 [performance.md](./performance.md) "A switch during startup waited on the
 write lock".
