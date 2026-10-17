@@ -49,8 +49,10 @@ import {
   Terminal,
 } from "lucide-react";
 import type { ComponentProps, ReactElement } from "react";
-import { refKindIcon, refKindInfo } from "./refKinds.js";
-import { pageKindOf } from "./tabs/pageRefs.js";
+import { REF_KIND_ICONS, refKindIcon, refKindInfo } from "./refKinds.js";
+import { useExtensions } from "./extensionsStore.js";
+import { pageKindOf, refFromTabId } from "./tabs/pageRefs.js";
+import type { Extension } from "./tauri-bridge/generated/bindings.js";
 import { parseRef } from "./refs/ref.js";
 
 /**
@@ -172,8 +174,25 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
   }
 }
 
+/**
+ * The icon an extension's page declares (`pages: - icon:`), or null when
+ * the tab id names no such page or it declares none: the caller then
+ * draws the lens icon.
+ */
+export function extPageIconComponent(extensions: Extension[] | null, tabId: string): LucideIcon | null {
+  const payload = refFromTabId(tabId)?.payload as { extension?: string; page?: string } | null | undefined;
+  if (!payload?.extension || !payload.page) return null;
+  const icon = extensions
+    ?.find((e) => e.name === payload.extension)
+    ?.pages.find((p) => p.id === payload.page)?.icon;
+  return icon ? (REF_KIND_ICONS[icon] ?? null) : null;
+}
+
 export interface PageKindIconProps extends Omit<ComponentProps<LucideIcon>, "ref"> {
   kind: string;
+  /** The page's tab id. An extension's page (`kind` `ext-page`) draws the
+   *  icon it declares; without the id it draws the lens icon. */
+  tabId?: string;
   /**
    * Pixel size for the icon. Defaults to 14 — small enough to sit
    * inline next to text labels at the project's default font size.
@@ -190,11 +209,19 @@ export interface PageKindIconProps extends Omit<ComponentProps<LucideIcon>, "ref
  * `aria-hidden` is set by default because the adjacent text label
  * is the accessible name; the icon is decorative.
  */
-export function PageKindIcon({
-  kind,
-  size = 14,
-  ...rest
-}: PageKindIconProps): ReactElement | null {
+export function PageKindIcon({ kind, tabId, ...rest }: PageKindIconProps): ReactElement | null {
+  if (kind === "ext-page" && tabId) return <ExtPageIcon tabId={tabId} {...rest} />;
+  return <KindIcon kind={kind} {...rest} />;
+}
+
+function ExtPageIcon({ tabId, ...rest }: Omit<PageKindIconProps, "kind" | "tabId"> & { tabId: string }): ReactElement | null {
+  const extensions = useExtensions();
+  const Icon = extPageIconComponent(extensions, tabId) ?? pageKindIconComponent("ext-page");
+  if (!Icon) return null;
+  return <Icon aria-hidden size={rest.size ?? 14} {...rest} />;
+}
+
+function KindIcon({ kind, size = 14, ...rest }: Omit<PageKindIconProps, "tabId">): ReactElement | null {
   const Icon = pageKindIconComponent(kind);
   if (!Icon) return null;
   return <Icon aria-hidden size={size} {...rest} />;

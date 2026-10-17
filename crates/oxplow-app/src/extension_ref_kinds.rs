@@ -22,8 +22,9 @@ use serde::{Deserialize, Serialize};
 use crate::extensions::manifest_v2::{at, item_lines, key_line};
 use crate::extensions::ExtensionPage;
 
-/// The icons a ref kind may name (lucide names; the desktop maps each).
+/// The icons a ref kind or a page may name (lucide names; the desktop maps each).
 pub const REF_KIND_ICONS: &[&str] = &[
+    "archive",
     "book-open",
     "box",
     "bug",
@@ -37,6 +38,7 @@ pub const REF_KIND_ICONS: &[&str] = &[
     "git-commit",
     "git-pull-request",
     "link",
+    "list-tree",
     "message-square",
     "package",
     "server",
@@ -44,6 +46,7 @@ pub const REF_KIND_ICONS: &[&str] = &[
     "star",
     "tag",
     "ticket",
+    "triangle-alert",
     "user",
     "zap",
 ];

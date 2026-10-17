@@ -230,7 +230,7 @@ export function BacklinksList({
           onDragStart={ctxRef !== null ? (e) => setContextRefDrag(e, ctxRef) : undefined}
           style={rowStyle}
         >
-          <PageKindIcon kind={pageKindOf(page) ?? kindOf(page) ?? "page"} size={14} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
+          <PageKindIcon kind={pageKindOf(page) ?? kindOf(page) ?? "page"} tabId={page} size={14} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
           <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {entry.label}
           </span>

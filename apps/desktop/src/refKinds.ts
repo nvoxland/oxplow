@@ -13,6 +13,7 @@
  * `useRefKinds` so they redraw when it changes.
  */
 import {
+  Archive,
   BookOpen,
   Box,
   Bug,
@@ -26,6 +27,7 @@ import {
   GitCommit,
   GitPullRequest,
   Link,
+  ListTree,
   type LucideIcon,
   MessageSquare,
   Package,
@@ -34,6 +36,7 @@ import {
   Star,
   Tag,
   Ticket,
+  TriangleAlert,
   User,
   Zap,
 } from "lucide-react";
@@ -51,6 +54,7 @@ import type { Reads, SqlQueryResult } from "./tauri-bridge/generated/bindings.js
  * keys.
  */
 export const REF_KIND_ICONS: Readonly<Record<string, LucideIcon>> = {
+  "archive": Archive,
   "book-open": BookOpen,
   "box": Box,
   "bug": Bug,
@@ -64,6 +68,7 @@ export const REF_KIND_ICONS: Readonly<Record<string, LucideIcon>> = {
   "git-commit": GitCommit,
   "git-pull-request": GitPullRequest,
   "link": Link,
+  "list-tree": ListTree,
   "message-square": MessageSquare,
   "package": Package,
   "server": Server,
@@ -71,6 +76,7 @@ export const REF_KIND_ICONS: Readonly<Record<string, LucideIcon>> = {
   "star": Star,
   "tag": Tag,
   "ticket": Ticket,
+  "triangle-alert": TriangleAlert,
   "user": User,
   "zap": Zap,
 };

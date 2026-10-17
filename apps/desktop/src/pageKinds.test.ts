@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
-import { kindForTabId, pageKindIconComponent, pageKindLabel } from "./pageKinds.js";
+import { REF_KIND_ICONS } from "./refKinds.js";
+import type { Extension } from "./tauri-bridge/generated/bindings.js";
+import { extPageIconComponent, kindForTabId, pageKindIconComponent, pageKindLabel } from "./pageKinds.js";
 
 describe("kindForTabId", () => {
   test("scheme-prefixed ids return the prefix", () => {
@@ -121,5 +123,28 @@ describe("core kinds a search hit can be", () => {
       expect(pageKindIconComponent(kind), kind).not.toBeNull();
       expect(pageKindLabel(kind), kind).toBe(word);
     }
+  });
+});
+
+describe("an extension page's icon", () => {
+  const extensions = [
+    {
+      name: "oxplow-foundation",
+      pages: [
+        { id: "problems", icon: "triangle-alert" },
+        { id: "plain", icon: null },
+      ],
+    },
+  ] as unknown as Extension[];
+
+  test("is the one its page declares", () => {
+    expect(extPageIconComponent(extensions, "page:oxplow-foundation/problems")).toBe(REF_KIND_ICONS["triangle-alert"]!);
+  });
+
+  test("is none when the page declares none, or is not there", () => {
+    expect(extPageIconComponent(extensions, "page:oxplow-foundation/plain")).toBeNull();
+    expect(extPageIconComponent(extensions, "page:oxplow-foundation/gone")).toBeNull();
+    expect(extPageIconComponent(null, "page:oxplow-foundation/problems")).toBeNull();
+    expect(extPageIconComponent(extensions, "page:tasks")).toBeNull();
   });
 });

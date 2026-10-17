@@ -597,7 +597,10 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `page:<extension>/<id>` (`Extension.pages`, `ExtensionPage`;
     checked at load in `parse_pages`: a kebab-case, unique id, a launcher
     category, a lens that exists), listed in the launcher under its
-    category (`components/extensionLauncher.ts`).
+    category (`components/extensionLauncher.ts`). A page's `icon` is one
+    of the ref-kind icons (`REF_KIND_ICONS`; an unknown one is a load
+    error); the tab strip, launcher, Go To lists and backlinks draw it
+    (`PageKindIcon`'s `tabId`), the lens icon when it declares none.
     The foundation uses them for pages oxplow once drew in React: Problems,
     Symbols and Closed Threads (`page:oxplow-foundation/<id>`).
   - **Panels** (P6.G1, target §11.3): `panels: [{ id, title, icon?,

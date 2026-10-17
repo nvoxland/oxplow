@@ -141,6 +141,7 @@ function VisitsBrowser({
             {recent.map((r) => (
               <LinkRow
                 key={r.refId}
+                tabId={r.refId}
                 kind={refFromTabId(r.refId)?.kind ?? r.refKind}
                 label={(r.label?.trim() ?? "") || r.refId}
                 onClick={() => {
@@ -158,6 +159,7 @@ function VisitsBrowser({
           {top.map((r) => (
             <LinkRow
               key={r.refId}
+              tabId={r.refId}
               kind={r.refKind}
               label={r.label}
               onClick={() => onOpenPage({ id: r.refId, kind: r.refKind as TabRef["kind"], payload: r.payload })}
@@ -195,11 +197,11 @@ const linkRowStyle: React.CSSProperties = {
 
 /** A single plain text link row (no box) for the visited lists, with
  *  the page-type icon before the label (matching bookmark rows). */
-function LinkRow({ kind, label, onClick }: { kind: string; label: string; onClick(): void }) {
+function LinkRow({ kind, tabId, label, onClick }: { kind: string; tabId: string; label: string; onClick(): void }) {
   return (
     <li>
       <button type="button" title={label} onClick={onClick} style={linkRowStyle}>
-        <PageKindIcon kind={kind} size={13} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
+        <PageKindIcon kind={kind} tabId={tabId} size={13} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
         <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {label}
         </span>
@@ -276,7 +278,7 @@ function BookmarksManager({
               padding: "7px 0",
             }}
           >
-            <PageKindIcon kind={b.ref.kind} size={13} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
+            <PageKindIcon kind={b.ref.kind} tabId={b.ref.id} size={13} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
             <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {b.label ?? b.ref.id}
             </span>

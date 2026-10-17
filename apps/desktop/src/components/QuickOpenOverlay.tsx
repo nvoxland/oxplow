@@ -498,7 +498,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                     }}
                   >
                     <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}>
-                      <PageKindIcon kind={result.entry.ref.kind} size={14} style={{ color: "var(--text-secondary)" }} />
+                      <PageKindIcon kind={result.entry.ref.kind} tabId={result.entry.ref.id} size={14} style={{ color: "var(--text-secondary)" }} />
                     </span>
                     <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
                       {result.entry.label}

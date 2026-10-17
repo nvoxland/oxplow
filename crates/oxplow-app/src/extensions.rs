@@ -3310,6 +3310,16 @@ fn parse_pages(
             errors.push(err("declared twice".into()));
         } else if !lenses.iter().any(|l| l.slug == p.lens) {
             errors.push(err(format!("its lens `{}` isn't in lenses/", p.lens)));
+        } else if p
+            .icon
+            .as_deref()
+            .is_some_and(|i| !crate::extension_ref_kinds::REF_KIND_ICONS.contains(&i))
+        {
+            errors.push(err(format!(
+                "its icon `{}` isn't one oxplow draws (one of {})",
+                p.icon.as_deref().unwrap_or_default(),
+                crate::extension_ref_kinds::REF_KIND_ICONS.join(", ")
+            )));
         } else {
             pages.push(ExtensionPage {
                 page_ref: oxplow_domain::refs::build::extension_page_ref(extension, &p.id),
@@ -8781,6 +8791,10 @@ commands:
             (
                 "{ id: a, title: A, category: Nowhere, lens: open }",
                 "category",
+            ),
+            (
+                "{ id: a, title: A, icon: nope, category: Work, lens: open }",
+                "icon",
             ),
         ] {
             let (_d, ext) = load_x(
