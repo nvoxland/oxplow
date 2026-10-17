@@ -1,0 +1,21 @@
+manifest: 2
+name: session-notes
+description: A thread's notes on its New Session page, between starting a session and picking an earlier one.
+sharing: private
+engine: ">=0.7"
+version: 0.1.0
+intent:
+  purpose: >-
+    Remind whoever opens a session what the thread already knows: its
+    notes, newest first, as a section of the New Session page right after
+    "Start a new session". It reads oxplow's notes and writes nothing.
+  origin: null
+  examples:
+    - name: thread-notes
+      input: { lens: thread-notes, params: { thread_id: 1 } }
+      expect: no rows for a thread with no notes
+# A section of a core page, placed by the page's stable section ids
+# (`start`, `earlier`), so it stays put as the page changes.
+ui:
+  slots:
+    - { slot: new-session.sections, lens: thread-notes, title: Notes on this thread, at: { after: start } }

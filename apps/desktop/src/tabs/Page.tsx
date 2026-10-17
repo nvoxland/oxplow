@@ -107,13 +107,9 @@ export interface PageProps {
   navBar?: PageNavBarConfig;
   /** Test id applied to the page root. */
   testId?: string;
-  /** When false, suppress the browser-style nav bar even if a
-   *  PageNavigationContext is present. Defaults to true. The agent
-   *  tab uses this to opt out; future bare-content pages can too. */
-  showNavBar?: boolean;
-  /** When false, suppress the title/chips/actions header. Defaults
-   *  to true. */
-  showHeader?: boolean;
+  /** Drawn before the title in the nav bar: what the page is (an agent
+   *  session's harness logo). */
+  titleIcon?: ReactNode;
   /** When true, the page renders its OWN title as an `<h1>` in the body
    *  (via {@link pageH1Style}), so the chrome (nav bar / header) does NOT
    *  render the title — avoiding a duplicate. The tab-strip label
@@ -156,7 +152,7 @@ export const pageH1Style: CSSProperties = {
  * The chrome reads only semantic CSS variables. Both light and dark
  * themes are styled by `public/index.html`.
  */
-export function Page({ title, kind, chips: ownChips, actions, pin, children, backlinks, outbound, snapshots, commentsNav, navBar, testId, showNavBar = true, showHeader = true, titleInBody = false, width = "full", rightRail, rightRailTitle }: PageProps) {
+export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, children, backlinks, outbound, snapshots, commentsNav, navBar, testId, titleInBody = false, width = "full", rightRail, rightRailTitle }: PageProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
   // Pages that don't pass an explicit `navBar` prop still get one
   // when rendered inside a PageNavigationContext provider — that's
@@ -190,7 +186,7 @@ export function Page({ title, kind, chips: ownChips, actions, pin, children, bac
     : undefined;
   const effectiveTitle: ReactNode = title ?? ctxNav?.title ?? "";
   const pinned = ctxNav?.pinned ?? false;
-  const baseNavBar: PageNavBarConfig | undefined = !showNavBar ? undefined : navBar ?? (ctxNav ? {
+  const baseNavBar: PageNavBarConfig | undefined = navBar ?? (ctxNav ? {
     canBack: ctxNav.canGoBack,
     canForward: ctxNav.canGoForward,
     onBack: ctxNav.goBack,
@@ -254,6 +250,7 @@ export function Page({ title, kind, chips: ownChips, actions, pin, children, bac
           onForward={effectiveNavBar.onForward}
           siblings={effectiveNavBar.siblings}
           title={titleInBody ? undefined : effectiveTitle}
+          titleIcon={titleInBody ? undefined : titleIcon}
           bookmark={effectiveNavBar.bookmark}
           backlinks={effectiveNavBar.backlinks}
           outbound={effectiveNavBar.outbound}
@@ -264,7 +261,7 @@ export function Page({ title, kind, chips: ownChips, actions, pin, children, bac
           ask={effectiveNavBar.ask}
         />
       ) : null}
-      {showHeader && !effectiveNavBar ? (
+      {!effectiveNavBar ? (
       <header
         data-testid="page-header"
         style={{
@@ -298,7 +295,7 @@ export function Page({ title, kind, chips: ownChips, actions, pin, children, bac
         {actions && actions.length > 0 ? <ActionButtons actions={actions} /> : null}
       </header>
       ) : null}
-      {showHeader && effectiveNavBar && chips && chips.length > 0 ? (
+      {effectiveNavBar && chips && chips.length > 0 ? (
         <div
           data-testid="page-chips"
           style={{

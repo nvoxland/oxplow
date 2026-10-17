@@ -108,6 +108,7 @@ import { GitHistoryPage } from "./pages/GitHistoryPage.js";
 import { GitDashboardPage } from "./pages/GitDashboardPage.js";
 import { UncommittedChangesPage } from "./pages/UncommittedChangesPage.js";
 import { AgentSessionPage } from "./pages/AgentSessionPage.js";
+import type { MenuItem } from "./menu.js";
 import { NewSessionPage } from "./pages/NewSessionPage.js";
 import { InlinePromptStrip } from "./components/InlinePromptStrip.js";
 import { reconcileSessionTabs } from "./tabs/sessionTabs.js";
@@ -2575,15 +2576,9 @@ export function App() {
         const session = selectedThreadSessions?.find((candidate) => candidate.id === sessionId) ?? null;
         const status = sessionStatuses[sessionId];
         const label = session ? session.displayName || sessionLabel(harnesses, session) : "Agent";
-        return {
-          id: ref.id,
-          label,
-          closable: true,
-          pinned: true,
-          agentStatus: status?.status ?? "waiting",
-          question: status?.question,
-          icon: session ? harnesses.find((h) => h.id === session.harness)?.icon : undefined,
-          contextMenu: [
+        // What can be done to the session: its tab's right-click menu and its
+        // page's actions in the nav bar.
+        const sessionMenu: MenuItem[] = [
             {
               id: "agent-session.rename",
               label: "Rename…",
@@ -2630,11 +2625,23 @@ export function App() {
                       },
                 ]
               : []),
-          ],
+          ];
+        return {
+          id: ref.id,
+          label,
+          closable: true,
+          pinned: true,
+          agentStatus: status?.status ?? "waiting",
+          question: status?.question,
+          icon: session ? harnesses.find((h) => h.id === session.harness)?.icon : undefined,
+          contextMenu: sessionMenu,
           render: () => (
             <AgentSessionPage
               thread={selectedThread}
               session={session}
+              title={label}
+              harnessIcon={session ? harnesses.find((h) => h.id === session.harness)?.icon : undefined}
+              actions={sessionMenu.map((m) => ({ id: m.id, label: m.label, disabled: !m.enabled, run: () => m.run?.() }))}
               stream={stream}
               visible={effectiveCenterActive === ref.id}
               onOpenFile={openTerminalPath}
@@ -2654,6 +2661,8 @@ export function App() {
           <NewSessionPage
             thread={selectedThread}
             harnesses={harnesses}
+            streamId={stream?.id ?? null}
+            onOpenPage={handleOpenPage}
             onStart={async (harness, remember) => {
               if (!selectedThread) return;
               if (remember) await saveNewThreadSession(harness);

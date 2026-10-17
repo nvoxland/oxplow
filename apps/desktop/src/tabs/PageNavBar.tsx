@@ -42,6 +42,8 @@ export interface PageNavBarProps {
   };
   /** Page title rendered to the right of the back/forward arrows. */
   title?: ReactNode;
+  /** Drawn before the title: what the page is (an agent's logo). */
+  titleIcon?: ReactNode;
   /** Optional bookmark affordance — when omitted, no star renders.
    *  The button always opens a popover that lets the user toggle this
    *  page's bookmark at one scope (thread / stream / project). */
@@ -96,6 +98,7 @@ export function PageNavBar({
   onForward,
   siblings,
   title,
+  titleIcon,
   bookmark,
   backlinks,
   outbound,
@@ -339,13 +342,18 @@ export function PageNavBar({
         <div
           style={{
             display: "flex",
-            alignItems: "baseline",
+            alignItems: titleIcon ? "center" : "baseline",
             gap: 8,
             flex: 1,
             minWidth: 0,
             paddingLeft: 6,
           }}
         >
+          {titleIcon ? (
+            <span data-testid="page-nav-title-icon" style={{ display: "inline-flex", flexShrink: 0, color: "var(--text-secondary)" }}>
+              {titleIcon}
+            </span>
+          ) : null}
           <span
             data-testid="page-nav-title"
             style={{

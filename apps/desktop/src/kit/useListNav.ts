@@ -17,7 +17,9 @@ export function useListNav({
 }: {
   count: number;
   onPick(index: number): void;
-  onEscape?(): void;
+  /** Escape: true when it did something (cleared the filter), so the key
+   *  goes no further. */
+  onEscape?(): boolean | void;
   /** Prefix for the rows' element ids. */
   id: string;
 }) {
@@ -37,8 +39,9 @@ export function useListNav({
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (count > 0) onPick(cursor);
-    } else if (e.key === "Escape" && onEscape) {
-      onEscape();
+    } else if (e.key === "Escape" && onEscape?.()) {
+      e.preventDefault();
+      e.stopPropagation();
     }
   };
   const keyProps = {

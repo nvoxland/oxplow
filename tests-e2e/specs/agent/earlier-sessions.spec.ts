@@ -1,4 +1,8 @@
-import { run, searchable } from "../../support/daemon.js";
+import { cpSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { ipc, run, searchable, until } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { searchLauncher } from "../../support/ui.js";
 
@@ -77,4 +81,30 @@ test("picking a session open here shows it and keeps the New Session page", asyn
   await expect(page.getByTestId(`center-tab-body-agent_session:${id}`)).toBeVisible();
   await expect(page.getByTestId("page-new-session")).toBeHidden();
   await expect(page.getByTestId("center-tab-page:new-session")).toHaveCount(1);
+});
+
+/// An extension adds a section to the New Session page through its
+/// sections slot, placed after "Start a new session" by that section's id,
+/// and marked as the extension's.
+test("an extension's section lands where its `at` says on the New Session page", async ({ fresh }) => {
+  const { page, daemon } = fresh;
+  const here = dirname(fileURLToPath(import.meta.url));
+  cpSync(join(here, "..", "..", "..", "examples", "extensions", "session-notes"), join(daemon.project, "oxplow", "extensions", "session-notes"), {
+    recursive: true,
+  });
+  await until("session-notes to load", 60_000, async () => {
+    const ext = await ipc<Array<{ name: string }>>(daemon, "list_extensions");
+    return ext.some((e) => e.name === "session-notes");
+  });
+
+  await page.goto("/");
+  const doc = page.getByTestId("page-new-session");
+  await expect(doc.locator("section[data-section]")).toHaveCount(3);
+  await expect
+    .poll(() => doc.locator("section[data-section]").evaluateAll((s) => s.map((e) => e.getAttribute("data-section"))))
+    .toEqual(["start", "session-notes/thread-notes", "earlier"]);
+  const notes = page.getByTestId("new-session.sections-session-notes/thread-notes");
+  await expect(notes.locator("h2")).toContainText("Notes on this thread");
+  await expect(notes.locator("[data-source]")).toHaveText("session-notes");
+  await expect(notes).toContainText("No notes on this thread yet.");
 });

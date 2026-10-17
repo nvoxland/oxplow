@@ -116,7 +116,7 @@ test("earlier sessions list under the Start row, newest first, with a line for a
   expect(getByTestId("earlier-row-codex:c2").querySelector("[data-status]")?.getAttribute("title")).toBe("not started in oxplow");
   expect(getByTestId("new-session-earlier-unavailable-codex").textContent).toContain("its daemon isn't running");
   // A conversation open in another thread's session can't be taken.
-  expect((getByTestId("earlier-row-agent_session:ses9") as HTMLButtonElement).disabled).toBe(true);
+  expect(getByTestId("earlier-row-agent_session:ses9").getAttribute("aria-disabled")).toBe("true");
 });
 
 test("the filter narrows the rows; ↓ and Enter take the row under the cursor; Escape clears the filter", async () => {
