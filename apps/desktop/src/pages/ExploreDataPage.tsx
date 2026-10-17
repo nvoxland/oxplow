@@ -13,6 +13,7 @@ import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 import { showToast } from "../components/toastStore.js";
+import { DataTable, type DataColumn } from "../kit/index.js";
 import { useRequestGuard } from "../request-guard.js";
 import type { LensChart, Reads, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import {
@@ -234,19 +235,12 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
           <summary style={{ cursor: "pointer" }}>
             <strong>{model.view}</strong> — {model.description}
           </summary>
-          <table style={docsTableStyle}>
-            <tbody>
-              {columns.map((c) => (
-                <tr key={c.name}>
-                  <td style={docsCellStyle}>
-                    <code>{c.name}</code>
-                  </td>
-                  <td style={{ ...docsCellStyle, color: "var(--text-muted)" }}>{c.sqlType}</td>
-                  <td style={docsCellStyle}>{c.doc}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable
+            header={false}
+            columns={docColumns}
+            rows={columns}
+            rowKey={(c) => c.name}
+          />
         </details>
       ) : null}
       {model && lineageOf ? <ModelLineage lineage={lineageOf} onPick={pick} /> : null}
@@ -500,8 +494,6 @@ const sqlStyle: CSSProperties = {
   fontFamily: "var(--font-mono, monospace)",
   fontSize: "var(--text-sm)",
 };
-const docsTableStyle: CSSProperties = { borderCollapse: "collapse", fontSize: "var(--text-xs)", marginTop: 6 };
-const docsCellStyle: CSSProperties = { padding: "2px 8px 2px 0", verticalAlign: "top" };
 const rawToggleStyle: CSSProperties = {
   fontSize: "var(--text-sm)",
   color: "var(--severity-medium)",
@@ -521,3 +513,10 @@ const errorStyle: CSSProperties = {
   whiteSpace: "pre-wrap",
   marginBottom: 12,
 };
+
+/** A model's columns, documented: name, type, what it holds. */
+const docColumns: DataColumn<ModelColumn>[] = [
+  { key: "name", label: "Column", render: (c) => <code>{c.name}</code> },
+  { key: "type", label: "Type", render: (c) => <span style={{ color: "var(--text-muted)" }}>{c.sqlType}</span> },
+  { key: "doc", label: "What it holds", render: (c) => c.doc },
+];

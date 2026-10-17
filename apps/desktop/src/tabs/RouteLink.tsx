@@ -1,8 +1,8 @@
 import type { CSSProperties, MouseEvent, ReactNode } from "react";
-import { useCallback, useMemo } from "react";
+import { useMemo } from "react";
 import type { TabRef } from "./tabState.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
-import type { NavSiblings } from "./PageNavigationContext.js";
+import type { NavSiblings, PageNavigation } from "./PageNavigationContext.js";
 import { openRefInWindow } from "./openRef.js";
 
 /**
@@ -20,24 +20,32 @@ import { openRefInWindow } from "./openRef.js";
  * Outside a `PageNavigationContext` provider, `onNavigate` MUST be
  * supplied — there's no current tab to navigate within.
  */
-export function useRouteDispatch(
+export interface RouteDispatchOptions {
+  onNavigate?: (ref: TabRef, opts?: { newTab?: boolean }) => void;
+  pinnedSlot?: boolean;
+  /**
+   * Optional sibling list this row is part of. When the row
+   * dispatches an in-tab navigation, the siblings travel with it
+   * and the destination page picks up prev/next buttons in its
+   * nav bar. Ignored when the navigation falls back to a new tab
+   * or to the rail-side `onNavigate` callback.
+   */
+  siblings?: NavSiblings;
+}
+
+/**
+ * The one dispatch (`dispatch(newTab)`) behind every link, with no hook:
+ * a row built in a loop (a table's `rowProps`) makes its own from the
+ * page's navigation context. Context first: inside a page, plain-click
+ * navigates in-tab; outside one (rail / palette) the caller's `onNavigate`
+ * runs, which typically opens a new tab.
+ */
+export function routeDispatch(
   ref: TabRef | string,
-  options: {
-    onNavigate?: (ref: TabRef, opts?: { newTab?: boolean }) => void;
-    pinnedSlot?: boolean;
-    /**
-     * Optional sibling list this row is part of. When the row
-     * dispatches an in-tab navigation, the siblings travel with it
-     * and the destination page picks up prev/next buttons in its
-     * nav bar. Ignored when the navigation falls back to a new tab
-     * or to the rail-side `onNavigate` callback.
-     */
-    siblings?: NavSiblings;
-  } = {},
-) {
-  const { onNavigate, pinnedSlot = false, siblings } = options;
-  const ctxNav = useOptionalPageNavigation();
-  const dispatch = useCallback((newTab: boolean) => {
+  ctxNav: PageNavigation | null,
+  { onNavigate, pinnedSlot = false, siblings }: RouteDispatchOptions = {},
+): (newTab: boolean) => void {
+  return (newTab) => {
     const escape = newTab || pinnedSlot;
     // A ref string opens through the registry, wherever the link sits.
     if (typeof ref === "string") {
@@ -46,11 +54,6 @@ export function useRouteDispatch(
       else openRefInWindow(ref, how);
       return;
     }
-    // Context-first: when this link sits inside a page that supplies a
-    // `PageNavigationContext`, route through it so plain-click does in-
-    // tab navigation. Outside a page (rail / palette), fall back to the
-    // caller's `onNavigate` — that callback typically maps to the
-    // host's "always-open-as-new-tab" handler.
     if (ctxNav) {
       ctxNav.navigate(ref, { newTab: escape, siblings: escape ? undefined : siblings });
       return;
@@ -60,13 +63,14 @@ export function useRouteDispatch(
       return;
     }
     // No way to navigate — silently no-op.
-  }, [ctxNav, onNavigate, pinnedSlot, ref, siblings]);
+  };
+}
 
-  const handlers = useMemo(() => ({
-    onClick: (e: MouseEvent) => {
-      const newTab = e.metaKey || e.ctrlKey;
-      dispatch(newTab);
-    },
+/** Browser-style click handlers for `dispatch`: plain → in this tab,
+ *  Cmd/Ctrl-click, middle- and right-click → a new tab. */
+export function routeHandlers(dispatch: (newTab: boolean) => void) {
+  return {
+    onClick: (e: MouseEvent) => dispatch(e.metaKey || e.ctrlKey),
     onAuxClick: (e: MouseEvent) => {
       // Middle-click → new tab. Browser default behavior.
       if (e.button === 1) {
@@ -82,8 +86,17 @@ export function useRouteDispatch(
       e.preventDefault();
       dispatch(true);
     },
-  }), [dispatch]);
+  };
+}
 
+export function useRouteDispatch(ref: TabRef | string, options: RouteDispatchOptions = {}) {
+  const { onNavigate, pinnedSlot = false, siblings } = options;
+  const ctxNav = useOptionalPageNavigation();
+  const dispatch = useMemo(
+    () => routeDispatch(ref, ctxNav, { onNavigate, pinnedSlot, siblings }),
+    [ref, ctxNav, onNavigate, pinnedSlot, siblings],
+  );
+  const handlers = useMemo(() => routeHandlers(dispatch), [dispatch]);
   return { dispatch, handlers };
 }
 

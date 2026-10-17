@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
-import type { Thread, FileStatus } from "../../api.js";
+import type { FileStatus } from "../../api.js";
 
 export interface ContextMenuTarget {
   path: string;

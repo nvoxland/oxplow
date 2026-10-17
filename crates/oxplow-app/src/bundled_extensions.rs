@@ -46,15 +46,18 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-foundation", "icons/codex.svg"),
             ext_file!("oxplow-foundation", "icons/opencode.svg"),
             ext_file!("oxplow-foundation", "lenses/catalog.yaml"),
+            ext_file!("oxplow-foundation", "lenses/closed-threads.yaml"),
             ext_file!("oxplow-foundation", "lenses/effort-files.yaml"),
             ext_file!("oxplow-foundation", "lenses/effort-summary.yaml"),
             ext_file!("oxplow-foundation", "lenses/file-history.yaml"),
             ext_file!("oxplow-foundation", "lenses/hand-off.yaml"),
             ext_file!("oxplow-foundation", "lenses/handoff-items.yaml"),
             ext_file!("oxplow-foundation", "lenses/handoff-recipients.yaml"),
+            ext_file!("oxplow-foundation", "lenses/problems.yaml"),
             ext_file!("oxplow-foundation", "lenses/recent-commits.yaml"),
             ext_file!("oxplow-foundation", "lenses/session-transcript.yaml"),
             ext_file!("oxplow-foundation", "lenses/snapshots.yaml"),
+            ext_file!("oxplow-foundation", "lenses/symbols.yaml"),
             ext_file!("oxplow-foundation", "lenses/thread-handoffs-in.yaml"),
             ext_file!("oxplow-foundation", "lenses/thread-handoffs-out.yaml"),
             ext_file!("oxplow-foundation", "lenses/thread-notes.yaml"),
@@ -2270,6 +2273,168 @@ mod tests {
             columns.lines().next().unwrap().starts_with("id INTEGER"),
             "{columns}"
         );
+    }
+
+    /// The pages the foundation shows as lenses are declared in its
+    /// manifest and their lenses exist.
+    #[tokio::test]
+    async fn the_foundation_declares_its_lens_pages() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let foundation = f
+            .svc
+            .extension_catalog
+            .named(f._dir.path(), "oxplow-foundation")
+            .expect("the foundation loads");
+        let pages: Vec<(&str, &str)> = foundation
+            .pages
+            .iter()
+            .map(|p| (p.id.as_str(), p.lens.as_str()))
+            .collect();
+        for (page, lens) in [
+            ("problems", "oxplow-foundation/problems"),
+            ("symbols", "oxplow-foundation/symbols"),
+            ("closed-threads", "oxplow-foundation/closed-threads"),
+        ] {
+            assert!(pages.contains(&(page, lens)), "{page}: {pages:?}");
+        }
+    }
+
+    fn texts(rows: &serde_json::Value, i: usize) -> Vec<String> {
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r[i].as_str().unwrap_or_default().to_string())
+            .collect()
+    }
+
+    /// Problems lists the stream's diagnostics by file, files with errors
+    /// first, the severest first inside a file; a severity keeps only its own.
+    #[tokio::test]
+    async fn the_problems_lens_groups_diagnostics_by_file() {
+        use oxplow_db::SqlCell::{Int, Text};
+        let f = crate::test_fixtures::services_with_effort().await;
+        let d = |severity: &str, message: &str, line: i64| oxplow_db::DiagnosticRow {
+            severity: severity.into(),
+            message: message.into(),
+            line,
+            col: 1,
+            ..Default::default()
+        };
+        let put = |path: &str, rows| {
+            f.svc
+                .diagnostic_store
+                .replace_file(1, "rust".into(), path.into(), rows)
+        };
+        put("a.rs", vec![d("warning", "unused", 3)]).await.unwrap();
+        put(
+            "b.rs",
+            vec![d("warning", "late", 9), d("error", "broken", 20)],
+        )
+        .await
+        .unwrap();
+        let fixture = &f;
+        let run = |severity: &'static str| async move {
+            run_bundled_lens_with(
+                fixture,
+                "oxplow-foundation/problems",
+                &[("stream_id", Int(1)), ("severity", Text(severity.into()))],
+            )
+            .await
+        };
+        let all = run("all").await;
+        assert_eq!(texts(&all, 0), ["b.rs", "b.rs", "a.rs"]);
+        assert_eq!(texts(&all, 2), ["broken", "late", "unused"]);
+        let errors = run("error").await;
+        assert_eq!(texts(&errors, 2), ["broken"]);
+    }
+
+    /// Symbols nests each under its container, under its file; a filter
+    /// keeps the names that contain it, a path one file.
+    #[tokio::test]
+    async fn the_symbols_lens_nests_symbols_under_their_container_and_file() {
+        use oxplow_db::SqlCell::{Int, Text};
+        let f = crate::test_fixtures::services_with_effort().await;
+        let sym = |id: &str, name: &str, kind: &str, container: Option<&str>, line: i64| {
+            oxplow_db::SymbolRow {
+                id: id.into(),
+                name: name.into(),
+                kind: kind.into(),
+                container: container.map(str::to_string),
+                signature: None,
+                line,
+                col: 1,
+                start_line: line,
+                start_col: 1,
+                end_line: line + 1,
+                end_col: 1,
+            }
+        };
+        f.svc
+            .symbol_store
+            .record(
+                1,
+                1,
+                vec![oxplow_db::FileSymbols {
+                    path: "w.py".into(),
+                    language: "python".into(),
+                    rows: Some(vec![
+                        sym("Widget", "Widget", "class", None, 1),
+                        sym("Widget::spin", "spin", "method", Some("Widget"), 2),
+                    ]),
+                }],
+                oxplow_db::SymbolCapture::default(),
+            )
+            .await
+            .unwrap();
+        let fixture = &f;
+        let run = |path: &'static str, filter: &'static str| async move {
+            run_bundled_lens_with(
+                fixture,
+                "oxplow-foundation/symbols",
+                &[
+                    ("stream_id", Int(1)),
+                    ("path", Text(path.into())),
+                    ("filter", Text(filter.into())),
+                ],
+            )
+            .await
+        };
+        let all = run("", "").await;
+        assert_eq!(texts(&all, 2), ["w.py", "class Widget", "method spin"]);
+        // `Widget` is the method's parent; the file is the class's.
+        assert_eq!(texts(&all, 1)[2], texts(&all, 0)[1]);
+        assert_eq!(texts(&all, 1)[1], "file:w.py");
+        let found = run("", "spi").await;
+        assert_eq!(texts(&found, 2), ["w.py", "method spin"]);
+        let outline = run("w.py", "").await;
+        assert_eq!(texts(&outline, 2), ["class Widget", "method spin"]);
+    }
+
+    /// Closed threads lists only closed ones, with the work they finished.
+    #[tokio::test]
+    async fn the_closed_threads_lens_lists_closed_threads_with_their_work() {
+        use oxplow_db::SqlCell::Int;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let thread =
+            crate::test_fixtures::new_thread(&f.svc, oxplow_domain::StreamId::new(1), "Old").await;
+        crate::test_fixtures::new_thread(&f.svc, oxplow_domain::StreamId::new(1), "Live").await;
+        f.svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                crate::commands::thread::CLOSE,
+                serde_json::json!({ "thread": oxplow_domain::refs::build::thread_ref(thread.id) }),
+                false,
+            )
+            .await
+            .unwrap();
+        let rows = run_bundled_lens_with(
+            &f,
+            "oxplow-foundation/closed-threads",
+            &[("stream_id", Int(1))],
+        )
+        .await;
+        assert_eq!(texts(&rows, 1), ["Old"]);
     }
 
     /// Finished items come newest first by when they closed, even within

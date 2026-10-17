@@ -478,7 +478,6 @@ pub const MANIFEST: &[Capability] = &[
         "set_agents",
         "which agents a thread can run is a person's choice",
     ),
-    model("list_closed_threads", &["v_thread"]),
     ui(
         "get_thread_state",
         "the person's selected and active thread; an agent reads threads in `v_thread` and has no selection",

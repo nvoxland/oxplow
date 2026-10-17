@@ -9,7 +9,7 @@
 ///   muted one that kept firing at the agent), each with Dismiss;
 /// - From extensions — panel badges that fire, each opening its lens.
 
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties } from "react";
 import { useState } from "react";
 
 import { useAlerts } from "../components/Alerts/useAlerts.js";
@@ -20,6 +20,7 @@ import { getOpErrorsStore, recordOpError } from "../components/opErrorsStore.js"
 import { ProposalCard } from "../components/Proposals/ProposalCard.js";
 import { dismissHint } from "../hints.js";
 import { decide } from "../proposals.js";
+import { Section } from "../kit/index.js";
 import { Page } from "../tabs/Page.js";
 import { lensRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -74,12 +75,10 @@ export function AlertsPage({ onOpenPage }: { onOpenPage(ref: TabRef): void }) {
           <Section
             title="Problems"
             testId="alerts-problems"
-            action={
-              opErrors.length > 0 ? (
-                <button type="button" data-testid="alerts-clear-ops" onClick={() => store.clear()} title="Clear every failed operation">
-                  Clear failed operations
-                </button>
-              ) : null
+            actions={
+              opErrors.length > 0
+                ? [{ id: "clear-ops", label: "Clear failed operations", title: "Clear every failed operation", run: () => store.clear() }]
+                : undefined
             }
           >
             {opErrors.map((e) => {
@@ -139,19 +138,6 @@ export function AlertsPage({ onOpenPage }: { onOpenPage(ref: TabRef): void }) {
         ) : null}
       </div>
     </Page>
-  );
-}
-
-function Section({ title, testId, action, children }: { title: string; testId: string; action?: ReactNode; children: ReactNode }) {
-  return (
-    <section data-testid={testId} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <h3 style={{ margin: 0, fontSize: "var(--text-sm)" }}>{title}</h3>
-        <span style={{ flex: 1 }} />
-        {action}
-      </div>
-      {children}
-    </section>
   );
 }
 

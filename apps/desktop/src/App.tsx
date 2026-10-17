@@ -1,6 +1,6 @@
 import { useRefKindsLoader } from "./refKinds.js";
 import { useOpenHandoffs } from "./handoffs.js";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
   closeThread,
@@ -12,7 +12,6 @@ import {
   startAgentSession,
   stopAgentSession,
   getThreadState,
-  getConfig,
   createWorkspaceDirectory,
   type AgentStatus,
   type AgentStatusEntry,
@@ -71,7 +70,6 @@ import {
   setLoadedFileContent,
   setOpenFileLoading,
   updateFileDraft,
-  type FileSessionState,
 } from "./editor-session.js";
 import { buildMenuBar, buildNativeMenuSnapshots, menuItemById, OPEN_RECENT_PREFIX } from "./menuBar.js";
 import { externalFileSyncAction } from "./external-file-sync.js";
@@ -137,10 +135,7 @@ import { getPageDetailStore } from "./tabs/openPageDetail.js";
 import { ExploreDataPage } from "./pages/ExploreDataPage.js";
 import { CatalogPage } from "./pages/CatalogPage.js";
 import { BoardPage } from "./pages/BoardPage.js";
-import { ProblemsPage } from "./pages/ProblemsPage.js";
 import { ExtensionPageView } from "./pages/ExtensionPageView.js";
-import { SymbolsPage } from "./pages/SymbolsPage.js";
-import { ClosedThreadsPage } from "./pages/ClosedThreadsPage.js";
 import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
 import { WorkItemPage } from "./pages/WorkItemPage.js";
 import { WikiPage } from "./pages/WikiPage.js";
@@ -156,12 +151,11 @@ import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { agentSessionRef, computeDiffId, diskFilePath, lensRef, pageKindOf, refFromTabId, closedThreadsRef, commentsRef, dashboardsRef, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newSessionRef, newStreamRef, newTaskRef, alertsRef, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, type DiffViewPayload } from "./tabs/pageRefs.js";
+import { agentSessionRef, computeDiffId, diskFilePath, lensRef, pageKindOf, refFromTabId, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, indexRef, newSessionRef, newStreamRef, newTaskRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, type DiffViewPayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
 import { installContextMenuSuppressor } from "./context-menu.js";
-import { TerminalPane } from "./components/TerminalPane.js";
 import { FilePage } from "./pages/FilePage.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
 import { computePagesDirectory } from "./components/RailHud/sections.js";
@@ -177,7 +171,7 @@ import {
   writePersistedCenterActive,
   writePersistedFileSessionPaths,
 } from "./tabs/pageTabsPersistence.js";
-import { forgetPage, generatedPaths, recordPageVisit, recordUserInterrupt, reportTabs, resolveSymbol } from "./api.js";
+import { generatedPaths, recordPageVisit, reportTabs, resolveSymbol } from "./api.js";
 import { openProject, createProject, listRecentProjects, shellAvailable } from "./api.js";
 import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
 import type { CommandOutcome, RecentProjectView } from "./tauri-bridge/generated/bindings.js";
@@ -3042,21 +3036,6 @@ export function App() {
           render: () => <DashboardsIndexPage onOpenPage={nav.navOpen} />,
         };
       },
-      problems: (ref, nav) => ({
-        id: ref.id,
-        label: "Problems",
-        closable: true,
-        render: () => (stream ? <ProblemsPage streamId={stream.id} onOpenPage={nav.navOpen} /> : null),
-      }),
-      symbols: (ref, nav) => {
-        const path = (ref.payload as { path?: string | null } | null)?.path ?? null;
-        return {
-          id: ref.id,
-          label: path ? `Symbols — ${path.split("/").pop()}` : "Symbols",
-          closable: true,
-          render: () => (stream ? <SymbolsPage streamId={stream.id} path={path} onOpenPage={nav.navOpen} /> : null),
-        };
-      },
       // A symbol opens its file at its line (openSymbol); it's never a tab.
       symbol: () => null,
       board: (ref, nav) => ({
@@ -3117,14 +3096,6 @@ export function App() {
       "tasks": workPage,
       "done-work": workPage,
       "backlog": workPage,
-      "closed-threads": (ref, nav) => {
-        return {
-          id: ref.id,
-          label: "Closed Threads",
-          closable: true,
-          render: () => <ClosedThreadsPage stream={stream} />,
-        };
-      },
       "external-url": (ref, nav) => {
         const externalUrl = (ref.payload as { url?: string } | null)?.url ?? "";
         let label = externalUrl;

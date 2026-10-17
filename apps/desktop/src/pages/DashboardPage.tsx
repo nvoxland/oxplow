@@ -7,6 +7,7 @@ import { readFailed } from "../logger.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { refFromTabId } from "../tabs/pageRefs.js";
+import { Section } from "../kit/index.js";
 import { PageKindIcon } from "../pageKinds.js";
 import { removeBookmark, setBookmark, useBookmarks, type Bookmark, type BookmarkScope } from "../tabs/bookmarks.js";
 import { recordOpError } from "../components/opErrorsStore.js";
@@ -31,26 +32,6 @@ export function DashboardPage({ stream, threadId = null, onOpenPage }: Dashboard
         <VisitsSections stream={stream} threadId={threadId} onOpenPage={onOpenPage} />
       </div>
     </Page>
-  );
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section>
-      <h2
-        style={{
-          fontSize: 11,
-          fontWeight: 600,
-          color: "var(--text-secondary)",
-          textTransform: "uppercase",
-          letterSpacing: 0.4,
-          margin: "0 0 8px",
-        }}
-      >
-        {title}
-      </h2>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>{children}</div>
-    </section>
   );
 }
 

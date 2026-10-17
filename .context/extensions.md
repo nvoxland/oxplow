@@ -598,6 +598,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     checked at load in `parse_pages`: a kebab-case, unique id, a launcher
     category, a lens that exists), listed in the launcher under its
     category (`components/extensionLauncher.ts`).
+    The foundation uses them for pages oxplow once drew in React: Problems,
+    Symbols and Closed Threads (`page:oxplow-foundation/<id>`).
   - **Panels** (P6.G1, target §11.3): `panels: [{ id, title, icon?,
     scope: project | stream | thread, body, badge?, open?, collapsed?,
     count? }]` put a lens in the

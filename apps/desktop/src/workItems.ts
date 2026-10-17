@@ -13,7 +13,6 @@ import { threadIdOf, threadRowId } from "./modelIds.js";
 import { workItemRef } from "./refs/ref.js";
 import { personCommands } from "./personCommands.js";
 import type { CommandOutcome, FieldDecl, Reads, SqlQueryResult, WorkItemsFeatures } from "./tauri-bridge/generated/bindings.js";
-import { commands } from "./tauri-bridge/index.js";
 
 /** The state every provider maps to. */
 export type CanonicalState = "todo" | "in_progress" | "blocked" | "done" | "canceled";

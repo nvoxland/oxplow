@@ -3,6 +3,7 @@ import { pageRef, refOf } from "../refs/ref.js";
 import { SEARCH_TRIGGER_TESTID } from "./TitleBar.js";
 import type { CSSProperties } from "react";
 import { useRefKinds } from "../refKinds.js";
+import { useListNav } from "../kit/index.js";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useExtensions } from "../extensionsStore.js";
 import {
@@ -119,6 +120,11 @@ function persistRecentCollapsed(collapsed: boolean): void {
   }
 }
 
+/** A row's id and aria state from the list contract. Not its hover: the
+ *  launcher scrolls the cursor's row into view, so a cursor that follows
+ *  the pointer would fight the wheel. */
+const rowA11y = ({ onMouseEnter: _hover, ...rest }: ReturnType<ReturnType<typeof useListNav>["optionProps"]>) => rest;
+
 export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pages: staticPages, offers, onClose, onOpenFile, onOpenPage, onOpenSearchHit }: Props) {
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<WorkspaceIndexedFile[]>([]);
@@ -129,7 +135,6 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
   const [recentEntries, setRecentEntries] = useState<LauncherPageEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedIndex, setSelectedIndex] = useState(0);
   const [expandedCategories, setExpandedCategories] = useState<Set<PageCategory>>(loadExpandedCategories);
   const [recentCollapsed, setRecentCollapsed] = useState<boolean>(loadRecentCollapsed);
   const [panelCoords, setPanelCoords] = useState<CSSProperties>(centeredFallbackCoords);
@@ -200,7 +205,6 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
   useEffect(() => {
     if (!open) return;
     setQuery("");
-    setSelectedIndex(0);
   }, [open]);
   // Its input has the focus whenever it shows: it renders only once there
   // is a stream, which on a fresh window can be just after it opened.
@@ -345,10 +349,23 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
     [launcherMode, recentEntries, pages, expandedSections, results],
   );
 
+  // The one list contract: ↑/↓/Enter/Escape (kit `useListNav`), a cursor
+  // that stays on a row as the list shortens. Tab / Home / End are the
+  // launcher's own, below.
+  const nav = useListNav({
+    count: rows.length,
+    onPick: (i) => {
+      const row = rows[i];
+      if (row) confirm(row);
+    },
+    onEscape: onClose,
+    id: "quick-open",
+  });
+  const { cursor: selectedIndex, setCursor: setSelectedIndex } = nav;
+  // A fresh query each time it opens starts at the first row.
   useEffect(() => {
-    if (selectedIndex < rows.length) return;
-    setSelectedIndex(rows.length === 0 ? 0 : rows.length - 1);
-  }, [rows, selectedIndex]);
+    if (open) setSelectedIndex(0);
+  }, [open, setSelectedIndex]);
 
   // Keep the keyboard cursor visible: scroll the active row into the
   // results viewport when it moves (it can otherwise sit off-screen in
@@ -409,43 +426,21 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
             setQuery(event.target.value);
             setSelectedIndex(0);
           }}
+          {...nav.inputProps}
           onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              onClose();
-              return;
-            }
-            if (event.key === "ArrowDown") {
-              event.preventDefault();
-              setSelectedIndex((current) => Math.min(current + 1, Math.max(rows.length - 1, 0)));
-              return;
-            }
-            if (event.key === "ArrowUp") {
-              event.preventDefault();
-              setSelectedIndex((current) => Math.max(current - 1, 0));
-              return;
-            }
             if (event.key === "Tab") {
               // Section jump: launcher mode hops header-to-header, search
               // mode hops between result groups (page→command→file→hit).
               event.preventDefault();
-              setSelectedIndex((current) => nextSectionIndex(rows, current, event.shiftKey ? -1 : 1));
-              return;
-            }
-            if (event.key === "Home") {
+              setSelectedIndex(nextSectionIndex(rows, selectedIndex, event.shiftKey ? -1 : 1));
+            } else if (event.key === "Home") {
               event.preventDefault();
               setSelectedIndex(0);
-              return;
-            }
-            if (event.key === "End") {
+            } else if (event.key === "End") {
               event.preventDefault();
               setSelectedIndex(Math.max(rows.length - 1, 0));
-              return;
-            }
-            if (event.key === "Enter") {
-              event.preventDefault();
-              const selected = rows[selectedIndex];
-              if (selected) confirm(selected);
+            } else {
+              nav.inputProps.onKeyDown?.(event);
             }
           }}
           placeholder="Search everything — pages, files, commands, content…"
@@ -471,6 +466,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                     key={`category:${result.category}`}
                     data-testid={`launcher-category-${result.category}`}
                     data-row-index={index}
+                    {...rowA11y(nav.optionProps(index))}
                     onClick={() => confirm(result)}
                     style={{
                       ...categoryRowStyle,
@@ -493,6 +489,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                     key={pageRef(result.entry.id)}
                     data-testid={`launcher-page-${result.entry.id}`}
                     data-row-index={index}
+                    {...rowA11y(nav.optionProps(index))}
                     onClick={() => confirm(result)}
                     style={{
                       ...resultStyle,
@@ -519,6 +516,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                     key={refOf("command", result.entry.id)}
                     data-testid={`launcher-command-${result.entry.id}`}
                     data-row-index={index}
+                    {...rowA11y(nav.optionProps(index))}
                     onClick={() => confirm(result)}
                     style={{
                       ...resultStyle,
@@ -546,6 +544,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                     key={`hit:${result.hit.ref}:${result.hit.stream_id ?? ""}`}
                     data-testid={`launcher-hit-${result.hit.ref}`}
                     data-row-index={index}
+                    {...rowA11y(nav.optionProps(index))}
                     onClick={() => confirm(result)}
                     style={{
                       ...resultStyle,
@@ -571,6 +570,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                     key="ask"
                     data-testid="launcher-ask"
                     data-row-index={index}
+                    {...rowA11y(nav.optionProps(index))}
                     onClick={() => confirm(result)}
                     title="Put this in the agent's input (it isn't sent)"
                     style={{
@@ -592,6 +592,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                 <button type="button"
                   key={refOf("file", result.file.path)}
                   data-row-index={index}
+                    {...rowA11y(nav.optionProps(index))}
                   onClick={() => confirm(result)}
                   style={{
                     ...resultStyle,

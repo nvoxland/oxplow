@@ -57,7 +57,6 @@ describe("pageKindIconComponent", () => {
       "hook-events",
       "new-stream",
       "new-task",
-      "closed-threads",
       "diff-view",
     ];
     for (const k of supported) {
@@ -88,7 +87,6 @@ describe("pageKindLabel", () => {
     expect(pageKindLabel("local-history")).toBe("local history");
     expect(pageKindLabel("uncommitted-changes")).toBe("uncommitted");
     expect(pageKindLabel("new-task")).toBe("new item");
-    expect(pageKindLabel("closed-threads")).toBe("threads");
   });
 
   test("passes plain kinds through unchanged", () => {

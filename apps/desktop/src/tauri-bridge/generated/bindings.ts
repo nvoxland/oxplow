@@ -111,11 +111,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listClosedThreads: (streamId: StreamId) => typedError<Thread[], IpcError>(__TAURI_INVOKE("list_closed_threads", { streamId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	selectThread: (req: SelectThreadRequest) => typedError<null, IpcError>(__TAURI_INVOKE("select_thread", { req })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the

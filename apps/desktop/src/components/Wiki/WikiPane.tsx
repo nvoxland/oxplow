@@ -13,6 +13,7 @@ import {
   type WikiPageSummary,
   NO_KNOWLEDGE_STORE,
 } from "../../knowledge.js";
+import { Section } from "../../kit/index.js";
 import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
 import { personCommands } from "../../personCommands.js";
 import type { Reads } from "../../tauri-bridge/generated/bindings.js";
@@ -20,6 +21,7 @@ import { logUi } from "../../logger.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
 import { formatContextMention } from "../../agent-context-ref.js";
+import { formatRelative } from "../format.js";
 import { ContextMenu } from "../ContextMenu.js";
 import { useRouteDispatch } from "../../tabs/RouteLink.js";
 import { wikiPageRef } from "../../tabs/pageRefs.js";
@@ -325,7 +327,7 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
         ) : (
           <>
             {visited.length > 0 && (
-              <Section
+              <NoteSection
                 title="Recently visited"
                 count={visited.length}
                 showAll={showAllVisited}
@@ -348,7 +350,7 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
               />
             )}
             {modified.length > 0 && (
-              <Section
+              <NoteSection
                 title={visited.length > 0 ? "Recently modified" : "Wiki pages"}
                 count={modified.length}
                 showAll={showAllModified}
@@ -392,7 +394,10 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
   );
 }
 
-function Section({
+/** A titled list of wiki pages: the kit section with its count in the
+ *  title and a Show all / Show less action once it is longer than the
+ *  initial limit. */
+function NoteSection({
   title,
   count,
   showAll,
@@ -405,32 +410,17 @@ function Section({
   onToggleShowAll: () => void;
   rows: React.ReactNode[];
 }) {
-  const showToggle = count > SECTION_INITIAL_LIMIT;
   return (
-    <div>
-      <div style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: "6px 10px 2px",
-        fontSize: 11,
-        textTransform: "uppercase",
-        letterSpacing: 0.5,
-        opacity: 0.6,
-      }}>
-        <span>{title} ({count})</span>
-        {showToggle && (
-          <button
-            type="button"
-            onClick={onToggleShowAll}
-            style={{ background: "none", border: "none", color: "inherit", fontSize: 11, cursor: "pointer", padding: 0 }}
-          >
-            {showAll ? "show less" : "show all"}
-          </button>
-        )}
-      </div>
+    <Section
+      title={`${title} (${count})`}
+      actions={
+        count > SECTION_INITIAL_LIMIT
+          ? [{ id: "toggle-all", label: showAll ? "Show less" : "Show all", run: onToggleShowAll }]
+          : undefined
+      }
+    >
       {rows}
-    </div>
+    </Section>
   );
 }
 
@@ -609,22 +599,6 @@ function NoteRow({
       >⋯</button>
     </div>
   );
-}
-
-function formatRelative(iso: string): string {
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return "";
-  const diff = Date.now() - t;
-  if (diff < 60_000) return "just now";
-  const min = Math.floor(diff / 60_000);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const d = Math.floor(hr / 24);
-  if (d < 7) return `${d}d ago`;
-  if (d < 30) return `${Math.floor(d / 7)}w ago`;
-  if (d < 365) return `${Math.floor(d / 30)}mo ago`;
-  return `${Math.floor(d / 365)}y ago`;
 }
 
 /** Allow only the `<mark>…</mark>` tags FTS5 wraps around matches; HTML-escape everything else. */

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { deleteWikiPage, writeWikiPage } from "../../api.js";
 import { readWikiPage, type WikiPageSummary } from "../../knowledge.js";
 import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";

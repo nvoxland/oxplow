@@ -4,6 +4,7 @@ import { setThreadPrompt, type Thread } from "../api.js";
 import { sessionLabel } from "../agentKinds.js";
 import { useAgentHarnesses } from "../useAgentHarnesses.js";
 import { useThreadSessions } from "../agentSessions.js";
+import { Section } from "../kit/index.js";
 import { Page } from "../tabs/Page.js";
 import { normalizePromptForSave } from "./StreamSettingsPage.js";
 
@@ -109,26 +110,6 @@ export function ThreadSettingsPage({ streamId, thread, onClose, onSaved }: Threa
         )}
       </div>
     </Page>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section style={{ marginBottom: 28 }}>
-      <h2
-        style={{
-          fontSize: 11,
-          fontWeight: 600,
-          color: "var(--text-secondary)",
-          textTransform: "uppercase",
-          letterSpacing: 0.4,
-          margin: "0 0 6px",
-        }}
-      >
-        {title}
-      </h2>
-      {children}
-    </section>
   );
 }
 

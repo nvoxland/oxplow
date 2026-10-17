@@ -177,8 +177,7 @@ export type IndexKind =
   | "dashboards"
   | "explore-data"
   | "catalog"
-  | "board"
-  | "problems";
+  | "board";
 
 export function indexRef(kind: IndexKind): TabRef {
   return route(kind);
@@ -267,11 +266,6 @@ function extPageOf(head: string): { extension: string; page: string } | null {
  *  `@snap:`/`@git:`): opening it opens its file at the symbol (`openSymbol`). */
 export function symbolRef(ref: string): TabRef {
   return { id: ref, kind: "symbol", payload: { ref } };
-}
-
-/** The Symbols page: one file's outline, or (no `path`) the project's. */
-export function symbolsRef(path: string | null = null): TabRef {
-  return path ? route("symbols", { path }, { path }) : route("symbols", { path: null });
 }
 
 export function wikiFreshnessRef(slug: string): TabRef {
@@ -429,10 +423,6 @@ export function threadSettingsRef(threadId: string): TabRef {
   return route("thread-settings", { threadId }, { thread: threadId });
 }
 
-export function closedThreadsRef(): TabRef {
-  return route("closed-threads");
-}
-
 /** Async-op error detail page. Scoped to the error id so each failure
  *  gets its own tab; closing it discards the view, not the store entry. */
 /** The Alerts page: everything that needs the person. */
@@ -483,13 +473,10 @@ const ROUTES: Record<RoutePageKind, (params: URLSearchParams) => TabRef | null> 
   "explore-data": () => indexRef("explore-data"),
   catalog: () => indexRef("catalog"),
   board: () => indexRef("board"),
-  problems: () => indexRef("problems"),
-  symbols: (p) => symbolsRef(p.get("path")),
   "git-dashboard": () => gitDashboardRef(),
   "uncommitted-changes": () => uncommittedChangesRef(),
   "new-stream": () => newStreamRef(),
   "new-task": () => newTaskRef(),
-  "closed-threads": () => closedThreadsRef(),
   diff: (p) => {
     const path = p.get("path");
     const left = parseRevision(p.get("left") ?? "");

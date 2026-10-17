@@ -1240,7 +1240,6 @@ const GUIDE_RIGHT = STREAM_RIGHT;
 const THREAD_RIGHT = 9;
 // The divider drawn along a thread tab's bottom, between stacked tabs.
 const THREAD_DIVIDER = 1;
-const STRIP_PADDING_Y = 6;
 const ROW_HEIGHT = 36;
 const GAP_HEIGHT = 14;
 // Height reserved (strip) and matched (overlay) for the per-stream

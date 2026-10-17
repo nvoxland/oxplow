@@ -49,6 +49,7 @@ import {
 } from "./dataSectionModel.js";
 import { collectorRowModel, COLLECTOR_RUNS } from "./extensionRowModel.js";
 import { DeliveryList } from "./DeliveryList.js";
+import { DataTable, type DataColumn } from "../kit/index.js";
 import { EnableAllButton } from "./ExtensionsSection.js";
 import { recordOpError } from "./opErrorsStore.js";
 import { showToast } from "./toastStore.js";
@@ -282,31 +283,12 @@ export function DataSection() {
           </button>
         ) : null}
       </div>
-      <table style={tableStyle}>
-        <thead>
-          <tr>
-            <th style={thStyle}>Entity</th>
-            <th style={thStyle}>From</th>
-            <th style={{ ...thStyle, textAlign: "right" }}>Rows</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.name} data-testid={`data-entity-${r.name}`} title={r.description}>
-              <td style={tdStyle}>
-                <code>{r.name}</code>
-              </td>
-              <td style={tdStyle}>{r.owner}</td>
-              <td
-                style={{ ...tdStyle, textAlign: "right", color: r.available ? undefined : "var(--text-secondary)" }}
-                title={r.rowsTitle}
-              >
-                {r.rows}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DataTable
+        columns={entityColumns}
+        rows={rows}
+        rowKey={(r) => r.name}
+        rowProps={(r) => ({ "data-testid": `data-entity-${r.name}`, title: r.description })}
+      />
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <h3 style={subheadStyle}>Collectors</h3>
         <span style={{ flex: 1 }} />
@@ -459,16 +441,6 @@ export function DataSection() {
 }
 
 const mutedStyle: CSSProperties = { fontSize: "var(--text-xs)", color: "var(--text-secondary)" };
-const tableStyle: CSSProperties = { width: "100%", borderCollapse: "collapse", fontSize: "var(--text-sm)" };
-const thStyle: CSSProperties = {
-  textAlign: "left",
-  fontWeight: 600,
-  fontSize: "var(--text-xs)",
-  color: "var(--text-secondary)",
-  padding: "4px 6px",
-  borderBottom: "1px solid var(--border-subtle)",
-};
-const tdStyle: CSSProperties = { padding: "3px 6px", borderBottom: "1px solid var(--border-subtle)" };
 const subheadStyle: CSSProperties = { fontSize: "var(--text-sm)", margin: "16px 0 4px" };
 const rowStyle: CSSProperties = { padding: "6px 0", borderBottom: "1px solid var(--border-subtle)", fontSize: "var(--text-sm)" };
 const errorStyle: CSSProperties = { fontSize: "var(--text-xs)", color: "var(--severity-critical)", marginTop: 4 };
@@ -640,3 +612,16 @@ function ProgramSource({ rowKey, program }: { rowKey: string; program: ProjectPr
     </div>
   );
 }
+
+/** The entities table: each model with its owner and row count. */
+const entityColumns: DataColumn<ReturnType<typeof entityRows>[number]>[] = [
+  { key: "entity", label: "Entity", render: (r) => <code>{r.name}</code> },
+  { key: "from", label: "From", render: (r) => r.owner },
+  {
+    key: "rows",
+    label: "Rows",
+    numeric: true,
+    render: (r) => <span style={r.available ? undefined : { color: "var(--text-secondary)" }}>{r.rows}</span>,
+    title: (r) => r.rowsTitle,
+  },
+];

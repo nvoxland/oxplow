@@ -1,3 +1,4 @@
+import { formatRelative } from "../format.js";
 import type { CSSProperties } from "react";
 import type { WorkItem, WorkList } from "../../workItems.js";
 
@@ -95,7 +96,7 @@ export function TaskDetailPane({
             {oldestBlocked.title}
           </div>
           <div style={{ color: "var(--muted)", fontSize: 11 }}>
-            {formatAge(oldestBlocked.updatedAt)} old
+            Changed {formatRelative(oldestBlocked.updatedAt)}
           </div>
         </div>
       ) : null}
@@ -108,7 +109,7 @@ export function TaskDetailPane({
                 ✓ {item.title}
               </div>
               <div style={{ color: "var(--muted)", fontSize: 11 }}>
-                {formatAge(item.closedAt ?? item.updatedAt)} ago
+                {formatRelative(item.closedAt ?? item.updatedAt)}
               </div>
             </div>
           ))}
@@ -129,14 +130,3 @@ function pickRecentlyClosed(done: WorkItem[], limit: number): WorkItem[] {
     .slice(0, limit);
 }
 
-function formatAge(iso: string | null): string {
-  if (!iso) return "—";
-  const ms = Date.now() - Date.parse(iso);
-  if (Number.isNaN(ms) || ms < 0) return iso;
-  const minutes = Math.floor(ms / 60_000);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  return `${days}d`;
-}

@@ -103,7 +103,7 @@ extension host lands.
 
 - **Agent & work:** `agent_session`, `new-session`, `work_item`, `tasks`, `done-work`, `backlog`,
   `archived`, `new-task`, `new-stream`, `stream-settings`,
-  `thread-settings`, `closed-threads`, `comments`, `hook-events`,
+  `thread-settings`, `comments`, `hook-events`,
   `alerts`
 - **Code & review:** `file`, `dir`, `files`, `diff`, `diff-view`,
   `uncommitted-changes`, `commit`, `git-history`, `git-dashboard`,
@@ -174,11 +174,11 @@ moved into the project DB and started fresh again) — see the decision in [refs
 | metric | `metric:<key>` | `metric:oxplow.coverage.abs_pct` |
 | lens | `lens:<extension>/<slug>[?param=value…]` (params sorted; `lensRef(id, params)`) | `lens:review/waiting-on-me`, `lens:oxplow-bundled/effort-tests?effort_id=12` |
 | ext-page | `page:<extension>/<page>` (`extPageRef`; the page contribution's ref) — an extension's `pages:` entry, its lens full-page (`ExtensionPageView` resolves the page from the stream's extensions, so a restored tab opens too, and titles the tab with the page's manifest `title` through `LensPage`'s `title`). Not a named route: `PageKind` includes `ExtensionPageKind`, and `refFromTabId` / `pageKindOf` recognise an extension's page by the slash in its id (a shell route has none). Params ride the id (`?ref=`) into the lens's `initialParams`: a ref of an extension's kind (`acme_pr:12`, P8.D7, extensions.md "Ref kinds") opens its kind's page this way | `page:github/open-prs`, `page:acme/pr?ref=acme_pr:12` |
-| symbols | `page:symbols[?path=<p>]` — one file's outline, or the project's symbols (filtered), from the tree-sitter index | `page:symbols?path=src/lib.rs` |
+| foundation lens pages | `page:oxplow-foundation/<id>` — Problems (`problems`), Symbols (`symbols`, `?path=` for one file's outline) and Closed Threads (`closed-threads`): lens pages the foundation declares under `pages:`, not core page kinds | `page:oxplow-foundation/symbols?path=src/lib.rs` |
 | symbol | `symbol:<path>/<id>` (`v_symbol.ref`, `symbolRef(ref)`) — no revision in the id; never a tab: opening one (`handleOpenPage`, or in-tab navigation) resolves it (`resolve_symbol`) and opens its file at the name's line (`openSymbol`). A pinned one (`@snap:<id>` / `@git:<sha>`) opens the file viewer at that revision; if the version is gone it shows a notice and opens the current symbol | `symbol:src/lib.rs/Widget::spin` |
 | agent_session | `agent_session:<ses id>` (`agentSessionRef(id)`, pinned) — an open agent session's terminal; its tab draws its harness's declared logo (`CenterTab.icon` from `HarnessListing.icon`, `AgentIcon`; the generic robot when it declares none) | `agent_session:ses3` |
 | new-session | `page:new-session` (`newSessionRef()`) — the session picker, a Document page (`DocumentLayout`): **Start a new session**, then **Earlier sessions**, and what extensions mount in `new-session.sections` (ids `start`, `earlier`; it binds `thread_id`). Earlier sessions is a kit toolbar and table (a filter and the thread's closed sessions and saved conversations, `list_earlier_sessions`; ↑/↓/Enter/Escape from the filter; a row reopens, resumes or shows its session by the action the backend chose — `terminal.md` "Earlier sessions") | `page:new-session` |
-| index routes | `page:<kind>` — `tasks`, `done-work`, `backlog`, `archived`, `wiki-index`, `files`, `comments`, `local-history(-full\|-by-commit-full)`, `git-history`, `git-dashboard`, `uncommitted-changes`, `hook-events`, `terminal`, `settings`, `metrics-recorded`, `dashboards`, `explore-data`, `catalog`, `board`, `problems`, `closed-threads`, `new-stream`, `new-task` | `page:tasks` |
+| index routes | `page:<kind>` — `tasks`, `done-work`, `backlog`, `archived`, `wiki-index`, `files`, `comments`, `local-history(-full\|-by-commit-full)`, `git-history`, `git-dashboard`, `uncommitted-changes`, `hook-events`, `terminal`, `settings`, `metrics-recorded`, `dashboards`, `explore-data`, `catalog`, `board`, `new-stream`, `new-task` | `page:tasks` |
 | diff | `page:diff?path=<p>&left=<ver>&right=<ver>[&label=<l>]` (versions `disk` / `ref:<x>` / `snap:<id>`; `diffRef(spec)` / `computeDiffId(spec)` — `revealLine` is not in the id, so re-clicking reuses the tab) | `page:diff?path=src/a.ts&left=ref:abc&right=disk` |
 | diff-view | `page:diff-view?snapshot=<N>` \| `?effort=<effortId>` \| `?start=<tok>&end=<tok>` (endpoint tokens `s<snapshotId>` / `c<sha>` / `w` / `none`) | `page:diff-view?effort=eff42` |
 | duplicate-block | `page:duplicate-block?left=<p>&left_lines=<a>-<b>&left_at=<ver>&right=…` | `page:duplicate-block?left=a.rs&left_lines=1-5&left_at=disk&right=b.rs&right_lines=9-13&right_at=ref:abc` |
@@ -252,6 +252,26 @@ stylesheet, `crates/oxplow-daemon/assets/oxplow-kit.css`, which the app
 imports (`main.tsx`) and custom components link, so a core page, a lens
 and a sandboxed component look alike. A page composes the kit; a new local
 section, table, filter list or "Loading…" line is a review finding.
+Settings, Stream and Thread settings, Alerts, Go To and the wiki page list
+draw their parts with the kit `Section` (no local copies): a page's action
+is a `PageAction` on its section (Alerts' "Clear failed operations" is
+`action-clear-ops`), and the Settings index scrolls to a section by its
+`data-section` id.
+Core tables are `DataTable` too (AI usage, Data entities, the Metrics list
+and a metric's recordings, a model's documented columns). A row built in a
+loop that opens a page takes its click from `routeDispatch(ref, ctxNav,
+options)` + `routeHandlers(dispatch)` (`tabs/RouteLink.tsx`, the same
+dispatch `useRouteDispatch` memoizes), not a hook per row.
+Every list driven by ↑/↓/Enter/Escape uses `useListNav` (usability.md
+"Keyboard"): the conversation picker, the dashboard's metric picker, the
+Plan keyboard value picker and the launcher. The launcher adds Tab (next
+section), Home and End to it and leaves out the pointer-moves-the-cursor
+part (it scrolls the cursor's row into view, which a hovering pointer would
+fight). The New Session page's earlier-sessions list is the one remaining
+copy.
+A time said as "how long ago" is `formatRelative` (`components/format.ts`;
+`formatRelativeSeconds` for a unix time): the launcher, the wiki list, a
+comment's time and the task panel use it, not their own copies.
 
 | Archetype | When | Core form | Extension form |
 |---|---|---|---|

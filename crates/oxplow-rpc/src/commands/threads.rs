@@ -28,13 +28,6 @@ pub async fn list_agent_harnesses(
     ))
 }
 
-pub async fn list_closed_threads(
-    svc: &Services,
-    stream_id: StreamId,
-) -> Result<Vec<Thread>, IpcError> {
-    Ok(svc.threads.list_closed(&stream_id).await?)
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct SelectThreadRequest {
     #[serde(rename = "streamId")]
@@ -56,7 +49,7 @@ pub async fn get_thread_state(
     stream_id: StreamId,
 ) -> Result<ThreadState, IpcError> {
     // The stream's open threads: a closed one is history, listed on the
-    // Closed Threads page (`list_closed_threads`), not in the nav.
+    // Closed Threads page, not in the nav.
     let threads: Vec<Thread> = svc
         .thread_store
         .list_for_stream(&stream_id)

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 
 import type { Stream } from "../api.js";
 import { QuickOpenOverlay } from "./QuickOpenOverlay.js";
@@ -75,7 +75,10 @@ test("something else taking focus doesn't cost the launcher its keystrokes", asy
   document.body.appendChild(other);
   other.focus();
   expect(document.activeElement).toBe(other);
-  await waitFor(() => expect(document.activeElement).toBe(input));
+  // It takes focus back on the next frame. Wait for that frame, not a
+  // poll: waitFor's interval stalled for seconds under the full suite.
+  await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+  expect(document.activeElement).toBe(input);
   other.remove();
 });
 
@@ -109,4 +112,40 @@ test("a closed launcher gives focus back to whatever has it", async () => {
   await new Promise((r) => setTimeout(r, 50));
   expect(document.activeElement).toBe(other);
   other.remove();
+});
+
+// The launcher follows the one list contract (useListNav): ↑/↓ move and stop
+// at the ends, Enter takes the row under the cursor, Escape closes, and the
+// input names the cursor's row.
+test("↑/↓ and Enter work from the input, and the input names the row under the cursor", () => {
+  const opened: string[] = [];
+  let closed = 0;
+  const view = render(
+    <QuickOpenOverlay
+      open
+      stream={stream}
+      threadId="thr1"
+      selectedFilePath={null}
+      pages={pages}
+      offers={[]}
+      onClose={() => closed++}
+      onOpenFile={() => {}}
+      onOpenPage={(ref) => opened.push(ref.id)}
+      onOpenSearchHit={() => {}}
+    />,
+  );
+  const input = view.getByPlaceholderText(/Search everything/);
+  // Enter on the collapsed section opens it; the page row appears.
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(view.getByTestId("launcher-page-tasks")).toBeTruthy();
+  fireEvent.keyDown(input, { key: "ArrowDown" });
+  fireEvent.keyDown(input, { key: "ArrowDown" });
+  const active = input.getAttribute("aria-activedescendant");
+  expect(document.getElementById(active!)?.getAttribute("data-testid")).toBe("launcher-page-tasks");
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(opened).toEqual(["tasks"]);
+  // Taking a page closes the launcher; so does Escape.
+  const afterPick = closed;
+  fireEvent.keyDown(input, { key: "Escape" });
+  expect(closed).toBe(afterPick + 1);
 });

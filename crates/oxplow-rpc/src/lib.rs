@@ -198,7 +198,6 @@ macro_rules! oxplow_command_table {
                 // threads
                 list_threads => $crate::commands::threads::list_threads { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::Thread>,
                 list_agent_harnesses => $crate::commands::threads::list_agent_harnesses {} -> Vec<::oxplow_app::harnesses::HarnessListing>,
-                list_closed_threads => $crate::commands::threads::list_closed_threads { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::Thread>,
                 get_thread_state => $crate::commands::threads::get_thread_state { stream_id: ::oxplow_domain::StreamId } -> $crate::commands::threads::ThreadState,
                 select_thread => $crate::commands::threads::select_thread { req: $crate::commands::threads::SelectThreadRequest } -> (),
                 // backlog

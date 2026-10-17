@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import { setStreamPrompt, type Stream } from "../api.js";
+import { Section } from "../kit/index.js";
 import { Page } from "../tabs/Page.js";
 
 export interface StreamSettingsPageProps {
@@ -99,26 +100,6 @@ export function StreamSettingsPage({ stream, onClose, onSaved }: StreamSettingsP
         )}
       </div>
     </Page>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section style={{ marginBottom: 28 }}>
-      <h2
-        style={{
-          fontSize: 11,
-          fontWeight: 600,
-          color: "var(--text-secondary)",
-          textTransform: "uppercase",
-          letterSpacing: 0.4,
-          margin: "0 0 6px",
-        }}
-      >
-        {title}
-      </h2>
-      {children}
-    </section>
   );
 }
 

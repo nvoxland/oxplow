@@ -40,7 +40,6 @@ import {
   type MetricSpec,
   type SeriesPoint,
 } from "./metricsSql.js";
-import { normalizeSnapshotId } from "./effort-snapshot.js";
 import { IpcCallError, ipcErrorCode, ipcErrorField, ipcErrorMessage } from "./ipc-error.js";
 import type {
   AiSettings,
@@ -1403,15 +1402,6 @@ export async function markThread(
 export async function closeThread(streamId: string, threadId: string): Promise<ThreadState> {
   await runCommand("oxplow.thread.close", { thread: threadRef(threadId) });
   return getThreadState(streamId);
-}
-
-export async function reopenThread(streamId: string, threadId: string): Promise<ThreadState> {
-  await runCommand("oxplow.thread.reopen", { thread: threadRef(threadId) });
-  return getThreadState(streamId);
-}
-
-export async function listClosedThreads(streamId: string): Promise<Thread[]> {
-  return unwrap(await commands.listClosedThreads(streamId));
 }
 
 export async function renameThread(_streamId: string, threadId: string, title: string): Promise<Thread> {
