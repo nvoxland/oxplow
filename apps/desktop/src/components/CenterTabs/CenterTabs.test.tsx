@@ -111,3 +111,21 @@ test("a session's tab closes on one click of its ×", () => {
   expect(closed).toEqual(["agent_session:ses7"]);
   expect(queryByTestId("center-tab-close-agent_session:ses7-confirm")).toBeNull();
 });
+
+// An agent session's tab shows its harness's logo, else the generic robot.
+test("an agent session's tab draws its harness's declared logo", () => {
+  const mark = "data:image/svg+xml;base64,PHN2Zy8+";
+  const tabs: CenterTab[] = [
+    { id: "agent_session:ses1", label: "Claude", closable: true, icon: mark, render: () => null },
+    { id: "agent_session:ses2", label: "Other", closable: true, render: () => null },
+    { id: "file:a.ts", label: "a.ts", closable: true, icon: mark, render: () => null },
+  ];
+  const { getByTestId } = render(
+    <CenterTabs tabs={tabs} activeId="file:a.ts" onActivate={() => {}} onClose={() => {}} onReorder={() => {}} />,
+  );
+  const within = (id: string) => getByTestId(`center-tab-${id}`).querySelector('[data-testid="agent-icon"]');
+  expect(within("agent_session:ses1")?.getAttribute("data-icon")).toBe("declared");
+  expect(within("agent_session:ses2")?.getAttribute("data-icon")).toBe("fallback");
+  // Only a session's tab: another kind keeps its own kind icon.
+  expect(within("file:a.ts")).toBeNull();
+});

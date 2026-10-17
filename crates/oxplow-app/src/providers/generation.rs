@@ -83,6 +83,7 @@ impl PreparedProviderGeneration {
                     .unwrap_or_default(),
                 fields: serde_json::to_value(&staged.instance.spec.fields).unwrap_or_default(),
                 id_pattern: staged.instance.spec.id_pattern.clone(),
+                icon: None,
                 config: serde_json::json!({}),
             })
             .collect()

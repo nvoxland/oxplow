@@ -3706,6 +3706,18 @@ implementations:
   `ai_provider` — every one declared is active); `id` is what
   `activeProviders` names, or a many-capability's key (an agent session's
   `harness`) — lowercase, never `none`.
+- **`icon:`** (any capability) is a path to an SVG inside the extension
+  (`icons/claude.svg`): the implementation's logo, shown wherever it is
+  (an agent harness's, on a session's tab). The checker (`load_icon`)
+  refuses a missing file, a path outside the extension or not ending
+  `.svg`, a file over 16 KB, one that doesn't start `<svg`, and one
+  carrying `<script`. The declaration keeps it as a `data:image/svg+xml;base64,…`
+  URI (`ImplementationDecl.icon`, `Implementation.icon`); the UI draws it
+  only as an image (the mask of an empty element, `AgentIcon`), never as
+  markup, so nothing in it runs. The foundation extension ships a
+  monochrome mark each for `claude`, `codex` and `opencode`
+  (`extensions/oxplow-foundation/icons/`); an external `agent_harness`
+  provider declares its own the same way.
 - `config:` configures the built-in, checked at load against its schema
   (`BuiltIn.config_schema`, `capability::check_config`; a built-in with
   none refuses any config); no built-in takes one now.

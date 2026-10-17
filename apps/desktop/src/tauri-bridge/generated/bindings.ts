@@ -3530,6 +3530,11 @@ export type HarnessListing = {
 	 *  `conversation_list`, …): what the UI offers for its sessions.
 	 */
 	features: string[],
+	/**
+	 *  Its logo, a `data:image/svg+xml;base64,…` URI the UI draws as an
+	 *  image (never as markup), when its declaration has an `icon:`.
+	 */
+	icon: string | null,
 };
 
 /**  A harness setting, as Settings → Agents shows it. */
@@ -3694,6 +3699,12 @@ export type ImplementationDecl = {
 	 *  else.
 	 */
 	needs: string[],
+	/**
+	 *  Its logo, as a `data:image/svg+xml;base64,…` URI for an `<img>`
+	 *  (never markup): the SVG `icon:` names inside the extension, checked
+	 *  by [`load_icon`].
+	 */
+	icon: string | null,
 };
 
 export type ImportDeclaration = {

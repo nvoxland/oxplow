@@ -1359,6 +1359,7 @@ impl Services {
                         .unwrap_or(serde_json::Value::Null),
                     fields: serde_json::Value::Array(Vec::new()),
                     id_pattern: None,
+                    icon: None,
                     config: serde_json::json!({}),
                 }],
                 vocabulary.clone(),

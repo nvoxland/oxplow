@@ -304,6 +304,8 @@ pub struct Implementation {
     pub fields: Value,
     /// What its items' own ids look like (a work list's), when it says.
     pub id_pattern: Option<String>,
+    /// Its logo as a data URI, when its declaration has an `icon:`.
+    pub icon: Option<String>,
     /// What its declaration configures (`config:`, checked against its
     /// built-in's schema): an ACP adapter's command, a provider's base URL.
     pub config: Value,
@@ -344,6 +346,7 @@ impl Implementation {
             fields: Value::Array(Vec::new()),
             // Nothing in text is none's: it keeps no items.
             id_pattern: None,
+            icon: None,
             config: Value::Object(Default::default()),
         }
     }
@@ -614,6 +617,7 @@ impl CapabilityRegistry {
                         features: built_in_features(b),
                         fields: built_in_fields(b),
                         id_pattern: b.id_pattern.map(str::to_string),
+                        icon: None,
                         config: Value::Object(Default::default()),
                     })
                 }),
@@ -1147,6 +1151,7 @@ pub fn declared_by(extensions: &[crate::extensions::Extension]) -> Vec<Implement
                     features: built_in_features(b),
                     fields: built_in_fields(b),
                     id_pattern: b.id_pattern.map(str::to_string),
+                    icon: d.icon.clone(),
                     config: d.config.clone(),
                 })
             })
@@ -1186,6 +1191,7 @@ fn scripted_implementation(
         features,
         fields: serde_json::Value::Array(Vec::new()),
         id_pattern: None,
+        icon: d.icon.clone(),
         config: d.config.clone(),
     }
 }
@@ -1330,6 +1336,7 @@ mod tests {
             features: Value::Null,
             fields: serde_json::Value::Array(Vec::new()),
             id_pattern: None,
+            icon: None,
             config: Value::Object(Default::default()),
         }
     }
@@ -1438,6 +1445,7 @@ mod tests {
             features: Value::Null,
             fields: serde_json::Value::Array(Vec::new()),
             id_pattern: None,
+            icon: None,
             config: Value::Object(Default::default()),
         };
         r.set_external(issues.clone(), true);
@@ -1767,6 +1775,7 @@ mod tests {
                 features: serde_json::json!({ "comments": false, "links": true, "ordering": true }),
                 fields: serde_json::Value::Array(Vec::new()),
                 id_pattern: None,
+                icon: None,
                 config: serde_json::json!({}),
             },
             true,
@@ -1802,6 +1811,7 @@ mod tests {
                 features: Value::Null,
                 fields: serde_json::Value::Array(Vec::new()),
                 id_pattern: None,
+                icon: None,
                 config: serde_json::json!({}),
             },
             true,

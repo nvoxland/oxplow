@@ -48,6 +48,9 @@ pub struct HarnessListing {
     /// The `agent_harness` features it declares (`resume`,
     /// `conversation_list`, …): what the UI offers for its sessions.
     pub features: Vec<String>,
+    /// Its logo, a `data:image/svg+xml;base64,…` URI the UI draws as an
+    /// image (never as markup), when its declaration has an `icon:`.
+    pub icon: Option<String>,
 }
 
 /// A harness setting, as Settings → Agents shows it.
@@ -100,6 +103,9 @@ pub fn listing(
                         .collect()
                 })
                 .unwrap_or_default(),
+            icon: capabilities
+                .get("agent_harness", h.id())
+                .and_then(|i| i.icon.clone()),
         })
         .collect()
 }
@@ -122,6 +128,7 @@ mod tests {
             features: serde_json::json!({}),
             fields: serde_json::json!([]),
             id_pattern: None,
+            icon: None,
             config: serde_json::json!({}),
         }
     }
@@ -149,6 +156,50 @@ mod tests {
         features.sort();
         assert_eq!(features, ["conversation_list", "resume"]);
         assert!(listing(&r, &no_capabilities(), &[])[0].features.is_empty());
+    }
+
+    /// A harness's declared logo rides its listing, as the data URI it
+    /// was declared as; one that declares none lists none.
+    #[test]
+    fn the_listing_carries_each_harnesss_logo() {
+        let r = HarnessRegistry::new(std::sync::Arc::new(String::new));
+        let claude = declared("agent_harness", "claude", "oxplow:claude-code");
+        let codex = declared("agent_harness", "codex", "oxplow:codex-cli");
+        register(&r, &[claude.clone(), codex.clone()]);
+        let capabilities = no_capabilities();
+        capabilities.set_declared(vec![
+            Implementation {
+                icon: Some("data:image/svg+xml;base64,PHN2Zy8+".into()),
+                ..claude
+            },
+            codex,
+        ]);
+        let listed = listing(&r, &capabilities, &[]);
+        let icon = |id: &str| listed.iter().find(|h| h.id == id).unwrap().icon.clone();
+        assert_eq!(
+            icon("claude").as_deref(),
+            Some("data:image/svg+xml;base64,PHN2Zy8+")
+        );
+        assert_eq!(icon("codex"), None);
+    }
+
+    /// The foundation extension ships a mark for each built-in agent, and
+    /// the running registry lists it.
+    #[tokio::test]
+    async fn the_built_in_agents_ship_a_logo() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let listed = listing(&fx.svc.harnesses, &fx.svc.capabilities, &[]);
+        for id in ["claude", "codex", "opencode"] {
+            let icon = listed
+                .iter()
+                .find(|h| h.id == id)
+                .and_then(|h| h.icon.clone())
+                .unwrap_or_else(|| panic!("{id} lists no logo"));
+            assert!(
+                icon.starts_with("data:image/svg+xml;base64,"),
+                "{id}: {icon}"
+            );
+        }
     }
 
     /// What's declared is registered under its key; what no longer is goes.

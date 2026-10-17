@@ -470,7 +470,10 @@ then the native name; if the second fails it says the alias was saved
 and the harness didn't take the name (`sessionRename.ts`). The new name
 returns through `thread/name/updated` into `native_title` like any other.
 The UI reads each
-harness's features from `list_agent_harnesses` (`HarnessListing.features`):
+harness's features from `list_agent_harnesses` (`HarnessListing.features`),
+and its logo (`HarnessListing.icon`: the SVG its `implementations:` entry
+names in `icon:`, as a data URI, null when it declares none — no harness id
+is named in the UI; "Implementations" in [extensions.md](./extensions.md)):
 
 | Harness (key) | Features |
 |---|---|

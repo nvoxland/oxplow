@@ -2665,6 +2665,14 @@
             "type": "string"
           },
           "default": []
+        },
+        "icon": {
+          "description": "A path to an SVG in the extension (`icons/claude.svg`): its logo,\nshown wherever the implementation is (a session's tab). Any\ncapability may declare one.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,

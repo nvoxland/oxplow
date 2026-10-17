@@ -43,6 +43,10 @@ pub struct ImplementationDecl {
     /// The scopes a policy script calls (`sql.read`); empty for anything
     /// else.
     pub needs: Vec<String>,
+    /// Its logo, as a `data:image/svg+xml;base64,…` URI for an `<img>`
+    /// (never markup): the SVG `icon:` names inside the extension, checked
+    /// by [`load_icon`].
+    pub icon: Option<String>,
     /// An AI provider or an effort policy written as a script: its text, when `entry` names a
     /// file of the extension rather than a built-in.
     #[serde(skip)]
@@ -69,6 +73,55 @@ pub(crate) struct ImplementationFile {
     /// can (`scope_calls::CALLABLE`).
     #[serde(default)]
     needs: Vec<String>,
+    /// A path to an SVG in the extension (`icons/claude.svg`): its logo,
+    /// shown wherever the implementation is (a session's tab). Any
+    /// capability may declare one.
+    #[serde(default)]
+    icon: Option<String>,
+}
+
+/// The largest icon file.
+const ICON_MAX_BYTES: usize = 16 * 1024;
+
+/// The SVG at `path` in the extension as a data URI. It is only ever
+/// drawn as an image, so a script in it would not run; one is refused all
+/// the same, as is anything but a small `.svg` inside the extension.
+fn load_icon(path: &str, read: &dyn Fn(&str) -> Option<String>) -> Result<String, String> {
+    if path.starts_with('/') || path.split('/').any(|p| p == "..") {
+        return Err(format!("icon `{path}` must be inside the extension"));
+    }
+    if !path.to_ascii_lowercase().ends_with(".svg") {
+        return Err(format!("icon `{path}` must be an `.svg` file"));
+    }
+    let Some(text) = read(path) else {
+        return Err(format!("icon `{path}` isn't in the extension"));
+    };
+    if text.len() > ICON_MAX_BYTES {
+        return Err(format!(
+            "icon `{path}` is too big ({} bytes; at most {ICON_MAX_BYTES})",
+            text.len()
+        ));
+    }
+    let body = text.trim_start();
+    let body = body
+        .strip_prefix("<?xml")
+        .and_then(|rest| rest.split_once("?>"))
+        .map_or(body, |(_, rest)| rest.trim_start());
+    if !body.starts_with("<svg") {
+        return Err(format!(
+            "icon `{path}` isn't an SVG (it must start with `<svg`)"
+        ));
+    }
+    if text.to_ascii_lowercase().contains("<script") {
+        return Err(format!(
+            "icon `{path}` carries a script; an icon is only a picture"
+        ));
+    }
+    use base64::Engine as _;
+    Ok(format!(
+        "data:image/svg+xml;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(text.as_bytes())
+    ))
 }
 
 /// Parse `implementations:`: the valid declarations, and what's wrong
@@ -159,8 +212,9 @@ fn decl_of(
             f.id
         ));
     }
+    let icon = f.icon.as_deref().map(|p| load_icon(p, read)).transpose()?;
     if !f.entry.starts_with("oxplow:") {
-        return script_decl(f, read);
+        return script_decl(f, read, icon);
     }
     if !f.needs.is_empty() {
         return Err(format!(
@@ -211,6 +265,7 @@ fn decl_of(
         skills: f.skills,
         config,
         needs: Vec::new(),
+        icon,
         script: None,
     })
 }
@@ -222,6 +277,7 @@ fn decl_of(
 fn script_decl(
     f: ImplementationFile,
     read: &dyn Fn(&str) -> Option<String>,
+    icon: Option<String>,
 ) -> Result<ImplementationDecl, String> {
     let script =
         |entry: &str| read(entry).ok_or_else(|| format!("entry `{entry}` isn't in the extension"));
@@ -294,6 +350,7 @@ fn script_decl(
         skills: f.skills,
         config,
         needs: f.needs,
+        icon,
         script: Some(script),
     })
 }
@@ -414,6 +471,73 @@ mod tests {
         }
     }
 
+    const MARK: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 8 8\"><path d=\"M0 0h8v8z\"/></svg>";
+
+    /// `icon:` is a path to an SVG inside the extension, whatever the
+    /// capability; the declaration holds it as a data URI, for an `<img>`.
+    #[test]
+    fn an_implementation_may_declare_an_icon() {
+        let read = |rel: &str| (rel == "icons/a.svg").then(|| MARK.to_string());
+        let (decls, errors) = parse_with(
+            "  - { capability: agent_harness, id: claude, entry: oxplow:claude-code, icon: icons/a.svg }\n",
+            &read,
+        );
+        assert_eq!(errors, Vec::<String>::new());
+        let uri = decls[0].icon.as_deref().unwrap();
+        let b64 = uri.strip_prefix("data:image/svg+xml;base64,").unwrap();
+        use base64::Engine as _;
+        assert_eq!(
+            String::from_utf8(
+                base64::engine::general_purpose::STANDARD
+                    .decode(b64)
+                    .unwrap()
+            )
+            .unwrap(),
+            MARK
+        );
+        // Without one, none.
+        let (decls, _) =
+            parse("  - { capability: agent_harness, id: claude, entry: oxplow:claude-code }\n");
+        assert_eq!(decls[0].icon, None);
+    }
+
+    /// The checker refuses an icon that isn't there, isn't an SVG, carries a
+    /// script or is too big, each at the entry's line.
+    #[test]
+    fn a_bad_icon_is_refused() {
+        let big = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\">{}</svg>",
+            " ".repeat(20_000)
+        );
+        let files: std::collections::HashMap<&str, String> = [
+            ("icons/ok.svg", MARK.to_string()),
+            ("icons/png.svg", "not an image".to_string()),
+            (
+                "icons/script.svg",
+                "<svg><script>alert(1)</script></svg>".to_string(),
+            ),
+            ("icons/big.svg", big),
+            ("icons/a.png", MARK.to_string()),
+        ]
+        .into();
+        let read = |rel: &str| files.get(rel).cloned();
+        for (icon, want) in [
+            ("icons/missing.svg", "isn't in the extension"),
+            ("icons/png.svg", "isn't an SVG"),
+            ("icons/script.svg", "script"),
+            ("icons/big.svg", "too big"),
+            ("icons/a.png", "must be an `.svg`"),
+            ("../escape.svg", "inside the extension"),
+        ] {
+            let (decls, errors) = parse_with(
+                &format!("  - {{ capability: agent_harness, id: claude, entry: oxplow:claude-code, icon: {icon} }}\n"),
+                &read,
+            );
+            assert!(decls.is_empty(), "{icon}");
+            assert!(errors.join("\n").contains(want), "{icon}: {errors:?}");
+        }
+    }
+
     #[test]
     fn a_built_in_is_declared_for_its_capability() {
         let (decls, errors) =
@@ -430,6 +554,7 @@ mod tests {
                 config: serde_json::json!({}),
                 needs: vec![],
                 script: None,
+                icon: None,
             }]
         );
     }

@@ -2582,6 +2582,7 @@ export function App() {
           pinned: true,
           agentStatus: status?.status ?? "waiting",
           question: status?.question,
+          icon: session ? harnesses.find((h) => h.id === session.harness)?.icon : undefined,
           contextMenu: [
             {
               id: "agent-session.rename",

@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { AgentStatus } from "../../api.js";
 import { kindForTabId, PageKindIcon } from "../../pageKinds.js";
+import { AgentIcon } from "../AgentIcon.js";
 import { AgentStatusDot } from "../AgentStatusDot.js";
 import { useContextMenu } from "../useRowContextMenu.js";
 import type { MenuItem } from "../../menu.js";
@@ -17,6 +18,9 @@ export interface CenterTab {
   pinned?: boolean;
   render: () => ReactNode;
   agentStatus?: AgentStatus;
+  /** An agent session's harness's declared logo (`HarnessListing.icon`);
+   *  the session's tab draws it in place of the generic robot. */
+  icon?: string | null;
   /** What the agent is waiting on, when `agentStatus` is awaiting. */
   question?: string;
   /** Kind-specific right-click menu entries for this tab. They render at
@@ -320,11 +324,15 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
                 />
               ) : null}
               {tab.agentStatus ? <AgentStatusDot status={tab.agentStatus} question={tab.question} /> : null}
-              <PageKindIcon
-                kind={kindForTabId(tab.id)}
-                size={13}
-                style={{ color: "var(--text-secondary)", flexShrink: 0 }}
-              />
+              {kindForTabId(tab.id) === "agent_session" ? (
+                <AgentIcon icon={tab.icon} size={13} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
+              ) : (
+                <PageKindIcon
+                  kind={kindForTabId(tab.id)}
+                  size={13}
+                  style={{ color: "var(--text-secondary)", flexShrink: 0 }}
+                />
+              )}
               <span
                 title={tab.label}
                 style={{

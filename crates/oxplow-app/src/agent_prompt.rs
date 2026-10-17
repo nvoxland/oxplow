@@ -186,6 +186,7 @@ mod tests {
             ),
             fields: serde_json::json!([]),
             id_pattern: None,
+            icon: None,
             config: serde_json::json!({}),
         }
     }

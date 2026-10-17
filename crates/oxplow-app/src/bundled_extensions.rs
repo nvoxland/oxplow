@@ -42,6 +42,9 @@ pub const BUNDLED: &[BundledExtension] = &[
         name: "oxplow-foundation",
         files: &[
             ext_file!("oxplow-foundation", "README.md"),
+            ext_file!("oxplow-foundation", "icons/claude.svg"),
+            ext_file!("oxplow-foundation", "icons/codex.svg"),
+            ext_file!("oxplow-foundation", "icons/opencode.svg"),
             ext_file!("oxplow-foundation", "lenses/catalog.yaml"),
             ext_file!("oxplow-foundation", "lenses/effort-files.yaml"),
             ext_file!("oxplow-foundation", "lenses/effort-summary.yaml"),

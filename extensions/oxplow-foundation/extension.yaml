@@ -18,9 +18,9 @@ intent:
 # The agent harnesses and AI providers oxplow runs: core's
 # built-ins, many of each at once (every one declared here is active).
 implementations:
-  - { capability: agent_harness, id: claude, entry: "oxplow:claude-code", title: Claude }
-  - { capability: agent_harness, id: codex, entry: "oxplow:codex-cli", title: Codex }
-  - { capability: agent_harness, id: opencode, entry: "oxplow:opencode", title: OpenCode }
+  - { capability: agent_harness, id: claude, entry: "oxplow:claude-code", title: Claude, icon: icons/claude.svg }
+  - { capability: agent_harness, id: codex, entry: "oxplow:codex-cli", title: Codex, icon: icons/codex.svg }
+  - { capability: agent_harness, id: opencode, entry: "oxplow:opencode", title: OpenCode, icon: icons/opencode.svg }
   # AI providers are scripts a person approves (Settings → Data → Programs).
   - { capability: ai_provider, id: anthropic, title: Anthropic, entry: providers/anthropic.star, config: { baseUrl: "https://api.anthropic.com", ops: [complete, completeTyped, streamTyped] } }
   - { capability: ai_provider, id: openai, title: OpenAI, entry: providers/openai_compatible.star, config: { baseUrl: "https://api.openai.com/v1", ops: [complete, completeTyped, streamTyped] } }
