@@ -6,7 +6,8 @@ import { useEffect, useState, type HTMLAttributes, type InputHTMLAttributes, typ
  * page's (`onEscape`: clear the filter). The pointer moves the cursor too.
  * Spread `inputProps` on the input, `listProps` on the list element and
  * `optionProps(i)` on each row; the input names the cursor's row
- * (`aria-activedescendant`), so focus never leaves it.
+ * (`aria-activedescendant`), so focus never leaves it. A list that holds
+ * focus itself (no input) spreads `keyProps` on the list instead.
  */
 export function useListNav({
   count,
@@ -40,12 +41,15 @@ export function useListNav({
       onEscape();
     }
   };
-  const inputProps: InputHTMLAttributes<HTMLInputElement> = {
+  const keyProps = {
     onKeyDown,
+    "aria-activedescendant": count > 0 ? optionId(cursor) : undefined,
+  };
+  const inputProps: InputHTMLAttributes<HTMLInputElement> = {
+    ...keyProps,
     role: "combobox",
     "aria-expanded": count > 0,
     "aria-controls": `${id}-list`,
-    "aria-activedescendant": count > 0 ? optionId(cursor) : undefined,
   };
   const listProps: HTMLAttributes<HTMLElement> = { id: `${id}-list`, role: "listbox" };
   const optionProps = (i: number) => ({
@@ -54,5 +58,5 @@ export function useListNav({
     "aria-selected": i === cursor,
     onMouseEnter: () => setCursor(i),
   });
-  return { cursor, setCursor, inputProps, listProps, optionProps };
+  return { cursor, setCursor, keyProps, inputProps, listProps, optionProps };
 }

@@ -1,4 +1,5 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { Facts, type Fact } from "../kit/Facts.js";
+import { useEffect, useState } from "react";
 
 import type { MetricSpec, SeriesPoint } from "../api.js";
 import { formatMetricValue, formatMetricValueExact } from "../components/format.js";
@@ -233,14 +234,6 @@ export function RecordingsTable({ samples, unit }: { samples: SeriesPoint[]; uni
   );
 }
 
-function Stat({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 13, padding: "3px 0" }}>
-      <span style={{ opacity: 0.6 }}>{label}</span>
-      <span style={{ textAlign: "right", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{children}</span>
-    </div>
-  );
-}
 
 /** Right-rail stats for the metric detail page: in-range value, type, id, … */
 export function MetricStatsRail({ def, samples }: { def: MetricSpec; samples: SeriesPoint[] }) {
@@ -254,41 +247,35 @@ export function MetricStatsRail({ def, samples }: { def: MetricSpec; samples: Se
       ? `${rangeStat.value > 0 ? "+" : ""}${fmt(rangeStat.value, def.unit)}`
       : fmt(rangeStat.value, def.unit)
     : null;
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }} data-testid="metric-detail-stats">
-      {rangeStat ? (
-        <Stat label={rangeStat.label}>
-          {/* Exact value on hover — the headline compacts at 10k, so the precise
-              number has to stay reachable (tsk183). */}
-          <strong title={formatMetricValueExact(rangeStat.value, def.unit)}>{rangeText}</strong>
-        </Stat>
-      ) : null}
-      {/* Definition metadata — the full "what is this metric" block (tsk33). */}
-      <Stat label="ID">
-        <code style={{ fontSize: 11, wordBreak: "break-all" }}>{def.key}</code>
-      </Stat>
-      <Stat label="Type">{def.display_kind}</Stat>
-      <Stat label="Aggregation">{specAggregation(def)}</Stat>
-      {def.source_measure ? (
-        <Stat label="Measure">
-          <code style={{ fontSize: 11, wordBreak: "break-all" }}>{def.source_measure}</code>
-        </Stat>
-      ) : null}
-      <Stat label="Scope">{def.scope}</Stat>
-      {def.category ? <Stat label="Category">{def.category}</Stat> : null}
-      {def.language ? <Stat label="Language">{def.language}</Stat> : null}
-      {def.unit ? <Stat label="Unit">{def.unit}</Stat> : null}
-      <Stat label="Direction">{def.direction}</Stat>
-      {def.target != null ? <Stat label="Target">{fmt(def.target, def.unit)}</Stat> : null}
-      {def.warn_at != null ? <Stat label="Warn at">{fmt(def.warn_at, def.unit)}</Stat> : null}
-      {def.fail_at != null ? <Stat label="Fail at">{fmt(def.fail_at, def.unit)}</Stat> : null}
-      {latest?.branch ? (
-        <Stat label="Branch">
-          <code style={{ fontSize: 11 }}>{latest.branch}</code>
-        </Stat>
-      ) : null}
-    </div>
-  );
+  const code = (text: string) => <code style={{ fontSize: "var(--text-xs)", wordBreak: "break-all" }}>{text}</code>;
+  const facts: Fact[] = [
+    ...(rangeStat
+      ? [
+          {
+            key: "range",
+            label: rangeStat.label,
+            // Exact value on hover — the headline compacts at 10k, so the
+            // precise number has to stay reachable (tsk183).
+            value: <strong title={formatMetricValueExact(rangeStat.value, def.unit)}>{rangeText}</strong>,
+          },
+        ]
+      : []),
+    // Definition metadata — the full "what is this metric" block (tsk33).
+    { key: "id", label: "ID", value: code(def.key) },
+    { key: "type", label: "Type", value: def.display_kind },
+    { key: "aggregation", label: "Aggregation", value: specAggregation(def) },
+    ...(def.source_measure ? [{ key: "measure", label: "Measure", value: code(def.source_measure) }] : []),
+    { key: "scope", label: "Scope", value: def.scope },
+    ...(def.category ? [{ key: "category", label: "Category", value: def.category }] : []),
+    ...(def.language ? [{ key: "language", label: "Language", value: def.language }] : []),
+    ...(def.unit ? [{ key: "unit", label: "Unit", value: def.unit }] : []),
+    { key: "direction", label: "Direction", value: def.direction },
+    ...(def.target != null ? [{ key: "target", label: "Target", value: fmt(def.target, def.unit) }] : []),
+    ...(def.warn_at != null ? [{ key: "warn", label: "Warn at", value: fmt(def.warn_at, def.unit) }] : []),
+    ...(def.fail_at != null ? [{ key: "fail", label: "Fail at", value: fmt(def.fail_at, def.unit) }] : []),
+    ...(latest?.branch ? [{ key: "branch", label: "Branch", value: code(latest.branch) }] : []),
+  ];
+  return <Facts testId="metric-detail-stats" facts={facts} />;
 }
 
 /**

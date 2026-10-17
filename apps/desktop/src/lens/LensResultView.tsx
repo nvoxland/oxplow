@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState, type CSSProperties, type ReactNode } from "react";
-import { getLens, lensActionForm, lensForm, lensText, runLens, runLensAction, submitLensForm, type LensRun, type SqlCell } from "../api.js";
+import { lensActionForm, lensForm, lensText, runLensAction, submitLensForm, type LensRun, type SqlCell } from "../api.js";
 import { Slideover } from "../components/Slideover.js";
 import type { FormStart } from "../tauri-bridge/generated/bindings.js";
 import type { LensAction } from "../tauri-bridge/generated/bindings.js";
@@ -21,12 +21,10 @@ import type { TabRef } from "../tabs/tabState.js";
 import {
   barRows,
   cellLinkRef,
-  childParams,
   linkTargetId,
   type LinkTarget,
   displayColumns,
   formatCell,
-  foldEmpty,
   hunkRows,
   isTimestamp,
   limitRows,
@@ -55,7 +53,8 @@ import { RefBadge } from "../components/RefBadge.js";
 import { CustomComponentViz } from "./CustomComponentViz.js";
 import { DashboardViz, DocumentViz } from "./PartsViz.js";
 import { DataTable, type DataColumn, type RowProps } from "../kit/DataTable.js";
-import { personCommands } from "../personCommands.js";
+import { Facts } from "../kit/Facts.js";
+import { Stat } from "../kit/Stat.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 import { showToast } from "../components/toastStore.js";
 import { addLensToContext, copyLens, performLensAction, rowRecord } from "./lensActions.js";
@@ -782,16 +781,7 @@ function TimelineViz({
 
 /** `detail`: the first row as label/value pairs. */
 function DetailViz({ row, cols, cell, rowMenu }: { row: SqlCell[]; cols: DisplayColumn[]; cell: CellRenderer; rowMenu: RowMenu }) {
-  return (
-    <dl data-testid="lens-detail" style={{ display: "grid", gridTemplateColumns: "max-content 1fr", gap: "4px 12px", margin: 0 }} {...rowMenu(row)}>
-      {cols.map((c) => (
-        <div key={c.key} style={{ display: "contents" }}>
-          <dt style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{c.label}</dt>
-          <dd style={{ margin: 0 }}>{cell(row, c)}</dd>
-        </div>
-      ))}
-    </dl>
-  );
+  return <Facts testId="lens-detail" facts={cols.map((c) => ({ key: c.key, label: c.label, value: cell(row, c) }))} {...rowMenu(row)} />;
 }
 
 const STEP_MARK: Record<StepStatus, { mark: string; color: string; label: string }> = {
@@ -962,19 +952,17 @@ function TreemapViz({ run, onOpenPage }: { run: LensRun; onOpenPage?(ref: TabRef
 }
 
 function NumberViz({ value, compact }: { value: SqlCell; compact: boolean }) {
-  return (
-    <div
-      data-testid="lens-number"
-      title={typeof value === "number" ? formatMetricValueExact(value) : undefined}
-      style={
-        compact
-          ? { display: "inline", color: "var(--text-secondary)", fontWeight: 500 }
-          : { fontSize: 48, fontWeight: 600, margin: "16px 0" }
-      }
-    >
-      {typeof value === "number" ? formatMetricValue(value) : formatCell(value)}
-    </div>
-  );
+  const title = typeof value === "number" ? formatMetricValueExact(value) : undefined;
+  const text = typeof value === "number" ? formatMetricValue(value) : formatCell(value);
+  // A compact strip shows it inline; anywhere else it is the place's figure.
+  if (compact) {
+    return (
+      <span data-testid="lens-number" title={title} style={{ color: "var(--text-secondary)", fontWeight: 500 }}>
+        {text}
+      </span>
+    );
+  }
+  return <Stat testId="lens-number" big value={text} title={title} />;
 }
 
 interface RowsVizProps {

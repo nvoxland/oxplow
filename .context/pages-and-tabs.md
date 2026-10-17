@@ -265,7 +265,10 @@ extensions mount in its parts slot, placed by `placeParts`; a contents list
 in the rail from four sections), `DataTable` (fixed `<col>` widths,
 `numeric` and `truncate` columns, groups, per-row props — the lens `table`
 viz draws through it), `Toolbar` (a filter and actions) with `useListNav`
-(the one ↑/↓/Enter/Escape contract, usability.md "Keyboard"), `Stat`,
+(the one ↑/↓/Enter/Escape contract, usability.md "Keyboard"; a list that
+holds focus itself spreads its `keyProps`), `Stat` (a figure; `big` when
+it is its place's whole — the lens `number` viz), `Facts` (labels beside
+values — the lens `detail` viz, a metric's definition),
 `TileGrid` / `TileSlot` / `Tile`, `Loading`, `ActionButtons`, and
 `EmptyState` (re-exported; it lives beside the agent prompts it offers).
 Lengths come from the spacing and radius tokens (theming.md).

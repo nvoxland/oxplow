@@ -16,7 +16,7 @@ import { cardLinkButton } from "../components/Card.js";
 import type { TaskSectionKind } from "../components/Plan/plan-utils.js";
 import { backlogRef, doneWorkRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { type Stream, type Thread } from "../api.js";
+import { type Stream } from "../api.js";
 import { useStreamThreads } from "./useStreamThreads.js";
 import { readWorkList, type WorkList } from "../workItems.js";
 import { Replaceable } from "../components/Replaceable.js";

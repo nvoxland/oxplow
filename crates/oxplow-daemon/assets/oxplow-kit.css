@@ -138,6 +138,13 @@
 .ox-stat-value { font-size: var(--text-2xl); font-weight: var(--weight-bold); line-height: var(--leading-tight); font-variant-numeric: tabular-nums; }
 .ox-stat-unit { margin-left: var(--space-1); font-size: var(--text-sm); font-weight: var(--weight-regular); color: var(--text-secondary); }
 .ox-stat-label { color: var(--text-secondary); font-size: var(--text-xs); }
+.ox-stat-big .ox-stat-value { font-size: var(--text-3xl); }
+
+/* A record's facts: labels beside their values. */
+.ox-facts { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-1) var(--space-3); margin: 0; font-size: var(--text-sm); }
+.ox-fact { display: contents; }
+.ox-fact dt { color: var(--text-secondary); }
+.ox-fact dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 
 /* Dashboards: a responsive grid of tiles; a tile spans by its size and
    is a titled card. 400px: a chart's labelled axis must fit. */

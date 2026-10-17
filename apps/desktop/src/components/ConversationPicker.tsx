@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { forkConversation, listNativeConversations, resumeConversation } from "../api.js";
+import { useListNav } from "../kit/useListNav.js";
 import { conversationRows, type ConversationRow, type PickerMode } from "./conversationRows.js";
 import { usePopoverDismiss } from "./usePopoverDismiss.js";
 
@@ -22,9 +23,9 @@ interface Props {
 export function ConversationPicker({ sessionId, mode, onChosen, onCancel }: Props) {
   const [rows, setRows] = useState<ConversationRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [cursor, setCursor] = useState(0);
   const [busy, setBusy] = useState(false);
   const boxRef = usePopoverDismiss<HTMLDivElement>(true, onCancel);
+  const nav = useListNav({ count: rows?.length ?? 0, onPick: (i) => void take(rows?.[i]), id: `conversations-${sessionId}` });
   const listRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -34,7 +35,7 @@ export function ConversationPicker({ sessionId, mode, onChosen, onCancel }: Prop
         if (!live) return;
         const next = conversationRows(listed, mode);
         setRows(next);
-        setCursor(Math.max(0, next.findIndex((r) => r.takeable)));
+        nav.setCursor(Math.max(0, next.findIndex((r) => r.takeable)));
       })
       .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));
     return () => {
@@ -58,19 +59,6 @@ export function ConversationPicker({ sessionId, mode, onChosen, onCancel }: Prop
     }
   };
 
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (!rows?.length) return;
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setCursor((c) => Math.min(rows.length - 1, c + 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setCursor((c) => Math.max(0, c - 1));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      void take(rows[cursor]);
-    }
-  };
 
   const title = mode === "resume" ? "Resume a saved conversation" : "Fork a saved conversation";
   return (
@@ -106,16 +94,14 @@ export function ConversationPicker({ sessionId, mode, onChosen, onCancel }: Prop
       {rows === null && !error ? <div style={{ padding: "8px 12px", color: "var(--muted)" }}>Reading its saved conversations…</div> : null}
       {rows?.length === 0 ? <div style={{ padding: "8px 12px", color: "var(--muted)" }}>No saved conversations for this worktree.</div> : null}
       {rows?.length ? (
-        <div ref={listRef} tabIndex={0} role="listbox" onKeyDown={onKeyDown} style={{ overflowY: "auto", outline: "none" }}>
+        <div ref={listRef} tabIndex={0} {...nav.listProps} {...nav.keyProps} style={{ overflowY: "auto", outline: "none" }}>
           {rows.map((row, i) => (
             <button
               key={row.id}
               type="button"
-              role="option"
-              aria-selected={i === cursor}
+              {...nav.optionProps(i)}
               data-testid={`conversation-row-${row.id}`}
               disabled={!row.takeable || busy}
-              onMouseEnter={() => setCursor(i)}
               onClick={() => void take(row)}
               style={{
                 display: "flex",
@@ -125,7 +111,7 @@ export function ConversationPicker({ sessionId, mode, onChosen, onCancel }: Prop
                 padding: "6px 12px",
                 border: "none",
                 textAlign: "left",
-                background: i === cursor ? "rgba(74, 158, 255, 0.18)" : "transparent",
+                background: i === nav.cursor ? "var(--accent-soft-bg)" : "transparent",
                 color: row.takeable ? "var(--text-primary)" : "var(--muted)",
                 cursor: row.takeable ? "pointer" : "default",
               }}
