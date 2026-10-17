@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import {
-  linkTarget,
+  linkRef,
   parseMarkdownLink,
   postprocessWikilinks,
   preprocessWikilinks,
@@ -398,39 +398,39 @@ test("postprocessWikilinks: broken link round-trips back to the authored [[#13]]
 // newTab, file / directory / commit links fell through to legacy
 // single-tab callbacks and dropped it.
 
-test("linkTarget: a wiki link targets its page", () => {
-  expect(linkTarget({ kind: "internal", slug: "some-page" })).toEqual(wikiPageRef("some-page"));
+test("linkRef: a wiki link targets its page", () => {
+  expect(linkRef({ kind: "internal", slug: "some-page" })).toBe(wikiPageRef("some-page").id);
 });
 
-test("linkTarget: a work item link targets its page", () => {
-  expect(linkTarget({ kind: "work_item", ref: "work_item:oxplow:tsk42" })).toEqual(workItemTabRef("work_item:oxplow:tsk42"));
+test("linkRef: a work item link targets its page", () => {
+  expect(linkRef({ kind: "work_item", ref: "work_item:oxplow:tsk42" })).toBe("work_item:oxplow:tsk42");
 });
 
-test("linkTarget: a directory link targets its directory", () => {
-  expect(linkTarget({ kind: "directory", path: "src/components" })).toEqual(
-    directoryRef("src/components"),
+test("linkRef: a directory link targets its directory", () => {
+  expect(linkRef({ kind: "directory", path: "src/components" })).toBe(
+    directoryRef("src/components").id,
   );
 });
 
-test("linkTarget: a commit link targets its commit", () => {
-  expect(linkTarget({ kind: "commit", sha: "abc123" })).toEqual(gitCommitRef("abc123"));
+test("linkRef: a commit link targets its commit", () => {
+  expect(linkRef({ kind: "commit", sha: "abc123" })).toBe(gitCommitRef("abc123").id);
 });
 
 // A bare file wikilink means "the working tree"; one that pinned a
 // version must keep it rather than being silently substituted.
-test("linkTarget: a bare file link coerces to the working tree", () => {
-  expect(linkTarget({ kind: "file", path: "src/main.rs" })).toEqual(fileRef("src/main.rs", WORKING));
+test("linkRef: a bare file link coerces to the working tree", () => {
+  expect(linkRef({ kind: "file", path: "src/main.rs" })).toBe(fileRef("src/main.rs", WORKING).id);
 });
 
-test("linkTarget: a pinned file link keeps the version it was authored with", () => {
+test("linkRef: a pinned file link keeps the version it was authored with", () => {
   const version = "git:deadbeef" as const;
-  expect(linkTarget({ kind: "file", path: "src/main.rs", version })).toEqual(
-    fileRef("src/main.rs", version),
+  expect(linkRef({ kind: "file", path: "src/main.rs", version })).toBe(
+    fileRef("src/main.rs", version).id,
   );
 });
 
-test("linkTarget: things that aren't pages have no target", () => {
-  expect(linkTarget({ kind: "external" })).toBeNull();
-  expect(linkTarget({ kind: "anchor" })).toBeNull();
-  expect(linkTarget({ kind: "empty" })).toBeNull();
+test("linkRef: things that aren't pages have no target", () => {
+  expect(linkRef({ kind: "external" })).toBeNull();
+  expect(linkRef({ kind: "anchor" })).toBeNull();
+  expect(linkRef({ kind: "empty" })).toBeNull();
 });

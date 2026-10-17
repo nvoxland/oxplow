@@ -3,13 +3,11 @@ import { act, cleanup, fireEvent, render } from "@testing-library/react";
 
 import { setRefKinds, type RefKind } from "../../refKinds.js";
 import { PageNavigationContext, type PageNavigation } from "../../tabs/PageNavigationContext.js";
-import { refFromTabId, workItemTabRef } from "../../tabs/pageRefs.js";
-import type { TabRef } from "../../tabs/tabState.js";
 import { RichTextField } from "./RichTextField.js";
 
 // tsk976: a link in an editable body opens its page whatever it names —
 // a task, an extension's ref — as it does in a read-only one (both through
-// `linkTarget`).
+// `linkRef` and `openRef`).
 
 const ACME_PR: RefKind = {
   kind: "acme_pr",
@@ -29,8 +27,8 @@ afterEach(() => {
 
 test("a work item link and an extension's ref open their pages", async () => {
   setRefKinds([ACME_PR]);
-  const opened: TabRef[] = [];
-  const nav = { navigate: (ref: TabRef) => opened.push(ref) } as unknown as PageNavigation;
+  const opened: string[] = [];
+  const nav = { navigate: () => {}, openRef: (ref: string) => opened.push(ref) } as unknown as PageNavigation;
   const view = render(
     <PageNavigationContext.Provider value={nav}>
       <RichTextField value="See [tsk1](work_item:oxplow:tsk1) and [pr 12](acme_pr:12)." onCommit={() => {}} />
@@ -44,5 +42,5 @@ test("a work item link and an extension's ref open their pages", async () => {
     expect(anchor).not.toBeNull();
     fireEvent.click(anchor!);
   }
-  expect(opened.map((r) => r.id)).toEqual([workItemTabRef("work_item:oxplow:tsk1").id, refFromTabId("acme_pr:12")!.id]);
+  expect(opened).toEqual(["work_item:oxplow:tsk1", "acme_pr:12"]);
 });

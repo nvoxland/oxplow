@@ -24,7 +24,7 @@ import { useRowContextMenu } from "../useRowContextMenu.js";
 import type { MenuItem } from "../../menu.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
-import { fileRef, directoryRef, gitCommitRef, wikiPageRef, workItemTabRef, refFromTabId } from "../../tabs/pageRefs.js";
+import { fileRef, directoryRef, gitCommitRef, wikiPageRef } from "../../tabs/pageRefs.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import { WORKING, gitRevision, type Revision } from "../../revision.js";
 import { useWikiRef } from "../../wikiTitleCache.js";
@@ -492,29 +492,27 @@ function WikiLinkSpan({
 }
 
 /**
- * The tab a parsed link targets, or `null` when it isn't a page at all
- * (external URLs, anchors, empty and broken refs).
- *
- * Every internal link kind resolves through here so they all behave the
- * same under "open in a new tab" (tsk265).
+ * The ref a parsed link names, or `null` when it isn't a page at all
+ * (external URLs, anchors, empty and broken refs). A click opens it
+ * through `PageNavigation.openRef`, where its kind's page says (the
+ * registry), the same for every kind under "open in a new tab" (tsk265).
  */
-export function linkTarget(parsed: ParsedLink): TabRef | null {
+export function linkRef(parsed: ParsedLink): string | null {
   switch (parsed.kind) {
     case "file":
       // Bare wikilinks (no `@version`) coerce to WORKING; explicit versions
       // flow through as authored. Load-bearing: a wikilink that pinned
       // `@HEAD` must NOT be silently substituted with the working tree.
-      return fileRef(parsed.path, parsed.version ?? WORKING);
+      return fileRef(parsed.path, parsed.version ?? WORKING).id;
     case "directory":
-      return directoryRef(parsed.path);
+      return directoryRef(parsed.path).id;
     case "commit":
-      return gitCommitRef(parsed.sha);
+      return gitCommitRef(parsed.sha).id;
     case "work_item":
-      return workItemTabRef(parsed.ref);
-    case "internal":
-      return wikiPageRef(parsed.slug);
     case "ref":
-      return refFromTabId(parsed.ref);
+      return parsed.ref;
+    case "internal":
+      return wikiPageRef(parsed.slug).id;
     default:
       return null;
   }
@@ -640,9 +638,9 @@ export function MarkdownView({
 
     // Every page-bearing link goes through the nav chokepoint, so
     // `newTab` means the same thing for all of them.
-    const target = linkTarget(parsed);
-    if (ctxNav && target) {
-      ctxNav.navigate(target, { newTab });
+    const target = linkRef(parsed);
+    if (ctxNav?.openRef && target) {
+      ctxNav.openRef(target, { newTab });
       return;
     }
 
@@ -672,11 +670,12 @@ export function MarkdownView({
   // Right-click parity for Cmd-click: the modifier is the fast path,
   // the menu is the discoverable one. Both go through the same target.
   const openItems = useCallback((parsed: ParsedLink): MenuItem[] => {
-    const target = linkTarget(parsed);
-    if (!ctxNav || !target) return [];
+    const target = linkRef(parsed);
+    if (!ctxNav?.openRef || !target) return [];
+    const open = ctxNav.openRef.bind(ctxNav);
     return [
-      { id: "open", label: "Open", enabled: true, run: () => ctxNav.navigate(target, { newTab: false }) },
-      { id: "open-new", label: "Open in new tab", enabled: true, run: () => ctxNav.navigate(target, { newTab: true }) },
+      { id: "open", label: "Open", enabled: true, run: () => open(target, { newTab: false }) },
+      { id: "open-new", label: "Open in new tab", enabled: true, run: () => open(target, { newTab: true }) },
     ];
   }, [ctxNav]);
 

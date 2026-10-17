@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { GitPullRequest } from "lucide-react";
 
-import { linkTarget, parseMarkdownLink, preprocessWikilinks } from "./components/Wiki/MarkdownView.js";
+import { linkRef, parseMarkdownLink, preprocessWikilinks } from "./components/Wiki/MarkdownView.js";
 import { pageKindIconComponent, pageKindLabel } from "./pageKinds.js";
 import { extensionWikilinkRef, refKindsFromResult, setRefKinds, type RefKind } from "./refKinds.js";
 import { refFromTabId } from "./tabs/pageRefs.js";
@@ -49,7 +49,7 @@ describe("an extension's ref kind (P8.D7)", () => {
     expect(body).toBe("see [pr:12](acme_pr:12)");
     const parsed = parseMarkdownLink("acme_pr:12");
     expect(parsed).toEqual({ kind: "ref", ref: "acme_pr:12" });
-    expect(linkTarget(parsed)?.id).toBe("page:acme/pr?ref=acme_pr:12");
+    expect(linkRef(parsed)).toBe("acme_pr:12");
     setRefKinds([]);
     expect(extensionWikilinkRef("pr:12")).toBeNull();
     expect(preprocessWikilinks("see [[pr:12]]")).toContain("oxplow-invalid:");

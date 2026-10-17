@@ -29,7 +29,7 @@ import { SelectionCommentToolbar } from "../Comments/SelectionCommentToolbar.js"
 import { selectionToolbarVisible } from "./selectionToolbar.js";
 import { ContextMenu } from "../ContextMenu.js";
 import type { MenuItem } from "../../menu.js";
-import { linkTarget, parseMarkdownLink } from "../Wiki/MarkdownView.js";
+import { linkRef, parseMarkdownLink } from "../Wiki/MarkdownView.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 
 /// Comment integration bundle. When provided, the field highlights
@@ -557,11 +557,11 @@ export function RichTextField({
       return true;
     }
     // Every page a link can name — a task, an extension's ref, a file —
-    // resolves through the one `linkTarget`, as `MarkdownView` does
-    // (tsk976).
-    const page = linkTarget(parsed);
+    // resolves through the one `linkRef` and `openRef`, as `MarkdownView`
+    // does (tsk976).
+    const page = linkRef(parsed);
     if (!page) return false;
-    ctxNav?.navigate(page, { newTab });
+    ctxNav?.openRef?.(page, { newTab });
     return true;
   };
 
