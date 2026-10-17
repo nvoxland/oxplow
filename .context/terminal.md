@@ -151,6 +151,33 @@ next launch forks it: `--resume <id> --fork-session`, Codex's `thread/fork`,
 running process; the page bumps the pane's `restartKey`, and the pane
 opens the session again once that process has exited.
 
+**Earlier sessions: the same lists, with no session to ask.** The New
+Session page lists the thread's earlier sessions under its Start row, so a
+person can bring one back without first opening a session to switch. One
+listing (`list_earlier_sessions { thread_id }`,
+`oxplow_app::session_history::earlier_sessions`, UI-only) merges the
+stream's closed oxplow sessions with every harness's saved conversations
+for the worktree (`harness_conversations`, the query
+`list_native_conversations` also builds; each harness is asked at once, one
+that fails or answers `Unavailable` becomes a line in `unavailable` and the
+rest still list), on (harness, native id), newest activity first, and
+decides each row's action itself: **reopen** (this thread's session a
+person closed: `oxplow.agent_session.reopen`, whose toast offers Undo),
+**resume** (a free conversation, an outside one or one from a session
+closed in another thread or by a close of its thread: a new session here,
+`oxplow.agent_session.open { resume }`, recorded `chosen`), **switch** (open
+in a session on this thread: show its tab) or **none** (open in another
+thread's session; the only row with nothing to take). A closed slot that
+never ran anything, or whose action would be none (another thread's, with
+no conversation to resume), is left out. A session's name is
+`AgentSession::display_name` (title, else the harness's name, else harness
+and day: the one rule, mirroring `v_agent_session.display_name`); the page
+labels a row with the given name, else a prompt.
+Nothing is adopted until a person picks it. The page filters in the client
+(title, prompts, thread, agent; ↑/↓, Enter, Escape clears the filter).
+A closed session's ref no longer opens nothing: it opens the
+`session-transcript` lens, which has a **Reopen** action.
+
 **Read-only session lookup (tsk139).** `lookup_terminal_session({ sessionId })`
 (core in `crates/oxplow-rpc/src/commands/terminal.rs`; Tauri shim +
 `bindings.ts` `lookupTerminalSession`) returns the live PTY `sessionId` of

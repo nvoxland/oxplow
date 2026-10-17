@@ -259,6 +259,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	listEarlierSessions: (threadId: string) => typedError<EarlierSessions, IpcError>(__TAURI_INVOKE("list_earlier_sessions", { threadId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	renameNativeConversation: (sessionId: string, name: string) => typedError<null, IpcError>(__TAURI_INVOKE("rename_native_conversation", { sessionId, name })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -2527,6 +2532,33 @@ export type DryRun =
 /**  A fresh, empty one: no usable project database. */
 "emptyDatabase";
 
+/**  What taking a row does. */
+export type EarlierAction = 
+/**  This thread's session a person closed: `oxplow.agent_session.reopen`. */
+"reopen" | 
+/**
+ *  A free conversation: a new session on it here
+ *  (`oxplow.agent_session.open { resume }`).
+ */
+"resume" | 
+/**  Open in a session on this thread: show its tab. */
+"switch" | 
+/**  Open in another thread's session: nothing to take. */
+"none";
+
+export type EarlierSession = {
+	harness: string,
+	session: PastSession | null,
+	conversation: NativeConversation | null,
+	action: EarlierAction,
+};
+
+export type EarlierSessions = {
+	/**  Most recently active first. */
+	rows: EarlierSession[],
+	unavailable: HarnessUnavailable[],
+};
+
 /**
  *  An effect as loaded (valid ones; invalid ones are in the extension's
  *  `errors`).
@@ -3506,6 +3538,12 @@ export type HarnessSettingListing = {
 	title: string,
 	hint: string,
 	placeholder: string,
+};
+
+/**  A harness that couldn't list its conversations now. */
+export type HarnessUnavailable = {
+	harness: string,
+	reason: string,
 };
 
 /**  Where a stream's workspace is. */
@@ -5267,6 +5305,31 @@ export type PanelPlacement = {
  *  the current thread — which of `stream_id` / `thread_id` its lenses get.
  */
 export type PanelScope = "project" | "stream" | "thread";
+
+/**  An oxplow session a row is about. */
+export type PastSession = {
+	/**  `agent_session:ses3`. */
+	session: string,
+	/**  How the session is named everywhere (`AgentSession::display_name`). */
+	display_name: string,
+	/**  The name a person or the harness gave it, when one did. */
+	name: string | null,
+	/**
+	 *  The conversation it is bound to (its harness's native id), when it
+	 *  has run: what a resume names.
+	 */
+	conversation: string | null,
+	/**  `thread:thr1` and its title. */
+	thread: string,
+	thread_title: string,
+	/**  It is on this thread. */
+	here: boolean,
+	/**  Still open (a row noting where a conversation is open). */
+	open: boolean,
+	closed_at: Timestamp | null,
+	turns: number,
+	last_prompt: string | null,
+};
 
 /**  What kind of project program it is. */
 export type ProgramKind = 

@@ -82,7 +82,7 @@ import { TitleBar } from "./components/TitleBar.js";
 import { showToast } from "./components/toastStore.js";
 import { awaitGitOp, opErrorOf } from "./git-op.js";
 import { UndoToastStack } from "./components/UndoToast.js";
-import { parseRef } from "./refs/ref.js";
+import { idOf, parseRef } from "./refs/ref.js";
 import { PersonCommandConfirm } from "./components/PersonCommandConfirm.js";
 import { RemoteConnectionBanner } from "./components/RemoteConnectionBanner.js";
 import { subscribeUiError } from "./ui-error.js";
@@ -155,7 +155,7 @@ import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { agentSessionRef, computeDiffId, diskFilePath, pageKindOf, refFromTabId, closedThreadsRef, commentsRef, dashboardsRef, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newSessionRef, newStreamRef, newTaskRef, alertsRef, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, type DiffViewPayload } from "./tabs/pageRefs.js";
+import { agentSessionRef, computeDiffId, diskFilePath, lensRef, pageKindOf, refFromTabId, closedThreadsRef, commentsRef, dashboardsRef, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newSessionRef, newStreamRef, newTaskRef, alertsRef, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, type DiffViewPayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
@@ -1789,10 +1789,18 @@ export function App() {
     // below — it fires whenever `effectiveCenterActive` resolves to a
     // new TabRef, regardless of which handler caused the activation.
     switch (ref.kind) {
-      case "agent_session":
-        // Its tab is there while it's open (`reconcileSessionTabs`).
-        setCenterActive(ref.id);
+      case "agent_session": {
+        // Its tab is there while it's open on this thread
+        // (`reconcileSessionTabs`). A closed session, or another thread's,
+        // has none: its transcript opens instead, with Reopen on it.
+        const sessionId = (ref.payload as { sessionId?: string } | null)?.sessionId;
+        if (sessionId && selectedThreadSessions?.some((candidate) => candidate.id === sessionId)) {
+          setCenterActive(ref.id);
+        } else {
+          handleOpenPageRef.current?.(lensRef("oxplow-foundation/session-transcript", { session: ref.id }));
+        }
         return;
+      }
       case "symbol":
         void openSymbol((ref.payload as { ref: string }).ref);
         return;
@@ -1848,7 +1856,7 @@ export function App() {
     // handleOpenDiff is a plain function over state setters and
     // selectedThreadId, which is already a dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleOpenFile, handleOpenWiki, selectedThreadId, selectedThreadWork, setCenterActive, stream?.id]);
+  }, [handleOpenFile, handleOpenWiki, selectedThreadId, selectedThreadSessions, selectedThreadWork, setCenterActive, stream?.id]);
 
   /**
    * Open the ref `ref` (of any kind) where its kind's page says
@@ -2657,6 +2665,28 @@ export function App() {
             onNoSession={async (remember) => {
               if (remember) await saveNewThreadSession("none");
               closePageTab(ref.id);
+            }}
+            onTakeEarlier={async (row) => {
+              if (!selectedThread) return;
+              const sessionId = row.session ? idOf(row.session, "agent_session") : null;
+              let tab: string | null = null;
+              if (row.action === "switch" && sessionId) {
+                tab = agentSessionRef(sessionId).id;
+              } else if (row.action === "reopen" && sessionId) {
+                // Undoable: the toast offers Undo, which closes it again.
+                const reopened = await personCommands.run(`Reopen ${row.label}`, "oxplow.agent_session.reopen", {
+                  session: row.session,
+                });
+                if (!reopened) return;
+                tab = agentSessionRef(sessionId).id;
+              } else if (row.action === "resume" && row.conversation) {
+                const opened = await openAgentSession(selectedThread.id, row.harness, undefined, row.conversation);
+                tab = agentSessionRef(opened.id).id;
+              }
+              if (!tab) return;
+              // The picker gives way to the session's tab.
+              closePageTab(ref.id);
+              setCenterActive(tab);
             }}
           />
         ),

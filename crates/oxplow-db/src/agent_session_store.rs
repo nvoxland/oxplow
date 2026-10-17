@@ -98,6 +98,63 @@ pub fn list_open_for_thread_tx(
     )
 }
 
+/// Every session (open or closed) of the stream's threads, oldest first.
+pub fn list_for_stream_tx(
+    conn: &Connection,
+    stream: oxplow_domain::StreamId,
+) -> Result<Vec<AgentSession>, DomainError> {
+    query(
+        conn,
+        "WHERE thread_id IN (SELECT id FROM threads WHERE stream_id = ?1)
+         ORDER BY opened_at, id",
+        [stream.value()],
+    )
+}
+
+/// How many turns each session ran and the last thing the person said in
+/// it, for the sessions of `ids`; a session with no turn has no entry.
+pub fn turn_summaries_tx(
+    conn: &Connection,
+    ids: &[AgentSessionId],
+) -> Result<std::collections::HashMap<AgentSessionId, (i64, Option<String>)>, DomainError> {
+    let mut out = std::collections::HashMap::new();
+    if ids.is_empty() {
+        return Ok(out);
+    }
+    // One grouped read: the count and the newest non-empty prompt (one probe per
+    // session, in the same statement).
+    let list = ids
+        .iter()
+        .map(|i| i.value().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT t.agent_session_id, count(*),
+                    (SELECT p.prompt FROM agent_turn p
+                      WHERE p.agent_session_id = t.agent_session_id AND p.prompt <> ''
+                      ORDER BY p.id DESC LIMIT 1)
+               FROM agent_turn t
+              WHERE t.agent_session_id IN ({list})
+              GROUP BY t.agent_session_id"
+        ))
+        .map_err(map_sql_err)?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                AgentSessionId::new(r.get(0)?),
+                r.get::<_, i64>(1)?,
+                r.get::<_, Option<String>>(2)?,
+            ))
+        })
+        .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+        .map_err(map_sql_err)?;
+    for (id, turns, last) in rows {
+        out.insert(id, (turns, last));
+    }
+    Ok(out)
+}
+
 /// The thread's most recently opened session that is still open.
 pub fn newest_open_for_thread_tx(
     conn: &Connection,
@@ -545,6 +602,50 @@ mod tests {
         )
         .unwrap();
         conn
+    }
+
+    /// One read gives every session's turn count and last non-empty prompt;
+    /// a session with no turn has no entry, a hand-back's empty prompt is
+    /// never "the last thing said".
+    #[test]
+    fn turn_summaries_come_from_one_grouped_read() {
+        let conn = fixture();
+        let a = insert_tx(
+            &conn,
+            &NewAgentSession::terminal(ThreadId::new(1), "claude"),
+            at(1),
+        )
+        .unwrap();
+        let b = insert_tx(
+            &conn,
+            &NewAgentSession::terminal(ThreadId::new(1), "claude"),
+            at(2),
+        )
+        .unwrap();
+        let none = insert_tx(
+            &conn,
+            &NewAgentSession::terminal(ThreadId::new(2), "claude"),
+            at(3),
+        )
+        .unwrap();
+        for (session, prompt) in [
+            (a.id, "first"),
+            (a.id, "second"),
+            (a.id, ""),
+            (b.id, "only"),
+        ] {
+            conn.execute(
+                "INSERT INTO agent_turn (thread_id, agent_session_id, prompt, started_at)
+                 VALUES (1, ?1, ?2, '2026-10-10T10:00:00Z')",
+                params![session.value(), prompt],
+            )
+            .unwrap();
+        }
+        let summaries = turn_summaries_tx(&conn, &[a.id, b.id, none.id]).unwrap();
+        assert_eq!(summaries.get(&a.id), Some(&(3, Some("second".to_string()))));
+        assert_eq!(summaries.get(&b.id), Some(&(1, Some("only".to_string()))));
+        assert_eq!(summaries.get(&none.id), None);
+        assert_eq!(turn_summaries_tx(&conn, &[]).unwrap().len(), 0);
     }
 
     #[test]

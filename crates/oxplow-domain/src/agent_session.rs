@@ -138,6 +138,27 @@ impl AgentSession {
     pub fn is_open(&self) -> bool {
         self.closed_at.is_none()
     }
+
+    /// The name a person or the harness gave it: its title, else the
+    /// harness's name for the conversation, trimmed; `None` when neither.
+    pub fn given_name(&self) -> Option<String> {
+        [&self.title, &self.native_title]
+            .into_iter()
+            .map(|n| n.trim())
+            .find(|n| !n.is_empty())
+            .map(str::to_string)
+    }
+
+    /// How the session is named everywhere: [`Self::given_name`], else the
+    /// harness and the day it opened. This is the one rule in Rust; it
+    /// mirrors `display_name` in `models/agent_session.sql` (the other
+    /// place a name is spelled), so change them together.
+    pub fn display_name(&self) -> String {
+        self.given_name().unwrap_or_else(|| {
+            let opened = self.opened_at.to_string();
+            format!("{} {}", self.harness, opened.get(..10).unwrap_or(&opened))
+        })
+    }
 }
 
 /// What opening a session stores; the id and timestamps are the store's.
@@ -169,6 +190,47 @@ impl NewAgentSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn session(title: &str, native_title: &str) -> AgentSession {
+        let at = Timestamp::from_unix_ms(1_700_000_000_000);
+        AgentSession {
+            id: AgentSessionId::new(3),
+            thread_id: ThreadId::new(1),
+            kind: SessionKind::Terminal,
+            harness: "claude".into(),
+            title: title.into(),
+            resume_session_id: String::new(),
+            host: None,
+            opened_at: at,
+            closed_at: None,
+            closed_reason: None,
+            updated_at: at,
+            pid: None,
+            last_seen_at: None,
+            stopped_by_user_at: None,
+            native_title: native_title.into(),
+            fork_next: false,
+        }
+    }
+
+    /// The one naming rule (it mirrors `models/agent_session.sql`): the
+    /// person's title, else the harness's name for the conversation, else
+    /// the harness and the day it opened.
+    #[test]
+    fn a_session_is_named_by_its_title_then_the_harness_then_its_day() {
+        assert_eq!(
+            session(" The parser ", "Native").given_name().as_deref(),
+            Some("The parser")
+        );
+        assert_eq!(
+            session("", " Native ").given_name().as_deref(),
+            Some("Native")
+        );
+        assert_eq!(session("  ", "").given_name(), None);
+        assert_eq!(session("The parser", "").display_name(), "The parser");
+        assert_eq!(session("", "Native").display_name(), "Native");
+        assert_eq!(session("", "").display_name(), "claude 2023-11-14");
+    }
 
     #[test]
     fn kinds_and_reasons_round_trip_their_strings() {
