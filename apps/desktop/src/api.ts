@@ -185,9 +185,9 @@ function buildBridge() {
       paneTarget: string,
       cols: number,
       rows: number,
-    ): Promise<{ sessionId: string; replayB64: string; launch: "reattached" | "started" | "resumed" }> => {
+    ): Promise<{ sessionId: string; replayB64: string }> => {
       const result = unwrap(await commands.openTerminalSession(paneTarget, cols, rows));
-      return { sessionId: result.sessionId, replayB64: result.replayB64, launch: result.launch };
+      return { sessionId: result.sessionId, replayB64: result.replayB64 };
     },
     /// The live terminal of an agent session, without starting one: `null`
     /// when none runs.
@@ -1325,12 +1325,6 @@ export async function openAgentSession(
       ...(title ? { title } : {}),
     })
   ).result as AgentSessionRecord;
-}
-
-/** Close an agent session: its process stops. Destructive — the caller
- *  has the person confirm first (`confirmed`). */
-export async function closeAgentSession(sessionId: string, confirmed: boolean): Promise<void> {
-  await runCommand("oxplow.agent_session.close", { session: agentSessionRef(sessionId) }, confirmed);
 }
 
 /** The person stops an agent: its process ends, the slot and saved

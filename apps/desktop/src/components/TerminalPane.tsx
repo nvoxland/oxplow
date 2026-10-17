@@ -206,7 +206,6 @@ export function TerminalPane({
   const launchFailedRef = useRef(false);
   // What the last open did: joined a live process, started, or resumed.
   const [confirmFresh, setConfirmFresh] = useState(false);
-  const [launch, setLaunch] = useState<"reattached" | "started" | "resumed" | null>(null);
   // Opening the session is deferred for a pane that starts on activation.
   const activatedRef = useRef(false);
   const activateRef = useRef<(() => void) | null>(null);
@@ -532,7 +531,7 @@ export function TerminalPane({
         if (opening || disposed) return;
         opening = true;
         logUi("info", "opening terminal session", { paneTarget, cols: term.cols, rows: term.rows, again });
-        void desktopBridge().openTerminalSession(paneTarget, term.cols, term.rows).then(({ sessionId, replayB64, launch: launched }) => {
+        void desktopBridge().openTerminalSession(paneTarget, term.cols, term.rows).then(({ sessionId, replayB64 }) => {
           if (disposed) {
             void desktopBridge().closeTerminalSession(sessionId);
             return;
@@ -546,7 +545,6 @@ export function TerminalPane({
           endedRef.current = false;
           launchFailedRef.current = false;
           setEnded(null);
-          setLaunch(launched);
           senderRef.current?.attach(sessionId);
           // Replay the session's ring buffer into the fresh xterm so
           // re-attaching to a long-running thread shows the same screen
@@ -709,22 +707,6 @@ export function TerminalPane({
           targetKind={comments.targetKind}
           targetId={comments.targetId}
         />
-      ) : null}
-      {launch && launch !== "started" && !ended && !isStoppedNow ? (
-        <div
-          data-testid="terminal-launch"
-          style={{
-            position: "absolute",
-            top: 4,
-            right: 12,
-            fontSize: 11,
-            color: "var(--muted)",
-            pointerEvents: "none",
-            zIndex: 3,
-          }}
-        >
-          {launch === "reattached" ? "Reattached to the running agent" : "Resumed the saved conversation"}
-        </div>
       ) : null}
       {isStoppedNow ? (
         <div

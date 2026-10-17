@@ -147,10 +147,15 @@ commands:
     ui: { label: "New Lens with Your Agent…", group: Tasks, input: { text: "Build me an oxplow lens (a page I can open with Cmd+P) that shows " }, when: "threadShown" }
   # agent_sessions.write
   - name: agent_session.close
-    summary: "Close an agent session (`agent_session:ses3`): its open turn ends and its process stops. An agent's waits for a person."
+    summary: "Close an agent session (`agent_session:ses3`): its open turn ends and its process stops. Its conversation is kept: `oxplow.agent_session.reopen` (its undo) opens it again."
     scope: agent_sessions.write
     op: close
-    confirm: destructive
+    invokers: { human: true, agent: true, lens: true }
+    example: {"session": "agent_session:ses3"}
+  - name: agent_session.reopen
+    summary: "Reopen an agent session a person closed (`agent_session:ses3`): its tab returns and its agent resumes the saved conversation. Not one its thread's or stream's close took, and not on a closed thread."
+    scope: agent_sessions.write
+    op: reopen
     invokers: { human: true, agent: true, lens: true }
     example: {"session": "agent_session:ses3"}
   - name: agent_session.open

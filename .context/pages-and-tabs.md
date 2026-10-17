@@ -710,9 +710,10 @@ the visible page would. `handleOpenPage` special-cases only `agent_session`
   `showNavBar={false}` and `showHeader={false}`). They are **pinned**
   (`TabRef.pinned`, `CenterTab.pinned`): they lead the strip, are never
   dragged or dropped on, the bulk closes skip them, and the tab cap never
-  counts or evicts them. Their × arms an inline confirm ("Close
-  session") — a process ends, so it can't be an Undo toast — and runs
-  `oxplow.agent_session.close`; the tab goes when the row closes. The
+  counts or evicts them. Their × runs `oxplow.agent_session.close` at
+  once, its toast offering Undo (`oxplow.agent_session.reopen`: the tab
+  returns and the saved conversation resumes); the tab goes when the row
+  closes. The
   right-click menu adds Rename…, an `InlinePromptStrip` in the strip's
   header. Each tab carries its own status dot and question (the
   session's status); the thread glyph and stream dot roll them up.

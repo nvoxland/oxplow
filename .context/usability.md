@@ -324,10 +324,11 @@ Things I keep forgetting. Read this before adding any UI.
   task permanently) push a toast without `onUndo` so the user
   still sees confirmation feedback even if they can't undo. Don't
   block the renderer with a centered confirm modal.
-- **Closing an agent session's tab is an inline confirm**, not an Undo
-  toast: its × arms ("Close session") and the second click closes the
-  session (`oxplow.agent_session.close`, destructive) — a stopped
-  process can't be undone. Rename… is on the tab's right-click menu; it sets
+- **Closing an agent session's tab closes the session at once**, with an
+  Undo toast: one click on its × runs `oxplow.agent_session.close`
+  through `personCommands`, and Undo runs its inverse,
+  `oxplow.agent_session.reopen`, which brings the tab back and resumes
+  the saved conversation. Rename… is on the tab's right-click menu; it sets
   oxplow's name for the session (the strip says so, and what clearing it
   falls back to — the harness's own name, shown as the placeholder), with
   an "Also rename it in <harness>" box only where the harness can.

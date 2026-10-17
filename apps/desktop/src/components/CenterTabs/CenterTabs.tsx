@@ -5,7 +5,6 @@ import { AgentStatusDot } from "../AgentStatusDot.js";
 import { useContextMenu } from "../useRowContextMenu.js";
 import type { MenuItem } from "../../menu.js";
 import { ErrorBoundary } from "../ErrorBoundary.js";
-import { InlineConfirm } from "../InlineConfirm.js";
 import { leadingPinnedCount, moveToIndex, reorderToAfterPinned } from "./centerTabsReorder.js";
 import { tabsToCloseOthers, tabsToCloseRight } from "./tabClose.js";
 
@@ -16,9 +15,6 @@ export interface CenterTab {
   /** Pinned: it leads the strip, isn't dragged or dropped on, and the
    *  bulk closes ("Close Other Tabs") skip it (an agent session's tab). */
   pinned?: boolean;
-  /** Its × arms first and closes on the second click — the inline
-   *  confirm for a destructive close; the label names what it does. */
-  closeConfirm?: string;
   render: () => ReactNode;
   agentStatus?: AgentStatus;
   /** What the agent is waiting on, when `agentStatus` is awaiting. */
@@ -342,29 +338,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
               >
                 {tab.label}
               </span>
-              {tab.closable && onClose && tab.closeConfirm ? (
-                // A destructive close arms first (usability.md "Per-row
-                // destructives"); the clicks stay off the tab itself.
-                <span onClick={(event) => event.stopPropagation()} style={{ display: "inline-flex" }}>
-                  <InlineConfirm
-                    confirmLabel={tab.closeConfirm}
-                    onConfirm={() => onClose(tab.id)}
-                    testIdPrefix={`center-tab-close-${tab.id}`}
-                  >
-                    {(arm) => (
-                      <button
-                        type="button"
-                        data-testid={`center-tab-close-${tab.id}`}
-                        onClick={arm}
-                        title={tab.closeConfirm}
-                        style={closeButtonStyle}
-                      >
-                        ×
-                      </button>
-                    )}
-                  </InlineConfirm>
-                </span>
-              ) : tab.closable && onClose ? (
+              {tab.closable && onClose ? (
                 <button type="button"
                   data-testid={`center-tab-close-${tab.id}`}
                   onClick={(event) => {
@@ -372,15 +346,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
                     onClose(tab.id);
                   }}
                   title={`Close ${tab.label}`}
-                  style={{
-                    border: "none",
-                    background: "transparent",
-                    color: "var(--muted)",
-                    cursor: "pointer",
-                    padding: "0 2px",
-                    fontSize: "var(--text-base)",
-                    lineHeight: 1,
-                  }}
+                  style={closeButtonStyle}
                 >
                   ×
                 </button>
@@ -558,7 +524,7 @@ function OverflowPanel({ tabs, activeId, anchorRef, onActivate, onClose, onDismi
             <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={tab.label}>
               {tab.label}
             </span>
-            {tab.closable && onClose && !tab.closeConfirm ? (
+            {tab.closable && onClose ? (
               <button
                 type="button"
                 data-testid={`center-tabs-overflow-close-${tab.id}`}
@@ -567,15 +533,7 @@ function OverflowPanel({ tabs, activeId, anchorRef, onActivate, onClose, onDismi
                   onClose(tab.id);
                 }}
                 title={`Close ${tab.label}`}
-                style={{
-                  border: "none",
-                  background: "transparent",
-                  color: "var(--muted)",
-                  cursor: "pointer",
-                  padding: "0 2px",
-                  fontSize: "var(--text-base)",
-                  lineHeight: 1,
-                }}
+                style={closeButtonStyle}
               >
                 ×
               </button>

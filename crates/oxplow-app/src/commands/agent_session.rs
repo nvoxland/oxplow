@@ -18,7 +18,8 @@ use std::sync::{Arc, RwLock};
 
 use oxplow_config::OxplowConfig;
 use oxplow_db::agent_session_store::{
-    bind_tx, get_tx, insert_tx, set_fork_next_tx, set_stopped_tx, set_title_tx, unbind_tx,
+    bind_tx, get_tx, insert_tx, reopen_tx, set_fork_next_tx, set_stopped_tx, set_title_tx,
+    unbind_tx,
 };
 use oxplow_domain::agent::registry::HarnessRegistry;
 use oxplow_domain::agent_session::BindingOrigin;
@@ -39,6 +40,7 @@ use super::{Handler, HandlerOutput, TxCtx};
 pub const OPEN: &str = "oxplow.agent_session.open";
 pub const RENAME: &str = "oxplow.agent_session.rename";
 pub const CLOSE: &str = "oxplow.agent_session.close";
+pub const REOPEN: &str = "oxplow.agent_session.reopen";
 pub const STOP: &str = "oxplow.agent_session.stop";
 pub const START: &str = "oxplow.agent_session.start";
 pub const START_FRESH: &str = "oxplow.agent_session.start_fresh";
@@ -264,14 +266,15 @@ pub fn rename_op() -> Op {
 
 /// `agent_session.close { session }`: its slot closes, its open turns end
 /// and it logs `stopped`, in one transaction; its process stops once that
-/// commits. Destructive (a process ends), so a person confirms it and an
-/// agent's waits as a proposal. Not undoable: a stopped process can't be.
+/// commits. Undone by `reopen`: the conversation is saved, and the
+/// reopened slot's process resumes it when its tab mounts — so it asks no
+/// one first.
 pub fn close_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
     Op::new(
         "agent_sessions.write",
         "close",
         schema::<SessionInput>(),
-        false,
+        true,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: SessionInput = parse(input)?;
             let session = load(ctx, &input.session)?;
@@ -291,12 +294,63 @@ pub fn close_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
             let processes = processes.clone();
             let id = session.id;
             Ok(HandlerOutput {
+                inverse: call(REOPEN, json!({ "session": input.session })),
                 after_commit: Some(Box::new(move || processes.kill(id))),
                 ..result(&after)
             })
         })),
     )
-    .confirm_at_least(Confirm::Destructive)
+}
+
+/// `agent_session.reopen { session }`: a slot a person closed opens again,
+/// its tab with it; its process resumes the saved conversation when the
+/// tab mounts. One its thread's or stream's close took is refused (reopen
+/// that instead), as is one on a closed thread. Undone by `close`.
+pub fn reopen_op() -> Op {
+    Op::new(
+        "agent_sessions.write",
+        "reopen",
+        schema::<SessionInput>(),
+        true,
+        Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
+            let input: SessionInput = parse(input)?;
+            let session = load(ctx, &input.session)?;
+            in_own_stream(ctx, session.thread_id)?;
+            if session.is_open() {
+                return Err(invalid("/session", "the session is open"));
+            }
+            if session.closed_reason != Some(SessionCloseReason::Closed) {
+                return Err(invalid(
+                    "/session",
+                    "its thread or stream closed it: reopen that instead",
+                ));
+            }
+            let thread_open: bool = ctx
+                .conn
+                .query_row(
+                    "SELECT closed_at IS NULL FROM threads WHERE id = ?1",
+                    [session.thread_id.value()],
+                    |r| r.get(0),
+                )
+                .map_err(sql)?;
+            if !thread_open {
+                return Err(invalid(
+                    "/session",
+                    format!(
+                        "`{}` is closed; reopen it first",
+                        thread_ref(session.thread_id)
+                    ),
+                ));
+            }
+            reopen_tx(ctx.conn, session.id, Timestamp::now())?;
+            let after = get_tx(ctx.conn, session.id)?
+                .ok_or_else(|| invalid("/session", "the session vanished"))?;
+            Ok(HandlerOutput {
+                inverse: call(CLOSE, json!({ "session": input.session })),
+                ..result(&after)
+            })
+        })),
+    )
 }
 
 /// `agent_session.stop { session }`: the person stopped the agent. The
@@ -547,6 +601,7 @@ pub fn ops(
         open_op(config, harnesses),
         rename_op(),
         close_op(processes.clone()),
+        reopen_op(),
         stop_op(processes.clone()),
         start_op(),
         start_fresh_op(),
@@ -923,10 +978,10 @@ mod tests {
         assert!(err.to_string().contains("agent"), "{err}");
     }
 
-    /// An agent opens and renames sessions only in its own stream, and its
-    /// close waits for a person as a proposal.
+    /// An agent opens and closes sessions only in its own stream; a close
+    /// is undoable, so it runs without waiting for a person.
     #[tokio::test]
-    async fn an_agent_opens_in_its_own_stream_and_its_close_is_proposed() {
+    async fn an_agent_opens_and_closes_in_its_own_stream() {
         let fx = services_with_effort().await;
         let mine = open(&fx, &agent(&fx), json!({ "thread": thread_ref(fx.thread) })).await;
         let err = run(
@@ -944,18 +999,19 @@ mod tests {
         .unwrap_err();
         assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
         let r = agent_session_ref(mine.id);
-        let err = run(&fx, &agent(&fx), CLOSE, json!({ "session": r }), true)
+        run(&fx, &agent(&fx), CLOSE, json!({ "session": r }), false)
             .await
-            .unwrap_err();
-        assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
-        assert!(get(&fx, mine.id).await.is_open());
+            .unwrap();
+        assert!(!get(&fx, mine.id).await.is_open());
     }
 
-    /// Closing is destructive: a person confirms it. It closes the slot
-    /// and its open turn in one run, audited with its `command.executed`;
-    /// renaming undoes to the old title.
+    /// Closing needs no confirmation: it closes the slot and its open turn
+    /// in one run, audited with its `command.executed`, and undoing it
+    /// reopens the slot (its process resumes the saved conversation when
+    /// its tab mounts). Reopening an open session, or one its thread's
+    /// close took, is refused.
     #[tokio::test]
-    async fn closing_asks_first_and_ends_the_open_turn() {
+    async fn closing_ends_the_open_turn_and_undo_reopens_it() {
         use oxplow_domain::stores::AgentTurnStore as _;
         let fx = services_with_effort().await;
         let s = fx.session;
@@ -979,14 +1035,7 @@ mod tests {
             .await
             .unwrap();
         let r = agent_session_ref(s);
-        let err = run(&fx, &Actor::Human, CLOSE, json!({ "session": r }), false)
-            .await
-            .unwrap_err();
-        assert!(
-            matches!(&err, CommandError::NeedsConfirmation { preview } if preview.destructive),
-            "{err:?}"
-        );
-        let out = run(&fx, &Actor::Human, CLOSE, json!({ "session": r }), true)
+        let out = run(&fx, &Actor::Human, CLOSE, json!({ "session": r }), false)
             .await
             .unwrap();
         let closed = get(&fx, s).await;
@@ -1017,6 +1066,33 @@ mod tests {
             .any(|e| e.envelope.event_type == "agent.status.changed"
                 && e.envelope.anchors.agent_session_id == Some(s)
                 && e.envelope.payload["state"] == "stopped"));
+
+        fx.svc
+            .commands
+            .undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .await
+            .unwrap();
+        let reopened = get(&fx, s).await;
+        assert!(reopened.is_open());
+        assert_eq!(reopened.closed_reason, None);
+        let err = run(&fx, &Actor::Human, REOPEN, json!({ "session": r }), false)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");
+
+        run(
+            &fx,
+            &Actor::Human,
+            "oxplow.thread.close",
+            json!({ "thread": thread_ref(fx.thread) }),
+            true,
+        )
+        .await
+        .unwrap();
+        let err = run(&fx, &Actor::Human, REOPEN, json!({ "session": r }), false)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");
     }
 
     #[tokio::test]
