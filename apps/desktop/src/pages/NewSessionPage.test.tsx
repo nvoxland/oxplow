@@ -21,6 +21,7 @@ function renderPicker() {
     <NewSessionPage
       thread={thread}
       harnesses={harnesses}
+      openSessions={0}
       onStart={async (harness, remember) => {
         started.push([harness, remember]);
       }}
@@ -31,6 +32,21 @@ function renderPicker() {
   );
   return { ...view, started, declined };
 }
+
+/** The heading says what the thread has: none yet (a new thread), or how
+ *  many are open (the launcher's New Agent Session…). */
+test("the heading counts the thread's open sessions", () => {
+  const none = render(<NewSessionPage thread={thread} harnesses={harnesses} openSessions={0} onStart={async () => {}} onNoSession={async () => {}} />);
+  expect(none.getByTestId("new-session-empty").textContent).toContain("“Fix the cart” has no agent running here yet");
+  expect(none.queryByTestId("new-session-none")).not.toBeNull();
+  cleanup();
+  const two = render(<NewSessionPage thread={thread} harnesses={harnesses} openSessions={2} onStart={async () => {}} onNoSession={async () => {}} />);
+  const heading = two.getByTestId("new-session-empty").textContent ?? "";
+  expect(heading).toContain("“Fix the cart” has 2 agent sessions open");
+  expect(heading).not.toContain("no agent");
+  // Declining a session only makes sense for a thread without one.
+  expect(two.queryByTestId("new-session-none")).toBeNull();
+});
 
 /** No Session in This Thread leaves the thread without one. */
 test("no session in this thread declines, remembering only when asked", async () => {
@@ -101,6 +117,7 @@ function renderEarlier(listing: EarlierSessions = earlier) {
     <NewSessionPage
       thread={thread}
       harnesses={harnesses}
+      openSessions={0}
       onStart={async () => {}}
       onNoSession={async () => {}}
       onTakeEarlier={async (row) => {
@@ -146,6 +163,7 @@ test("clicking a row takes it, and a refusal shows on the page", async () => {
     <NewSessionPage
       thread={thread}
       harnesses={harnesses}
+      openSessions={0}
       onStart={async () => {}}
       onNoSession={async () => {}}
       onTakeEarlier={async () => {

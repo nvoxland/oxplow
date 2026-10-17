@@ -2652,6 +2652,7 @@ export function App() {
         render: () => (
           <NewSessionPage
             thread={selectedThread}
+            openSessions={selectedThreadSessions?.length ?? 0}
             harnesses={harnesses}
             onStart={async (harness, remember) => {
               if (!selectedThread) return;

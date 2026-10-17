@@ -9,6 +9,9 @@ import { Page, pageH1Style } from "../tabs/Page.js";
 
 interface NewSessionPageProps {
   thread: Thread | null;
+  /** How many sessions the thread has open: none on a new thread, some
+   *  when the launcher's New Agent Session… opened the page. */
+  openSessions: number;
   /** The registered harnesses in priority order (`useAgentHarnesses`). */
   harnesses: HarnessListing[];
   /** Open the session; resolves once its row exists (its tab follows).
@@ -33,6 +36,7 @@ interface NewSessionPageProps {
  */
 export function NewSessionPage({
   thread,
+  openSessions,
   harnesses,
   onStart,
   onNoSession,
@@ -111,8 +115,12 @@ export function NewSessionPage({
         <h1 style={pageH1Style}>New agent session</h1>
         <EmptyState
           testId="new-session-empty"
-          title={thread ? `“${thread.title}” has no agent running here yet` : "No thread selected"}
-          text="Pick an agent and start it. It runs in its own tab; a thread can have several."
+          title={heading(thread, openSessions)}
+          text={
+            openSessions > 0
+              ? "Start another agent, or pick up an earlier session below. Each runs in its own tab."
+              : "Pick an agent and start it. It runs in its own tab; a thread can have several."
+          }
         >
           <form
             onSubmit={async (e) => {
@@ -147,25 +155,28 @@ export function NewSessionPage({
             <button type="submit" data-testid="new-session-start" disabled={busy || !thread || !picked} style={startStyle}>
               Start
             </button>
-            <button
-              type="button"
-              data-testid="new-session-none"
-              disabled={busy}
-              style={noneStyle}
-              onClick={async () => {
-                setBusy(true);
-                setError(null);
-                try {
-                  await onNoSession(remember);
-                } catch (err) {
-                  setError(err instanceof Error ? err.message : String(err));
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              No Session in This Thread
-            </button>
+            {/* Declining a session is for a thread without one. */}
+            {openSessions === 0 ? (
+              <button
+                type="button"
+                data-testid="new-session-none"
+                disabled={busy}
+                style={noneStyle}
+                onClick={async () => {
+                  setBusy(true);
+                  setError(null);
+                  try {
+                    await onNoSession(remember);
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : String(err));
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                No Session in This Thread
+              </button>
+            ) : null}
           </form>
           <label style={rememberStyle} title="Change it later in Settings → Agents">
             <input
@@ -289,6 +300,12 @@ const tagStyle = {
   borderRadius: 3,
   padding: "0 4px",
 } as const;
+
+function heading(thread: Thread | null, openSessions: number): string {
+  if (!thread) return "No thread selected";
+  if (openSessions === 0) return `“${thread.title}” has no agent running here yet`;
+  return `“${thread.title}” has ${openSessions} agent session${openSessions === 1 ? "" : "s"} open`;
+}
 
 const selectStyle = {
   background: "var(--surface-card)",

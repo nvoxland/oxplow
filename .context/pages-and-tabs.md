@@ -38,7 +38,9 @@ pages are THE shell.
   ones and every agent's saved conversations for the worktree); taking one
   closes the picker and activates that session's tab. A closed session's
   ref (a search hit) opens its transcript lens, not a missing tab. The
-  picker's **No Session in This Thread** closes it, and
+  picker's heading counts the thread's open sessions (none on a new
+  thread). On a thread with none, **No Session in This Thread** closes
+  it (hidden once a session is open), and
   its **Remember this for new threads** checkbox saves the choice (the
   agent started, or `none`) as `newThreadSession`; Settings → Agents has
   the same choice ("New threads start with",
