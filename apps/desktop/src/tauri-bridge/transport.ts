@@ -270,13 +270,54 @@ export function ipcRequest(name: string, args: Record<string, unknown> | undefin
   };
 }
 
+/// Calls whose latency a person feels: keystrokes to a terminal and the
+/// switch of a stream. They have lanes of their own (see `createLanes`).
+export const PRIORITY_COMMANDS: ReadonlySet<string> = new Set(["forward_terminal_input", "switch_stream"]);
+
+/// How many `/ipc` requests each lane keeps in flight. The webview holds
+/// six HTTP/1.1 connections to the daemon; the lanes add up to that, so a
+/// burst of reads (a refetch storm) can fill the bulk lane and never the
+/// connections the priority lane has.
+export const BULK_IN_FLIGHT = 4;
+export const PRIORITY_IN_FLIGHT = 2;
+
+/// Two first-in first-out lanes, each running at most its limit at once:
+/// whatever waits in one never delays the other. Pure; exported for tests.
+export function createLanes(limits: { bulk: number; priority: number }) {
+  type Lane = { limit: number; running: number; waiting: Array<() => void> };
+  const lanes: Record<"bulk" | "priority", Lane> = {
+    bulk: { limit: limits.bulk, running: 0, waiting: [] },
+    priority: { limit: limits.priority, running: 0, waiting: [] },
+  };
+  return function run<T>(priority: boolean, task: () => Promise<T>): Promise<T> {
+    const lane = lanes[priority ? "priority" : "bulk"];
+    return new Promise<T>((resolve, reject) => {
+      const start = () => {
+        lane.running += 1;
+        task()
+          .then(resolve, reject)
+          .finally(() => {
+            lane.running -= 1;
+            lane.waiting.shift()?.();
+          });
+      };
+      if (lane.running < lane.limit) start();
+      else lane.waiting.push(start);
+    });
+  };
+}
+
+const inLane = createLanes({ bulk: BULK_IN_FLIGHT, priority: PRIORITY_IN_FLIGHT });
+
 export async function invoke<T>(name: string, args?: Record<string, unknown>): Promise<T> {
   const route = invokeRoute(name, remoteBase, shellAvailable());
   if (route === "tauri") return tauriInvoke<T>(name, args);
   if (route === "none") {
     throw { code: "NOT_FOUND", message: `${name} is the desktop shell's, and this window has none`, cause: null };
   }
-  const resp = await fetch(`${remoteBase}/ipc/${name}`, ipcRequest(name, args, remoteToken));
+  const base = remoteBase;
+  const token = remoteToken;
+  const resp = await inLane(PRIORITY_COMMANDS.has(name), () => fetch(`${base}/ipc/${name}`, ipcRequest(name, args, token)));
   if (resp.status === 401) {
     // The daemon refused this window's token: no retry fixes that.
     markTokenRefused();

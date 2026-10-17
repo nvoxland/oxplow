@@ -61,6 +61,18 @@ developer-facing mechanics.
   one it fetches `/ipc/:name` and demuxes the `/events` WS with backoff
   reconnect.
 
+  **Two lanes, so input is never starved.** The webview holds six HTTP/1.1
+  connections to a daemon, and `/ipc` calls share them. A refetch storm
+  used to fill all six: terminal keystrokes timed out ("the terminal
+  didn't answer within 5 s") and a stream switch took minutes. `invoke`
+  now sends each call through one of two first-in first-out lanes
+  (`createLanes`): **bulk** (4 in flight) and **priority** (2 in flight,
+  `PRIORITY_COMMANDS`: `forward_terminal_input`, `switch_stream`). The
+  two add up to six, so a full bulk lane leaves the priority lane its
+  connections; what waits in one never delays the other. Terminal output
+  already rides the `/events` WebSocket. Pinned by `request lanes` in
+  `transport.test.ts`.
+
   **Which daemon is a per-window question** (tsk258). The shell injects
   `window.__OXPLOW__ = { base, kind, projectDir }` into every window it creates
   (`src-tauri/src/windows.rs`, `initialization_script` — built through

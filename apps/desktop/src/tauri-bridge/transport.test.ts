@@ -8,6 +8,10 @@ import {
   resolveToken,
   handleSocketOpen,
   parseRemoteInput,
+  createLanes,
+  BULK_IN_FLIGHT,
+  PRIORITY_IN_FLIGHT,
+  PRIORITY_COMMANDS,
   triggerRemoteResync,
 } from "./transport";
 import { EVENT_CHANNELS } from "./channels";
@@ -181,5 +185,49 @@ describe("a window closing", () => {
     expect(ipcRequest("unregister_client_host", { client: "c" }, null).keepalive).toBe(true);
     expect(ipcRequest(PROJECT_COMMAND, undefined, "t").keepalive).toBe(false);
     expect(ipcRequest(PROJECT_COMMAND, undefined, "t").headers).toMatchObject({ Authorization: "Bearer t" });
+  });
+});
+
+describe("request lanes", () => {
+  /// A task that stays in flight until `finish` is called.
+  function pending() {
+    let finish: () => void = () => {};
+    const done = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    return { run: () => done, finish };
+  }
+
+  test("a burst of reads fills the bulk lane and terminal input still goes at once", async () => {
+    const lanes = createLanes({ bulk: BULK_IN_FLIGHT, priority: PRIORITY_IN_FLIGHT });
+    let started = 0;
+    const reads = Array.from({ length: 20 }, () => {
+      const p = pending();
+      void lanes(false, () => {
+        started += 1;
+        return p.run();
+      });
+      return p;
+    });
+    expect(started).toBe(BULK_IN_FLIGHT);
+    let sent = false;
+    const key = lanes(true, async () => {
+      sent = true;
+    });
+    await key;
+    expect(sent).toBe(true);
+    expect(started).toBe(BULK_IN_FLIGHT);
+    // Reads finishing let the waiting ones through, in order.
+    reads[0].finish();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(started).toBe(BULK_IN_FLIGHT + 1);
+    reads.forEach((r) => r.finish());
+  });
+
+  test("the lanes together stay within the webview's six connections, and input is a priority call", () => {
+    expect(BULK_IN_FLIGHT + PRIORITY_IN_FLIGHT).toBeLessThanOrEqual(6);
+    expect(PRIORITY_COMMANDS.has("forward_terminal_input")).toBe(true);
+    expect(PRIORITY_COMMANDS.has("list_streams")).toBe(false);
   });
 });
