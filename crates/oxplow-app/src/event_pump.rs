@@ -51,6 +51,7 @@ use tokio::sync::Notify;
 pub const CORE_CONSUMERS: &[&str] = &[
     "advisories.post_tool",
     "advisories.turn_end",
+    "agent.context_changes",
     "capabilities.agent_text",
     "change.analyze",
     "collection",

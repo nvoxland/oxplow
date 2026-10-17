@@ -51,6 +51,7 @@ pub mod component_bundles;
 pub mod config_reactors;
 pub mod config_service;
 pub mod config_watch;
+pub mod context_watch;
 pub mod contribution_health;
 pub mod credential_lint;
 pub mod daemon_supervisor;
@@ -720,6 +721,10 @@ pub struct Services {
     pub agent_policy: Arc<agent_policy::AgentPolicy>,
     /// Recording and prompt context shared by every agent transport.
     pub agent_context: Arc<agent_context::AgentContext>,
+    /// Bumped when the log records a fact an agent's context reads
+    /// (`context_watch`): a session without a prompt hook rebuilds its
+    /// context on it.
+    pub context_changes: tokio::sync::watch::Sender<u64>,
     /// Open ACP agent sessions (tsk281). Sessions get a
     /// `chat::host::ServicesChatHost` holding `Services` weakly.
     pub chat: Arc<chat::manager::ChatManager>,
@@ -1418,6 +1423,12 @@ impl Services {
                 .with_snapshots(snapshots.clone())
                 .with_metrics(fact_store.clone(), event_bus.clone())
                 .with_steering_sources(agent_turn_store.clone(), comment_store.clone());
+        // What an agent's context reads changing: sessions without a
+        // prompt hook inject it between turns.
+        let (context_changes, _) = tokio::sync::watch::channel(0u64);
+        event_pump.register_async(Arc::new(context_watch::ContextChanges {
+            changed: context_changes.clone(),
+        }));
         // The post-commit half of effort open/close runs on the pump.
         event_pump.register_async(Arc::new(effort_lifecycle::EffortLifecycleConsumer::new(
             efforts.without_event_pump(),
@@ -1978,6 +1989,7 @@ impl Services {
             lsp_sessions: lsp,
             agent_policy,
             agent_context: Arc::new(agent_context::AgentContext::default()),
+            context_changes,
             chat,
             approvals,
             lsp_installer: lsp_installer_svc,

@@ -27,6 +27,8 @@ struct Host {
     /// Deny every worktree write with this reason.
     deny_writes: Option<String>,
     context: Option<String>,
+    /// The signal a change to the context bumps.
+    changes: Option<tokio::sync::watch::Sender<u64>>,
     log: Mutex<Vec<String>>,
 }
 
@@ -62,8 +64,20 @@ impl ChatHost for Host {
     async fn session_started(&self, _t: &ThreadId, s: &str) {
         self.log.lock().push(format!("started {s}"));
     }
-    async fn prompt_context(&self, _t: &ThreadId, _s: &str) -> Option<String> {
-        self.context.clone()
+    async fn prompt_context(
+        &self,
+        _t: &ThreadId,
+        _s: &str,
+    ) -> Option<crate::agent_context::PendingContext> {
+        self.context
+            .clone()
+            .map(crate::agent_context::PendingContext::plain)
+    }
+    async fn context_delivered(&self, context: crate::agent_context::PendingContext) {
+        self.log.lock().push(format!("delivered {}", context.text));
+    }
+    fn context_changes(&self) -> Option<tokio::sync::watch::Receiver<u64>> {
+        self.changes.as_ref().map(|s| s.subscribe())
     }
     async fn turn_started(&self, _t: &ThreadId, _s: &str, prompt: &str) {
         self.log.lock().push(format!("turn_started {prompt}"));
@@ -891,20 +905,38 @@ mod codex {
     /// A daemon whose `thread/start` opens `thr-x` and whose
     /// `thread/resume` opens it named.
     fn daemon(home: &std::path::Path) -> FakeAppServer {
-        FakeAppServer::start(home, |method, _| match method {
+        daemon_failing(home, 0)
+    }
+
+    /// A daemon that refuses its first `fails` context injections.
+    fn daemon_failing(home: &std::path::Path, fails: usize) -> FakeAppServer {
+        let refusals = std::sync::atomic::AtomicUsize::new(fails);
+        FakeAppServer::start(home, move |method, _| match method {
             "thread/start" => Ok(json!({"thread": {"id": THREAD, "name": null}})),
             "thread/resume" => Ok(json!({"thread": {"id": THREAD, "name": "Earlier work"}})),
             "thread/goal/set" | "thread/goal/clear" => Ok(json!({})),
             "thread/name/set" => Ok(json!({})),
-            "thread/inject_items" => Ok(json!({})),
+            "thread/inject_items" => {
+                let left = refusals.load(std::sync::atomic::Ordering::SeqCst);
+                if left > 0 {
+                    refusals.store(left - 1, std::sync::atomic::Ordering::SeqCst);
+                    Err("the daemon is busy".into())
+                } else {
+                    Ok(json!({}))
+                }
+            }
             other => Err(format!("no {other}")),
         })
     }
 
     async fn open_codex(host: Host, method: &str) -> (Rig, FakeAppServer) {
+        open_codex_failing(host, method, 0).await
+    }
+
+    async fn open_codex_failing(host: Host, method: &str, fails: usize) -> (Rig, FakeAppServer) {
         // Short: a unix socket's path has a length limit.
         let dir = tempfile::Builder::new().tempdir_in("/tmp").unwrap();
-        let fake = daemon(dir.path());
+        let fake = daemon_failing(dir.path(), fails);
         let mgr = ChatManager::new();
         let host = Arc::new(host);
         let thread = mgr
@@ -1029,6 +1061,63 @@ mod codex {
         rig.wait_status(ChatStatus::Idle).await;
         injected_is(&fake, 2).await;
         assert!(rig.host.log().contains(&"compacted".to_string()));
+    }
+
+    /// A context the daemon refused is not delivered: nothing is recorded
+    /// as sent, so the next chance (the end of a turn) carries it whole.
+    #[tokio::test]
+    async fn a_refused_inject_loses_nothing() {
+        let (mut rig, fake) = open_codex_failing(
+            Host {
+                context: Some("<handoffs>x</handoffs>".into()),
+                ..Host::default()
+            },
+            "thread/start",
+            1,
+        )
+        .await;
+        injected_is(&fake, 1).await;
+        assert!(
+            !rig.host.log().iter().any(|l| l.starts_with("delivered")),
+            "{:?}",
+            rig.host.log()
+        );
+        fake.push(note("turn/started", json!({"turn": {"id": "u1"}})));
+        fake.push(note("item/completed", json!({"item": {"type": "userMessage", "id": "m1", "content": [{"type": "text", "text": "go"}]}})));
+        fake.push(note(
+            "turn/completed",
+            json!({"turn": {"id": "u1", "status": "completed"}}),
+        ));
+        rig.wait_status(ChatStatus::Idle).await;
+        injected_is(&fake, 2).await;
+        assert_eq!(
+            rig.host
+                .log()
+                .iter()
+                .filter(|l| *l == "delivered <handoffs>x</handoffs>")
+                .count(),
+            1
+        );
+    }
+
+    /// While no turn runs, a change to what the context says is injected
+    /// at once — not after the next turn ends.
+    #[tokio::test]
+    async fn a_change_while_idle_is_injected_before_the_next_turn() {
+        let (changes, _) = tokio::sync::watch::channel(0u64);
+        let (rig, fake) = open_codex(
+            Host {
+                context: Some("<handoffs>y</handoffs>".into()),
+                changes: Some(changes.clone()),
+                ..Host::default()
+            },
+            "thread/start",
+        )
+        .await;
+        injected_is(&fake, 1).await;
+        changes.send_modify(|n| *n += 1);
+        injected_is(&fake, 2).await;
+        assert_eq!(rig.host.count("turn_started"), 0, "no turn ran");
     }
 
     /// A prompt the person types into Codex's TUI is recorded as theirs:

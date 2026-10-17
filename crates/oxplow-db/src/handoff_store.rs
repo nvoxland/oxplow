@@ -1,8 +1,8 @@
 //! Handoffs: work handed from one thread to another (`oxplow.handoff.send`,
 //! `oxplow.handoff.settle`). A handoff is a record oxplow keeps, never a
 //! message it delivers: the recipient thread's agent is given it at the
-//! start of its next prompt ([`SqliteHandoffStore::take_for_prompt`], which
-//! stamps `delivered_at`), and the person sees it at once. Its body's
+//! start of its next prompt ([`SqliteHandoffStore::peek_for_prompt`], then
+//! [`SqliteHandoffStore::mark_delivered`] once the agent has it), and the person sees it at once. Its body's
 //! `[[…]]` links are its `page_ref` edges (source kind `handoff`). See
 //! `.context/agent-model.md` "Handoffs and native messaging".
 
@@ -243,40 +243,45 @@ impl SqliteHandoffStore {
     }
 
     /// The open handoffs to `thread` no agent was given yet, oldest first,
-    /// stamped delivered to `session` in the same transaction: each reaches
-    /// the thread's agents once, at the first prompt that takes it.
-    pub async fn take_for_prompt(
+    /// still undelivered: the delivery can fail, so the stamp
+    /// ([`Self::mark_delivered`]) waits until the agent has them.
+    pub async fn peek_for_prompt(&self, thread: ThreadId) -> Result<Vec<Handoff>, DomainError> {
+        self.db
+            .transaction(move |conn| {
+                conn.prepare(
+                    "SELECT * FROM handoff
+                      WHERE to_thread_id = ?1 AND state = 'open' AND delivered_at IS NULL
+                      ORDER BY sent_at, id",
+                )
+                .and_then(|mut stmt| {
+                    stmt.query_map(params![thread.value()], row_to_handoff)?
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .map_err(map_sql_err)
+            })
+            .await
+    }
+
+    /// Stamp handoffs `ids` delivered to `session` (those still waiting):
+    /// each reaches the thread's agents once, at the first prompt that
+    /// carries it.
+    pub async fn mark_delivered(
         &self,
-        thread: ThreadId,
+        ids: Vec<HandoffId>,
         session: Option<AgentSessionId>,
-    ) -> Result<Vec<Handoff>, DomainError> {
+    ) -> Result<(), DomainError> {
         self.db
             .transaction(move |tx| {
-                let waiting = tx
-                    .prepare(
-                        "SELECT * FROM handoff
-                          WHERE to_thread_id = ?1 AND state = 'open' AND delivered_at IS NULL
-                          ORDER BY sent_at, id",
-                    )
-                    .and_then(|mut stmt| {
-                        stmt.query_map(params![thread.value()], row_to_handoff)?
-                            .collect::<rusqlite::Result<Vec<_>>>()
-                    })
-                    .map_err(map_sql_err)?;
-                let now = Timestamp::now();
-                let mut taken = Vec::with_capacity(waiting.len());
-                for mut h in waiting {
+                let now = ts_to_string(Timestamp::now());
+                for id in ids.iter() {
                     tx.execute(
                         "UPDATE handoff SET delivered_at = ?2, delivered_to_session_id = ?3
                           WHERE id = ?1 AND delivered_at IS NULL",
-                        params![h.id.value(), ts_to_string(now), session.map(|s| s.value())],
+                        params![id.value(), now, session.map(|s| s.value())],
                     )
                     .map_err(map_sql_err)?;
-                    h.delivered_at = Some(now);
-                    h.delivered_to_session_id = session;
-                    taken.push(h);
                 }
-                Ok(taken)
+                Ok(())
             })
             .await
     }

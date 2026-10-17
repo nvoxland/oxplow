@@ -695,8 +695,8 @@ Work handed from one thread to another (`oxplow.handoff.*`,
 `from_actor` (CHECK `user` / `agent` / `effect` / `job` / `system`),
 `to_thread_id` (CHECK it isn't the sender's), `work_item` (a ref),
 `body`, `sent_at`, `delivered_at` + `delivered_to_session_id` (stamped by
-`SqliteHandoffStore::take_for_prompt` when a prompt in the recipient
-thread carries it), `state` (CHECK `open` / `taken` / `declined` /
+`SqliteHandoffStore::mark_delivered` once the agent has the prompt or
+injected context that carries it), `state` (CHECK `open` / `taken` / `declined` /
 `withdrawn`), `settled_at`, `settled_by_session_id`, `note`. Sessions
 are `ON DELETE SET NULL`, threads `CASCADE`. Its ref is `handoff:hnd<n>`;
 its body's `[[…]]` links are `page_ref` edges from `handoff`, restated

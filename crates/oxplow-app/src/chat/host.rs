@@ -15,6 +15,7 @@ use oxplow_domain::agent::tool::ToolUse;
 use oxplow_domain::hook::TurnRun;
 
 use super::conn::TurnTokens;
+use crate::agent_context::PendingContext;
 use crate::hook_ingest::HookEnvelope;
 use crate::Services;
 
@@ -31,8 +32,20 @@ pub trait ChatHost: Send + Sync + 'static {
     ) -> PolicyDecision;
     /// A session is up (new or loaded): remember it for the next resume.
     async fn session_started(&self, thread: &ThreadId, session_id: &str);
-    /// Context to attach to the person's next prompt.
-    async fn prompt_context(&self, thread: &ThreadId, session_id: &str) -> Option<String>;
+    /// Context to attach to the person's next prompt, built and not yet
+    /// taken: the host commits it ([`Self::context_delivered`]) once the
+    /// agent has it.
+    async fn prompt_context(&self, thread: &ThreadId, session_id: &str) -> Option<PendingContext>;
+    /// The agent has the context [`Self::prompt_context`] built: record it
+    /// as sent.
+    async fn context_delivered(&self, context: PendingContext);
+    /// A signal that bumps whenever what [`Self::prompt_context`] would
+    /// say may have changed (a handoff to the thread, an agent arriving in
+    /// its worktree, a recorded decision); `None` for a host that has no
+    /// such events.
+    fn context_changes(&self) -> Option<tokio::sync::watch::Receiver<u64>> {
+        None
+    }
     async fn turn_started(&self, thread: &ThreadId, session_id: &str, prompt: &str);
     /// A tool call finished: record it. What it leaves for the agent
     /// (nudges) waits in the store for the next prompt's context.
@@ -199,11 +212,11 @@ impl ChatHost for ServicesChatHost {
         self.ingest(&svc, env).await;
     }
 
-    async fn prompt_context(&self, thread: &ThreadId, session_id: &str) -> Option<String> {
+    async fn prompt_context(&self, thread: &ThreadId, session_id: &str) -> Option<PendingContext> {
         let svc = self.svc.upgrade()?;
         let harness = self.harness(&svc).await;
         svc.agent_context
-            .prompt_context(
+            .build_context(
                 &svc,
                 thread,
                 Some(session_id),
@@ -211,6 +224,16 @@ impl ChatHost for ServicesChatHost {
                 harness.as_deref(),
             )
             .await
+    }
+
+    async fn context_delivered(&self, context: PendingContext) {
+        if let Some(svc) = self.svc.upgrade() {
+            svc.agent_context.commit(&svc, context).await;
+        }
+    }
+
+    fn context_changes(&self) -> Option<tokio::sync::watch::Receiver<u64>> {
+        Some(self.svc.upgrade()?.context_changes.subscribe())
     }
 
     async fn turn_started(&self, thread: &ThreadId, session_id: &str, prompt: &str) {

@@ -291,8 +291,24 @@ impl Actor {
 
         let closed = conn.closed();
         tokio::pin!(closed);
+        // What the context says may change while no turn runs: build it
+        // again on the signal (the baselines drop a build that changes
+        // nothing).
+        let mut changes = self.host.context_changes();
         let reason = loop {
             tokio::select! {
+                changed = async {
+                    match changes.as_mut() {
+                        Some(rx) => rx.changed().await.is_ok(),
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    if changed {
+                        self.inject_context(conn.as_ref()).await;
+                    } else {
+                        changes = None;
+                    }
+                }
                 msg = incoming.recv() => match msg {
                     Some(msg) => {
                         self.on_incoming(msg).await;
@@ -363,8 +379,10 @@ impl Actor {
         else {
             return;
         };
-        if let Err(e) = conn.inject(&context).await {
-            tracing::warn!(error = %e, "context not delivered to the agent");
+        match conn.inject(&context.text).await {
+            Ok(()) => self.host.context_delivered(context).await,
+            // Nothing was taken: the next chance builds it all again.
+            Err(e) => tracing::warn!(error = %e, "context not delivered to the agent"),
         }
     }
 
@@ -417,12 +435,12 @@ impl Actor {
         if let Some(sp) = self.pending_system_prompt.take() {
             parts.push(sp);
         }
-        if let Some(c) = self
+        let built = self
             .host
             .prompt_context(self.thread(), &self.session_id)
-            .await
-        {
-            parts.push(c);
+            .await;
+        if let Some(c) = &built {
+            parts.push(c.text.clone());
         }
         let context = (!parts.is_empty()).then(|| parts.join("\n\n"));
         let hp = super::human_prompt::compose(&text, context.as_deref());
@@ -440,6 +458,9 @@ impl Actor {
             self.turn = None;
             self.push(ItemBody::Error { message: e.clone() });
             return Err(ChatError::Agent(e));
+        }
+        if let Some(c) = built {
+            self.host.context_delivered(c).await;
         }
         self.set_status(ChatStatus::Running);
         Ok(())

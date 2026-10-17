@@ -160,45 +160,38 @@ impl SqliteAgentNudgeStore {
         thread_id: &str,
         budget: usize,
     ) -> Result<Vec<AgentNudge>, DomainError> {
-        let thread_val = ThreadId::try_from_str(thread_id)
-            .ok_or_else(|| DomainError::Invalid(format!("bad thread id: {thread_id}")))?
-            .value();
+        let thread_val = thread_value(thread_id)?;
         self.db
             .transaction(move |tx| {
-                let sql_err = crate::database::map_sql_err;
-                let mut waiting = tx
-                    .prepare(&format!(
-                        "SELECT {SELECT_COLS} FROM agent_nudge
-                          WHERE thread_id = ?1 AND delivered_at IS NULL AND audience = 'agent'
-                          ORDER BY instr(kind, '/') > 0, id"
-                    ))
-                    .map_err(sql_err)?
-                    .query_map(params![thread_val], row_to_nudge)
-                    .map_err(sql_err)?
-                    .collect::<rusqlite::Result<Vec<_>>>()
-                    .map_err(sql_err)?;
-                let mut used = 0;
-                let mut taken = 0;
-                for n in &waiting {
-                    let len = n.message.chars().count();
-                    if taken > 0 && used + len > budget {
-                        break;
-                    }
-                    used += len;
-                    taken += 1;
-                }
-                waiting.truncate(taken);
+                let mut waiting = waiting_tx(tx, thread_val, budget)?;
                 let now = Timestamp::now();
+                mark_delivered_tx(tx, waiting.iter().map(|n| n.id), now)?;
                 for n in &mut waiting {
-                    tx.execute(
-                        "UPDATE agent_nudge SET delivered_at = ?2 WHERE id = ?1",
-                        params![n.id, ts_to_string(now)],
-                    )
-                    .map_err(sql_err)?;
                     n.delivered_at = Some(now);
                 }
                 Ok(waiting)
             })
+            .await
+    }
+
+    /// What [`Self::take_for_agent`] would take, left undelivered: for a
+    /// delivery that can fail, which then calls [`Self::mark_delivered`]
+    /// once the agent has the text.
+    pub async fn peek_for_agent(
+        &self,
+        thread_id: &str,
+        budget: usize,
+    ) -> Result<Vec<AgentNudge>, DomainError> {
+        let thread_val = thread_value(thread_id)?;
+        self.db
+            .transaction(move |tx| waiting_tx(tx, thread_val, budget))
+            .await
+    }
+
+    /// Mark nudges `ids` delivered (those still waiting).
+    pub async fn mark_delivered(&self, ids: Vec<i64>) -> Result<(), DomainError> {
+        self.db
+            .transaction(move |tx| mark_delivered_tx(tx, ids.iter().copied(), Timestamp::now()))
             .await
     }
 
@@ -385,6 +378,60 @@ pub fn claim_once_tx(
         )
         .map_err(crate::database::map_sql_err)?;
     Ok(n == 1)
+}
+
+fn thread_value(thread_id: &str) -> Result<i64, DomainError> {
+    Ok(ThreadId::try_from_str(thread_id)
+        .ok_or_else(|| DomainError::Invalid(format!("bad thread id: {thread_id}")))?
+        .value())
+}
+
+/// The thread's undelivered agent nudges within `budget` (see
+/// `take_for_agent`).
+fn waiting_tx(
+    conn: &rusqlite::Connection,
+    thread_val: i64,
+    budget: usize,
+) -> Result<Vec<AgentNudge>, DomainError> {
+    let sql_err = crate::database::map_sql_err;
+    let mut waiting = conn
+        .prepare(&format!(
+            "SELECT {SELECT_COLS} FROM agent_nudge
+              WHERE thread_id = ?1 AND delivered_at IS NULL AND audience = 'agent'
+              ORDER BY instr(kind, '/') > 0, id"
+        ))
+        .map_err(sql_err)?
+        .query_map(params![thread_val], row_to_nudge)
+        .map_err(sql_err)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(sql_err)?;
+    let mut used = 0;
+    let mut taken = 0;
+    for n in &waiting {
+        let len = n.message.chars().count();
+        if taken > 0 && used + len > budget {
+            break;
+        }
+        used += len;
+        taken += 1;
+    }
+    waiting.truncate(taken);
+    Ok(waiting)
+}
+
+fn mark_delivered_tx(
+    conn: &rusqlite::Connection,
+    ids: impl Iterator<Item = i64>,
+    now: Timestamp,
+) -> Result<(), DomainError> {
+    for id in ids {
+        conn.execute(
+            "UPDATE agent_nudge SET delivered_at = ?2 WHERE id = ?1 AND delivered_at IS NULL",
+            params![id, ts_to_string(now)],
+        )
+        .map_err(crate::database::map_sql_err)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

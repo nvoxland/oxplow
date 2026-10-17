@@ -185,7 +185,7 @@ is left out by its row id (the hook's `agent_session_id`, the chat host's
 session, the launch's row). Nothing in the line is for the agent to act
 on: no pid, no session id. An agent arriving or leaving changes the
 block, so the next prompt carries it; Codex has no prompt, so the change
-is injected when its turn ends.
+is injected as it happens, while no turn runs.
 
 ### Per-harness delivery
 
@@ -901,27 +901,44 @@ developer-role message to the thread's history. Checked live on the
   again with the injected text, in the same turn. So the timing rule is:
   inject only while no turn runs.
 
-The session actor (`chat/session.rs`, `inject_context`) therefore asks
-`AgentContext::prompt_context` — the same "once, then on change"
-baselines, the `<handoffs>` block and its `delivered_at` stamp, nudges
-and decisions — and injects what it returns (`Connection::inject`) at
-three moments, each only when the connection says it can
-(`Connection::can_inject`: the thread runs no turn, read from
+The session actor (`chat/session.rs`, `inject_context`) therefore builds
+the context with `AgentContext::build_context` — the same "once, then on
+change" baselines, the `<handoffs>` block, nudges and decisions a prompt
+carries — and injects it (`Connection::inject`), only when the connection
+says it can (`Connection::can_inject`: the thread runs no turn, read from
 `turn/started` / `turn/completed`; and the daemon knows the method, else
-the first refusal, "unknown variant", turns it off for the connection):
-when the session opens, when a turn ends, and after a compaction
-(`ChatHost::compacted` resets the baselines; a compaction inside a turn
-waits for that turn's end). A change while no turn runs (a new neighbour,
-a new assignment) therefore reaches the agent at the end of the next
-turn, one turn behind a hook-based harness; there is no event to inject
-on while the thread is idle. The launch prompt's `developerInstructions`
-leave the session context out (the harness declares `prompt_context`);
-the first injection carries it. An injection that fails is logged and
-lost: the baseline is already taken, and a handoff stamped delivered
-stays so.
+the first refusal, "unknown variant", turns it off for the connection).
+It does so at four moments: when the session opens, when a turn ends,
+after a compaction (`ChatHost::compacted` resets the baselines; one inside
+a turn waits for that turn's end), and **on a change**: the
+`agent.context_changes` pump consumer (`context_watch.rs`) bumps
+`Services::context_changes` when the log records a fact the context
+reads — `handoff.sent` / `handoff.settled`, `agent.session.started` /
+`.ended` (who else is in the worktree), `effort.opened` / `.closed` /
+`.finished` / `.linked` / `.retitled` and the decision reviews, and the
+`oxplow.effort.record_decision` command — and each session watching it
+builds again. A build that changes nothing is `None` (the baselines), so
+a no-op event injects nothing; a change during a turn waits for its end.
+No polling. The launch prompt's `developerInstructions` leave the session
+context out (the harness declares `prompt_context`); the first injection
+carries it.
 
-Pinned by `context_is_injected_between_turns_never_during_one` (a
-scripted daemon), `a_recorded_inject_starts_no_turn_and_waits_for_none`
+**Building takes nothing; delivery commits.** `build_context` returns a
+`PendingContext` and changes no state: no baseline moves, no handoff or
+nudge is stamped. `AgentContext::commit` records the blocks as the
+session's baselines, stamps the handoffs it carried delivered (by id) and
+marks its nudges, and runs only once the agent has the text: the hook
+answer for Claude Code and opencode (`prompt_context` is build then
+commit, the answer counting as the success), `conn.prompt` for an ACP
+agent, the daemon's `{}` for an injection. A refused injection commits
+nothing, so a handoff stays undelivered and the next chance carries it
+whole.
+
+Pinned by `context_is_injected_between_turns_never_during_one`,
+`a_refused_inject_loses_nothing` and
+`a_change_while_idle_is_injected_before_the_next_turn` (a scripted
+daemon), `a_context_that_was_not_delivered_takes_nothing` and
+`a_handoff_tells_the_context_watchers`, `a_recorded_inject_starts_no_turn_and_waits_for_none`
 (`tests/fixtures/codex/inject.jsonl`, recorded on the live daemon),
 `nothing_is_injected_into_a_running_turn`, and the source guard
 `only_the_codex_connection_injects_context` (the drive guards stay:
@@ -1413,10 +1430,10 @@ None is cross-thread, visible to the person, and acknowledged.
   state or delivery stamp, and the Explore hand-back relies on that.
 
 **When the recipient sees it.** Its agent: at the start of its next
-prompt. `AgentContext::prompt_context` takes the thread's open,
-undelivered handoffs (`SqliteHandoffStore::take_for_prompt`, which
-stamps `delivered_at` and `delivered_to_session_id` in the same
-transaction) and puts them in a `<handoffs>` block after the session
+prompt. `AgentContext::build_context` reads the thread's open,
+undelivered handoffs (`SqliteHandoffStore::peek_for_prompt`) and
+`AgentContext::commit` stamps `delivered_at` and `delivered_to_session_id`
+(`mark_delivered`, by id) once the agent has them and puts them in a `<handoffs>` block after the session
 context: each one's ref, the sender's thread and session (or "the
 person"), when, its item's quoted title, the body up to
 `HANDOFF_BODY_IN_CONTEXT` characters with its ref for the rest, and how
@@ -1425,8 +1442,9 @@ a nudge, and mustn't land in the middle of other work. The session
 context counts the thread's open ones (`- **Open handoffs to this
 thread:** N`, `agent_context::surroundings`), so a later session or a
 restart learns of them without the bodies again. Codex gets the whole
-block too, injected between turns (the same `take_for_prompt` stamps it
-at that moment, not at a prompt).
+block too, injected between turns. The take is two steps
+(`peek_for_prompt`, then `mark_delivered` by id once the agent has the
+text), so a delivery that fails stamps nothing.
 
 The person: at once, through the foundation extension (core's own, so a
 project with `oxplow-bundled` off still has it):
@@ -1454,7 +1472,7 @@ thread's menu, see it on the other thread, take it, the item moves.
 a server prompt or `turn/start` for a handoff: those are Drive on an
 interactive surface ("Key invariant").
 `source_guards::a_handoff_reaches_an_agent_only_at_its_prompt` pins
-that `take_for_prompt` has one caller and that no production code names
+that `peek_for_prompt` has one caller and that no production code names
 `prompt_async`, Claude Code's channels, or its inbox socket (outside the
 harness that scrubs it from a child's environment). A restart loses
 nothing: the record and its stamps are in the database. Pinned by the

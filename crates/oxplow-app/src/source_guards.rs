@@ -952,7 +952,7 @@ fn nothing_in_core_drives_an_agent() {
 /// child's environment.
 #[test]
 fn a_handoff_reaches_an_agent_only_at_its_prompt() {
-    const TAKE: &str = "take_for_prompt(";
+    const TAKE: &str = "peek_for_prompt(";
     const TAKERS: &[&str] = &[
         "crates/oxplow-db/src/handoff_store.rs",
         "crates/oxplow-app/src/agent_context.rs",

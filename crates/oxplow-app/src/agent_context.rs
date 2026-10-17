@@ -16,7 +16,7 @@
 use std::collections::HashMap;
 
 use oxplow_domain::stores::{StreamStore, ThreadStore};
-use oxplow_domain::{AgentSessionId, StreamId, ThreadId};
+use oxplow_domain::{AgentSessionId, HandoffId, StreamId, ThreadId};
 use parking_lot::Mutex;
 use tracing::warn;
 
@@ -91,10 +91,9 @@ impl AgentContext {
     }
 
     /// Context for a human's prompt in agent session `agent_session` (its
-    /// harness's own id is `session_id`): the `<session-context>` block
-    /// (only when it changed for this session), the thread's undelivered nudges
-    /// (prompt advisories, and the hints its last turn's end left), and the
-    /// open effort's decisions (once per session, and when they change).
+    /// harness's own id is `session_id`), delivered by the hook answer
+    /// that carries it: built ([`Self::build_context`]) and committed
+    /// ([`Self::commit`]) in one step, the answer counting as the success.
     /// Nothing for a session whose harness can't carry context on a prompt
     /// (`prompt_context`): nothing meant for its agent is taken.
     pub async fn prompt_context(
@@ -105,13 +104,49 @@ impl AgentContext {
         agent_session: Option<AgentSessionId>,
         harness: Option<&str>,
     ) -> Option<String> {
+        let built = self
+            .build_context(svc, thread_id, session_id, agent_session, harness)
+            .await?;
+        let text = built.text.clone();
+        self.commit(svc, built).await;
+        Some(text)
+    }
+
+    /// What a prompt in the session would carry, built and **not yet
+    /// taken**: the `<session-context>` block (only when it differs from
+    /// what the session was last sent), the thread's undelivered handoffs,
+    /// nudges (prompt advisories, and the hints its last turn's end left)
+    /// and the open effort's decisions (once per session, and when they
+    /// change). Nothing changes until [`Self::commit`] — the delivery can
+    /// fail, and then the next build carries it all again.
+    pub async fn build_context(
+        &self,
+        svc: &Services,
+        thread_id: &ThreadId,
+        session_id: Option<&str>,
+        agent_session: Option<AgentSessionId>,
+        harness: Option<&str>,
+    ) -> Option<PendingContext> {
         if !carries(svc, harness, PROMPT_CONTEXT) {
             return None;
         }
+        let mut pending = PendingContext {
+            text: String::new(),
+            baselines: Vec::new(),
+            handoffs: Vec::new(),
+            nudges: Vec::new(),
+            agent_session,
+        };
         let ctx_block = self
             .refreshed_session_context(svc, thread_id, session_id, agent_session)
             .await;
-        let handoffs_block = handoffs(svc, *thread_id, agent_session).await;
+        if let (Some(key), Some(block)) = (session_id, &ctx_block) {
+            pending.baselines.push((key.to_string(), block.clone()));
+        }
+        let handoffs_block = handoffs(svc, *thread_id).await;
+        if let Some((_, ids)) = &handoffs_block {
+            pending.handoffs = ids.clone();
+        }
         // Prompt advisories land as nudges beside any a turn's end or a
         // late tool call left; the prompt carries them all.
         crate::advisories::for_thread(
@@ -121,16 +156,59 @@ impl AgentContext {
             None,
         )
         .await;
-        let advisory_block = undelivered(svc, thread_id).await;
+        let advisory_block = waiting_nudges(svc, thread_id).await;
+        if let Some((_, ids)) = &advisory_block {
+            pending.nudges = ids.clone();
+        }
         let decisions_block = self
             .refreshed_decisions_context(svc, thread_id, session_id)
             .await;
-        let combined: String = [ctx_block, handoffs_block, advisory_block, decisions_block]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        (!combined.is_empty()).then_some(combined)
+        if let (Some(key), Some(block)) = (session_id, &decisions_block) {
+            pending
+                .baselines
+                .push((format!("{key}{DECISIONS_KEY_SUFFIX}"), block.clone()));
+        }
+        let combined: String = [
+            ctx_block,
+            handoffs_block.map(|(text, _)| text),
+            advisory_block.map(|(text, _)| text),
+            decisions_block,
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("\n\n");
+        if combined.is_empty() {
+            return None;
+        }
+        pending.text = combined;
+        Some(pending)
+    }
+
+    /// The agent has what [`Self::build_context`] built: remember the
+    /// blocks as sent, stamp the handoffs it carried delivered to the
+    /// session (by id), and mark its nudges delivered.
+    pub async fn commit(&self, svc: &Services, built: PendingContext) {
+        {
+            let mut state = self.state.lock();
+            for (key, block) in built.baselines {
+                state.last_context_by_session_id.insert(key, block);
+            }
+        }
+        if !built.handoffs.is_empty() {
+            if let Err(err) = svc
+                .handoff_store
+                .mark_delivered(built.handoffs, built.agent_session)
+                .await
+            {
+                warn!(?err, "stamping the delivered handoffs failed");
+            }
+        }
+        if !built.nudges.is_empty() {
+            if let Err(err) = svc.nudge_store.mark_delivered(built.nudges).await {
+                warn!(?err, "marking the delivered nudges failed");
+            }
+        }
     }
 
     /// A fresh `<session-context>` block, naming the other live agents in
@@ -156,7 +234,7 @@ impl AgentContext {
             .flatten()?;
         let around = surroundings(svc, stream.id, thread.id, agent_session).await;
         let block = build_session_context_block(&stream, Some(&thread), &around);
-        self.should_emit(session_id, &block).then_some(block)
+        self.would_emit(session_id, &block).then_some(block)
     }
 
     /// The open effort's recorded decisions, on the first prompt of a
@@ -176,26 +254,53 @@ impl AgentContext {
             .flatten()?;
         let block = crate::reasoning::effort_decisions_block(&svc.sql, effort.id.value()).await?;
         let key = session_id.map(|s| format!("{s}{DECISIONS_KEY_SUFFIX}"));
-        self.should_emit(key.as_deref(), &block).then_some(block)
+        self.would_emit(key.as_deref(), &block).then_some(block)
     }
 
-    /// Whether `block` is new for `session_id` (recording it if so).
-    /// Without a session id it always emits: suppressing could hide a
-    /// change from another session sharing the thread.
-    fn should_emit(&self, session_id: Option<&str>, block: &str) -> bool {
+    /// Whether `block` is new for `session_id`: it differs from what the
+    /// session was last sent (recorded by [`Self::commit`]). Without a
+    /// session id it always is: suppressing could hide a change from
+    /// another session sharing the thread.
+    fn would_emit(&self, session_id: Option<&str>, block: &str) -> bool {
         let Some(session_id) = session_id else {
             return true;
         };
-        let mut state = self.state.lock();
-        match state.last_context_by_session_id.get(session_id) {
-            Some(previous) if previous == block => false,
-            _ => {
-                state
-                    .last_context_by_session_id
-                    .insert(session_id.to_string(), block.to_string());
-                true
-            }
+        self.state
+            .lock()
+            .last_context_by_session_id
+            .get(session_id)
+            .is_none_or(|previous| previous != block)
+    }
+}
+
+/// Context built for an agent and not yet delivered
+/// ([`AgentContext::build_context`]): the text, and what committing it
+/// ([`AgentContext::commit`]) records — the blocks as the session's
+/// baselines, the handoffs and nudges it carried as delivered.
+pub struct PendingContext {
+    pub text: String,
+    baselines: Vec<(String, String)>,
+    handoffs: Vec<HandoffId>,
+    nudges: Vec<i64>,
+    agent_session: Option<AgentSessionId>,
+}
+
+impl PendingContext {
+    /// A context that commits nothing: for a double standing in for a
+    /// host in tests.
+    pub fn plain(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            baselines: Vec::new(),
+            handoffs: Vec::new(),
+            nudges: Vec::new(),
+            agent_session: None,
         }
+    }
+
+    /// The handoffs it carries (by id), for tests.
+    pub fn handoff_ids(&self) -> &[HandoffId] {
+        &self.handoffs
     }
 }
 
@@ -240,28 +345,46 @@ async fn undelivered(svc: &Services, thread_id: &ThreadId) -> Option<String> {
     (!text.is_empty()).then(|| text.join("\n\n"))
 }
 
+/// The agent's undelivered nudges, as [`undelivered`] would take them, and
+/// their ids, still waiting: a prompt's delivery marks them
+/// ([`AgentContext::commit`]) once the agent has the text.
+async fn waiting_nudges(svc: &Services, thread_id: &ThreadId) -> Option<(String, Vec<i64>)> {
+    let nudges = match svc
+        .nudge_store
+        .peek_for_agent(&thread_id.to_string(), NUDGE_BUDGET)
+        .await
+    {
+        Ok(n) => n,
+        Err(err) => {
+            warn!(?err, "reading undelivered nudges failed");
+            return None;
+        }
+    };
+    let ids = nudges.iter().map(|n| n.id).collect();
+    let text: Vec<String> = nudges.into_iter().map(|n| n.message).collect();
+    (!text.is_empty()).then(|| (text.join("\n\n"), ids))
+}
+
 /// Characters of a handoff's body its prompt carries; the rest is read
 /// through its ref.
 pub const HANDOFF_BODY_IN_CONTEXT: usize = 1_500;
 
 /// The open handoffs to `thread` no agent was given yet, as one
-/// `<handoffs>` block, stamped delivered to `session`: each reaches the
-/// thread's agents once, at the first prompt that takes it — never with a
-/// tool call, so it doesn't land in the middle of other work.
-async fn handoffs(
-    svc: &Services,
-    thread: ThreadId,
-    session: Option<AgentSessionId>,
-) -> Option<String> {
+/// `<handoffs>` block and their ids, still undelivered: each reaches the
+/// thread's agents once, at the first prompt that carries it — never with
+/// a tool call, so it doesn't land in the middle of other work. The stamp
+/// is [`AgentContext::commit`]'s, once the agent has the text.
+async fn handoffs(svc: &Services, thread: ThreadId) -> Option<(String, Vec<HandoffId>)> {
     use oxplow_db::semantic_layer::SqlCell;
-    let taken = match svc.handoff_store.take_for_prompt(thread, session).await {
+    let taken = match svc.handoff_store.peek_for_prompt(thread).await {
         Ok(t) if !t.is_empty() => t,
         Ok(_) => return None,
         Err(err) => {
-            warn!(?err, "taking the thread's handoffs failed");
+            warn!(?err, "reading the thread's handoffs failed");
             return None;
         }
     };
+    let ids: Vec<HandoffId> = taken.iter().map(|h| h.id).collect();
     // How the person sees each: its sender's thread and session, its item.
     let labels: HashMap<String, (String, Option<String>, Option<String>)> = match svc
         .sql
@@ -319,7 +442,7 @@ async fn handoffs(
         }
     }
     s.push_str("</handoffs>");
-    Some(s)
+    Some((s, ids))
 }
 
 /// What the session context says around the agent: the other live agents
@@ -480,6 +603,99 @@ mod tests {
         );
     }
 
+    /// Building a context takes nothing: until it is committed (the agent
+    /// has it), a handoff stays undelivered and every baseline stays, so a
+    /// delivery that fails costs nothing and the next build carries it all
+    /// again; the commit stamps the handoff by id and records the blocks.
+    #[tokio::test]
+    async fn a_context_that_was_not_delivered_takes_nothing() {
+        use oxplow_domain::Actor;
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &*fx.svc;
+        let to =
+            crate::test_fixtures::new_thread(svc, oxplow_domain::StreamId::new(1), "them").await;
+        let theirs = crate::test_fixtures::open_session(svc, to.id).await;
+        svc.commands
+            .run(
+                &Actor::Human,
+                crate::commands::handoff::SEND,
+                serde_json::json!({
+                    "from_thread": oxplow_domain::refs::build::thread_ref(fx.thread),
+                    "to_thread": oxplow_domain::refs::build::thread_ref(to.id),
+                    "body": "the parser half is yours",
+                }),
+                false,
+            )
+            .await
+            .unwrap();
+        let ctx = AgentContext::default();
+        let build = || ctx.build_context(svc, &to.id, Some("s1"), Some(theirs), None);
+        let undelivered = || async {
+            svc.db
+                .read(|c| {
+                    c.query_row(
+                        "SELECT count(*) FROM handoff WHERE delivered_at IS NULL",
+                        [],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+        };
+
+        // The delivery failed: nothing was committed.
+        let failed = build().await.unwrap();
+        assert!(failed.text.contains("the parser half is yours"));
+        assert_eq!(failed.handoff_ids().len(), 1);
+        drop(failed);
+        assert_eq!(undelivered().await, 1);
+
+        // So the next build carries the handoff, and the session context,
+        // whole.
+        let retried = build().await.unwrap();
+        assert!(retried.text.contains("the parser half is yours"));
+        assert!(
+            retried.text.contains("<session-context>"),
+            "{}",
+            retried.text
+        );
+        ctx.commit(svc, retried).await;
+        assert_eq!(undelivered().await, 0);
+
+        // Delivered: nothing changed, nothing to say.
+        assert!(build().await.is_none());
+    }
+
+    /// The pump tells watchers that what a context reads changed: a
+    /// handoff sent to a thread, but not a command that touches nothing
+    /// the context reads.
+    #[tokio::test]
+    async fn a_handoff_tells_the_context_watchers() {
+        use oxplow_domain::Actor;
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &*fx.svc;
+        let to =
+            crate::test_fixtures::new_thread(svc, oxplow_domain::StreamId::new(1), "them").await;
+        let mut changes = svc.context_changes.subscribe();
+        changes.mark_unchanged();
+        svc.commands
+            .run(
+                &Actor::Human,
+                crate::commands::handoff::SEND,
+                serde_json::json!({
+                    "from_thread": oxplow_domain::refs::build::thread_ref(fx.thread),
+                    "to_thread": oxplow_domain::refs::build::thread_ref(to.id),
+                    "body": "yours",
+                }),
+                false,
+            )
+            .await
+            .unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        assert!(changes.has_changed().unwrap());
+    }
+
     /// A handoff to a thread reaches its agent once, at the next prompt —
     /// stamped delivered to that session — and never with a tool call. The
     /// session context counts the thread's open handoffs for later
@@ -570,28 +786,38 @@ mod tests {
         assert!(!ctx.contains("Also in this worktree"), "{ctx}");
     }
 
+    /// The session was sent `block` (what a commit records).
+    fn sent(state: &AgentContext, session: &str, block: &str) {
+        state
+            .state
+            .lock()
+            .last_context_by_session_id
+            .insert(session.to_string(), block.to_string());
+    }
+
     #[test]
     fn session_context_emits_initial_and_changed_blocks_only() {
         let state = AgentContext::default();
 
-        assert!(state.should_emit(Some("session-1"), "context-a"));
-        assert!(!state.should_emit(Some("session-1"), "context-a"));
-        assert!(state.should_emit(Some("session-1"), "context-b"));
+        assert!(state.would_emit(Some("session-1"), "context-a"));
+        sent(&state, "session-1", "context-a");
+        assert!(!state.would_emit(Some("session-1"), "context-a"));
+        assert!(state.would_emit(Some("session-1"), "context-b"));
     }
 
     #[test]
     fn session_context_without_session_id_is_never_suppressed() {
         let state = AgentContext::default();
-        assert!(state.should_emit(None, "context"));
-        assert!(state.should_emit(None, "context"));
+        assert!(state.would_emit(None, "context"));
+        assert!(state.would_emit(None, "context"));
     }
 
     #[test]
     fn clearing_session_context_baseline_allows_fresh_emission() {
         let state = AgentContext::default();
-        assert!(state.should_emit(Some("session-1"), "context"));
-        assert!(!state.should_emit(Some("session-1"), "context"));
+        sent(&state, "session-1", "context");
+        assert!(!state.would_emit(Some("session-1"), "context"));
         state.reset_session(Some("session-1"));
-        assert!(state.should_emit(Some("session-1"), "context"));
+        assert!(state.would_emit(Some("session-1"), "context"));
     }
 }
