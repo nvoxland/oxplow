@@ -19,11 +19,17 @@ let entities: Array<{ name: string; owner: string; kind: string; description: st
 let counts: Record<string, number> = {};
 /** What `oxplow.effect.backfill_plan` counts. */
 let plannedCount = 3;
+/** The event listeners the section (and its `useRerunOnChange`) registered. */
+const listeners = new Set<(event: Record<string, unknown>) => void>();
+const emit = (event: Record<string, unknown>) => listeners.forEach((l) => l(event));
+/** How often each list was read, and which models were counted. */
+const reads = { entities: 0, collectors: 0, programs: 0, counted: [] as string[] };
 mock.module("../api.js", () => ({
   ...realApi,
   querySql: async (sql: string) => {
     const counted = /^SELECT count\(\*\) FROM "(\w+)"$/.exec(sql)?.[1];
     if (counted) {
+      reads.counted.push(counted);
       const n = counts[counted];
       if (n === undefined) throw new Error("query_sql: timed out after 5s");
       return { columns: ["count(*)"], rows: [[n]], truncated: false, reads: { models: [counted], tables: [], measures: [] }, freshness: {} };
@@ -62,8 +68,14 @@ mock.module("../api.js", () => ({
     decided.push(`discard ${id}`);
     return { ...letter, state: "discarded" };
   },
-  listDataEntities: async () => entities,
-  listCollectors: async () => collectorListings,
+  listDataEntities: async () => {
+    reads.entities++;
+    return entities;
+  },
+  listCollectors: async () => {
+    reads.collectors++;
+    return collectorListings;
+  },
   revokeProjectProgram: async (kind: string, name: string) => {
     revoked.push(`${kind}:${name}`);
     return [];
@@ -71,7 +83,7 @@ mock.module("../api.js", () => ({
   revokeCollector: async (owner: string, id: string) => {
     revoked.push(`collector ${owner}/${id}`);
   },
-  listProjectPrograms: async () => [
+  listProjectPrograms: async () => (reads.programs++, [
     {
       kind: "provider",
       name: "tracker/fake",
@@ -115,14 +127,19 @@ mock.module("../api.js", () => ({
       approved: true,
       version: "h3",
     },
-  ],
+  ]),
   programSource: async () => "def transform(x):\n    return {\"skip\": \"nothing\"}\n",
   providerDeclarationImpact: () => answer(),
-  subscribeOxplowEvents: () => () => {},
+  subscribeOxplowEvents: (handler: (event: Record<string, unknown>) => void) => {
+    listeners.add(handler);
+    return () => listeners.delete(handler);
+  },
 }));
 const { DataSection } = await import("./DataSection.js");
 
 afterEach(() => {
+  listeners.clear();
+  Object.assign(reads, { entities: 0, collectors: 0, programs: 0, counted: [] });
   entities = [];
   counts = {};
   decided.length = 0;
@@ -356,4 +373,49 @@ test("the project's own collector is revoked like any extension's", async () => 
   fireEvent.click(await view.findByTestId("menu-item-revoke"));
   fireEvent.click(await view.findByTestId("collector-revoke-confirm-project/tests.cov"));
   await waitFor(() => expect(revoked).toEqual(["collector project/tests.cov"]));
+});
+
+// tsk1403: each list re-reads on the change that touches what it shows.
+const model = (name: string) => ({ name, owner: "core", kind: "sql", description: "" });
+const modelsChanged = (...models: string[]) => ({ kind: "modelsChanged", models });
+const quiet = () => new Promise((r) => setTimeout(r, 250));
+
+test("a collector run re-reads the collectors, not the models or their counts", async () => {
+  entities = [model("v_a")];
+  counts = { v_a: 1 };
+  const view = render(<DataSection />);
+  await waitFor(() => expect(view.getByTestId("data-entity-v_a")).toBeTruthy());
+  const before = { ...reads, counted: [...reads.counted] };
+  emit(modelsChanged("v_collector_run"));
+  await waitFor(() => expect(reads.collectors).toBe(before.collectors + 1));
+  await quiet();
+  expect(reads.entities).toBe(before.entities);
+  expect(reads.programs).toBe(before.programs);
+  expect(reads.counted).toEqual(before.counted);
+});
+
+test("a change to one counted model recounts that model alone", async () => {
+  entities = [model("v_a"), model("v_b")];
+  counts = { v_a: 1, v_b: 2 };
+  const view = render(<DataSection />);
+  await waitFor(() => expect(view.getByTestId("data-entity-v_b")).toBeTruthy());
+  reads.counted.length = 0;
+  emit(modelsChanged("v_a"));
+  await waitFor(() => expect(reads.counted).toEqual(["v_a"]));
+  await quiet();
+  expect(reads.counted).toEqual(["v_a"]);
+  expect(reads.entities).toBe(1);
+});
+
+test("an approval re-reads the programs and collectors; the catalog changing re-reads all", async () => {
+  entities = [model("v_a")];
+  counts = { v_a: 1 };
+  const view = render(<DataSection />);
+  await waitFor(() => expect(view.getByTestId("data-entity-v_a")).toBeTruthy());
+  emit({ kind: "approvalsChanged" });
+  await waitFor(() => expect(reads.programs).toBe(2));
+  expect(reads.entities).toBe(1);
+  emit({ kind: "extensionsChanged" });
+  await waitFor(() => expect(reads.entities).toBe(2));
+  expect(reads.programs).toBe(3);
 });

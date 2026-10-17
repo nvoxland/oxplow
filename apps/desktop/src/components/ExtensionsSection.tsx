@@ -42,7 +42,7 @@ import {
 import { NEW_LENS_COMMAND } from "../lens/lensModel.js";
 import { useCommandDraft } from "../commandDraft.js";
 import { disabledCount, enableAgain, enableAllAgain, healthLine, healthOf, repairWithAgent, useContributionHealth, type ContributionHealth } from "../contributionHealth.js";
-import { collectorRan, extensionCredentials, extensionRowModel, LATEST_RUNS_SQL, lastRuns, type LastRun, type RunRow, reviewModel, secretCredentials, secretRowModel, serviceLines, type SecretCredential } from "./extensionRowModel.js";
+import { COLLECTOR_RUNS, extensionCredentials, extensionRowModel, LATEST_RUNS_SQL, lastRuns, type LastRun, type RunRow, reviewModel, secretCredentials, secretRowModel, serviceLines, type SecretCredential } from "./extensionRowModel.js";
 import { extensionsChanged } from "../lens/lensRerun.js";
 import { ImpactReportView } from "./ImpactReportView.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
@@ -75,25 +75,14 @@ export function ExtensionsSection() {
     { kind: "install"; url: string; review: ExtensionReview } | { kind: "update"; name: string; review: ExtensionReview } | null
   >(null);
 
-  const refresh = useCallback(async () => {
+  // Each part re-reads on the change that touches it, not on any event
+  // (tsk1403): the extensions and their checks when the catalog or config
+  // changes, the collectors when a run commits (`v_collector_run`), the
+  // last runs when a run row does (`v_extension_run`).
+  const loadExtensions = useCallback(async () => {
     try {
       const listed = await listExtensions();
       setExts(listed);
-      setCollectors(await listCollectors());
-      // A read that fails costs the line, not the list.
-      void querySql(LATEST_RUNS_SQL, [], null)
-        .then((r) => {
-          setRunReads(r.reads);
-          setRuns(
-            lastRuns(
-              r.rows.map(
-                ([extension, contribution, outcome, error, finished_at, decisions]) =>
-                  ({ extension, contribution, outcome, error, finished_at, decisions }) as RunRow,
-              ),
-            ),
-          );
-        })
-        .catch(() => setRuns({}));
       const reports = await Promise.all(
         listed
           .filter((e) => e.origin !== "bundled" && e.enabled)
@@ -113,20 +102,51 @@ export function ExtensionsSection() {
       setExts([]);
     }
   }, []);
+  const loadCollectors = useCallback(async () => {
+    try {
+      setCollectors(await listCollectors());
+    } catch (e) {
+      recordOpError({ label: "List collectors", message: String(e) });
+    }
+  }, []);
+  const loadRuns = useCallback(async () => {
+    // A read that fails costs the line, not the list.
+    try {
+      const r = await querySql(LATEST_RUNS_SQL, [], null);
+      setRunReads(r.reads);
+      setRuns(
+        lastRuns(
+          r.rows.map(
+            ([extension, contribution, outcome, error, finished_at, decisions]) =>
+              ({ extension, contribution, outcome, error, finished_at, decisions }) as RunRow,
+          ),
+        ),
+      );
+    } catch {
+      setRuns({});
+    }
+  }, []);
+  /** Everything again: what an install, an update or an enable leaves
+   *  different. */
+  const refresh = useCallback(async () => {
+    await Promise.all([loadExtensions(), loadCollectors(), loadRuns()]);
+  }, [loadExtensions, loadCollectors, loadRuns]);
 
-  // A run commits a `v_extension_run` row: the line follows it.
-  useRerunOnChange(runReads, () => void refresh());
+  useRerunOnChange(runReads, () => void loadRuns());
+  useRerunOnChange(COLLECTOR_RUNS, () => void loadCollectors());
   useEffect(() => {
     // A read that fails costs the lines' wording, not the list.
     void listServices().then(setServiceListing).catch(() => setServiceListing([]));
   }, []);
   useEffect(() => {
     void refresh();
-    // Scheduled and agent-triggered runs land here too.
     return subscribeOxplowEvents((event) => {
-      if (collectorRan(event) || extensionsChanged(event as Record<string, unknown>)) void refresh();
+      if (extensionsChanged(event as Record<string, unknown>)) {
+        void loadExtensions();
+        void loadCollectors();
+      }
     });
-  }, [refresh]);
+  }, [refresh, loadExtensions, loadCollectors]);
 
   async function review() {
     const gitUrl = url.trim();

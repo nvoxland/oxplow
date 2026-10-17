@@ -27,7 +27,8 @@ import {
   subscribeOxplowEvents,
   type CollectorListing,
 } from "../api.js";
-import type { DataEntity, ProjectProgram } from "../tauri-bridge/generated/bindings.js";
+import type { DataEntity, ProjectProgram, Reads } from "../tauri-bridge/generated/bindings.js";
+import { coalesce, extensionsChanged, readsChanged, useRerunOnChange } from "../lens/lensRerun.js";
 import { collectorRef } from "../refs/ref.js";
 import { indexRef } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
@@ -46,7 +47,7 @@ import {
   type EntityCount,
   type ProviderImpactState,
 } from "./dataSectionModel.js";
-import { collectorRan, collectorRowModel } from "./extensionRowModel.js";
+import { collectorRowModel, COLLECTOR_RUNS } from "./extensionRowModel.js";
 import { DeliveryList } from "./DeliveryList.js";
 import { EnableAllButton } from "./ExtensionsSection.js";
 import { recordOpError } from "./opErrorsStore.js";
@@ -68,33 +69,57 @@ export function DataSection() {
   // What approving each unapproved provider would change, by instance.
   const [impacts, setImpacts] = useState<Record<string, ProviderImpactState>>({});
 
-  const refresh = useCallback(async () => {
+  /// What each model's count read, so a commit that touches one recounts
+  /// that model alone.
+  const countReads = useRef<Record<string, Reads>>({});
+
+  /** One list read; a failure lands in the op errors and empties nothing
+   *  already shown. */
+  const listed = useCallback(async <T,>(label: string, read: () => Promise<T>, set: (v: T) => void) => {
     try {
-      const [entities, listings, progs] = await Promise.all([
-        listDataEntities(),
-        listCollectors(),
-        listProjectPrograms(),
-      ]);
-      setEntities(entities);
-      setCollectors(listings);
-      setPrograms(progs);
-      void countRows(entities);
+      set(await read());
+    } catch (e) {
+      recordOpError({ label, message: String(e) });
+      return false;
+    }
+    return true;
+  }, []);
+
+  // Each list re-reads on the change that touches what it shows, not on
+  // any event (tsk1403): the entities when the catalog or config changes,
+  // the collectors when a run commits (`v_collector_run`) or an approval
+  // does, the programs on an approval or a catalog change, and a model's
+  // count when that model changes.
+  const loadEntities = useCallback(async () => {
+    try {
+      const found = await listDataEntities();
+      setEntities(found);
+      void countRows(found);
     } catch (e) {
       recordOpError({ label: "List data", message: String(e) });
-      setEntities([]);
+      setEntities((prev) => prev ?? []);
     }
   }, []);
+  const loadCollectors = useCallback(() => listed("List data", listCollectors, setCollectors), [listed]);
+  const loadPrograms = useCallback(() => listed("List data", listProjectPrograms, setPrograms), [listed]);
+  /** The collectors and programs again: what an approval, a run or a
+   *  revoke leaves different. */
+  const refresh = useCallback(async () => {
+    await Promise.all([loadCollectors(), loadPrograms()]);
+  }, [loadCollectors, loadPrograms]);
 
   // One model at a time, so counting never crowds the daemon: a model too
   // big to count within query_sql's timeout costs its own cell (tsk1065).
-  async function countRows(entities: DataEntity[]) {
+  async function countRows(entities: DataEntity[], only?: ReadonlySet<string>) {
     const run = ++counting.current;
-    setCounts({});
-    for (const e of entities.filter((e) => e.kind !== "declared")) {
+    const todo = entities.filter((e) => e.kind !== "declared" && (!only || only.has(e.name)));
+    if (!only) setCounts({});
+    for (const e of todo) {
       let count: EntityCount;
       try {
         // Names come from the registry, never from user input.
         const result = await querySql(`SELECT count(*) FROM "${e.name}"`, [], 1);
+        countReads.current[e.name] = result.reads;
         const n = result.rows[0]?.[0];
         count = typeof n === "number" ? { rows: n } : { error: "no count came back" };
       } catch (err) {
@@ -112,14 +137,45 @@ export function DataSection() {
     [],
   );
 
+  const entitiesRef = useRef<DataEntity[] | null>(null);
+  entitiesRef.current = entities;
+
   useEffect(() => {
-    void refresh();
-    // Scheduled and agent-triggered runs land here too: each commits its
-    // `collector_run` row.
-    return subscribeOxplowEvents((event) => {
-      if (collectorRan(event) || event.kind === "approvalsChanged") void refresh();
+    void loadEntities();
+    void loadCollectors();
+    void loadPrograms();
+    // A burst of commits recounts the models it touched once.
+    const touched = new Set<string>();
+    const recount = coalesce(() => {
+      const names = new Set(touched);
+      touched.clear();
+      if (entitiesRef.current && names.size > 0) void countRows(entitiesRef.current, names);
     });
-  }, [refresh]);
+    const off = subscribeOxplowEvents((event) => {
+      const e = event as Record<string, unknown>;
+      if (extensionsChanged(e)) {
+        void loadEntities();
+        void loadCollectors();
+        void loadPrograms();
+        return;
+      }
+      if (e.kind === "approvalsChanged") {
+        void loadCollectors();
+        void loadPrograms();
+        return;
+      }
+      for (const [name, reads] of Object.entries(countReads.current)) {
+        if (readsChanged(e, reads)) touched.add(name);
+      }
+      if (touched.size > 0) recount.schedule();
+    });
+    return () => {
+      recount.cancel();
+      off();
+    };
+  }, [loadEntities, loadCollectors, loadPrograms]);
+  // Scheduled and agent-triggered runs each commit a `collector_run` row.
+  useRerunOnChange(COLLECTOR_RUNS, () => void loadCollectors());
 
   // The unapproved providers, by name and the version on disk: their
   // diffs reload only when one of those changes, not on every refresh.

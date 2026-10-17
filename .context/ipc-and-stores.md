@@ -277,6 +277,21 @@ C5 moves them.)
 event log (`snapshot.taken` / `vcs.head.moved` → `SnapshotTaken`), and the
 UI-only signals with no durable fact behind them (a toast, a stream
 orphaned, an agent's status, `ConfigChanged` for the Settings view).
+**A reader re-reads what an event touches, not on any event.** A
+Settings list (Extensions, Data, Capabilities, Integrations) loads each
+part on its own trigger: the catalog or config change
+(`extensionsChanged`) for extensions and their checks, entities and
+programs; an approval (`approvalsChanged`) for programs and collectors;
+`useRerunOnChange` over the models the part read (`v_collector_run` for
+the collector list, `v_extension_run` for the last runs); and a model's
+row count when that model's own `ModelsChanged` names it
+(`DataSection`, from each count query's `reads`). A collector run
+(frequent) therefore re-lists the collectors and nothing else — it does
+not list the extensions again, re-check each one or recount every model
+(pinned by `ExtensionsSection.runs.test.tsx` and `DataSection.test.tsx`).
+The daemon still re-reads `project.yaml` on each extension-catalog call;
+serving it from the loaded copy is open.
+
 **Backend work never listens to it**: it runs on the event pump (a
 consumer of the log), an asset (tables → recompute), the VCS watcher's
 ref moves (`RefMoves`) or the extension catalog's change signal. Only

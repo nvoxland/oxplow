@@ -2,6 +2,7 @@
 import { contributionOf } from "../refs/ref.js";
 import type { CollectorListing, Extension, SecretRef, ExtensionReview, ScriptServices, ServiceListing, Trigger } from "../tauri-bridge/generated/bindings.js";
 import { readsChanged } from "../lens/lensRerun.js";
+import type { Reads } from "../tauri-bridge/generated/bindings.js";
 
 export interface ExtensionRowModel {
   name: string;
@@ -71,10 +72,14 @@ export interface CollectorRowModel {
   canEnableAgain: boolean;
 }
 
-/** A collector ran — by hand, on its schedule or for an event: each run
- *  commits its `collector_run` row, so `v_collector_run` changed. */
+/** What the collector lists read: a collector ran — by hand, on its
+ *  schedule or for an event — and each run commits its `collector_run`
+ *  row. */
+export const COLLECTOR_RUNS: Reads = { models: ["v_collector_run"], tables: [], measures: [] };
+
+/** A collector ran: `v_collector_run` changed. */
 export function collectorRan(event: Readonly<Record<string, unknown>>): boolean {
-  return readsChanged(event, { models: ["v_collector_run"], tables: [], measures: [] });
+  return readsChanged(event, COLLECTOR_RUNS);
 }
 
 /** A collector's trigger as a short phrase. */
