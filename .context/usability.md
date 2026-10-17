@@ -381,11 +381,11 @@ carries the same pair (Open / Open in new tab) so the gesture is
 discoverable without knowing the modifier.
 
 The rule that keeps this honest: every page-bearing link resolves
-through one `linkTarget(parsed)` and one `navigate(ref, { newTab })`
-call (`components/Wiki/MarkdownView.tsx`). Per-kind click branches are
+through one `linkRef(parsed)` and one `openRef(ref, { newTab })` call
+(`components/Wiki/MarkdownView.tsx`). Per-kind click branches are
 how it drifted before — task links honoured the modifier while file,
 directory and commit links silently ignored it (tsk265). A new link kind
-gets the behaviour by being added to `linkTarget`, not by growing
+gets the behaviour by being added to `linkRef`, not by growing
 another branch.
 
 ## Hover reveals, click rearranges

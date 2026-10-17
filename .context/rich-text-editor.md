@@ -86,7 +86,7 @@ show the pencil — that's the consistent signal "this is for reading."
   false` — click handling is owned by the
   React layer: the `RichTextField` wrapper's `onClick` /
   `onAuxClick` intercepts clicks on `<a>` descendants, parses the
-  href via `parseMarkdownLink` and resolves its page via `linkTarget`
+  href via `parseMarkdownLink` and names its ref via `linkRef`
   (both from `MarkdownView` — one resolution for every kind: a task, an
   extension's ref, a file; tsk976), and routes through
   `useOptionalPageNavigation`. Plain click → in-tab

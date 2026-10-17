@@ -2209,7 +2209,7 @@ goes to that frame alone) and listens on the other end only. Frame
 messages (`parseFrameMessage`): `ready`, `{ id, method: query, asset,
 params }` (params SqlCell values only), `{ id, method: invoke, command,
 input }`, `{ id, method: navigate, ref }` (an oxplow page only:
-`componentNavigationTarget` refuses an external-url ref with `INVALID`,
+`componentMayOpen` refuses an external-url ref with `INVALID`,
 since an outside tab would carry whatever the frame put in its URL out);
 replies `{ id, ok, result |
 error: { code, message, field? } }` (`field`: the input an `INVALID`
