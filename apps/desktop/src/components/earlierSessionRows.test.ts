@@ -8,7 +8,9 @@ const conversation = (over: Partial<NativeConversation> = {}): NativeConversatio
 const past = (over: Partial<PastSession> = {}): PastSession =>
   ({
     session: "agent_session:ses3",
-    display_name: "claude agent_session:ses3",
+    name: null,
+    conversation: null,
+    display_name: "claude 2026-10-10",
     thread: "thread:thr1",
     thread_title: "Main",
     here: true,
@@ -35,7 +37,7 @@ test("a row is labelled by its title, else a prompt, else its id", () => {
 test("a person's own name for a session labels it, the default name doesn't", () => {
   const [named, unnamed] = earlierSessionRows(
     listing(
-      { harness: "claude", session: past({ display_name: "The parser" }), conversation: conversation({ title: null }), action: "reopen" },
+      { harness: "claude", session: past({ name: "The parser", display_name: "The parser" }), conversation: conversation({ title: null }), action: "reopen" },
       { harness: "claude", session: past({ last_prompt: "hello" }), conversation: null, action: "reopen" },
     ),
   );
@@ -87,4 +89,17 @@ test("the filter matches every word against title, prompts, thread and harness",
   expect(filterEarlierRows(rows, "billing").map((r) => r.harness)).toEqual(["codex"]);
   expect(filterEarlierRows(rows, "codex refund").length).toBe(1);
   expect(filterEarlierRows(rows, "nothing like it")).toEqual([]);
+});
+
+// A session whose conversation the harness didn't list resumes on its own
+// native id; a session ref is never a conversation id.
+test("a resume row's conversation is a native id, never a session ref", () => {
+  const rows = earlierSessionRows(
+    listing(
+      { harness: "claude", session: past({ here: false, conversation: "native-9", last_prompt: "hi" }), conversation: null, action: "resume" },
+      { harness: "claude", session: null, conversation: conversation({ id: "c7" }), action: "resume" },
+    ),
+  );
+  expect(rows.map((r) => r.conversation)).toEqual(["native-9", "c7"]);
+  for (const r of rows) expect(r.conversation).not.toMatch(/^agent_session:/);
 });

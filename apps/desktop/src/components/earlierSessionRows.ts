@@ -28,17 +28,12 @@ export interface EarlierRow {
   haystack: string;
 }
 
-/** A session with no name of its own is named `<harness> agent_session:ses3`. */
-function named(display: string, harness: string): boolean {
-  return !display.startsWith(`${harness} agent_session:`);
-}
-
 function labelOf(row: EarlierSession): string {
   const c = row.conversation;
   const s = row.session;
   return (
     c?.title?.trim() ||
-    (s && named(s.display_name, row.harness) ? s.display_name.trim() : "") ||
+    s?.name?.trim() ||
     c?.first_prompt?.trim() ||
     s?.last_prompt?.trim() ||
     c?.id ||
@@ -78,7 +73,9 @@ export function earlierSessionRows(listing: EarlierSessions): EarlierRow[] {
       detail: turns ?? formatSize(c?.size_bytes ?? null),
       action: row.action,
       session: s?.session ?? null,
-      conversation: c?.id ?? s?.session ?? null,
+      // A native id, never a session ref: a session whose conversation the
+      // harness didn't list resumes on the one it is bound to.
+      conversation: c?.id ?? s?.conversation ?? null,
       haystack: [label, c?.title, c?.first_prompt, s?.last_prompt, s?.thread_title, row.harness, note]
         .filter(Boolean)
         .join("\n")

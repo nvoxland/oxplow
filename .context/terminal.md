@@ -167,7 +167,12 @@ person closed: `oxplow.agent_session.reopen`, whose toast offers Undo),
 closed in another thread or by a close of its thread: a new session here,
 `oxplow.agent_session.open { resume }`, recorded `chosen`), **switch** (open
 in a session on this thread: show its tab) or **none** (open in another
-thread's session). A closed slot that never ran anything is left out.
+thread's session; the only row with nothing to take). A closed slot that
+never ran anything, or whose action would be none (another thread's, with
+no conversation to resume), is left out. A session's name is
+`AgentSession::display_name` (title, else the harness's name, else harness
+and day: the one rule, mirroring `v_agent_session.display_name`); the page
+labels a row with the given name, else a prompt.
 Nothing is adopted until a person picks it. The page filters in the client
 (title, prompts, thread, agent; ↑/↓, Enter, Escape clears the filter).
 A closed session's ref no longer opens nothing: it opens the

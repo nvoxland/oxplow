@@ -44,7 +44,13 @@ pub enum EarlierAction {
 pub struct PastSession {
     /// `agent_session:ses3`.
     pub session: String,
+    /// How the session is named everywhere (`AgentSession::display_name`).
     pub display_name: String,
+    /// The name a person or the harness gave it, when one did.
+    pub name: Option<String>,
+    /// The conversation it is bound to (its harness's native id), when it
+    /// has run: what a resume names.
+    pub conversation: Option<String>,
     /// `thread:thr1` and its title.
     pub thread: String,
     pub thread_title: String,
@@ -166,13 +172,9 @@ pub async fn earlier_sessions_of(
 
     let past = |s: &AgentSession| PastSession {
         session: agent_session_ref(s.id),
-        display_name: if !s.title.is_empty() {
-            s.title.clone()
-        } else if !s.native_title.is_empty() {
-            s.native_title.clone()
-        } else {
-            format!("{} {}", s.harness, agent_session_ref(s.id))
-        },
+        display_name: s.display_name(),
+        name: s.given_name(),
+        conversation: (!s.resume_session_id.is_empty()).then(|| s.resume_session_id.clone()),
         thread: thread_ref(s.thread_id),
         thread_title: titles.get(&s.thread_id).cloned().unwrap_or_default(),
         here: s.thread_id == thread,
@@ -245,13 +247,20 @@ pub async fn earlier_sessions_of(
         if !started {
             continue;
         }
+        // Closed, with nothing to take (another thread's, or one a close of
+        // its thread took, and no conversation to resume): not listed. Only
+        // a conversation open elsewhere is a row with nothing to take.
+        let action = action_for(s, false);
+        if action == EarlierAction::None {
+            continue;
+        }
         rows.push((
             s.closed_at.or(Some(s.updated_at)),
             EarlierSession {
                 harness: s.harness.clone(),
                 session: Some(past(s)),
                 conversation: None,
-                action: action_for(s, false),
+                action,
             },
         ));
     }
@@ -545,6 +554,79 @@ mod tests {
             (2, Some("second"))
         );
         assert_eq!(out.rows[0].action, EarlierAction::Reopen);
+    }
+
+    /// A closed session whose conversation its harness didn't list (it is
+    /// beyond the limit, or gone) still carries its native id for a resume,
+    /// and the person's title, if any, as `name`.
+    #[tokio::test]
+    async fn an_unlisted_conversation_keeps_its_native_id_and_the_sessions_name() {
+        let f = fixture().await;
+        let other = session(
+            &f.fx.svc,
+            f.other,
+            "h",
+            Some("native-9"),
+            Some(SessionCloseReason::Closed),
+        )
+        .await;
+        let id = other.value();
+        f.fx.svc
+            .db
+            .transaction(move |tx| {
+                tx.execute(
+                    "UPDATE agent_session SET title = 'The parser' WHERE id = ?1",
+                    [id],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let out = list(&f, vec![harness("h", vec![])]).await;
+        assert_eq!(out.rows.len(), 1, "{:?}", out.rows);
+        let r = &out.rows[0];
+        assert_eq!(r.action, EarlierAction::Resume);
+        let past = r.session.as_ref().unwrap();
+        assert_eq!(past.conversation.as_deref(), Some("native-9"));
+        assert_eq!(past.name.as_deref(), Some("The parser"));
+        assert_eq!(past.display_name, "The parser");
+    }
+
+    /// A closed session no one can take — another thread's, with turns but
+    /// no conversation to resume — is left out; only a conversation open in
+    /// another thread's session is listed with nothing to take.
+    #[tokio::test]
+    async fn a_closed_session_with_nothing_to_take_is_left_out() {
+        let f = fixture().await;
+        let s = session(
+            &f.fx.svc,
+            f.other,
+            "h",
+            None,
+            Some(SessionCloseReason::Closed),
+        )
+        .await;
+        let id = s.value();
+        let thread = f.other.value();
+        f.fx.svc
+            .db
+            .transaction(move |tx| {
+                tx.execute(
+                    "INSERT INTO agent_turn (thread_id, agent_session_id, prompt, started_at)
+                     VALUES (?1, ?2, 'hello', '2026-10-10T10:00:00Z')",
+                    rusqlite::params![thread, id],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        session(&f.fx.svc, f.other, "h", Some("busy"), None).await;
+        let out = list(&f, vec![harness("h", vec![conversation("busy", 5)])]).await;
+        assert_eq!(out.rows.len(), 1, "{:?}", out.rows);
+        assert_eq!(out.rows[0].action, EarlierAction::None);
+        assert!(out.rows[0].session.as_ref().unwrap().open);
     }
 
     /// Most recently active first.

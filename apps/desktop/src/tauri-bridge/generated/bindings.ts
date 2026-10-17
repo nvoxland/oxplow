@@ -5310,7 +5310,15 @@ export type PanelScope = "project" | "stream" | "thread";
 export type PastSession = {
 	/**  `agent_session:ses3`. */
 	session: string,
+	/**  How the session is named everywhere (`AgentSession::display_name`). */
 	display_name: string,
+	/**  The name a person or the harness gave it, when one did. */
+	name: string | null,
+	/**
+	 *  The conversation it is bound to (its harness's native id), when it
+	 *  has run: what a resume names.
+	 */
+	conversation: string | null,
 	/**  `thread:thr1` and its title. */
 	thread: string,
 	thread_title: string,
