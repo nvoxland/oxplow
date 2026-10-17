@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 
 import type { Stream } from "../api.js";
 import { QuickOpenOverlay } from "./QuickOpenOverlay.js";
@@ -75,7 +75,10 @@ test("something else taking focus doesn't cost the launcher its keystrokes", asy
   document.body.appendChild(other);
   other.focus();
   expect(document.activeElement).toBe(other);
-  await waitFor(() => expect(document.activeElement).toBe(input));
+  // It takes focus back on the next frame. Wait for that frame, not a
+  // poll: waitFor's interval stalled for seconds under the full suite.
+  await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+  expect(document.activeElement).toBe(input);
   other.remove();
 });
 
