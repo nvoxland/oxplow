@@ -73,7 +73,7 @@ test("a pinned page's bar has no back or forward", () => {
 
 test("a chip that opens something is a button", () => {
   let opened = 0;
-  const { getByRole } = render(<Page title="T" showNavBar={false} chips={[{ label: "Fresh", onClick: () => opened++ }]}>body</Page>);
+  const { getByRole } = render(<Page title="T" chips={[{ label: "Fresh", onClick: () => opened++ }]}>body</Page>);
   fireEvent.click(getByRole("button", { name: "Fresh" }));
   expect(opened).toBe(1);
 });

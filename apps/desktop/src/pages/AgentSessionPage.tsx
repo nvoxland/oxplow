@@ -9,11 +9,19 @@ import type { AgentSessionRow } from "../agentSessions.js";
 import { ConversationPicker } from "../components/ConversationPicker.js";
 import type { PickerMode } from "../components/conversationRows.js";
 import { useState } from "react";
+import { AgentIcon } from "../components/AgentIcon.js";
+import type { PageAction } from "../kit/actions.js";
 
 interface AgentSessionPageProps {
   thread: Thread | null;
   /** The agent session the tab shows; `null` while the thread's sessions load. */
   session: AgentSessionRow | null;
+  /** The session's name, as its tab shows it. */
+  title: string;
+  /** Its harness's logo (`HarnessListing.icon`). */
+  harnessIcon?: string | null;
+  /** What can be done to the session (its tab's menu, as actions). */
+  actions: readonly PageAction[];
   stream: Stream | null;
   visible: boolean;
   /** Click-through handler for file paths detected in terminal output. */
@@ -29,14 +37,18 @@ interface AgentSessionPageProps {
 }
 
 /**
- * An agent session's tab: its terminal. Like every other page kind it
- * renders inside the shared Page chrome — configured to hide the nav bar (the terminal owns
- * its full height) and the header (no title row). Its tab is pinned and
- * follows the session's row (`reconcileSessionTabs`).
+ * An agent session's tab: its terminal under the shared nav bar, which
+ * names the session beside its harness's logo and offers its actions
+ * (rename, switch or fork its conversation, stop or start it). Its tab is
+ * pinned — no back or forward — and follows the session's row
+ * (`reconcileSessionTabs`).
  */
 export function AgentSessionPage({
   thread,
   session,
+  title,
+  harnessIcon,
+  actions,
   stream,
   visible,
   onOpenFile,
@@ -53,20 +65,20 @@ export function AgentSessionPage({
   const isLinkablePath = useWorkspaceLinkIndex(stream?.id);
   if (!thread) {
     return (
-      <Page testId="page-agent" showNavBar={false} showHeader={false}>
+      <Page testId="page-agent" title={title}>
         <div style={{ padding: 12, color: "var(--muted)" }}>No thread selected.</div>
       </Page>
     );
   }
   if (!session) {
     return (
-      <Page testId="page-agent" showNavBar={false} showHeader={false}>
+      <Page testId="page-agent" title={title}>
         <div style={{ padding: 12, color: "var(--muted)" }}>Loading the agent session…</div>
       </Page>
     );
   }
   return (
-    <Page testId="page-agent" showNavBar={false} showHeader={false}>
+    <Page testId="page-agent" title={title} titleIcon={<AgentIcon icon={harnessIcon} size={14} />} actions={actions}>
       <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
         {/* What the agent showed with `oxplow_show_lens` (P6.C2). */}
         <AnswersStrip key={thread.id} threadId={thread.id} onOpenPage={onOpenPage} />

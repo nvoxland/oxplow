@@ -27,6 +27,8 @@
 .ox-faint { color: var(--text-muted); }
 .ox-small { font-size: var(--text-xs); }
 .ox-mono { font-family: var(--font-mono); }
+/* Read by a screen reader, not drawn: a column header an icon says. */
+.ox-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .ox-heading {
   font-size: var(--text-md);
   font-weight: var(--weight-bold);

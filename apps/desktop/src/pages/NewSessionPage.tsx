@@ -4,8 +4,15 @@ import { ArrowLeftRight, CircleDot, ExternalLink, Lock, RotateCcw, type LucideIc
 import { listEarlierSessions, type Thread } from "../api.js";
 import { agentChoices } from "../agentKinds.js";
 import type { EarlierSessions, HarnessListing } from "../tauri-bridge/generated/bindings.js";
+import { AgentIcon } from "../components/AgentIcon.js";
 import { earlierSessionRows, filterEarlierRows, takeable, type EarlierRow, type EarlierStatus } from "../components/earlierSessionRows.js";
-import { Page, pageH1Style } from "../tabs/Page.js";
+import { numericRowId } from "../lens/lensModel.js";
+import { DataTable, type DataColumn } from "../kit/DataTable.js";
+import { DocumentLayout } from "../kit/DocumentLayout.js";
+import { Loading } from "../kit/Loading.js";
+import { Toolbar } from "../kit/Toolbar.js";
+import { useListNav } from "../kit/useListNav.js";
+import type { TabRef } from "../tabs/tabState.js";
 
 interface NewSessionPageProps {
   thread: Thread | null;
@@ -21,13 +28,17 @@ interface NewSessionPageProps {
   onTakeEarlier?(row: EarlierRow): Promise<void>;
   /** Read the thread's earlier sessions (default: the daemon's). */
   loadEarlier?(threadId: string): Promise<EarlierSessions>;
+  streamId?: string | null;
+  onOpenPage?(ref: TabRef): void;
 }
 
 /**
- * The session picker: what a new thread opens with when the person's
+ * The session picker, a Document page: start a new session, or take an
+ * earlier one. What a new thread opens with when the person's
  * `newThreadSession` is `ask`. Starting one only opens its slot — the new
  * tab starts its process when it mounts, and nothing is typed into it.
- * It offers no prompts to hand an agent: there is no agent here yet.
+ * Extensions add sections through `new-session.sections` (ids `start`,
+ * `earlier`; it binds `thread_id`).
  */
 export function NewSessionPage({
   thread,
@@ -35,6 +46,8 @@ export function NewSessionPage({
   onStart,
   onTakeEarlier,
   loadEarlier = listEarlierSessions,
+  streamId = null,
+  onOpenPage,
 }: NewSessionPageProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,11 +63,10 @@ export function NewSessionPage({
     if (!active || active === document.body) agentRef.current?.focus();
   }, []);
   // The earlier sessions: read once the page opens; a filter narrows them
-  // in the client, and ↑/↓/Enter/Escape work from the filter's input.
+  // in the client, driving the list from its input.
   const [earlier, setEarlier] = useState<EarlierSessions | null>(null);
   const [earlierError, setEarlierError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
-  const [cursor, setCursor] = useState(0);
   const threadId = thread?.id ?? null;
   useEffect(() => {
     if (!threadId) return;
@@ -69,8 +81,7 @@ export function NewSessionPage({
   }, [threadId, loadEarlier]);
   const allRows = earlier ? earlierSessionRows(earlier) : null;
   const rows = allRows ? filterEarlierRows(allRows, filter) : null;
-  useEffect(() => setCursor(0), [filter, earlier]);
-  const harnessTitle = (id: string) => harnesses.find((h) => h.id === id)?.title ?? id;
+  const harness = (id: string) => harnesses.find((h) => h.id === id);
   const takeRow = async (row: EarlierRow | undefined) => {
     if (!row || !takeable(row) || busy || !onTakeEarlier) return;
     setBusy(true);
@@ -83,163 +94,157 @@ export function NewSessionPage({
       setBusy(false);
     }
   };
-  const onFilterKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") {
-      if (filter !== "") {
-        e.preventDefault();
-        e.stopPropagation();
-        setFilter("");
-      }
-    } else if (e.key === "ArrowDown" && rows?.length) {
-      e.preventDefault();
-      setCursor((c) => Math.min(rows.length - 1, c + 1));
-    } else if (e.key === "ArrowUp" && rows?.length) {
-      e.preventDefault();
-      setCursor((c) => Math.max(0, c - 1));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      void takeRow(rows?.[cursor]);
-    }
-  };
+  const nav = useListNav({
+    count: rows?.length ?? 0,
+    onPick: (i) => void takeRow(rows?.[i]),
+    onEscape: () => {
+      if (filter === "") return false;
+      setFilter("");
+      return true;
+    },
+    id: "earlier-sessions",
+  });
+  useEffect(() => nav.setCursor(0), [filter, earlier]); // eslint-disable-line react-hooks/exhaustive-deps
   const picked = choices.some((c) => c.value === choice) ? choice : (choices[0]?.value ?? "");
+
+  const columns: DataColumn<EarlierRow>[] = [
+    {
+      key: "agent",
+      label: <span className="ox-sr-only">Agent</span>,
+      width: 28,
+      render: (r) => (
+        <span title={harness(r.harness)?.title ?? r.harness} aria-label={harness(r.harness)?.title ?? r.harness} data-harness={r.harness} style={{ display: "inline-flex" }}>
+          <AgentIcon icon={harness(r.harness)?.icon} size={14} />
+        </span>
+      ),
+    },
+    { key: "status", label: <span className="ox-sr-only">Status</span>, width: 24, render: (r) => <StatusIcon status={r.status} note={r.note} /> },
+    { key: "session", label: "Session", truncate: true, render: (r) => r.label, title: (r) => r.label },
+    { key: "when", label: "Last active", width: 128, render: (r) => <span className="ox-faint oxplow-tabular">{r.when ?? ""}</span> },
+    { key: "turns", label: "Turns", width: 52, numeric: true, render: (r) => <span className="ox-faint">{r.turns ?? ""}</span> },
+    { key: "size", label: "Size", width: 68, numeric: true, render: (r) => <span className="ox-faint">{r.size ?? ""}</span> },
+  ];
+
+  const start = (
+    <>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (!thread || busy) return;
+          setBusy(true);
+          setError(null);
+          try {
+            await onStart(picked, remember);
+          } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+          } finally {
+            setBusy(false);
+          }
+        }}
+        style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-3)", alignItems: "center" }}
+      >
+        <select
+          data-testid="new-session-agent"
+          className="ox-select"
+          value={picked}
+          disabled={busy || !thread}
+          onChange={(e) => setChoice(e.target.value)}
+          ref={agentRef}
+        >
+          {choices.map((c) => (
+            <option key={c.value} value={c.value}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+        <button type="submit" data-testid="new-session-start" className="ox-button ox-primary" disabled={busy || !thread || !picked}>
+          New Session
+        </button>
+        <label className="ox-muted" style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", cursor: "pointer" }} title="Change it later in Settings → Agents">
+          <input
+            type="checkbox"
+            data-testid="new-session-remember"
+            checked={remember}
+            disabled={busy}
+            onChange={(e) => setRemember(e.target.checked)}
+          />
+          Remember this for new threads
+        </label>
+      </form>
+      {error ? (
+        <p data-testid="new-session-error" className="ox-error">
+          {error}
+        </p>
+      ) : null}
+    </>
+  );
+
+  const earlierBody = (
+    <>
+      <Toolbar
+        filter={{
+          value: filter,
+          onChange: setFilter,
+          label: "Filter earlier sessions",
+          placeholder: "Filter by title, prompt, thread or agent",
+          testId: "new-session-earlier-filter",
+          inputProps: nav.inputProps,
+        }}
+      />
+      {earlierError ? (
+        <p data-testid="new-session-earlier-error" className="ox-error">
+          {earlierError}
+        </p>
+      ) : null}
+      {rows === null && !earlierError ? <Loading what="saved sessions" /> : null}
+      {earlier?.unavailable.map((u) => (
+        <p key={u.harness} data-testid={`new-session-earlier-unavailable-${u.harness}`} className="ox-empty-line">
+          {harness(u.harness)?.title ?? u.harness} couldn't list its saved sessions: {u.reason}
+        </p>
+      ))}
+      {allRows && allRows.length === 0 ? (
+        <p data-testid="new-session-earlier-empty" className="ox-empty-line">
+          No earlier sessions for this worktree.
+        </p>
+      ) : null}
+      {allRows && allRows.length > 0 && rows?.length === 0 ? (
+        <p data-testid="new-session-earlier-nomatch" className="ox-empty-line">
+          Nothing matches the filter.
+        </p>
+      ) : null}
+      {rows?.length ? (
+        <DataTable<EarlierRow>
+          testId="new-session-earlier-rows"
+          columns={columns}
+          rows={rows}
+          rowKey={(r) => r.key}
+          tableProps={{ ...nav.listProps, "aria-label": "Earlier sessions" }}
+          rowProps={(row, i) => ({
+            ...nav.optionProps(i),
+            "data-testid": `earlier-row-${row.key}`,
+            "data-action": row.action,
+            "aria-disabled": !takeable(row) || busy,
+            className: [takeable(row) ? "ox-clickable" : "ox-inert", i === nav.cursor ? "ox-selected" : ""].filter(Boolean).join(" "),
+            onClick: () => void takeRow(row),
+          })}
+        />
+      ) : null}
+    </>
+  );
+
   return (
-    <Page testId="page-new-session" showNavBar={false} titleInBody>
-      <div style={{ padding: "20px 24px", maxWidth: 960 }}>
-        <h1 style={pageH1Style}>Agent sessions</h1>
-        <section data-testid="new-session-new" style={newCardStyle}>
-          <h2 style={sectionH2Style}>Start a new session</h2>
-          <form
-            onSubmit={async (e) => {
-              e.preventDefault();
-              if (!thread || busy) return;
-              setBusy(true);
-              setError(null);
-              try {
-                await onStart(picked, remember);
-              } catch (err) {
-                setError(err instanceof Error ? err.message : String(err));
-              } finally {
-                setBusy(false);
-              }
-            }}
-            style={{ display: "flex", gap: 8, alignItems: "center" }}
-          >
-            <select
-              data-testid="new-session-agent"
-              value={picked}
-              disabled={busy || !thread}
-              onChange={(e) => setChoice(e.target.value)}
-              style={selectStyle}
-              ref={agentRef}
-            >
-              {choices.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
-            <button type="submit" data-testid="new-session-start" disabled={busy || !thread || !picked} style={startStyle}>
-              New Session
-            </button>
-          </form>
-          <label style={rememberStyle} title="Change it later in Settings → Agents">
-            <input
-              type="checkbox"
-              data-testid="new-session-remember"
-              checked={remember}
-              disabled={busy}
-              onChange={(e) => setRemember(e.target.checked)}
-            />
-            Remember this for new threads
-          </label>
-          {error ? (
-            <div data-testid="new-session-error" style={{ color: "var(--severity-high)" }}>
-              {error}
-            </div>
-          ) : null}
-        </section>
-        {thread ? (
-          <section data-testid="new-session-earlier" style={{ marginTop: 32 }}>
-            <h2 style={sectionH2Style}>Earlier sessions</h2>
-            <input
-              type="text"
-              data-testid="new-session-earlier-filter"
-              aria-label="Filter earlier sessions"
-              placeholder="Filter by title, prompt, thread or agent"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              onKeyDown={onFilterKeyDown}
-              style={filterStyle}
-            />
-            {earlierError ? (
-              <div data-testid="new-session-earlier-error" style={{ color: "var(--severity-high)", marginTop: 6 }}>
-                {earlierError}
-              </div>
-            ) : null}
-            {rows === null && !earlierError ? (
-              <div style={mutedStyle}>Reading saved sessions…</div>
-            ) : null}
-            {earlier?.unavailable.map((u) => (
-              <div key={u.harness} data-testid={`new-session-earlier-unavailable-${u.harness}`} style={mutedStyle}>
-                {harnessTitle(u.harness)} couldn't list its saved sessions: {u.reason}
-              </div>
-            ))}
-            {allRows && allRows.length === 0 ? (
-              <div data-testid="new-session-earlier-empty" style={mutedStyle}>
-                No earlier sessions for this worktree.
-              </div>
-            ) : null}
-            {allRows && allRows.length > 0 && rows?.length === 0 ? (
-              <div data-testid="new-session-earlier-nomatch" style={mutedStyle}>
-                Nothing matches the filter.
-              </div>
-            ) : null}
-            {rows?.length ? (
-              <div role="listbox" aria-label="Earlier sessions" style={{ marginTop: 6 }}>
-                <div aria-hidden style={{ ...rowStyle, ...headerStyle }}>
-                  <span>Agent</span>
-                  <span />
-                  <span>Session</span>
-                  <span>Last active</span>
-                  <span style={numberStyle}>Turns</span>
-                  <span style={numberStyle}>Size</span>
-                </div>
-                {rows.map((row, i) => (
-                  <button
-                    key={row.key}
-                    type="button"
-                    role="option"
-                    aria-selected={i === cursor}
-                    data-testid={`earlier-row-${row.key}`}
-                    data-action={row.action}
-                    disabled={!takeable(row) || busy}
-                    onMouseEnter={() => setCursor(i)}
-                    onClick={() => void takeRow(row)}
-                    style={{
-                      ...rowStyle,
-                      background: i === cursor ? "rgba(74, 158, 255, 0.18)" : "transparent",
-                      color: takeable(row) ? "var(--text-primary)" : "var(--text-muted)",
-                      cursor: takeable(row) ? "pointer" : "default",
-                    }}
-                  >
-                    <span>
-                      <span style={tagStyle}>{harnessTitle(row.harness)}</span>
-                    </span>
-                    <StatusIcon status={row.status} note={row.note} />
-                    <span style={cellStyle} title={row.label}>
-                      {row.label}
-                    </span>
-                    <span style={metaStyle}>{row.when ?? ""}</span>
-                    <span style={{ ...metaStyle, ...numberStyle }}>{row.turns ?? ""}</span>
-                    <span style={{ ...metaStyle, ...numberStyle }}>{row.size ?? ""}</span>
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </section>
-        ) : null}
-      </div>
-    </Page>
+    <DocumentLayout
+      testId="page-new-session"
+      title="Agent sessions"
+      slot="new-session.sections"
+      slotParams={{ thread_id: threadId ? numericRowId(threadId) : null }}
+      streamId={streamId}
+      onOpenPage={onOpenPage}
+      sections={[
+        { id: "start", title: "Start a new session", testId: "new-session-new", body: start },
+        ...(thread ? [{ id: "earlier", title: "Earlier sessions", testId: "new-session-earlier", body: earlierBody }] : []),
+      ]}
+    />
   );
 }
 
@@ -255,103 +260,8 @@ const STATUS_ICONS: Record<EarlierStatus, LucideIcon> = {
 function StatusIcon({ status, note }: { status: EarlierStatus; note: string }) {
   const Icon = STATUS_ICONS[status];
   return (
-    <span title={note} aria-label={note} data-status={status} style={{ display: "inline-flex", alignSelf: "center", color: "var(--text-muted)" }}>
+    <span title={note} aria-label={note} data-status={status} className="ox-faint" style={{ display: "inline-flex" }}>
       <Icon size={13} aria-hidden />
     </span>
   );
 }
-
-// The new session's controls sit in a card of their own, set off from the
-// list of earlier sessions below.
-const newCardStyle = {
-  background: "var(--surface-card)",
-  border: "1px solid var(--border-subtle)",
-  borderRadius: 6,
-  padding: "14px 16px",
-  marginTop: 12,
-} as const;
-
-const sectionH2Style = { fontSize: "var(--text-md, 14px)", margin: "0 0 10px" } as const;
-
-const filterStyle = {
-  width: "100%",
-  boxSizing: "border-box",
-  background: "var(--surface-card)",
-  color: "var(--text-primary)",
-  border: "1px solid var(--border-subtle)",
-  borderRadius: 4,
-  padding: "5px 8px",
-  fontSize: "var(--text-sm)",
-} as const;
-
-const mutedStyle = { color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: 6 } as const;
-
-// One column template for the header and every row, so each piece of a
-// row lines up with the same piece of the others: agent, status icon,
-// session (taking what the others leave), last active, turns, size.
-const rowStyle = {
-  display: "grid",
-  gridTemplateColumns: "60px 16px minmax(0, 1fr) 104px 40px 60px",
-  width: "100%",
-  columnGap: 12,
-  alignItems: "baseline",
-  padding: "6px 8px",
-  border: "none",
-  borderRadius: 4,
-  textAlign: "left",
-  fontSize: "var(--text-sm)",
-} as const;
-
-const headerStyle = {
-  fontSize: 11,
-  fontWeight: 600,
-  color: "var(--text-secondary)",
-  borderBottom: "1px solid var(--border-subtle)",
-  borderRadius: 0,
-  padding: "4px 8px",
-} as const;
-
-const cellStyle = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } as const;
-
-const metaStyle = { fontSize: 11, color: "var(--text-muted)", fontVariantNumeric: "tabular-nums" } as const;
-
-const numberStyle = { textAlign: "right" } as const;
-
-const tagStyle = {
-  fontSize: 10,
-  textTransform: "uppercase",
-  letterSpacing: 0.4,
-  color: "var(--text-secondary)",
-  border: "1px solid var(--border-subtle)",
-  borderRadius: 3,
-  padding: "0 4px",
-} as const;
-
-const selectStyle = {
-  background: "var(--surface-card)",
-  color: "var(--text-primary)",
-  border: "1px solid var(--border-subtle)",
-  borderRadius: 4,
-  padding: "4px 6px",
-  fontSize: "var(--text-sm)",
-} as const;
-
-const rememberStyle = {
-  display: "flex",
-  alignItems: "center",
-  gap: 6,
-  marginTop: 10,
-  fontSize: "var(--text-sm)",
-  color: "var(--text-secondary)",
-  cursor: "pointer",
-} as const;
-
-const startStyle = {
-  background: "var(--accent)",
-  color: "var(--text-on-accent, white)",
-  border: "none",
-  borderRadius: 4,
-  padding: "5px 12px",
-  fontSize: "var(--text-sm)",
-  cursor: "pointer",
-} as const;

@@ -1040,6 +1040,54 @@ async fn without_a_model_inferring_reasoning_skips_and_says_where_to_bind_one() 
     );
 }
 
+/// The session-notes example adds a section to a core page: it checks
+/// clean, its mount is the New Session page's sections slot placed after
+/// `start`, and its example runs.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_session_notes_example_adds_a_section_to_the_new_session_page() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    oxplow_app::vcs::GitProvider
+        .init_repository(root)
+        .await
+        .unwrap();
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions");
+    copy_dir(
+        &examples.join("session-notes"),
+        &root.join("oxplow/extensions/session-notes"),
+    );
+    let report = check(
+        root,
+        "session-notes",
+        &ExtensionCatalog::new(),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(report.ok, "{}", render_findings(&report, Format::Text));
+    let tested = test_extension(root, "session-notes", false).await.unwrap();
+    assert_eq!(tested.errors, Vec::<String>::new());
+    assert!(
+        tested.ran.contains(&"example thread-notes".to_string()),
+        "{:?}",
+        tested.ran
+    );
+    let ext = ExtensionCatalog::new()
+        .named(root, "session-notes")
+        .unwrap();
+    let mount = &ext.ui.slots[0];
+    assert_eq!(mount.slot, "new-session.sections");
+    assert_eq!(
+        mount.at,
+        Some(oxplow_app::extensions::SlotAt::After {
+            after: "start".into()
+        })
+    );
+    assert!(ext.warnings.is_empty(), "{:?}", ext.warnings);
+}
+
 /// Both examples copied into one project.
 async fn review_project(with_producer: bool) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
