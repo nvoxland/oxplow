@@ -1,14 +1,19 @@
-/* oxplow's component kit: a few classes in oxplow's look, for custom
-   components (`viz: custom` lenses). Link it beside the client library:
+/* oxplow's component kit: the classes every page is drawn with. The app
+   imports this sheet (`apps/desktop/src/main.tsx`) and its kit components
+   (`src/kit/`) render these classes, so a core page, a lens and a custom
+   component look alike. A custom component (`viz: custom` lens) links it
+   beside the client library:
 
      <link rel="stylesheet" href="/component-lib/oxplow-kit.css">
 
    and, once connected, call `component.applyTheme()`: it sets the
    theme's tokens (`--text-primary`, …) on the frame's root, which every
    rule here reads. Token-only — no color of its own — so a component
-   follows the theme. */
+   follows the theme. Lengths are the spacing and radius tokens.
 
-body {
+   `:where(body)` weighs nothing, so in the app its own body rules win. */
+
+:where(body) {
   margin: 0;
   font-family: var(--font-ui);
   font-size: var(--text-base);
@@ -26,7 +31,7 @@ body {
   font-size: var(--text-md);
   font-weight: var(--weight-bold);
   line-height: var(--leading-tight);
-  margin: 0 0 6px;
+  margin: 0 0 var(--space-1);
 }
 .ox-link { color: var(--accent); cursor: pointer; text-decoration: none; }
 .ox-link:hover { color: var(--accent-hover); text-decoration: underline; }
@@ -35,14 +40,14 @@ body {
 .ox-card {
   background: var(--surface-card);
   border: 1px solid var(--border-subtle);
-  border-radius: 4px;
-  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
 }
 .ox-badge {
   display: inline-block;
-  padding: 0 6px;
+  padding: 0 var(--space-1);
   border: 1px solid var(--border-subtle);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--text-secondary);
   font-size: var(--text-xs);
 }
@@ -54,8 +59,8 @@ body {
   color: var(--button-secondary-fg);
   background: var(--button-secondary-bg);
   border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  padding: 2px 10px;
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-3);
   cursor: pointer;
 }
 .ox-button:hover { color: var(--button-secondary-fg-hover); background: var(--button-secondary-bg-hover); }
@@ -64,8 +69,8 @@ body {
 .ox-button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* Forms: a stack of fields, each a label over a control. */
-.ox-form { display: flex; flex-direction: column; gap: 10px; }
-.ox-field { display: flex; flex-direction: column; gap: 3px; }
+.ox-form { display: flex; flex-direction: column; gap: var(--space-3); }
+.ox-field { display: flex; flex-direction: column; gap: var(--space-1); }
 .ox-label { color: var(--text-secondary); font-size: var(--text-xs); }
 .ox-input,
 .ox-select,
@@ -75,8 +80,8 @@ body {
   color: var(--text-primary);
   background: var(--surface-app);
   border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
 }
 .ox-textarea { resize: vertical; min-height: 4em; }
 .ox-input:focus,
@@ -89,12 +94,76 @@ body {
 .ox-dragging { opacity: 0.5; }
 .ox-drop-target { border: 1px dashed var(--accent); box-shadow: 0 0 0 2px var(--accent-soft-bg); }
 
-/* Tables */
+/* Tables: header in small secondary text, a rule under every row. A
+   table with <col> widths is laid out fixed, so columns line up and a
+   long cell is cut (`ox-truncate`) instead of pushing the others. */
 .ox-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.ox-table.ox-fixed { table-layout: fixed; }
 .ox-table th,
-.ox-table td { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--border-subtle); }
-.ox-table th { color: var(--text-secondary); font-weight: var(--weight-medium); }
+.ox-table td { padding: var(--space-2); text-align: left; vertical-align: top; border-bottom: 1px solid var(--border-subtle); }
+.ox-table th { padding-block: var(--space-1); color: var(--text-secondary); font-size: var(--text-xs); font-weight: var(--weight-medium); }
+.ox-table .ox-group { padding: 0; }
+.ox-table tr.ox-clickable { cursor: pointer; }
+.ox-table tr.ox-clickable:hover,
+.ox-table tr.ox-selected { background: var(--accent-soft-bg); }
+.ox-table tr.ox-inert { color: var(--text-muted); cursor: default; }
+.ox-table tr.ox-emphasis { background: var(--accent-soft-bg); font-weight: var(--weight-medium); }
 .ox-num { font-variant-numeric: tabular-nums; text-align: right; }
+.ox-table th.ox-num { text-align: right; }
+.ox-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Document pages: a title, an intro, then sections. A section is a
+   heading over a rule, no box (wiki style); sections stack apart. */
+.ox-title { margin: 0; font-size: var(--text-2xl); font-weight: var(--weight-bold); line-height: var(--leading-tight); color: var(--text-primary); }
+.ox-intro { margin: var(--space-2) 0 0; color: var(--text-secondary); }
+.ox-section { margin-top: var(--space-6); }
+.ox-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding-bottom: var(--space-1);
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.ox-section-title { flex: 1; margin: 0; font-size: var(--text-lg); font-weight: var(--weight-medium); line-height: var(--leading-tight); }
+.ox-section-desc { margin: 0 0 var(--space-3); color: var(--text-secondary); font-size: var(--text-sm); }
+.ox-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); align-items: center; }
+
+/* A row above a list: its filter, then its actions. */
+.ox-toolbar { display: flex; gap: var(--space-2); align-items: center; margin-bottom: var(--space-2); }
+.ox-toolbar .ox-input { flex: 1; min-width: 0; }
+
+/* A number with its label. */
+.ox-stat { display: flex; flex-direction: column; gap: 2px; }
+.ox-stat-value { font-size: var(--text-2xl); font-weight: var(--weight-bold); line-height: var(--leading-tight); font-variant-numeric: tabular-nums; }
+.ox-stat-unit { margin-left: var(--space-1); font-size: var(--text-sm); font-weight: var(--weight-regular); color: var(--text-secondary); }
+.ox-stat-label { color: var(--text-secondary); font-size: var(--text-xs); }
+
+/* Dashboards: a responsive grid of tiles; a tile spans by its size and
+   is a titled card. 400px: a chart's labelled axis must fit. */
+.ox-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); grid-auto-rows: auto; gap: var(--space-4); }
+.ox-tile-slot { min-width: 0; position: relative; }
+.ox-tile-wide { grid-column: span 2; }
+.ox-tile-tall { grid-row: span 2; }
+.ox-tile-full { grid-column: 1 / -1; }
+.ox-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  padding: var(--space-3);
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+.ox-tile-title { font-weight: var(--weight-bold); color: var(--text-primary); }
+.ox-tile-body { overflow: auto; min-height: 0; }
+
+/* What's loading, and what isn't there. */
+.ox-loading,
+.ox-empty-line { margin: var(--space-1) 0 0; color: var(--text-muted); font-size: var(--text-sm); }
 
 /* States */
 .ox-ok { color: var(--status-done); }

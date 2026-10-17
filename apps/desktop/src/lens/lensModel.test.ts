@@ -20,7 +20,7 @@ const lens = (over: Partial<Lens> = {}): Lens => ({
   steps: null,
   hunks: null,
   form: null,
-  children: [],
+  parts: [],
   launcherCategory: null,
   hidden: false,
   path: "oxplow/extensions/review/lenses/waiting.yaml",
@@ -30,8 +30,8 @@ const lens = (over: Partial<Lens> = {}): Lens => ({
 describe("displayColumns", () => {
   test("without declared columns shows every result column by name", () => {
     expect(displayColumns(lens(), ["ref", "title"])).toEqual([
-      { key: "ref", label: "ref", index: 0, link: null, unitIndex: null, iconIndex: null, toneIndex: null },
-      { key: "title", label: "title", index: 1, link: null, unitIndex: null, iconIndex: null, toneIndex: null },
+      { key: "ref", label: "ref", index: 0, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null },
+      { key: "title", label: "title", index: 1, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null },
     ]);
   });
 
@@ -44,8 +44,8 @@ describe("displayColumns", () => {
       ],
     });
     expect(displayColumns(l, ["id", "title", "u"])).toEqual([
-      { key: "title", label: "Task", index: 1, link: { kind: "page", from: "id", line: null, base: null, head: null }, unitIndex: null, iconIndex: null, toneIndex: null },
-      { key: "id", label: "id", index: 0, link: null, unitIndex: 2, iconIndex: null, toneIndex: null },
+      { key: "title", label: "Task", index: 1, link: { kind: "page", from: "id", line: null, base: null, head: null }, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null },
+      { key: "id", label: "id", index: 0, link: null, unitIndex: 2, iconIndex: null, toneIndex: null, width: null, format: null },
     ]);
   });
 
@@ -59,7 +59,7 @@ describe("displayColumns", () => {
       columns: [{ key: "title", label: null, link: null, unit: null, icon: "glyph", tone: "hue" }, { key: "bucket", label: null, link: null, unit: null }],
     });
     expect(displayColumns(styled, ["title", "bucket", "glyph", "hue"])).toEqual([
-      { key: "title", label: "title", index: 0, link: null, unitIndex: null, iconIndex: 2, toneIndex: 3 },
+      { key: "title", label: "title", index: 0, link: null, unitIndex: null, iconIndex: 2, toneIndex: 3, width: null, format: null },
     ]);
     const auto = lens({ group: { by: "bucket", link: null }, emphasis: "on", depth: "d" });
     expect(displayColumns(auto, ["title", "bucket", "on", "d"]).map((c) => c.key)).toEqual(["title"]);
@@ -506,4 +506,13 @@ describe("adHocLens charts", () => {
     expect(adHocLens("SELECT 1", "bar", chart).chart).toEqual(chart);
     expect(adHocLens("SELECT 1", "table").chart).toBeNull();
   });
+});
+
+test("a column's format reads its value; a value it doesn't read shows as without one", () => {
+  expect(formatCell(1536, undefined, "bytes")).toBe("1.5 KB");
+  expect(formatCell(0.25, undefined, "percent")).toBe("25%");
+  expect(formatCell(1500, undefined, "duration")).not.toBe("1500");
+  expect(formatCell("2026-10-17T10:00:00Z", undefined, "relative")).toMatch(/ago|just now|\d/);
+  expect(formatCell("plain", undefined, "date")).toBe("plain");
+  expect(formatCell(3, undefined, "date")).toBe("3");
 });

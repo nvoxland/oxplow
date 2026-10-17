@@ -28,7 +28,6 @@ export function GitHistoryPage({ stream, onOpenPage, revealSha }: GitHistoryPage
     <Page
       testId="page-git-history"
       title="Git History"
-      layout={sidebar ? "details" : "full"}
       rightRailTitle="From extensions"
       rightRail={
         sidebar ? (

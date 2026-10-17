@@ -498,6 +498,15 @@ another branch.
   ancestor-descriptor chain (unit-tested without a DOM); add new exempt
   surfaces there.
 
+## Actions are data; core draws them
+
+- **A page's actions are `PageAction[]`** (`src/kit/actions.ts`), drawn in
+  the nav bar by core — never a page's own buttons in its chrome. A
+  section's actions are `PageAction[]` too, at its heading. A primary
+  action is the accent button; one per place.
+- **A section is a heading over a rule**, no box (`kit/Section`). A card
+  is a dashboard tile's, not a page section's.
+
 ## Collapsible page sections
 
 - **A page with stacked sections gets them from the shared primitive**, not
@@ -604,6 +613,10 @@ declaring *what it is* and mounting the generic layer.
 
 ## Keyboard
 
+- **A list driven from an input uses `useListNav`** (`src/kit/useListNav.ts`):
+  ↑/↓ move the cursor, Enter takes the row under it, Escape is the page's
+  (clear the filter), the pointer moves the cursor too, and focus stays in
+  the input (`aria-activedescendant`). Don't hand-roll another.
 - **Shortcuts are commands'.** A shortcut is a command's `ui.shortcut`
   (`.context/commands.md` "Offering a command to a person"), shown on
   its menu item when it has a `ui.menu` place; there's no separate key

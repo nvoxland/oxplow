@@ -215,7 +215,7 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
   );
 
   return (
-    <Page testId="page-explore-data" title="Explore Data" layout="details" rightRail={catalogList} rightRailTitle="Data">
+    <Page testId="page-explore-data" title="Explore Data" width="reading" rightRail={catalogList} rightRailTitle="Data">
       <p style={{ color: "var(--text-secondary)", marginTop: 0 }}>
         Everything oxplow knows, as read-only SQL views. Pick one on the right, tweak the query, and save it as a
         lens to keep it as a page. Metrics read as columns of a grid:{" "}

@@ -1,5 +1,10 @@
 title: Usage
 description: Where your attention and your agents' tokens went over the last 30 days.
-viz: grid
-children: [token-total, tokens-by-agent, tokens-by-day, page-visits-by-day, top-pages]
+viz: dashboard
+tiles:
+  - { lens: token-total }
+  - { lens: tokens-by-agent }
+  - { lens: tokens-by-day }
+  - { lens: page-visits-by-day }
+  - { lens: top-pages }
 launcher: { category: Activity }

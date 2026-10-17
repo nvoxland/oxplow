@@ -34,7 +34,7 @@ import {
  * Usage — controls in the details rail, sections in the body:
  * ```tsx
  * <CollapsibleSections pageKey="metrics-recorded" testIdPrefix="recorded">
- *   <Page layout="details" rightRail={<>…filters… <SectionCollapseControls /></>}>
+ *   <Page width="reading" rightRail={<>…filters… <SectionCollapseControls /></>}>
  *     {groups.map((g) => (
  *       <CollapsibleSection key={g.key} id={g.key} title={g.label} count={g.entries.length}>
  *         …

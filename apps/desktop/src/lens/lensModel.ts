@@ -4,8 +4,17 @@
  * entries for loaded lenses. React-free so it's unit-tested directly.
  * See `.context/extensions.md`.
  */
-import { formatMetricValue, formatShortDateTime } from "../components/format.js";
-import type { Extension, Lens, LensChart, LensLink, LensRun, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
+import {
+  formatBytes,
+  formatDateOnly,
+  formatDurationMs,
+  formatInteger,
+  formatMetricValue,
+  formatPercent,
+  formatRelative,
+  formatShortDateTime,
+} from "../components/format.js";
+import type { ColumnFormat, Extension, Lens, SlotAt, LensChart, LensLink, LensRun, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/RailHud/sections.js";
 import { computeDiffId, duplicateBlockRef, effortDiffRef, fileRef, gitCommitRef, lensRef, metricRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
@@ -25,6 +34,10 @@ export interface DisplayColumn {
   iconIndex: number | null;
   /** Position of the column naming the cell's tone. */
   toneIndex: number | null;
+  /** Its width in pixels, when the lens fixes one. */
+  width: number | null;
+  /** How its value reads (`LensColumn.format`). */
+  format: ColumnFormat | null;
 }
 
 /** The columns that style rows rather than show as cells: `group.by`,
@@ -45,7 +58,7 @@ export function displayColumns(lens: Lens, resultColumns: string[]): DisplayColu
   };
   if (lens.columns.length === 0) {
     return resultColumns.flatMap((key, index) =>
-      styling.includes(key) ? [] : [{ key, label: key, index, link: null, unitIndex: null, iconIndex: null, toneIndex: null }],
+      styling.includes(key) ? [] : [{ key, label: key, index, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null }],
     );
   }
   const out: DisplayColumn[] = [];
@@ -60,6 +73,8 @@ export function displayColumns(lens: Lens, resultColumns: string[]): DisplayColu
       unitIndex: at(c.unit),
       iconIndex: at(c.icon),
       toneIndex: at(c.tone),
+      width: c.width ?? null,
+      format: c.format ?? null,
     });
   }
   return out;
@@ -221,13 +236,19 @@ export function cellLinkRef(
   }
 }
 
+/** A lens made of other lenses (a document's sections, a dashboard's
+ *  tiles): it has no rows of its own. */
+export function isComposite(viz: LensViz): boolean {
+  return viz === "document" || viz === "dashboard";
+}
+
 /** Lens runs split for a page of sections (tsk1036): the ones to show, and
- *  the ones with nothing to show — no rows, no error, not a grid (whose
- *  children decide) — folded into one "Nothing found" line. */
+ *  the ones with nothing to show — no rows, no error, not a composite
+ *  (whose parts decide) — folded into one "Nothing found" line. */
 export function foldEmpty<T extends { run: LensRun | null; error: string | null }>(
   runs: T[],
 ): { shown: T[]; empty: T[] } {
-  const isEmpty = (r: T) => r.error === null && r.run !== null && r.run.lens.viz !== "grid" && r.run.result.rows.length === 0;
+  const isEmpty = (r: T) => r.error === null && r.run !== null && !isComposite(r.run.lens.viz) && r.run.result.rows.length === 0;
   return { shown: runs.filter((r) => !isEmpty(r)), empty: runs.filter(isEmpty) };
 }
 
@@ -239,15 +260,35 @@ export function isTimestamp(v: SqlCell): v is string {
   return typeof v === "string" && TIMESTAMP.test(v);
 }
 
-/** Plain-text rendering of one cell: a timestamp in local time, as the rest
- *  of the app shows times; a number with its `unit` (another cell's value,
+/** Plain-text rendering of one cell: by its column's `format` when it
+ *  has one; else a timestamp in local time, as the rest of the app shows
+ *  times, and a number with its `unit` (another cell's value,
  *  `LensColumn.unit`) as a metric value (tsk1038). */
-export function formatCell(v: SqlCell, unit?: SqlCell): string {
+export function formatCell(v: SqlCell, unit?: SqlCell, format?: ColumnFormat | null): string {
   if (v === null) return "—";
   if (typeof v === "boolean") return v ? "yes" : "no";
+  const formatted = format ? byFormat(v, format) : null;
+  if (formatted !== null) return formatted;
   if (typeof v === "number") return typeof unit === "string" ? formatMetricValue(v, unit) : String(v);
   if (isTimestamp(v)) return formatShortDateTime(v);
   return v;
+}
+
+/** `v` read by `format`; null when it isn't the kind of value the format
+ *  reads (the cell then shows as it would without one). */
+function byFormat(v: string | number, format: ColumnFormat): string | null {
+  if (typeof v === "string") {
+    if (Number.isNaN(Date.parse(v))) return null;
+    if (format === "date") return formatDateOnly(v);
+    if (format === "datetime") return formatShortDateTime(v);
+    if (format === "relative") return formatRelative(v);
+    return null;
+  }
+  if (format === "bytes") return formatBytes(v);
+  if (format === "duration") return formatDurationMs(v);
+  if (format === "integer") return formatInteger(v);
+  if (format === "percent") return formatPercent(v);
+  return null;
 }
 
 /** Launcher entries for every loaded lens that isn't `hidden`, under its
@@ -357,7 +398,7 @@ export function adHocLens(query: string, viz: LensViz, chart: LensChart | null =
     group: null,
     emphasis: null,
     depth: null,
-    children: [],
+    parts: [],
     launcherCategory: null,
     hidden: false,
     actions: [],
@@ -411,6 +452,25 @@ export function slotRuns(
       if (s.slot !== slot) continue;
       const lens = ext.lenses.find((l) => l.id === s.lensId);
       if (lens) out.push({ id: s.lensId, params: childParams(lens, params) });
+    }
+  }
+  return out;
+}
+
+/** What extensions mount among a page's parts (`<page>.sections`), in
+ *  declaration order: each lens, where it goes, its heading (its own, else
+ *  its lens's title) and whose it is. */
+export function slotParts(
+  extensions: Extension[],
+  slot: string,
+): { id: string; lensId: string; at: SlotAt; title: string; extension: string }[] {
+  const out: { id: string; lensId: string; at: SlotAt; title: string; extension: string }[] = [];
+  for (const ext of extensions) {
+    if (!ext.enabled) continue;
+    for (const s of ext.ui.slots) {
+      if (s.slot !== slot) continue;
+      const lens = ext.lenses.find((l) => l.id === s.lensId);
+      if (lens) out.push({ id: s.lensId, lensId: s.lensId, at: s.at ?? "end", title: s.title ?? lens.title, extension: ext.name });
     }
   }
   return out;

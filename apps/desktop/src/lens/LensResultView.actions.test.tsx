@@ -77,7 +77,7 @@ const lens: Lens = {
   steps: null,
   hunks: null,
   form: null,
-  children: [],
+  parts: [],
   launcherCategory: null,
   hidden: false,
   actions: [{ id: "finish", label: "Finish", command: "oxplow.work_item.transition", input: {}, row: true }],

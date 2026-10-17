@@ -96,12 +96,23 @@ pub struct IntentPrompt {
     pub about: Option<String>,
 }
 
-/// A slot mount: a lens into a core page.
+/// A slot mount: a lens into a core page, or among a document or
+/// dashboard lens's parts.
 #[derive(Debug, Clone, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SlotMount {
     pub slot: String,
     pub lens: String,
+    /// Where among the page's parts (a parts slot only): `start`, `end`,
+    /// `{ after: <id> }`, `{ before: <id> }`. Default `end`.
+    #[serde(default)]
+    pub at: Option<super::SlotAt>,
+    /// Its heading in the page; else the lens's title.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// A tile's size (a `.tiles` slot only).
+    #[serde(default)]
+    pub size: Option<super::TileSize>,
 }
 
 /// `ui:` — everything an extension adds to the core UI: lenses mounted

@@ -68,6 +68,9 @@ export interface PageNavigation {
   goForward(): void;
   canGoBack: boolean;
   canGoForward: boolean;
+  /** The tab is pinned (its kind's, `isPinnedKind`): it leads the strip
+   *  and is always itself, so its bar has no back or forward. */
+  pinned?: boolean;
   /** Sibling-list state for the current page. Null when this page
    *  was not opened from a list. Up/down step through `entries`
    *  without affecting back/forward history. */

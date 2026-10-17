@@ -261,7 +261,7 @@ export function WorkItemPage({
       testId="work-item-page"
       title={item.title}
       kind="work_item"
-      layout="details"
+      width="reading"
       rightRail={rail}
       backlinks={backlinks}
       outbound={outbound}

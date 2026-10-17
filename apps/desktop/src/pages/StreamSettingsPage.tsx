@@ -51,13 +51,7 @@ export function StreamSettingsPage({ stream, onClose, onSaved }: StreamSettingsP
     <Page
       testId="page-stream-settings"
       title={stream ? `Stream Settings — ${stream.title}` : "Stream Settings"}
-      actions={
-        onClose ? (
-          <button type="button" onClick={onClose} style={buttonStyle}>
-            Close
-          </button>
-        ) : null
-      }
+      actions={onClose ? [{ id: "close", label: "Close", run: onClose }] : undefined}
     >
       <div style={{ padding: "20px 24px", maxWidth: 720 }}>
         {!stream ? (

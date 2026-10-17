@@ -1903,6 +1903,23 @@ export type ColumnDecl = {
 	doc: string,
 };
 
+/**  How a column's value reads in the UI. An agent reads the raw value. */
+export type ColumnFormat = 
+/**  A timestamp's date. */
+"date" | 
+/**  A timestamp's date and time. */
+"datetime" | 
+/**  A timestamp as how long ago (`3 h ago`). */
+"relative" | 
+/**  A byte count (`1.2 MB`). */
+"bytes" | 
+/**  Milliseconds as a duration (`1.4 s`, `3 m`). */
+"duration" | 
+/**  A whole number with separators (`12,345`). */
+"integer" | 
+/**  A fraction 0–1 as a percentage (`42%`). */
+"percent";
+
 /**  Declared type of an entity column. */
 export type ColumnType = "text" | "int" | "real" | "bool" | 
 /**  An RFC 3339 timestamp, stored as text. */
@@ -4026,6 +4043,13 @@ export type LensColumn = {
 	 *  `success`, `warning`, `danger` or `muted` (anything else is plain).
 	 */
 	tone?: string | null,
+	/**  Its width in pixels; the columns without one share the rest. */
+	width?: number | null,
+	/**
+	 *  How its value reads; else as the query returned it (a timestamp in
+	 *  local time, a number with its `unit`).
+	 */
+	format?: ColumnFormat | null,
 };
 
 /**  A `custom` lens's component and the props it starts with. */
@@ -4202,6 +4226,28 @@ export type LensParamOption = {
 };
 
 /**
+ *  One part of a `document` (a section) or a `dashboard` (a tile):
+ *  another lens, or markdown.
+ */
+export type LensPart = {
+	/**
+	 *  Stable within the lens: what another extension's mount names to go
+	 *  beside it (`at: { after: <id> }`).
+	 */
+	id: string,
+	/**  Its heading; else its lens's title. */
+	title: string | null,
+	/**  The lens it shows (`<extension>/<slug>`). */
+	lens: string | null,
+	/**  Or prose it shows. */
+	markdown: string | null,
+	/**  A tile's size. */
+	size: TileSize | null,
+	/**  The extension that mounted it, when it isn't the lens's own. */
+	from: string | null,
+};
+
+/**
  *  One press of a lens's action: the lens, the action, the lens's params,
  *  the row it was pressed on (a row action), and what the person filled in
  *  (a form action, `form: true`).
@@ -4261,10 +4307,18 @@ export type LensRun_Serialize = {
 export type LensSlot = {
 	/**
 	 *  Which page region, from [`SLOTS`] (`effort.review.details`,
-	 *  `vcs.commit.details`, …); the lens takes the params it offers.
+	 *  `vcs.commit.details`, …), or a document or dashboard lens's parts
+	 *  (`<extension>/<slug>.sections`, `.tiles`); the lens takes the params
+	 *  it offers.
 	 */
 	slot: string,
 	lensId: string,
+	/**  Where it goes among the page's parts; `None` in a region. */
+	at: SlotAt | null,
+	/**  Its heading; else its lens's title. */
+	title: string | null,
+	/**  A tile's size; `None` outside a dashboard. */
+	size: TileSize | null,
 };
 
 /**
@@ -4383,10 +4437,17 @@ export type LensViz =
  */
 "treemap" | 
 /**
- *  Other lenses (`children`), stacked, each given the params it
- *  declares from this lens's params.
+ *  A page of sections (`sections`), wiki style: each another lens,
+ *  given the params it declares from this lens's, or markdown. Other
+ *  extensions add sections at `<extension>/<slug>.sections`.
  */
-"grid" | 
+"document" | 
+/**
+ *  A grid of tiles (`tiles`), each another lens (or markdown) at a
+ *  size, given the params it declares from this lens's. Other
+ *  extensions add tiles at `<extension>/<slug>.tiles`.
+ */
+"dashboard" | 
 /**
  *  Rows nested by `tree.parent` (a row's parent is the row whose
  *  `tree.id` it names; none, or one not in the result, is a root),
@@ -4459,8 +4520,11 @@ export type Lens_Deserialize = {
 	emphasis: string | null,
 	/**  For `list` / `table`: a column whose integer value indents the row. */
 	depth: string | null,
-	/**  For `grid`: child lens ids. */
-	children: string[],
+	/**
+	 *  For `document` its sections, for `dashboard` its tiles: its own,
+	 *  then what other extensions mount, placed by their `at`.
+	 */
+	parts: LensPart[],
 	/**  Launcher section; `None` = "Lenses". */
 	launcherCategory: LauncherCategory | null,
 	/**  Not listed in the launcher. */
@@ -4518,8 +4582,11 @@ export type Lens_Serialize = {
 	emphasis: string | null,
 	/**  For `list` / `table`: a column whose integer value indents the row. */
 	depth: string | null,
-	/**  For `grid`: child lens ids. */
-	children: string[],
+	/**
+	 *  For `document` its sections, for `dashboard` its tiles: its own,
+	 *  then what other extensions mount, placed by their `at`.
+	 */
+	parts: LensPart[],
 	/**  Launcher section; `None` = "Lenses". */
 	launcherCategory: LauncherCategory | null,
 	/**  Not listed in the launcher. */
@@ -6014,6 +6081,17 @@ export type SkillKind =
 "command";
 
 /**
+ *  Where a mount goes among a page's parts: `start`, `end` (the default),
+ *  or `{ after: <id> }` / `{ before: <id> }` beside one of them. An id the
+ *  page no longer has means the end (and a load warning), so a page that
+ *  changes never loses what an extension adds.
+ */
+export type SlotAt = SlotEdge | ({ after: string }) & { before?: never } | ({ before: string }) & { after?: never };
+
+/**  The ends of a page's parts. */
+export type SlotEdge = "start" | "end";
+
+/**
  *  `snapshot` row — one per `request_snapshot()` call that had
  *  dirty files. Groups the `file_snapshot` rows captured in that
  *  batch. See [[crates/oxplow-db/migrations/V13__snapshot.sql]].
@@ -6427,6 +6505,12 @@ export type ThreadTabs = {
 	/**  The tab selected in the thread (its id); none when none is. */
 	active: string | null,
 };
+
+/**
+ *  How much of a dashboard a tile takes: one cell, two across, two down,
+ *  or the whole row.
+ */
+export type TileSize = "small" | "wide" | "tall" | "full";
 
 /**  Wall-clock UTC timestamp serialized as a fixed-width RFC 3339 string. */
 export type Timestamp = string;

@@ -9,7 +9,7 @@ import { readWikiFreshness } from "../knowledge.js";
 import { summarizeWikiFreshness } from "../components/Wiki/wikiFreshness.js";
 import { Page } from "../tabs/Page.js";
 import { CommentNavigator } from "../components/Comments/CommentNavigator.js";
-import { WikiPageTab, FreshnessBadge } from "../components/Wiki/WikiPageTab.js";
+import { WikiPageTab, freshnessChip } from "../components/Wiki/WikiPageTab.js";
 import { useWikiPageController } from "../components/Wiki/useWikiPageController.js";
 import { WikiTableOfContents } from "../components/Wiki/WikiTableOfContents.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -152,22 +152,11 @@ function WikiPageBody({
     <Page
       testId="page-wiki"
       kind="wiki"
-      actions={
-        freshness ? (
-          <button
-            type="button"
-            onClick={openFreshness}
-            title="Open the freshness view for this wiki page"
-            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "inline-flex" }}
-          >
-            <FreshnessBadge summary={freshness} />
-          </button>
-        ) : undefined
-      }
+      chips={freshness ? [freshnessChip(freshness, openFreshness)] : undefined}
       backlinks={backlinks}
       outbound={outbound}
       commentsNav={<CommentNavigator targetKind="wiki" targetId={slug} />}
-      layout="details"
+      width="reading"
       rightRail={rail}
     >
       <WikiPageTab

@@ -6,6 +6,10 @@ import type { BookmarkScope } from "./bookmarks.js";
 import type { AskTarget } from "../components/Prompts/AskMenu.js";
 import { chipsFor } from "../components/decorators.js";
 import { useDecorations } from "../components/useDecorations.js";
+import type { PinnedTile } from "../components/Dashboard/PinToDashboard.js";
+import { ActionButtons } from "../kit/ActionButtons.js";
+import type { PageAction } from "../kit/actions.js";
+import type { TabRef } from "./tabState.js";
 
 export interface PageNavBarConfig {
   canBack: boolean;
@@ -47,7 +51,6 @@ export interface PageNavBarConfig {
   /** Optional comment navigator node (count + prev/next + orphaned
    *  list) for comment-bearing pages. */
   comments?: ReactNode;
-  actions?: ReactNode;
 }
 
 export interface PageChip {
@@ -57,6 +60,8 @@ export interface PageChip {
   /** Soft background color override. */
   background?: string;
   title?: string;
+  /** Pressing the chip (a wiki page's freshness opens its report). */
+  onClick?(): void;
 }
 
 export interface PageProps {
@@ -70,8 +75,12 @@ export interface PageProps {
   kind?: string;
   /** Optional status / metadata chips rendered next to the kind. */
   chips?: PageChip[];
-  /** Optional kebab actions — rendered as `⋯` popover. */
-  actions?: ReactNode;
+  /** What the page can do, as data: core draws them in the nav bar (in
+   *  the header when the page shows no bar). */
+  actions?: readonly PageAction[];
+  /** What the page would add to a dashboard: the nav bar's Pin to
+   *  Dashboard. */
+  pin?: { tile: PinnedTile; onOpenPage(ref: TabRef): void };
   /** Page body. */
   children: ReactNode;
   /** Optional backlinks. When the active page has a nav bar (which it
@@ -110,22 +119,20 @@ export interface PageProps {
    *  render the title — avoiding a duplicate. The tab-strip label
    *  (`usePageTitle`) is unaffected. Defaults to false. */
   titleInBody?: boolean;
-  /** Body layout. `"full"` (default) renders edge-to-edge — today's
-   *  behavior. `"details"` renders a two-column grid: a bounded
-   *  reading-width center column (`.oxplow-reading-column`, 78ch,
-   *  centered) plus a sticky right rail (`rightRail`). The center
-   *  column owns the width so children just fill it. Below ~960px
-   *  body-container width the rail unmounts and the center column
-   *  reflows. Purely responsive — no user-controlled toggle. */
-  layout?: "full" | "details";
-  /** Right-rail content for `layout="details"`. Ignored otherwise. */
+  /** The body's width: `"full"` (default) is every pixel, and the page
+   *  owns its padding; `"reading"` is a padded, bounded reading column
+   *  (`.oxplow-reading-column`, 78ch, centered) that its children fill. */
+  width?: "full" | "reading";
+  /** The page's control panel, a sticky column at the right, beside a
+   *  body of either width (padded then). Below ~960px it moves to the top
+   *  of the body. Purely responsive — no user-controlled toggle. */
   rightRail?: ReactNode;
   /** Title for the right rail's panel header. Defaults to "Details". */
   rightRailTitle?: ReactNode;
 }
 
 /** Body-container width below which the right rail moves inline (it never
- *  disappears — `DetailsBody` relocates the same panel to the top of the
+ *  disappears — `RailBody` relocates the same panel to the top of the
  *  center column). */
 const DETAILS_RAIL_THRESHOLD_PX = 960;
 
@@ -149,12 +156,8 @@ export const pageH1Style: CSSProperties = {
  * The chrome reads only semantic CSS variables. Both light and dark
  * themes are styled by `public/index.html`.
  */
-export function Page({ title, kind, chips: ownChips, actions, children, backlinks, outbound, snapshots, commentsNav, navBar, testId, showNavBar = true, showHeader = true, titleInBody = false, layout = "full", rightRail, rightRailTitle }: PageProps) {
+export function Page({ title, kind, chips: ownChips, actions, pin, children, backlinks, outbound, snapshots, commentsNav, navBar, testId, showNavBar = true, showHeader = true, titleInBody = false, width = "full", rightRail, rightRailTitle }: PageProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
-  // In the details layout the `⋯` actions move into the right rail's
-  // panel header; keep them out of the page header to avoid duplication.
-  const railOwnsActions = layout === "details" && rightRail != null;
-  const headerActions = railOwnsActions ? null : actions;
   // Pages that don't pass an explicit `navBar` prop still get one
   // when rendered inside a PageNavigationContext provider — that's
   // how the host (App.tsx) injects browser-style back/forward into
@@ -186,6 +189,7 @@ export function Page({ title, kind, chips: ownChips, actions, children, backlink
     ? (backlinks as { count: number; body: ReactNode }).count
     : undefined;
   const effectiveTitle: ReactNode = title ?? ctxNav?.title ?? "";
+  const pinned = ctxNav?.pinned ?? false;
   const baseNavBar: PageNavBarConfig | undefined = !showNavBar ? undefined : navBar ?? (ctxNav ? {
     canBack: ctxNav.canGoBack,
     canForward: ctxNav.canGoForward,
@@ -243,6 +247,7 @@ export function Page({ title, kind, chips: ownChips, actions, children, backlink
     >
       {effectiveNavBar ? (
         <PageNavBar
+          history={!pinned}
           canBack={effectiveNavBar.canBack}
           canForward={effectiveNavBar.canForward}
           onBack={effectiveNavBar.onBack}
@@ -254,7 +259,8 @@ export function Page({ title, kind, chips: ownChips, actions, children, backlink
           outbound={effectiveNavBar.outbound}
           snapshots={effectiveNavBar.snapshots}
           comments={effectiveNavBar.comments}
-          actions={effectiveNavBar.actions}
+          actions={actions}
+          pin={pin}
           ask={effectiveNavBar.ask}
         />
       ) : null}
@@ -287,30 +293,12 @@ export function Page({ title, kind, chips: ownChips, actions, children, backlink
               {effectiveTitle}
             </span>
           )}
-          {chips?.map((chip, i) => (
-            <span
-              key={i}
-              title={chip.title}
-              style={{
-                fontSize: 11,
-                fontWeight: "var(--weight-medium)",
-                color: chip.color ?? "var(--text-secondary)",
-                background: chip.background ?? "transparent",
-                padding: "2px 6px",
-                borderRadius: 4,
-                border: chip.background ? "none" : "1px solid var(--border-subtle)",
-              }}
-            >
-              {chip.label}
-            </span>
-          ))}
+          {chips?.map((chip, i) => <Chip key={i} chip={chip} />)}
         </div>
-        {headerActions ? (
-          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>{headerActions}</div>
-        ) : null}
+        {actions && actions.length > 0 ? <ActionButtons actions={actions} /> : null}
       </header>
       ) : null}
-      {showHeader && effectiveNavBar && ((chips && chips.length > 0) || headerActions) ? (
+      {showHeader && effectiveNavBar && chips && chips.length > 0 ? (
         <div
           data-testid="page-chips"
           style={{
@@ -324,31 +312,12 @@ export function Page({ title, kind, chips: ownChips, actions, children, backlink
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0, flexWrap: "wrap" }}>
-            {chips?.map((chip, i) => (
-              <span
-                key={i}
-                title={chip.title}
-                style={{
-                  fontSize: 11,
-                  fontWeight: "var(--weight-medium)",
-                  color: chip.color ?? "var(--text-secondary)",
-                  background: chip.background ?? "transparent",
-                  padding: "2px 6px",
-                  borderRadius: 4,
-                  border: chip.background ? "none" : "1px solid var(--border-subtle)",
-                }}
-              >
-                {chip.label}
-              </span>
-            ))}
+            {chips.map((chip, i) => <Chip key={i} chip={chip} />)}
           </div>
-          {headerActions ? (
-            <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>{headerActions}</div>
-          ) : null}
         </div>
       ) : null}
-      {layout === "details" ? (
-        <DetailsBody rightRail={rightRail} rightRailTitle={rightRailTitle} rightRailActions={actions}>{children}</DetailsBody>
+      {width === "reading" || rightRail != null ? (
+        <RailBody width={width} rightRail={rightRail} rightRailTitle={rightRailTitle}>{children}</RailBody>
       ) : (
         <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "auto", display: "flex", flexDirection: "column" }}>
           {children}
@@ -392,7 +361,31 @@ export function Page({ title, kind, chips: ownChips, actions, children, backlink
   );
 }
 
-function DetailsBody({ children, rightRail, rightRailTitle, rightRailActions }: { children: ReactNode; rightRail?: ReactNode; rightRailTitle?: ReactNode; rightRailActions?: ReactNode }) {
+/** A page's status or metadata chip, pressable when it says what it opens. */
+function Chip({ chip }: { chip: PageChip }) {
+  const style: CSSProperties = {
+    fontSize: "var(--text-xs)",
+    fontWeight: "var(--weight-medium)",
+    color: chip.color ?? "var(--text-secondary)",
+    background: chip.background ?? "transparent",
+    padding: "2px 6px",
+    borderRadius: "var(--radius-sm)",
+    border: chip.background ? "none" : "1px solid var(--border-subtle)",
+  };
+  return chip.onClick ? (
+    <button type="button" title={chip.title} onClick={chip.onClick} style={{ ...style, font: "inherit", fontSize: style.fontSize, cursor: "pointer" }}>
+      {chip.label}
+    </button>
+  ) : (
+    <span title={chip.title} style={style}>
+      {chip.label}
+    </span>
+  );
+}
+
+/** A padded body: a reading column or every pixel, with the page's rail
+ *  beside it (or above it, when narrow). */
+function RailBody({ children, width, rightRail, rightRailTitle }: { children: ReactNode; width: "full" | "reading"; rightRail?: ReactNode; rightRailTitle?: ReactNode }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [showRail, setShowRail] = useState(true);
 
@@ -413,12 +406,12 @@ function DetailsBody({ children, rightRail, rightRailTitle, rightRailActions }: 
   // of the center column instead of the side. The rail never just vanishes.
   const railInline = !showRail && railProvided;
 
-  // The details panel — identical look (card surface + tinted header band +
-  // ⋯ actions) whether it sits in the side rail (`aside`, sticky) or stacked
-  // inline at the top of the center column when the rail collapses.
+  // The rail panel — identical look (card surface + tinted header band)
+  // whether it sits in the side rail (`aside`, sticky) or stacked inline at
+  // the top of the center column when the rail collapses.
   const railPanel = (variant: "aside" | "inline") => (
     <aside
-      data-testid="page-details-rail"
+      data-testid="page-rail"
       style={{
         ...(variant === "aside"
           ? {
@@ -456,11 +449,6 @@ function DetailsBody({ children, rightRail, rightRailTitle, rightRailActions }: 
         }}
       >
         <span style={{ flex: "1 0 auto" }}>{rightRailTitle ?? "Details"}</span>
-        {rightRailActions ? (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, textTransform: "none", letterSpacing: 0 }}>
-            {rightRailActions}
-          </div>
-        ) : null}
       </div>
       <div style={{ padding: 12 }}>{rightRail}</div>
     </aside>
@@ -469,7 +457,7 @@ function DetailsBody({ children, rightRail, rightRailTitle, rightRailActions }: 
   return (
     <div
       ref={scrollRef}
-      data-testid="page-details-body"
+      data-testid="page-rail-body"
       style={{
         flex: 1,
         minHeight: 0,
@@ -483,13 +471,13 @@ function DetailsBody({ children, rightRail, rightRailTitle, rightRailActions }: 
       }}
     >
       <div
-        data-testid="page-details-center"
+        data-testid="page-rail-center"
         // `oxplow-reading-column` (index.html) owns the reading-width cap
         // + centering and cancels child self-width, so the title, body,
         // and activity all live within one bounded, centered column
         // instead of each managing its own width. `minWidth: 0` keeps the
         // grid item from overflowing the track.
-        className="oxplow-reading-column"
+        className={width === "reading" ? "oxplow-reading-column" : undefined}
         style={{ minWidth: 0 }}
       >
         {railInline ? railPanel("inline") : null}

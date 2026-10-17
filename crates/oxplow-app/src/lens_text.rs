@@ -23,7 +23,8 @@ pub const MAX_ROWS: usize = 50;
 pub const MAX_HUNK_FILES: usize = 20;
 pub const MAX_HUNK_BYTES: usize = 8_000;
 
-/// What a component needs beyond its rows: a grid's children's runs, a
+/// What a component needs beyond its rows: the runs of a document's or a
+/// dashboard's lens parts (in part order), a
 /// `hunks` lens's diffs (one per row, in row order, up to
 /// [`MAX_HUNK_FILES`]).
 #[derive(Debug, Clone, Default)]
@@ -83,8 +84,9 @@ pub async fn text_of(
     Ok(render(run, &resolve(svc, root, run, ctx).await?))
 }
 
-/// What `run`'s component needs beyond its rows: a grid's children, run
-/// with the params each declares from the grid's; a `hunks` lens's diffs,
+/// What `run`'s component needs beyond its rows: a document's or a
+/// dashboard's lens parts, each run with the params it declares from the
+/// lens's; a `hunks` lens's diffs,
 /// each file read at both revisions in `root`.
 pub async fn resolve(
     svc: &crate::Services,
@@ -94,8 +96,8 @@ pub async fn resolve(
 ) -> Result<Resolved, DomainError> {
     let mut out = Resolved::default();
     match run.lens.viz {
-        LensViz::Grid => {
-            for id in &run.lens.children {
+        LensViz::Document | LensViz::Dashboard => {
+            for id in run.lens.part_lenses() {
                 let child = svc.extension_catalog.find_lens(root, id)?;
                 let params = run
                     .params
@@ -175,21 +177,31 @@ async fn file_diff(svc: &crate::Services, root: &Path, path: &str, from: &str, t
     }
 }
 
-/// `run` as text. A grid renders its resolved children in order under
-/// their titles, a `hunks` lens its resolved diffs; every other component
+/// `run` as text. A document or dashboard renders its parts in order
+/// under their titles (a lens part its resolved run, a markdown part its
+/// prose), a `hunks` lens its resolved diffs; every other component
 /// renders its rows.
 pub fn render(run: &LensRun, resolved: &Resolved) -> String {
     let rows = &run.result.rows;
-    if run.lens.viz == LensViz::Grid {
-        return resolved
-            .children
+    if matches!(run.lens.viz, LensViz::Document | LensViz::Dashboard) {
+        let mut runs = resolved.children.iter();
+        return run
+            .lens
+            .parts
             .iter()
-            .map(|c| {
-                format!(
-                    "### {}\n\n{}",
-                    c.lens.title,
-                    render(c, &Resolved::default())
-                )
+            .filter_map(|part| match (&part.lens, &part.markdown) {
+                (Some(_), _) => runs.next().map(|c| {
+                    format!(
+                        "### {}\n\n{}",
+                        part.title.as_deref().unwrap_or(&c.lens.title),
+                        render(c, &Resolved::default())
+                    )
+                }),
+                (None, Some(md)) => Some(match &part.title {
+                    Some(t) => format!("### {t}\n\n{md}"),
+                    None => md.clone(),
+                }),
+                (None, None) => None,
             })
             .collect::<Vec<_>>()
             .join("\n\n");
@@ -227,7 +239,9 @@ pub fn render(run: &LensRun, resolved: &Resolved) -> String {
         LensViz::Detail => detail(run),
         LensViz::Steps => steps(run),
         LensViz::Hunks => hunks(run, &resolved.diffs),
-        LensViz::Table | LensViz::List | LensViz::Grid | LensViz::Form => table(run),
+        LensViz::Table | LensViz::List | LensViz::Document | LensViz::Dashboard | LensViz::Form => {
+            table(run)
+        }
         // A component's rendering is its own; an agent reads its rows.
         LensViz::Custom => format!(
             "(custom component `{}/{}`; its table rendering)\n{}",
@@ -704,7 +718,7 @@ mod tests {
                 group: None,
                 emphasis: None,
                 depth: None,
-                children: Vec::new(),
+                parts: Vec::new(),
                 launcher_category: None,
                 hidden: false,
                 actions: Vec::new(),
@@ -819,10 +833,28 @@ mod tests {
         assert_eq!(render(&empty, &Resolved::default()), "Nothing waiting.");
     }
 
-    /// A grid reads as its children, in order, under their titles.
+    /// A document reads as its parts, in order, under their titles: a
+    /// lens part its run (a part's own title wins), a markdown part its
+    /// prose.
     #[test]
-    fn a_grid_renders_its_children_in_order() {
-        let grid = run(LensViz::Grid, None, &[], Vec::new());
+    fn a_document_renders_its_parts_in_order() {
+        let part = |id: &str, title: Option<&str>, lens: Option<&str>, markdown: Option<&str>| {
+            crate::extensions::LensPart {
+                id: id.into(),
+                title: title.map(Into::into),
+                lens: lens.map(Into::into),
+                markdown: markdown.map(Into::into),
+                size: None,
+                from: None,
+            }
+        };
+        let grid = with(run(LensViz::Document, None, &[], Vec::new()), |l| {
+            l.parts = vec![
+                part("open", None, Some("x/open"), None),
+                part("intro", Some("About"), None, Some("Read me.")),
+                part("note", Some("Notes"), Some("x/note"), None),
+            ]
+        });
         let mut a = run(LensViz::Number, None, &["n"], vec![vec![SqlCell::Int(5)]]);
         a.lens.title = "Open".into();
         let mut b = run(LensViz::Markdown, None, &["m"], vec![vec![t("**ok**")]]);
@@ -835,7 +867,7 @@ mod tests {
                     diffs: Vec::new()
                 }
             ),
-            "### Open\n\n5\n\n### Note\n\n**ok**"
+            "### Open\n\n5\n\n### About\n\nRead me.\n\n### Notes\n\n**ok**"
         );
     }
 

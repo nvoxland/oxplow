@@ -140,3 +140,46 @@ export function isSameCalendarDay(a: string, b: string): boolean {
     da.getDate() === db.getDate()
   );
 }
+
+/** `1.2 MB`, `34 KB`, `512 B` — a list's size column (whole KB); null when
+ *  the size is unknown. */
+export function formatSize(bytes: number | null): string | null {
+  if (bytes === null) return null;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** `YYYY-MM-DD HH:MM`, local — a list's last-active column; null when
+ *  absent or not a time. */
+export function formatWhen(at: string | null): string | null {
+  if (!at) return null;
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return null;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** How long ago `at` was: `just now`, `5 min ago`, `3 h ago`, `2 d ago`,
+ *  then the date. Falls back to the raw string if it isn't a time. */
+export function formatRelative(at: string, now: number = Date.now()): string {
+  const t = new Date(at).getTime();
+  if (Number.isNaN(t)) return at;
+  const s = Math.max(0, Math.round((now - t) / 1000));
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  if (s < 7 * 86400) return `${Math.floor(s / 86400)} d ago`;
+  return formatDateOnly(at);
+}
+
+/** A whole number with separators: `12,345`. */
+export function formatInteger(n: number): string {
+  return Math.round(n).toLocaleString();
+}
+
+/** A fraction 0–1 as a percentage: `42%`, `4.2%` under ten. */
+export function formatPercent(fraction: number): string {
+  const p = fraction * 100;
+  return `${Math.abs(p) < 10 && p !== 0 ? p.toFixed(1) : Math.round(p)}%`;
+}

@@ -77,24 +77,9 @@ export function ExternalUrlPage({ url, onOpenInBrowser }: ExternalUrlPageProps) 
   const safeUrl = verdict.url;
   const host = new URL(safeUrl).host;
   const chips = [{ label: opening ? "opening…" : host }];
-  const actions = onOpenInBrowser ? (
-    <button
-      type="button"
-      data-testid="page-external-url-open-in-browser"
-      onClick={() => onOpenInBrowser(safeUrl)}
-      style={{
-        padding: "4px 10px",
-        background: "var(--surface-tab-inactive)",
-        color: "var(--text-primary)",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: 6,
-        cursor: "pointer",
-        fontSize: "var(--text-xs)",
-      }}
-    >
-      Open in browser
-    </button>
-  ) : null;
+  const actions = onOpenInBrowser
+    ? [{ id: "open-in-browser", label: "Open in browser", run: () => onOpenInBrowser(safeUrl) }]
+    : undefined;
 
   return (
     <Page testId="page-external-url" title={host} kind="external-url" chips={chips} actions={actions}>

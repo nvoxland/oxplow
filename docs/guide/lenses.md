@@ -46,10 +46,10 @@ params:
 query: |
   SELECT ref, title, updated_at FROM v_work_item
   WHERE state = 'blocked' AND thread_id = :thread_id
-viz: table            # table | list | number | markdown | bar | line | treemap | grid | custom
+viz: table            # table | list | number | markdown | bar | line | treemap | document | dashboard | custom
 columns:
   - { key: title, label: Item, link: { kind: page, from: ref } }
-  - { key: updated_at, label: Updated }
+  - { key: updated_at, label: Updated, format: relative, width: 120 }
 empty: Nothing is blocked.
 ```
 
@@ -81,10 +81,10 @@ viz: treemap
 chart: { label: path, size: churn, group: zone }
 ```
 
-```yaml
-viz: grid             # other lenses, stacked
-children: [visits, tokens-by-day]
-```
+A column can also set `width` (in pixels) and `format`: `date`,
+`datetime`, `relative` (how long ago), `bytes`, `duration`
+(milliseconds), `integer` or `percent` (a 0-1 fraction). `format`
+changes only what you see. Agents read the raw values.
 
 `launcher: { category: Activity }` files a lens under that launcher
 heading; `hidden: true` leaves it out (for lenses only a slot shows).
@@ -134,6 +134,75 @@ declare them.
 
 A lens action never approves a source. The first run of a source that
 executes a program is still approved in Settings → Data.
+
+### Documents and dashboards
+
+A `document` lens is a wiki-style page of sections. A `dashboard` lens is
+a responsive grid of titled cards. Neither needs a `query`. Each part is
+another lens, or prose.
+
+```yaml
+# lenses/overview.yaml
+title: Project overview
+params:
+  - { name: stream_id, label: Stream }
+viz: document
+sections:
+  - id: intro
+    markdown: What needs attention in this stream.
+  - lens: waiting-on-me
+  - lens: review/recent-commits
+    title: Latest commits
+```
+
+```yaml
+# lenses/health.yaml
+title: Health
+params:
+  - { name: stream_id, label: Stream }
+viz: dashboard
+tiles:
+  - lens: waiting-on-me
+  - lens: token-trend
+    size: wide
+```
+
+- Each part has exactly one of `lens` (a slug in this extension, or
+  `<ext>/<slug>`) and `markdown`.
+- `id` defaults to the lens slug. A markdown part needs an `id`. Ids
+  are unique in the lens, so give one of two copies of a lens an `id`.
+- `title` defaults to the lens's title.
+- Each lens part gets the params it declares from the page's params.
+- A document folds sections with no rows into one line: "Nothing found:
+  ...".
+- A tile has a `size`: `small` (default), `wide`, `tall` or `full`. A
+  markdown tile defaults to `full`. A section takes no `size`.
+- A document has `sections`, not `tiles`. A dashboard has `tiles`, not
+  `sections`.
+- A lens your agent shows as an answer can't be a document or a
+  dashboard.
+
+Another extension can add to your document or dashboard. It mounts a lens
+in a slot named `<extension>/<slug>.sections` (document) or
+`<extension>/<slug>.tiles` (dashboard):
+
+```yaml
+# the "audit" extension's extension.yaml
+ui:
+  slots:
+    - slot: project/overview.sections
+      lens: stale-reviews
+      at: { after: intro }
+      title: Stale reviews
+```
+
+- `at` is `start`, `end` (default), `{ after: <part id> }` or
+  `{ before: <part id> }`. If the part id does not exist, you get a load
+  warning and the mount goes at the end.
+- The target's params are the slot's params. The mounted lens must
+  declare at least one of them (when the target has any).
+- The added part shows the name of the extension that added it.
+- `size` works only on a `.tiles` slot.
 
 ### Grouping and styling rows
 
@@ -204,8 +273,9 @@ page's id as a param, so it must declare it:
 | `vcs.history.sidebar` | Git history's side column | `stream_id` |
 | `diff.file.header` | a file diff, above the editor | `path`, `left_revision`, `right_revision`, `stream_id` |
 | `settings.section` | Settings, in a section named after the extension | none |
+| `new-session.sections` | The New Session page, as sections (part ids `start`, `earlier`) | `thread_id` |
 
-A lens declares the params its slot passes (a `settings.section` lens needs none). `change_id` points at
+A lens declares the params its slot passes (a `settings.section` lens needs none). `at` works only on a parts slot such as `new-session.sections`. A region slot refuses it. `change_id` points at
 the page's change in `v_change`, with its analysis in `v_change_file`,
 `v_change_function`, `v_change_import`, `v_change_co_change` and
 `v_change_duplicate`.

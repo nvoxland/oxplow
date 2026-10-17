@@ -96,16 +96,6 @@ export function metricTile(key: string): { kind: "query"; sql: string; display: 
   };
 }
 
-/** Grid footprint for a tile size — `full` spans every column (a heading band),
- *  `wide` two columns, `tall` two rows, anything else stays 1×1. Returned as a
- *  style fragment the grid item spreads. */
-export function tileSpanStyle(size: TileOptions["size"]): { gridColumn?: string; gridRow?: string } {
-  if (size === "full") return { gridColumn: "1 / -1" };
-  if (size === "wide") return { gridColumn: "span 2" };
-  if (size === "tall") return { gridRow: "span 2" };
-  return {};
-}
-
 /** The window a tile actually renders: the dashboard-level filter, with any
  *  per-tile override winning. A tile `range` of `all` explicitly means "no time
  *  window" (so a tile can opt out of a windowed dashboard). Pure — `now` is

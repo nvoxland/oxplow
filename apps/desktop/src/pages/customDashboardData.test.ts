@@ -8,7 +8,6 @@ import {
   metricTile,
   parseTileOptions,
   resolveTileWindow,
-  tileSpanStyle,
 } from "./customDashboardData.js";
 
 function sample(capturedAt: string, value: number): SeriesPoint {
@@ -90,22 +89,6 @@ describe("parseTileOptions — layout and window fields", () => {
   });
 
 
-});
-
-describe("tileSpanStyle", () => {
-  it("maps wide to a column span and tall to a row span", () => {
-    expect(tileSpanStyle("wide")).toEqual({ gridColumn: "span 2" });
-    expect(tileSpanStyle("tall")).toEqual({ gridRow: "span 2" });
-  });
-
-  it("maps full to the whole grid width — the heading-band size", () => {
-    expect(tileSpanStyle("full")).toEqual({ gridColumn: "1 / -1" });
-  });
-
-  it("gives a small / absent size no span at all", () => {
-    expect(tileSpanStyle("small")).toEqual({});
-    expect(tileSpanStyle(undefined)).toEqual({});
-  });
 });
 
 describe("resolveTileWindow", () => {

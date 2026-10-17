@@ -2290,7 +2290,7 @@
       "additionalProperties": false
     },
     "SlotMount": {
-      "description": "A slot mount: a lens into a core page.",
+      "description": "A slot mount: a lens into a core page, or among a document or\ndashboard lens's parts.",
       "type": "object",
       "properties": {
         "slot": {
@@ -2298,12 +2298,92 @@
         },
         "lens": {
           "type": "string"
+        },
+        "at": {
+          "description": "Where among the page's parts (a parts slot only): `start`, `end`,\n`{ after: <id> }`, `{ before: <id> }`. Default `end`.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SlotAt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "title": {
+          "description": "Its heading in the page; else the lens's title.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "size": {
+          "description": "A tile's size (a `.tiles` slot only).",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TileSize"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,
       "required": [
         "slot",
         "lens"
+      ]
+    },
+    "SlotAt": {
+      "description": "Where a mount goes among a page's parts: `start`, `end` (the default),\nor `{ after: <id> }` / `{ before: <id> }` beside one of them. An id the\npage no longer has means the end (and a load warning), so a page that\nchanges never loses what an extension adds.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SlotEdge"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "after": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "after"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "before": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "before"
+          ]
+        }
+      ]
+    },
+    "SlotEdge": {
+      "description": "The ends of a page's parts.",
+      "type": "string",
+      "enum": [
+        "start",
+        "end"
+      ]
+    },
+    "TileSize": {
+      "description": "How much of a dashboard a tile takes: one cell, two across, two down,\nor the whole row.",
+      "type": "string",
+      "enum": [
+        "small",
+        "wide",
+        "tall",
+        "full"
       ]
     },
     "DecoratorFile": {

@@ -336,7 +336,7 @@ export function MetricDetailPage({
       testId="page-metric-detail"
       title={def?.title ?? entry?.title ?? "Metric"}
       titleInBody
-      layout="details"
+      width="reading"
       rightRailTitle="Details"
       rightRail={
         def ? (

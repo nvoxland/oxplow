@@ -5,7 +5,7 @@
  * "Choosing another conversation").
  */
 import type { ListedConversation } from "../tauri-bridge/generated/bindings.js";
-import { formatSize, formatWhen } from "./conversationFormat.js";
+import { formatSize, formatWhen } from "./format.js";
 
 export type PickerMode = "resume" | "fork";
 

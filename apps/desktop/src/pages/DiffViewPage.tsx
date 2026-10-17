@@ -671,7 +671,7 @@ function ResolvedEndpointDiff({
       titleInBody
       backlinks={backlinks}
       outbound={outbound}
-      layout="details"
+      width="reading"
       rightRail={rail}
     >
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>

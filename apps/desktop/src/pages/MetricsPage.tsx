@@ -289,7 +289,7 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
     <Page
       testId="page-metrics-recorded"
       title="Metrics"
-      layout="details"
+      width="reading"
       rightRailTitle="Filters"
       rightRail={
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>

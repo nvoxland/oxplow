@@ -1,5 +1,8 @@
 title: Agent Interface
 description: How agents use oxplow's interface over the last 30 days — which tools they call, which commands they run and how often those are refused or fail, and which hints fire.
-viz: grid
-children: [interface-tool-calls, interface-commands, interface-hints]
+viz: dashboard
+tiles:
+  - { lens: interface-tool-calls }
+  - { lens: interface-commands }
+  - { lens: interface-hints }
 launcher: { category: Activity }

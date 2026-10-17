@@ -211,13 +211,7 @@ export function NewStreamPage({ vcsEnabled, defaultTitle, onClose, onCreated }: 
     <Page
       testId="page-new-stream"
       title="New Stream"
-      actions={
-        onClose ? (
-          <button type="button" onClick={onClose} style={buttonStyle}>
-            Close
-          </button>
-        ) : null
-      }
+      actions={onClose ? [{ id: "close", label: "Close", run: onClose }] : undefined}
     >
       <form
         onSubmit={(e) => {

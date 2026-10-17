@@ -2,9 +2,16 @@ import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { AskMenu, type AskTarget } from "../components/Prompts/AskMenu.js";
 import { RefCommandsMenu } from "../components/RefCommandsMenu.js";
+import { PinToDashboard, type PinnedTile } from "../components/Dashboard/PinToDashboard.js";
+import { ActionButtons } from "../kit/ActionButtons.js";
+import type { PageAction } from "../kit/actions.js";
+import type { TabRef } from "./tabState.js";
 import type { BookmarkScope } from "./bookmarks.js";
 
 export interface PageNavBarProps {
+  /** Back and forward through the tab's history. A pinned page has none
+   *  (it is always itself), so its bar leaves them out. Default true. */
+  history?: boolean;
   canBack: boolean;
   canForward: boolean;
   onBack(): void;
@@ -66,8 +73,10 @@ export interface PageNavBarProps {
    *  + orphaned list) for comment-bearing pages. Rendered before the
    *  backlinks dropdown. */
   comments?: ReactNode;
-  /** Optional kebab actions slot at the right edge. */
-  actions?: ReactNode;
+  /** The page's actions, at the right edge; drawn here, never by the page. */
+  actions?: readonly PageAction[];
+  /** What the page would add to a dashboard: a Pin to Dashboard menu. */
+  pin?: { tile: PinnedTile; onOpenPage(ref: TabRef): void; disabledReason?: string | null };
   /** The page's canonical ref (and stream): the Ask menu — Ask About
    *  This and the prompts about its kind (P6.D1/D2). Omitted, no Ask. */
   ask?: AskTarget;
@@ -80,6 +89,7 @@ export interface PageNavBarProps {
  * real navigation/bookmark/backlinks state.
  */
 export function PageNavBar({
+  history = true,
   canBack,
   canForward,
   onBack,
@@ -92,6 +102,7 @@ export function PageNavBar({
   snapshots,
   comments,
   actions,
+  pin,
   ask,
 }: PageNavBarProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
@@ -140,26 +151,30 @@ export function PageNavBar({
         position: "relative",
       }}
     >
-      <button
-        type="button"
-        data-testid="page-nav-back"
-        title="Back"
-        disabled={!canBack}
-        onClick={onBack}
-        style={navButtonStyle(canBack)}
-      >
-        ←
-      </button>
-      <button
-        type="button"
-        data-testid="page-nav-forward"
-        title="Forward"
-        disabled={!canForward}
-        onClick={onForward}
-        style={navButtonStyle(canForward)}
-      >
-        →
-      </button>
+      {history ? (
+        <>
+          <button
+            type="button"
+            data-testid="page-nav-back"
+            title="Back"
+            disabled={!canBack}
+            onClick={onBack}
+            style={navButtonStyle(canBack)}
+          >
+            ←
+          </button>
+          <button
+            type="button"
+            data-testid="page-nav-forward"
+            title="Forward"
+            disabled={!canForward}
+            onClick={onForward}
+            style={navButtonStyle(canForward)}
+          >
+            →
+          </button>
+        </>
+      ) : null}
 
       {siblings ? (
         <div
@@ -542,9 +557,8 @@ export function PageNavBar({
         </div>
       ) : null}
 
-      {actions ? (
-        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>{actions}</div>
-      ) : null}
+      {pin ? <PinToDashboard tile={pin.tile} testId="page-pin" onOpenPage={pin.onOpenPage} disabledReason={pin.disabledReason ?? null} /> : null}
+      {actions && actions.length > 0 ? <ActionButtons actions={actions} /> : null}
     </div>
   );
 }

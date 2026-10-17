@@ -53,6 +53,8 @@ import { safeColor } from "../components/decorators.js";
 import { useDecorations } from "../components/useDecorations.js";
 import { RefBadge } from "../components/RefBadge.js";
 import { CustomComponentViz } from "./CustomComponentViz.js";
+import { DashboardViz, DocumentViz } from "./PartsViz.js";
+import { DataTable, type DataColumn, type RowProps } from "../kit/DataTable.js";
 import { personCommands } from "../personCommands.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 import { showToast } from "../components/toastStore.js";
@@ -222,10 +224,14 @@ function LensBody(props: LensResultViewProps & { actions?: LensActionsState }) {
       </p>
     );
   }
-  // A grid composes child lenses and has no rows of its own; it's its own
-  // component so the row views' hooks always run in the same order.
-  if (run.lens.viz === "grid") {
-    return <GridViz childIds={run.lens.children} params={run.params} streamId={streamId} onOpenPage={onOpenPage} />;
+  // A document or dashboard composes other lenses and has no rows of its
+  // own; each is its own component so the row views' hooks always run in
+  // the same order.
+  if (run.lens.viz === "document") {
+    return <DocumentViz parts={run.lens.parts} params={run.params} streamId={streamId} onOpenPage={onOpenPage} />;
+  }
+  if (run.lens.viz === "dashboard") {
+    return <DashboardViz parts={run.lens.parts} params={run.params} streamId={streamId} onOpenPage={onOpenPage} />;
   }
   if (run.lens.viz === "form") return <FormViz run={run} streamId={streamId} />;
   return <RowsBody {...props} />;
@@ -263,7 +269,7 @@ function RowsBody({
   const cols = displayColumns(lens, result.columns);
   const cell: CellRenderer = (row, c) => {
     const raw = row[c.index] ?? null;
-    const formatted = formatCell(raw, c.unitIndex === null ? undefined : (row[c.unitIndex] ?? null));
+    const formatted = formatCell(raw, c.unitIndex === null ? undefined : (row[c.unitIndex] ?? null), c.format);
     // A timestamp keeps its full local time a hover away.
     const text = isTimestamp(raw) ? <span title={formatFullDateTime(raw)}>{formatted}</span> : formatted;
     // Its icon and tone, named by other columns of the row.
@@ -674,7 +680,7 @@ function treeLabelColumn(lens: LensRun["lens"], cols: DisplayColumn[], resultCol
   const declared = cols.find((c) => c.key === key);
   if (declared) return declared;
   const index = resultColumns.indexOf(key);
-  return index === -1 ? null : { key, label: key, index, link: null, unitIndex: null, iconIndex: null, toneIndex: null };
+  return index === -1 ? null : { key, label: key, index, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null };
 }
 
 interface TreeVizProps {
@@ -955,63 +961,6 @@ function TreemapViz({ run, onOpenPage }: { run: LensRun; onOpenPage?(ref: TabRef
   );
 }
 
-/** `grid`: each child lens, run with the params it declares from ours. */
-function GridViz({
-  childIds,
-  params,
-  streamId,
-  onOpenPage,
-}: {
-  childIds: string[];
-  params: Record<string, SqlCell>;
-  streamId: string | null;
-  onOpenPage?(ref: TabRef): void;
-}) {
-  const [children, setChildren] = useState<{ id: string; run: LensRun | null; error: string | null }[]>([]);
-  const paramsKey = JSON.stringify(params);
-  useEffect(() => {
-    let live = true;
-    void Promise.all(
-      childIds.map(async (id) => {
-        try {
-          const child = await getLens(id);
-          return { id, run: await runLens(id, childParams(child, params), streamId), error: null };
-        } catch (e) {
-          return { id, run: null, error: e instanceof Error ? e.message : String(e) };
-        }
-      }),
-    ).then((next) => {
-      if (live) setChildren(next);
-    });
-    return () => {
-      live = false;
-    };
-    // paramsKey stands in for `params` (a fresh object each render).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [childIds.join("|"), paramsKey, streamId]);
-  // Children with nothing to show fold into one closing line (tsk1036).
-  const { shown, empty } = foldEmpty(children);
-  return (
-    <div data-testid="lens-grid">
-      {shown.map(({ id, run, error }) => (
-        <section key={id} data-testid={`lens-grid-child-${id}`} style={{ marginBottom: 20 }}>
-          <h3 style={{ fontSize: "var(--text-sm)", margin: "0 0 6px" }}>{run?.lens.title ?? id}</h3>
-          {error ? (
-            <div style={{ fontSize: "var(--text-xs)", color: "var(--severity-critical)" }}>{error}</div>
-          ) : run ? (
-            <LensResultView run={run} onOpenPage={onOpenPage} streamId={streamId} maxRows={25} toolbar={false} />
-          ) : null}
-        </section>
-      ))}
-      {empty.length > 0 ? (
-        <p data-testid="lens-grid-nothing-found" style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", margin: 0 }}>
-          Nothing found: {empty.map(({ id, run }) => run?.lens.title ?? id).join(", ")}.
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
 function NumberViz({ value, compact }: { value: SqlCell; compact: boolean }) {
   return (
     <div
@@ -1093,45 +1042,39 @@ function ListViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
 }
 
 function TableViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
+  // Each row with its index in the result: its test id.
+  type Row = [SqlCell[], number];
+  const columns: DataColumn<Row>[] = cols.map((c) => ({
+    key: c.key,
+    label: c.label,
+    width: c.width ?? undefined,
+    render: ([row]) => cell(row, c),
+  }));
+  const parts = sections(rows, view);
   return (
-    <>
-      <table data-testid="lens-table" style={tableStyle}>
-        <thead>
-          <tr>
-            {cols.map((c) => (
-              <th key={c.key} style={thStyle}>
-                {c.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sections(rows, view).map(({ group, rows: inGroup }) => (
-            <Fragment key={group?.key ?? ""}>
-              {group && view ? (
-                <tr>
-                  <td colSpan={Math.max(cols.length, 1)} style={{ padding: 0 }}>
-                    {view.heading(group)}
-                  </td>
-                </tr>
-              ) : null}
-              {inGroup.map(([row, i]) => {
-                const look = view?.rowLook(row) ?? noLook;
-                return (
-                  <tr key={i} data-testid={`lens-row-${i}`} style={look.emphasized ? emphasisStyle : undefined} {...rowMenu(row)} {...look.props}>
-                    {cols.map((c, j) => (
-                      <td key={c.key} style={j === 0 && look.indent ? { ...tdStyle, paddingLeft: 8 + look.indent } : tdStyle}>
-                        {cell(row, c)}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })}
-            </Fragment>
-          ))}
-        </tbody>
-      </table>
-    </>
+    <DataTable<Row>
+      testId="lens-table"
+      columns={columns}
+      groups={parts.map(({ group, rows: inGroup }) => ({
+        key: group?.key ?? "",
+        heading: group && view ? view.heading(group) : null,
+        rows: inGroup,
+      }))}
+      rowKey={([, i]) => i}
+      rowProps={([row, i]) => {
+        const look = view?.rowLook(row) ?? noLook;
+        return {
+          "data-testid": `lens-row-${i}`,
+          className: look.emphasized ? "ox-emphasis" : undefined,
+          ...rowMenu(row),
+          ...(look.props as RowProps),
+        };
+      }}
+      cellStyle={([row], _c, j) => {
+        const indent = j === 0 ? (view?.rowLook(row) ?? noLook).indent : 0;
+        return indent ? { paddingLeft: `calc(var(--space-2) + ${indent}px)` } : undefined;
+      }}
+    />
   );
 }
 
@@ -1145,15 +1088,6 @@ const disclosureStyle: CSSProperties = {
   cursor: "pointer",
   font: "inherit",
 };
-const tableStyle: CSSProperties = { width: "100%", borderCollapse: "collapse", fontSize: "var(--text-sm)" };
-const thStyle: CSSProperties = {
-  textAlign: "left",
-  padding: "6px 8px",
-  borderBottom: "1px solid var(--border-subtle)",
-  color: "var(--text-secondary)",
-  fontWeight: 600,
-};
-const tdStyle: CSSProperties = { padding: "6px 8px", borderBottom: "1px solid var(--border-subtle)", verticalAlign: "top" };
 const listRowStyle: CSSProperties = { padding: "8px 0", borderBottom: "1px solid var(--border-subtle)" };
 /** An `emphasis` row: the soft accent wash an active row gets. */
 const emphasisStyle: CSSProperties = { background: "var(--accent-soft-bg)", fontWeight: 500 };

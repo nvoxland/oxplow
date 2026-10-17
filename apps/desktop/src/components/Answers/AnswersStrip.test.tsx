@@ -31,7 +31,7 @@ const lens = (title: string): Lens => ({
   steps: null,
   hunks: null,
   form: null,
-  children: [],
+  parts: [],
   launcherCategory: null,
   hidden: false,
   actions: [],

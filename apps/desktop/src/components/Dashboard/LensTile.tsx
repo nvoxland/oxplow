@@ -8,6 +8,8 @@ import { lensRef } from "../../tabs/pageRefs.js";
 import { RouteLink } from "../../tabs/RouteLink.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import { useContextMenu } from "../useRowContextMenu.js";
+import { Loading } from "../../kit/Loading.js";
+import { Tile } from "../../kit/Tiles.js";
 
 /** Rows a lens tile shows before "open the lens for the rest". */
 const TILE_MAX_ROWS = 8;
@@ -71,39 +73,27 @@ export function LensTile({
   const title = opts.title ?? run?.lens.title ?? lensId;
 
   return (
-    <section
+    <Tile
       data-testid={`lens-tile-${item.id}`}
       onContextMenu={(e) => ctxMenu.open(e, menuItems)}
-      style={{
-        background: "var(--surface-card)",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: 6,
-        padding: 12,
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-        minWidth: 0,
-        height: "100%",
-        overflow: "hidden",
-      }}
+      title={
+        <RouteLink
+          to={lensRef(lensId)}
+          onNavigate={() => open(lensRef(lensId))}
+          style={{ background: "none", border: "none", padding: 0, textAlign: "left", font: "inherit", cursor: "pointer", color: "inherit" }}
+        >
+          {title}
+        </RouteLink>
+      }
     >
-      <RouteLink
-        to={lensRef(lensId)}
-        onNavigate={() => open(lensRef(lensId))}
-        style={{ background: "none", border: "none", padding: 0, textAlign: "left", font: "inherit", fontWeight: 600, cursor: "pointer", color: "var(--text-primary)" }}
-      >
-        {title}
-      </RouteLink>
       {error ? (
-        <div style={{ fontSize: "var(--text-xs)", color: "var(--severity-critical)" }}>{error}</div>
+        <p className="ox-error">{error}</p>
       ) : run ? (
-        <div style={{ overflow: "auto", minHeight: 0 }}>
-          <LensResultView run={run} onOpenPage={open} maxRows={TILE_MAX_ROWS} />
-        </div>
+        <LensResultView run={run} onOpenPage={open} maxRows={TILE_MAX_ROWS} />
       ) : (
-        <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Loading…</div>
+        <Loading what="the lens" />
       )}
       {ctxMenu.menu}
-    </section>
+    </Tile>
   );
 }

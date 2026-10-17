@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
-import { Page, pageH1Style } from "../tabs/Page.js";
+import { Page } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Stream } from "../tauri-bridge/index.js";
@@ -15,7 +15,7 @@ import { paramKind, paramOptions, paramOptionsSql, type ParamKind, type ParamOpt
 import { recordOpError } from "../components/opErrorsStore.js";
 import { useRequestGuard } from "../request-guard.js";
 import { LensResultView } from "../lens/LensResultView.js";
-import { PinToDashboard } from "../components/Dashboard/PinToDashboard.js";
+import type { PageAction } from "../kit/actions.js";
 
 export interface LensPageProps {
   /** `<extension>/<slug>`. */
@@ -89,26 +89,15 @@ export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOp
     insertIntoAgent(formatContextMention({ kind: "lens", lensId, params }));
   };
 
-  const actions = (
-    <div style={{ display: "flex", gap: 8 }}>
-      <button type="button" data-testid="lens-refresh" onClick={() => void refresh()}>
-        Refresh
-      </button>
-      <PinToDashboard
-        tile={{ kind: "lens", lensId, optionsJson: JSON.stringify({ size: "wide" }) }}
-        testId="lens-pin"
-        onOpenPage={onOpenPage}
-      />
-      <button
-        type="button"
-        data-testid="lens-improve-with-agent"
-        title="Add this lens to the agent's context so you can ask it to change the lens"
-        onClick={improveWithAgent}
-      >
-        Improve with Agent
-      </button>
-    </div>
-  );
+  const actions: PageAction[] = [
+    { id: "lens-refresh", label: "Refresh", run: () => void refresh() },
+    {
+      id: "lens-improve-with-agent",
+      label: "Improve with Agent",
+      title: "Add this lens to the agent's context so you can ask it to change the lens",
+      run: improveWithAgent,
+    },
+  ];
 
   const rightRail =
     lens && lens.params.length > 0 ? (
@@ -124,15 +113,16 @@ export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOp
       testId="page-lens"
       kind="lens"
       titleInBody
-      layout="details"
+      // A dashboard wants every pixel; everything else reads as a document.
+      width={lens?.viz === "dashboard" ? "full" : "reading"}
       actions={actions}
+      pin={{ tile: { kind: "lens", lensId, optionsJson: JSON.stringify({ size: "wide" }) }, onOpenPage }}
       rightRail={rightRail}
       rightRailTitle="Parameters"
     >
-      <h1 style={pageH1Style}>{title}</h1>
-      {lens?.description ? (
-        <p style={{ color: "var(--text-secondary)", marginTop: 0 }}>{lens.description}</p>
-      ) : null}
+      <div style={lens?.viz === "dashboard" ? { padding: "var(--space-5)" } : undefined}>
+      <h1 className="ox-title">{title}</h1>
+      {lens?.description ? <p className="ox-intro">{lens.description}</p> : null}
       {error ? (
         <div data-testid="lens-error" style={errorStyle}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>This lens couldn't run.</div>
@@ -149,6 +139,7 @@ export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOp
           {lens.path}
         </p>
       ) : null}
+      </div>
     </Page>
   );
 }

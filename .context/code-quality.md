@@ -26,7 +26,7 @@ for the user to install.
 > `list_code_quality_findings`, `read_endpoint_files_content`) are gone.
 > `crates/oxplow-app/src/change_analysis.rs` computes and stores each change
 > behind `v_change*` ([semantic-layer.md](./semantic-layer.md) → "Change
-> analysis"), and the oxplow-bundled `change-review` lens grid shows it in
+> analysis"), and the oxplow-bundled `change-review` document lens shows it in
 > the `vcs.commit.details`, `vcs.status.details` and `effort.review.details` slots.
 
 ## Per-function metrics (change analysis, not a persisted scan)
@@ -387,7 +387,7 @@ quieter UI; a false-positive is a wrong "wrong layer" callout.
 
 ### Where it shows
 
-The oxplow-bundled `change-review` grid (commit, uncommitted and
+The oxplow-bundled `change-review` document (commit, uncommitted and
 `effort.review.details` slots): summary, look-here-first, a churn treemap grouped
 by zone, function changes, test changes, co-change surprises,
 duplication (with compare links) and new cross-zone imports. Zone badges

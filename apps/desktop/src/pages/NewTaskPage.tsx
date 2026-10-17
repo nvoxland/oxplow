@@ -88,13 +88,7 @@ export function NewTaskPage({ defaults = {}, epics = [], onClose, onSubmit }: Ne
       testId="page-new-tasks"
       title="New item"
       kind="new-task"
-      actions={
-        onClose ? (
-          <button type="button" onClick={onClose} style={buttonStyle}>
-            Close
-          </button>
-        ) : null
-      }
+      actions={onClose ? [{ id: "close", label: "Close", run: onClose }] : undefined}
     >
       <form
         onSubmit={(event) => {

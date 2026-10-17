@@ -628,7 +628,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     focusable and opens it from a right-click or the Menu key / Shift+F10. A command
     that asks shows `CommandConfirm` from `LensResultView` itself, above
     the body, so it asks wherever the row is (an answer in the strip, a
-    grid child, a dashboard tile), not only where the toolbar is shown.
+    document's section, a dashboard tile), not only where the toolbar is shown.
     - `input` is the command's input. A string that is exactly
       `{{param.<name>}}` or `{{row.<column>}}` becomes that value, typed
       (a number stays a number); a string containing them has them spliced
@@ -654,7 +654,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     - **Every lens has Copy** (its text rendering, the `lens_text` RPC)
       **and Add to Agent Context** (`[oxplow lens <id> params…]` into the
       agent's input, never sent) — kit affordances, not declared. A
-      compact strip and a grid's children (`toolbar={false}`) show no
+      compact strip and a composite's parts (`toolbar={false}`) show no
       toolbar.
     - Running a collector is the command **`oxplow.collector.sync { collector }`**
       (External, `Invokers::ALL`; `collector_runner::CollectorRunner::sync`,
@@ -671,8 +671,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - **Viz** (`LensResultView.tsx`): `table`, `list`, `number`, `markdown`,
     plus `bar` (`DailyBarChart`), `line` (`components/charts/TrendChart`,
     one chart per `chart.series`), `treemap` (two-level
-    `components/charts/squarify`) and `grid` (children run with the
-    params they declare), and the structure components (P6.A2): `tree`
+    `components/charts/squarify`), the composites `document` and
+    `dashboard` (parts run with the params they declare), and the structure components (P6.A2): `tree`
     (collapsible nesting by `tree.parent`; orphans are roots, a cycle is
     cut), `timeline` (oldest first, linked through `timeline.ref`),
     `detail` (the first row as label/value pairs), `steps` (a checklist
@@ -687,7 +687,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `lens_actions::submit_form`) runs the command as the lens acting for
     the person, the defaults under what they entered; a command that asks
     shows `CommandConfirm`. A form's text rendering names its command
-    (an agent runs the command itself). Only a form and a grid (which renders its children, never rows of its own) omit `query`. The loader drops a
+    (an agent runs the command itself). Only a form and a composite (`document` / `dashboard`, which renders its parts, never rows of its own) omit `query`. The loader drops a
     lens missing the column roles its viz needs, naming the block
     (`chart`, `tree`, `timeline`, `steps`, `hunks`), and
     `oxplow_validate_extension` checks every named column exists in the result
@@ -803,7 +803,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       answer stores and what `oxplow.lens.keep` writes (`Lens::from_spec`,
       `Lens::spec`). `extensions::save_lens(root, ext, slug, &spec,
       &LensOrigin)` refuses a spec with a `spec_problem` (no title, a
-      `grid` or `custom`, or a `form`: a form's submit runs its command
+      composite or a `custom` lens, or a `form`: a form's submit runs its command
       as the person, and an answer an agent chose never does — so no
       answer, and no kept spec, is a form), writes the YAML
       pruned of nulls and empties, and — when the file doesn't then load —
@@ -931,7 +931,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   ignores it; `find_lens` and `oxplow_run_lens` say it's disabled. Settings →
   Extensions toggles it through the UI-only `set_extension_enabled`.
 - **A page of sections leads with what matters** (tsk1036). Slot sections
-  (`LensSlots`) and a `grid`'s children with no rows (no error, not a grid)
+  (`LensSlots`) and a `document`'s sections with no rows (no error, not a composite)
   fold into one closing line, "Nothing found: Duplication, Co-change
   Surprises, …", each a link to its lens (`lensModel::foldEmpty`). A
   section's Copy / Add to Agent Context show on hover or focus (the
@@ -1189,7 +1189,7 @@ declare `engine` (satisfied by this oxplow) and its own `version`.
   warning;
 - lifecycle: sharing rules above; `engine` is `>=MAJOR.MINOR[.PATCH]`;
 - cross-references: a `ui.slots` lens exists (and declares a param
-  the slot binds); a grid's `children` exist — in this extension or,
+  the slot binds); a composite's part lenses exist — in this extension or,
   once everything is loaded, in another; a `launcher` target is a
   canonical ref. A metric's `sourceMeasure` or a fact collector's `facts` that
   is neither declared in the extension nor an `oxplow.*` built-in is a
@@ -1560,7 +1560,7 @@ taken by the SQL `v_*` views; not "data app".)
 
 A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
 `description`, `query`, `viz`, `params`, `columns`, `empty`, `chart`,
-`children`, `launcher`, `hidden`, `actions` and `alert`.
+`sections`, `tiles`, `launcher`, `hidden`, `actions` and `alert`.
 
 - `params`: `name`, `label`, `default`, `options`. Untyped: a value is
   bound as-is.
@@ -1594,7 +1594,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
 - `query`: SQL over `v_*` and the extension's entities, with `:param`
   binding.
 - `viz`: `table`, `list`, `number`, `markdown`, `bar`, `line`, `treemap`,
-  `grid` (child lenses, `children`), `tree`, `timeline`, `detail`,
+  `document`, `dashboard` (both below), `tree`, `timeline`, `detail`,
   `steps`, `hunks`, `form` (`form: { command, defaults?, fixed?,
   fields? }`; no `query` needed: one, if given, prefills from its first
   row; `fixed` fields show their `defaults` value and can't be changed —
@@ -1682,7 +1682,29 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
 - `alert`: a row-count or threshold condition that shows a panel badge
   (nudging the agent is what advisories are for).
 
-> **Not built.** From the original design: a column `format`; a
+- **Composites: `document` and `dashboard`.** A lens of other lenses
+  (the Document and Dashboard archetypes, [pages-and-tabs.md](./pages-and-tabs.md)
+  "Page archetypes and the kit"). `document` takes `sections:`, a
+  `dashboard` `tiles:`, each a list of parts `{ id?, title?, lens? |
+  markdown?, size? }` (`PartFile` → `LensPart`, `parse_parts`): exactly one
+  of `lens` (a slug here, or `<ext>/<slug>`) and `markdown`; `id` defaults
+  to the lens's slug and a markdown part needs one; ids are unique; `size`
+  (`small`, `wide`, `tall`, `full`) only on a tile. A lens part runs with
+  the params it declares from the composite's (`childParams`). Neither
+  needs a `query`. A part lens of its own extension must exist at load
+  (`parts_problem`); another extension's resolves with the catalog, and a
+  missing one drops the composite. `lens_text` renders a composite as a
+  `###` section per part. A standalone spec can't be either
+  (`spec_problem`). The UI draws a document as kit `Section`s (empty ones
+  fold into one "Nothing found" line) and a dashboard as a kit `TileGrid`
+  (`lens/PartsViz.tsx`), running every part together and re-running all of
+  them on any part's reads (`useLensRuns`).
+- **Columns** also take `width` (pixels: the table lays out fixed, so
+  columns line up) and `format` (`date`, `datetime`, `relative`, `bytes`,
+  `duration` in ms, `integer`, `percent` of a 0–1 fraction), read by
+  `formatCell` in the UI only; an agent reads the raw value.
+
+> **Not built.** From the original design: a
 > `decision` link kind; `followup-comment` and `open-diff` actions.
 > (`hunks` and `steps` are built, above; `copy-review-prompt` became
 > `copy` on the Review Prompt lens.)
@@ -1696,10 +1718,37 @@ never types into the agent.
 
 ## Slots
 
-Slots are the **only** way an extension reaches a core page. Core pages
-declare them (`SLOTS` in `extensions.rs`) and render whatever is mounted,
-in declaration order (there is no `order` field). With nothing mounted,
-the page is plain. **Slot names are one dotted namespace,
+Slots are the **only** way an extension reaches a page. Core pages
+declare them (`SLOTS` in `extensions.rs`, a `SlotSpec` each: name, params,
+and `parts`) and render whatever is mounted. With nothing mounted, the
+page is plain.
+
+**Two kinds of slot.** A *region* (`SlotParts::Region`) is one place on
+the page; its mounts show in declaration order. A *parts slot* is a page's
+own list of parts — a Document's sections (`SlotParts::Sections`), a
+Dashboard's tiles (`SlotParts::Tiles`) — with the parts' **stable ids**
+listed in `SLOTS`. A mount there says where it goes: `at: start`, `end`
+(the default), `{ after: <id> }` or `{ before: <id> }` (`SlotAt`, untagged
+because serde_yaml reads tagged enums only as YAML tags); it may also give
+a `title` and, on a tile, a `size`. The id is the contract, so a mount
+survives the page's code changing: an `at` beside an id the page doesn't
+list is a load **warning**, and the mount goes at the end. `at` on a
+region and `size` off a `.tiles` slot are errors (`mount_problem`). Core
+pages place mounts among their own parts in the UI (`kit/placeParts.ts`,
+through `DocumentLayout`).
+
+**Every composite lens is a parts slot too:** `<extension>/<slug>.sections`
+of a `document`, `.tiles` of a `dashboard`, with its parts' ids and its
+params as the slot's. So one extension adds to another's page the way it
+adds to a core one. These resolve when the catalog is final
+(`place_lens_mounts`, the last step of `resolve_catalog`): a mount naming
+no loaded composite, or the wrong kind, is an error of the mounting
+extension and goes; a good one becomes a `LensPart` of the target lens,
+placed by `at` (`place_parts`, the same rule as `placeParts.ts`) with
+`from` naming the mounting extension. The target's page, its text and
+`get_lens` all show it, and the UI marks it with that extension's name. A
+mount's contribution id is `<slot>-<n>` with a lens's `/` written `.`
+(`LensSlot::local_id`). **Slot names are one dotted namespace,
 `<capability>.<page>.<region>`** (P6b.C1): a mount naming anything else
 is an unknown slot (listing the known ones), and a top-level
 `slot_mounts:` / `decorators:` / `replacements:` is an unknown field —
@@ -1717,6 +1766,7 @@ they live under `ui:`.
 | `vcs.history.sidebar` | GitHistoryPage, a side column shown only when something mounts there (`useSlotMounted`) | `stream_id` |
 | `diff.file.header` | a file diff (`DiffPane`), a strip under its header (P9.A2; `DiffFileHeaderSlot`) | `path`, `left_revision`, `right_revision` (each a revision in its wire form: `working`, `snap:<id>`, `git:<sha>`), `stream_id` |
 | `settings.section` | Settings: a section per mounting extension, titled with its name, before AI (tsk330; `SettingsSlotSections`, `slotRuns(…, extension)`) | none |
+| `new-session.sections` (parts: `start`, `earlier`) | the New Session page's sections (`DocumentLayout`) | `thread_id` |
 
 The launcher isn't a slot: a lens lists itself with `launcher.category`.
 
@@ -1923,7 +1973,7 @@ each version carries its lenses **already run once**
 (`extensions::run_lenses` → `LensRuns`: default params, no viewer
 context) — for the candidate, the very runs `check_extension` checked,
 so a review runs each lens once — and each is rendered from its run
-(`lens_text::render`, a grid's children rendering empty) against **its
+(`lens_text::render`, a composite's parts rendering empty) against **its
 own version's models** (each side's overlay — so a lens over a
 model the candidate changes renders against the changed SQL). A lens
 that fails the same way on both sides is `unchanged`. Each
@@ -2437,7 +2487,7 @@ its scope trace.
   actor, causing event, outcome, error, wall and CPU time, model calls — the
   small inspector, with no log or secret to read.
 - **How agents use oxplow's interface.** The bundled `agent-interface` page
-  (launcher, Activity) is a grid of three lenses over the last 30 days:
+  (launcher, Activity) is a dashboard of three lenses over the last 30 days:
   `interface-tool-calls` (oxplow's MCP tools by tool and harness, from
   `v_tool_call` joined to `v_agent_session`; a call whose session oxplow has
   no record of reads harness `unknown`), `interface-commands` (agents' runs by
@@ -4023,12 +4073,12 @@ tool: open_work              # offered as <namespace>_open_work
   number or markdown lens is its first cell; a bar chart is its labels
   and values with the total; a line chart pivots to one column per
   series with each series' total; a treemap lists labels by size,
-  largest first; a grid renders its children in order under `###`
+  largest first; a composite renders its parts in order under `###`
   titles; a tree is an indented list; a timeline is `at — label (ref)`
   lines oldest first; a detail is `**label**: value` lines; steps are a
   numbered `[x]`/`[>]`/`[!]`/`[ ]` checklist; hunks are each file's
   unified diff between its two revisions (up to 20 files, 8 KB each).
-  What a component needs beyond its rows — a grid's child runs, the
+  What a component needs beyond its rows — a composite's part runs, the
   hunks' diffs — is `lens_text::resolve`d first (`text_of`). Tables
   stop at 50 rows and say how many more; an empty result says the
   lens's `empty` text. It's what `oxplow_run_lens`, `oxplow_get_open_page` and `copy`
@@ -4154,15 +4204,15 @@ What moves out of core, and what it becomes:
 
 | Today (core) | Becomes |
 |---|---|
-| Planning / Review / Quality dashboards | `grid` lenses (**done**: `planning`, `review`, `quality`) |
+| Planning / Review / Quality dashboards | `document` lenses (**done**: `planning`, `review`, `quality`) |
 | Code-quality runner, dup scan, FindingPage, DuplicateBlockPage | **done:** the `findings` / `duplicate-blocks` lenses; the dup scan runs in core's change analysis; `DuplicateBlockPage` stays core as the compare page |
-| Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | **done:** the `change-review` grid in the `effort.review.details` / `vcs.commit.details` / `vcs.status.details` slots; core keeps a changed-files tree (`ChangedFilesTree`, `useChangedFiles`) |
+| Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | **done:** the `change-review` document in the `effort.review.details` / `vcs.commit.details` / `vcs.status.details` slots; core keeps a changed-files tree (`ChangedFilesTree`, `useChangedFiles`) |
 | Fact collectors (`oxplow/extensions/project/collectors/*.star`, idiom `.star`; gauges until P7.B3) | extensions can declare fact collectors (tsk311); done: the code metrics are oxplow-foundation's (the opt-in ones say `default: off`) |
 | Metric-threshold nudges | **done:** the `threshold-crossed` advisory (with `metric-deltas`) |
-| Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | **done:** the `usage` grid; `task-tokens` (`work_item.detail.body` slot) and `thread-tokens` (`thread.plan.header` slot) |
+| Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | **done:** the `usage` dashboard; `task-tokens` (`work_item.detail.body` slot) and `thread-tokens` (`thread.plan.header` slot) |
 | Git History's commit graph | **done:** the `history-graph` component, replacing core's plain `CommitList` (`vcs.history.graph`) |
 | Local history dashboard | stays core (snapshots are substrate); the `recent-snapshots` lens in `review` covers the at-a-glance view |
-| Effort metrics block, effort coverage page, tests-run and nudge blocks | **done:** `effort.review.details` slot lenses `effort-tests` (grid: coverage, untested files, test runs, failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges` |
+| Effort metrics block, effort coverage page, tests-run and nudge blocks | **done:** `effort.review.details` slot lenses `effort-tests` (a document: coverage, untested files, test runs, failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges` |
 | Rail panels: Comments, Work, Uncommitted, Go To | **done:** Go To (`go-to`, the thread's bookmarks then its recent or most visited pages through the `mode` choice param, `go-to-bookmarks` collapsed — needing bookmarks as project data (`v_bookmark`), lens param `options` and page-kind icons; the rail has no core panels left); Comments (`comments`, a panel `open`ing the inbox) and Work (`work` grouped over the `thread_work` model, which also lists the thread's unlinked efforts — open under In progress, closed under Finished, whose header opens the `thread-activity` lens of the thread's turns by effort — `work-line` collapsed, `work-count`, the `clear_finished` command + `finished_cleared` model); and Uncommitted (`uncommitted`, a tree over the working change's stage-one file list, which change analysis now keeps current on every move). Only the UI moves: stores, commands and views stay core. What Work needed and lenses lacked became general features, listed under "Added for extraction" — the pattern for any panel an extension builds |
 | The effort-close inference of unrecorded decisions and of the claims an agent's answers made (the `effort.decisions` reactor) | **done:** the AI profile `reasoning` (fallback `main`), the job `reasoning`, the command `oxplow.effort.infer_reasoning` and the effects `infer-reasoning` / `store-reasoning`, writing through core's `oxplow.effort.replace_inferred_decisions` and `oxplow.effort.replace_inferred_claims`; review and storage stay core ([ai-providers.md](./ai-providers.md) "Inferred reasoning") |
 

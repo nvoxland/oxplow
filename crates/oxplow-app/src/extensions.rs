@@ -60,9 +60,14 @@ pub enum LensViz {
     /// Nested rectangles sized by `chart.size`, labelled by `chart.label`,
     /// grouped (and coloured) by `chart.group`.
     Treemap,
-    /// Other lenses (`children`), stacked, each given the params it
-    /// declares from this lens's params.
-    Grid,
+    /// A page of sections (`sections`), wiki style: each another lens,
+    /// given the params it declares from this lens's, or markdown. Other
+    /// extensions add sections at `<extension>/<slug>.sections`.
+    Document,
+    /// A grid of tiles (`tiles`), each another lens (or markdown) at a
+    /// size, given the params it declares from this lens's. Other
+    /// extensions add tiles at `<extension>/<slug>.tiles`.
+    Dashboard,
     /// Rows nested by `tree.parent` (a row's parent is the row whose
     /// `tree.id` it names; none, or one not in the result, is a root),
     /// each shown as `tree.label`.
@@ -467,6 +472,139 @@ pub struct LensColumn {
     /// `success`, `warning`, `danger` or `muted` (anything else is plain).
     #[serde(default)]
     pub tone: Option<String>,
+    /// Its width in pixels; the columns without one share the rest.
+    #[serde(default)]
+    pub width: Option<u32>,
+    /// How its value reads; else as the query returned it (a timestamp in
+    /// local time, a number with its `unit`).
+    #[serde(default)]
+    pub format: Option<ColumnFormat>,
+}
+
+/// How a column's value reads in the UI. An agent reads the raw value.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ColumnFormat {
+    /// A timestamp's date.
+    Date,
+    /// A timestamp's date and time.
+    Datetime,
+    /// A timestamp as how long ago (`3 h ago`).
+    Relative,
+    /// A byte count (`1.2 MB`).
+    Bytes,
+    /// Milliseconds as a duration (`1.4 s`, `3 m`).
+    Duration,
+    /// A whole number with separators (`12,345`).
+    Integer,
+    /// A fraction 0–1 as a percentage (`42%`).
+    Percent,
+}
+
+/// One part of a `document` (a section) or a `dashboard` (a tile):
+/// another lens, or markdown.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LensPart {
+    /// Stable within the lens: what another extension's mount names to go
+    /// beside it (`at: { after: <id> }`).
+    pub id: String,
+    /// Its heading; else its lens's title.
+    pub title: Option<String>,
+    /// The lens it shows (`<extension>/<slug>`).
+    pub lens: Option<String>,
+    /// Or prose it shows.
+    pub markdown: Option<String>,
+    /// A tile's size.
+    pub size: Option<TileSize>,
+    /// The extension that mounted it, when it isn't the lens's own.
+    pub from: Option<String>,
+}
+
+/// A part as a lens file writes it (`sections:` / `tiles:` entries).
+#[derive(Debug, Clone, PartialEq, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct PartFile {
+    /// Defaults to its lens's slug; required for markdown.
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    title: Option<String>,
+    /// A lens slug in this extension, or `<ext>/<slug>`.
+    #[serde(default)]
+    lens: Option<String>,
+    #[serde(default)]
+    markdown: Option<String>,
+    /// A tile's size (`tiles:` only).
+    #[serde(default)]
+    size: Option<TileSize>,
+}
+
+/// A lens file's `sections:` (for `document`) or `tiles:` (for
+/// `dashboard`) as parts: ids defaulted and unique, exactly one of `lens`
+/// and `markdown`, a size only on a tile.
+fn parse_parts(
+    extension: &str,
+    viz: LensViz,
+    sections: Vec<PartFile>,
+    tiles: Vec<PartFile>,
+) -> Result<Vec<LensPart>, String> {
+    let (key, files) = match viz {
+        LensViz::Document if tiles.is_empty() => ("sections", sections),
+        LensViz::Dashboard if sections.is_empty() => ("tiles", tiles),
+        LensViz::Document => return Err("a `document` has `sections`, not `tiles`".into()),
+        LensViz::Dashboard => return Err("a `dashboard` has `tiles`, not `sections`".into()),
+        _ if sections.is_empty() && tiles.is_empty() => return Ok(Vec::new()),
+        _ => return Err("`sections` are a `document`'s and `tiles` a `dashboard`'s".into()),
+    };
+    if files.is_empty() {
+        return Err(format!("viz `{}` needs `{key}: [...]`", viz_name(viz)));
+    }
+    let mut out: Vec<LensPart> = Vec::new();
+    for (i, f) in files.into_iter().enumerate() {
+        let lens = f.lens.map(|c| {
+            if c.contains('/') {
+                c
+            } else {
+                format!("{extension}/{c}")
+            }
+        });
+        if lens.is_some() == f.markdown.is_some() {
+            return Err(format!(
+                "{key}[{i}]: needs exactly one of `lens` and `markdown`"
+            ));
+        }
+        if key == "sections" && f.size.is_some() {
+            return Err(format!("{key}[{i}]: `size` is a dashboard tile's"));
+        }
+        let id = match (f.id, &lens) {
+            (Some(id), _) => id,
+            (None, Some(l)) => l.rsplit('/').next().unwrap_or(l).to_string(),
+            (None, None) => return Err(format!("{key}[{i}]: a markdown part needs an `id`")),
+        };
+        if out.iter().any(|p| p.id == id) {
+            return Err(format!("{key}: two parts are `{id}`; give one an `id`"));
+        }
+        out.push(LensPart {
+            id,
+            title: f.title,
+            lens,
+            markdown: f.markdown,
+            size: f.size,
+            from: None,
+        });
+    }
+    Ok(out)
+}
+
+/// A viz as a lens file names it.
+fn viz_name(viz: LensViz) -> String {
+    serde_json::to_value(viz)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_default()
 }
 
 /// `group` on a `list` or `table`: the rows under a heading per distinct
@@ -581,9 +719,13 @@ struct LensFile {
     emphasis: Option<String>,
     #[serde(default)]
     depth: Option<String>,
-    /// For `grid`: lens slugs in this extension, or `<ext>/<slug>` ids.
+    /// For `document`: its sections, each a lens (a slug in this
+    /// extension, or `<ext>/<slug>`) or markdown.
     #[serde(default)]
-    children: Vec<String>,
+    sections: Vec<PartFile>,
+    /// For `dashboard`: its tiles.
+    #[serde(default)]
+    tiles: Vec<PartFile>,
     #[serde(default)]
     launcher: Option<LauncherFile>,
     /// Keep it out of the launcher (e.g. a lens only a slot shows).
@@ -895,31 +1037,222 @@ struct AdvisoryFile {
 /// the ones it declares and must declare at least one.
 /// Slot names are one dotted namespace, `<capability>.<page>.<region>`
 /// (P6b): what a page shows a lens is named by what the page is about.
-pub const SLOTS: &[(&str, &[&str])] = &[
+/// A page's own parts are slots too (`<page>.sections`, `<page>.tiles`):
+/// a mount there goes `at:` the start, the end, or beside one of the
+/// page's parts, named by the stable ids listed here.
+pub const SLOTS: &[SlotSpec] = &[
     // An effort's review (its diff view).
-    ("effort.review.details", &["effort_id", "change_id"]),
+    SlotSpec::region("effort.review.details", &["effort_id", "change_id"]),
     // A work item's page, below its body: the item's ref, whichever list.
-    ("work_item.detail.body", &["ref"]),
+    SlotSpec::region("work_item.detail.body", &["ref"]),
     // The same page's side rail.
-    ("work_item.detail.sidebar", &["ref"]),
+    SlotSpec::region("work_item.detail.sidebar", &["ref"]),
     // A thread's plan, as a compact strip.
-    ("thread.plan.header", &["thread_id"]),
-    ("vcs.commit.details", &["change_id"]),
+    SlotSpec::region("thread.plan.header", &["thread_id"]),
+    SlotSpec::region("vcs.commit.details", &["change_id"]),
     // Uncommitted changes: a strip above them, and below the files.
-    ("vcs.status.header", &["stream_id"]),
-    ("vcs.status.details", &["change_id"]),
+    SlotSpec::region("vcs.status.header", &["stream_id"]),
+    SlotSpec::region("vcs.status.details", &["change_id"]),
     // Git history's side column.
-    ("vcs.history.sidebar", &["stream_id"]),
+    SlotSpec::region("vcs.history.sidebar", &["stream_id"]),
     // A file diff's header strip, above the editor: the file and the two
     // revisions the diff reads (`working`, `snap:<id>`, `git:<sha>`).
-    (
+    SlotSpec::region(
         "diff.file.header",
         &["path", "left_revision", "right_revision", "stream_id"],
     ),
     // Settings: a section per extension with the lenses it mounts (its
     // own status or configuration views). No params.
-    ("settings.section", &[]),
+    SlotSpec::region("settings.section", &[]),
+    // The New Session page's sections: starting one, then the earlier ones.
+    SlotSpec {
+        name: "new-session.sections",
+        params: &["thread_id"],
+        parts: SlotParts::Sections(&["start", "earlier"]),
+    },
 ];
+
+/// A place in a core page a lens can be mounted ([`SLOTS`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SlotSpec {
+    pub name: &'static str,
+    /// The params the page binds; a mounted lens takes the ones it declares.
+    pub params: &'static [&'static str],
+    pub parts: SlotParts,
+}
+
+impl SlotSpec {
+    const fn region(name: &'static str, params: &'static [&'static str]) -> Self {
+        Self {
+            name,
+            params,
+            parts: SlotParts::Region,
+        }
+    }
+
+    /// The core slot named `name`.
+    pub fn core(name: &str) -> Option<&'static SlotSpec> {
+        SLOTS.iter().find(|s| s.name == name)
+    }
+}
+
+/// What a slot holds: a fixed region of the page, or the page's own list
+/// of parts (a document's sections, a dashboard's tiles), among which a
+/// mount is placed by `at:` relative to the parts' stable ids.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlotParts {
+    Region,
+    Sections(&'static [&'static str]),
+    Tiles(&'static [&'static str]),
+}
+
+/// Where a mount goes among a page's parts: `start`, `end` (the default),
+/// or `{ after: <id> }` / `{ before: <id> }` beside one of them. An id the
+/// page no longer has means the end (and a load warning), so a page that
+/// changes never loses what an extension adds.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
+#[serde(untagged)]
+pub enum SlotAt {
+    Edge(SlotEdge),
+    After { after: String },
+    Before { before: String },
+}
+
+/// The ends of a page's parts.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum SlotEdge {
+    Start,
+    End,
+}
+
+impl Default for SlotAt {
+    fn default() -> Self {
+        SlotAt::Edge(SlotEdge::End)
+    }
+}
+
+impl SlotAt {
+    /// The part it's placed beside, if any.
+    pub fn anchor(&self) -> Option<&str> {
+        match self {
+            SlotAt::After { after: id } | SlotAt::Before { before: id } => Some(id),
+            SlotAt::Edge(_) => None,
+        }
+    }
+}
+
+/// How much of a dashboard a tile takes: one cell, two across, two down,
+/// or the whole row.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    specta::Type,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum TileSize {
+    #[default]
+    Small,
+    Wide,
+    Tall,
+    Full,
+}
+
+/// What a slot holds, as a mount is checked against it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PartsKind {
+    Region,
+    Sections,
+    Tiles,
+}
+
+/// A slot naming a lens's parts — `<extension>/<slug>.sections` (a
+/// document's) or `.tiles` (a dashboard's): the lens id and which.
+fn lens_slot_target(slot: &str) -> Option<(&str, PartsKind)> {
+    let (lens, which) = slot.rsplit_once('.')?;
+    if !lens.contains('/') {
+        return None;
+    }
+    match which {
+        "sections" => Some((lens, PartsKind::Sections)),
+        "tiles" => Some((lens, PartsKind::Tiles)),
+        _ => None,
+    }
+}
+
+/// What's wrong with mounting `lens` in a slot that binds `params` and
+/// holds `kind` of parts with stable `ids`: an error, or a warning (an
+/// `at` beside a part the page doesn't have goes at the end).
+fn mount_problem(
+    mount: &LensSlot,
+    lens: &Lens,
+    params: &[&str],
+    kind: PartsKind,
+    ids: &[&str],
+) -> Result<Option<String>, String> {
+    // A slot offers params; a mounted lens takes the ones it declares
+    // and must declare at least one, or it can't relate to the page.
+    if !params.is_empty()
+        && !params
+            .iter()
+            .any(|p| lens.params.iter().any(|lp| lp.name == *p))
+    {
+        return Err(format!(
+            "slot `{}` passes {}; lens `{}` must declare at least one in `params`",
+            mount.slot,
+            params
+                .iter()
+                .map(|p| format!("`{p}`"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            lens.slug
+        ));
+    }
+    if kind == PartsKind::Region && mount.at.is_some() {
+        return Err(format!(
+            "slot `{}` is one region of its page; `at` places a mount among a page's \
+             sections or tiles",
+            mount.slot
+        ));
+    }
+    if kind != PartsKind::Tiles && mount.size.is_some() {
+        return Err(format!(
+            "slot `{}` holds no tiles; `size` is a dashboard tile's",
+            mount.slot
+        ));
+    }
+    Ok(mount
+        .at
+        .as_ref()
+        .and_then(SlotAt::anchor)
+        .filter(|id| !ids.contains(id))
+        .map(|id| {
+            format!(
+                "slot `{}` has no part `{id}` (it has {}); lens `{}` goes at the end",
+                mount.slot,
+                if ids.is_empty() {
+                    "none".to_string()
+                } else {
+                    ids.iter()
+                        .map(|i| format!("`{i}`"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                },
+                lens.slug
+            )
+        }))
+}
 
 /// What a left-nav panel is bound to: the project, the current stream, or
 /// the current thread — which of `stream_id` / `thread_id` its lenses get.
@@ -1016,9 +1349,25 @@ struct PanelFile {
 #[serde(rename_all = "camelCase")]
 pub struct LensSlot {
     /// Which page region, from [`SLOTS`] (`effort.review.details`,
-    /// `vcs.commit.details`, …); the lens takes the params it offers.
+    /// `vcs.commit.details`, …), or a document or dashboard lens's parts
+    /// (`<extension>/<slug>.sections`, `.tiles`); the lens takes the params
+    /// it offers.
     pub slot: String,
     pub lens_id: String,
+    /// Where it goes among the page's parts; `None` in a region.
+    pub at: Option<SlotAt>,
+    /// Its heading; else its lens's title.
+    pub title: Option<String>,
+    /// A tile's size; `None` outside a dashboard.
+    pub size: Option<TileSize>,
+}
+
+impl LensSlot {
+    /// Its contribution's local id, as the `n`th mount of its extension:
+    /// `<slot>-<n>`, a lens's `/` written `.` (`base.page.sections-0`).
+    pub fn local_id(&self, n: usize) -> String {
+        format!("{}-{n}", self.slot.replace('/', "."))
+    }
 }
 
 /// A loaded lens.
@@ -1053,8 +1402,9 @@ pub struct Lens {
     pub emphasis: Option<String>,
     /// For `list` / `table`: a column whose integer value indents the row.
     pub depth: Option<String>,
-    /// For `grid`: child lens ids.
-    pub children: Vec<String>,
+    /// For `document` its sections, for `dashboard` its tiles: its own,
+    /// then what other extensions mount, placed by their `at`.
+    pub parts: Vec<LensPart>,
     /// Launcher section; `None` = "Lenses".
     pub launcher_category: Option<LauncherCategory>,
     /// Not listed in the launcher.
@@ -1072,6 +1422,14 @@ pub struct Lens {
     /// extension's namespace (`extension_commands::tool_name`): a call
     /// runs it and returns its text rendering.
     pub tool: Option<String>,
+}
+
+impl Lens {
+    /// The lenses its parts show (a document's sections, a dashboard's
+    /// tiles).
+    pub fn part_lenses(&self) -> impl Iterator<Item = &str> {
+        self.parts.iter().filter_map(|p| p.lens.as_deref())
+    }
 }
 
 /// A loaded extension and anything wrong with it.
@@ -1310,20 +1668,20 @@ pub(super) fn load_sources(root: &Path) -> Vec<Extension> {
 
 pub(super) fn resolve_catalog(mut out: Vec<Extension>, disabled: &[String]) -> Vec<Extension> {
     out.sort_by(|a, b| a.name.cmp(&b.name).then(a.origin.cmp(&b.origin)));
-    // A grid's child in ANOTHER extension resolves here, once every
-    // extension is loaded; a missing one is an error and the grid is
-    // dropped so every loaded lens renders.
+    // A document's or dashboard's part from ANOTHER extension resolves
+    // here, once every extension is loaded; a missing one is an error and
+    // the lens is dropped so every loaded lens renders.
     let all_ids: Vec<String> = out
         .iter()
         .flat_map(|e| e.lenses.iter().map(|l| l.id.clone()))
         .collect();
     for ext in &mut out {
         let mut bad = Vec::new();
-        for l in ext.lenses.iter().filter(|l| l.viz == LensViz::Grid) {
-            for c in &l.children {
-                if !all_ids.contains(c) {
+        for l in &ext.lenses {
+            for c in l.part_lenses() {
+                if !all_ids.iter().any(|id| id == c) {
                     ext.errors.push(format!(
-                        "{}: child lens `{c}` isn't in any loaded extension",
+                        "{}: part lens `{c}` isn't in any loaded extension",
                         l.path
                     ));
                     bad.push(l.id.clone());
@@ -1364,14 +1722,157 @@ pub(super) fn resolve_catalog(mut out: Vec<Extension>, disabled: &[String]) -> V
     }
     descriptors::check_catalog(&mut out);
     public_contracts::activate(&mut out);
-    out.into_iter()
+    let mut out: Vec<Extension> = out
+        .into_iter()
         .map(|mut ext| {
             if ext.public_contracts.blocked {
                 clear_contributions(&mut ext);
             }
             apply_disabled(ext, disabled)
         })
-        .collect()
+        .collect();
+    place_lens_mounts(&mut out);
+    out
+}
+
+/// Mounts among another lens's parts (`<extension>/<slug>.sections` of a
+/// document, `.tiles` of a dashboard), once the catalog is final: each is
+/// checked against that lens and placed among its parts by its `at`, so
+/// the lens's page, its text and `get_lens` all show it. A bad one is an
+/// error of the extension that mounts it, and goes.
+fn place_lens_mounts(out: &mut [Extension]) {
+    struct Target {
+        params: Vec<String>,
+        kind: PartsKind,
+        ids: Vec<String>,
+    }
+    let targets: BTreeMap<String, Target> = out
+        .iter()
+        .flat_map(|e| e.lenses.iter())
+        .filter_map(|l| {
+            let kind = match l.viz {
+                LensViz::Document => PartsKind::Sections,
+                LensViz::Dashboard => PartsKind::Tiles,
+                _ => return None,
+            };
+            Some((
+                l.id.clone(),
+                Target {
+                    params: l.params.iter().map(|p| p.name.clone()).collect(),
+                    kind,
+                    ids: l.parts.iter().map(|p| p.id.clone()).collect(),
+                },
+            ))
+        })
+        .collect();
+    let mut placed: BTreeMap<String, Vec<(LensPart, SlotAt)>> = BTreeMap::new();
+    for ext in out.iter_mut() {
+        let manifest = format!("{}/extension.yaml", ext.path);
+        let mut dropped = Vec::new();
+        for (index, mount) in ext.ui.slots.iter().enumerate() {
+            let Some((target, kind)) = lens_slot_target(&mount.slot) else {
+                continue;
+            };
+            let Some(lens) = ext.lenses.iter().find(|l| l.id == mount.lens_id) else {
+                continue;
+            };
+            let checked = match targets.get(target) {
+                None => Err(format!(
+                    "slot `{}` names lens `{target}`, which isn't a loaded document or dashboard",
+                    mount.slot
+                )),
+                Some(t) if t.kind != kind => Err(format!(
+                    "slot `{}`: lens `{target}` is a {}, so its parts are at `{target}.{}`",
+                    mount.slot,
+                    if t.kind == PartsKind::Sections {
+                        "document"
+                    } else {
+                        "dashboard"
+                    },
+                    if t.kind == PartsKind::Sections {
+                        "sections"
+                    } else {
+                        "tiles"
+                    },
+                )),
+                Some(t) => {
+                    let params: Vec<&str> = t.params.iter().map(String::as_str).collect();
+                    let ids: Vec<&str> = t.ids.iter().map(String::as_str).collect();
+                    mount_problem(mount, lens, &params, kind, &ids)
+                }
+            };
+            match checked {
+                Err(problem) => {
+                    ext.errors.push(format!("{manifest}: {problem}"));
+                    dropped.push(index);
+                }
+                Ok(warning) => {
+                    ext.warnings
+                        .extend(warning.map(|w| format!("{manifest}: {w}")));
+                    placed.entry(target.to_string()).or_default().push((
+                        LensPart {
+                            id: mount.lens_id.clone(),
+                            title: mount.title.clone(),
+                            lens: Some(mount.lens_id.clone()),
+                            markdown: None,
+                            size: mount.size,
+                            from: Some(ext.name.clone()),
+                        },
+                        mount.at.clone().unwrap_or_default(),
+                    ));
+                }
+            }
+        }
+        for index in dropped.into_iter().rev() {
+            let mount = ext.ui.slots.remove(index);
+            let id = oxplow_domain::contribution::ContributionId::new(
+                &ext.name,
+                oxplow_domain::contribution::ContributionKind::Slot,
+                &mount.local_id(index),
+            );
+            ext.contributions.retain(|d| d.id != id);
+        }
+    }
+    for lens in out.iter_mut().flat_map(|e| e.lenses.iter_mut()) {
+        if let Some(mounts) = placed.remove(&lens.id) {
+            lens.parts = place_parts(std::mem::take(&mut lens.parts), mounts);
+        }
+    }
+}
+
+/// A page's own parts with mounts placed among them: `start` ones first,
+/// each `before`/`after` one beside its part, `end` ones (and any beside a
+/// part the page doesn't have) last; mounts at one place keep their order.
+/// The UI places mounts into core pages the same way (`kit/placeParts.ts`).
+fn place_parts(own: Vec<LensPart>, mounts: Vec<(LensPart, SlotAt)>) -> Vec<LensPart> {
+    let ids: Vec<String> = own.iter().map(|p| p.id.clone()).collect();
+    let mounts: Vec<(LensPart, SlotAt)> = mounts
+        .into_iter()
+        .map(|(part, at)| match at.anchor() {
+            Some(id) if !ids.iter().any(|i| i == id) => (part, SlotAt::default()),
+            _ => (part, at),
+        })
+        .collect();
+    let at = |pred: &dyn Fn(&SlotAt) -> bool| -> Vec<LensPart> {
+        mounts
+            .iter()
+            .filter(|(_, a)| pred(a))
+            .map(|(p, _)| p.clone())
+            .collect()
+    };
+    let mut out = at(&|a| *a == SlotAt::Edge(SlotEdge::Start));
+    for part in own {
+        let id = part.id.clone();
+        out.extend(at(
+            &|a| matches!(a, SlotAt::Before { before } if *before == id),
+        ));
+        out.push(part);
+        out.extend(at(
+            &|a| matches!(a, SlotAt::After { after } if *after == id),
+        ));
+    }
+    out.extend(at(&|a| *a == SlotAt::default()));
+    out
 }
 
 /// A catalog block's error as the manifest's, not project.yaml's.
@@ -2514,15 +3015,21 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 }
                 let actions =
                     parse_actions(std::mem::take(&mut l.actions), &l.params, l.group.is_some())?;
+                let parts = parse_parts(
+                    name,
+                    l.viz,
+                    std::mem::take(&mut l.sections),
+                    std::mem::take(&mut l.tiles),
+                )?;
                 let tool = l
                     .tool
                     .take()
                     .map(|t| crate::extension_commands::tool_name(&ext.namespace, &t))
                     .transpose()?;
-                Ok((l, alert, actions, tool))
+                Ok((l, alert, actions, tool, parts))
             });
         match parsed {
-            Ok((l, alert, actions, tool)) => ext.lenses.push(Lens {
+            Ok((l, alert, actions, tool, parts)) => ext.lenses.push(Lens {
                 tool,
                 id: format!("{name}/{slug}"),
                 extension: name.to_string(),
@@ -2544,17 +3051,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 group: l.group,
                 emphasis: l.emphasis,
                 depth: l.depth,
-                children: l
-                    .children
-                    .into_iter()
-                    .map(|c| {
-                        if c.contains('/') {
-                            c
-                        } else {
-                            format!("{name}/{c}")
-                        }
-                    })
-                    .collect(),
+                parts,
                 launcher_category: l.launcher.map(|la| la.category),
                 hidden: l.hidden,
                 actions,
@@ -2604,47 +3101,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     ext.lenses.retain(|l| !bad.contains(&l.id));
 
     for s in slot_files {
-        let slot_params = SLOTS.iter().find(|(n, _)| *n == s.slot).map(|(_, p)| *p);
-        let lens = ext.lenses.iter().find(|l| l.slug == s.lens);
-        // A slot offers params; a mounted lens takes the ones it declares
-        // and must declare at least one, or it can't relate to the page.
-        let missing: Vec<&str> = match (slot_params, lens) {
-            (Some(params), Some(l))
-                if !params
-                    .iter()
-                    .any(|p| l.params.iter().any(|lp| lp.name == *p)) =>
-            {
-                params.to_vec()
-            }
-            _ => vec![],
-        };
         let mount_line = entry_line(&manifest, "ui", "lens", &s.lens);
-        if slot_params.is_none() {
-            ext.errors.push(at(
-                &file,
-                mount_line,
-                format!(
-                    "unknown slot `{}` (known: {})",
-                    s.slot,
-                    SLOTS.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", ")
-                ),
-            ));
-        } else if !missing.is_empty() {
-            ext.errors.push(at(
-                &file,
-                mount_line,
-                format!(
-                    "slot `{}` passes {}; lens `{}` must declare at least one in `params`",
-                    s.slot,
-                    missing
-                        .iter()
-                        .map(|p| format!("`{p}`"))
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    s.lens
-                ),
-            ));
-        } else if lens.is_none() {
+        let Some(lens) = ext.lenses.iter().find(|l| l.slug == s.lens) else {
             ext.errors.push(at(
                 &file,
                 mount_line,
@@ -2653,11 +3111,46 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     s.slot, s.lens
                 ),
             ));
-        } else {
-            ext.ui.slots.push(LensSlot {
-                slot: s.slot,
-                lens_id: format!("{name}/{}", s.lens),
-            });
+            continue;
+        };
+        let mount = LensSlot {
+            slot: s.slot,
+            lens_id: lens.id.clone(),
+            at: s.at,
+            title: s.title,
+            size: s.size,
+        };
+        // Another lens's parts resolve once every extension is loaded
+        // (`place_lens_mounts`).
+        if lens_slot_target(&mount.slot).is_some() {
+            ext.ui.slots.push(mount);
+            continue;
+        }
+        let Some(spec) = SlotSpec::core(&mount.slot) else {
+            ext.errors.push(at(
+                &file,
+                mount_line,
+                format!(
+                    "unknown slot `{}` (known: {}, or a document's `<extension>/<lens>.sections` \
+                     and a dashboard's `<extension>/<lens>.tiles`)",
+                    mount.slot,
+                    SLOTS.iter().map(|s| s.name).collect::<Vec<_>>().join(", ")
+                ),
+            ));
+            continue;
+        };
+        let (kind, ids) = match spec.parts {
+            SlotParts::Region => (PartsKind::Region, Vec::new()),
+            SlotParts::Sections(ids) => (PartsKind::Sections, ids.to_vec()),
+            SlotParts::Tiles(ids) => (PartsKind::Tiles, ids.to_vec()),
+        };
+        match mount_problem(&mount, lens, spec.params, kind, &ids) {
+            Err(problem) => ext.errors.push(at(&file, mount_line, problem)),
+            Ok(warning) => {
+                ext.warnings
+                    .extend(warning.map(|w| at(&file, mount_line, w)));
+                ext.ui.slots.push(mount);
+            }
         }
     }
     if let Some(v) = decorator_files {
@@ -2962,17 +3455,15 @@ fn choices_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
         })
 }
 
-fn grid_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
-    if lens.children.is_empty() {
-        return Some("viz `grid` needs `children: [lens, ...]`".into());
-    }
-    lens.children
-        .iter()
+/// A document's or dashboard's part naming a lens of its own extension
+/// that isn't there (another extension's resolves with the catalog).
+fn parts_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
+    lens.part_lenses()
         .find(|c| {
             c.split_once('/').map(|(e, _)| e) == Some(lens.extension.as_str())
-                && !ids_in_extension.contains(c)
+                && !ids_in_extension.iter().any(|id| id == c)
         })
-        .map(|c| format!("child lens `{c}` isn't in this extension's lenses/"))
+        .map(|c| format!("part lens `{c}` isn't in this extension's lenses/"))
 }
 
 fn shape_problem(
@@ -3050,7 +3541,7 @@ fn shape_problem(
                 })
         }
         // A grid composes its children; it renders no rows of its own.
-        LensViz::Grid => grid_problem(lens, ids_in_extension),
+        LensViz::Document | LensViz::Dashboard => parts_problem(lens, ids_in_extension),
         // Its rows are what the component shows and what an agent reads.
         LensViz::Custom if lens.query.trim().is_empty() => {
             Some("viz `custom` needs a `query`: its rows are what the component shows".into())
@@ -4562,7 +5053,7 @@ impl Lens {
             group: spec.group.clone(),
             emphasis: spec.emphasis.clone(),
             depth: spec.depth.clone(),
-            children: Vec::new(),
+            parts: Vec::new(),
             launcher_category: None,
             hidden: false,
             actions: Vec::new(),
@@ -4597,16 +5088,19 @@ impl Lens {
 }
 
 /// What's wrong with `spec` as a standalone lens, if anything: no title,
-/// or a component missing what it needs. A `grid` composes other lenses
-/// and a `custom` lens an extension's component, so a standalone spec
-/// can't be either; nor a `form`, whose submit runs its command as the
+/// or a component missing what it needs. A `document` or `dashboard`
+/// composes other lenses and a `custom` lens an extension's component, so
+/// a standalone spec can't be either; nor a `form`, whose submit runs its command as the
 /// person — an answer an agent chose never does.
 pub fn spec_problem(spec: &LensSpec) -> Option<String> {
     if spec.title.trim().is_empty() {
         return Some("a lens needs a `title`".into());
     }
-    if spec.viz == LensViz::Grid {
-        return Some("a `grid` composes lens files; show each lens instead".into());
+    if matches!(spec.viz, LensViz::Document | LensViz::Dashboard) {
+        return Some(format!(
+            "a `{}` composes lens files; show each lens instead",
+            viz_name(spec.viz)
+        ));
     }
     if spec.viz == LensViz::Custom {
         return Some(
@@ -6458,18 +6952,18 @@ empty: No items.
         write(
             dir.path(),
             "oxplow/extensions/board/lenses/all.yaml",
-            "title: All\nviz: grid\nchildren: [review/tasks, review/missing]\n",
+            "title: All\nviz: document\nsections: [{ lens: review/tasks }, { lens: review/missing }]\n",
         );
         let board = only(dir.path(), "board");
         assert!(
             board
                 .errors
                 .iter()
-                .any(|m| m.contains("child lens `review/missing` isn't in any loaded extension")),
+                .any(|m| m.contains("part lens `review/missing` isn't in any loaded extension")),
             "{:?}",
             board.errors
         );
-        assert!(board.lenses.is_empty(), "the broken grid is dropped");
+        assert!(board.lenses.is_empty(), "the broken document is dropped");
     }
 
     /// The tally extension: a starlark collector declaring entity `thing`,
@@ -6911,6 +7405,176 @@ commands:
         assert_eq!(e.ui.slots[0].slot, "settings.section");
     }
 
+    /// A document's sections are lenses or markdown: an id defaults to the
+    /// lens's slug (a lens shown twice needs an `id`), markdown needs one,
+    /// ids are unique, a section has no
+    /// size, and `tiles` are a dashboard's.
+    #[test]
+    fn document_sections_parse_and_bad_ones_are_errors() {
+        let (_d, ext) = load_x(
+            &[
+                ("n", "title: N\nquery: SELECT 1 AS n\nviz: number\n"),
+                (
+                    "doc",
+                    "title: D\nviz: document\nsections:\n  - { id: intro, title: About, markdown: Hello }\n  - { lens: n }\n  - { lens: x/n, id: again }\n",
+                ),
+                ("md-no-id", "title: D\nviz: document\nsections: [{ markdown: hi }]\n"),
+                ("both", "title: D\nviz: document\nsections: [{ lens: n, markdown: hi }]\n"),
+                ("twice", "title: D\nviz: document\nsections: [{ lens: n }, { lens: n }]\n"),
+                ("sized", "title: D\nviz: document\nsections: [{ lens: n, size: wide }]\n"),
+                ("tiled", "title: D\nviz: document\ntiles: [{ lens: n }]\n"),
+                ("empty", "title: D\nviz: document\n"),
+                ("stray", "title: T\nquery: SELECT 1\nsections: [{ lens: n }]\n"),
+            ],
+            "",
+        );
+        let doc = ext.lenses.iter().find(|l| l.slug == "doc").unwrap();
+        let parts: Vec<_> = doc
+            .parts
+            .iter()
+            .map(|p| (p.id.as_str(), p.lens.as_deref(), p.markdown.as_deref()))
+            .collect();
+        assert_eq!(
+            parts,
+            vec![
+                ("intro", None, Some("Hello")),
+                ("n", Some("x/n"), None),
+                ("again", Some("x/n"), None),
+            ]
+        );
+        let errs = ext.errors.join("\n");
+        for (slug, want) in [
+            ("md-no-id", "needs an `id`"),
+            ("both", "exactly one of `lens` and `markdown`"),
+            ("twice", "two parts are `n`"),
+            ("sized", "`size` is a dashboard tile's"),
+            ("tiled", "has `sections`, not `tiles`"),
+            ("empty", "needs `sections: [...]`"),
+            ("stray", "`sections` are a `document`'s"),
+        ] {
+            assert!(
+                errs.lines().any(|l| l.contains(slug) && l.contains(want)),
+                "{slug}: {errs}"
+            );
+            assert!(!ext.lenses.iter().any(|l| l.slug == slug), "{slug}");
+        }
+    }
+
+    /// A page's sections are a slot: a mount says where among them it
+    /// goes; a region takes no `at`, only tiles take a `size`, and an `at`
+    /// beside a part the page doesn't have is a warning (it goes last).
+    #[test]
+    fn a_parts_slot_places_its_mounts() {
+        let (_d, ext) = load_x(
+            &[
+                ("presets", "title: Presets\nparams: [{ name: thread_id }]\nquery: SELECT 1\n"),
+                ("stray", "title: Stray\nparams: [{ name: thread_id }]\nquery: SELECT 1\n"),
+                ("region", "title: R\nparams: [{ name: ref }]\nquery: SELECT 1\n"),
+                ("sized", "title: S\nparams: [{ name: thread_id }]\nquery: SELECT 1\n"),
+            ],
+            "ui:\n  slots:\n    - { slot: new-session.sections, lens: presets, title: Team presets, at: { after: start } }\n    - { slot: new-session.sections, lens: stray, at: { before: gone } }\n    - { slot: work_item.detail.body, lens: region, at: start }\n    - { slot: new-session.sections, lens: sized, size: wide }\n",
+        );
+        let mounts: Vec<_> = ext
+            .ui
+            .slots
+            .iter()
+            .map(|m| (m.lens_id.as_str(), m.at.clone(), m.title.as_deref()))
+            .collect();
+        assert_eq!(
+            mounts,
+            vec![
+                (
+                    "x/presets",
+                    Some(SlotAt::After {
+                        after: "start".into()
+                    }),
+                    Some("Team presets")
+                ),
+                (
+                    "x/stray",
+                    Some(SlotAt::Before {
+                        before: "gone".into()
+                    }),
+                    None
+                ),
+            ]
+        );
+        let errs = ext.errors.join("\n");
+        assert!(errs.contains("is one region of its page"), "{errs}");
+        assert!(errs.contains("`size` is a dashboard tile's"), "{errs}");
+        let warns = ext.warnings.join("\n");
+        assert!(
+            warns.contains("has no part `gone` (it has `start`, `earlier`)"),
+            "{warns}"
+        );
+    }
+
+    /// Another extension adds to a document lens through its sections slot;
+    /// the lens's parts then hold it, placed by its `at` and marked with
+    /// who mounted it. A mount naming no document is an error and goes.
+    #[test]
+    fn an_extension_adds_a_section_to_another_extensions_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let ext_yaml = |name: &str, tail: &str| {
+            format!("manifest: 2\nname: {name}\nintent:\n  purpose: x\n  examples: [{{ name: a }}]\n{tail}")
+        };
+        write(
+            dir.path(),
+            "oxplow/extensions/base/extension.yaml",
+            &ext_yaml("base", ""),
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/base/lenses/a.yaml",
+            "title: A\nparams: [{ name: stream_id }]\nquery: SELECT 1\n",
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/base/lenses/b.yaml",
+            "title: B\nquery: SELECT 1\n",
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/base/lenses/page.yaml",
+            "title: Page\nparams: [{ name: stream_id }]\nviz: document\nsections: [{ lens: a }, { lens: b }]\n",
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/addon/extension.yaml",
+            &ext_yaml(
+                "addon",
+                "ui:\n  slots:\n    - { slot: base/page.sections, lens: extra, at: { after: a } }\n    - { slot: base/a.sections, lens: extra }\n    - { slot: base/page.tiles, lens: extra }\n",
+            ),
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/addon/lenses/extra.yaml",
+            "title: Extra\nparams: [{ name: stream_id }]\nquery: SELECT 1\n",
+        );
+        let base = only(dir.path(), "base");
+        let page = base.lenses.iter().find(|l| l.slug == "page").unwrap();
+        let parts: Vec<_> = page
+            .parts
+            .iter()
+            .map(|p| (p.id.as_str(), p.from.as_deref()))
+            .collect();
+        assert_eq!(
+            parts,
+            vec![("a", None), ("addon/extra", Some("addon")), ("b", None)]
+        );
+        let addon = only(dir.path(), "addon");
+        let errs = addon.errors.join("\n");
+        assert!(
+            errs.contains("lens `base/a`, which isn't a loaded document or dashboard"),
+            "{errs}"
+        );
+        assert!(
+            errs.contains("is a document, so its parts are at `base/page.sections`"),
+            "{errs}"
+        );
+        assert_eq!(addon.ui.slots.len(), 1, "the bad mounts go");
+    }
+
     /// The documented examples in `examples/extensions/` load cleanly, so
     /// a format change can't silently break what the guide tells people to
     /// copy.
@@ -6961,14 +7625,17 @@ commands:
         (dir, ext)
     }
 
-    /// A grid composes its children and never renders rows of its own, so
-    /// it needs no `query` (like a form); every other viz still does.
+    /// A document composes its parts and never renders rows of its own,
+    /// so it needs no `query` (like a form); every other viz still does.
     #[test]
-    fn a_grid_needs_no_query() {
+    fn a_document_needs_no_query() {
         let (_d, ext) = load_x(
             &[
                 ("n", "title: N\nquery: SELECT 1 AS n\nviz: number\n"),
-                ("all", "title: All\nviz: grid\nchildren: [n]\n"),
+                (
+                    "all",
+                    "title: All\nviz: document\nsections: [{ lens: n }]\n",
+                ),
                 ("bare", "title: B\nviz: table\n"),
             ],
             "",
@@ -6995,9 +7662,9 @@ commands:
                 ("visits", "title: V\nquery: SELECT 'a' AS day, 1 AS n\nviz: bar\nchart: { x: day, y: n }\n"),
                 ("trend", "title: T\nquery: SELECT 1 AS at, 2 AS v, 'm' AS s\nviz: line\nchart: { x: at, y: v, series: s }\n"),
                 ("map", "title: M\nquery: SELECT 'p' AS path, 3 AS churn, 'core' AS zone\nviz: treemap\nchart: { label: path, size: churn, group: zone }\n"),
-                ("all", "title: All\nviz: grid\nchildren: [visits, trend]\n"),
+                ("all", "title: All\nviz: dashboard\ntiles: [{ lens: visits, size: wide }, { lens: trend }]\n"),
                 ("nobar", "title: N\nquery: SELECT 1\nviz: bar\n"),
-                ("badgrid", "title: G\nviz: grid\nchildren: [nope]\n"),
+                ("badgrid", "title: G\nviz: dashboard\ntiles: [{ lens: nope }]\n"),
             ],
             "",
         );
@@ -7027,7 +7694,19 @@ commands:
                 .as_deref(),
             Some("zone")
         );
-        assert_eq!(lens("all").unwrap().children, vec!["x/visits", "x/trend"]);
+        let tiles: Vec<_> = lens("all")
+            .unwrap()
+            .parts
+            .iter()
+            .map(|p| (p.id.as_str(), p.lens.as_deref(), p.size))
+            .collect();
+        assert_eq!(
+            tiles,
+            vec![
+                ("visits", Some("x/visits"), Some(TileSize::Wide)),
+                ("trend", Some("x/trend"), None)
+            ]
+        );
         assert!(lens("nobar").is_none() && lens("badgrid").is_none());
         let errs = ext.errors.join("\n");
         assert!(errs.contains("nobar") && errs.contains("chart"), "{errs}");

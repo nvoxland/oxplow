@@ -69,7 +69,7 @@ mock.module("../api.js", () => ({
         custom: lensViz === "custom" ? { component: "board", props: null } : null,
         columns: [],
         actions: [],
-        children: [],
+        parts: [],
         params: [],
       },
       params,

@@ -33,7 +33,8 @@ import { Page, pageH1Style } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { RANGE_PRESETS, rangeFromPreset } from "./metricDetailData.js";
-import { type TileOptions, metricTile, parseTileOptions, tileSpanStyle } from "./customDashboardData.js";
+import { type TileOptions, metricTile, parseTileOptions } from "./customDashboardData.js";
+import { TileGrid, TileSlot } from "../kit/Tiles.js";
 
 /** Drag payload for tile reordering — distinct from the rail's section MIME so
  *  a rail drag can never drop into the grid. */
@@ -371,20 +372,8 @@ export function CustomDashboardPage({
             </EmptyState>
           </div>
         ) : (
-          <div
-            style={{
-              display: "grid",
-              // 400px min: a line tile has to fit a labeled time axis, and at
-              // ~320px the chart scaled down until its ticks were unreadable
-              // (tsk144).
-              gridTemplateColumns: "repeat(auto-fill, minmax(400px, 1fr))",
-              // Rows size to content: a heading band must be able to be one
-              // line tall. Metric tiles carry their own min-height instead, so
-              // charts still get room (tsk147).
-              gridAutoRows: "auto",
-              gap: 16,
-            }}
-            data-testid="dashboard-grid"
+          <TileGrid
+            testId="dashboard-grid"
             onDragOver={(e) => {
               if (!e.dataTransfer.types.includes(TILE_MIME)) return;
               e.preventDefault();
@@ -405,8 +394,11 @@ export function CustomDashboardPage({
               const opts = parseTileOptions(it.options_json);
               const isDragging = dragId === it.id;
               return (
-                <div
+                <TileSlot
                   key={it.id}
+                  // A text tile is a heading band: full grid width unless it
+                  // was explicitly sized otherwise.
+                  size={(it.kind === "text" ? (opts.size ?? "full") : opts.size) ?? "small"}
                   draggable
                   onDragStart={(e) => {
                     e.dataTransfer.setData(TILE_MIME, it.id);
@@ -440,16 +432,7 @@ export function CustomDashboardPage({
                     dropAt(after ? index + 1 : index);
                   }}
                   data-testid={`dashboard-tile-slot-${it.id}`}
-                  style={{
-                    // A text tile is a heading band: full grid width unless it
-                    // was explicitly sized otherwise.
-                    ...tileSpanStyle(it.kind === "text" ? (opts.size ?? "full") : opts.size),
-                    minWidth: 0,
-                    opacity: isDragging ? 0.4 : 1,
-                    // Anchors the absolutely-positioned insertion line below.
-                    position: "relative",
-                    borderRadius: 6,
-                  }}
+                  style={{ opacity: isDragging ? 0.4 : 1 }}
                 >
                   {/* Insertion line — an absolutely positioned bar sitting in
                       the grid gap. It must live OUTSIDE the tile card: an
@@ -506,10 +489,10 @@ export function CustomDashboardPage({
                       onBranches={mergeBranches}
                     />
                   )}
-                </div>
+                </TileSlot>
               );
             })}
-          </div>
+          </TileGrid>
         )}
         {pickerAt ? (
           <MetricPickerPanel

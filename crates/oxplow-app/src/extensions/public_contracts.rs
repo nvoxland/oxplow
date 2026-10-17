@@ -229,11 +229,7 @@ pub(super) fn prepare(ext: &mut Extension) {
         .enumerate()
         .map(|(index, slot)| {
             (
-                ContributionId::new(
-                    &ext.name,
-                    ContributionKind::Slot,
-                    &format!("{}-{index}", slot.slot),
-                ),
+                ContributionId::new(&ext.name, ContributionKind::Slot, &slot.local_id(index)),
                 slot.clone(),
             )
         })
@@ -688,7 +684,7 @@ fn prune_mounts(
             let grids: Vec<_> = ext
                 .lenses
                 .iter()
-                .filter(|lens| lens.children.iter().any(|child| !lenses.contains(child)))
+                .filter(|lens| lens.part_lenses().any(|part| !lenses.contains(part)))
                 .map(|lens| ContributionId::new(&ext.name, ContributionKind::Lens, &lens.slug))
                 .collect();
             changed |= !grids.is_empty();

@@ -37,7 +37,7 @@ const lens = (viz: Lens["viz"]): Lens => ({
   group: null,
   emphasis: null,
   depth: null,
-  children: [],
+  parts: [],
   launcherCategory: null,
   hidden: false,
   actions: [],

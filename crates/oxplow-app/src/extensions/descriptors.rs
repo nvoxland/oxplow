@@ -96,11 +96,7 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         out.push(d);
     }
     for (n, slot) in ext.ui.slots.iter().enumerate() {
-        let d = new(
-            ContributionKind::Slot,
-            &format!("{}-{n}", slot.slot),
-            RunsOn::Mount,
-        );
+        let d = new(ContributionKind::Slot, &slot.local_id(n), RunsOn::Mount);
         out.push(d);
     }
     for dec in &ext.ui.decorators {

@@ -1,3 +1,4 @@
+import type { PageChip } from "../../tabs/Page.js";
 import { useEffect, useMemo, useRef } from "react";
 import {
   writeWikiPage,
@@ -215,23 +216,18 @@ function ReferencedFilesFooter({
 /// Renders the freshness level derived from the page's
 /// `v_knowledge_ref` rows (`summarizeWikiFreshness`) — the same
 /// source the header chip counts, so the two can't disagree.
-export function FreshnessBadge({ summary }: { summary: WikiFreshnessSummary }) {
-  const title =
+/** A wiki page's freshness as its page's chip: stale refs say so on hover,
+ *  and pressing it opens the freshness report. */
+export function freshnessChip(summary: WikiFreshnessSummary, open: () => void): PageChip {
+  const refs =
     summary.staleRefs.length > 0
       ? `${summary.staleRefs.length} of ${summary.totalRefs} ref${summary.totalRefs === 1 ? "" : "s"} stale`
       : `${summary.totalRefs} referenced file${summary.totalRefs === 1 ? "" : "s"}`;
-  return (
-    <span
-      title={title}
-      style={{
-        fontSize: 11,
-        padding: "2px 6px",
-        borderRadius: 3,
-        background: FRESHNESS_COLOR[summary.freshness],
-        color: "#fff",
-      }}
-    >
-      {FRESHNESS_LABEL[summary.freshness]}
-    </span>
-  );
+  return {
+    label: FRESHNESS_LABEL[summary.freshness],
+    background: FRESHNESS_COLOR[summary.freshness],
+    color: "#fff",
+    title: `${refs}. Open the freshness view for this wiki page.`,
+    onClick: open,
+  };
 }

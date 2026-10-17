@@ -6,7 +6,7 @@
  * (`.context/pages-and-tabs.md` "new-session").
  */
 import type { EarlierAction, EarlierSession, EarlierSessions } from "../tauri-bridge/generated/bindings.js";
-import { formatSize, formatWhen } from "./conversationFormat.js";
+import { formatSize, formatWhen } from "./format.js";
 
 export type EarlierStatus = "open_here" | "closed_here" | "elsewhere" | "outside" | "open_elsewhere";
 

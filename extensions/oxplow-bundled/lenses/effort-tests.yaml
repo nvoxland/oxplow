@@ -1,6 +1,11 @@
 title: Coverage and Tests
 description: Diff coverage on the effort's changed lines, the test runs it made, and what failed.
 params: [{ name: effort_id }]
-viz: grid
-children: [effort-coverage, effort-untested-files, effort-test-runs, effort-failed-tests, effort-analysis-findings]
+viz: document
+sections:
+  - { lens: effort-coverage }
+  - { lens: effort-untested-files }
+  - { lens: effort-test-runs }
+  - { lens: effort-failed-tests }
+  - { lens: effort-analysis-findings }
 hidden: true

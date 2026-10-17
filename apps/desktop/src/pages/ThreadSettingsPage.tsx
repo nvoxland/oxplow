@@ -53,13 +53,7 @@ export function ThreadSettingsPage({ streamId, thread, onClose, onSaved }: Threa
     <Page
       testId="page-thread-settings"
       title={thread ? `Thread Settings — ${thread.title}` : "Thread Settings"}
-      actions={
-        onClose ? (
-          <button type="button" onClick={onClose} style={buttonStyle}>
-            Close
-          </button>
-        ) : null
-      }
+      actions={onClose ? [{ id: "close", label: "Close", run: onClose }] : undefined}
     >
       <div style={{ padding: "20px 24px", maxWidth: 720 }}>
         {!thread ? (

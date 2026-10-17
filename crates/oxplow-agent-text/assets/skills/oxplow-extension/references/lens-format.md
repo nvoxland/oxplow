@@ -53,11 +53,12 @@ query: |
   FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id
   WHERE w.state = 'blocked' AND t.stream_id = :stream_id
   ORDER BY w.updated_at DESC
-viz: table                      # table | list | number | markdown | bar | line | treemap | grid | custom
+viz: table                      # table | list | number | markdown | bar | line | treemap | document | dashboard | custom
 columns:                        # optional; controls headers, order and links
   - { key: title, label: Item, link: { kind: page, from: ref } }
   - { key: thread }
   # - { key: took, unit: unit }  # a number shown in another column's unit (ms, %, lines)
+  # - { key: created_at, format: relative, width: 120 }  # width in pixels; format is display only
 empty: Nothing is waiting on you.
 ```
 
@@ -79,13 +80,20 @@ empty: Nothing is waiting on you.
   - `treemap` draws nested rectangles: `chart: { label: <column>, size:
     <column>, group: <optional column> }`. A tile click follows the
     lens's first column link.
-  - `grid` stacks other lenses: `children: [slug, other-ext/slug]`. Each
-    child gets the params it declares from this lens's params.
+  - `document` is a wiki-style page of sections: `sections: [...]`. See
+    "Document and dashboard lenses" below.
+  - `dashboard` is a responsive grid of titled cards: `tiles: [...]`. See
+    "Document and dashboard lenses" below.
   - `custom` renders one of the
     extension's `custom_components` in a sandboxed frame: `custom: {
     component: <id>, props: { … } }`. It still needs a `query` — its rows
     are what the component gets and what an agent reads (as a table).
     Reach for it only when no built-in viz fits.
+- **`columns[].width` and `format`**: `width` is in pixels. The columns
+  without one share the rest. `format` is one of `date`, `datetime`,
+  `relative` (how long ago), `bytes`, `duration` (milliseconds),
+  `integer` or `percent` (a 0-1 fraction). `format` changes only what
+  the person sees. Agents read the raw values.
 - **`link.kind`** makes cells clickable:
   - `page` takes any page's ref — a work item's (`v_work_item.ref`),
     `commit:<sha>`, `page:git-dashboard`, ….
@@ -150,3 +158,80 @@ empty: Nothing is waiting on you.
   command you can't run (or that needs a person's confirmation, like
   approving an exec collector) is refused.
 - **Unknown keys are errors.** Only the keys shown here exist today.
+
+## Document and dashboard lenses
+
+A `document` or `dashboard` lens needs no `query`. It shows other lenses
+(and prose) as parts.
+
+```yaml
+# lenses/overview.yaml: a document
+title: Project overview
+params:
+  - { name: stream_id, label: Stream }
+viz: document
+sections:
+  - id: intro
+    markdown: |
+      What needs attention in this stream.
+  - lens: waiting-on-me
+  - lens: review/recent-commits
+    title: Latest commits
+```
+
+```yaml
+# lenses/health.yaml: a dashboard
+title: Health
+params:
+  - { name: stream_id, label: Stream }
+viz: dashboard
+tiles:
+  - lens: waiting-on-me
+  - lens: token-trend
+    size: wide
+```
+
+Each entry is `{ id?, title?, lens?, markdown?, size? }`:
+
+- Give exactly one of `lens` and `markdown`. `lens` is a slug in this
+  extension, or `<ext>/<slug>`.
+- `id` defaults to the lens slug. A markdown part needs an `id`. Ids are
+  unique in the lens. To show one lens twice, give one of them an `id`.
+- `title` defaults to the lens's title.
+- Each lens part runs with the params it declares, taken from the
+  document's or dashboard's params.
+- A `document` folds the sections with no rows into one line:
+  "Nothing found: ...".
+- `size` is `small` (default), `wide`, `tall` or `full`. A markdown tile
+  defaults to `full`. `size` is refused on a section.
+- `tiles` on a document, and `sections` on a dashboard, are refused.
+- A standalone lens spec (an agent answer from `oxplow_show_lens`) can't
+  be a `document` or `dashboard`.
+
+### Adding parts from another extension
+
+Another extension adds to a document or dashboard through a slot named
+`<extension>/<slug>.sections` (document) or `<extension>/<slug>.tiles`
+(dashboard), in `ui.slots`:
+`{ slot, lens, at?, title?, size? }`.
+
+```yaml
+# extension.yaml of the "audit" extension
+ui:
+  slots:
+    - slot: project/overview.sections
+      lens: stale-reviews
+      at: { after: intro }
+      title: Stale reviews
+```
+
+- `at` is `start`, `end` (default), `{ after: <part id> }` or
+  `{ before: <part id> }`. An `at` that names a part id the target
+  doesn't have is a load warning. The mount goes at the end.
+- The target's params are the slot's params. The mounted lens must
+  declare at least one of them (when the target has any).
+- The mounted part shows marked with the extension that added it.
+- Core pages have parts slots too: `new-session.sections` (part ids
+  `start` and `earlier`; binds `thread_id`).
+- `at` is refused on a core region slot, such as `work_item.detail.body`.
+  `size` is allowed only on a `.tiles` slot.

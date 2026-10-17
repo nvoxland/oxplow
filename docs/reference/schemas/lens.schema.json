@@ -148,13 +148,19 @@
       ],
       "default": null
     },
-    "children": {
-      "description": "For `grid`: lens slugs in this extension, or `<ext>/<slug>` ids.",
+    "sections": {
+      "description": "For `document`: its sections, each a lens (a slug in this\nextension, or `<ext>/<slug>`) or markdown.",
       "type": "array",
       "items": {
-        "type": "string"
-      },
-      "default": []
+        "$ref": "#/definitions/PartFile"
+      }
+    },
+    "tiles": {
+      "description": "For `dashboard`: its tiles.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/PartFile"
+      }
     },
     "launcher": {
       "anyOf": [
@@ -250,9 +256,14 @@
           "const": "treemap"
         },
         {
-          "description": "Other lenses (`children`), stacked, each given the params it\ndeclares from this lens's params.",
+          "description": "A page of sections (`sections`), wiki style: each another lens,\ngiven the params it declares from this lens's, or markdown. Other\nextensions add sections at `<extension>/<slug>.sections`.",
           "type": "string",
-          "const": "grid"
+          "const": "document"
+        },
+        {
+          "description": "A grid of tiles (`tiles`), each another lens (or markdown) at a\nsize, given the params it declares from this lens's. Other\nextensions add tiles at `<extension>/<slug>.tiles`.",
+          "type": "string",
+          "const": "dashboard"
         },
         {
           "description": "Rows nested by `tree.parent` (a row's parent is the row whose\n`tree.id` it names; none, or one not in the result, is a root),\neach shown as `tree.label`.",
@@ -420,6 +431,28 @@
             "null"
           ],
           "default": null
+        },
+        "width": {
+          "description": "Its width in pixels; the columns without one share the rest.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "default": null
+        },
+        "format": {
+          "description": "How its value reads; else as the query returned it (a timestamp in\nlocal time, a number with its `unit`).",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ColumnFormat"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,
@@ -514,6 +547,46 @@
           "description": "Two line ranges side by side: the value is\n`path:start-end|peer:start-end`; `head` names a column with the\nrevision to read (`working`, `snap:<id>`, `git:<rev>`; the working\ntree if absent).",
           "type": "string",
           "const": "compare"
+        }
+      ]
+    },
+    "ColumnFormat": {
+      "description": "How a column's value reads in the UI. An agent reads the raw value.",
+      "oneOf": [
+        {
+          "description": "A timestamp's date.",
+          "type": "string",
+          "const": "date"
+        },
+        {
+          "description": "A timestamp's date and time.",
+          "type": "string",
+          "const": "datetime"
+        },
+        {
+          "description": "A timestamp as how long ago (`3 h ago`).",
+          "type": "string",
+          "const": "relative"
+        },
+        {
+          "description": "A byte count (`1.2 MB`).",
+          "type": "string",
+          "const": "bytes"
+        },
+        {
+          "description": "Milliseconds as a duration (`1.4 s`, `3 m`).",
+          "type": "string",
+          "const": "duration"
+        },
+        {
+          "description": "A whole number with separators (`12,345`).",
+          "type": "string",
+          "const": "integer"
+        },
+        {
+          "description": "A fraction 0–1 as a percentage (`42%`).",
+          "type": "string",
+          "const": "percent"
         }
       ]
     },
@@ -746,6 +819,65 @@
       "additionalProperties": false,
       "required": [
         "by"
+      ]
+    },
+    "PartFile": {
+      "description": "A part as a lens file writes it (`sections:` / `tiles:` entries).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Defaults to its lens's slug; required for markdown.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "lens": {
+          "description": "A lens slug in this extension, or `<ext>/<slug>`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "markdown": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "size": {
+          "description": "A tile's size (`tiles:` only).",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TileSize"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "TileSize": {
+      "description": "How much of a dashboard a tile takes: one cell, two across, two down,\nor the whole row.",
+      "type": "string",
+      "enum": [
+        "small",
+        "wide",
+        "tall",
+        "full"
       ]
     },
     "LauncherFile": {

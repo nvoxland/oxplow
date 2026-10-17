@@ -3402,6 +3402,7 @@ export function App() {
         goForward: () => handleGoForward(tabId),
         canGoBack: entry.back.length > 0,
         canGoForward: entry.forward.length > 0,
+        pinned: !!tab.pinned,
         siblings: entry.siblings,
         goPrevSibling: entry.siblings && entry.siblings.index > 0
           ? () => handleStepSibling(tabId, entry.siblings!.index - 1)

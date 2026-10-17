@@ -124,13 +124,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     <Page
       testId="page-settings"
       title="Settings"
-      actions={
-        onClose ? (
-          <button type="button" onClick={onClose} style={buttonStyle}>
-            Close
-          </button>
-        ) : null
-      }
+      actions={onClose ? [{ id: "close", label: "Close", run: onClose }] : undefined}
     >
       <div style={{ padding: "20px 24px", maxWidth: 820 }}>
         <nav data-testid="settings-index" aria-label="Settings sections" style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 20 }}>

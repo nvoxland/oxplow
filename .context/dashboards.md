@@ -115,15 +115,17 @@ checklist:
 - **`custom-dashboard`** — payload-bearing (modeled on `metric`): the id
   is `custom-dashboard:dsh<n>`, `customDashboardRef(id)` carries the id in both
   the tab id and payload, and a **`refFromTabId` case** rebuilds it from a
-  history-restored tab (no payload). `CustomDashboardPage` uses `Page`
-  **`layout="full"`** + `titleInBody` and owns its own padding — a tile grid
-  wants every pixel, so it deliberately does **not** use the details layout
-  (whose 78ch reading column + 320px rail squeeze the grid; the rail version
+  history-restored tab (no payload). `CustomDashboardPage` uses `Page`'s
+  default full width + `titleInBody` and owns its own padding — a tile grid
+  wants every pixel, so it deliberately does **not** use the reading width
+  (whose 78ch column + 320px rail squeeze the grid; the rail version
   was reverted after review). The page renders its own **header row** instead:
   the editable title `<h1>` (`InlineEdit` → `renameDashboard`) on the left,
-  **+ Add metric** and a **Delete** `InlineConfirm` on the right. Body is a
-  responsive flow grid
-  (`grid-template-columns: repeat(auto-fill, minmax(320px, 1fr))`) of tiles;
+  **+ Add metric** and a **Delete** `InlineConfirm` on the right. Body is the
+  kit's tile grid (`TileGrid` / `TileSlot` / `Tile`, `src/kit/Tiles.tsx`:
+  `repeat(auto-fill, minmax(400px, 1fr))`, a slot spanning by its size) — the
+  same grid a `dashboard` lens draws, so a user dashboard and an extension's
+  look alike; the page adds drag-to-reorder on the slots;
   empty state is a dashed drop-zone card. Live-refreshes when `v_dashboard`
   / `v_dashboard_item` change (structure); the metric specs and catalog re-read when their models change
   (`useRerunOnChange`).
