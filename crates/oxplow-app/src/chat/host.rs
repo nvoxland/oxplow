@@ -59,6 +59,16 @@ pub trait ChatHost: Send + Sync + 'static {
     async fn compacted(&self, thread: &ThreadId, session_id: &str);
     /// A permission card is (or no longer is) waiting on the person.
     async fn awaiting_user(&self, thread: &ThreadId, question: Option<String>);
+    /// A child agent of the session started or finished. Recorded; oxplow
+    /// never drives the child.
+    async fn subagent(
+        &self,
+        thread: &ThreadId,
+        session_id: &str,
+        change: &super::conn::SubagentChange,
+        id: &str,
+        kind: Option<&str>,
+    );
     /// The agent put a plan to the person. Recorded; nothing waits on it.
     async fn plan_proposed(&self, thread: &ThreadId, session_id: &str, text: &str);
     /// The agent went away mid-session.
@@ -280,6 +290,34 @@ impl ChatHost for ServicesChatHost {
         {
             warn!(?err, "acp: naming the conversation failed");
         }
+    }
+
+    async fn subagent(
+        &self,
+        thread: &ThreadId,
+        session_id: &str,
+        change: &super::conn::SubagentChange,
+        id: &str,
+        kind: Option<&str>,
+    ) {
+        use super::conn::SubagentChange;
+        let Some(svc) = self.svc.upgrade() else {
+            return;
+        };
+        let (hook, said) = match change {
+            SubagentChange::Started => (HookKind::SubagentStart, None),
+            SubagentChange::Finished(said) => (HookKind::SubagentStop, said.as_deref()),
+        };
+        let mut body = serde_json::json!({ "session_id": session_id, "agent_id": id });
+        if let Some(said) = said {
+            body[crate::hook_ingest::LAST_ASSISTANT_MESSAGE] = serde_json::json!(said);
+        }
+        let mut env = self.envelope(hook, thread, session_id, body, None);
+        env.subagent = Some(oxplow_domain::agent::tool::Subagent {
+            id: id.to_string(),
+            kind: kind.map(str::to_string),
+        });
+        self.ingest(&svc, env).await;
     }
 
     async fn plan_proposed(&self, thread: &ThreadId, session_id: &str, text: &str) {

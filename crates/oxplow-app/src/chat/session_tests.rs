@@ -90,6 +90,20 @@ impl ChatHost for Host {
     async fn named(&self, _t: &ThreadId, _s: &str, title: &str) {
         self.log.lock().push(format!("named {title}"));
     }
+    async fn subagent(
+        &self,
+        _t: &ThreadId,
+        _s: &str,
+        change: &crate::chat::conn::SubagentChange,
+        id: &str,
+        _kind: Option<&str>,
+    ) {
+        let what = match change {
+            crate::chat::conn::SubagentChange::Started => "started",
+            crate::chat::conn::SubagentChange::Finished(_) => "finished",
+        };
+        self.log.lock().push(format!("subagent {what} {id}"));
+    }
     async fn plan_proposed(&self, _t: &ThreadId, _s: &str, text: &str) {
         self.log.lock().push(format!("plan {text}"));
     }

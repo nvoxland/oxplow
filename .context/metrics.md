@@ -1151,6 +1151,12 @@ effort (it stops at an existing `effort-lifecycle` capture).
 
 #### OTEL token tracking (tsk22)
 
+**A Codex collab agent's tokens are not counted.** Its work is a subagent of
+the parent's session (`agent-model.md` "Collab agents are subagents"), but
+its tokens are its own thread's `thread/tokenUsage/updated`, which the
+observer ignores; the parent turn's counts are the parent thread's alone.
+Per-subagent token facts are not recorded.
+
 Token facts come from **OpenTelemetry**, not transcript parsing. The old
 Stop-hook transcript parse overcounted ~2–3× (Claude writes one JSONL line per
 content block and repeats the message's cumulative `usage` on each; the parser

@@ -502,6 +502,32 @@ impl Actor {
             // says it waits.
             Incoming::Waiting(_) if self.replaying => {}
             Incoming::Waiting(question) => self.host.awaiting_user(self.thread(), question).await,
+            // A replayed history's children were recorded as they ran.
+            Incoming::Subagent { .. } | Incoming::ChildCall { .. } if self.replaying => {}
+            Incoming::Subagent { change, id, kind } => {
+                self.host
+                    .subagent(
+                        self.thread(),
+                        &self.session_id,
+                        &change,
+                        &id,
+                        kind.as_deref(),
+                    )
+                    .await
+            }
+            Incoming::ChildCall { child, call } => {
+                if let Some(mut use_) = mapping::tool_use(&call) {
+                    use_.subagent = Some(child);
+                    self.host
+                        .tool_finished(
+                            self.thread(),
+                            &self.session_id,
+                            &use_,
+                            &mapping::content(&call),
+                        )
+                        .await;
+                }
+            }
             // A replayed history's plan was recorded when it was proposed.
             Incoming::Plan(_) if self.replaying => {}
             Incoming::Plan(text) => {

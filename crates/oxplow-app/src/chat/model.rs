@@ -17,6 +17,8 @@ pub enum ToolKind {
     Think,
     Fetch,
     SwitchMode,
+    /// The agent drives a child agent (Codex's collab tools).
+    Subagent,
     #[default]
     Other,
 }

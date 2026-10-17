@@ -613,3 +613,96 @@ async fn a_permission_card_restores_the_status_it_interrupted() {
     host.awaiting_user(&thread, None).await;
     assert_eq!(status().await.0, AgentStatusState::Idle);
 }
+
+/// A Codex collab agent through the real host: it starts and finishes as a
+/// subagent of the parent's session, its finished edit is recorded as the
+/// subagent's, and the parent's turn ending while it runs leaves the
+/// parent working.
+#[tokio::test]
+async fn a_codex_child_agent_is_a_subagent_of_the_parents_session() {
+    use oxplow_app::chat::conn::SubagentChange;
+    use oxplow_app::chat::host::ChatHost as _;
+    use oxplow_domain::agent::tool::{Subagent, ToolKind, ToolUse};
+    use oxplow_domain::AgentStatusState;
+    let (svc, root, _dir) = boot().await;
+    let thread = seed(&svc, &root).await;
+    let session = session_of(&svc, thread).await;
+    let host = ServicesChatHost::new(&svc, Some(StreamId::new(1)), session);
+    let child = "01a14232-aaaa-7d40-8466-1ec0e927ef99";
+    host.turn_started(&thread, "native", "count the lines")
+        .await;
+    host.subagent(
+        &thread,
+        "native",
+        &SubagentChange::Started,
+        child,
+        Some("/root/worker"),
+    )
+    .await;
+    let edit = ToolUse {
+        name: "apply_patch".into(),
+        kind: ToolKind::Edit,
+        paths: vec!["a.txt".into()],
+        call_id: Some("k1".into()),
+        subagent: Some(Subagent {
+            id: child.into(),
+            kind: Some("/root/worker".into()),
+        }),
+        ..Default::default()
+    };
+    host.tool_finished(&thread, "native", &edit, &serde_json::json!({}))
+        .await;
+    // The parent's turn ends while the child runs.
+    host.turn_ended(&thread, "native", Some("done"), None, None)
+        .await;
+    let status = svc
+        .agent_status_store
+        .get(&thread, Some(session))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        status.state,
+        AgentStatusState::Running,
+        "a child is still at work"
+    );
+
+    let rows = || async {
+        svc.sql
+            .query_sql(
+                "SELECT id, kind, state, calls FROM v_subagent",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap()
+            .rows
+    };
+    assert_eq!(
+        rows().await,
+        [vec![
+            SqlCell::Text(child.into()),
+            SqlCell::Text("/root/worker".into()),
+            SqlCell::Text("running".into()),
+            SqlCell::Int(0),
+        ]],
+        "no tool-call row is projected without its consumer; the state is the bracket's"
+    );
+    host.subagent(
+        &thread,
+        "native",
+        &SubagentChange::Finished(Some("3 lines".into())),
+        child,
+        Some("/root/worker"),
+    )
+    .await;
+    let state = rows().await[0][2].clone();
+    assert_eq!(state, SqlCell::Text("finished".into()));
+    // The child's edit is on the record with the child's id.
+    let events = svc.event_log_store.read_after(0, 1000).await.unwrap();
+    let edit_event = events
+        .iter()
+        .find(|e| e.envelope.event_type == "agent.tool.finished")
+        .expect("the child's edit");
+    assert_eq!(edit_event.envelope.payload["subagent"]["id"], child);
+}

@@ -144,6 +144,7 @@ pub const BUILT_INS: &[BuiltIn] = &[
             "permission_prompts",
             "resume",
             "runtime_text",
+            "subagents",
             "conversation_list",
             "conversation_fork",
             "native_rename",

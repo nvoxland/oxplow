@@ -472,7 +472,7 @@ harness's features from `list_agent_harnesses` (`HarnessListing.features`):
 | Harness (key) | Features |
 |---|---|
 | Claude Code (`claude`) | terminal, permission_prompts, resume, transcript, telemetry, runtime_text, subagents, prompt_context, tool_context, conversation_list, conversation_fork |
-| Codex (`codex`) | terminal, permission_prompts, resume, runtime_text, conversation_list, conversation_fork, native_rename |
+| Codex (`codex`) | terminal, permission_prompts, resume, runtime_text, subagents, conversation_list, conversation_fork, native_rename |
 | opencode (`opencode`) | terminal, permission_prompts, resume, runtime_text, subagents, prompt_context, tool_context, conversation_list, conversation_fork |
 
 (`crates/oxplow-app/src/capabilities.rs`, the `harness(…)` built-ins.)
@@ -888,10 +888,47 @@ is the candidate for a mid-session channel; it is experimental and not
 used.
 
 **Pitfalls.** `/new` in the TUI starts a thread with the TUI's own
-config, which oxplow doesn't bind: use Start Fresh. Collab agents
-(`collabAgentToolCall`) aren't subagents here, and a compaction
+config, which oxplow doesn't bind: use Start Fresh. A compaction
 (`thread/compacted`, the `contextCompaction` item) resets no context
 baseline (there is no prompt channel to re-send them on); it is only logged.
+
+**Collab agents are subagents** (feature `subagents`). A Codex thread can
+spawn child agents, each its own thread on the daemon, and the daemon
+sends this client the child threads' notifications too. The observer
+(`chat/codex.rs`, `on_message`) maps what it sees; it never calls a collab
+tool and never starts, interrupts or closes a child, and a child gets no
+session slot, bearer or process of oxplow's:
+
+- `subAgentActivity` `started` / `completed` / `interrupted` on the
+  parent thread (`agentThreadId`, `agentPath`) become
+  `agent.subagent.started@1` / `.finished@1` (`Incoming::Subagent` →
+  `ChatHost::subagent` → a `SubagentStart` / `SubagentStop` hook), the
+  subagent's id the child thread's id and its kind the `agentPath`
+  (`/root/count_lines`). A `collabAgentToolCall`'s `agentsStates` do the
+  same for the children it names (a terminal state finishes one, with its
+  `message` as the result), once per child whichever item says it first.
+  Recorded 2026-10-16 on 0.162.1: a spawn shows only as a
+  `subAgentActivity` (no `spawnAgent` collab item); `wait` is a
+  `collabAgentToolCall` with no receivers.
+- A `collabAgentToolCall` is also the parent's own tool call, kind
+  `subagent`, named by its tool (`wait`, `spawnAgent`, …).
+- A child thread's **finished tool calls** (`item/completed` of a command,
+  a file change, an MCP call, …) are recorded in the parent's session as the
+  subagent's (`ToolUse.subagent`, `v_tool_call.subagent_id`), so its edits
+  are claimed by the parent's effort. Only those: a child's messages,
+  token counts, status and approval waits are its own thread's and do not
+  reach the parent (a child waiting on approval does not park the parent).
+  Which threads are children is learned from the parent's items, so a child's
+  messages before then are dropped.
+- The status rule holds as for Claude: the parent's turn ending with a
+  child still running leaves the session working.
+
+A child's tokens are not recorded: its `thread/tokenUsage/updated` is its
+own thread's and is ignored (per-subagent token facts are future work;
+`.context/metrics.md`). Pinned by `a_recorded_codex_collab_agent_is_attributed`
+(`tests/fixtures/codex/collab.jsonl`, a live spawn on 0.162.1),
+`a_collab_agent_is_a_subagent_of_the_thread` and
+`a_codex_child_agent_is_a_subagent_of_the_parents_session`.
 
 ## Observing
 
@@ -1160,7 +1197,7 @@ keeping an `awaiting_user` the turn set — and acks `{}`. Without
 ### Subagents
 
 **Who in a session acted.** A subagent (Claude Code's `Agent`/`Task`, an
-opencode child session) is not a session: it has
+opencode child session, a Codex collab agent) is not a session: it has
 no bearer and no process oxplow knows. It is who made a call inside its
 parent's session: `ToolUse.subagent { id, kind? }`, on
 `agent.tool.requested@3` / `agent.tool.finished@3` and
@@ -1388,7 +1425,8 @@ nothing: the record and its stamps are in the database. Pinned by the
 **Native messaging stays native, and is observed:** Claude Code's inbound
 cross-session message as its own kind of prompt (not the person's
 words, like a subagent's hand-back), and Codex's collab agents as
-subagents, are planned; neither is built. oxplow doesn't read Claude's
+subagents (built, "Collab agents are subagents"), are planned or built:
+the inbound message is not. oxplow doesn't read Claude's
 team mailboxes (not a documented interface).
 
 Cross-thread ownership and duplicate work are visibility, not gates

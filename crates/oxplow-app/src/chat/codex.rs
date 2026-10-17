@@ -25,7 +25,7 @@ use serde_json::{json, Value};
 use tokio::sync::{mpsc, watch};
 
 use super::acp::{cap, cap_value};
-use super::conn::{Connection, Incoming, Opened, TurnEnd, TurnTokens};
+use super::conn::{Connection, Incoming, Opened, SubagentChange, TurnEnd, TurnTokens};
 use super::human_prompt::HumanPrompt;
 use super::model::{
     ChatUpdate, ContextUsage, PlanEntry, PlanStatus, ToolCall, ToolKind, ToolStatus,
@@ -61,10 +61,22 @@ struct State {
     asked: Option<String>,
     /// The thread is waiting on the person (the status was reported).
     waiting: bool,
+    /// The child agents this thread drives (Codex's collab agents), by
+    /// their own thread's id: what passes of what their threads send.
+    children: std::collections::HashMap<String, Child>,
     /// The model and effort the thread has now: what it opened on, then
     /// what its settings changes made them; and the context fill its last
     /// `thread/tokenUsage/updated` said.
     run: TurnRun,
+}
+
+/// One child agent, as far as it has been seen.
+#[derive(Default)]
+struct Child {
+    /// Its role or path, when Codex said.
+    kind: Option<String>,
+    started: bool,
+    finished: bool,
 }
 
 /// The model and effort a thread opened on (`thread/start`, `resume` or
@@ -255,26 +267,184 @@ async fn pump(
         return;
     }
     while let Some(message) = messages.recv().await {
-        let ours = {
-            let s = state.lock();
-            s.thread.is_some() && message.thread_id() == s.thread.as_deref()
-        };
-        if !ours {
-            continue;
-        }
-        // A request (an approval, a question) is the TUI's to answer; what
-        // it asks is remembered for the wait the status reports.
-        let ServerMessage::Notification { method, params } = message else {
-            if let ServerMessage::Request { method, params, .. } = &message {
-                note_request(method, params, &mut state.lock());
-            }
-            continue;
-        };
-        for incoming in on_notification(&method, &params, &mut state.lock()) {
+        for incoming in on_message(&message, &mut state.lock()) {
             if tx.send(incoming).is_err() {
                 return;
             }
         }
+    }
+}
+
+/// What one daemon message makes of the thread: its own messages, those of
+/// a child agent it drives (only the child's finished tool calls), and the
+/// start of a child thread it spawned.
+fn on_message(message: &ServerMessage, state: &mut State) -> Vec<Incoming> {
+    let Some(ours) = state.thread.clone() else {
+        return Vec::new();
+    };
+    let thread = message.thread_id();
+    if thread == Some(ours.as_str()) {
+        // A request (an approval, a question) is the TUI's to answer; what
+        // it asks is remembered for the wait the status reports.
+        return match message {
+            ServerMessage::Notification { method, params } => {
+                on_notification(method, params, state)
+            }
+            ServerMessage::Request { method, params, .. } => {
+                note_request(method, params, state);
+                Vec::new()
+            }
+        };
+    }
+    if let ServerMessage::Notification { method, params } = message {
+        if let Some(child) = thread.filter(|t| state.children.contains_key(*t)) {
+            return on_child_notification(child, method, params, state);
+        }
+        if method == "thread/started" {
+            // The daemon says a thread began, and whose child it is.
+            let spawn = params.pointer("/thread/source/subAgent/thread_spawn");
+            let parent = spawn.and_then(|s| s.get("parent_thread_id")?.as_str());
+            if let (Some(id), true) = (
+                params.pointer("/thread/id").and_then(Value::as_str),
+                parent == Some(ours.as_str()),
+            ) {
+                let kind = ["agent_role", "agent_nickname"]
+                    .iter()
+                    .find_map(|k| spawn?.get(*k)?.as_str().filter(|s| !s.is_empty()))
+                    .map(str::to_string);
+                let child = state.children.entry(id.to_string()).or_default();
+                child.kind = child.kind.take().or(kind);
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// A child agent's finished tool call, as the child's. Its talk, tokens,
+/// status and waits are its own thread's, not the parent's.
+fn on_child_notification(child: &str, method: &str, p: &Value, state: &mut State) -> Vec<Incoming> {
+    if method != "item/completed" {
+        return Vec::new();
+    }
+    let Some(item) = p.get("item") else {
+        return Vec::new();
+    };
+    let id = item.get("id").and_then(Value::as_str).unwrap_or_default();
+    let ty = item.get("type").and_then(Value::as_str).unwrap_or_default();
+    if matches!(
+        ty,
+        "userMessage"
+            | "agentMessage"
+            | "reasoning"
+            | "plan"
+            | "hookPrompt"
+            | "contextCompaction"
+            | "enteredReviewMode"
+            | "exitedReviewMode"
+            | "sleep"
+            | "subAgentActivity"
+            | "collabAgentToolCall"
+    ) {
+        return Vec::new();
+    }
+    let Some(call) = tool_call(item, id.to_string(), true) else {
+        return Vec::new();
+    };
+    let kind = state.children.get(child).and_then(|c| c.kind.clone());
+    vec![Incoming::ChildCall {
+        child: oxplow_domain::agent::tool::Subagent {
+            id: child.to_string(),
+            kind,
+        },
+        call: Box::new(call),
+    }]
+}
+
+/// The lifecycle a child's state names, once each: `Started` the first
+/// time it is seen, `Finished` when it ends.
+fn child_changes(
+    state: &mut State,
+    id: &str,
+    kind: Option<String>,
+    status: &str,
+    said: Option<String>,
+) -> Vec<Incoming> {
+    let child = state.children.entry(id.to_string()).or_default();
+    child.kind = child.kind.take().or(kind);
+    let mut out = Vec::new();
+    let ended = matches!(
+        status,
+        "completed" | "interrupted" | "errored" | "shutdown" | "notFound"
+    );
+    if !child.started {
+        child.started = true;
+        out.push(Incoming::Subagent {
+            change: SubagentChange::Started,
+            id: id.to_string(),
+            kind: child.kind.clone(),
+        });
+    }
+    if ended && !child.finished {
+        child.finished = true;
+        out.push(Incoming::Subagent {
+            change: SubagentChange::Finished(
+                said.filter(|s| !s.trim().is_empty())
+                    .or_else(|| Some(status.to_string())),
+            ),
+            id: id.to_string(),
+            kind: child.kind.clone(),
+        });
+    }
+    out
+}
+
+/// A collab call or a child's activity item, as the lifecycle of the
+/// children it names.
+fn collab_lifecycle(item: &Value, state: &mut State) -> Vec<Incoming> {
+    match item.get("type").and_then(Value::as_str) {
+        Some("collabAgentToolCall") => {
+            let states = item.get("agentsStates").and_then(Value::as_object);
+            let mut out = Vec::new();
+            let ids = item
+                .get("receiverThreadIds")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str);
+            for id in ids {
+                let s = states.and_then(|m| m.get(id));
+                let status = s
+                    .and_then(|s| s.get("status")?.as_str())
+                    .unwrap_or("pendingInit");
+                // `notFound` names an id that never was a child.
+                if status == "notFound" && !state.children.contains_key(id) {
+                    continue;
+                }
+                let said = s
+                    .and_then(|s| s.get("message")?.as_str())
+                    .map(str::to_string);
+                out.extend(child_changes(state, id, None, status, said));
+            }
+            out
+        }
+        Some("subAgentActivity") => {
+            let Some(id) = item.get("agentThreadId").and_then(Value::as_str) else {
+                return Vec::new();
+            };
+            let kind = item
+                .get("agentPath")
+                .and_then(Value::as_str)
+                .filter(|p| !p.is_empty())
+                .map(str::to_string);
+            let status = match item.get("kind").and_then(Value::as_str) {
+                Some("completed") => "completed",
+                Some("interrupted") => "interrupted",
+                // Started, or talked to: it is running.
+                _ => "running",
+            };
+            child_changes(state, id, kind, status, None)
+        }
+        _ => Vec::new(),
     }
 }
 
@@ -361,13 +531,18 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
         {
             vec![Incoming::Compacted]
         }
-        "item/started" | "item/completed" => p
-            .get("item")
-            .map(|item| item_updates(item, method == "item/completed", &mut state.streamed))
-            .unwrap_or_default()
-            .into_iter()
-            .map(|u| Incoming::Update(Box::new(u)))
-            .collect(),
+        "item/started" | "item/completed" => {
+            let Some(item) = p.get("item") else {
+                return Vec::new();
+            };
+            let mut out: Vec<Incoming> =
+                item_updates(item, method == "item/completed", &mut state.streamed)
+                    .into_iter()
+                    .map(|u| Incoming::Update(Box::new(u)))
+                    .collect();
+            out.extend(collab_lifecycle(item, state));
+            out
+        }
         "item/agentMessage/delta" => {
             streamed(p, state);
             update(ChatUpdate::AgentChunk(text_of(p, "delta")))
@@ -517,7 +692,8 @@ fn item_updates(item: &Value, done: bool, streamed: &mut HashSet<String>) -> Vec
             }
         }
         "userMessage" | "agentMessage" | "reasoning" | "plan" | "hookPrompt"
-        | "contextCompaction" | "enteredReviewMode" | "exitedReviewMode" | "sleep" => Vec::new(),
+        | "contextCompaction" | "enteredReviewMode" | "exitedReviewMode" | "sleep"
+        | "subAgentActivity" => Vec::new(),
         _ => tool_call(item, id, done)
             .into_iter()
             .map(ChatUpdate::ToolCall)
@@ -646,6 +822,20 @@ fn tool_call(item: &Value, id: String, done: bool) -> Option<ToolCall> {
                 call.raw_output = Some(cap_value(r.clone()));
             }
         }
+        "collabAgentToolCall" => {
+            call.kind = ToolKind::Subagent;
+            call.name = Some(s("tool").to_string());
+            call.title = format!("Agent: {}", s("tool"));
+            call.raw_input = Some(json!({
+                "tool": item.get("tool"),
+                "prompt": item.get("prompt").map(|p| p.as_str().map_or(Value::Null, |p| json!(cap(p)))),
+                "receiverThreadIds": item.get("receiverThreadIds"),
+            }));
+            if status != ToolStatus::InProgress {
+                call.raw_output =
+                    Some(cap_value(json!({"agentsStates": item.get("agentsStates")})));
+            }
+        }
         "webSearch" => {
             call.kind = ToolKind::Fetch;
             call.title = format!("Search the web: {}", s("query"));
@@ -749,6 +939,198 @@ mod tests {
         assert!(plans(item("item/started", "1. a")).is_empty());
         assert!(plans(item("item/completed", "  ")).is_empty());
         assert_eq!(plans(item("item/completed", "1. a\n2. b")), ["1. a\n2. b"]);
+    }
+
+    const CHILD: &str = "01a14232-aaaa-7d40-8466-1ec0e927ef99";
+
+    /// The recorded collab thread (`tests/fixtures/codex/collab.jsonl`, Codex
+    /// 0.162.1): a parent that spawns one sub-agent to count a file's lines
+    /// and waits for it. The child's own notifications are in it.
+    #[test]
+    fn a_recorded_codex_collab_agent_is_attributed() {
+        const PARENT: &str = "01a1479e-91e3-7f41-aaa4-d869ae37eb7d";
+        const KID: &str = "01a1479e-ac05-71f0-8c17-da181af4fcc9";
+        let mut state = State {
+            thread: Some(PARENT.into()),
+            ..State::default()
+        };
+        let mut seen: Vec<String> = Vec::new();
+        for line in include_str!("../../tests/fixtures/codex/collab.jsonl")
+            .lines()
+            .skip(1)
+        {
+            let v: Value = serde_json::from_str(line).unwrap();
+            let message = ServerMessage::Notification {
+                method: v["method"].as_str().unwrap().into(),
+                params: v["params"].clone(),
+            };
+            for incoming in on_message(&message, &mut state) {
+                seen.push(match incoming {
+                    Incoming::Subagent {
+                        change: SubagentChange::Started,
+                        id,
+                        kind,
+                    } => {
+                        format!("started {id} {}", kind.unwrap_or_default())
+                    }
+                    Incoming::Subagent {
+                        change: SubagentChange::Finished(_),
+                        id,
+                        ..
+                    } => {
+                        format!("finished {id}")
+                    }
+                    Incoming::ChildCall { child, call } => {
+                        format!(
+                            "child {} {:?} {}",
+                            child.id,
+                            call.kind,
+                            call.title.contains("wc -l")
+                        )
+                    }
+                    Incoming::Waiting(_) => "waiting".into(),
+                    Incoming::PromptDone(_) => "turn done".into(),
+                    Incoming::Update(u) => match *u {
+                        ChatUpdate::ToolCall(t) if t.kind == ToolKind::Subagent => {
+                            format!("collab {}", t.name.unwrap_or_default())
+                        }
+                        _ => continue,
+                    },
+                    _ => continue,
+                });
+            }
+        }
+        assert_eq!(
+            seen,
+            [
+                format!("started {KID} /root/count_lines"),
+                "collab wait".to_string(),
+                format!("child {KID} Execute true"),
+                // The child's finished turn is not the parent's; the parent's
+                // own turn end is the only one.
+                format!("finished {KID}"),
+                "collab wait".to_string(),
+                "turn done".to_string(),
+            ],
+            "start, the child's command, finish, in order; the wait is the parent's own call"
+        );
+    }
+
+    fn note(method: &str, params: Value) -> ServerMessage {
+        ServerMessage::Notification {
+            method: method.into(),
+            params,
+        }
+    }
+
+    /// What a message makes of a parent thread with a child agent: the
+    /// collab call is the parent's own tool call; the child's start and end
+    /// bracket a subagent; the child's finished tool calls are the
+    /// subagent's, whose own talk, tokens and waits are not the parent's.
+    /// Observed only: nothing is sent to the child.
+    #[test]
+    fn a_collab_agent_is_a_subagent_of_the_thread() {
+        let mut state = State {
+            thread: Some(THREAD.into()),
+            ..State::default()
+        };
+        let mut all = |m: ServerMessage| on_message(&m, &mut state);
+        let subagents = |v: &[Incoming]| -> Vec<(String, bool)> {
+            v.iter()
+                .filter_map(|i| match i {
+                    Incoming::Subagent { change, id, .. } => {
+                        Some((id.clone(), matches!(change, SubagentChange::Finished(_))))
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        // The parent's spawn call: its own tool call, in oxplow's words a
+        // subagent call, naming the child.
+        let spawn = json!({"threadId": THREAD, "item": {
+            "type": "collabAgentToolCall", "id": "c1", "tool": "spawnAgent",
+            "status": "completed", "senderThreadId": THREAD,
+            "receiverThreadIds": [CHILD], "prompt": "count the lines",
+            "agentsStates": {CHILD: {"status": "pendingInit"}}}});
+        let got = all(note("item/completed", spawn));
+        let call = got
+            .iter()
+            .find_map(|i| match i {
+                Incoming::Update(u) => match &**u {
+                    ChatUpdate::ToolCall(t) => Some(t.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("the collab call is a tool call");
+        assert_eq!(call.kind, ToolKind::Subagent);
+        assert_eq!(call.name.as_deref(), Some("spawnAgent"));
+        assert_eq!(
+            subagents(&got),
+            [(CHILD.to_string(), false)],
+            "pending: started"
+        );
+
+        // The same child again says nothing new.
+        let started = json!({"threadId": THREAD, "item": {
+            "type": "subAgentActivity", "id": "a1", "kind": "started",
+            "agentThreadId": CHILD, "agentPath": "/root/worker"}});
+        assert!(subagents(&all(note("item/completed", started))).is_empty());
+
+        // The child's finished command is the subagent's; its talk,
+        // tokens and waits are not the parent's.
+        let ran = json!({"threadId": CHILD, "item": {
+            "type": "commandExecution", "id": "k1", "status": "completed",
+            "command": "wc -l a.txt", "cwd": "/w", "exitCode": 0,
+            "aggregatedOutput": "3 a.txt", "commandActions": []}});
+        let got = all(note("item/completed", ran));
+        let [Incoming::ChildCall { child, call }] = got.as_slice() else {
+            panic!("not one child call: {} messages", got.len())
+        };
+        assert_eq!(child.id, CHILD);
+        assert_eq!(call.kind, ToolKind::Execute);
+        for quiet in [
+            note(
+                "item/completed",
+                json!({"threadId": CHILD, "item": {"type": "agentMessage", "id": "m", "text": "hi"}}),
+            ),
+            note(
+                "thread/status/changed",
+                json!({"threadId": CHILD, "status": {"type": "active", "activeFlags": ["waitingOnApproval"]}}),
+            ),
+            note(
+                "turn/completed",
+                json!({"threadId": CHILD, "turn": {"status": "completed"}}),
+            ),
+        ] {
+            assert!(all(quiet).is_empty());
+        }
+        // A thread that is nobody's child stays out.
+        assert!(all(note("item/completed", json!({"threadId": "other", "item": {"type": "commandExecution", "id": "z", "status": "completed", "command": "ls"}}))).is_empty());
+
+        // It finishes, saying what it said last.
+        let done = json!({"threadId": THREAD, "item": {
+            "type": "collabAgentToolCall", "id": "c2", "tool": "wait",
+            "status": "completed", "senderThreadId": THREAD,
+            "receiverThreadIds": [CHILD],
+            "agentsStates": {CHILD: {"status": "completed", "message": "3 lines"}}}});
+        let got = all(note("item/completed", done));
+        let finished: Vec<_> = got
+            .iter()
+            .filter_map(|i| match i {
+                Incoming::Subagent {
+                    change: SubagentChange::Finished(said),
+                    ..
+                } => said.clone(),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(finished, ["3 lines"]);
+        // And only once.
+        let activity = json!({"threadId": THREAD, "item": {
+            "type": "subAgentActivity", "id": "a2", "kind": "completed",
+            "agentThreadId": CHILD, "agentPath": "/root/worker"}});
+        assert!(subagents(&all(note("item/completed", activity))).is_empty());
     }
 
     fn status(flags: &[&str]) -> Value {

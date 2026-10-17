@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use oxplow_domain::hook::TurnRun;
 
 use super::human_prompt::HumanPrompt;
-use super::model::{ChatUpdate, PermissionAnswer, PermissionAsk};
+use super::model::{ChatUpdate, PermissionAnswer, PermissionAsk, ToolCall};
 
 /// The agent's side of one session.
 #[async_trait]
@@ -77,8 +77,32 @@ pub enum Incoming {
     /// The agent summarized its context to make room (Codex's
     /// `contextCompaction` item). Observed only.
     Compacted,
+    /// A child agent of the thread started or finished (Codex's collab
+    /// agents). Observed only: nothing here calls a collab tool or starts,
+    /// interrupts or closes a child.
+    Subagent {
+        change: SubagentChange,
+        id: String,
+        /// What kind it is (its role or path), when Codex says.
+        kind: Option<String>,
+    },
+    /// A tool call a child agent finished, in the child's own thread:
+    /// recorded as the child's, in the parent's session.
+    ChildCall {
+        child: oxplow_domain::agent::tool::Subagent,
+        call: Box<ToolCall>,
+    },
     /// The turn in flight finished (or failed).
     PromptDone(Result<TurnEnd, String>),
+}
+
+/// A child agent's change of state.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SubagentChange {
+    Started,
+    /// It finished (completed, interrupted, errored, shut down): what it
+    /// said last, or why it ended.
+    Finished(Option<String>),
 }
 
 /// How a turn ended.

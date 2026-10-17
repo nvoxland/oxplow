@@ -40,6 +40,7 @@ pub fn tool_use(t: &ToolCall) -> Option<ToolUse> {
         ToolKind::Search => Kind::Search,
         ToolKind::Execute => Kind::Shell,
         ToolKind::Fetch => Kind::Fetch,
+        ToolKind::Subagent => Kind::Subagent,
         ToolKind::Other => Kind::Other,
     };
     let input = |keys: &[&str]| {
