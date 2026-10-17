@@ -82,7 +82,7 @@ describe("row groups and styling", () => {
       ["Ready", "Ready", ["a", "c"]],
       ["Done", "Done", ["b"]],
     ]);
-    expect(groups[0]!.ref?.id).toBe("page:tasks");
+    expect(groups[0]!.ref).toBe("page:tasks");
     expect(groups[1]!.ref).toBeNull();
   });
 
@@ -116,7 +116,7 @@ describe("cellLinkRef", () => {
   const row = [42, "Fix it", "src/a.ts", "auth-flow", "effort:eff7"];
 
   test("a page link reads its ref from `from`", () => {
-    expect(cellLinkRef({ kind: "page", from: "ref", line: null, base: null, head: null }, "title", [...row, "work_item:issues:E-1"], [...cols, "ref"])?.id).toBe("work_item:issues:E-1");
+    expect(cellLinkRef({ kind: "page", from: "ref", line: null, base: null, head: null }, "title", [...row, "work_item:issues:E-1"], [...cols, "ref"])).toBe("work_item:issues:E-1");
   });
   test("file / wiki / effort-diff links default to the column itself", () => {
     expect(cellLinkRef({ kind: "file", from: null, line: null, base: null, head: null }, "path", row, cols)?.id).toBe("file:src/a.ts");
@@ -426,9 +426,10 @@ test("a slot can be narrowed to one extension, and lists who mounts there", () =
   expect(slotExtensions(exts, "settings.section")).toEqual(["a", "b"]);
 });
 
-test("page links open any oxplow page by its tab id", () => {
-  expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["work_item:oxplow:tsk3"], ["p"])?.id).toBe("work_item:oxplow:tsk3");
-  expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["page:git-dashboard"], ["p"])?.kind).toBe("git-dashboard");
+test("page links name any ref, which opens where its kind's page says", () => {
+  expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["work_item:oxplow:tsk3"], ["p"])).toBe("work_item:oxplow:tsk3");
+  expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["page:git-dashboard"], ["p"])).toBe("page:git-dashboard");
+  expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["handoff:hnd1"], ["p"])).toBe("handoff:hnd1");
 });
 
 const result = (columns: string[], rows: (string | number | null)[][]) => ({

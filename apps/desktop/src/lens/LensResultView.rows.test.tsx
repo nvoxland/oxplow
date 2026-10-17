@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { Lens, LensLink, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { CONTEXT_REF_MIME } from "../dragMimes.js";
+import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
 
 // Lens rows can be grouped under headings (with actions there),
 // styled from their own columns, and dragged into the agent's context.
@@ -160,4 +161,25 @@ test("a lens that needs a capability that isn't active says so instead of showin
   const view = render(<LensResultView run={run} compact onOpenPage={() => {}} />);
   expect(view.getByTestId("lens-inactive").textContent).toContain("Needs: Work list");
   expect(view.queryByTestId("lens-row-0")).toBeNull();
+});
+
+// A cell or heading that links to a ref opens it where its kind's page
+// says (`openRef`), whatever the kind: a handoff, a note, an extension's.
+test("a link to a ref of any kind opens through the page's openRef", () => {
+  const opened: Array<[string, boolean | undefined]> = [];
+  const nav = {
+    navigate: () => {},
+    openRef: (ref: string, how?: { newTab?: boolean }) => opened.push([ref, how?.newTab]),
+  } as unknown as PageNavigation;
+  const view = render(
+    <PageNavigationContext.Provider value={nav}>
+      <LensResultView run={runOf(grouped)} compact />
+    </PageNavigationContext.Provider>,
+  );
+  fireEvent.click(view.getByTestId("lens-row-2").querySelector("button")!);
+  fireEvent.click(view.getAllByTestId("lens-group-link")[0]!, { metaKey: true });
+  expect(opened).toEqual([
+    ["work_item:oxplow:tsk3", false],
+    ["page:tasks", true],
+  ]);
 });

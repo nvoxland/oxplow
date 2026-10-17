@@ -14,12 +14,16 @@ import { ResultCompleteness } from "./ResultCompleteness.js";
 import { SchemaForm } from "../components/SchemaForm/SchemaForm.js";
 import { fieldErrors, needsConfirmation } from "../ipc-error.js";
 import { RouteLink } from "../tabs/RouteLink.js";
-import { refFromTabId } from "../tabs/pageRefs.js";
+import { parseRef } from "../refs/ref.js";
+import { openRefInWindow } from "../tabs/openRef.js";
+import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import {
   barRows,
   cellLinkRef,
   childParams,
+  linkTargetId,
+  type LinkTarget,
   displayColumns,
   formatCell,
   foldEmpty,
@@ -245,7 +249,7 @@ function RowsBody({
   const linkedRefs = result.rows.flatMap((row) =>
     lens.columns.flatMap((c) => {
       const ref = c.link ? cellLinkRef(c.link, c.key, row, result.columns) : null;
-      return ref ? [ref.id] : [];
+      return ref ? [linkTargetId(ref)] : [];
     }),
   );
   const badges = useDecorations("row-badge", linkedRefs);
@@ -267,9 +271,9 @@ function RowsBody({
     const tone = toneColor(toneName);
     const icon = c.iconIndex === null ? null : lensIcon(row[c.iconIndex] ?? null);
     const ref = c.link ? cellLinkRef(c.link, c.key, row, result.columns) : null;
-    const mine = ref ? badges.filter((b) => b.ref === ref.id) : [];
+    const mine = ref ? badges.filter((b) => b.ref === linkTargetId(ref)) : [];
     const body = ref ? (
-      <RouteLink to={ref} onNavigate={onOpenPage ? () => onOpenPage(ref) : undefined} style={tone ? { ...linkStyle, color: tone } : linkStyle}>
+      <RouteLink to={ref} onNavigate={tabNavigate(ref, onOpenPage)} style={tone ? { ...linkStyle, color: tone } : linkStyle}>
         {text}
       </RouteLink>
     ) : (
@@ -392,7 +396,7 @@ function GroupHeading({
         <RouteLink
           to={ref}
           testId="lens-group-link"
-          onNavigate={onOpenPage ? () => onOpenPage(ref) : undefined}
+          onNavigate={tabNavigate(ref, onOpenPage)}
           style={{ ...linkStyle, color: "inherit", letterSpacing: "inherit", textTransform: "inherit" }}
         >
           {group.label}
@@ -731,6 +735,13 @@ function TreeItem({ node, ...rest }: TreeVizProps & { node: TreeNode }) {
   );
 }
 
+/** What a link's `onNavigate` is: a page built from the row goes to the
+ *  host's opener when one is given; a ref string always opens through
+ *  `openRef`. */
+function tabNavigate(target: LinkTarget, onOpenPage?: (ref: TabRef) => void): (() => void) | undefined {
+  return typeof target !== "string" && onOpenPage ? () => onOpenPage(target) : undefined;
+}
+
 /** `timeline`: entries oldest first, each linked through its ref. */
 function TimelineViz({
   entries,
@@ -744,13 +755,13 @@ function TimelineViz({
   return (
     <ol data-testid="lens-timeline" style={{ listStyle: "none", padding: 0, margin: 0, borderLeft: "2px solid var(--border-subtle)" }}>
       {entries.map((e, i) => {
-        const ref = e.ref ? refFromTabId(e.ref) : null;
+        const ref = e.ref && parseRef(e.ref) ? e.ref : null;
         return (
           <li key={i} data-testid={`lens-timeline-entry-${i}`} style={{ padding: "4px 0 4px 12px" }} {...rowMenu(e.row)}>
             <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{e.at}</div>
             <div>
               {ref ? (
-                <RouteLink to={ref} onNavigate={onOpenPage ? () => onOpenPage(ref) : undefined} style={linkStyle}>
+                <RouteLink to={ref} style={linkStyle}>
                   {e.label}
                 </RouteLink>
               ) : (
@@ -871,6 +882,7 @@ const TREEMAP_PALETTE = Array.from({ length: 8 }, (_, i) => `var(--chart-${i + 1
 /** Two-level squarified treemap: groups first (by total size), then
  *  items inside each group. A tile follows the lens's first column link. */
 function TreemapViz({ run, onOpenPage }: { run: LensRun; onOpenPage?(ref: TabRef): void }) {
+  const nav = useOptionalPageNavigation();
   const items = treemapItems(run.lens, run.result);
   const groups = new Map<string, typeof items>();
   for (const it of items) {
@@ -890,7 +902,8 @@ function TreemapViz({ run, onOpenPage }: { run: LensRun; onOpenPage?(ref: TabRef
   const open = (row: SqlCell[]) => {
     if (!linkCol?.link) return;
     const ref = cellLinkRef(linkCol.link, linkCol.key, row, run.result.columns);
-    if (ref) onOpenPage?.(ref);
+    if (typeof ref === "string") (nav?.openRef ?? openRefInWindow)(ref, {});
+    else if (ref) onOpenPage?.(ref);
   };
   return (
     <div data-testid="lens-treemap">

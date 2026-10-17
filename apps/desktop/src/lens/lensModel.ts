@@ -7,7 +7,7 @@
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import type { Extension, Lens, LensChart, LensLink, LensRun, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/RailHud/sections.js";
-import { computeDiffId, duplicateBlockRef, effortDiffRef, refFromTabId, fileRef, gitCommitRef, lensRef, metricRef, wikiPageRef } from "../tabs/pageRefs.js";
+import { computeDiffId, duplicateBlockRef, effortDiffRef, fileRef, gitCommitRef, lensRef, metricRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { formatContextMention, type ContextRef } from "../agent-context-ref.js";
@@ -71,7 +71,7 @@ export interface RowGroup {
   key: string;
   label: string;
   rows: SqlCell[][];
-  ref: TabRef | null;
+  ref: LinkTarget | null;
 }
 
 /** A grouped lens's rows under a heading per distinct `group.by` value,
@@ -137,7 +137,17 @@ export function rowContextRef(lens: Lens, columns: string[], row: SqlCell[]): Co
   return { kind: "ref", ref };
 }
 
-/** The page a linked cell opens, or null when the target value is
+/** Where a linked cell opens: a page built from the row (a file at a
+ *  line, a diff between two revisions), or a ref string, which opens
+ *  where its kind's page says (`openRef`). */
+export type LinkTarget = TabRef | string;
+
+/** The ref a target is, for what keys on one (badges, Ask About This). */
+export function linkTargetId(target: LinkTarget): string {
+  return typeof target === "string" ? target : target.id;
+}
+
+/** Where a linked cell opens, or null when the target value is
  *  missing. `link.from` names the column holding the target id and
  *  defaults to the cell's own column. */
 export function cellLinkRef(
@@ -145,7 +155,7 @@ export function cellLinkRef(
   columnKey: string,
   row: SqlCell[],
   resultColumns: string[],
-): TabRef | null {
+): LinkTarget | null {
   const idx = resultColumns.indexOf(link.from ?? columnKey);
   if (idx === -1) return null;
   const v = row[idx];
@@ -163,7 +173,8 @@ export function cellLinkRef(
     case "metric":
       return metricRef(s);
     case "page":
-      return refFromTabId(s);
+      // Any ref: the registry says where its kind opens.
+      return parseRef(s) ? s : null;
     case "diff-at": {
       const at = (col: string | null) => {
         const i = col ? resultColumns.indexOf(col) : -1;
@@ -369,7 +380,7 @@ export function rowMention(lensId: string, columns: string[], row: SqlCell[]): s
 export function rowRef(lens: Lens, columns: string[], row: SqlCell[]): string | null {
   for (const c of lens.columns) {
     const ref = c.link ? cellLinkRef(c.link, c.key, row, columns) : null;
-    if (ref && parseRef(ref.id)) return ref.id;
+    if (ref && parseRef(linkTargetId(ref))) return linkTargetId(ref);
   }
   return null;
 }
