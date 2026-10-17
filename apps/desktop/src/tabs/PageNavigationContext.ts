@@ -58,6 +58,12 @@ export interface PageNavigation {
    * the option, since there's no "current" tab to navigate within.
    */
   navigate(ref: TabRef, opts?: NavigateOptions): void;
+  /**
+   * Open the ref `ref` (of any kind) where its kind's page says: a tab
+   * here or a new one, a selected thread, a shown stream
+   * (`tabs/openRef.ts`). The one way a link to a ref string opens.
+   */
+  openRef?(ref: string, how?: NavigateOptions): void;
   goBack(): void;
   goForward(): void;
   canGoBack: boolean;

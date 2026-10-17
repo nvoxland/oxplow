@@ -3,10 +3,12 @@ import { useCallback, useMemo } from "react";
 import type { TabRef } from "./tabState.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
 import type { NavSiblings } from "./PageNavigationContext.js";
+import { openRefInWindow } from "./openRef.js";
 
 /**
- * Browser-style click semantics for any element that points at a
- * `TabRef`. Returns a `dispatch(newTab)` function plus a bundle of
+ * Browser-style click semantics for any element that points at a page:
+ * a `TabRef`, or a ref string of any kind, which opens where its kind's
+ * page says (`openRef`; a note opens its thread). Returns a `dispatch(newTab)` function plus a bundle of
  * mouse event handlers that map plain-click → in-tab navigate,
  * cmd/ctrl-click + middle-click + right-click → open in a new tab.
  *
@@ -19,7 +21,7 @@ import type { NavSiblings } from "./PageNavigationContext.js";
  * supplied — there's no current tab to navigate within.
  */
 export function useRouteDispatch(
-  ref: TabRef,
+  ref: TabRef | string,
   options: {
     onNavigate?: (ref: TabRef, opts?: { newTab?: boolean }) => void;
     pinnedSlot?: boolean;
@@ -37,6 +39,13 @@ export function useRouteDispatch(
   const ctxNav = useOptionalPageNavigation();
   const dispatch = useCallback((newTab: boolean) => {
     const escape = newTab || pinnedSlot;
+    // A ref string opens through the registry, wherever the link sits.
+    if (typeof ref === "string") {
+      const how = { newTab: escape, siblings: escape ? undefined : siblings };
+      if (ctxNav?.openRef) ctxNav.openRef(ref, how);
+      else openRefInWindow(ref, how);
+      return;
+    }
     // Context-first: when this link sits inside a page that supplies a
     // `PageNavigationContext`, route through it so plain-click does in-
     // tab navigation. Outside a page (rail / palette), fall back to the
@@ -81,7 +90,7 @@ export function useRouteDispatch(
 export interface RouteLinkProps {
   // NOT `ref` — that's a reserved prop React 18 strips from function components
   // (it never reaches this component), so the destination MUST use another name.
-  to: TabRef;
+  to: TabRef | string;
   children: ReactNode;
   /**
    * Fallback navigation — used only when no `PageNavigationContext`

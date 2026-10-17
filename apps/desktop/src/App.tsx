@@ -191,6 +191,7 @@ import type { WhenContext } from "./when.js";
 import { runLocally, startClientHost, type ClientCallContext, type ClientCallRef, type ClientHandlers } from "./clientHost.js";
 import { streamOfThread, withTab, withoutTab } from "./tabs/threadTabOps.js";
 import { planNavigation } from "./tabs/navigation.js";
+import { openRef as openRefAt, setWindowRefOpener } from "./tabs/openRef.js";
 import { usePersonCommands } from "./personCommandsStore.js";
 import { personCommands } from "./personCommands.js";
 import { getUiClientId, logUi, setUiLogContext } from "./logger.js";
@@ -1850,20 +1851,41 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handleOpenFile, handleOpenWiki, selectedThreadId, selectedThreadWork, setCenterActive, stream?.id]);
 
-  /** Navigate to a unified-search hit: wherever its ref opens
-   *  (`tabs/refOpener.ts`, by way of `planNavigation`) — a page here, or
-   *  the thread or stream it names. A hit whose ref opens nothing does
-   *  nothing. */
+  /**
+   * Open the ref `ref` (of any kind) where its kind's page says
+   * (`tabs/openRef.ts`, by way of `refOpener`): a tab through `open`, the
+   * thread or stream it names, or an error. The one path every link to a
+   * ref takes — a page's links (`PageNavigation.openRef`), the rail and
+   * palette (the window's opener), a search hit. Kept in a ref so the
+   * page contexts built in a memo always call the latest.
+   */
+  const openRefRef = useRef<(ref: string, how: import("./tabs/openRef.js").OpenHow, open: import("./tabs/openRef.js").RefHost["open"]) => void>(() => {});
+  openRefRef.current = (ref, how, open) => {
+    void openRefAt(ref, how, {
+      open,
+      showThread: async (thread) => {
+        const streamId = streamOfThread(threadStatesRef.current, thread);
+        if (!streamId) return false;
+        await handleSelectThread(streamId, thread);
+        return true;
+      },
+      showStream: async (id) => {
+        if (!threadStatesRef.current[id]) return false;
+        if (stream?.id !== id) await handleSwitch(id);
+        return true;
+      },
+      failed: (message) => recordOpError({ label: "Open a reference", message }),
+    });
+  };
+  useEffect(() => {
+    setWindowRefOpener((ref, how) => openRefRef.current(ref, how, (tab) => handleOpenPageRef.current?.(tab)));
+    return () => setWindowRefOpener(null);
+  }, []);
+
+  /** Navigate to a unified-search hit: wherever its ref opens. */
   const openSearchHit = useCallback((hit: import("./api.js").SearchHit) => {
-    void (async () => {
-      const plan = await planNavigation({ ref: hit.ref }, threadStatesRef.current, stream?.id ?? null);
-      if (stream?.id !== plan.streamId) await handleSwitch(plan.streamId);
-      if (plan.selectThread && plan.threadId) await handleSelectThread(plan.streamId, plan.threadId);
-      if (plan.page) handleOpenPage(plan.page);
-    })().catch(() => undefined);
-    // handleSwitch / handleSelectThread are plain functions over state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleOpenPage, stream?.id]);
+    openRefRef.current(hit.ref, { newTab: true }, (tab) => handleOpenPage(tab));
+  }, [handleOpenPage]);
 
   /**
    * Browser-style in-tab navigation. Replaces the page tab whose
@@ -3343,6 +3365,11 @@ export function App() {
           if (opts?.newTab) handleOpenPage(newRef);
           else handleNavigateInTab(tabId, newRef, opts?.siblings);
         },
+        openRef: (target: string, how?: { newTab?: boolean; siblings?: import("./tabs/PageNavigationContext.js").NavSiblings }) =>
+          openRefRef.current(target, how ?? {}, (tab, h) => {
+            if (h.newTab) handleOpenPage(tab);
+            else handleNavigateInTab(tabId, tab, h.siblings);
+          }),
         goBack: () => handleGoBack(tabId),
         goForward: () => handleGoForward(tabId),
         canGoBack: entry.back.length > 0,
