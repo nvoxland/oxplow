@@ -11,13 +11,14 @@ import { useEffect, useRef, useState } from "react";
 
 import { invokeComponentCommand, loadComponent, recordUsage, runComponentQuery, subscribeOxplowEvents } from "../api.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
-import type { TabRef } from "../tabs/tabState.js";
+import { openRefInWindow } from "../tabs/openRef.js";
+import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { remoteBaseUrl } from "../tauri-bridge/transport.js";
 import type { LensRun } from "../tauri-bridge/generated/bindings.js";
 import { lensDefinitionChanged } from "./lensRerun.js";
 import {
   componentBundleUrl,
-  componentNavigationTarget,
+  componentMayOpen,
   componentRefusal,
   createBridgeHost,
   initMessage,
@@ -27,7 +28,6 @@ import {
 export function CustomComponentViz({
   run,
   streamId,
-  onOpenPage,
   fallback,
   onFailure,
   onReady,
@@ -36,7 +36,6 @@ export function CustomComponentViz({
 }: {
   run: LensRun;
   streamId: string | null;
-  onOpenPage?(ref: TabRef, opts?: { newTab?: boolean }): void;
   /** The lens's table: shown when the component can't be. */
   fallback: ReactNode;
   /** Told why when the component can't be shown — and then it shows
@@ -135,7 +134,6 @@ export function CustomComponentViz({
         component={component}
         run={run}
         streamId={streamId}
-        onOpenPage={onOpenPage}
         readyTimeoutMs={readyTimeoutMs}
         onFail={(why) => setFailed({ src, reason: why })}
         onReady={onReady}
@@ -151,7 +149,6 @@ function ComponentFrame({
   component,
   run,
   streamId,
-  onOpenPage,
   readyTimeoutMs,
   onFail,
   onReady,
@@ -162,11 +159,11 @@ function ComponentFrame({
   component: string;
   run: LensRun;
   streamId: string | null;
-  onOpenPage?(ref: TabRef, opts?: { newTab?: boolean }): void;
   readyTimeoutMs: number;
   onFail(reason: string): void;
   onReady?(): void;
 }) {
+  const nav = useOptionalPageNavigation();
   const [asking, setAsking] = useState<{ command: string; answer(ok: boolean): void } | null>(null);
   // Why its last invoke was refused: shown here, not left to the frame.
   const [refused, setRefused] = useState<string | null>(null);
@@ -221,9 +218,9 @@ function ComponentFrame({
           }
         },
         navigate: (ref, opts) => {
-          const tab = componentNavigationTarget(ref);
-          if (tab) onOpenPage?.(tab, opts);
-          return tab !== null;
+          if (!componentMayOpen(ref)) return false;
+          (nav?.openRef ?? openRefInWindow)(ref, opts);
+          return true;
         },
         confirm: (command) => new Promise<boolean>((answer) => setAsking({ command, answer })),
         onReady: () => {

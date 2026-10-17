@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { IpcCallError } from "../ipc-error.js";
 import type { LensRun } from "../tauri-bridge/generated/bindings.js";
-import { componentBundleUrl, componentNavigationTarget, componentRefusal, createBridgeHost, initMessage, parseFrameMessage, tokensFromStyle } from "./componentBridge.js";
+import { componentBundleUrl, componentMayOpen, componentRefusal, createBridgeHost, initMessage, parseFrameMessage, tokensFromStyle } from "./componentBridge.js";
 
 // P6b.D4: a custom component talks to the host over a MessageChannel —
 // three requests (query, invoke, navigate) and a `ready`; everything else
@@ -174,10 +174,11 @@ test("ready is heard once; an update posts only a result the frame hasn't seen",
 // A component reaches no network, so it may not open an outside URL by
 // navigating the host: only app pages, and a refused navigate is answered.
 test("a component navigates to app pages only", async () => {
-  expect(componentNavigationTarget("work_item:oxplow:tsk1")?.kind).toBe("work_item");
-  expect(componentNavigationTarget("page:external-url?url=https%3A%2F%2Fevil.example%2F%3Fd%3D1")).toBeNull();
-  expect(componentNavigationTarget("not a ref")).toBeNull();
-  const h = harness({ navigate: (ref) => componentNavigationTarget(ref) !== null });
+  expect(componentMayOpen("work_item:oxplow:tsk1")).toBe(true);
+  expect(componentMayOpen("handoff:hnd1")).toBe(true);
+  expect(componentMayOpen("page:external-url?url=https%3A%2F%2Fevil.example%2F%3Fd%3D1")).toBe(false);
+  expect(componentMayOpen("not a ref")).toBe(false);
+  const h = harness({ navigate: (ref) => componentMayOpen(ref) });
   h.send({ id: "n2", method: "navigate", ref: "page:external-url?url=https%3A%2F%2Fevil.example%2F" });
   await h.settle();
   expect(h.received).toEqual([

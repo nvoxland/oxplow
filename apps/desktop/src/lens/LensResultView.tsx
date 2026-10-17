@@ -501,7 +501,6 @@ function LensViz({
         <CustomComponentViz
           run={{ ...run, result }}
           streamId={streamId}
-          onOpenPage={onOpenPage}
           fallback={<TableViz rows={result.rows} cols={cols} cell={cell} rowMenu={rowMenu} />}
           onFailure={onCustomFailure}
           onReady={onCustomReady}

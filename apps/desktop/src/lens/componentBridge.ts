@@ -18,8 +18,7 @@
 /// (`/component-lib/oxplow-component.js`, `oxplow.connect()`); it checks
 /// `protocol` against the one it speaks.
 import { IpcCallError, needsConfirmation } from "../ipc-error.js";
-import { refFromTabId } from "../tabs/pageRefs.js";
-import type { TabRef } from "../tabs/tabState.js";
+import { parseRef } from "../refs/ref.js";
 import type { CommandOutcome, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 
 /// The protocol above, by number: bumped when a message's shape changes,
@@ -106,7 +105,7 @@ export interface BridgeDeps {
   /** Run a declared command as the lens for the person. */
   invoke(command: string, input: unknown, confirmed: boolean): Promise<CommandOutcome>;
   /** Open `ref`'s page, in a new tab when asked; false when it isn't one
-   *  a component may open (`componentNavigationTarget`). */
+   *  a component may open (`componentMayOpen`). */
   navigate(ref: string, opts: { newTab: boolean }): boolean;
   /** Ask the person, in the host, to confirm `command`. */
   confirm(command: string): Promise<boolean>;
@@ -120,12 +119,13 @@ export function componentRefusal(e: unknown): string | null {
   return e instanceof IpcCallError && e.code === "DENIED" ? e.message : null;
 }
 
-/** The page a component's `navigate` opens: an oxplow page for `ref`,
- *  never an outside URL (the frame has no network, and an external-url
- *  tab would carry whatever it put in the URL out). */
-export function componentNavigationTarget(ref: string): TabRef | null {
-  const tab = refFromTabId(ref);
-  return tab && tab.kind !== "external-url" ? tab : null;
+/** Whether a component's `navigate` may open `ref`: an oxplow ref, never
+ *  an outside URL (the frame has no network, and an external-url tab would
+ *  carry whatever it put in the URL out). It opens where its kind's page
+ *  says (`openRef`). */
+export function componentMayOpen(ref: string): boolean {
+  const parsed = parseRef(ref);
+  return parsed !== null && !(parsed.kind === "page" && ref.startsWith("page:external-url"));
 }
 
 /** What a run shows the frame: an `update` repeats none of it. */
