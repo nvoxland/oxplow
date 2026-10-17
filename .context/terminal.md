@@ -116,9 +116,9 @@ context menu has **Stop Agent** / **Start Agent**.
 falls back to a fresh one (`Resume::Saved` is `exec <agent> <resume args>`,
 no `||`). The pane is told what happened:
 
-- `open_terminal_session` answers `launch`: `reattached` (a live process
-  was joined), `started`, or `resumed` (the saved conversation); the pane
-  shows a faint "Reattached…" / "Resumed…" note.
+- The pane shows no note about how it connected (joined a live process,
+  started fresh, or resumed the saved conversation): the replayed screen
+  or the agent's own resume output says it.
 - The `exit` message carries an `outcome` (`session_outcome.rs`): a
   resume that exited nonzero **before the session recorded a turn**
   (`turn_since`: no `agent_turn` at or after the launch) is

@@ -185,9 +185,9 @@ function buildBridge() {
       paneTarget: string,
       cols: number,
       rows: number,
-    ): Promise<{ sessionId: string; replayB64: string; launch: "reattached" | "started" | "resumed" }> => {
+    ): Promise<{ sessionId: string; replayB64: string }> => {
       const result = unwrap(await commands.openTerminalSession(paneTarget, cols, rows));
-      return { sessionId: result.sessionId, replayB64: result.replayB64, launch: result.launch };
+      return { sessionId: result.sessionId, replayB64: result.replayB64 };
     },
     /// The live terminal of an agent session, without starting one: `null`
     /// when none runs.

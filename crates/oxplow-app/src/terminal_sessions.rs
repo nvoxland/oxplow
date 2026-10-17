@@ -197,15 +197,10 @@ impl TerminalSessionRegistry {
     /// plus a base64-encoded snapshot of the replay buffer that the
     /// renderer should write into a fresh xterm before it starts
     /// consuming live events.
-    pub fn build_attach_result(
-        session_id: String,
-        replay: Vec<u8>,
-        launch: LaunchKind,
-    ) -> AttachResult {
+    pub fn build_attach_result(session_id: String, replay: Vec<u8>) -> AttachResult {
         AttachResult {
             session_id,
             replay_b64: B64.encode(&replay[..]),
-            launch,
         }
     }
 
@@ -241,22 +236,14 @@ impl TerminalSessionRegistry {
             let map = self.inner.lock().await;
             if let Some(entry) = map.get(&existing_id) {
                 let replay = entry.ring.lock().await.snapshot();
-                return Ok(Self::build_attach_result(
-                    existing_id,
-                    replay,
-                    LaunchKind::Reattached,
-                ));
+                return Ok(Self::build_attach_result(existing_id, replay));
             }
             // Stale by_key entry (entry was killed); fall through and
             // create a fresh session.
         }
         let req = make_request(cols, rows);
-        let launch = match agent {
-            Some(pane) if pane.launch.resumed => LaunchKind::Resumed,
-            _ => LaunchKind::Started,
-        };
         let session_id = self.spawn_with(req, key.clone(), agent).await?;
-        Ok(Self::build_attach_result(session_id, Vec::new(), launch))
+        Ok(Self::build_attach_result(session_id, Vec::new()))
     }
 
     /// Read-only: the live session id indexed under external `key`, or
@@ -521,21 +508,6 @@ pub struct AttachResult {
     pub session_id: String,
     #[serde(rename = "replayB64")]
     pub replay_b64: String,
-    /// What this attach did: joined a live process, started a fresh
-    /// conversation, or resumed a saved one.
-    pub launch: LaunchKind,
-}
-
-/// What an attach did about the process behind the pane.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "snake_case")]
-pub enum LaunchKind {
-    /// A live process was already running; the pane joined it.
-    Reattached,
-    /// A process was started for a conversation with nothing saved.
-    Started,
-    /// A process was started resuming the saved conversation.
-    Resumed,
 }
 
 /// Read a process's current working directory by pid. Linux reads the
