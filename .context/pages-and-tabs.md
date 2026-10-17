@@ -35,14 +35,15 @@ pages are THE shell.
   picker is an ordinary tab after that: its × closes it for good, and
   closing a thread's last session leaves its other tabs (or home), not
   the picker. It also lists the thread's **earlier sessions** (closed
-  ones and every agent's saved conversations for the worktree); taking one
-  closes the picker and activates that session's tab. A closed session's
-  ref (a search hit) opens its transcript lens, not a missing tab. The
-  picker's heading counts the thread's open sessions (none on a new
-  thread). On a thread with none, **No Session in This Thread** closes
-  it (hidden once a session is open), and
-  its **Remember this for new threads** checkbox saves the choice (the
-  agent started, or `none`) as `newThreadSession`; Settings → Agents has
+  ones and every agent's saved conversations for the worktree), one
+  column each for agent, session, status, last active, turns and size.
+  Taking one open in the thread shows its tab and keeps the picker;
+  reopening or resuming one, like **New Session**, closes the picker and
+  activates that session's tab. A closed session's ref (a search hit)
+  opens its transcript lens, not a missing tab. The picker says nothing
+  of the thread's open sessions (its tabs show them) and has no way to
+  decline one (its × closes it); its **Remember this for new threads**
+  checkbox saves the agent started as `newThreadSession`; Settings → Agents has
   the same choice ("New threads start with",
   `components/NewThreadSessionSetting.tsx`). The launcher's New Agent
   Session… opens the picker, and each agent's command starts a session

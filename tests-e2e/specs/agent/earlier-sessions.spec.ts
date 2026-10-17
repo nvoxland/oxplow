@@ -23,7 +23,7 @@ test("a closed session is listed on the New Session page and picking it reopens 
   await expect(page.getByTestId("page-new-session")).toBeVisible();
   const row = page.getByTestId(`earlier-row-agent_session:${id}`);
   await expect(row).toContainText("Parser work");
-  await expect(row).toContainText("closed here");
+  await expect(row.locator("[data-status]")).toHaveAttribute("title", "closed here");
   await row.click();
 
   await expect(page.getByTestId(`center-tab-agent_session:${id}`)).toBeVisible();
@@ -54,4 +54,27 @@ test("a closed session found by search opens its transcript, which can reopen it
   await expect(page.getByTestId(`center-tab-agent_session:${id}`)).toHaveCount(0);
   await page.getByTestId("lens-action-reopen").click();
   await expect(page.getByTestId(`center-tab-agent_session:${id}`)).toBeVisible();
+});
+
+/// A session open in this thread is listed too; picking it shows its tab
+/// and leaves the New Session page open (only starting one closes it).
+test("picking a session open here shows it and keeps the New Session page", async ({ fresh }) => {
+  const { page, daemon } = fresh;
+  const opened = await run<Opened>(daemon, "oxplow.agent_session.open", {
+    thread: `thread:${daemon.thread}`,
+    resume: "conv-open",
+    title: "Lexer work",
+  });
+  const id = opened.result.id;
+
+  await page.goto("/");
+  await searchLauncher(page, "new agent session");
+  await page.getByTestId("launcher-command-oxplow.agent_session.open").click();
+  const row = page.getByTestId(`earlier-row-agent_session:${id}`);
+  await expect(row.locator("[data-status]")).toHaveAttribute("title", "open in this thread");
+  await row.click();
+
+  await expect(page.getByTestId(`center-tab-body-agent_session:${id}`)).toBeVisible();
+  await expect(page.getByTestId("page-new-session")).toBeHidden();
+  await expect(page.getByTestId("center-tab-page:new-session")).toHaveCount(1);
 });

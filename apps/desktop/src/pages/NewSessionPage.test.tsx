@@ -16,50 +16,28 @@ const harnesses: HarnessListing[] = [
 
 function renderPicker() {
   const started: Array<[string, boolean]> = [];
-  const declined: boolean[] = [];
   const view = render(
     <NewSessionPage
       thread={thread}
       harnesses={harnesses}
-      openSessions={0}
       onStart={async (harness, remember) => {
         started.push([harness, remember]);
       }}
-      onNoSession={async (remember) => {
-        declined.push(remember);
-      }}
     />,
   );
-  return { ...view, started, declined };
+  return { ...view, started };
 }
 
-/** The heading says what the thread has: none yet (a new thread), or how
- *  many are open (the launcher's New Agent Session…). */
-test("the heading counts the thread's open sessions", () => {
-  const none = render(<NewSessionPage thread={thread} harnesses={harnesses} openSessions={0} onStart={async () => {}} onNoSession={async () => {}} />);
-  expect(none.getByTestId("new-session-empty").textContent).toContain("“Fix the cart” has no agent running here yet");
-  expect(none.queryByTestId("new-session-none")).not.toBeNull();
-  cleanup();
-  const two = render(<NewSessionPage thread={thread} harnesses={harnesses} openSessions={2} onStart={async () => {}} onNoSession={async () => {}} />);
-  const heading = two.getByTestId("new-session-empty").textContent ?? "";
-  expect(heading).toContain("“Fix the cart” has 2 agent sessions open");
-  expect(heading).not.toContain("no agent");
-  // Declining a session only makes sense for a thread without one.
-  expect(two.queryByTestId("new-session-none")).toBeNull();
-});
-
-/** No Session in This Thread leaves the thread without one. */
-test("no session in this thread declines, remembering only when asked", async () => {
-  const first = renderPicker();
-  fireEvent.click(first.getByTestId("new-session-none"));
-  await waitFor(() => expect(first.declined).toEqual([false]));
-  cleanup();
-
-  const second = renderPicker();
-  fireEvent.click(second.getByTestId("new-session-remember"));
-  fireEvent.click(second.getByTestId("new-session-none"));
-  await waitFor(() => expect(second.declined).toEqual([true]));
-  expect(second.started).toEqual([]);
+/** The page is the agent picker and the earlier sessions: it says nothing
+ *  of the thread's sessions (its tabs show them) and offers no way to
+ *  decline one (the tab's × closes it); the button is New Session. */
+test("the page offers New Session, with nothing about the thread's sessions", () => {
+  const { getByTestId, queryByTestId, container } = renderPicker();
+  expect(getByTestId("new-session-start").textContent).toBe("New Session");
+  expect(queryByTestId("new-session-empty")).toBeNull();
+  expect(queryByTestId("new-session-none")).toBeNull();
+  expect(container.textContent).not.toContain("no agent running");
+  expect(container.textContent).not.toContain("Settings → Agents changes it");
 });
 
 /** Start with Remember This makes the chosen agent what new threads start. */
@@ -117,9 +95,7 @@ function renderEarlier(listing: EarlierSessions = earlier) {
     <NewSessionPage
       thread={thread}
       harnesses={harnesses}
-      openSessions={0}
       onStart={async () => {}}
-      onNoSession={async () => {}}
       onTakeEarlier={async (row) => {
         taken.push(row);
       }}
@@ -133,8 +109,11 @@ test("earlier sessions list under the Start row, newest first, with a line for a
   const { getByTestId, findByTestId, getByRole } = renderEarlier();
   await findByTestId("earlier-row-agent_session:ses3");
   expect(within(getByRole("listbox")).getAllByRole("option").map((o) => o.getAttribute("data-action"))).toEqual(["reopen", "resume", "none"]);
-  expect(getByTestId("earlier-row-agent_session:ses3").textContent).toContain("closed here");
-  expect(getByTestId("earlier-row-codex:c2").textContent).toContain("not started in oxplow");
+  // Its status is an icon, its words the icon's tooltip.
+  const status = getByTestId("earlier-row-agent_session:ses3").querySelector("[data-status]") as HTMLElement;
+  expect(status.dataset.status).toBe("closed_here");
+  expect(status.getAttribute("title")).toBe("closed here");
+  expect(getByTestId("earlier-row-codex:c2").querySelector("[data-status]")?.getAttribute("title")).toBe("not started in oxplow");
   expect(getByTestId("new-session-earlier-unavailable-codex").textContent).toContain("its daemon isn't running");
   // A conversation open in another thread's session can't be taken.
   expect((getByTestId("earlier-row-agent_session:ses9") as HTMLButtonElement).disabled).toBe(true);
@@ -163,9 +142,7 @@ test("clicking a row takes it, and a refusal shows on the page", async () => {
     <NewSessionPage
       thread={thread}
       harnesses={harnesses}
-      openSessions={0}
       onStart={async () => {}}
-      onNoSession={async () => {}}
       onTakeEarlier={async () => {
         throw new Error("the session is open");
       }}

@@ -1,28 +1,23 @@
 import { useEffect, useRef, useState } from "react";
+import { ArrowLeftRight, CircleDot, ExternalLink, Lock, RotateCcw, type LucideIcon } from "lucide-react";
 
 import { listEarlierSessions, type Thread } from "../api.js";
 import { agentChoices } from "../agentKinds.js";
 import type { EarlierSessions, HarnessListing } from "../tauri-bridge/generated/bindings.js";
-import { earlierSessionRows, filterEarlierRows, takeable, type EarlierRow } from "../components/earlierSessionRows.js";
-import { EmptyState } from "../components/Prompts/EmptyState.js";
+import { earlierSessionRows, filterEarlierRows, takeable, type EarlierRow, type EarlierStatus } from "../components/earlierSessionRows.js";
 import { Page, pageH1Style } from "../tabs/Page.js";
 
 interface NewSessionPageProps {
   thread: Thread | null;
-  /** How many sessions the thread has open: none on a new thread, some
-   *  when the launcher's New Agent Session… opened the page. */
-  openSessions: number;
   /** The registered harnesses in priority order (`useAgentHarnesses`). */
   harnesses: HarnessListing[];
   /** Open the session; resolves once its row exists (its tab follows).
    *  `remember`: new threads start this agent from now on. */
   onStart(harness: string, remember: boolean): Promise<void>;
-  /** Leave the thread without a session (the picker closes).
-   *  `remember`: new threads start with none from now on. */
-  onNoSession(remember: boolean): Promise<void>;
   /** Take an earlier session: reopen it, resume its conversation in a new
-   *  session here, or show its tab (`row.action`). Resolves once done (the
-   *  picker then gives way to the session). */
+   *  session here, or show its tab (`row.action`). Resolves once done: the
+   *  picker gives way to a reopened or resumed session, and stays open
+   *  behind one it only showed. */
   onTakeEarlier?(row: EarlierRow): Promise<void>;
   /** Read the thread's earlier sessions (default: the daemon's). */
   loadEarlier?(threadId: string): Promise<EarlierSessions>;
@@ -36,10 +31,8 @@ interface NewSessionPageProps {
  */
 export function NewSessionPage({
   thread,
-  openSessions,
   harnesses,
   onStart,
-  onNoSession,
   onTakeEarlier,
   loadEarlier = listEarlierSessions,
 }: NewSessionPageProps) {
@@ -111,17 +104,10 @@ export function NewSessionPage({
   const picked = choices.some((c) => c.value === choice) ? choice : (choices[0]?.value ?? "");
   return (
     <Page testId="page-new-session" showNavBar={false} titleInBody>
-      <div style={{ padding: "20px 24px", maxWidth: 720 }}>
-        <h1 style={pageH1Style}>New agent session</h1>
-        <EmptyState
-          testId="new-session-empty"
-          title={heading(thread, openSessions)}
-          text={
-            openSessions > 0
-              ? "Start another agent, or pick up an earlier session below. Each runs in its own tab."
-              : "Pick an agent and start it. It runs in its own tab; a thread can have several."
-          }
-        >
+      <div style={{ padding: "20px 24px", maxWidth: 960 }}>
+        <h1 style={pageH1Style}>Agent sessions</h1>
+        <section data-testid="new-session-new" style={newCardStyle}>
+          <h2 style={sectionH2Style}>Start a new session</h2>
           <form
             onSubmit={async (e) => {
               e.preventDefault();
@@ -153,30 +139,8 @@ export function NewSessionPage({
               ))}
             </select>
             <button type="submit" data-testid="new-session-start" disabled={busy || !thread || !picked} style={startStyle}>
-              Start
+              New Session
             </button>
-            {/* Declining a session is for a thread without one. */}
-            {openSessions === 0 ? (
-              <button
-                type="button"
-                data-testid="new-session-none"
-                disabled={busy}
-                style={noneStyle}
-                onClick={async () => {
-                  setBusy(true);
-                  setError(null);
-                  try {
-                    await onNoSession(remember);
-                  } catch (err) {
-                    setError(err instanceof Error ? err.message : String(err));
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
-              >
-                No Session in This Thread
-              </button>
-            ) : null}
           </form>
           <label style={rememberStyle} title="Change it later in Settings → Agents">
             <input
@@ -187,17 +151,16 @@ export function NewSessionPage({
               onChange={(e) => setRemember(e.target.checked)}
             />
             Remember this for new threads
-            <span style={{ color: "var(--text-muted)" }}>(Settings → Agents changes it)</span>
           </label>
           {error ? (
             <div data-testid="new-session-error" style={{ color: "var(--severity-high)" }}>
               {error}
             </div>
           ) : null}
-        </EmptyState>
+        </section>
         {thread ? (
-          <section data-testid="new-session-earlier" style={{ marginTop: 20 }}>
-            <h2 style={{ fontSize: "var(--text-md, 14px)", margin: "0 0 8px" }}>Earlier sessions</h2>
+          <section data-testid="new-session-earlier" style={{ marginTop: 32 }}>
+            <h2 style={sectionH2Style}>Earlier sessions</h2>
             <input
               type="text"
               data-testid="new-session-earlier-filter"
@@ -233,6 +196,14 @@ export function NewSessionPage({
             ) : null}
             {rows?.length ? (
               <div role="listbox" aria-label="Earlier sessions" style={{ marginTop: 6 }}>
+                <div aria-hidden style={{ ...rowStyle, ...headerStyle }}>
+                  <span>Agent</span>
+                  <span />
+                  <span>Session</span>
+                  <span>Last active</span>
+                  <span style={numberStyle}>Turns</span>
+                  <span style={numberStyle}>Size</span>
+                </div>
                 {rows.map((row, i) => (
                   <button
                     key={row.key}
@@ -251,10 +222,16 @@ export function NewSessionPage({
                       cursor: takeable(row) ? "pointer" : "default",
                     }}
                   >
-                    <span style={tagStyle}>{harnessTitle(row.harness)}</span>
-                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.label}</span>
-                    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{row.note}</span>
-                    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{[row.when, row.detail].filter(Boolean).join(" · ")}</span>
+                    <span>
+                      <span style={tagStyle}>{harnessTitle(row.harness)}</span>
+                    </span>
+                    <StatusIcon status={row.status} note={row.note} />
+                    <span style={cellStyle} title={row.label}>
+                      {row.label}
+                    </span>
+                    <span style={metaStyle}>{row.when ?? ""}</span>
+                    <span style={{ ...metaStyle, ...numberStyle }}>{row.turns ?? ""}</span>
+                    <span style={{ ...metaStyle, ...numberStyle }}>{row.size ?? ""}</span>
                   </button>
                 ))}
               </div>
@@ -265,6 +242,36 @@ export function NewSessionPage({
     </Page>
   );
 }
+
+const STATUS_ICONS: Record<EarlierStatus, LucideIcon> = {
+  open_here: CircleDot,
+  closed_here: RotateCcw,
+  elsewhere: ArrowLeftRight,
+  outside: ExternalLink,
+  open_elsewhere: Lock,
+};
+
+/** Where a row stands, as an icon; its words on hover. */
+function StatusIcon({ status, note }: { status: EarlierStatus; note: string }) {
+  const Icon = STATUS_ICONS[status];
+  return (
+    <span title={note} aria-label={note} data-status={status} style={{ display: "inline-flex", alignSelf: "center", color: "var(--text-muted)" }}>
+      <Icon size={13} aria-hidden />
+    </span>
+  );
+}
+
+// The new session's controls sit in a card of their own, set off from the
+// list of earlier sessions below.
+const newCardStyle = {
+  background: "var(--surface-card)",
+  border: "1px solid var(--border-subtle)",
+  borderRadius: 6,
+  padding: "14px 16px",
+  marginTop: 12,
+} as const;
+
+const sectionH2Style = { fontSize: "var(--text-md, 14px)", margin: "0 0 10px" } as const;
 
 const filterStyle = {
   width: "100%",
@@ -279,10 +286,14 @@ const filterStyle = {
 
 const mutedStyle = { color: "var(--text-muted)", fontSize: "var(--text-sm)", marginTop: 6 } as const;
 
+// One column template for the header and every row, so each piece of a
+// row lines up with the same piece of the others: agent, status icon,
+// session (taking what the others leave), last active, turns, size.
 const rowStyle = {
-  display: "flex",
+  display: "grid",
+  gridTemplateColumns: "60px 16px minmax(0, 1fr) 104px 40px 60px",
   width: "100%",
-  gap: 10,
+  columnGap: 12,
   alignItems: "baseline",
   padding: "6px 8px",
   border: "none",
@@ -290,6 +301,21 @@ const rowStyle = {
   textAlign: "left",
   fontSize: "var(--text-sm)",
 } as const;
+
+const headerStyle = {
+  fontSize: 11,
+  fontWeight: 600,
+  color: "var(--text-secondary)",
+  borderBottom: "1px solid var(--border-subtle)",
+  borderRadius: 0,
+  padding: "4px 8px",
+} as const;
+
+const cellStyle = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } as const;
+
+const metaStyle = { fontSize: 11, color: "var(--text-muted)", fontVariantNumeric: "tabular-nums" } as const;
+
+const numberStyle = { textAlign: "right" } as const;
 
 const tagStyle = {
   fontSize: 10,
@@ -301,12 +327,6 @@ const tagStyle = {
   padding: "0 4px",
 } as const;
 
-function heading(thread: Thread | null, openSessions: number): string {
-  if (!thread) return "No thread selected";
-  if (openSessions === 0) return `“${thread.title}” has no agent running here yet`;
-  return `“${thread.title}” has ${openSessions} agent session${openSessions === 1 ? "" : "s"} open`;
-}
-
 const selectStyle = {
   background: "var(--surface-card)",
   color: "var(--text-primary)",
@@ -314,16 +334,6 @@ const selectStyle = {
   borderRadius: 4,
   padding: "4px 6px",
   fontSize: "var(--text-sm)",
-} as const;
-
-const noneStyle = {
-  background: "transparent",
-  color: "var(--text-primary)",
-  border: "1px solid var(--border-subtle)",
-  borderRadius: 4,
-  padding: "4px 12px",
-  fontSize: "var(--text-sm)",
-  cursor: "pointer",
 } as const;
 
 const rememberStyle = {

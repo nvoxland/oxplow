@@ -2653,7 +2653,6 @@ export function App() {
         render: () => (
           <NewSessionPage
             thread={selectedThread}
-            openSessions={selectedThreadSessions?.length ?? 0}
             harnesses={harnesses}
             onStart={async (harness, remember) => {
               if (!selectedThread) return;
@@ -2664,17 +2663,16 @@ export function App() {
               closePageTab(ref.id);
               setCenterActive(agentSessionRef(opened.id).id);
             }}
-            onNoSession={async (remember) => {
-              if (remember) await saveNewThreadSession("none");
-              closePageTab(ref.id);
-            }}
             onTakeEarlier={async (row) => {
               if (!selectedThread) return;
               const sessionId = row.session ? idOf(row.session, "agent_session") : null;
-              let tab: string | null = null;
               if (row.action === "switch" && sessionId) {
-                tab = agentSessionRef(sessionId).id;
-              } else if (row.action === "reopen" && sessionId) {
+                // Already open: show it, and keep the picker for another pick.
+                setCenterActive(agentSessionRef(sessionId).id);
+                return;
+              }
+              let tab: string | null = null;
+              if (row.action === "reopen" && sessionId) {
                 // Undoable: the toast offers Undo, which closes it again.
                 const reopened = await personCommands.run(`Reopen ${row.label}`, "oxplow.agent_session.reopen", {
                   session: row.session,

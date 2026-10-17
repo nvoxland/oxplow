@@ -35,7 +35,6 @@ test("an ended terminal session says so and its tab closes it", async ({ fresh }
   const tabTestId = (await tab.getAttribute("data-testid")) ?? "";
   const id = tabTestId.slice("center-tab-".length);
   await page.getByTestId(`center-tab-close-${id}`).click();
-  await page.getByTestId(`center-tab-close-${id}-confirm`).click();
   await expect(page.getByTestId(tabTestId)).toHaveCount(0);
 });
 
@@ -105,7 +104,7 @@ async function addThread(page: import("@playwright/test").Page, daemon: import("
 }
 
 /// The picker is an ordinary tab: its × closes it for good (a reload
-/// doesn't bring it back), and No Session in This Thread does the same.
+/// doesn't bring it back).
 test("the picker closes, and stays closed", async ({ fresh }) => {
   const { page, daemon } = fresh;
   await page.goto("/");
@@ -115,32 +114,14 @@ test("the picker closes, and stays closed", async ({ fresh }) => {
   await page.reload();
   await expect(page.getByTestId("navigator-strip")).toBeVisible();
   await expect(page.getByTestId(PICKER_CLOSE)).toHaveCount(0);
-
-  await addThread(page, daemon, "Research");
-  await expect(page.getByTestId("page-new-session")).toBeVisible();
-  await page.getByTestId("new-session-none").click();
-  await expect(page.getByTestId(PICKER_CLOSE)).toHaveCount(0);
 });
 
-/// Remember This makes the choice what new threads start with: none opens
-/// no picker; an agent starts that agent's session.
+/// Remember This makes the agent chosen what new threads start with.
 test("a remembered choice is what new threads start with", async ({ fresh }) => {
   const { page, daemon } = fresh;
   await ipc(daemon, "set_agents", { agents: ["terminal", "claude"] });
   await page.goto("/");
   await expect(page.getByTestId("page-new-session")).toBeVisible();
-  await page.getByTestId("new-session-remember").check();
-  await page.getByTestId("new-session-none").click();
-  await expect(page.getByTestId(PICKER_CLOSE)).toHaveCount(0);
-
-  await addThread(page, daemon, "Quiet");
-  await expect(page.getByTestId("navigator-strip").getByTitle("Quiet")).toBeVisible();
-  await expect(page.getByTestId(PICKER_CLOSE)).toHaveCount(0);
-  await expect(page.locator('[data-testid^="center-tab-agent_session:"]')).toHaveCount(0);
-
-  // Remember an agent from the picker, which the launcher still opens.
-  await searchLauncher(page, "new agent session");
-  await page.getByTestId("launcher-command-oxplow.agent_session.open").click();
   await page.getByTestId("new-session-agent").selectOption("claude");
   await page.getByTestId("new-session-remember").check();
   await page.getByTestId("new-session-start").click();

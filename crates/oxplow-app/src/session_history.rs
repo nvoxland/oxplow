@@ -236,11 +236,27 @@ pub async fn earlier_sessions_of(
             },
         ));
     }
-    // Closed sessions no conversation listing carried (its harness keeps no
-    // list, or the conversation is gone): left out when the slot never
-    // started — no native id, no turns.
+    // Sessions no conversation listing carried (its harness keeps no list,
+    // or the conversation is gone). One open on this thread is a row to
+    // switch to; one open elsewhere is listed only beside its conversation.
+    // A closed one is left out when the slot never started — no native id,
+    // no turns.
     for s in &sessions {
-        if s.is_open() || used.contains(&s.id) {
+        if used.contains(&s.id) {
+            continue;
+        }
+        if s.is_open() {
+            if s.thread_id == thread {
+                rows.push((
+                    Some(s.updated_at),
+                    EarlierSession {
+                        harness: s.harness.clone(),
+                        session: Some(past(s)),
+                        conversation: None,
+                        action: EarlierAction::Switch,
+                    },
+                ));
+            }
             continue;
         }
         let started = !s.resume_session_id.is_empty() || turns.contains_key(&s.id);
@@ -375,6 +391,22 @@ mod tests {
 
     async fn fixture() -> Fixture {
         let fx = crate::test_fixtures::services_with_effort().await;
+        // The setup's own session never ran: closed, it lists as nothing,
+        // so each test's rows are its own.
+        let setup = fx.session;
+        fx.svc
+            .db
+            .transaction(move |tx| {
+                oxplow_db::agent_session_store::close_tx(
+                    tx,
+                    setup,
+                    SessionCloseReason::Closed,
+                    Timestamp::now(),
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
         let stream = fx.svc.streams.ensure_primary().await.unwrap().id;
         let other = crate::test_fixtures::new_thread(&fx.svc, stream, "elsewhere").await;
         Fixture {
@@ -627,6 +659,23 @@ mod tests {
         assert_eq!(out.rows.len(), 1, "{:?}", out.rows);
         assert_eq!(out.rows[0].action, EarlierAction::None);
         assert!(out.rows[0].session.as_ref().unwrap().open);
+    }
+
+    /// A session open on this thread is a row to switch to even when its
+    /// harness lists no conversation for it; one open elsewhere is listed
+    /// only beside a conversation.
+    #[tokio::test]
+    async fn a_session_open_here_is_listed_without_a_conversation() {
+        let f = fixture().await;
+        let here = session(&f.fx.svc, f.fx.thread, "h", None, None).await;
+        session(&f.fx.svc, f.other, "h", Some("there"), None).await;
+        let out = list(&f, vec![harness("h", vec![])]).await;
+        assert_eq!(out.rows.len(), 1, "{:?}", out.rows);
+        assert_eq!(out.rows[0].action, EarlierAction::Switch);
+        assert_eq!(
+            out.rows[0].session.as_ref().unwrap().session,
+            agent_session_ref(here)
+        );
     }
 
     /// Most recently active first.

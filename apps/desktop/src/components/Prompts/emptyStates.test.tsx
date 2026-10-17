@@ -57,8 +57,8 @@ test("no metrics recorded is an EmptyState", async () => {
   expect(emptyStates(container).length).toBe(1);
 });
 
-/** The session picker is an EmptyState offering no prompts: there is no
- *  agent to hand one to yet. */
+/** The session picker offers no prompts: there is no agent to hand one
+ *  to yet. */
 test("a thread with no agent session shows the picker, with no prompts", () => {
   const thread = { id: "thr1", title: "Fix the cart" } as unknown as Thread;
   const { container, getByTestId } = render(
@@ -70,10 +70,8 @@ test("a thread with no agent session shows the picker, with no prompts", () => {
         { id: "opencode", title: "OpenCode", enabled: false },
       ]}
       onStart={async () => {}}
-      onNoSession={async () => {}}
     />,
   );
-  expect(emptyStates(container).length).toBe(1);
   expect(container.textContent).not.toContain("Ask the agent");
   expect(Array.from((getByTestId("new-session-agent") as HTMLSelectElement).options).map((o) => o.value)).toEqual([
     "claude",

@@ -62,18 +62,19 @@ test("a note says why a row stands out, and only an open-elsewhere row is not ta
     "open in this thread",
     "open in Helper (Other)",
   ]);
+  expect(rows.map((r) => r.status)).toEqual(["closed_here", "elsewhere", "outside", "open_here", "open_elsewhere"]);
   expect(rows.map(takeable)).toEqual([true, true, true, true, false]);
 });
 
-test("a row shows its turns, else its size, and when it was last active", () => {
+test("a row shows its turns, its size and when it was last active, each on its own", () => {
   const [a, b] = earlierSessionRows(
     listing(
       { harness: "claude", session: past({ turns: 3 }), conversation: conversation({ size_bytes: 2048 }), action: "reopen" },
       { harness: "claude", session: null, conversation: conversation({ id: "s", size_bytes: 2048 }), action: "resume" },
     ),
   );
-  expect(a!.detail).toBe("3 turns");
-  expect(b!.detail).toBe("2 KB");
+  expect([a!.turns, a!.size]).toEqual(["3", "2 KB"]);
+  expect([b!.turns, b!.size]).toEqual([null, "2 KB"]);
   expect(a!.when).toMatch(/^2026-10-10 \d\d:\d\d$/);
 });
 

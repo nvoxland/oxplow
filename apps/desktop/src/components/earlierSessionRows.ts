@@ -8,18 +8,26 @@
 import type { EarlierAction, EarlierSession, EarlierSessions } from "../tauri-bridge/generated/bindings.js";
 import { formatSize, formatWhen } from "./conversationFormat.js";
 
+export type EarlierStatus = "open_here" | "closed_here" | "elsewhere" | "outside" | "open_elsewhere";
+
 export interface EarlierRow {
   /** Stable across re-reads: the session's ref, else harness + conversation. */
   key: string;
   harness: string;
   /** Its title, else the first or last thing said, else its id. */
   label: string;
-  /** Why it stands out: closed here, from another thread, outside oxplow. */
+  /** Where it stands, for its icon: open here, closed here, from another
+   *  thread, started outside oxplow, open in another thread. */
+  status: EarlierStatus;
+  /** The same in words (the icon's tooltip): closed here, from another
+   *  thread, outside oxplow. */
   note: string;
   /** When it was last active (`YYYY-MM-DD HH:MM`, local), when known. */
   when: string | null;
-  /** Its turns, else its size. */
-  detail: string | null;
+  /** How many turns oxplow saw it run, when it ran in oxplow. */
+  turns: string | null;
+  /** Its saved conversation's size, when its harness says. */
+  size: string | null;
   action: EarlierAction;
   /** What taking it needs: the session to reopen or show, the conversation to resume. */
   session: string | null;
@@ -40,6 +48,21 @@ function labelOf(row: EarlierSession): string {
     s?.session ||
     ""
   );
+}
+
+function statusOf(row: EarlierSession): EarlierStatus {
+  const s = row.session;
+  switch (row.action) {
+    case "reopen":
+      return "closed_here";
+    case "switch":
+      return "open_here";
+    case "none":
+      return "open_elsewhere";
+    case "resume":
+      if (!s) return "outside";
+      return s.here ? "closed_here" : "elsewhere";
+  }
 }
 
 function noteOf(row: EarlierSession): string {
@@ -63,14 +86,15 @@ export function earlierSessionRows(listing: EarlierSessions): EarlierRow[] {
     const s = row.session;
     const label = labelOf(row);
     const note = noteOf(row);
-    const turns = s && s.turns > 0 ? `${s.turns} turn${s.turns === 1 ? "" : "s"}` : null;
     return {
       key: s?.session ?? `${row.harness}:${c?.id ?? ""}`,
       harness: row.harness,
       label,
+      status: statusOf(row),
       note,
       when: formatWhen(c?.updated_at ?? s?.closed_at ?? null),
-      detail: turns ?? formatSize(c?.size_bytes ?? null),
+      turns: s && s.turns > 0 ? String(s.turns) : null,
+      size: formatSize(c?.size_bytes ?? null),
       action: row.action,
       session: s?.session ?? null,
       // A native id, never a session ref: a session whose conversation the
