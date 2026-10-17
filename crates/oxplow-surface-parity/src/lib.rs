@@ -531,7 +531,6 @@ pub const MANIFEST: &[Capability] = &[
         "ingest_hook_event",
         "the hook subprocess's transport into the core, not an agent's call",
     ),
-    model("list_agent_events", &["v_event"]),
     ui(
         "list_agent_statuses",
         "agents' live status, shown to the person; an agent is the one with the status",

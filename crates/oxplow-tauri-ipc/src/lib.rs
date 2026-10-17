@@ -223,7 +223,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::git_change_scopes,
             // hooks / agent lifecycle
             commands::generated::ingest_hook_event,
-            commands::generated::list_agent_events,
             commands::generated::read_event_content,
             commands::generated::list_agent_statuses,
             commands::generated::list_open_agent_turns,

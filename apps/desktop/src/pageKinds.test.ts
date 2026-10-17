@@ -20,7 +20,6 @@ describe("kindForTabId", () => {
   test("page routes return the page name, with or without params", () => {
     expect(kindForTabId("page:new-session")).toBe("new-session");
     expect(kindForTabId("page:tasks")).toBe("tasks");
-    expect(kindForTabId("page:done-work")).toBe("done-work");
     expect(kindForTabId("page:dashboard?variant=visits")).toBe("dashboard");
     expect(kindForTabId("page:external-url?url=https://example.com")).toBe("external-url");
     expect(kindForTabId("page:diff?path=a/b.ts&left=disk&right=ref:x")).toBe("diff");
@@ -49,14 +48,12 @@ describe("pageKindIconComponent", () => {
       "external-url",
       "uncommitted-changes",
       "tasks",
-      "done-work",
       "backlog",
       "wiki-index",
       "files",
       "local-history",
       "git-history",
       "git-dashboard",
-      "hook-events",
       "new-stream",
       "new-task",
       "diff-view",
@@ -85,7 +82,6 @@ describe("pageKindLabel", () => {
     expect(pageKindLabel("work_item")).toBe("work item");
     expect(pageKindLabel("metric")).toBe("metric");
     expect(pageKindLabel("wiki")).toBe("wiki page");
-    expect(pageKindLabel("done-work")).toBe("done work");
     expect(pageKindLabel("local-history")).toBe("local history");
     expect(pageKindLabel("uncommitted-changes")).toBe("uncommitted");
     expect(pageKindLabel("new-task")).toBe("new item");

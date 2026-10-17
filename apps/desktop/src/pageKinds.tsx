@@ -13,14 +13,12 @@
  * label here too.
  */
 import {
-  Activity,
   Bell,
   Bot,
   BarChart3,
   BookOpen,
   Columns3,
   Braces,
-  CheckCheck,
   CheckSquare,
   Copy,
   ExternalLink,
@@ -138,8 +136,6 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
     // Literal-id index pages (kind === id).
     case "tasks":
       return CheckSquare;
-    case "done-work":
-      return CheckCheck;
     case "backlog":
       return Inbox;
     case "wiki-index":
@@ -156,8 +152,6 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return GitMerge;
     case "git-dashboard":
       return GitBranch;
-    case "hook-events":
-      return Activity;
     case "metrics-recorded":
       return BarChart3;
     case "metric":
@@ -258,8 +252,6 @@ export function pageKindLabel(kind: string): string {
       return "explore data";
     case "wiki-index":
       return "wiki";
-    case "done-work":
-      return "done work";
     case "local-history":
       return "local history";
     case "local-history-full":
@@ -270,8 +262,6 @@ export function pageKindLabel(kind: string): string {
       return "git history";
     case "git-dashboard":
       return "git";
-    case "hook-events":
-      return "hook events";
     case "duplicate-block":
       return "duplicate";
     case "external-url":

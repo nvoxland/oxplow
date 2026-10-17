@@ -13,11 +13,13 @@
  * `useRefKinds` so they redraw when it changes.
  */
 import {
+  Activity,
   Archive,
   BookOpen,
   Box,
   Bug,
   Calendar,
+  CircleCheck,
   CircleDot,
   Database,
   FileText,
@@ -54,11 +56,13 @@ import type { Reads, SqlQueryResult } from "./tauri-bridge/generated/bindings.js
  * keys.
  */
 export const REF_KIND_ICONS: Readonly<Record<string, LucideIcon>> = {
+  "activity": Activity,
   "archive": Archive,
   "book-open": BookOpen,
   "box": Box,
   "bug": Bug,
   "calendar": Calendar,
+  "circle-check": CircleCheck,
   "circle-dot": CircleDot,
   "database": Database,
   "file-text": FileText,

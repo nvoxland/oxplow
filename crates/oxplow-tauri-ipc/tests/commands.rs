@@ -109,15 +109,6 @@ async fn get_file_snapshot_missing_returns_none() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_agent_events_empty_for_fresh_project() {
-    let app = TestApp::build().await;
-    let v = commands::generated::list_agent_events(app.state(), None, None, Some(10))
-        .await
-        .unwrap();
-    assert!(v.is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_agent_statuses_empty_for_fresh_project() {
     let app = TestApp::build().await;
     let v = commands::generated::list_agent_statuses(app.state())

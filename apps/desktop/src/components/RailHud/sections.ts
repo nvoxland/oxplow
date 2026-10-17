@@ -3,7 +3,6 @@ import {
   backlogRef,
   dashboardRef,
   dashboardsRef,
-  doneWorkRef,
   gitDashboardRef,
   indexRef,
   tasksRef,
@@ -54,7 +53,6 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
     // Labels are emoji-free — `PageKindIcon` resolves the leading
     // glyph from the entry's ref kind at render time.
     { id: "tasks", label: "Tasks", ref: tasksRef(), category: "Work", keywords: "dashboard" },
-    { id: "done-work", label: "Done Work", ref: doneWorkRef(), category: "Work" },
     {
       id: "backlog",
       label: "Backlog",
@@ -68,7 +66,6 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
     { id: "git-history", label: "Git History", ref: indexRef("git-history"), category: "Git" },
     { id: "uncommitted-changes", label: "Uncommitted", ref: uncommittedChangesRef(), category: "Git" },
     { id: "local-history", label: "Local History", ref: indexRef("local-history"), category: "Activity" },
-    { id: "hook-events", label: "Hook Events", ref: indexRef("hook-events"), category: "Activity" },
     { id: "comments", label: "Comments Dashboard", ref: indexRef("comments"), category: "Activity" },
     { id: "dashboard-visits", label: "Go To", ref: dashboardRef("visits"), category: "Activity" },
     { id: "wiki-index", label: "Wiki", ref: indexRef("wiki-index"), category: "Knowledge" },

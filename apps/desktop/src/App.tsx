@@ -116,12 +116,10 @@ import { useAgentHarnesses } from "./useAgentHarnesses.js";
 import { useThreadSessions } from "./agentSessions.js";
 import { rollUpAgentStatus, threadStatuses } from "./agentStatusRollup.js";
 import { TerminalPage } from "./pages/TerminalPage.js";
-import { HookEventsPage } from "./pages/HookEventsPage.js";
 import { FilesPage } from "./pages/FilesPage.js";
 import { DirectoryPage } from "./pages/DirectoryPage.js";
 import { WikiIndexPage } from "./pages/WikiIndexPage.js";
 import { TasksPage } from "./pages/TasksPage.js";
-import { DoneWorkPage } from "./pages/DoneWorkPage.js";
 import { BacklogPage } from "./pages/BacklogPage.js";
 import { CommentsInboxPage } from "./pages/CommentsInboxPage.js";
 import { MetricDetailPage } from "./pages/MetricDetailPage.js";
@@ -2511,7 +2509,6 @@ export function App() {
       };
       const labelByKind: Record<string, string> = {
         "tasks": "Tasks",
-        "done-work": "Done Work",
         "backlog": "Backlog",
       };
       return {
@@ -2522,8 +2519,6 @@ export function App() {
           switch (ref.kind) {
             case "tasks":
               return <TasksPage {...sharedProps} streams={streams} currentStreamId={stream?.id ?? null} onOpenPage={nav.navOpen} />;
-            case "done-work":
-              return <DoneWorkPage {...sharedProps} />;
             case "backlog":
               return <BacklogPage {...sharedProps} />;
             default:
@@ -2902,14 +2897,6 @@ export function App() {
           ),
         };
       },
-      "hook-events": (ref, nav) => {
-        return {
-          id: ref.id,
-          label: "Hook Events",
-          closable: true,
-          render: () => <HookEventsPage streamId={stream?.id ?? null} />,
-        };
-      },
       terminal: (ref, nav) => {
         return {
           id: ref.id,
@@ -3085,7 +3072,6 @@ export function App() {
         };
       },
       "tasks": workPage,
-      "done-work": workPage,
       "backlog": workPage,
       "external-url": (ref, nav) => {
         const externalUrl = (ref.payload as { url?: string } | null)?.url ?? "";

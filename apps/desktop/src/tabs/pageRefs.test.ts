@@ -90,7 +90,7 @@ describe("pageRefs", () => {
     const ref = indexRef("tasks");
     expect(ref.id).toBe("page:tasks");
     expect(ref.kind).toBe("tasks");
-    expect(hookEventsRef()).toEqual({ id: "page:hook-events", kind: "hook-events", payload: null });
+    expect(hookEventsRef()).toEqual({ id: "page:oxplow-foundation/hook-events", kind: "ext-page", payload: { extension: "oxplow-foundation", page: "hook-events" } });
     expect(uncommittedChangesRef().id).toBe("page:uncommitted-changes");
   });
 

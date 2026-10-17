@@ -101,9 +101,9 @@ extension as `lens:<slug>` pages ([extensions.md](./extensions.md), epic
 tsk275) — don't grow them; new instruments should be lenses once the
 extension host lands.
 
-- **Agent & work:** `agent_session`, `new-session`, `work_item`, `tasks`, `done-work`, `backlog`,
+- **Agent & work:** `agent_session`, `new-session`, `work_item`, `tasks`, `backlog`,
   `archived`, `new-task`, `new-stream`, `stream-settings`,
-  `thread-settings`, `comments`, `hook-events`,
+  `thread-settings`, `comments`,
   `alerts`
 - **Code & review:** `file`, `dir`, `files`, `diff`, `diff-view`,
   `uncommitted-changes`, `commit`, `git-history`, `git-dashboard`,
@@ -174,11 +174,11 @@ moved into the project DB and started fresh again) — see the decision in [refs
 | metric | `metric:<key>` | `metric:oxplow.coverage.abs_pct` |
 | lens | `lens:<extension>/<slug>[?param=value…]` (params sorted; `lensRef(id, params)`) | `lens:review/waiting-on-me`, `lens:oxplow-bundled/effort-tests?effort_id=12` |
 | ext-page | `page:<extension>/<page>` (`extPageRef`; the page contribution's ref) — an extension's `pages:` entry, its lens full-page (`ExtensionPageView` resolves the page from the stream's extensions, so a restored tab opens too, and titles the tab with the page's manifest `title` through `LensPage`'s `title`, and draws its manifest `icon` wherever a page's icon shows: `PageKindIcon` takes the tab id and `extPageIconComponent` resolves it). Not a named route: `PageKind` includes `ExtensionPageKind`, and `refFromTabId` / `pageKindOf` recognise an extension's page by the slash in its id (a shell route has none). Params ride the id (`?ref=`) into the lens's `initialParams`: a ref of an extension's kind (`acme_pr:12`, P8.D7, extensions.md "Ref kinds") opens its kind's page this way | `page:github/open-prs`, `page:acme/pr?ref=acme_pr:12` |
-| foundation lens pages | `page:oxplow-foundation/<id>` — Problems (`problems`), Symbols (`symbols`, `?path=` for one file's outline) and Closed Threads (`closed-threads`): lens pages the foundation declares under `pages:`, not core page kinds | `page:oxplow-foundation/symbols?path=src/lib.rs` |
+| foundation lens pages | `page:oxplow-foundation/<id>` — Problems (`problems`), Symbols (`symbols`, `?path=` for one file's outline), Closed Threads (`closed-threads`), Hook Events (`hook-events`, the agent's `agent.*` events from `v_event`) and Done Work (`done-work`, the thread's closed items, with a Reopen row action): lens pages the foundation declares under `pages:`, not core page kinds | `page:oxplow-foundation/symbols?path=src/lib.rs` |
 | symbol | `symbol:<path>/<id>` (`v_symbol.ref`, `symbolRef(ref)`) — no revision in the id; never a tab: opening one (`handleOpenPage`, or in-tab navigation) resolves it (`resolve_symbol`) and opens its file at the name's line (`openSymbol`). A pinned one (`@snap:<id>` / `@git:<sha>`) opens the file viewer at that revision; if the version is gone it shows a notice and opens the current symbol | `symbol:src/lib.rs/Widget::spin` |
 | agent_session | `agent_session:<ses id>` (`agentSessionRef(id)`, pinned) — an open agent session's terminal; its tab draws its harness's declared logo (`CenterTab.icon` from `HarnessListing.icon`, `AgentIcon`; the generic robot when it declares none) | `agent_session:ses3` |
 | new-session | `page:new-session` (`newSessionRef()`) — the session picker: the Start row, then **Earlier sessions** (a filter and the thread's closed sessions and saved conversations, `list_earlier_sessions`; ↑/↓/Enter/Escape from the filter; a row reopens, resumes or shows its session by the action the backend chose — `terminal.md` "Earlier sessions") | `page:new-session` |
-| index routes | `page:<kind>` — `tasks`, `done-work`, `backlog`, `archived`, `wiki-index`, `files`, `comments`, `local-history(-full\|-by-commit-full)`, `git-history`, `git-dashboard`, `uncommitted-changes`, `hook-events`, `terminal`, `settings`, `metrics-recorded`, `dashboards`, `explore-data`, `catalog`, `board`, `new-stream`, `new-task` | `page:tasks` |
+| index routes | `page:<kind>` — `tasks`, `backlog`, `archived`, `wiki-index`, `files`, `comments`, `local-history(-full\|-by-commit-full)`, `git-history`, `git-dashboard`, `uncommitted-changes`, `terminal`, `settings`, `metrics-recorded`, `dashboards`, `explore-data`, `catalog`, `board`, `new-stream`, `new-task` | `page:tasks` |
 | diff | `page:diff?path=<p>&left=<ver>&right=<ver>[&label=<l>]` (versions `disk` / `ref:<x>` / `snap:<id>`; `diffRef(spec)` / `computeDiffId(spec)` — `revealLine` is not in the id, so re-clicking reuses the tab) | `page:diff?path=src/a.ts&left=ref:abc&right=disk` |
 | diff-view | `page:diff-view?snapshot=<N>` \| `?effort=<effortId>` \| `?start=<tok>&end=<tok>` (endpoint tokens `s<snapshotId>` / `c<sha>` / `w` / `none`) | `page:diff-view?effort=eff42` |
 | duplicate-block | `page:duplicate-block?left=<p>&left_lines=<a>-<b>&left_at=<ver>&right=…` | `page:duplicate-block?left=a.rs&left_lines=1-5&left_at=disk&right=b.rs&right_lines=9-13&right_at=ref:abc` |
@@ -520,14 +520,14 @@ replaced by four focused pages so each has one job:
   it. Header link "View all done →" routes to Done Work; kebab
   carries the `hide-auto` filter and a "View backlog →"
   entry. PageKind is `"tasks"`; ref helper is `tasksRef()`.
-- **Done work** (`page-done-work`) — full descending list of the
-  current thread's closed items (done and canceled).
+- **Done work** (`page:oxplow-foundation/done-work`, a foundation lens page) —
+  full descending list of the current thread's closed items (done and canceled).
 - **Backlog** (`page-backlog`) — the active list's items on no thread
   (`v_work_item.thread_id IS NULL`), for a list with the `lists`
   feature; `oxplow.work_item.move` takes one to a thread and back. The
   `backlogReadyCount` badge in the rail directory hangs off this entry.
 
-All three read the work-item interface (`workItems.readWorkList`) and
+Tasks and Backlog read the work-item interface (`workItems.readWorkList`) and
 wrap `PlanPane`, which takes the active list's profile
 (`useWorkListProfile`: its features and declared fields) and offers only
 what the list can do: drag reordering with `ordering`, the backlog with

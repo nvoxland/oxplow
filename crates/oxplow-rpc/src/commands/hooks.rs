@@ -4,7 +4,7 @@
 use oxplow_app::agent_status_derive::{derive_session_status, recent_activity};
 use oxplow_app::{HookEnvelope, Services};
 use oxplow_domain::stores::AgentTurnStore;
-use oxplow_domain::{AgentStatus, AgentTurn, StoredEvent, ThreadId};
+use oxplow_domain::{AgentStatus, AgentTurn, ThreadId};
 
 use crate::error::IpcError;
 
@@ -16,30 +16,6 @@ pub async fn ingest_hook_event(svc: &Services, envelope: HookEnvelope) -> Result
         .await
         .map_err(|e| IpcError::internal(e.to_string()))?;
     Ok(())
-}
-
-/// The most `list_agent_events` returns in one call.
-const MAX_AGENT_EVENTS: usize = 1000;
-
-/// The newest agent activity (`agent.*` events), newest first — on a
-/// thread when given, else a stream, else everywhere. The activity log's
-/// source (P3.9; it used to read an in-memory hook ring a restart
-/// emptied). Bodies are behind [`read_event_content`].
-pub async fn list_agent_events(
-    svc: &Services,
-    thread_id: Option<ThreadId>,
-    stream_id: Option<oxplow_domain::StreamId>,
-    limit: Option<u32>,
-) -> Result<Vec<StoredEvent>, IpcError> {
-    Ok(svc
-        .event_log_store
-        .recent(
-            "agent",
-            thread_id,
-            stream_id,
-            limit.map_or(200, |n| n as usize).min(MAX_AGENT_EVENTS),
-        )
-        .await?)
 }
 
 /// One body of an event (a tool's input or output), capped; `None` when it
@@ -94,15 +70,6 @@ pub async fn get_agent_turn(
 
 #[cfg(test)]
 mod tests {
-    #[tokio::test]
-    async fn list_agent_events_dispatches_with_all_optionals_absent() {
-        let (svc, _dir) = crate::test_support::services().await;
-        let out = crate::dispatch("list_agent_events", serde_json::json!({}), &svc)
-            .await
-            .unwrap();
-        assert!(out.is_array());
-    }
-
     #[tokio::test]
     async fn list_agent_statuses_dispatches() {
         let (svc, _dir) = crate::test_support::services().await;

@@ -1490,7 +1490,7 @@ first part was kept. It is read through `oxplow_app::event_bodies::read`,
 by **event id and body** (`input` / `output`), never by bare hash: the
 person's IPC read sees any stream, the MCP `oxplow_read` of `event:<id>#…` only the
 caller's own stream's events, and both return at most 64 KiB of text with
-`truncated`. `list_agent_events` returns at most 1,000 rows. The retention
+`truncated`. The retention
 sweep deletes a body after its namespace's window and the event stays. It is separate from the snapshot blob store because the
 retention differs (and the blob store's GC only knows snapshot rows).
 `v_event_content` exposes everything but the bytes. `event_log` gained

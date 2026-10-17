@@ -47,12 +47,14 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-foundation", "icons/opencode.svg"),
             ext_file!("oxplow-foundation", "lenses/catalog.yaml"),
             ext_file!("oxplow-foundation", "lenses/closed-threads.yaml"),
+            ext_file!("oxplow-foundation", "lenses/done-work.yaml"),
             ext_file!("oxplow-foundation", "lenses/effort-files.yaml"),
             ext_file!("oxplow-foundation", "lenses/effort-summary.yaml"),
             ext_file!("oxplow-foundation", "lenses/file-history.yaml"),
             ext_file!("oxplow-foundation", "lenses/hand-off.yaml"),
             ext_file!("oxplow-foundation", "lenses/handoff-items.yaml"),
             ext_file!("oxplow-foundation", "lenses/handoff-recipients.yaml"),
+            ext_file!("oxplow-foundation", "lenses/hook-events.yaml"),
             ext_file!("oxplow-foundation", "lenses/problems.yaml"),
             ext_file!("oxplow-foundation", "lenses/recent-commits.yaml"),
             ext_file!("oxplow-foundation", "lenses/session-transcript.yaml"),
@@ -2294,6 +2296,8 @@ mod tests {
             ("problems", "oxplow-foundation/problems"),
             ("symbols", "oxplow-foundation/symbols"),
             ("closed-threads", "oxplow-foundation/closed-threads"),
+            ("hook-events", "oxplow-foundation/hook-events"),
+            ("done-work", "oxplow-foundation/done-work"),
         ] {
             assert!(pages.contains(&(page, lens)), "{page}: {pages:?}");
         }
@@ -2435,6 +2439,102 @@ mod tests {
         )
         .await;
         assert_eq!(texts(&rows, 1), ["Old"]);
+    }
+
+    /// Done work lists the thread's closed items, the latest first.
+    #[tokio::test]
+    async fn the_done_work_lens_lists_closed_items_latest_first() {
+        use oxplow_db::SqlCell::Int;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let thread = f.thread.to_string();
+        let mut refs = Vec::new();
+        for title in ["older", "newer", "open"] {
+            let item = crate::test_fixtures::file_item(
+                &f.svc,
+                serde_json::json!({ "title": title, "thread": thread }),
+            )
+            .await;
+            refs.push(oxplow_tasks::work_item_ref(item));
+        }
+        for (r, to) in [(&refs[0], "done"), (&refs[1], "canceled")] {
+            f.svc
+                .commands
+                .run(
+                    &oxplow_domain::Actor::Human,
+                    "oxplow.work_item.transition",
+                    serde_json::json!({ "ref": r, "to": to }),
+                    false,
+                )
+                .await
+                .unwrap();
+        }
+        let (older, newer) = (refs[0].clone(), refs[1].clone());
+        f.svc
+            .db
+            .transaction(move |tx| {
+                tx.execute(
+                    "UPDATE work_item SET closed_at = '2026-01-05T09:00:00Z' WHERE ref = ?1",
+                    [&older],
+                )
+                .and_then(|_| {
+                    tx.execute(
+                        "UPDATE work_item SET closed_at = '2026-03-01T09:00:00Z' WHERE ref = ?1",
+                        [&newer],
+                    )
+                })
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let rows = run_bundled_lens_with(
+            &f,
+            "oxplow-foundation/done-work",
+            &[("thread_id", Int(f.thread.value()))],
+        )
+        .await;
+        assert_eq!(texts(&rows, 1), ["newer", "older"], "{rows}");
+        assert_eq!(texts(&rows, 2), ["canceled", "done"], "{rows}");
+    }
+
+    /// Hook events read the stream's `agent.*` events newest first, each
+    /// with what it says: a tool, its target and its outcome.
+    #[tokio::test]
+    async fn the_hook_events_lens_says_what_each_agent_event_did() {
+        use oxplow_db::SqlCell::Int;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let post = |event: &str, payload: serde_json::Value| {
+            let env = oxplow_domain::Envelope::new(event, 3, "test", payload)
+                .unwrap()
+                .with_anchors(oxplow_domain::events::Anchors {
+                    stream_id: Some(oxplow_domain::StreamId::new(1)),
+                    ..Default::default()
+                });
+            let log = f.svc.event_log_store.clone();
+            async move { log.append(env).await.unwrap() }
+        };
+        post(
+            "agent.tool.requested",
+            serde_json::json!({ "tool": "Edit", "kind": "edit", "paths": ["src/a.rs"], "decision": "allowed" }),
+        )
+        .await;
+        post(
+            "agent.tool.finished",
+            serde_json::json!({ "tool": "Edit", "kind": "edit", "paths": ["src/a.rs"], "ok": false }),
+        )
+        .await;
+        let rows = run_bundled_lens_with(
+            &f,
+            "oxplow-foundation/hook-events",
+            &[("stream_id", Int(1))],
+        )
+        .await;
+        let kinds = texts(&rows, 2);
+        assert_eq!(&kinds[..2], ["tool.finished", "tool.requested"], "{rows}");
+        assert_eq!(
+            &texts(&rows, 3)[..2],
+            ["Edit · src/a.rs · failed", "Edit · src/a.rs"],
+            "{rows}"
+        );
     }
 
     /// Finished items come newest first by when they closed, even within

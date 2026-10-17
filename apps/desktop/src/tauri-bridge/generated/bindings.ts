@@ -667,11 +667,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listAgentEvents: (threadId: string | null, streamId: string | null, limit: number | null) => typedError<StoredEvent[], IpcError>(__TAURI_INVOKE("list_agent_events", { threadId, streamId, limit })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	readEventContent: (eventId: string, body: EventBodyKey) => typedError<{
 	text: string,
 	size: number,
@@ -1361,26 +1356,6 @@ export type AlertState = {
 	value: number | null,
 	/**  What the badge says, e.g. `3 rows` or `Coverage low: 72`. */
 	message: string,
-};
-
-/**
- *  Where an event sits in oxplow's timeline. The engine fills these
- *  from context; every field is optional because not every event has a
- *  thread (a snapshot) or an effort (a stream-level config change).
- */
-export type Anchors = {
-	stream_id: StreamId | null,
-	thread_id: ThreadId | null,
-	effort_id: EffortId | null,
-	/**  `agent_turn.id`. */
-	turn_id: number | null,
-	/**
-	 *  The agent session it happened in (`agent_session.id`) — not the
-	 *  harness's own session id, which `agent_turn.session_id` holds.
-	 */
-	agent_session_id: AgentSessionId | null,
-	/**  `snapshot.id`. */
-	snapshot_id: number | null,
 };
 
 export type AppVersion = {
@@ -2741,42 +2716,6 @@ export type EntityRelation = {
 	to: string,
 	/**  The SQL join condition, e.g. `v_github_pr.head_branch = v_stream.branch`. */
 	on: string,
-};
-
-/**  One event as written to the log. */
-export type Envelope = {
-	id: EventId,
-	/**
-	 *  The event's name, `namespace.name[.name]` (`work_item.transitioned`,
-	 *  `agent.tool.finished`). Extensions emit only under their own namespace.
-	 */
-	type: string,
-	/**
-	 *  The schema version of `event_type`; the payload validates against
-	 *  `type@v`.
-	 */
-	v: number,
-	at: Timestamp,
-	/**  What emitted it: `agent:thr3`, `human`, `system:snapshot_capture`. */
-	source: string,
-	anchors: Anchors,
-	/**  The canonical refs (`.context/refs.md`) the event is about. */
-	subject: string[],
-	/**
-	 *  Validated against the type's JSON Schema on append (P1.5). Large or
-	 *  sensitive content is never inline: it is stored by content hash and
-	 *  the payload carries the hash.
-	 */
-	payload: unknown,
-	payload_hash: string | null,
-	/**  The event that caused this one. */
-	cause: EventId | null,
-	/**
-	 *  A stable key the emitter derives from the action (`work_item:tsk4:
-	 *  transition:eff9`), so an at-least-once producer can't log the same
-	 *  occurrence twice: the second append fails with `Constraint`.
-	 */
-	dedupe_key: string | null,
 };
 
 /**
@@ -6282,18 +6221,6 @@ export type StatusEntry = {
 	path: string,
 	status: FileStatus,
 };
-
-/**  An envelope as read back from the log, with its position. */
-export type StoredEvent = {
-	/**  Global insert order; the delivery order and what checkpoints hold. */
-	seq: number,
-	/**
-	 *  When retention replaced the payload with `{}` (the envelope stays).
-	 *  An expired event is history only: the pump skips it and nothing
-	 *  derives state from it.
-	 */
-	payload_expired_at: Timestamp | null,
-} & Envelope;
 
 export type Stream = {
 	id: StreamId,

@@ -24,11 +24,13 @@ use crate::extensions::ExtensionPage;
 
 /// The icons a ref kind or a page may name (lucide names; the desktop maps each).
 pub const REF_KIND_ICONS: &[&str] = &[
+    "activity",
     "archive",
     "book-open",
     "box",
     "bug",
     "calendar",
+    "circle-check",
     "circle-dot",
     "database",
     "file-text",

@@ -160,7 +160,6 @@ export function newSessionRef(): TabRef {
 
 export type IndexKind =
   | "tasks"
-  | "done-work"
   | "backlog"
   | "wiki-index"
   | "files"
@@ -170,7 +169,6 @@ export type IndexKind =
   | "local-history-full"
   | "local-history-by-commit-full"
   | "git-history"
-  | "hook-events"
   | "terminal"
   | "settings"
   | "metrics-recorded"
@@ -303,8 +301,9 @@ export function terminalRef(): TabRef {
   return indexRef("terminal");
 }
 
+/** The Hook Events page: the foundation's `hook-events` lens page. */
 export function hookEventsRef(): TabRef {
-  return indexRef("hook-events");
+  return extPageRef("oxplow-foundation", "hook-events");
 }
 
 /**
@@ -315,8 +314,9 @@ export function hookEventsRef(): TabRef {
 export function tasksRef(): TabRef {
   return indexRef("tasks");
 }
+/** The Done Work page: the foundation's `done-work` lens page. */
 export function doneWorkRef(): TabRef {
-  return indexRef("done-work");
+  return extPageRef("oxplow-foundation", "done-work");
 }
 export function backlogRef(): TabRef {
   return indexRef("backlog");
@@ -456,7 +456,6 @@ export function externalUrlRef(url: string): TabRef {
 const ROUTES: Record<RoutePageKind, (params: URLSearchParams) => TabRef | null> = {
   "new-session": () => newSessionRef(),
   tasks: () => indexRef("tasks"),
-  "done-work": () => indexRef("done-work"),
   backlog: () => indexRef("backlog"),
   "wiki-index": () => indexRef("wiki-index"),
   files: () => indexRef("files"),
@@ -465,7 +464,6 @@ const ROUTES: Record<RoutePageKind, (params: URLSearchParams) => TabRef | null> 
   "local-history-full": () => indexRef("local-history-full"),
   "local-history-by-commit-full": () => indexRef("local-history-by-commit-full"),
   "git-history": () => indexRef("git-history"),
-  "hook-events": () => indexRef("hook-events"),
   terminal: () => indexRef("terminal"),
   settings: () => indexRef("settings"),
   "metrics-recorded": () => indexRef("metrics-recorded"),
