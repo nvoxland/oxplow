@@ -140,13 +140,13 @@ function DiffBody({
   const outboundEntries = usePageOutbound(graphRef);
   const backlinks = {
     count: backlinkEntries.length,
-    body: <BacklinksList entries={backlinkEntries} onOpenPage={onOpenPage} />,
+    body: <BacklinksList entries={backlinkEntries} />,
   };
   const outbound =
     outboundEntries.length > 0
       ? {
           count: outboundEntries.length,
-          body: <BacklinksList entries={outboundEntries} onOpenPage={onOpenPage} />,
+          body: <BacklinksList entries={outboundEntries} />,
         }
       : undefined;
 

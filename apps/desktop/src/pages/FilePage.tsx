@@ -86,14 +86,14 @@ export function FilePage({ dirty, ...editorProps }: FilePageProps) {
     backlinkEntries.length > 0
       ? {
           count: backlinkEntries.length,
-          body: <BacklinksList entries={backlinkEntries} onOpenPage={onOpen} />,
+          body: <BacklinksList entries={backlinkEntries} />,
         }
       : undefined;
   const outbound =
     outboundEntries.length > 0
       ? {
           count: outboundEntries.length,
-          body: <BacklinksList entries={outboundEntries} onOpenPage={onOpen} />,
+          body: <BacklinksList entries={outboundEntries} />,
         }
       : undefined;
   const snapshots =
@@ -104,7 +104,6 @@ export function FilePage({ dirty, ...editorProps }: FilePageProps) {
             <BacklinksList
               entries={[]}
               snapshotEntries={snapshotEntries}
-              onOpenPage={onOpen}
               onOpenSnapshot={({ snapshotId }) => {
                 const numeric = Number(snapshotId);
                 if (Number.isFinite(numeric)) onOpen(snapshotRef(numeric));

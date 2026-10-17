@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { listBacklinks, listPageOutbound, type BacklinkEdge } from "../api.js";
-import { indexRef, lensRef, refFromTabId } from "./pageRefs.js";
+import { lensRef } from "./pageRefs.js";
+import { refKindInfo, refKindsLoaded } from "../refKinds.js";
 import { workItemId } from "../workItemRef.js";
-import { contributionOf, idOf, refOf, wikiRef } from "../refs/ref.js";
+import { contributionOf, idOf, kindOf, pageRef, parseRef, refOf, wikiRef } from "../refs/ref.js";
 import type { TabRef } from "./tabState.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
 
@@ -143,10 +144,10 @@ export function edgeToOutboundEntry(edge: BacklinkEdge): BacklinkEntry {
  */
 function entryFor(edge: BacklinkEdge, kind: string, id: string): BacklinkEntry {
   const target = refOf(kind, id);
-  const ref = refFor(kind, id, edge.resolved);
-  const dead = ref === null && !edge.resolved;
+  const open = openFor(kind, id, edge.resolved);
+  const dead = open === null && !edge.resolved;
   return {
-    ref,
+    open,
     target,
     label: dead ? target : (edge.source_label ?? id),
     subtitle: humanRefType(edge.ref_type, edge.source_extra),
@@ -187,7 +188,7 @@ export function dedupeEntriesByTarget(entries: BacklinkEntry[]): BacklinkEntry[]
     if (group.length === 1) return group[0];
     // Pick the "best" base entry: wiki kind wins over file when the
     // file is the on-disk shadow of the same wiki page.
-    const wikiMember = group.find((g) => g.ref?.kind === "wiki");
+    const wikiMember = group.find((g) => kindOf(g.target) === "wiki");
     const base = wikiMember ?? group[0];
     // Combine subtitles, dropping empties and duplicates while
     // preserving first-seen order.
@@ -214,34 +215,29 @@ export function dedupeEntriesByTarget(entries: BacklinkEntry[]): BacklinkEntry[]
  * the wiki tab itself.
  */
 function canonicalEntryKey(entry: BacklinkEntry): string {
-  const ref = entry.ref;
-  if (!ref) return entry.target;
-  if (ref.kind === "file") {
-    const path = (ref.payload as { path?: string } | null)?.path;
-    if (path) {
-      const m = /^\.oxplow\/wiki\/(.+)\.md$/.exec(path);
-      if (m) return wikiRef(m[1]!);
-    }
+  const parsed = parseRef(entry.target);
+  if (parsed?.kind === "file") {
+    const m = /^\.oxplow\/wiki\/(.+)\.md$/.exec(parsed.id);
+    if (m) return wikiRef(m[1]!);
   }
-  const id = canonicalIdForTarget(ref) ?? ref.id;
-  return refOf(ref.kind, id);
+  return entry.target;
 }
 
 /**
- * The page a `(kind, id)` ref opens, through the one ref → page mapping
- * (`refFromTabId`: the core kinds with a page, a lens, an extension's
- * page and the pages of an extension's own kinds). A contribution
+ * The ref a `(kind, id)` row opens: itself, where its kind's page says
+ * (the registry, `openRef`) when the kind has one. A contribution
  * (`collector:<ext>/<id>`, `job:…`) something resolves, with no page of
  * its own, opens Settings, where extensions are managed. Anything else
  * yields null: a dead link when nothing resolves it.
  */
-function refFor(kind: string, id: string, resolved: boolean): TabRef | null {
+function openFor(kind: string, id: string, resolved: boolean): string | null {
   // Findings are listed by the oxplow-bundled Findings lens.
-  if (kind === "finding") return lensRef("oxplow-bundled/findings");
+  if (kind === "finding") return lensRef("oxplow-bundled/findings").id;
   const canonical = refOf(kind, id);
-  const page = refFromTabId(canonical);
-  if (page) return page;
-  return resolved && contributionOf(canonical) !== null ? indexRef("settings") : null;
+  const info = refKindInfo(kind);
+  // Before the kinds are read, a ref is taken to open as itself.
+  if (info ? info.page !== null : !refKindsLoaded()) return canonical;
+  return resolved && contributionOf(canonical) !== null ? pageRef("settings") : null;
 }
 
 /**

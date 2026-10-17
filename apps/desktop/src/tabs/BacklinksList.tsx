@@ -6,8 +6,10 @@ import type { MenuItem } from "../menu.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
 import { PageKindIcon } from "../pageKinds.js";
-import { refOf } from "../refs/ref.js";
-import type { TabRef } from "./tabState.js";
+import { kindOf, parseRef, refOf } from "../refs/ref.js";
+import { openRefInWindow } from "./openRef.js";
+import { refTargetNow } from "./refOpener.js";
+import { pageKindOf } from "./pageRefs.js";
 import { setContextRefDrag } from "../agent-context-dnd.js";
 import type { ContextRef } from "../agent-context-ref.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
@@ -56,7 +58,6 @@ export interface BacklinksListProps {
   /** Optional commit-typed backlinks. Click opens the host's
    *  CommitDetailSlideover. */
   commitEntries?: CommitBacklinkEntry[];
-  onOpenPage(ref: TabRef): void;
   /** Right-click actions for an entry (Unlink on a work item's link row).
    *  Without them — or with none for a row — right-click opens the page in
    *  a new tab. */
@@ -69,7 +70,7 @@ export interface BacklinksListProps {
 }
 
 /**
- * Translate a `TabRef` into a `ContextRef` so a backlink entry can be
+ * Translate a ref into a `ContextRef` so a backlink entry can be
  * dragged into the agent terminal as an @-mention. Files / notes /
  * tasks have direct mappings; finding refs land as a file ref to
  * the finding's path because the agent doesn't have its own
@@ -78,27 +79,12 @@ export interface BacklinksListProps {
  *
  * Pure — exported for tests.
  */
-export function tabRefToContextRef(ref: TabRef): ContextRef | null {
-  if (ref.kind === "file") {
-    const payload = ref.payload as { path?: unknown } | null;
-    if (payload && typeof payload.path === "string") {
-      return { kind: "file", path: payload.path };
-    }
-    return null;
-  }
-  if (ref.kind === "wiki") {
-    const payload = ref.payload as { slug?: unknown } | null;
-    if (payload && typeof payload.slug === "string") {
-      return { kind: "wiki", slug: payload.slug };
-    }
-    return null;
-  }
-  if (ref.kind === "work_item") {
-    const payload = ref.payload as { ref?: unknown } | null;
-    if (payload && typeof payload.ref === "string") {
-      return { kind: "work_item", ref: payload.ref, title: workItemLabel(payload.ref), state: "" };
-    }
-    return null;
+export function refToContextRef(ref: string): ContextRef | null {
+  const parsed = parseRef(ref);
+  if (parsed?.kind === "file") return { kind: "file", path: parsed.id };
+  if (parsed?.kind === "wiki") return { kind: "wiki", slug: parsed.id };
+  if (parsed?.kind === "work_item") {
+    return { kind: "work_item", ref, title: workItemLabel(ref), state: "" };
   }
   return null;
 }
@@ -112,12 +98,12 @@ export function BacklinksList({
   entries,
   snapshotEntries = [],
   commitEntries = [],
-  onOpenPage,
   entryMenu,
   onOpenSnapshot,
   onOpenCommit,
 }: BacklinksListProps) {
   const ctxNav = useOptionalPageNavigation();
+  const openRef = ctxNav?.openRef ?? openRefInWindow;
   const { open: openMenu, menu } = useContextMenu();
   // Pre-compute the sibling list (the regular `entries` only — snapshot
   // and commit entries open slideovers and don't participate in tab-
@@ -125,7 +111,10 @@ export function BacklinksList({
   // `siblings`, picks up prev/next buttons keyed by the row's index.
   const siblingsList = useMemo<NavSiblings>(
     () => ({
-      entries: entries.flatMap((e) => (e.ref ? [{ ref: e.ref, label: e.label }] : [])),
+      entries: entries.flatMap((e) => {
+        const target = e.open ? refTargetNow(e.open) : null;
+        return target && "tab" in target ? [{ ref: target.tab, label: e.label }] : [];
+      }),
       // index is resolved at the destination via ref.id matching.
       index: 0,
     }),
@@ -190,11 +179,11 @@ export function BacklinksList({
         </button>
       ))}
       {entries.map((entry, idx) => {
-        const page = entry.ref;
+        const page = entry.open;
         const items = entryMenu?.(entry) ?? [];
         const onContextMenu = (e: MouseEvent) => {
           if (items.length > 0) openMenu(e, items, entry.label);
-          else if (page) { e.preventDefault(); onOpenPage(page); }
+          else if (page) { e.preventDefault(); openRef(page, { newTab: true }); }
           else e.preventDefault();
         };
         if (!page) {
@@ -217,31 +206,31 @@ export function BacklinksList({
             </div>
           );
         }
-        const ctxRef = tabRefToContextRef(page);
+        const ctxRef = refToContextRef(page);
         return (
         <button
-          key={page.id}
+          key={page}
           type="button"
-          data-testid={`backlinks-entry-${page.id}`}
+          data-testid={`backlinks-entry-${page}`}
           onClick={(e: MouseEvent) => {
             // Cmd/Ctrl-click opens in a new tab; default is in-tab
-            // navigation when a PageNavigation context is available,
-            // falling back to the host's onOpenPage (new tab) otherwise.
+            // navigation when a PageNavigation context is available
+            // (outside one, the window's opener: a new tab).
             if ((e.metaKey || e.ctrlKey) || !ctxNav) {
-              onOpenPage(page);
+              openRef(page, { newTab: true });
             } else {
-              ctxNav.navigate(page, { siblings: { entries: siblingsList.entries, index: idx, title: "Backlinks" } });
+              openRef(page, { siblings: { entries: siblingsList.entries, index: idx, title: "Backlinks" } });
             }
           }}
           onAuxClick={(e: MouseEvent) => {
-            if (e.button === 1) { e.preventDefault(); onOpenPage(page); }
+            if (e.button === 1) { e.preventDefault(); openRef(page, { newTab: true }); }
           }}
           onContextMenu={onContextMenu}
           draggable={ctxRef !== null}
           onDragStart={ctxRef !== null ? (e) => setContextRefDrag(e, ctxRef) : undefined}
           style={rowStyle}
         >
-          <PageKindIcon kind={page.kind} size={14} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
+          <PageKindIcon kind={pageKindOf(page) ?? kindOf(page) ?? "page"} size={14} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
           <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {entry.label}
           </span>

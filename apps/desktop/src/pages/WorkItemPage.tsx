@@ -179,7 +179,6 @@ export function WorkItemPage({
       <BacklinksList
         entries={backlinkEntries}
         snapshotEntries={snapshotBacklinks}
-        onOpenPage={onOpenPage}
         onOpenSnapshot={(payload) => {
           const id = Number(payload.snapshotId);
           if (Number.isFinite(id)) onOpenPage(snapshotRef(id));
@@ -190,7 +189,7 @@ export function WorkItemPage({
   };
   const outbound =
     outboundEntries.length > 0
-      ? { count: outboundEntries.length, body: <BacklinksList entries={outboundEntries} onOpenPage={onOpenPage} entryMenu={linkMenu} /> }
+      ? { count: outboundEntries.length, body: <BacklinksList entries={outboundEntries} entryMenu={linkMenu} /> }
       : undefined;
 
   if (!item) {

@@ -3040,8 +3040,8 @@ helpers consult and `useRefKinds` subscribes to:
 - `pageKindIconComponent` / `pageKindLabel` fall back to a kind's icon
   (`REF_KIND_ICONS`, a lucide component per allowed name — a Rust test
   keeps the two lists equal) and label;
-- `refFromTabId("acme_pr:12")` opens `page:acme/pr?ref=acme_pr:12`
-  through the kind's page template, `page:acme/pr?ref={ref}` (refs.md
+- `openRef("acme_pr:12", …)` (a link to the ref) opens
+  `page:acme/pr?ref=acme_pr:12` through the kind's page template, `page:acme/pr?ref={ref}` (refs.md
   "Where a ref opens"; `extPageRef` carries params; `ExtensionPageView`
   hands them to the lens as `initialParams`);
 - `preprocessWikilinks` turns `[[acme_pr:12]]` / `[[pr:12]]` into a link

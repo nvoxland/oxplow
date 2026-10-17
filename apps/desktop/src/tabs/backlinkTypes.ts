@@ -4,12 +4,11 @@
  * stay kind-agnostic — the IPC reader-mapper turns each
  * `BacklinkEdge` into the page + label+subtitle the row needs.
  */
-import type { TabRef } from "./tabState.js";
-
 export interface BacklinkEntry {
-  /** The page the row opens; null when no page shows the ref — either
-   *  nothing resolves it (`dead`) or it resolves but has no page. */
-  ref: TabRef | null;
+  /** The ref the row opens — through `openRef`, where its kind's page
+   *  says; null when no page shows it: either nothing resolves it
+   *  (`dead`) or it resolves but has no page. */
+  open: string | null;
   /** The far end's canonical ref, as the graph stores it. */
   target: string;
   label: string;

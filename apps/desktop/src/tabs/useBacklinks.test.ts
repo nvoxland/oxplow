@@ -1,9 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import { canonicalIdForTarget, dedupeEntriesByTarget, edgeToInboundEntry, edgeToOutboundEntry, humanRefTypeForTest } from "./useBacklinks.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
 import type { BacklinkEdge } from "../api.js";
-import { setRefKinds } from "../refKinds.js";
+import { setRefKinds, type RefKind } from "../refKinds.js";
 import {
   directoryRef,
   effortDiffRef,
@@ -118,13 +118,13 @@ describe("humanRefType", () => {
 describe("dedupeEntriesByTarget", () => {
   test("collapses wiki + on-disk file shadow into a single wiki row", () => {
     const entries: BacklinkEntry[] = [
-      { ref: fileRef(".oxplow/wiki/local-snapshots.md"), target: "file:.oxplow/wiki/local-snapshots.md", label: ".oxplow/wiki/local-snapshots.md", subtitle: "modified" },
-      { ref: wikiPageRef("local-snapshots"), target: "wiki:local-snapshots", label: "Local Snapshots", subtitle: "created" },
-      { ref: wikiPageRef("local-snapshots"), target: "wiki:local-snapshots", label: "Local Snapshots", subtitle: "mention" },
+      { open: "file:.oxplow/wiki/local-snapshots.md", target: "file:.oxplow/wiki/local-snapshots.md", label: ".oxplow/wiki/local-snapshots.md", subtitle: "modified" },
+      { open: "wiki:local-snapshots", target: "wiki:local-snapshots", label: "Local Snapshots", subtitle: "created" },
+      { open: "wiki:local-snapshots", target: "wiki:local-snapshots", label: "Local Snapshots", subtitle: "mention" },
     ];
     const out = dedupeEntriesByTarget(entries);
     expect(out).toHaveLength(1);
-    expect(out[0].ref?.kind).toBe("wiki");
+    expect(out[0].open).toBe("wiki:local-snapshots");
     expect(out[0].label).toBe("Local Snapshots");
     // Subtitles merged in first-seen order, deduped.
     expect(out[0].subtitle).toBe("modified · created · mention");
@@ -132,9 +132,9 @@ describe("dedupeEntriesByTarget", () => {
 
   test("preserves rows that point at different targets", () => {
     const entries: BacklinkEntry[] = [
-      { ref: wikiPageRef("a"), target: "wiki:a", label: "A", subtitle: "mention" },
-      { ref: wikiPageRef("b"), target: "wiki:b", label: "B", subtitle: "mention" },
-      { ref: fileRef("src/x.ts"), target: "file:src/x.ts", label: "src/x.ts", subtitle: "modified" },
+      { open: "wiki:a", target: "wiki:a", label: "A", subtitle: "mention" },
+      { open: "wiki:b", target: "wiki:b", label: "B", subtitle: "mention" },
+      { open: "file:src/x.ts", target: "file:src/x.ts", label: "src/x.ts", subtitle: "modified" },
     ];
     const out = dedupeEntriesByTarget(entries);
     expect(out).toHaveLength(3);
@@ -142,8 +142,8 @@ describe("dedupeEntriesByTarget", () => {
 
   test("collapses two ref_types pointing at the same wiki page", () => {
     const entries: BacklinkEntry[] = [
-      { ref: wikiPageRef("url-schemes"), target: "wiki:url-schemes", label: "URL Schemes", subtitle: "created" },
-      { ref: wikiPageRef("url-schemes"), target: "wiki:url-schemes", label: "URL Schemes", subtitle: "mention" },
+      { open: "wiki:url-schemes", target: "wiki:url-schemes", label: "URL Schemes", subtitle: "created" },
+      { open: "wiki:url-schemes", target: "wiki:url-schemes", label: "URL Schemes", subtitle: "mention" },
     ];
     const out = dedupeEntriesByTarget(entries);
     expect(out).toHaveLength(1);
@@ -152,19 +152,19 @@ describe("dedupeEntriesByTarget", () => {
 
   test("file path that doesn't look like a wiki shadow stays a file row", () => {
     const entries: BacklinkEntry[] = [
-      { ref: fileRef("src/foo.rs"), target: "file:src/foo.rs", label: "src/foo.rs", subtitle: "modified" },
-      { ref: fileRef("src/foo.rs"), target: "file:src/foo.rs", label: "src/foo.rs", subtitle: "mention" },
+      { open: "file:src/foo.rs", target: "file:src/foo.rs", label: "src/foo.rs", subtitle: "modified" },
+      { open: "file:src/foo.rs", target: "file:src/foo.rs", label: "src/foo.rs", subtitle: "mention" },
     ];
     const out = dedupeEntriesByTarget(entries);
     expect(out).toHaveLength(1);
-    expect(out[0].ref?.kind).toBe("file");
+    expect(out[0].open).toBe("file:src/foo.rs");
     expect(out[0].subtitle).toBe("modified · mention");
   });
 
   test("drops blank subtitles cleanly", () => {
     const entries: BacklinkEntry[] = [
-      { ref: wikiPageRef("a"), target: "wiki:a", label: "A", subtitle: "" },
-      { ref: wikiPageRef("a"), target: "wiki:a", label: "A", subtitle: "mention" },
+      { open: "wiki:a", target: "wiki:a", label: "A", subtitle: "" },
+      { open: "wiki:a", target: "wiki:a", label: "A", subtitle: "mention" },
     ];
     const out = dedupeEntriesByTarget(entries);
     expect(out[0].subtitle).toBe("mention");
@@ -172,6 +172,12 @@ describe("dedupeEntriesByTarget", () => {
 });
 
 describe("edges to any ref", () => {
+  // The kinds are read: core's, as the registry lists them.
+  const coreKind = (kind: string, page: string | null): RefKind => ({
+    kind, extension: null, label: null, idPattern: ".*", wikilinks: [], resolve: null, page, icon: null,
+  });
+  beforeEach(() => setRefKinds([coreKind("effort", "{ref}"), coreKind("work_item", "{ref}"), coreKind("collector", null)]));
+  afterEach(() => setRefKinds([]));
   const edge = (over: Partial<BacklinkEdge>): BacklinkEdge => ({
     source_kind: "work_item",
     source_id: "oxplow:tsk1",
@@ -189,7 +195,7 @@ describe("edges to any ref", () => {
       edge({ target_kind: "collector", target_id: "triage/todos", source_label: "Triage todos" }),
     );
     expect(entry.dead).toBe(false);
-    expect(entry.ref?.kind).toBe("settings");
+    expect(entry.open).toBe("page:settings");
     expect(entry.label).toBe("Triage todos");
     expect(entry.subtitle).toBe("about");
     expect(entry.linkType).toBe("about");
@@ -198,7 +204,7 @@ describe("edges to any ref", () => {
 
   test("a link to a core kind with a page opens it", () => {
     const entry = edgeToOutboundEntry(edge({ target_kind: "effort", target_id: "eff12", source_label: "An effort" }));
-    expect(entry.ref?.kind).toBe("effort");
+    expect(entry.open).toBe("effort:eff12");
   });
 
   test("a link to an extension's kind opens the page its ref_kinds names", () => {
@@ -207,10 +213,10 @@ describe("edges to any ref", () => {
     ]);
     try {
       const entry = edgeToOutboundEntry(edge({ target_kind: "acme_pr", target_id: "12", source_label: "PR 12" }));
-      expect(entry.ref?.kind).toBe("ext-page");
+      expect(entry.open).toBe("acme_pr:12");
       expect(entry.dead).toBe(false);
     } finally {
-      setRefKinds([]);
+      setRefKinds([coreKind("effort", "{ref}"), coreKind("work_item", "{ref}"), coreKind("collector", null)]);
     }
   });
 
@@ -218,7 +224,7 @@ describe("edges to any ref", () => {
     const entry = edgeToOutboundEntry(
       edge({ target_kind: "acme_pr", target_id: "12", resolved: false, source_label: null }),
     );
-    expect(entry.ref).toBeNull();
+    expect(entry.open).toBeNull();
     expect(entry.dead).toBe(true);
     expect(entry.label).toBe("acme_pr:12");
     expect(dedupeEntriesByTarget([entry, entry])).toHaveLength(1);
@@ -226,7 +232,7 @@ describe("edges to any ref", () => {
 
   test("an inbound edge reads the source side", () => {
     const entry = edgeToInboundEntry(edge({ source_label: "Fix it" }));
-    expect(entry.ref?.kind).toBe("work_item");
+    expect(entry.open).toBe("work_item:oxplow:tsk1");
     expect(entry.label).toBe("Fix it");
   });
 });

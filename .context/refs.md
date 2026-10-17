@@ -272,11 +272,17 @@ a decision opens its effort, else its thread), or a fixed page
 NULL is a kind with no page (an event, a proposal). The desktop's one
 opener (`tabs/refOpener.ts`: `refTarget`, and `refTargetNow` when the
 template reads no row) fills it (`refKinds.pageTabId`) and says whether
-the window opens a tab, selects a thread or a stream, or opens nothing;
-search hits and `oxplow_navigate` go through it, and `refFromTabId`
-falls back to the template for any kind it has no case for, so a
-wikilink, a lens link or a backlink to an extension's kind opens the
-same page. Before the registry is read, a ref opens as itself.
+the window opens a tab, selects a thread or a stream, or opens nothing.
+**A link to a ref string opens it at the click** (`tabs/openRef.ts`
+`openRef`, by way of `PageNavigation.openRef`, or the window's opener
+outside a page): `<RouteLink to="handoff:hnd1">`, a wikilink
+(`MarkdownView.linkRef`), a lens `page` link, a timeline entry, a
+backlink row (`BacklinkEntry.open`), a component's `navigate`, a search
+hit and `oxplow_navigate` all take it, so a kind's page is decided
+once, here. `refFromTabId` is not an opener: it parses a **tab id**
+(history, bookmarks, a restored tab) and returns null for any other
+kind. Never turn a ref of an arbitrary kind into a `TabRef` yourself.
+Before the registry is read, a ref opens as itself.
 
 **Searchable kinds** (P9.D3). Every kind `v_ref_kind` lists with a
 `searchable` view has that view's rows (`ref`, `title`, `body`,

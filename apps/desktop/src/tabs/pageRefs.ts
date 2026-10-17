@@ -16,7 +16,6 @@
  * covers every constructor).
  */
 
-import { pageTabId } from "../refKinds.js";
 import type { PageKind, RoutePageKind, TabRef } from "./tabState.js";
 import {
   WORKING,
@@ -595,13 +594,10 @@ export function refFromTabId(id: string): TabRef | null {
       const extParams = Object.fromEntries(params.entries());
       return extPageRef(ext.extension, ext.page, Object.keys(extParams).length ? extParams : undefined);
     }
-    default: {
-      // Any other kind opens where its page template says (an
-      // extension's kind: its page, given the ref), when that needs
-      // nothing but the ref; `refOpener` reads the row for one that does.
-      const tab = pageTabId(id);
-      return tab !== null && tab !== id ? refFromTabId(tab) : null;
-    }
+    default:
+      // Not a tab id: a ref of another kind opens where its kind's page
+      // says (`openRef`, `refOpener`), not here.
+      return null;
   }
 }
 

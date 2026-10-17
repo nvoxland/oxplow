@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 // A work item's page — one for every list — offers what its list declares.
@@ -68,7 +68,18 @@ mock.module("../api.js", () => ({
 const { WorkItemPage } = await import("./WorkItemPage.js");
 const { PageNavigationContext } = await import("../tabs/PageNavigationContext.js");
 
+const { setRefKinds } = await import("../refKinds.js");
+// The kinds are read, as in the app: a collector has no page of its own.
+beforeEach(() =>
+  setRefKinds(
+    [["work_item", "{ref}"], ["collector", null]].map(([kind, page]) => ({
+      kind: kind!, extension: null, label: null, idPattern: ".*", wikilinks: [], resolve: null, page, icon: null,
+    })),
+  ),
+);
+
 afterEach(() => {
+  setRefKinds([]);
   parent = "work_item:fake:W-0";
   ran.length = 0;
   outbound = [];

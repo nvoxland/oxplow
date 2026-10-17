@@ -5,6 +5,7 @@ import { linkRef, parseMarkdownLink, preprocessWikilinks } from "./components/Wi
 import { pageKindIconComponent, pageKindLabel } from "./pageKinds.js";
 import { extensionWikilinkRef, refKindsFromResult, setRefKinds, type RefKind } from "./refKinds.js";
 import { refFromTabId } from "./tabs/pageRefs.js";
+import { refTargetNow } from "./tabs/refOpener.js";
 
 const ACME_PR: RefKind = {
   kind: "acme_pr",
@@ -28,9 +29,12 @@ describe("an extension's ref kind (P8.D7)", () => {
   });
 
   test("opens its extension's page with the ref", () => {
+    // A ref of another kind is no tab id: the opener says where it opens.
     expect(refFromTabId("acme_pr:12")).toBeNull();
     setRefKinds([ACME_PR]);
-    const tab = refFromTabId("acme_pr:12");
+    expect(refFromTabId("acme_pr:12")).toBeNull();
+    const target = refTargetNow("acme_pr:12");
+    const tab = target && "tab" in target ? target.tab : null;
     expect(tab).toEqual({
       id: "page:acme/pr?ref=acme_pr:12",
       kind: "ext-page",

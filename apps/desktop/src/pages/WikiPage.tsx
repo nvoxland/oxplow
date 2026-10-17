@@ -45,13 +45,13 @@ export function WikiPage({ stream, slug, onClosed, onOpenWikiPage, onOpenFile, o
   const outboundEntries = usePageOutbound(ref);
   const backlinks = {
     count: backlinkEntries.length,
-    body: <BacklinksList entries={backlinkEntries} onOpenPage={onOpenPage} />,
+    body: <BacklinksList entries={backlinkEntries} />,
   };
   const outbound =
     outboundEntries.length > 0
       ? {
           count: outboundEntries.length,
-          body: <BacklinksList entries={outboundEntries} onOpenPage={onOpenPage} />,
+          body: <BacklinksList entries={outboundEntries} />,
         }
       : undefined;
 

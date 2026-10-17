@@ -131,6 +131,12 @@ export function setRefKinds(kinds: readonly RefKind[]): void {
   for (const l of listeners) l();
 }
 
+/** Whether the list has been read: before it, a kind that isn't core's is
+ *  not yet known to be missing. */
+export function refKindsLoaded(): boolean {
+  return current.size > 0;
+}
+
 /** A ref kind by name, or null (unknown, or the list isn't loaded yet). */
 export function refKindInfo(kind: string): RefKind | null {
   return current.get(kind) ?? null;
