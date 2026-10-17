@@ -442,22 +442,24 @@ test("streams are inverted tiles and threads indented tabs, tied by a guide line
   // Flat where another tab sits next to it; the last rounds the bottom.
   expect(writer.style.borderRadius).toBe("0px");
   expect(queued.style.borderRadius).toBe("0px 0px 6px");
-  expect(writer.style.borderWidth).toBe("2px 1px 0px 0px");
-  expect(queued.style.borderWidth).toBe("2px 1px 1px 0px");
+  expect(writer.style.borderWidth).toBe("0px 1px 1px 0px");
+  expect(queued.style.borderWidth).toBe("0px 1px 1px 0px");
   // A marked thread is not outlined like the selection: a corner fold in
   // its mark's colour sits in its top-left corner, at the window's edge;
   // an unmarked thread has none.
   const mark = writer.querySelector("[data-testid=navigator-thread-mark]") as HTMLElement;
   expect(mark.getAttribute("title")).toBe("Marked amber");
   expect(mark.style.color).toBe("var(--thread-mark-amber)");
-  expect(mark.style.top).toBe("-2px");
+  expect(mark.style.top).toBe("0px");
   expect(mark.style.left).toBe("0px");
   expect(queued.querySelector("[data-testid=navigator-thread-mark]")).toBeNull();
-  // A grey divider in the guide line's colour falls between stacked tabs;
-  // the outer right and bottom edges keep their frame.
+  // A grey divider in the guide line's colour falls between stacked tabs,
+  // along each one's bottom but the last's, so none sits under the
+  // stream's tab; the outer right and bottom edges keep their frame.
   // (The DOM folds the left side, equal to the right, away.)
-  expect(writer.style.borderColor).toBe("var(--text-muted) var(--border-strong) var(--border-strong)");
-  expect(queued.style.borderColor).toBe(writer.style.borderColor);
+  expect(writer.style.borderColor).toBe("transparent var(--border-strong) var(--text-muted)");
+  expect(writer.style.borderTopWidth).toBe("0px");
+  expect(queued.style.borderColor).toBe("var(--border-strong)");
   // The column behind the tabs is one colour: the app's.
   expect(getByTestId("navigator-strip").style.background).toBe("var(--surface-app)");
 

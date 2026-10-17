@@ -1001,13 +1001,14 @@ function IconCell({
         backgroundImage: "linear-gradient(var(--panel-header-bg), var(--panel-header-bg))",
         backgroundColor: "var(--surface-card)",
         color: "var(--text-primary)",
-        // Each tab draws its top edge, and the last also its bottom. The
-        // top edge is a 2px divider in the guide line's grey, so it stands
-        // out between two tabs (a 1px frame-coloured one vanished at this
-        // size); the right and bottom keep the frame.
-        borderWidth: isLast ? `${THREAD_DIVIDER}px 1px 1px 0` : `${THREAD_DIVIDER}px 1px 0 0`,
+        // Each tab but the last draws a divider along its bottom, in the
+        // guide line's grey, so it stands out between two tabs (a
+        // frame-coloured one vanished at this size) and none falls under
+        // the stream's tab; the last's bottom and every right edge keep
+        // the frame.
+        borderWidth: isLast ? "0 1px 1px 0" : `0 1px ${THREAD_DIVIDER}px 0`,
         borderStyle: "solid",
-        borderColor: "var(--text-muted) var(--border-strong) var(--border-strong) var(--border-strong)",
+        borderColor: isLast ? "var(--border-strong)" : "transparent var(--border-strong) var(--text-muted)",
         fontSize: THREAD_LETTER_FONT,
         fontWeight: 600,
       };
@@ -1104,7 +1105,7 @@ function MarkFold({ mark }: { mark: ThreadMark }) {
       title={`Marked ${mark}`}
       style={{
         position: "absolute",
-        top: -THREAD_DIVIDER,
+        top: 0,
         left: 0,
         display: "flex",
         color: markColour(mark),
@@ -1237,8 +1238,8 @@ const SELECTION_BAR = 3;
 const STREAM_RIGHT = 2;
 const GUIDE_RIGHT = STREAM_RIGHT;
 const THREAD_RIGHT = 9;
-// The divider drawn along a thread tab's top, between stacked tabs.
-const THREAD_DIVIDER = 2;
+// The divider drawn along a thread tab's bottom, between stacked tabs.
+const THREAD_DIVIDER = 1;
 const STRIP_PADDING_Y = 6;
 const ROW_HEIGHT = 36;
 const GAP_HEIGHT = 14;
