@@ -463,6 +463,19 @@ for a window it isn't drawing, while a real block starts after frames were
 running. A hidden document (`visibilitychange`) is still discounted. At
 most one tick right after a window is covered can still report.
 
+## A worktree's files as a live model (measured 2026-10-18)
+
+`v_workspace_file` reads a stream's worktree on every query: the VCS
+status, the filtered walk, and the rows into a temp table. On this repo
+(2,321 files kept by the filter): status ~28 ms, walk ~40 ms, temp table
+~2 ms — about 70 ms a query, and the walk grows with the tree. Listing one
+folder through `list_workspace_entries` costs the status and one
+`read_dir`, about 30 ms. So the Project panel, Quick Open's file index and
+the Directory page keep their workspace-listing IPCs until a live model
+can be read for one folder (a pushdown of `parent = ?` into the read);
+`v_workspace_file` serves lenses and the agent's whole-tree questions,
+where one walk per query is fine.
+
 ## Daemon transport: what a loopback HTTP hop costs (tsk255)
 
 Measured for the daemon-backed shell epic ([[tsk254]]), from **inside the real

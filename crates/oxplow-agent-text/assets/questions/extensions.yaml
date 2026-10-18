@@ -80,3 +80,25 @@
   reaches:
     sql: SELECT path FROM v_zone_unmatched ORDER BY path
   shape: { columns: [path] }
+- question: Which settings does this project set itself, rather than leaving them at their default?
+  skill: oxplow-extension
+  reaches:
+    sql: SELECT key, value FROM v_config_value WHERE origin = 'project' ORDER BY key
+  shape: { columns: [key, value] }
+- question: Which saved agent conversations could be resumed here, and which harness keeps each?
+  skill: oxplow-extension
+  reaches:
+    sql: >-
+      SELECT harness, native_id, title, updated_at FROM v_agent_conversation
+      WHERE native_id IS NOT NULL ORDER BY updated_at DESC
+  shape: { columns: [harness, native_id, title, updated_at] }
+- question: Which worktrees of this repository could a new stream adopt?
+  skill: oxplow-extension
+  reaches:
+    sql: SELECT path, branch FROM v_vcs_workspace WHERE NOT is_main AND stream_id IS NULL
+  shape: { columns: [path, branch] }
+- question: What is in the src folder of this stream's worktree, and which of its files changed?
+  skill: oxplow-extension
+  reaches:
+    sql: SELECT name, kind, status FROM v_workspace_file WHERE parent = 'src' ORDER BY kind, name
+  shape: { columns: [name, kind, status] }

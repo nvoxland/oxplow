@@ -486,8 +486,12 @@ from: whether a key is in the keychain (`v_ai_provider.key_set`,
 hand), which language servers run and whose binary is on disk
 (`v_lsp_server`), and a machine's collector approvals and credentials
 (`v_collector_state`, `v_collector_credential`; per machine, outside the
-repo), and what the zone table does to the worktree (`v_zone`,
-`v_zone_unmatched`: `project.yaml` edited by hand, and the files on disk). A restated table (as `v_lens` and `v_extension` are, in the
+repo), what the zone table does to the worktree (`v_zone`,
+`v_zone_unmatched`: `project.yaml` edited by hand, and the files on disk),
+every setting's effective value (`v_config_value`), a worktree's files
+(`v_workspace_file`), the harnesses' saved conversations
+(`v_agent_conversation`: files the harness writes outside oxplow), and the
+repository's working copies (`v_vcs_workspace`). A restated table (as `v_lens` and `v_extension` are, in the
 extension-generation transaction) would be wrong between the change and the
 next restatement, and nothing says when that is. So these are **live
 models** (`crates/oxplow-app/src/live_models.rs`, `LiveModels::NAMES`): the
@@ -497,7 +501,8 @@ rows are read when a query names the model.
   takes a connection, `SqlGateway::materialize` finds each live model the SQL
   names (`v_<name>`, bare or quoted), reads its rows from the registry the app
   bound (`LiveSources`: the AI service, the LSP session manager, the
-  collector listing, the config and the worktree's file list), and hands them to the query as a temp table
+  collector listing, the config, the worktree's file list, the stream
+  store, the harness registry and the VCS), and hands them to the query as a temp table
   `live_<name>` with a temp view `v_<name>` over it. The temp view shadows
   the core view of the same name for that query alone, and both are dropped
   with it.
@@ -507,16 +512,35 @@ rows are read when a query names the model.
   to read the sources (a bare `SqlGateway::new`) **refuses** a run naming one
   rather than answer empty, and a test pins that no core model is built on a
   live one (it would read the stub).
-- **Cheap and lock-free:** a read walks in-memory registries, a config file
-  and the keychain; it takes no database connection and holds no lock while
-  the query runs. Nothing is cached, so a result is as current as the query.
-  A live read has no watermark, so a result's `freshness` doesn't mention it.
+- **Stream-scoped:** a query runs for a stream (`SqlQuery::stream`, which a
+  lens sets from its `stream_id` param). A model of a worktree —
+  `v_workspace_file`, `v_agent_conversation` — reads that stream's, and the
+  primary checkout's when the query names none; its rows carry the
+  `stream_id` they list. `LiveModels::materialize` takes the stream.
+- **Cheap, and current:** a read walks in-memory registries, a config file,
+  the keychain, the stream store, a worktree's files (`v_workspace_file` and
+  `v_zone` walk them on every query) or each harness's conversation index;
+  it holds no lock while the query runs. Nothing is cached, so a result is
+  as current as the query. A live read has no watermark, so a result's
+  `freshness` doesn't mention it.
+- **Changed, as any model is:** `live_models::follows` says what changes
+  each one — the events about the state it reads (`ConfigChanged`,
+  `WorkspaceChanged`, `VcsRefsChanged`, `LspServersChanged`,
+  `ApprovalsChanged`, `CredentialChanged`, `ExtensionsChanged`) and the
+  models it reads through (`v_agent_conversation` follows `v_agent_session`
+  and `v_agent_turn`; `v_vcs_workspace` follows `v_stream`). The bus, as
+  it posts such an event, posts the `ModelsChanged` naming the live models
+  that follow it (`models_changed::announced_after`, so every emitter is
+  covered and no backend code listens to the bus), and the change loop adds
+  the live models that read through the models a commit changed
+  (`live_models_reading`). A lens over a live model then re-runs like one
+  over a table: its `reads.models` names it.
 - **Never a secret:** the keychain is asked whether an entry exists
   (`key_set`, `is_set`), never for its value; a test stores a key and a
   credential and proves neither reaches any column.
 - **Adding one:** a stub `models/<name>.sql` and its `models.yaml` entry (with
-  column docs), the name and columns in `live_models.rs`, a read in
-  `LiveSources`, and an answerability question. Declare an integer column
+  column docs), the name, columns and what it `follows` in `live_models.rs`,
+  a read in `LiveSources`, and an answerability question. Declare an integer column
   `INT` (what SQLite infers for a `CAST`). If the state does have a change
   hook, restate it in a table instead.
 

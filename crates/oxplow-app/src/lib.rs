@@ -1315,6 +1315,9 @@ impl Services {
             catalog: extension_catalog.clone(),
             config: config_arc.clone(),
             workspace_files: workspace_files.clone(),
+            streams: stream_store.clone(),
+            harnesses: harnesses.clone(),
+            vcs: vcs.clone(),
         });
         let extension_secrets = Arc::new(extension_secrets::ExtensionSecrets::new(
             extension_catalog.clone(),

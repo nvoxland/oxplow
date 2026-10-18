@@ -3,9 +3,18 @@
 //! because that state has no change hook to restate it from — the keychain
 //! (is a key set), `ai.yaml` and `project.yaml` (edited by hand), the
 //! language-server process table and the binaries on disk, a machine's
-//! approvals. A restated table would be wrong between the change and the
-//! next restatement; reading when asked is always right, and each read is
-//! one small registry walk (no query, no lock held).
+//! approvals, the worktree's files, the harnesses' saved conversations. A
+//! restated table would be wrong between the change and the next
+//! restatement; reading when asked is always right.
+//!
+//! A query runs for a stream (`SqlQuery::stream`, a lens's `stream_id`):
+//! a model of a worktree — its files, its conversations — reads that
+//! stream's, and the primary checkout's when the query names none.
+//!
+//! What changes a live model is in [`follows`]: the events that change
+//! what it reads, and the models it reads through. The change loop
+//! announces it as changed with them (`models_changed`), so a lens over
+//! it re-runs like one over a table.
 //!
 //! The mechanism is `metric_grid()`'s: the gateway, before it takes a
 //! connection, reads each live model its SQL names and hands the rows to
@@ -17,9 +26,10 @@
 use std::sync::{Arc, OnceLock};
 
 use oxplow_db::{SqlCell, TempTable, TempView};
-use oxplow_domain::DomainError;
+use oxplow_domain::{DomainError, Stream, StreamId, StreamKind};
 
 use crate::ai_service::AiService;
+use crate::events::OxplowEvent;
 use crate::lsp_sessions::LspSessionManager;
 
 /// The live models, by name (`v_<name>`).
@@ -32,6 +42,10 @@ pub const NAMES: &[&str] = &[
     "zone",
     "zone_unmatched",
     "scope",
+    "config_value",
+    "agent_conversation",
+    "vcs_workspace",
+    "workspace_file",
 ];
 
 /// The columns a live model's rows have, in order.
@@ -78,7 +92,80 @@ pub fn columns(name: &str) -> &'static [&'static str] {
         "zone" => &["position", "zone", "patterns", "color", "files"],
         "zone_unmatched" => &["path"],
         "scope" => &["id", "access", "host", "spends", "summary"],
+        "config_value" => &[
+            "key",
+            "value",
+            "origin",
+            "extension",
+            "human_only",
+            "doc",
+            "schema",
+        ],
+        "agent_conversation" => &[
+            "stream_id",
+            "harness",
+            "native_id",
+            "title",
+            "first_prompt",
+            "started_at",
+            "updated_at",
+            "size_bytes",
+            "parent",
+            "problem",
+        ],
+        "vcs_workspace" => &["path", "branch", "head", "is_main", "stream_id"],
+        "workspace_file" => &["stream_id", "path", "parent", "name", "kind", "status"],
         _ => &[],
+    }
+}
+
+/// What can change a live model's rows.
+pub enum Change<'a> {
+    /// An event about what it reads.
+    Event(&'a OxplowEvent),
+    /// These models changed (`v_<name>`).
+    Models(&'a [String]),
+}
+
+/// Whether `change` can change live model `name`'s rows: the events about
+/// the state it reads, and the models it reads through.
+pub fn follows(name: &str, change: &Change<'_>) -> bool {
+    use OxplowEvent as E;
+    match change {
+        Change::Event(event) => match name {
+            "ai_role" | "ai_provider" => matches!(
+                event,
+                E::ConfigChanged | E::CredentialChanged { .. } | E::ExtensionsChanged
+            ),
+            "lsp_server" => matches!(event, E::LspServersChanged | E::ConfigChanged),
+            "collector_state" | "collector_credential" => matches!(
+                event,
+                E::ApprovalsChanged
+                    | E::CredentialChanged { .. }
+                    | E::ExtensionsChanged
+                    | E::ConfigChanged
+            ),
+            "zone" | "zone_unmatched" => {
+                matches!(event, E::ConfigChanged | E::WorkspaceChanged { .. })
+            }
+            "config_value" => matches!(event, E::ConfigChanged | E::ExtensionsChanged),
+            "vcs_workspace" => matches!(event, E::VcsRefsChanged { .. }),
+            "workspace_file" => matches!(
+                event,
+                E::WorkspaceChanged { .. } | E::VcsRefsChanged { .. } | E::ConfigChanged
+            ),
+            _ => false,
+        },
+        Change::Models(models) => {
+            let reads = |m: &str| models.iter().any(|x| x == m);
+            match name {
+                // Its conversations change as sessions run.
+                "agent_conversation" => reads("v_agent_session") || reads("v_agent_turn"),
+                // A stream adopting a working copy.
+                "vcs_workspace" => reads("v_stream"),
+                _ => false,
+            }
+        }
     }
 }
 
@@ -96,6 +183,9 @@ pub struct LiveSources {
     pub catalog: Arc<crate::extension_catalog::ExtensionCatalog>,
     pub config: Arc<std::sync::RwLock<oxplow_config::OxplowConfig>>,
     pub workspace_files: Arc<crate::workspace_files::WorkspaceFiles>,
+    pub streams: Arc<dyn oxplow_domain::stores::StreamStore>,
+    pub harnesses: oxplow_domain::agent::registry::HarnessRegistry,
+    pub vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
 }
 
 /// How many unmatched paths `v_zone_unmatched` lists: enough to see the
@@ -123,6 +213,14 @@ fn flag(value: bool) -> SqlCell {
 
 fn json(value: &impl serde::Serialize) -> SqlCell {
     text(serde_json::to_string(value).unwrap_or_default())
+}
+
+/// An enum value as its wire name (`default`, `project`).
+fn wire_name(value: &impl serde::Serialize) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_default()
 }
 
 impl LiveModels {
@@ -157,19 +255,21 @@ impl LiveModels {
         Ok(found)
     }
 
-    /// The temp table and view that stand for each of `names` in a query:
-    /// the rows read now (`with_rows`), or none for a check, which only
-    /// compiles.
+    /// The temp table and view that stand for each of `names` in a query
+    /// run for `stream` (a row id; none: the primary checkout): the rows
+    /// read now (`with_rows`), or none for a check, which only compiles.
     pub async fn materialize(
         &self,
         names: &[&'static str],
+        stream: Option<i64>,
         with_rows: bool,
     ) -> Result<(Vec<TempTable>, Vec<TempView>), DomainError> {
         let mut tables = Vec::new();
         let mut views = Vec::new();
+        let stream = stream.map(StreamId::new);
         for name in names {
             let rows = if with_rows {
-                self.read(name).await?
+                self.read(name, stream).await?
             } else {
                 Vec::new()
             };
@@ -187,7 +287,11 @@ impl LiveModels {
         Ok((tables, views))
     }
 
-    async fn read(&self, name: &str) -> Result<Vec<Vec<SqlCell>>, DomainError> {
+    async fn read(
+        &self,
+        name: &str,
+        stream: Option<StreamId>,
+    ) -> Result<Vec<Vec<SqlCell>>, DomainError> {
         // A table core ships: nothing to bind.
         if name == "scope" {
             return Ok(scopes());
@@ -205,6 +309,10 @@ impl LiveModels {
             "collector_credential" => sources.collector_credentials().await,
             "zone" => Ok(sources.zones().await?.0),
             "zone_unmatched" => Ok(sources.zones().await?.1),
+            "config_value" => sources.config_values().await,
+            "agent_conversation" => sources.agent_conversations(stream).await,
+            "vcs_workspace" => sources.vcs_workspaces().await,
+            "workspace_file" => sources.workspace_files(stream).await,
             other => Err(DomainError::Invalid(format!(
                 "`v_{other}` isn't a live model"
             ))),
@@ -214,19 +322,13 @@ impl LiveModels {
 
 /// `v_scope`: every scope a command may need.
 fn scopes() -> Vec<Vec<SqlCell>> {
-    fn name(value: &impl serde::Serialize) -> String {
-        serde_json::to_value(value)
-            .ok()
-            .and_then(|v| v.as_str().map(str::to_string))
-            .unwrap_or_default()
-    }
     oxplow_domain::scope::SCOPES
         .iter()
         .map(|s| {
             vec![
                 text(s.id),
-                text(name(&s.access)),
-                text(name(&s.host)),
+                text(wire_name(&s.access)),
+                text(wire_name(&s.host)),
                 SqlCell::Int(i64::from(s.spends)),
                 text(s.summary),
             ]
@@ -426,5 +528,199 @@ impl LiveSources {
             SqlCell::Int(other),
         ]);
         Ok((table, unmatched))
+    }
+
+    /// The stream a query runs for: `stream`, else the primary.
+    async fn stream(&self, stream: Option<StreamId>) -> Result<Stream, DomainError> {
+        if let Some(id) = stream {
+            return self.streams.get(&id).await?.ok_or(DomainError::NotFound);
+        }
+        self.streams
+            .list()
+            .await?
+            .into_iter()
+            .find(|s| s.kind == StreamKind::Primary)
+            .ok_or(DomainError::NotFound)
+    }
+
+    async fn config_values(&self) -> Result<Vec<Vec<SqlCell>>, DomainError> {
+        let config = self
+            .config
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let project_dir = self.worktrees.project_dir();
+        let extensions = self
+            .catalog
+            .unpinned(project_dir, "v_config_value lists what extensions declare");
+        let ai = self.ai.settings().await.ok();
+        let global = oxplow_config::global_config_dir();
+        Ok(crate::effective_config::effective_config(
+            &config,
+            project_dir,
+            ai.as_ref(),
+            global.as_deref(),
+            extensions.as_ref(),
+        )
+        .iter()
+        .map(|s| {
+            vec![
+                text(s.key.clone()),
+                json(&s.value),
+                text(wire_name(&s.origin)),
+                opt(s.extension.clone()),
+                flag(s.human_only),
+                text(s.doc.clone()),
+                if s.schema.is_null() {
+                    SqlCell::Null(())
+                } else {
+                    json(&s.schema)
+                },
+            ]
+        })
+        .collect())
+    }
+
+    /// Every harness's saved conversations in the stream's worktree, each
+    /// asked at once; one that can't answer is a row saying why.
+    async fn agent_conversations(
+        &self,
+        stream: Option<StreamId>,
+    ) -> Result<Vec<Vec<SqlCell>>, DomainError> {
+        use oxplow_domain::agent::harness::HarnessError;
+        let stream = self.stream(stream).await?;
+        let harnesses = self.harnesses.all();
+        let answers = futures::future::join_all(harnesses.iter().map(|h| {
+            let stream = &stream;
+            async move {
+                (
+                    h.id().to_string(),
+                    crate::session_history::harness_conversations(h.as_ref(), stream).await,
+                )
+            }
+        }))
+        .await;
+        let id = SqlCell::Int(stream.id.value());
+        let time = |t: Option<oxplow_domain::Timestamp>| opt(t.map(|t| t.to_string()));
+        let mut rows = Vec::new();
+        for (harness, answer) in answers {
+            match answer {
+                Ok(found) => rows.extend(found.into_iter().map(|c| {
+                    vec![
+                        id.clone(),
+                        text(harness.clone()),
+                        text(c.id),
+                        opt(c.title),
+                        opt(c.first_prompt),
+                        time(c.started_at),
+                        time(c.updated_at),
+                        c.size_bytes
+                            .map_or(SqlCell::Null(()), |n| SqlCell::Int(n as i64)),
+                        opt(c.parent),
+                        SqlCell::Null(()),
+                    ]
+                })),
+                // It keeps no list: nothing to say.
+                Err(HarnessError::Unsupported { .. }) => {}
+                Err(problem) => {
+                    let mut row = vec![SqlCell::Null(()); columns("agent_conversation").len()];
+                    row[0] = id.clone();
+                    row[1] = text(harness);
+                    row[9] = text(problem.to_string());
+                    rows.push(row);
+                }
+            }
+        }
+        Ok(rows)
+    }
+
+    /// The repository's working copies, primary first, each with the stream
+    /// working in it (paths compared as the disk resolves them).
+    async fn vcs_workspaces(&self) -> Result<Vec<Vec<SqlCell>>, DomainError> {
+        let canon = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.into());
+        let project_dir = self.worktrees.project_dir();
+        let streams: Vec<(std::path::PathBuf, i64)> = self
+            .streams
+            .list()
+            .await?
+            .iter()
+            .map(|s| {
+                let path = crate::worktrees::workspace_path(project_dir, &s.worktree_path);
+                (canon(&path), s.id.value())
+            })
+            .collect();
+        let mut workspaces = self.vcs.list_workspaces(project_dir).await?;
+        workspaces.sort_by_key(|w| !w.is_main);
+        Ok(workspaces
+            .into_iter()
+            .map(|w| {
+                let at = canon(std::path::Path::new(&w.path));
+                let stream = streams.iter().find(|(p, _)| *p == at).map(|(_, id)| *id);
+                vec![
+                    text(w.path),
+                    opt(w.branch),
+                    opt(w.head),
+                    flag(w.is_main),
+                    stream.map_or(SqlCell::Null(()), SqlCell::Int),
+                ]
+            })
+            .collect())
+    }
+
+    /// The stream's worktree's files its filter keeps, and every folder
+    /// above them.
+    async fn workspace_files(
+        &self,
+        stream: Option<StreamId>,
+    ) -> Result<Vec<Vec<SqlCell>>, DomainError> {
+        let stream = self.stream(stream).await?;
+        let generated = self
+            .config
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .generated
+            .clone();
+        let files = self
+            .workspace_files
+            .list_files(Some(&stream.id.to_string()), &generated)
+            .await
+            .map_err(|e| DomainError::Invalid(e.to_string()))?;
+        let id = SqlCell::Int(stream.id.value());
+        let split = |path: &str| match path.rsplit_once('/') {
+            Some((parent, name)) => (parent.to_string(), name.to_string()),
+            None => (String::new(), path.to_string()),
+        };
+        let mut dirs = std::collections::BTreeSet::new();
+        let mut rows = Vec::with_capacity(files.len());
+        for file in files {
+            let mut at = file.path.as_str();
+            while let Some((parent, _)) = at.rsplit_once('/') {
+                if !dirs.insert(parent.to_string()) {
+                    break;
+                }
+                at = parent;
+            }
+            let (parent, name) = split(&file.path);
+            rows.push(vec![
+                id.clone(),
+                text(file.path.clone()),
+                text(parent),
+                text(name),
+                text("file"),
+                opt(file.status.map(|s| s.as_str())),
+            ]);
+        }
+        rows.extend(dirs.into_iter().map(|dir| {
+            let (parent, name) = split(&dir);
+            vec![
+                id.clone(),
+                text(dir),
+                text(parent),
+                text(name),
+                text("dir"),
+                SqlCell::Null(()),
+            ]
+        }));
+        Ok(rows)
     }
 }

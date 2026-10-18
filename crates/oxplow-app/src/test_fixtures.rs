@@ -459,3 +459,80 @@ pub(crate) fn foundation_producer_specs() -> Vec<oxplow_db::NewMetricSpec> {
         .filter(|spec| spec.entity_json.is_none())
         .collect()
 }
+
+/// A harness that lists the conversations it is told to, or fails with
+/// `answer`'s message; it launches nothing.
+pub struct Listing {
+    pub id: &'static str,
+    pub answer: Result<Vec<oxplow_domain::agent::harness::NativeConversation>, String>,
+}
+
+#[async_trait::async_trait]
+impl oxplow_domain::agent::harness::AgentHarness for Listing {
+    fn id(&self) -> &str {
+        self.id
+    }
+    fn title(&self) -> &str {
+        self.id
+    }
+    async fn launch(
+        &self,
+        _input: &oxplow_domain::agent::harness::LaunchInput,
+    ) -> Result<oxplow_domain::agent::harness::Launch, oxplow_domain::agent::harness::HarnessError>
+    {
+        Err(oxplow_domain::agent::harness::HarnessError::Unsupported {
+            harness: self.id.into(),
+            what: "launch".into(),
+        })
+    }
+    async fn tool_use(
+        &self,
+        _body: &serde_json::Value,
+    ) -> Option<oxplow_domain::agent::tool::ToolUse> {
+        None
+    }
+    async fn render(
+        &self,
+        _answer: &oxplow_domain::agent::observe::HookAnswer,
+    ) -> serde_json::Value {
+        serde_json::json!({})
+    }
+    async fn conversations(
+        &self,
+        _query: &oxplow_domain::agent::harness::ConversationQuery,
+    ) -> Result<
+        Vec<oxplow_domain::agent::harness::NativeConversation>,
+        oxplow_domain::agent::harness::HarnessError,
+    > {
+        self.answer
+            .clone()
+            .map_err(oxplow_domain::agent::harness::HarnessError::Unavailable)
+    }
+}
+
+/// A [`Listing`] harness that lists `found`.
+pub fn listing_harness(
+    id: &'static str,
+    found: Vec<oxplow_domain::agent::harness::NativeConversation>,
+) -> Arc<dyn oxplow_domain::agent::harness::AgentHarness> {
+    Arc::new(Listing {
+        id,
+        answer: Ok(found),
+    })
+}
+
+/// A saved conversation `id`, last active at minute `minute` of a fixed
+/// hour, titled `about <id>`.
+pub fn conversation(id: &str, minute: u32) -> oxplow_domain::agent::harness::NativeConversation {
+    oxplow_domain::agent::harness::NativeConversation {
+        id: id.into(),
+        title: Some(format!("about {id}")),
+        first_prompt: None,
+        started_at: None,
+        updated_at: Some(
+            oxplow_domain::Timestamp::parse(&format!("2026-10-10T10:{minute:02}:00Z")).unwrap(),
+        ),
+        size_bytes: None,
+        parent: None,
+    }
+}

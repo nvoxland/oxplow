@@ -13874,5 +13874,177 @@
         "key"
       ]
     }
+  },
+  "config_value": {
+    "1": {
+      "columns": [
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "A project key (`snapshotRetentionDays`), or a scoped name (`ai.roles.main`, `personal.activeProviders`, `metrics.<key>`, `dimensions.<key>`)."
+        },
+        {
+          "name": "value",
+          "type": "TEXT",
+          "doc": "Its value now, as JSON."
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "doc": "Where the value comes from: `default`, `global`, `project`, `personal` or `extension`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension it comes from, when `origin` is `extension`."
+        },
+        {
+          "name": "human_only",
+          "type": "INT",
+          "doc": "1 when only a person may set it; an agent's change waits for their approval."
+        },
+        {
+          "name": "doc",
+          "type": "TEXT",
+          "doc": "What it is for."
+        },
+        {
+          "name": "schema",
+          "type": "TEXT",
+          "doc": "A project key's value schema, as JSON; NULL for the rest."
+        }
+      ],
+      "key": [
+        "key"
+      ]
+    }
+  },
+  "agent_conversation": {
+    "1": {
+      "columns": [
+        {
+          "name": "stream_id",
+          "type": "INT",
+          "doc": "The stream whose worktree it was begun in (v_stream.id)."
+        },
+        {
+          "name": "harness",
+          "type": "TEXT",
+          "doc": "The harness that keeps it (`claude`, `codex`, `opencode`)."
+        },
+        {
+          "name": "native_id",
+          "type": "TEXT",
+          "doc": "The harness's own id for it: what a resume names. NULL on a `problem` row."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Its title, if the harness keeps one."
+        },
+        {
+          "name": "first_prompt",
+          "type": "TEXT",
+          "doc": "The first thing the person asked, if the harness keeps it."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "When it began."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "When it was last active."
+        },
+        {
+          "name": "size_bytes",
+          "type": "INT",
+          "doc": "How large its saved transcript is."
+        },
+        {
+          "name": "parent",
+          "type": "TEXT",
+          "doc": "The conversation it was forked from, if any."
+        },
+        {
+          "name": "problem",
+          "type": "TEXT",
+          "doc": "Why the harness couldn't list its conversations now; NULL on a conversation."
+        }
+      ],
+      "key": []
+    }
+  },
+  "vcs_workspace": {
+    "1": {
+      "columns": [
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "Where it is on disk."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "The branch it has checked out; NULL on a detached HEAD."
+        },
+        {
+          "name": "head",
+          "type": "TEXT",
+          "doc": "The commit it is at."
+        },
+        {
+          "name": "is_main",
+          "type": "INT",
+          "doc": "1 for the repository's primary working copy."
+        },
+        {
+          "name": "stream_id",
+          "type": "INT",
+          "doc": "The stream working in it (v_stream.id); NULL when none does."
+        }
+      ],
+      "key": [
+        "path"
+      ]
+    }
+  },
+  "workspace_file": {
+    "1": {
+      "columns": [
+        {
+          "name": "stream_id",
+          "type": "INT",
+          "doc": "The stream whose worktree it lists (v_stream.id)."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "Its path in the worktree, `/`-separated."
+        },
+        {
+          "name": "parent",
+          "type": "TEXT",
+          "doc": "The folder it is in; `''` at the top level."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "Its last path segment."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`file` or `dir`."
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "doc": "A file's change against HEAD (`added`, `modified`, `deleted`, `renamed`, `untracked`, `conflicted`); NULL when unchanged, and on a folder."
+        }
+      ],
+      "key": []
+    }
   }
 }
