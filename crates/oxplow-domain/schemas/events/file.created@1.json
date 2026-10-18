@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`file.created@1`: a file was made in a stream's worktree\n(`oxplow.file.create`).",
+  "properties": {
+    "path": {
+      "description": "Its path in the worktree.",
+      "type": "string"
+    },
+    "stream": {
+      "description": "The stream (`str2`).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "stream",
+    "path"
+  ],
+  "title": "FileCreatedV1",
+  "type": "object"
+}

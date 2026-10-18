@@ -134,6 +134,11 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<ConfigChanged>().expect("core type registers");
         r.register::<FileSaved>().expect("core type registers");
+        r.register::<FileCreated>().expect("core type registers");
+        r.register::<FileDirectoryCreated>()
+            .expect("core type registers");
+        r.register::<FileRenamed>().expect("core type registers");
+        r.register::<FileDeleted>().expect("core type registers");
         r.register::<EffectResult>().expect("core type registers");
         r.register::<SnapshotTaken>().expect("core type registers");
         r.register::<VcsHeadMoved>().expect("core type registers");
@@ -686,6 +691,82 @@ impl EventType for FileSaved {
     const TYPE: &'static str = "file.saved";
     const V: u32 = 1;
     type Payload = FileSavedV1;
+}
+
+/// `file.created@1`: a file was made in a stream's worktree
+/// (`oxplow.file.create`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FileCreatedV1 {
+    /// The stream (`str2`).
+    pub stream: String,
+    /// Its path in the worktree.
+    pub path: String,
+}
+
+pub struct FileCreated;
+impl EventType for FileCreated {
+    const TYPE: &'static str = "file.created";
+    const V: u32 = 1;
+    type Payload = FileCreatedV1;
+}
+
+/// `file.directory_created@1`: a directory was made in a stream's worktree
+/// (`oxplow.file.create_directory`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FileDirectoryCreatedV1 {
+    /// The stream (`str2`).
+    pub stream: String,
+    /// Its path in the worktree.
+    pub path: String,
+}
+
+pub struct FileDirectoryCreated;
+impl EventType for FileDirectoryCreated {
+    const TYPE: &'static str = "file.directory_created";
+    const V: u32 = 1;
+    type Payload = FileDirectoryCreatedV1;
+}
+
+/// `file.renamed@1`: a file or directory of a stream's worktree moved
+/// (`oxplow.file.rename`). What holds the old path — an open editor
+/// buffer, a tab — follows it to the new one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FileRenamedV1 {
+    /// The stream (`str2`).
+    pub stream: String,
+    /// Where it was.
+    pub from: String,
+    /// Where it is.
+    pub to: String,
+}
+
+pub struct FileRenamed;
+impl EventType for FileRenamed {
+    const TYPE: &'static str = "file.renamed";
+    const V: u32 = 1;
+    type Payload = FileRenamedV1;
+}
+
+/// `file.deleted@1`: a file or directory of a stream's worktree was
+/// removed (`oxplow.file.delete`). What holds it — an open editor buffer
+/// under the path — closes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FileDeletedV1 {
+    /// The stream (`str2`).
+    pub stream: String,
+    /// The path that is gone.
+    pub path: String,
+}
+
+pub struct FileDeleted;
+impl EventType for FileDeleted {
+    const TYPE: &'static str = "file.deleted";
+    const V: u32 = 1;
+    type Payload = FileDeletedV1;
 }
 
 /// `capability.switched@1`: a capability's active implementation changed
@@ -2213,6 +2294,10 @@ mod tests {
                 ("effort.linked", 1),
                 ("effort.opened", 2),
                 ("effort.retitled", 1),
+                ("file.created", 1),
+                ("file.deleted", 1),
+                ("file.directory_created", 1),
+                ("file.renamed", 1),
                 ("file.saved", 1),
                 ("handoff.sent", 1),
                 ("handoff.settled", 1),

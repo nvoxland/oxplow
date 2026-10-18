@@ -1,0 +1,5 @@
+{
+  "stream": "str2",
+  "from": "src/a.rs",
+  "to": "src/b.rs"
+}

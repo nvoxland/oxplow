@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`file.renamed@1`: a file or directory of a stream's worktree moved\n(`oxplow.file.rename`). What holds the old path — an open editor\nbuffer, a tab — follows it to the new one.",
+  "properties": {
+    "from": {
+      "description": "Where it was.",
+      "type": "string"
+    },
+    "stream": {
+      "description": "The stream (`str2`).",
+      "type": "string"
+    },
+    "to": {
+      "description": "Where it is.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "stream",
+    "from",
+    "to"
+  ],
+  "title": "FileRenamedV1",
+  "type": "object"
+}

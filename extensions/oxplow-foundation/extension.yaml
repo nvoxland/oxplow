@@ -536,6 +536,31 @@ commands:
     invokers: { human: true, agent: true, lens: true }
     confirm: destructive
     example: {"file_snapshot": 42}
+  - name: file.create
+    summary: "Make a file in a stream's worktree. The folders above it are made too; it is refused when the file exists. Logs `file.created`."
+    scope: files.write
+    op: create
+    invokers: { human: true, agent: true, lens: true }
+    example: {"stream": "stream:str1", "path": "docs/notes.md", "content": "# Notes\n"}
+  - name: file.create_directory
+    summary: "Make a directory in a stream's worktree. Those above it are made too. Logs `file.directory_created`."
+    scope: files.write
+    op: create_directory
+    invokers: { human: true, agent: true, lens: true }
+    example: {"stream": "stream:str1", "path": "docs/guide"}
+  - name: file.rename
+    summary: "Move a file or directory of a stream's worktree. It is refused when the target exists. Logs `file.renamed`, which the window follows with its open editors."
+    scope: files.write
+    op: rename
+    invokers: { human: true, agent: true, lens: true }
+    example: {"stream": "stream:str1", "from": "src/old.rs", "to": "src/new.rs"}
+  - name: file.delete
+    summary: "Remove a file, or a directory with all it holds, from a stream's worktree. A person's, confirmed. Logs `file.deleted`, which the window follows by closing its editors."
+    scope: files.write
+    op: delete
+    invokers: { human: true, agent: true, lens: true }
+    confirm: destructive
+    example: {"stream": "stream:str1", "path": "docs/obsolete.md"}
   - name: file.save
     summary: "Write a file of a stream's worktree with the content saved (what the editor's Save writes); logs `file.saved`. Its content isn't kept in the record, its size is."
     scope: files.write

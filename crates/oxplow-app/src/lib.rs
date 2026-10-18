@@ -1831,7 +1831,13 @@ impl Services {
             .chain(commands::effect::ops(services_slot.clone()))
             .chain(commands::agent_reads::ops(services_slot.clone()))
             .chain(client_host::ops(&client_host))
-            .chain([commands::file::save_op(workspace_files.clone())])
+            .chain([
+                commands::file::save_op(workspace_files.clone()),
+                commands::file::create_op(workspace_files.clone()),
+                commands::file::create_directory_op(workspace_files.clone()),
+                commands::file::rename_op(workspace_files.clone()),
+                commands::file::delete_op(workspace_files.clone()),
+            ])
         {
             commands.add_op(op).expect("core ops register");
         }
@@ -2318,6 +2324,10 @@ mod tests {
                 "oxplow.extension.review",
                 "oxplow.extension.update",
                 "oxplow.extension.validate",
+                "oxplow.file.create",
+                "oxplow.file.create_directory",
+                "oxplow.file.delete",
+                "oxplow.file.rename",
                 "oxplow.file.save",
                 "oxplow.git.cherry_pick",
                 "oxplow.git.ignore",
@@ -2446,6 +2456,9 @@ mod tests {
                 "extensions.check/preview",
                 "extensions.check/review",
                 "extensions.check/validate",
+                "files.write/create",
+                "files.write/create_directory",
+                "files.write/rename",
                 "files.write/save",
                 // Each side settles only its own side of a handoff
                 // (`may_settle`), checked before a take composes its move.
