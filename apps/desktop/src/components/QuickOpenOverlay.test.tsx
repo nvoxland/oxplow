@@ -33,9 +33,10 @@ function renderOverlay() {
 // The launcher tree still renders after the Recent-section wiring: static
 // category headers show, and with no backend the recent-visit fetch rejects
 // → the Recent section stays absent (rather than crashing the overlay).
-test("renders the static launcher tree and omits Recent when there are no visits", () => {
-  const { getByTestId, queryByTestId } = renderOverlay();
-  expect(getByTestId("launcher-category-Work")).toBeTruthy();
+test("renders the static launcher tree and omits Recent when there are no visits", async () => {
+  const { findByTestId, queryByTestId } = renderOverlay();
+  // The page list waits for the extensions (here none: no backend).
+  expect(await findByTestId("launcher-category-Work")).toBeTruthy();
   expect(queryByTestId("launcher-category-Recent")).toBeNull();
 });
 
@@ -117,7 +118,7 @@ test("a closed launcher gives focus back to whatever has it", async () => {
 // The launcher follows the one list contract (useListNav): ↑/↓ move and stop
 // at the ends, Enter takes the row under the cursor, Escape closes, and the
 // input names the cursor's row.
-test("↑/↓ and Enter work from the input, and the input names the row under the cursor", () => {
+test("↑/↓ and Enter work from the input, and the input names the row under the cursor", async () => {
   const opened: string[] = [];
   let closed = 0;
   const view = render(
@@ -135,6 +136,7 @@ test("↑/↓ and Enter work from the input, and the input names the row under t
     />,
   );
   const input = view.getByPlaceholderText(/Search everything/);
+  await view.findByTestId("launcher-category-Work");
   // Enter on the collapsed section opens it; the page row appears.
   fireEvent.keyDown(input, { key: "Enter" });
   expect(view.getByTestId("launcher-page-tasks")).toBeTruthy();

@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 
 import type { Extension } from "../tauri-bridge/generated/bindings.js";
-import { launcherPages } from "./extensionLauncher.js";
+import { launcherDirectory, launcherPages } from "./extensionLauncher.js";
+import { settingsRef } from "../tabs/pageRefs.js";
 
 const page = (over: Record<string, unknown>) => ({
   icon: null,
@@ -45,4 +46,16 @@ test("a page's count lens is its badge, and zero shows none", () => {
   ];
   expect(launcherPages(exts, { "oxplow-foundation/backlog-count": 4 })[0]?.badge).toBe(4);
   expect(launcherPages(exts, { "oxplow-foundation/backlog-count": 0 })[0]?.badge).toBeUndefined();
+});
+
+test("until the extensions load, the launcher lists no pages rather than some of them", () => {
+  const settingsArea = { id: "settings-agents", label: "Settings: Agents", ref: settingsRef("agents"), category: "System" as const };
+  expect(launcherDirectory(null, {}, [settingsArea])).toEqual([]);
+  const loaded = launcherDirectory(
+    [ext({ name: "oxplow-foundation", pages: [page({ id: "settings", extension: "oxplow-foundation", pageRef: "page:settings", title: "Settings", category: "System" })] } as never)],
+    {},
+    [settingsArea],
+  );
+  // The declared page leads its category; the area entries follow it.
+  expect(loaded.map((p) => p.label)).toEqual(["Settings", "Settings: Agents"]);
 });
