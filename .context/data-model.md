@@ -384,7 +384,7 @@ Each stream owns:
 - per-pane / per-thread agent resume session ids (so reconnecting picks up
   history for the assigned agent)
 - a `runtime_state.current_stream_id` pointer (singleton row, id=1)
-- a `custom_prompt` column (migration V6, nullable TEXT) — per-stream
+- a `custom_prompt` column (migration V6, nullable TEXT; read as `v_stream.prompt`, v3) — per-stream
   standing instructions appended to the agent's system prompt after the
   global `agentPromptAppend` section. Set via the `oxplow.stream.set_prompt`
   command (`apps/desktop/src/api.ts`'s `setStreamPrompt`); the stream
@@ -442,7 +442,7 @@ with this thread" gesture). `ThreadStore::list_for_stream` filters
 `archived_at IS NULL`, so archived threads vanish from every consumer
 in lockstep with the stream that owns them.
 
-`custom_prompt` (migration v18, nullable TEXT) — per-thread standing
+`custom_prompt` (migration v18, nullable TEXT; read as `v_thread.prompt`, v5) — per-thread standing
 instructions appended to the agent's system prompt after the stream-level
 `custom_prompt`. Set via `setBatchPrompt(threadId, prompt)` on `BatchStore`;
 IPC-exposed as `setBatchPrompt(streamId, threadId, prompt)`. Emits a

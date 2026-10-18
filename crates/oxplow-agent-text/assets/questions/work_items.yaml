@@ -10,6 +10,14 @@
   reaches:
     sql: SELECT id, started_at, ended_at, summary FROM v_effort WHERE work_item = 'work_item:oxplow:tsk1' ORDER BY started_at
   shape: { columns: [id, started_at, ended_at, summary] }
+- question: What standing instructions did the person set for this thread and its stream?
+  about: thread
+  skill: oxplow-runtime
+  reaches:
+    sql: >-
+      SELECT s.prompt AS stream_prompt, t.prompt AS thread_prompt FROM v_thread t
+      JOIN v_stream s ON s.id = t.stream_id WHERE t.ref = 'thread:thr1'
+  shape: { columns: [stream_prompt, thread_prompt] }
 - question: Mark a work item done.
   skill: work-items
   reaches:

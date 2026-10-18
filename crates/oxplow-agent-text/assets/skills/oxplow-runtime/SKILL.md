@@ -14,6 +14,10 @@ finish.
   and links it to an item you or the person start. The files you change
   (with edit tools or a shell) and the test runs you make are recorded
   against it. Its summary is your last answer.
+- **Standing instructions.** What the person set for every session of
+  your stream and of your thread is `v_stream.prompt` and `v_thread.prompt`
+  (`SELECT s.prompt, t.prompt FROM v_thread t JOIN v_stream s ON s.id =
+  t.stream_id`); they are already in your system prompt.
 - **Waiting on the person.** When you need their answer, end your reply
   with the question. oxplow shows your thread as waiting on them. This is
   the one way to ask; nothing else is needed.
