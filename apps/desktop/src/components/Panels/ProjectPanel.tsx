@@ -3,6 +3,8 @@ import type { CSSProperties } from "react";
 import { InlinePromptStrip } from "../InlinePromptStrip.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { coalescedRefresh, type CoalescedRefresh } from "../../coalesced-refresh.js";
+import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
+import type { Reads } from "../../tauri-bridge/generated/bindings.js";
 import {
   changedPaths,
   vcsMergeBase,
@@ -86,6 +88,7 @@ export function ProjectPanel({
   const [loadingDirs, setLoadingDirs] = useState<Record<string, boolean>>({});
   const [indexedFiles, setIndexedFiles] = useState<WorkspaceIndexedFile[]>([]);
   const [statusSummary, setStatusSummary] = useState<StatusCounts | null>(null);
+  const [summaryReads, setSummaryReads] = useState<Reads>(NO_READS);
   const [error, setError] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuTarget | null>(null);
   // Inline-prompt state for new-file/new-folder/rename. Replaces the
@@ -125,11 +128,15 @@ export function ProjectPanel({
       const result = await listWorkspaceFiles(stream.id);
       setIndexedFiles(result.files);
       setStatusSummary(result.summary);
+      setSummaryReads(result.summaryReads);
       setError(null);
     } catch (e) {
       setError(String(e));
     }
   }, [stream]);
+
+  // The status counts read the working change: they re-run when it moves.
+  useRerunOnChange(summaryReads, () => void loadWorkspaceIndex());
 
   useEffect(() => {
     setExpandedDirs({ "": true });

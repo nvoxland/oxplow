@@ -122,6 +122,9 @@ impl FileStatus {
 pub struct StatusEntry {
     pub path: String,
     pub status: FileStatus,
+    /// The change is in the index, ready to commit (`git add`ed); false
+    /// for a provider with no staging.
+    pub staged: bool,
 }
 
 /// An operation paused mid-way, waiting on its conflicts.

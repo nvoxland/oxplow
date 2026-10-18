@@ -6,17 +6,9 @@ use oxplow_app::vcs::reads;
 use oxplow_app::Services;
 use oxplow_domain::vcs::{
     BlameLine, Branch, Divergence, Revision, RevisionDetail, RevisionInfo, VcsWorkspace,
-    WorkspaceStatus,
 };
 
 use crate::error::IpcError;
-
-pub async fn vcs_status(
-    svc: &Services,
-    stream_id: Option<String>,
-) -> Result<WorkspaceStatus, IpcError> {
-    Ok(reads::status(svc, stream_id.as_deref()).await?)
-}
 
 pub async fn vcs_blame(
     svc: &Services,
@@ -122,8 +114,6 @@ mod tests {
             let svc = svc.clone();
             async move { crate::dispatch(name, args, &svc).await.unwrap() }
         };
-        let status = call("vcs_status", json!({ "streamId": null })).await;
-        assert!(status["entries"].is_array(), "{status}");
         let blame = call(
             "vcs_blame",
             json!({ "streamId": null, "path": "a.txt", "revision": "working" }),

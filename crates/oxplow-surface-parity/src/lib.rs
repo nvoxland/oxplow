@@ -580,10 +580,6 @@ pub const MANIFEST: &[Capability] = &[
         "an effort review's Extension Changes; an agent runs `oxplow extension check --impact`",
     ),
     ui(
-        "vcs_status",
-        "the UI's live VCS state; an agent runs `git status` in its worktree",
-    ),
-    ui(
         "vcs_revision",
         "one revision's detail for the history view; an agent reads `v_commit`",
     ),

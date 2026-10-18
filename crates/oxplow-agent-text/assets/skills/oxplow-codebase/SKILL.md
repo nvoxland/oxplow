@@ -27,17 +27,16 @@ every stream. `v_model_column` documents each column.
   Who changes a file most: the same join, `GROUP BY c.author`. Who last
   changed each line: the `oxplow_vcs_blame { path, revision? }` tool (`working`,
   `snap:<id>` or `git:<rev>`; an uncommitted line names no commit).
-  Quick answers have a tool each (`references/history.md`, `oxplow_get_skill` reference `history`); history past
-  the index (any revision, one path, paged) is `oxplow_vcs_log`; `v_commit` is
-  for joins.
+  Quick answers have a tool each (`references/history.md`); history past
+  the index (any revision, one path, paged) is `oxplow_vcs_log`.
 - **`v_branch`** — branches (`name`, `kind`, `head_sha`, `is_default`,
   the `stream_id` that has it checked out, and for a local one its
   `upstream`, `ahead`, `behind`); **`v_tag`** — tags. A `v_stream` row's
-  `head_sha` is where its workspace is.
+  `head_sha` is where its workspace is. Uncommitted files: `v_change_file`
+  of the `v_change` with `kind = 'working'` (`staged`, `untracked`).
 
-Changing history (commit, merge, rebase, push, checkout) is the
-`oxplow.vcs.*` commands (`list_commands` shows them) or `git` in your
-terminal.
+Changing history (commit, merge, rebase, push, checkout): the
+`oxplow.vcs.*` commands (`list_commands`) or `git` in your terminal.
 
 ## Code (`v_symbol`, `v_diagnostic`, `v_lsp_server`, the `code_*` tools)
 

@@ -26,6 +26,10 @@ pub struct ChangedFile {
     pub deletions: i64,
     pub base: Option<String>,
     pub head: Option<String>,
+    /// A working tree's file: its change is in the index.
+    pub staged: Option<bool>,
+    /// A working tree's file: git doesn't track it yet.
+    pub untracked: Option<bool>,
 }
 
 /// The project's own test-file conventions (`testing.testPaths`), added to
@@ -251,6 +255,8 @@ fn file_rows(files: &[ChangedFile], zones: &ZoneRules, tests: &TestPaths) -> Vec
             deletions: f.deletions,
             zone: Some(zones.classify(&f.path)),
             is_test: tests.is_test(&f.path),
+            staged: f.staged,
+            untracked: f.untracked,
         })
         .collect()
 }
@@ -464,16 +470,46 @@ pub async fn refresh_files(
     let events_to = events_to(svc).await?;
     let only = own_files(svc, kind, &key).await?;
     let entries = svc.trees.diff(&root, base.as_ref(), &head).await?;
+    // A working tree is also asked what git says of it: which of its files
+    // are staged or untracked, how many conflict, what is in progress.
+    let status = if kind == "working" {
+        Some(svc.vcs.status(&root).await?)
+    } else {
+        None
+    };
+    let flags: std::collections::HashMap<&str, (bool, bool)> = status
+        .iter()
+        .flat_map(|s| s.entries.iter())
+        .map(|e| {
+            (
+                e.path.as_str(),
+                (
+                    e.staged,
+                    e.status == oxplow_domain::vcs::FileStatus::Untracked,
+                ),
+            )
+        })
+        .collect();
     let files: Vec<ChangedFile> = entries
         .into_iter()
         .filter(|e| only.as_ref().is_none_or(|own| own.contains(&e.path)))
-        .map(|e| ChangedFile {
-            path: e.path,
-            status: e.status.as_str().to_string(),
-            additions: e.additions as i64,
-            deletions: e.deletions as i64,
-            base: None,
-            head: None,
+        .map(|e| {
+            let flag = status.is_some().then(|| {
+                flags
+                    .get(e.path.as_str())
+                    .copied()
+                    .unwrap_or((false, false))
+            });
+            ChangedFile {
+                status: e.status.as_str().to_string(),
+                additions: e.additions as i64,
+                deletions: e.deletions as i64,
+                base: None,
+                head: None,
+                staged: flag.map(|f| f.0),
+                untracked: flag.map(|f| f.1),
+                path: e.path,
+            }
         })
         .collect();
     let rows = {
@@ -484,8 +520,7 @@ pub async fn refresh_files(
             &TestPaths::from_config(&cfg.testing.test_paths),
         )
     };
-    let (conflicted, in_progress) = if kind == "working" {
-        let status = svc.vcs.status(&root).await?;
+    let (conflicted, in_progress) = if let Some(status) = status {
         let conflicted = status
             .entries
             .iter()
@@ -985,6 +1020,8 @@ async fn compute(
                 deletions: e.deletions as i64,
                 base: None,
                 head: None,
+                staged: None,
+                untracked: None,
             })
             .collect();
         let mut results = build_results(&files, &analysis, &zones, &tests);
@@ -1211,6 +1248,8 @@ mod tests {
             deletions: 0,
             base: Some(base.into()),
             head: Some(head.into()),
+            staged: None,
+            untracked: None,
         }];
         let analysis = crate::code_analysis::analyze_files(
             vec![crate::code_analysis::AnalyzeFileSpec {

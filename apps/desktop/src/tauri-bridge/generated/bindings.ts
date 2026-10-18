@@ -868,11 +868,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	vcsStatus: (streamId: string | null) => typedError<WorkspaceStatus, IpcError>(__TAURI_INVOKE("vcs_status", { streamId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	vcsBlame: (streamId: string | null, path: string, revision: string) => typedError<BlameLine[], IpcError>(__TAURI_INVOKE("vcs_blame", { streamId, path, revision })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -3650,9 +3645,6 @@ export type ImportGuard = {
 	source: DeclaredAt,
 };
 
-/**  An operation paused mid-way, waiting on its conflicts. */
-export type InProgressOp = "merge" | "rebase" | "cherry_pick" | "revert";
-
 export type InstalledLspPackage = {
 	name: string,
 	version: string,
@@ -6189,12 +6181,6 @@ export type SqlQueryResult = {
 	coverage?: SourceCoverage[],
 };
 
-/**  One changed path in a workspace. */
-export type StatusEntry = {
-	path: string,
-	status: FileStatus,
-};
-
 export type Stream = {
 	id: StreamId,
 	kind: StreamKind,
@@ -6593,14 +6579,6 @@ export type WorkspaceFile = {
 export type WorkspaceIndexedFile = {
 	path: string,
 	status: FileStatus | null,
-};
-
-/**  A workspace's changes against its head. */
-export type WorkspaceStatus = {
-	/**  Changed paths, sorted. */
-	entries: StatusEntry[],
-	/**  The operation in progress, if one is. */
-	in_progress: InProgressOp | null,
 };
 
 /**

@@ -48,6 +48,11 @@ pub struct ChangeFileRow {
     pub deletions: i64,
     pub zone: Option<String>,
     pub is_test: bool,
+    /// For a working tree's file: its change is in the index. `None` leaves
+    /// what was stored (a deep analysis lists files without asking git).
+    pub staged: Option<bool>,
+    /// For a working tree's file: git doesn't track it yet.
+    pub untracked: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -466,12 +471,24 @@ fn write_files(
     if stored.is_some_and(|s| s > events_to) {
         return Ok(false);
     }
+    // A list that doesn't ask git keeps what was stored for a path.
+    let kept: std::collections::HashMap<String, (Option<i64>, Option<i64>)> = {
+        let mut stmt = tx
+            .prepare("SELECT path, staged, untracked FROM change_file WHERE change_id = ?1")
+            .map_err(map_sql_err)?;
+        let rows = stmt
+            .query_map([id], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))
+            .map_err(map_sql_err)?;
+        rows.collect::<Result<_, _>>().map_err(map_sql_err)?
+    };
     tx.execute("DELETE FROM change_file WHERE change_id = ?1", [id])
         .map_err(map_sql_err)?;
     for f in files {
+        let (was_staged, was_untracked) = kept.get(&f.path).copied().unwrap_or((None, None));
         tx.execute(
-            "INSERT INTO change_file (change_id, path, status, additions, deletions, zone, is_test)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO change_file (change_id, path, status, additions, deletions, zone, is_test,
+                                      staged, untracked)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             rusqlite::params![
                 id,
                 f.path,
@@ -479,7 +496,9 @@ fn write_files(
                 f.additions,
                 f.deletions,
                 f.zone,
-                i64::from(f.is_test)
+                i64::from(f.is_test),
+                f.staged.map(i64::from).or(was_staged),
+                f.untracked.map(i64::from).or(was_untracked),
             ],
         )
         .map_err(map_sql_err)?;
@@ -593,6 +612,7 @@ mod tests {
                 deletions: 1,
                 zone: Some("core".into()),
                 is_test: false,
+                ..Default::default()
             }],
             functions: vec![ChangeFunctionRow {
                 path: path.into(),

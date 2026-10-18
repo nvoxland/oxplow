@@ -51,7 +51,10 @@ pub use repo::{
     resolve_revision,
 };
 pub use smart_merge::{auto_resolve_conflicts, merge3, merge3_str, tokenize, AutoResolveReport};
-pub use status::{head_commit_sha, list_git_statuses, read_blob, GitCleanBaseline, GitFileStatus};
+pub use status::{
+    head_commit_sha, list_git_statuses, list_staged_paths, read_blob, GitCleanBaseline,
+    GitFileStatus,
+};
 pub use sync::{
     add_path, checkout_branch, cherry_pick, commit, fetch, merge, pull, pull_remote_into_current,
     push, push_current_to, rebase, revert, take_conflict_side, GitOpResult,

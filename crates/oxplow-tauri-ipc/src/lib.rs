@@ -255,7 +255,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::list_workspace_files,
             commands::generated::read_workspace_file,
             commands::generated::files_at,
-            commands::generated::vcs_status,
             commands::generated::vcs_blame,
             commands::generated::vcs_revision,
             commands::generated::vcs_merge_base,

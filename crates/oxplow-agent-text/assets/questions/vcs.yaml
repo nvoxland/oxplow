@@ -38,6 +38,14 @@
   reaches:
     sql: SELECT id, branch, head_sha FROM v_stream WHERE archived_at IS NULL
   shape: { columns: [id, branch, head_sha] }
+- question: Which uncommitted files are staged, and which does git not track yet?
+  skill: oxplow-codebase
+  reaches:
+    sql: >-
+      SELECT f.path, f.staged, f.untracked FROM v_change c
+      JOIN v_change_file f ON f.change_id = c.id
+      WHERE c.kind = 'working' AND c.stream_id = 1
+  shape: { columns: [path, staged, untracked] }
 - question: What did this commit change?
   about: commit
   skill: oxplow-codebase

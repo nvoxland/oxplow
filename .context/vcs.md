@@ -186,12 +186,13 @@ indexed history (`v_commit`) for joins.
 
 ## The stream's reads (P5.B4)
 
-`oxplow_app::vcs::reads` is what the UI and agent tools call: `head`
-(`HeadInfo { revision, branch }`), `status`, `blame(path, revision)`,
+`oxplow_app::vcs::reads` is what the UI and agent tools call:
+`status` (agents only: `oxplow_vcs_status`), `blame(path, revision)`,
 `revision(revision)` (a commit's message and files) and
 `merge_base(a, b)` — each routed by stream and naming versions as
 `Revision`s (a snapshot answers with the revision its tree equals). RPCs
-`vcs_status`, `vcs_blame`, `vcs_revision`, `vcs_merge_base`
+`vcs_blame`, `vcs_revision`, `vcs_merge_base`
+(and the head and status reads, now `v_stream.head_sha` and the working change's `v_change_file`)
 replaced `get_repo_conflict_state`,
 `get_workspace_status_summary`, `git_blame`, `local_blame`,
 `get_commit_detail` and `get_branch_changes`; MCP `git_diff` became

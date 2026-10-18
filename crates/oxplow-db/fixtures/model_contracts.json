@@ -1675,6 +1675,56 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "change_id",
+          "type": "INTEGER",
+          "doc": "The change (v_change.id)."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "Repo-relative path."
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "doc": "`added`, `modified` or `deleted`."
+        },
+        {
+          "name": "additions",
+          "type": "INTEGER",
+          "doc": "Lines added."
+        },
+        {
+          "name": "deletions",
+          "type": "INTEGER",
+          "doc": "Lines deleted."
+        },
+        {
+          "name": "zone",
+          "type": "TEXT",
+          "doc": "Architectural zone from the project's zone rules (`other` when none match)."
+        },
+        {
+          "name": "is_test",
+          "type": "INTEGER",
+          "doc": "1 if the path looks like a test file."
+        },
+        {
+          "name": "staged",
+          "type": "INTEGER",
+          "doc": "For a `working` change: 1 when the file's change is in the index (staged, ready to commit), else 0; NULL for the other kinds of change. (v2)"
+        },
+        {
+          "name": "untracked",
+          "type": "INTEGER",
+          "doc": "For a `working` change: 1 when git doesn't track the file yet (it shows as `added`), else 0; NULL for the other kinds of change. (v2)"
+        }
+      ],
+      "key": []
     }
   },
   "change_function": {

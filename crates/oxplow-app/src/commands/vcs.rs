@@ -175,6 +175,7 @@ async fn announcement(
             change_kind: WorkspaceChangeKind::Updated,
             path: String::new(),
         });
+        ref_moves.index_moved(stream);
         for id in moved {
             ref_moves.moved(id);
         }

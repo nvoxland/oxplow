@@ -3,13 +3,12 @@ import { SpecConfirm } from "../components/SpecConfirm.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MergeReadiness, OpOutcome, RemoteBranchEntry, RevisionInfo, Stream, StatusCounts } from "../api.js";
 import {
-  countStatus,
+  streamStatusCounts,
   vcsDivergence,
   streamHead,
   streamUpstream,
   vcsRevision,
   vcsRevisionsBetween,
-  vcsStatus,
   gitRebase,
   vcsFetch,
   vcsMerge,
@@ -23,7 +22,8 @@ import {
   subscribeWorkspaceEvents,
 } from "../api.js";
 import { AgentStatusDot } from "../components/AgentStatusDot.js";
-import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
+import { unionReads, useRerunOnChange } from "../lens/lensRerun.js";
+import type { Reads } from "../tauri-bridge/generated/bindings.js";
 import { gitRevision, vcsRevOf } from "../revision.js";
 import { readBranches, readHistory, type History } from "../vcsHistory.js";
 import { sessionStatusKey } from "../agentStatusRollup.js";
@@ -54,6 +54,8 @@ interface DashboardData {
     behindUpstream: number;
   };
   uncommitted: StatusCounts | null;
+  /** What the uncommitted counts read: re-run when it changes. */
+  uncommittedReads: Reads;
   recentLog: History & { currentBranch: string | null };
   streams: StreamRow[];
   remoteBranches: RemoteBranchEntry[];
@@ -166,8 +168,8 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
       setError(null);
       const head = await streamHead(streamId);
       const headSha = vcsRevOf(head.revision);
-      const [statusSummary, history, remoteBranches, streams] = await Promise.all([
-        vcsStatus(streamId).then(countStatus),
+      const [status, history, remoteBranches, streams] = await Promise.all([
+        streamStatusCounts(streamId),
         readHistory(headSha, RECENT_LIMIT),
         listRecentRemoteBranches(streamId, 20),
         listStreams(),
@@ -187,7 +189,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
       const otherStreams = streams.filter((s) => s.id !== streamId);
       const streamRows: StreamRow[] = await Promise.all(
         otherStreams.map(async (other) => {
-          const uncommitted = await vcsStatus(other.id).then(countStatus).catch(() => null);
+          const uncommitted = await streamStatusCounts(other.id).then((s) => s.counts).catch(() => null);
           const otherBranch = other.branch || null;
           if (!otherBranch || !branch || otherBranch === branch) {
             return { stream: other, branch: otherBranch, ahead: 0, behind: 0, uncommitted };
@@ -206,7 +208,8 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
           aheadUpstream,
           behindUpstream,
         },
-        uncommitted: statusSummary,
+        uncommitted: status.counts,
+        uncommittedReads: status.reads,
         recentLog: log,
         streams: streamRows,
         remoteBranches,
@@ -224,7 +227,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
     void refresh();
   }, [refresh]);
   // The commit indexer lands new commits in `v_commit` after a ref moves.
-  useRerunOnChange(data?.recentLog.reads ?? NO_READS, () => void refresh());
+  useRerunOnChange(unionReads([data?.recentLog.reads, data?.uncommittedReads]), () => void refresh());
 
   // Debounce watcher-driven refreshes: a single `git rebase`/`git merge`
   // can fire .git/refs and workspace events dozens of times in quick

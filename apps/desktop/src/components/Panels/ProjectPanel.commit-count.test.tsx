@@ -17,13 +17,6 @@ const realBindings = await import("../../tauri-bridge/generated/bindings.js");
 
 const ok = <T,>(data: T) => ({ status: "ok" as const, data });
 
-const STATUS = {
-  entries: [
-    { path: "a.ts", status: "modified" },
-    { path: "b.ts", status: "untracked" },
-  ],
-  in_progress: null,
-};
 // Five indexed files — more than the 2 changed — so a button bound to the
 // file count would read "Commit (5)" and fail the assertion below.
 const FILES = [
@@ -44,7 +37,6 @@ mock.module("../../tauri-bridge/generated/bindings.js", () => ({
   commands: {
     ...realBindings.commands,
     listWorkspaceFiles: async () => ok(FILES),
-    vcsStatus: async () => ok(STATUS),
     listWorkspaceEntries: async () => ok([]),
     gitChangeScopes: async () =>
       ok({
@@ -56,6 +48,19 @@ mock.module("../../tauri-bridge/generated/bindings.js", () => ({
         unstaged: [],
       }),
   },
+}));
+
+// The status counts are a read of the working change (`streamStatusCounts`);
+// other files mock `api.js` process-wide, so this one names the listing it
+// wants: two changed files — one modified, one untracked.
+const realApi = await import("../../api.js");
+mock.module("../../api.js", () => ({
+  ...realApi,
+  listWorkspaceFiles: async () => ({
+    files: FILES,
+    summary: { added: 0, modified: 1, deleted: 0, renamed: 0, untracked: 1, conflicted: 0, total: 2 },
+    summaryReads: { models: [], tables: [], measures: [] },
+  }),
 }));
 
 const { ProjectPanel } = await import("./ProjectPanel.js");

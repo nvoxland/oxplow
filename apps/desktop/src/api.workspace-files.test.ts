@@ -22,8 +22,14 @@ mock.module("./tauri-bridge/generated/bindings.js", () => ({
         { name: "src", path: "src", kind: "directory", status: null, hasChanges: true },
         { name: "a.ts", path: "a.ts", kind: "file", status: "conflicted", hasChanges: true },
       ]),
-    vcsStatus: async () =>
-      ok({ entries: [{ path: "changed.ts", status: "modified" }], in_progress: null }),
+    querySql: async () =>
+      ok({
+        columns: [],
+        rows: [[0, "modified", 0, 1]],
+        truncated: false,
+        reads: { models: [], tables: [], measures: [] },
+        freshness: [],
+      }),
   },
 }));
 
