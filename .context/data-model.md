@@ -426,7 +426,7 @@ removed in v13 — use the task log as the source of truth instead.
 
 `closed_at` (migration v44, nullable TEXT) — set means the thread is
 closed. A closed thread sits hidden from the rail; it surfaces only on the **Closed Threads**
-page (`page:oxplow-foundation/closed-threads`, the foundation's `closed-threads`
+page (`page:closed-threads`, the foundation's `closed-threads`
 lens over `v_thread`), which lists each closed thread with the work it
 finished (counts by state) and a Reopen row action. `oxplow.thread.reopen` clears
 `closed_at` and the thread returns to the rail as an open tab.
@@ -1301,7 +1301,7 @@ Skill prompt at `crates/oxplow-agent-text/assets/skills/oxplow-wiki-capture/SKIL
 `knowledge.ts`'s `readWikiFreshness`) joins `page_ref` with the latest
 primary-stream `file_snapshot` per target path, a `stale` flag per ref.
 The foundation's `wiki-freshness` lens
-(`page:oxplow-foundation/wiki-freshness?slug=<slug>`) shows
+(`page:wiki-freshness?slug=<slug>`) shows
 the table with per-ref + per-page "Mark verified" actions, which run
 `oxplow.knowledge.verify_refs` (re-writing the page with those refs in
 `verified_refs`). The wiki page chrome adds a `Freshness (N stale)` action

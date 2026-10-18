@@ -45,6 +45,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-foundation", "icons/claude.svg"),
             ext_file!("oxplow-foundation", "icons/codex.svg"),
             ext_file!("oxplow-foundation", "icons/opencode.svg"),
+            ext_file!("oxplow-foundation", "lenses/backlog-count.yaml"),
             ext_file!("oxplow-foundation", "lenses/catalog.yaml"),
             ext_file!("oxplow-foundation", "lenses/catalog-config-keys.yaml"),
             ext_file!("oxplow-foundation", "lenses/catalog-overview.yaml"),
@@ -2289,10 +2290,11 @@ mod tests {
         );
     }
 
-    /// The pages the foundation shows as lenses are declared in its
-    /// manifest and their lenses exist.
+    /// The foundation declares oxplow's pages: those drawn as lenses, and
+    /// every other one as a built-in until it becomes a lens. Its pages are
+    /// core-named (`page:tasks`), as its commands are.
     #[tokio::test]
-    async fn the_foundation_declares_its_lens_pages() {
+    async fn the_foundation_declares_its_pages() {
         let f = crate::test_fixtures::services_with_effort().await;
         let foundation = f
             .svc
@@ -2302,7 +2304,7 @@ mod tests {
         let pages: Vec<(&str, &str)> = foundation
             .pages
             .iter()
-            .map(|p| (p.id.as_str(), p.lens.as_str()))
+            .filter_map(|p| Some((p.id.as_str(), p.lens()?)))
             .collect();
         for (page, lens) in [
             ("problems", "oxplow-foundation/problems"),
@@ -2318,6 +2320,31 @@ mod tests {
         ] {
             assert!(pages.contains(&(page, lens)), "{page}: {pages:?}");
         }
+        for name in crate::built_in_pages::BUILT_IN_PAGES {
+            let page = foundation
+                .pages
+                .iter()
+                .find(|p| p.id == *name)
+                .unwrap_or_else(|| panic!("{name} isn't declared"));
+            assert_eq!(
+                page.body,
+                crate::extensions::PageBody::BuiltIn {
+                    name: name.to_string()
+                }
+            );
+        }
+        assert!(
+            foundation
+                .pages
+                .iter()
+                .all(|p| p.page_ref == format!("page:{}", p.id)),
+            "{:?}",
+            foundation
+                .pages
+                .iter()
+                .map(|p| &p.page_ref)
+                .collect::<Vec<_>>()
+        );
     }
 
     /// The Catalog's sections answer: what can be asked, grouped by who
@@ -3404,7 +3431,7 @@ mod tests {
             (
                 "oxplow-bundled/go-to",
                 Some("oxplow-bundled/go-to-bookmarks"),
-                Some("page:oxplow-foundation/go-to")
+                Some("page:go-to")
             )
         );
         let thread = f.thread.to_string();

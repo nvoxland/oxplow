@@ -38,7 +38,7 @@ mock.module("../../api.js", () => ({
   ...realApi,
   getPanelLayout: async () => [{ panel: "ext:x/w", hidden: false, collapsed: true }],
   setPanelLayout: async () => {},
-  listExtensions: async () => [{ name: "x", enabled: true, panels: [panel], lenses: [], ui: { slots: [], commands: [], decorators: [], replacements: [] } }],
+  listExtensions: async () => [{ name: "x", enabled: true, pages: [], panels: [panel], lenses: [], ui: { slots: [], commands: [], decorators: [], replacements: [] } }],
   runLens: async (id: string, params: Record<string, SqlCell>): Promise<LensRun> => {
     const r = results[id]!;
     if (id === "x/body") bodyRuns.push(params);

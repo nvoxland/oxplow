@@ -20,7 +20,7 @@ mock.module("../api.js", () => ({
   ...realApi,
   subscribeOxplowEvents: () => () => {},
   listExtensions: async () => [
-    { enabled: true, lenses: [{ title: "Ready Tasks", needs: ["work_items"] }], advisories: [] },
+    { enabled: true, pages: [], lenses: [{ title: "Ready Tasks", needs: ["work_items"] }], advisories: [] },
   ],
   effectiveConfig: async () => [
     { key: "activeProviders", origin: "default", value: {} },

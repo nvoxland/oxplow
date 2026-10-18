@@ -2155,18 +2155,61 @@
           "default": null
         },
         "category": {
-          "$ref": "#/definitions/LauncherCategory"
+          "description": "Its launcher section; leave it out for a page only opened from\nelsewhere.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LauncherCategory"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "keywords": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "params": {
+          "description": "The params its id carries.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "count": {
+          "description": "A `number` lens of this extension whose value is the launcher badge.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         },
         "lens": {
-          "type": "string"
+          "description": "A lens of this extension that draws the page …",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "component": {
+          "description": "… or `oxplow:<name>`, a built-in (oxplow's own extension only).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,
       "required": [
         "id",
-        "title",
-        "category",
-        "lens"
+        "title"
       ]
     },
     "LauncherCategory": {

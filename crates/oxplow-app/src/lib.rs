@@ -26,6 +26,7 @@ pub mod background_task;
 pub mod blob_store;
 pub mod boot;
 pub mod branch_reconciler;
+pub mod built_in_pages;
 pub mod bundled_extensions;
 pub mod capabilities;
 #[cfg(test)]

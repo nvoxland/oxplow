@@ -25,7 +25,7 @@ mock.module("../api.js", () => ({
     // P10 (K1): oxplow-bundled's verdict, on the effort it was given on.
     {
       name: "oxplow-bundled",
-      enabled: true,
+      enabled: true, pages: [],
       ui: {
         slots: [],
         commands: [],

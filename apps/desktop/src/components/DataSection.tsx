@@ -30,7 +30,7 @@ import {
 import type { DataEntity, ProjectProgram, Reads } from "../tauri-bridge/generated/bindings.js";
 import { coalesce, extensionsChanged, readsChanged, useRerunOnChange } from "../lens/lensRerun.js";
 import { collectorRef } from "../refs/ref.js";
-import { indexRef } from "../tabs/pageRefs.js";
+import { pageTabRef } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { enableAgain, type ContributionHealth } from "../contributionHealth.js";
 import { useContextMenu } from "./useRowContextMenu.js";
@@ -278,7 +278,7 @@ export function DataSection() {
         </span>
         <span style={{ flex: 1 }} />
         {nav ? (
-          <button type="button" data-testid="data-explore" onClick={() => nav.navigate(indexRef("explore-data"))}>
+          <button type="button" data-testid="data-explore" onClick={() => nav.navigate(pageTabRef("explore-data"))}>
             Explore Data
           </button>
         ) : null}

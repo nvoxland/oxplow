@@ -131,7 +131,10 @@ import { insertIntoAgent } from "./agent-input-bus.js";
 import { getPageDetailStore } from "./tabs/openPageDetail.js";
 import { ExploreDataPage } from "./pages/ExploreDataPage.js";
 import { BoardPage } from "./pages/BoardPage.js";
-import { ExtensionPageView } from "./pages/ExtensionPageView.js";
+import { DeclaredPageView } from "./pages/DeclaredPageView.js";
+import { kindForTabId } from "./pageKinds.js";
+import { declaredPage, isBuiltInPage, type BuiltInPageName } from "./pages/declaredPages.js";
+import { useExtensions } from "./extensionsStore.js";
 import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
 import { WorkItemPage } from "./pages/WorkItemPage.js";
 import { WikiPage } from "./pages/WikiPage.js";
@@ -145,14 +148,14 @@ import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { agentSessionRef, computeDiffId, diskFilePath, lensRef, pageKindOf, refFromTabId, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, indexRef, newSessionRef, newStreamRef, newTaskRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, type DiffViewPayload } from "./tabs/pageRefs.js";
+import { agentSessionRef, computeDiffId, diskFilePath, lensRef, pageKindOf, refFromTabId, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, pageTabRef, pagePayload, recordedPageKind, isPage, diffRef, diffSpecOf, duplicateBlockOf, endpointsOf, newSessionRef, newStreamRef, newTaskRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, type DiffViewPayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
 import { installContextMenuSuppressor } from "./context-menu.js";
 import { FilePage } from "./pages/FilePage.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
-import { computePagesDirectory } from "./components/RailHud/sections.js";
+import { settingsAreaEntries } from "./components/RailHud/sections.js";
 import { NON_TRACKED_KINDS } from "./components/RailHud/history.js";
 import { resolveActiveTabRef } from "./tabs/resolveActiveTabRef.js";
 import { buildTabReport } from "./tabs/tabReport.js";
@@ -269,7 +272,7 @@ const HOME_TAB = "";
 function homeTabOf(tabs: TabRef[]): string {
   return (
     tabs.find((t) => t.kind === "agent_session")?.id ??
-    tabs.find((t) => t.kind === "new-session")?.id ??
+    tabs.find((t) => isPage(t, "new-session"))?.id ??
     tabs[0]?.id ??
     HOME_TAB
   );
@@ -1041,7 +1044,7 @@ export function App() {
       if (!session || !session.files[activeFile]) setCenterActive(HOME_TAB);
       return;
     }
-    if (pageKindOf(centerActive) === "diff") {
+    if (isPage(refFromTabId(centerActive), "diff")) {
       if (!diffTabs.some((tab) => tab.id === centerActive)) setCenterActive(HOME_TAB);
       return;
     }
@@ -1247,7 +1250,7 @@ export function App() {
       threadShown: !!selectedThread,
       fileShown: !!selectedFilePath,
       fileDirty: !!currentFile && !currentFile.isLoading && currentFileDirty,
-      pageKind: (centerActive ? refFromTabId(centerActive)?.kind : undefined) ?? "",
+      pageKind: centerActive ? kindForTabId(centerActive) : "",
       vcsEnabled: !!workspaceContext.vcsEnabled,
       shellAvailable: shellAvailable(),
       enabledAgents: harnesses
@@ -1284,7 +1287,7 @@ export function App() {
         return;
       case "commit":
         if (!stream || !workspaceContext.vcsEnabled) return;
-        handleOpenPageRef.current?.(indexRef("files"));
+        handleOpenPageRef.current?.(pageTabRef("files"));
         setCommitFilesRequest((n) => n + 1);
         return;
       default:
@@ -1494,7 +1497,7 @@ export function App() {
       const ctxAfter = visitContextRef.current;
       const label = tabLabelByIdRef.current[effectiveCenterActive] ?? ref.id;
       void recordPageVisit({
-        refKind: ref.kind,
+        refKind: recordedPageKind(ref),
         refId: ref.id,
         payload: ref.payload,
         label,
@@ -1564,16 +1567,7 @@ export function App() {
     // chrome as every other page kind. `diffTabs` is only a spec
     // registry indexed by id.
     if (selectedThreadId) {
-      const ref: TabRef = {
-        id,
-        kind: "diff",
-        payload: {
-          path: request.path,
-          leftVersion: request.leftVersion,
-          rightVersion: request.rightVersion,
-          labelOverride: request.labelOverride ?? null,
-        },
-      };
+      const ref = diffRef(request);
       setThreadPageTabs((prev) => {
         const existing = prev[selectedThreadId] ?? [];
         if (existing.some((t) => t.id === id)) return prev;
@@ -1682,7 +1676,7 @@ export function App() {
     for (const id of orderedIds) {
       const path = diskFilePath(id);
       if (path !== null) orderedFiles.push(path);
-      else if (pageKindOf(id) === "diff") orderedDiffIds.push(id);
+      else if (isPage(refFromTabId(id), "diff")) orderedDiffIds.push(id);
     }
     mutateFileSession(stream.id, (base) => reorderOpenFiles(base, orderedFiles));
     setDiffTabs((prev) => {
@@ -1752,7 +1746,7 @@ export function App() {
       if (opening.tabs.length > 0) {
         setThreadPageTabs((prev) => {
           const current = prev[threadId] ?? [];
-          if (current.some((t) => t.kind === "new-session")) return prev;
+          if (current.some((t) => isPage(t, "new-session"))) return prev;
           return { ...prev, [threadId]: [...opening.tabs, ...current] };
         });
       }
@@ -1765,7 +1759,7 @@ export function App() {
       logUi("warn", "opening a new thread failed; showing the session picker", { error: String(error) });
       setThreadPageTabs((prev) => {
         const current = prev[threadId] ?? [];
-        if (current.some((t) => t.kind === "new-session")) return prev;
+        if (current.some((t) => isPage(t, "new-session"))) return prev;
         return { ...prev, [threadId]: [newSessionRef(), ...current] };
       });
     }
@@ -1774,6 +1768,16 @@ export function App() {
   const bookmarks = useBookmarks(selectedThreadId, stream?.id ?? null);
 
   const handleOpenPage = useCallback((ref: TabRef) => {
+    // Every kind not handled below opens as a per-thread page tab.
+    const openAsPageTab = () => {
+      if (!selectedThreadId) return;
+      setThreadPageTabs((prev) => {
+        const existing = prev[selectedThreadId] ?? [];
+        if (existing.some((t) => t.id === ref.id)) return prev;
+        return { ...prev, [selectedThreadId]: [...existing, ref] };
+      });
+      setCenterActive(ref.id);
+    };
     // Page-visit recording lives in the central activation effect
     // below — it fires whenever `effectiveCenterActive` resolves to a
     // new TabRef, regardless of which handler caused the activation.
@@ -1823,24 +1827,19 @@ export function App() {
         }
         return;
       }
-      case "diff": {
+      case "page": {
         // A diff built from its spec (e.g. a lens `diff-at` link).
-        const spec = ref.payload as DiffSpec | null;
-        if (spec?.path && spec.leftVersion && spec.rightVersion) handleOpenDiff(spec);
-        return;
-      }
-      default: {
-        // Every other kind opens as a per-thread page tab.
-        if (selectedThreadId) {
-          setThreadPageTabs((prev) => {
-            const existing = prev[selectedThreadId] ?? [];
-            if (existing.some((t) => t.id === ref.id)) return prev;
-            return { ...prev, [selectedThreadId]: [...existing, ref] };
-          });
-          setCenterActive(ref.id);
+        const spec = isPage(ref, "diff") ? (pagePayload(ref)?.state as DiffSpec | undefined) : undefined;
+        if (spec?.path && spec.leftVersion && spec.rightVersion) {
+          handleOpenDiff(spec);
+          return;
         }
+        openAsPageTab();
         return;
       }
+      default:
+        openAsPageTab();
+        return;
     }
     // handleOpenDiff is a plain function over state setters and
     // selectedThreadId, which is already a dependency.
@@ -1938,10 +1937,10 @@ export function App() {
         setEditorNavigationTarget({ path: payload.path, line: payload.line, column: 1 });
       }
     }
-    if (ref.kind === "diff") {
+    if (isPage(ref, "diff")) {
       // A diff ref that carries its whole spec (lens `diff-at` links)
       // registers it here, since no handleOpenDiffInTab ran first.
-      const spec = ref.payload as DiffSpec | null;
+      const spec = pagePayload(ref)?.state as DiffSpec | undefined;
       if (spec?.path && spec.leftVersion && spec.rightVersion) {
         setDiffTabs((prev) =>
           prev.some((t) => t.id === ref.id)
@@ -2019,17 +2018,7 @@ export function App() {
       }
       return [...byId.entries()].map(([tid, tspec]) => ({ id: tid, spec: tspec }));
     });
-    const ref: TabRef = {
-      id,
-      kind: "diff",
-      payload: {
-        path: spec.path,
-        leftVersion: spec.leftVersion,
-        rightVersion: spec.rightVersion,
-        labelOverride: spec.labelOverride ?? null,
-      },
-    };
-    handleNavigateInTab(currentTabId, ref, siblings);
+    handleNavigateInTab(currentTabId, diffRef(spec), siblings);
   }, [handleNavigateInTab]);
 
   /**
@@ -2439,6 +2428,7 @@ export function App() {
     [stream],
   );
 
+  const extensions = useExtensions();
   const centerTabs: CenterTab[] = useMemo(() => {
     const tabs: CenterTab[] = [];
     // File tabs live in `threadPageTabs` like every other page kind;
@@ -2502,30 +2492,22 @@ export function App() {
           nav.navOpen(newTaskRef(payload)),
         onOpenTaskPage: (ref: string) => nav.navOpen(workItemTabRef(ref)),
       };
-      const labelByKind: Record<string, string> = {
-        "tasks": "Tasks",
-        "backlog": "Backlog",
-      };
+      const tasks = isPage(ref, "tasks");
       return {
         id: ref.id,
-        label: labelByKind[ref.kind] ?? ref.kind,
+        label: tasks ? "Tasks" : "Backlog",
         closable: true,
-        render: () => {
-          switch (ref.kind) {
-            case "tasks":
-              return <TasksPage {...sharedProps} streams={streams} currentStreamId={stream?.id ?? null} onOpenPage={nav.navOpen} />;
-            case "backlog":
-              return <BacklogPage {...sharedProps} />;
-            default:
-              return null;
-          }
-        },
+        render: () =>
+          tasks ? (
+            <TasksPage {...sharedProps} streams={streams} currentStreamId={stream?.id ?? null} onOpenPage={nav.navOpen} />
+          ) : (
+            <BacklogPage {...sharedProps} />
+          ),
       };
     };
     // A snapshot, an effort, an agent turn (entity pages, P2.11) and an
     // ad-hoc endpoints pair (`diff-view` route) all render as a diff.
-    const diffViewTab = (ref: TabRef, nav: SlotNav): CenterTab | null => {
-      const payload = ref.payload as DiffViewPayload | null;
+    const diffViewTab = (ref: TabRef, payload: DiffViewPayload | null, nav: SlotNav): CenterTab | null => {
       if (!payload) return null;
       const label =
         payload.mode === "snapshot"
@@ -2553,6 +2535,413 @@ export function App() {
     };
     // The features a session's harness declares (`agent_harness`).
     const harnessFeatures = (harness: string): string[] => harnesses.find((h) => h.id === harness)?.features ?? [];
+    // Oxplow's own pages the kit can't draw yet, by their declared
+    // built-in name (`oxplow:<name>` in oxplow-foundation's `pages:`).
+    // The list only shrinks: each leaves when its page becomes a lens.
+    const builtInPages: Record<BuiltInPageName, (ref: TabRef, nav: SlotNav) => CenterTab | null> = {
+      "new-session": (ref) => ({
+        id: ref.id,
+        label: "New session",
+        closable: true,
+        render: () => (
+          <NewSessionPage
+            thread={selectedThread}
+            harnesses={harnesses}
+            streamId={stream?.id ?? null}
+            onOpenPage={handleOpenPage}
+            onStart={async (harness, remember) => {
+              if (!selectedThread) return;
+              if (remember) await saveNewThreadSession(harness);
+              const opened = await openAgentSession(selectedThread.id, harness);
+              // The picker gives way to the session's tab (it follows the
+              // row once the model re-reads).
+              closePageTab(ref.id);
+              setCenterActive(agentSessionRef(opened.id).id);
+            }}
+            onTakeEarlier={async (row) => {
+              if (!selectedThread) return;
+              const sessionId = row.session ? idOf(row.session, "agent_session") : null;
+              if (row.action === "switch" && sessionId) {
+                // Already open: show it, and keep the picker for another pick.
+                setCenterActive(agentSessionRef(sessionId).id);
+                return;
+              }
+              let tab: string | null = null;
+              if (row.action === "reopen" && sessionId) {
+                // Undoable: the toast offers Undo, which closes it again.
+                const reopened = await personCommands.run(`Reopen ${row.label}`, "oxplow.agent_session.reopen", {
+                  session: row.session,
+                });
+                if (!reopened) return;
+                tab = agentSessionRef(sessionId).id;
+              } else if (row.action === "resume" && row.conversation) {
+                const opened = await openAgentSession(selectedThread.id, row.harness, undefined, row.conversation);
+                tab = agentSessionRef(opened.id).id;
+              }
+              if (!tab) return;
+              // The picker gives way to the session's tab.
+              closePageTab(ref.id);
+              setCenterActive(tab);
+            }}
+          />
+        ),
+      }),
+      diff: (ref, nav) => {
+        // Diff that arrived via in-tab navigation. Look up the
+        // registered spec; skip if missing (the registration path is
+        // handleOpenDiffInTab — a stale ref without a spec would be
+        // a bug).
+        const spec = diffTabs.find((t) => t.id === ref.id)?.spec ?? diffSpecOf(pagePayload(ref)!.params);
+        if (!spec) return null;
+        const label = spec.path.split("/").pop() ?? spec.path;
+        const suffix = spec.labelOverride ?? "diff";
+        return {
+          id: ref.id,
+          label: `${label} (${suffix})`,
+          closable: true,
+          render: () => stream ? (
+            <DiffPage
+              stream={stream}
+              spec={spec}
+              visible={effectiveCenterActive === ref.id}
+              onJumpToSource={(p) => {
+                // In-tab navigation: replace the slot's diff with
+                // the file. Back returns to the diff. Browser-tab
+                // semantics; do NOT close the diff manually here —
+                // handleNavigateInTab takes care of swapping the
+                // slot's ref while keeping the diff in the back stack.
+                nav.navOpenFile(p);
+              }}
+            />
+          ) : null,
+        };
+      },
+      "duplicate-block": (ref, nav) => {
+        const payload = duplicateBlockOf(pagePayload(ref)!.params);
+        if (!payload) return null;
+        const leftBase = payload.leftPath.split("/").pop() ?? payload.leftPath;
+        const rightBase = payload.rightPath.split("/").pop() ?? payload.rightPath;
+        return {
+          id: ref.id,
+          label: `${leftBase} ↔ ${rightBase}`,
+          closable: true,
+          render: () => stream ? (
+            <DuplicateBlockPage
+              stream={stream}
+              payload={payload}
+              visible={effectiveCenterActive === ref.id}
+              onJumpToSource={(p, v) => {
+                handleNavigateInTab(nav.slotId, fileRef(p, v));
+              }}
+            />
+          ) : null,
+        };
+      },
+      settings: (ref, nav) => {
+        const page = pagePayload(ref)!;
+        const area = settingsArea(page.params.area);
+        const section = (page.state as { section?: string } | undefined)?.section ?? null;
+        return {
+          id: ref.id,
+          label: area.id === "overview" ? "Settings" : `Settings: ${area.title}`,
+          closable: true,
+          render: () => <SettingsPage area={area.id} section={section} onOpenPage={nav.navOpen} />,
+        };
+      },
+      "local-history": (ref, nav) => {
+        return {
+          id: ref.id,
+          label: "Local History",
+          closable: true,
+          render: () => (
+            <LocalHistoryDashboardPage
+              stream={stream}
+              onOpenPage={nav.navOpen}
+            />
+          ),
+        };
+      },
+      "local-history-full": (ref, nav) => {
+        return {
+          id: ref.id,
+          label: "All snapshots",
+          closable: true,
+          render: () => (
+            <LocalHistoryDashboardPage
+              stream={stream}
+              onOpenPage={nav.navOpen}
+              mode="full-list"
+            />
+          ),
+        };
+      },
+      "local-history-by-commit-full": (ref, nav) => {
+        return {
+          id: ref.id,
+          label: "All commits",
+          closable: true,
+          render: () => (
+            <LocalHistoryDashboardPage
+              stream={stream}
+              onOpenPage={nav.navOpen}
+              mode="full-by-commit"
+            />
+          ),
+        };
+      },
+      "diff-view": (ref, nav) => diffViewTab(ref, endpointsOf(pagePayload(ref)!.params), nav),
+      "git-history": (ref, nav) => {
+        return {
+          id: ref.id,
+          label: "Git History",
+          closable: true,
+          render: () => (
+            <GitHistoryPage stream={stream} onOpenPage={nav.navOpen} />
+          ),
+        };
+      },
+      "git-dashboard": (ref, nav) => {
+        return {
+          id: ref.id,
+          label: "Git Dashboard",
+          closable: true,
+          render: () => (
+            <GitDashboardPage
+              stream={stream}
+              onOpenPage={nav.navOpen}
+              onRevealCommit={nav.navRevealCommit}
+            />
+          ),
+        };
+      },
+      "uncommitted-changes": (ref, nav) => {
+        return {
+          id: ref.id,
+          label: "Uncommitted",
+          closable: true,
+          render: () => (
+            <UncommittedChangesPage
+              stream={stream}
+              onOpenPage={nav.navOpen}
+              onOpenFile={nav.navOpenFile}
+              onOpenDiff={nav.navOpenDiff}
+              onOpenDiffInTab={nav.navOpenDiff}
+            />
+          ),
+        };
+      },
+      terminal: (ref, nav) => {
+        return {
+          id: ref.id,
+          label: "Terminal",
+          closable: true,
+          render: () => (
+            <TerminalPage
+              stream={stream}
+              visible={effectiveCenterActive === ref.id}
+              onOpenFile={(absPath, line, column) => {
+                if (!stream) return;
+                const wt = stream.worktree_path.endsWith("/")
+                  ? stream.worktree_path.slice(0, -1)
+                  : stream.worktree_path;
+                const rel = absPath.startsWith(wt + "/")
+                  ? absPath.slice(wt.length + 1)
+                  : absPath;
+                if (typeof line === "number" && line > 0) {
+                  void handleNavigateToLocation({ path: rel, line, column: column ?? 1 });
+                } else {
+                  void handleOpenFile(rel);
+                }
+              }}
+            />
+          ),
+        };
+      },
+      alerts: (ref, nav) => {
+        return {
+          id: ref.id,
+          label: "Alerts",
+          closable: true,
+          render: () => <AlertsPage onOpenPage={nav.navOpen} />,
+        };
+      },
+      files: (ref, nav) => {
+        return {
+          id: ref.id,
+          label: "Files",
+          closable: true,
+          render: () => (
+            <FilesPage
+              stream={stream}
+              vcsEnabled={workspaceContext.vcsEnabled}
+              selectedFilePath={selectedFilePath}
+              generated={generated.exclude}
+              onOpenFile={nav.navOpenFile}
+              onOpenDiff={nav.navOpenDiff}
+              onCreateFile={handleCreateFile}
+              onCreateDirectory={handleCreateDirectory}
+              onRenamePath={handleRenamePath}
+              onDeletePath={handleDeletePath}
+              onToggleGenerated={handleToggleGenerated}
+              commitRequest={commitFilesRequest}
+            />
+          ),
+        };
+      },
+      comments: (ref, nav) => {
+        return {
+          id: ref.id,
+          label: "Comments Dashboard",
+          closable: true,
+          render: () => <CommentsInboxPage stream={stream} onOpenPage={nav.navOpen} />,
+        };
+      },
+      "metrics-recorded": (ref, nav) => {
+        return {
+          id: ref.id,
+          label: "Metrics",
+          closable: true,
+          render: () => <MetricsPage onOpenPage={nav.navOpen} />,
+        };
+      },
+      "custom-dashboard": (ref, nav) => {
+        // `customDashboardRef(id)` — one user-created dashboard (grid of tiles).
+        const p = pagePayload(ref)!.params;
+        return {
+          id: ref.id,
+          label: "Dashboard",
+          closable: true,
+          render: () => <CustomDashboardPage dashboardId={p?.id} onOpenPage={nav.navOpen} />,
+        };
+      },
+      board: (ref, nav) => ({
+        id: ref.id,
+        label: "Board",
+        closable: true,
+        render: () => (
+          <BoardPage threadId={selectedThreadId ?? null} streamId={stream?.id ?? null} onOpenPage={nav.navOpen} />
+        ),
+      }),
+      "explore-data": (ref, nav) => {
+        return {
+          id: ref.id,
+          label: "Explore Data",
+          closable: true,
+          render: () => <ExploreDataPage stream={stream} onOpenPage={nav.navOpen} />,
+        };
+      },
+      "tasks": workPage,
+      "backlog": workPage,
+      "external-url": (ref, nav) => {
+        const externalUrl = pagePayload(ref)!.params.url ?? "";
+        let label = externalUrl;
+        try {
+          const u = new URL(externalUrl);
+          label = u.host + (u.pathname && u.pathname !== "/" ? u.pathname : "");
+        } catch { /* keep raw */ }
+        return {
+          id: ref.id,
+          label: label.length > 40 ? label.slice(0, 40) + "…" : label,
+          closable: true,
+          contextMenu: [
+            {
+              id: "external-url.open-in-browser",
+              label: "Open in Browser",
+              enabled: true,
+              run: () => { void openExternalUrl(externalUrl); },
+            },
+            {
+              id: "external-url.copy",
+              label: "Copy URL",
+              enabled: true,
+              run: () => { void navigator.clipboard.writeText(externalUrl).catch(() => {}); },
+            },
+          ],
+          render: () => (
+            <ExternalUrlPage
+              url={externalUrl}
+              onOpenInBrowser={(u) => { void openExternalUrl(u); }}
+            />
+          ),
+        };
+      },
+      "stream-settings": (ref, nav) => {
+        const targetStreamId = pagePayload(ref)!.params.stream ?? "";
+        const targetStream = streams.find((s) => s.id === targetStreamId) ?? null;
+        return {
+          id: ref.id,
+          label: targetStream ? `Settings · ${targetStream.title}` : "Stream Settings",
+          closable: true,
+          render: () => (
+            <StreamSettingsPage
+              stream={targetStream}
+              onClose={() => closePageTab(ref.id)}
+              onSaved={(next) => setStreams(next)}
+            />
+          ),
+        };
+      },
+      "thread-settings": (ref, nav) => {
+        const targetThreadId = pagePayload(ref)!.params.thread ?? "";
+        const targetThread = currentThreadState.threads.find((t) => t.id === targetThreadId) ?? null;
+        return {
+          id: ref.id,
+          label: targetThread ? `Settings · ${targetThread.title}` : "Thread Settings",
+          closable: true,
+          render: () => (
+            <ThreadSettingsPage
+              streamId={stream?.id ?? ""}
+              thread={targetThread}
+              onClose={() => closePageTab(ref.id)}
+              onSaved={(nextThreads) => {
+                if (!stream) return;
+                setThreadStates((prev) => ({
+                  ...prev,
+                  [stream.id]: {
+                    ...(prev[stream.id] ?? { selectedThreadId: null, threads: [] }),
+                    threads: nextThreads,
+                  },
+                }));
+              }}
+            />
+          ),
+        };
+      },
+      "new-stream": (ref, nav) => {
+        return {
+          id: ref.id,
+          label: "New Stream",
+          closable: true,
+          render: () => (
+            <NewStreamPage
+              vcsEnabled={workspaceContext.vcsEnabled}
+              defaultTitle={`Stream ${streams.length + 1}`}
+              onClose={() => closePageTab(ref.id)}
+              onCreated={(created) => {
+                handleStreamCreated(created);
+                closePageTab(ref.id);
+              }}
+            />
+          ),
+        };
+      },
+      "new-task": (ref) => {
+        const payload = (pagePayload(ref)!.state as { parentRef?: string | null } | undefined) ?? {};
+        return {
+          id: ref.id,
+          label: "New item",
+          closable: true,
+          render: () => (
+            <NewTaskPage
+              defaults={{ parentRef: payload.parentRef ?? null }}
+              epics={selectedThreadWork?.epics ?? []}
+              onClose={() => closePageTab(ref.id)}
+              onSubmit={(input) => handleCreateTask({ ...input, state: input.state ?? "todo" })}
+            />
+          ),
+        };
+      },
+    };
     const pageRenderers: Record<PageKind, (ref: TabRef, nav: SlotNav) => CenterTab | null> = {
       agent_session: (ref) => {
         const sessionId = (ref.payload as { sessionId: string }).sessionId;
@@ -2636,104 +3025,6 @@ export function App() {
           ),
         };
       },
-      "new-session": (ref) => ({
-        id: ref.id,
-        label: "New session",
-        closable: true,
-        render: () => (
-          <NewSessionPage
-            thread={selectedThread}
-            harnesses={harnesses}
-            streamId={stream?.id ?? null}
-            onOpenPage={handleOpenPage}
-            onStart={async (harness, remember) => {
-              if (!selectedThread) return;
-              if (remember) await saveNewThreadSession(harness);
-              const opened = await openAgentSession(selectedThread.id, harness);
-              // The picker gives way to the session's tab (it follows the
-              // row once the model re-reads).
-              closePageTab(ref.id);
-              setCenterActive(agentSessionRef(opened.id).id);
-            }}
-            onTakeEarlier={async (row) => {
-              if (!selectedThread) return;
-              const sessionId = row.session ? idOf(row.session, "agent_session") : null;
-              if (row.action === "switch" && sessionId) {
-                // Already open: show it, and keep the picker for another pick.
-                setCenterActive(agentSessionRef(sessionId).id);
-                return;
-              }
-              let tab: string | null = null;
-              if (row.action === "reopen" && sessionId) {
-                // Undoable: the toast offers Undo, which closes it again.
-                const reopened = await personCommands.run(`Reopen ${row.label}`, "oxplow.agent_session.reopen", {
-                  session: row.session,
-                });
-                if (!reopened) return;
-                tab = agentSessionRef(sessionId).id;
-              } else if (row.action === "resume" && row.conversation) {
-                const opened = await openAgentSession(selectedThread.id, row.harness, undefined, row.conversation);
-                tab = agentSessionRef(opened.id).id;
-              }
-              if (!tab) return;
-              // The picker gives way to the session's tab.
-              closePageTab(ref.id);
-              setCenterActive(tab);
-            }}
-          />
-        ),
-      }),
-      diff: (ref, nav) => {
-        // Diff that arrived via in-tab navigation. Look up the
-        // registered spec; skip if missing (the registration path is
-        // handleOpenDiffInTab — a stale ref without a spec would be
-        // a bug).
-        const spec = diffTabs.find((t) => t.id === ref.id)?.spec;
-        if (!spec) return null;
-        const label = spec.path.split("/").pop() ?? spec.path;
-        const suffix = spec.labelOverride ?? "diff";
-        return {
-          id: ref.id,
-          label: `${label} (${suffix})`,
-          closable: true,
-          render: () => stream ? (
-            <DiffPage
-              stream={stream}
-              spec={spec}
-              visible={effectiveCenterActive === ref.id}
-              onJumpToSource={(p) => {
-                // In-tab navigation: replace the slot's diff with
-                // the file. Back returns to the diff. Browser-tab
-                // semantics; do NOT close the diff manually here —
-                // handleNavigateInTab takes care of swapping the
-                // slot's ref while keeping the diff in the back stack.
-                nav.navOpenFile(p);
-              }}
-            />
-          ) : null,
-        };
-      },
-      "duplicate-block": (ref, nav) => {
-        const payload = ref.payload as import("./tabs/pageRefs.js").DuplicateBlockPayload | null;
-        if (!payload) return null;
-        const leftBase = payload.leftPath.split("/").pop() ?? payload.leftPath;
-        const rightBase = payload.rightPath.split("/").pop() ?? payload.rightPath;
-        return {
-          id: ref.id,
-          label: `${leftBase} ↔ ${rightBase}`,
-          closable: true,
-          render: () => stream ? (
-            <DuplicateBlockPage
-              stream={stream}
-              payload={payload}
-              visible={effectiveCenterActive === ref.id}
-              onJumpToSource={(p, v) => {
-                handleNavigateInTab(nav.slotId, fileRef(p, v));
-              }}
-            />
-          ) : null,
-        };
-      },
       file: (ref, nav) => {
         const payload = ref.payload as { path?: string; version?: import("./revision.js").Revision } | null;
         const path = payload?.path;
@@ -2788,101 +3079,9 @@ export function App() {
           ) : null,
         };
       },
-      settings: (ref, nav) => {
-        const payload = (ref.payload as { area?: string | null; section?: string | null } | null) ?? {};
-        const area = settingsArea(payload.area);
-        return {
-          id: ref.id,
-          label: area.id === "overview" ? "Settings" : `Settings: ${area.title}`,
-          closable: true,
-          render: () => <SettingsPage area={area.id} section={payload.section ?? null} onOpenPage={nav.navOpen} />,
-        };
-      },
-      "local-history": (ref, nav) => {
-        return {
-          id: ref.id,
-          label: "Local History",
-          closable: true,
-          render: () => (
-            <LocalHistoryDashboardPage
-              stream={stream}
-              onOpenPage={nav.navOpen}
-            />
-          ),
-        };
-      },
-      "local-history-full": (ref, nav) => {
-        return {
-          id: ref.id,
-          label: "All snapshots",
-          closable: true,
-          render: () => (
-            <LocalHistoryDashboardPage
-              stream={stream}
-              onOpenPage={nav.navOpen}
-              mode="full-list"
-            />
-          ),
-        };
-      },
-      "local-history-by-commit-full": (ref, nav) => {
-        return {
-          id: ref.id,
-          label: "All commits",
-          closable: true,
-          render: () => (
-            <LocalHistoryDashboardPage
-              stream={stream}
-              onOpenPage={nav.navOpen}
-              mode="full-by-commit"
-            />
-          ),
-        };
-      },
-      "diff-view": (ref, nav) => diffViewTab(ref, nav),
-      snapshot: (ref, nav) => diffViewTab(ref, nav),
-      effort: (ref, nav) => diffViewTab(ref, nav),
-      turn: (ref, nav) => diffViewTab(ref, nav),
-      "git-history": (ref, nav) => {
-        return {
-          id: ref.id,
-          label: "Git History",
-          closable: true,
-          render: () => (
-            <GitHistoryPage stream={stream} onOpenPage={nav.navOpen} />
-          ),
-        };
-      },
-      "git-dashboard": (ref, nav) => {
-        return {
-          id: ref.id,
-          label: "Git Dashboard",
-          closable: true,
-          render: () => (
-            <GitDashboardPage
-              stream={stream}
-              onOpenPage={nav.navOpen}
-              onRevealCommit={nav.navRevealCommit}
-            />
-          ),
-        };
-      },
-      "uncommitted-changes": (ref, nav) => {
-        return {
-          id: ref.id,
-          label: "Uncommitted",
-          closable: true,
-          render: () => (
-            <UncommittedChangesPage
-              stream={stream}
-              onOpenPage={nav.navOpen}
-              onOpenFile={nav.navOpenFile}
-              onOpenDiff={nav.navOpenDiff}
-              onOpenDiffInTab={nav.navOpenDiff}
-            />
-          ),
-        };
-      },
+      snapshot: (ref, nav) => diffViewTab(ref, ref.payload as DiffViewPayload | null, nav),
+      effort: (ref, nav) => diffViewTab(ref, ref.payload as DiffViewPayload | null, nav),
+      turn: (ref, nav) => diffViewTab(ref, ref.payload as DiffViewPayload | null, nav),
       commit: (ref, nav) => {
         const sha = (ref.payload as { sha?: string } | null)?.sha ?? "";
         return {
@@ -2902,80 +3101,6 @@ export function App() {
           ),
         };
       },
-      terminal: (ref, nav) => {
-        return {
-          id: ref.id,
-          label: "Terminal",
-          closable: true,
-          render: () => (
-            <TerminalPage
-              stream={stream}
-              visible={effectiveCenterActive === ref.id}
-              onOpenFile={(absPath, line, column) => {
-                if (!stream) return;
-                const wt = stream.worktree_path.endsWith("/")
-                  ? stream.worktree_path.slice(0, -1)
-                  : stream.worktree_path;
-                const rel = absPath.startsWith(wt + "/")
-                  ? absPath.slice(wt.length + 1)
-                  : absPath;
-                if (typeof line === "number" && line > 0) {
-                  void handleNavigateToLocation({ path: rel, line, column: column ?? 1 });
-                } else {
-                  void handleOpenFile(rel);
-                }
-              }}
-            />
-          ),
-        };
-      },
-      alerts: (ref, nav) => {
-        return {
-          id: ref.id,
-          label: "Alerts",
-          closable: true,
-          render: () => <AlertsPage onOpenPage={nav.navOpen} />,
-        };
-      },
-      files: (ref, nav) => {
-        return {
-          id: ref.id,
-          label: "Files",
-          closable: true,
-          render: () => (
-            <FilesPage
-              stream={stream}
-              vcsEnabled={workspaceContext.vcsEnabled}
-              selectedFilePath={selectedFilePath}
-              generated={generated.exclude}
-              onOpenFile={nav.navOpenFile}
-              onOpenDiff={nav.navOpenDiff}
-              onCreateFile={handleCreateFile}
-              onCreateDirectory={handleCreateDirectory}
-              onRenamePath={handleRenamePath}
-              onDeletePath={handleDeletePath}
-              onToggleGenerated={handleToggleGenerated}
-              commitRequest={commitFilesRequest}
-            />
-          ),
-        };
-      },
-      comments: (ref, nav) => {
-        return {
-          id: ref.id,
-          label: "Comments Dashboard",
-          closable: true,
-          render: () => <CommentsInboxPage stream={stream} onOpenPage={nav.navOpen} />,
-        };
-      },
-      "metrics-recorded": (ref, nav) => {
-        return {
-          id: ref.id,
-          label: "Metrics",
-          closable: true,
-          render: () => <MetricsPage onOpenPage={nav.navOpen} />,
-        };
-      },
       metric: (ref, nav) => {
         const p = (ref.payload ?? null) as { metricKey?: string } | null;
         return {
@@ -2987,55 +3112,8 @@ export function App() {
           ),
         };
       },
-      "custom-dashboard": (ref, nav) => {
-        // `customDashboardRef(id)` — one user-created dashboard (grid of tiles).
-        const p = (ref.payload ?? null) as { id?: string } | null;
-        return {
-          id: ref.id,
-          label: "Dashboard",
-          closable: true,
-          render: () => <CustomDashboardPage dashboardId={p?.id} onOpenPage={nav.navOpen} />,
-        };
-      },
       // A symbol opens its file at its line (openSymbol); it's never a tab.
       symbol: () => null,
-      board: (ref, nav) => ({
-        id: ref.id,
-        label: "Board",
-        closable: true,
-        render: () => (
-          <BoardPage threadId={selectedThreadId ?? null} streamId={stream?.id ?? null} onOpenPage={nav.navOpen} />
-        ),
-      }),
-      "explore-data": (ref, nav) => {
-        return {
-          id: ref.id,
-          label: "Explore Data",
-          closable: true,
-          render: () => <ExploreDataPage stream={stream} onOpenPage={nav.navOpen} />,
-        };
-      },
-      "ext-page": (ref, nav) => {
-        const { extension, page, params } = ref.payload as {
-          extension: string;
-          page: string;
-          params?: Record<string, string>;
-        };
-        return {
-          id: ref.id,
-          label: page,
-          closable: true,
-          render: () => (
-            <ExtensionPageView
-              extension={extension}
-              page={page}
-              params={params}
-              stream={stream}
-              onOpenPage={nav.navOpen}
-            />
-          ),
-        };
-      },
       lens: (ref, nav) => {
         const payload = ref.payload as { lensId?: string; params?: Record<string, SqlCell> } | null;
         const lensId = payload?.lensId ?? "";
@@ -3045,41 +3123,6 @@ export function App() {
           closable: true,
           render: () => (
             <LensPage lensId={lensId} initialParams={payload?.params} stream={stream} onOpenPage={nav.navOpen} />
-          ),
-        };
-      },
-      "tasks": workPage,
-      "backlog": workPage,
-      "external-url": (ref, nav) => {
-        const externalUrl = (ref.payload as { url?: string } | null)?.url ?? "";
-        let label = externalUrl;
-        try {
-          const u = new URL(externalUrl);
-          label = u.host + (u.pathname && u.pathname !== "/" ? u.pathname : "");
-        } catch { /* keep raw */ }
-        return {
-          id: ref.id,
-          label: label.length > 40 ? label.slice(0, 40) + "…" : label,
-          closable: true,
-          contextMenu: [
-            {
-              id: "external-url.open-in-browser",
-              label: "Open in Browser",
-              enabled: true,
-              run: () => { void openExternalUrl(externalUrl); },
-            },
-            {
-              id: "external-url.copy",
-              label: "Copy URL",
-              enabled: true,
-              run: () => { void navigator.clipboard.writeText(externalUrl).catch(() => {}); },
-            },
-          ],
-          render: () => (
-            <ExternalUrlPage
-              url={externalUrl}
-              onOpenInBrowser={(u) => { void openExternalUrl(u); }}
-            />
           ),
         };
       },
@@ -3144,80 +3187,26 @@ export function App() {
           ),
         };
       },
-      "stream-settings": (ref, nav) => {
-        const targetStreamId = (ref.payload as { streamId?: string } | null)?.streamId ?? "";
-        const targetStream = streams.find((s) => s.id === targetStreamId) ?? null;
+      // A declared page: what its declaration says draws it — a lens, or
+      // (oxplow's own, until the kit can draw it) a built-in page.
+      page: (ref, nav) => {
+        const page = pagePayload(ref)!;
+        const declared = declaredPage(extensions, page);
+        const builtIn =
+          declared?.body.kind === "builtIn"
+            ? declared.body.name
+            : extensions === null && page.extension === null && isBuiltInPage(page.page)
+              ? page.page
+              : null;
+        if (builtIn && isBuiltInPage(builtIn)) {
+          const tab = builtInPages[builtIn](ref, nav);
+          return tab ? { ...tab, label: tab.label || declared?.title || page.page } : null;
+        }
         return {
           id: ref.id,
-          label: targetStream ? `Settings · ${targetStream.title}` : "Stream Settings",
+          label: declared?.title ?? page.page,
           closable: true,
-          render: () => (
-            <StreamSettingsPage
-              stream={targetStream}
-              onClose={() => closePageTab(ref.id)}
-              onSaved={(next) => setStreams(next)}
-            />
-          ),
-        };
-      },
-      "thread-settings": (ref, nav) => {
-        const targetThreadId = (ref.payload as { threadId?: string } | null)?.threadId ?? "";
-        const targetThread = currentThreadState.threads.find((t) => t.id === targetThreadId) ?? null;
-        return {
-          id: ref.id,
-          label: targetThread ? `Settings · ${targetThread.title}` : "Thread Settings",
-          closable: true,
-          render: () => (
-            <ThreadSettingsPage
-              streamId={stream?.id ?? ""}
-              thread={targetThread}
-              onClose={() => closePageTab(ref.id)}
-              onSaved={(nextThreads) => {
-                if (!stream) return;
-                setThreadStates((prev) => ({
-                  ...prev,
-                  [stream.id]: {
-                    ...(prev[stream.id] ?? { selectedThreadId: null, threads: [] }),
-                    threads: nextThreads,
-                  },
-                }));
-              }}
-            />
-          ),
-        };
-      },
-      "new-stream": (ref, nav) => {
-        return {
-          id: ref.id,
-          label: "New Stream",
-          closable: true,
-          render: () => (
-            <NewStreamPage
-              vcsEnabled={workspaceContext.vcsEnabled}
-              defaultTitle={`Stream ${streams.length + 1}`}
-              onClose={() => closePageTab(ref.id)}
-              onCreated={(created) => {
-                handleStreamCreated(created);
-                closePageTab(ref.id);
-              }}
-            />
-          ),
-        };
-      },
-      "new-task": (ref) => {
-        const payload = (ref.payload as { parentRef?: string | null } | null) ?? {};
-        return {
-          id: ref.id,
-          label: "New item",
-          closable: true,
-          render: () => (
-            <NewTaskPage
-              defaults={{ parentRef: payload.parentRef ?? null }}
-              epics={selectedThreadWork?.epics ?? []}
-              onClose={() => closePageTab(ref.id)}
-              onSubmit={(input) => handleCreateTask({ ...input, state: input.state ?? "todo" })}
-            />
-          ),
+          render: () => <DeclaredPageView page={page} declared={declared} stream={stream} onOpenPage={nav.navOpen} />,
         };
       },
     };
@@ -3394,6 +3383,7 @@ export function App() {
     centerActive,
     selectedThreadWork,
     backlogState,
+    extensions,
   ]);
 
   return (
@@ -3599,9 +3589,7 @@ export function App() {
         stream={stream}
         threadId={selectedThreadId}
         selectedFilePath={selectedFilePath}
-        pages={computePagesDirectory({
-          backlogReadyCount: backlogState?.items.length ?? 0,
-        })}
+        pages={settingsAreaEntries()}
         offers={offers}
         onClose={() => setQuickOpenVisible(false)}
         onOpenFile={(path) => {

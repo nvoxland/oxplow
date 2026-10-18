@@ -3,54 +3,41 @@
  *
  * `kindForTabId` extracts the kind from a tab id like
  * `file:src/foo.ts` → `"file"`, `work_item:oxplow:tsk42` → `"work_item"`,
- * or `page:tasks` → `"tasks"` (a shell route).
+ * or, for a declared page, its page id: `page:tasks` → `"tasks"`,
+ * `page:gh/open-prs` → `"gh/open-prs"` (what visits and bookmarks
+ * record, `recordedPageKind`).
  *
  * `pageKindIconComponent` / `PageKindIcon` map that kind to the
  * lucide-react icon used everywhere a page-kind label renders —
- * tabs, rail history/finished, backlinks list, markdown links.
- *
- * If you add a new page kind in `tabs/pageRefs.ts`, add its icon and
- * label here too.
+ * tabs, rail history/finished, backlinks list, markdown links. An entity
+ * kind's icon is here; a declared page's is the one its `pages:` entry
+ * names, so a page added to a manifest needs nothing here.
  */
 import {
-  Bell,
   Bot,
-  BarChart3,
   BookOpen,
-  Columns3,
   Braces,
   CheckSquare,
-  Copy,
-  ExternalLink,
   FileText,
   Folder,
-  FolderTree,
   Forward,
   Gauge,
-  GitBranch,
   GitCommit,
   GitCompare,
-  GitMerge,
   Glasses,
-  Database,
-  History,
-  Inbox,
   LayoutDashboard,
   type LucideIcon,
   MessageSquareText,
   MessagesSquare,
-  Plus,
   Scale,
-  Settings,
   StickyNote,
-  Terminal,
 } from "lucide-react";
 import type { ComponentProps, ReactElement } from "react";
 import { REF_KIND_ICONS, refKindIcon, refKindInfo } from "./refKinds.js";
 import { useExtensions } from "./extensionsStore.js";
-import { pageKindOf, refFromTabId } from "./tabs/pageRefs.js";
-import type { Extension } from "./tauri-bridge/generated/bindings.js";
-import { parseRef } from "./refs/ref.js";
+import { pageKindOf, recordedPageKind, refFromTabId } from "./tabs/pageRefs.js";
+import type { Extension, ExtensionPage } from "./tauri-bridge/generated/bindings.js";
+import { extPageRef, pageRef as corePageRef, parseRef } from "./refs/ref.js";
 
 /**
  * Map a page-kind string to its icon component. Returns `null`
@@ -62,7 +49,7 @@ import { parseRef } from "./refs/ref.js";
  * arbitrary `tab.id` prefixes without an exhaustive switch eating
  * future kinds.
  */
-export function pageKindIconComponent(kind: string): LucideIcon | null {
+export function pageKindIconComponent(kind: string, extensions: Extension[] | null = null): LucideIcon | null {
   switch (kind) {
     // Scheme-prefixed kinds (TabRef.kind).
     case "file":
@@ -72,14 +59,11 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
     case "directory":
       return Folder;
     case "diff":
-    case "diff-view":
     // A snapshot, an effort and a turn open as their diff (P2.11).
     case "snapshot":
     case "effort":
     case "turn":
       return GitCompare;
-    case "duplicate-block":
-      return Copy;
     case "wiki":
       return BookOpen;
     case "work_item":
@@ -89,26 +73,12 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
     case "commit":
       return GitCommit;
     case "dashboard":
-    case "custom-dashboard":
       return LayoutDashboard;
-    case "alerts":
-      return Bell;
-    case "stream-settings":
-    case "thread-settings":
-    case "settings":
-      return Settings;
-    case "external-url":
-      return ExternalLink;
-    case "uncommitted-changes":
-      return GitBranch;
 
     case "lens":
-    case "ext-page":
+    // A page no enabled extension declares (yet).
+    case "page":
       return Glasses;
-    case "explore-data":
-      return Database;
-    case "board":
-      return Columns3;
     case "symbol":
       return Braces;
 
@@ -124,61 +94,40 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return MessageSquareText;
     case "decision":
       return Scale;
-    case "new-session":
-      return Plus;
 
-    // Literal-id index pages (kind === id).
-    case "tasks":
-      return CheckSquare;
-    case "backlog":
-      return Inbox;
-    case "files":
-      return FolderTree;
-    case "comments":
-      return Inbox;
-    case "local-history":
-    case "local-history-full":
-    case "local-history-by-commit-full":
-      return History;
-    case "git-history":
-      return GitMerge;
-    case "git-dashboard":
-      return GitBranch;
-    case "metrics-recorded":
-      return BarChart3;
     case "metric":
       return Gauge;
-    case "terminal":
-      return Terminal;
-    case "new-stream":
-    case "new-task":
-      return Plus;
 
     // An extension's ref kind (`ref_kinds:`, P8.D7) draws its declared icon.
+    // A declared page draws the icon its `pages:` entry names.
     default:
-      return refKindIcon(kind);
+      return refKindIcon(kind) ?? declaredPageIcon(extensions, kind);
   }
 }
 
-/**
- * The icon an extension's page declares (`pages: - icon:`), or null when
- * the tab id names no such page or it declares none: the caller then
- * draws the lens icon.
- */
-export function extPageIconComponent(extensions: Extension[] | null, tabId: string): LucideIcon | null {
-  const payload = refFromTabId(tabId)?.payload as { extension?: string; page?: string } | null | undefined;
-  if (!payload?.extension || !payload.page) return null;
-  const icon = extensions
-    ?.find((e) => e.name === payload.extension)
-    ?.pages.find((p) => p.id === payload.page)?.icon;
+/** The declared page a page kind names (`tasks`, `gh/open-prs`). */
+function declaredPageOf(extensions: Extension[] | null, kind: string): ExtensionPage | null {
+  if (!extensions) return null;
+  // A page kind is the page's id, `<extension>/` first for any but oxplow's.
+  const slash = kind.indexOf("/");
+  const pageRef = slash === -1 ? corePageRef(kind) : extPageRef(kind.slice(0, slash), kind.slice(slash + 1));
+  for (const e of extensions) {
+    const found = e.enabled ? e.pages.find((p) => p.pageRef === pageRef) : undefined;
+    if (found) return found;
+  }
+  return null;
+}
+
+/** The icon a declared page names (`pages: - icon:`), or null when no
+ *  page has that id or it names none. */
+export function declaredPageIcon(extensions: Extension[] | null, kind: string): LucideIcon | null {
+  const icon = declaredPageOf(extensions, kind)?.icon;
   return icon ? (REF_KIND_ICONS[icon] ?? null) : null;
 }
 
 export interface PageKindIconProps extends Omit<ComponentProps<LucideIcon>, "ref"> {
+  /** An entity kind, or a declared page's id (`kindForTabId`). */
   kind: string;
-  /** The page's tab id. An extension's page (`kind` `ext-page`) draws the
-   *  icon it declares; without the id it draws the lens icon. */
-  tabId?: string;
   /**
    * Pixel size for the icon. Defaults to 14 — small enough to sit
    * inline next to text labels at the project's default font size.
@@ -195,20 +144,15 @@ export interface PageKindIconProps extends Omit<ComponentProps<LucideIcon>, "ref
  * `aria-hidden` is set by default because the adjacent text label
  * is the accessible name; the icon is decorative.
  */
-export function PageKindIcon({ kind, tabId, ...rest }: PageKindIconProps): ReactElement | null {
-  if (kind === "ext-page" && tabId) return <ExtPageIcon tabId={tabId} {...rest} />;
-  return <KindIcon kind={kind} {...rest} />;
-}
-
-function ExtPageIcon({ tabId, ...rest }: Omit<PageKindIconProps, "kind" | "tabId"> & { tabId: string }): ReactElement | null {
-  const extensions = useExtensions();
-  const Icon = extPageIconComponent(extensions, tabId) ?? pageKindIconComponent("ext-page");
-  if (!Icon) return null;
-  return <Icon aria-hidden size={rest.size ?? 14} {...rest} />;
-}
-
-function KindIcon({ kind, size = 14, ...rest }: Omit<PageKindIconProps, "tabId">): ReactElement | null {
+export function PageKindIcon({ kind, size = 14, ...rest }: PageKindIconProps): ReactElement | null {
   const Icon = pageKindIconComponent(kind);
+  if (!Icon) return <DeclaredPageIcon kind={kind} size={size} {...rest} />;
+  return <Icon aria-hidden size={size} {...rest} />;
+}
+
+/** A declared page's icon, which only the loaded extensions know. */
+function DeclaredPageIcon({ kind, size, ...rest }: PageKindIconProps): ReactElement | null {
+  const Icon = declaredPageIcon(useExtensions(), kind);
   if (!Icon) return null;
   return <Icon aria-hidden size={size} {...rest} />;
 }
@@ -220,68 +164,32 @@ function KindIcon({ kind, size = 14, ...rest }: Omit<PageKindIconProps, "tabId">
  * "diff", "tasks"); short-circuits the cases where the chrome
  * historically rendered a softer phrasing.
  */
-export function pageKindLabel(kind: string): string {
+export function pageKindLabel(kind: string, extensions: Extension[] | null = null): string {
   switch (kind) {
     case "wiki":
       return "wiki page";
     case "work_item":
       return "work item";
-    case "diff-view":
-      return "diff";
-    case "new-task":
-      return "new item";
-    case "new-stream":
-      return "new stream";
     case "agent_session":
       return "agent session";
     case "thread_note":
       return "note";
-    case "new-session":
-      return "new session";
-    case "lens":
-      return "lens";
-    case "explore-data":
-      return "explore data";
-    case "local-history":
-      return "local history";
-    case "local-history-full":
-      return "all snapshots";
-    case "local-history-by-commit-full":
-      return "all commits";
-    case "git-history":
-      return "git history";
-    case "git-dashboard":
-      return "git";
-    case "duplicate-block":
-      return "duplicate";
-    case "external-url":
-      return "external link";
-    case "uncommitted-changes":
-      return "uncommitted";
-    case "stream-settings":
-      return "stream settings";
-    case "thread-settings":
-      return "thread settings";
-    case "alerts":
-      return "alerts";
-    case "metrics-recorded":
-      return "metrics";
-    case "custom-dashboard":
-      return "dashboard";
     default:
-      return refKindInfo(kind)?.label ?? kind;
+      return refKindInfo(kind)?.label ?? declaredPageOf(extensions, kind)?.title.toLowerCase() ?? kind;
   }
 }
 
 /**
  * The kind a tab id renders as — an entity ref's kind
  * (`work_item:oxplow:tsk42` → `work_item`, `file:src/a.rs@git:HEAD` →
- * `file`) or a route's name (`page:diff-view?effort=eff9` → `diff-view`).
+ * `file`) or a declared page's id (`page:diff-view?effort=eff9` →
+ * `diff-view`, `page:gh/open-prs` → `gh/open-prs`).
  * Text that is not a tab id comes back unchanged so a caller can still
  * label it. The chrome uses this for icons and kind chips.
  */
 export function kindForTabId(tabId: string): string {
   const kind = pageKindOf(tabId);
+  if (kind === "page") return recordedPageKind(refFromTabId(tabId)!);
   if (kind) return kind;
   // A ref of a kind with no page of its own (`finding:…`) still has an icon.
   return parseRef(tabId)?.kind ?? tabId;

@@ -60,6 +60,7 @@ import { recordOpError } from "../components/opErrorsStore.js";
 import { showToast } from "../components/toastStore.js";
 import { addLensToContext, copyLens, openAfterAction, performLensAction, rowRecord } from "./lensActions.js";
 import { LensIcon, lensIcon, toneColor } from "./lensIcons.js";
+import { useExtensions } from "../extensionsStore.js";
 import { setContextRefDrag } from "../agent-context-dnd.js";
 
 type CellRenderer = (row: SqlCell[], col: DisplayColumn) => ReactNode;
@@ -263,6 +264,7 @@ function RowsBody({
   const result = limitRows(run.result, maxRows);
   const ctxMenu = useContextMenu();
   const refOffersFor = useRefOffers();
+  const extensions = useExtensions();
   // Extensions' badges for the refs these rows link to (P6b.C5).
   const linkedRefs = result.rows.flatMap((row) =>
     lens.columns.flatMap((c) => {
@@ -303,7 +305,7 @@ function RowsBody({
     // Its icon and tone, named by other columns of the row.
     const toneName = c.toneIndex === null ? null : (row[c.toneIndex] ?? null);
     const tone = toneColor(toneName);
-    const icon = c.iconIndex === null ? null : lensIcon(row[c.iconIndex] ?? null);
+    const icon = c.iconIndex === null ? null : lensIcon(row[c.iconIndex] ?? null, extensions);
     const ref = c.link ? cellLinkRef(c.link, c.key, row, result.columns) : null;
     const mine = ref ? badges.filter((b) => b.ref === linkTargetId(ref)) : [];
     const body = ref ? (

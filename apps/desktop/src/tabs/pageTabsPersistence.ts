@@ -16,9 +16,9 @@ import { parseRevision } from "../revision.js";
 
 export const FILE_SESSIONS_STORAGE_KEY = "oxplow.layout.v2.fileSessions";
 export const CENTER_ACTIVE_STORAGE_KEY = "oxplow.layout.v2.centerActive";
-export const THREAD_TABS_STORAGE_KEY = "oxplow.layout.v2.threadPageTabs";
-export const THREAD_HISTORY_STORAGE_KEY = "oxplow.layout.v2.threadPageHistory";
-export const DIFF_SPECS_STORAGE_KEY = "oxplow.layout.v2.diffSpecs";
+export const THREAD_TABS_STORAGE_KEY = "oxplow.layout.v3.threadPageTabs";
+export const THREAD_HISTORY_STORAGE_KEY = "oxplow.layout.v3.threadPageHistory";
+export const DIFF_SPECS_STORAGE_KEY = "oxplow.layout.v3.diffSpecs";
 
 /** A single back/forward stack frame. Stores both the ref and the
  *  siblings record from when that page was active, so going back

@@ -6,16 +6,19 @@ import {
   dashboardsRef,
   directoryRef,
   diffRef,
+  diffSpecOf,
   diskFilePath,
   duplicateBlockRef,
   effortDiffRef,
   endpointDiffRef,
+  endpointsOf,
+  extPageRef,
   externalUrlRef,
   fileRef,
   gitCommitRef,
   uncommittedChangesRef,
   hookEventsRef,
-  indexRef,
+  pageTabRef,
   lensRef,
   metricRef,
   newTaskRef,
@@ -30,11 +33,13 @@ import {
   wikiFreshnessRef,
   wikiPageRef,
   workItemTabRef,
+  type PagePayload,
 } from "./pageRefs.js";
+import type { TabRef } from "./tabState.js";
 import { parseRef } from "../refs/ref.js";
 
 describe("pageRefs", () => {
-  test("an agent session's tab is its ref, pinned; the picker is a closable route", () => {
+  test("an agent session's tab is its ref, pinned; the picker is a closable page", () => {
     expect(agentSessionRef("ses3")).toEqual({
       id: "agent_session:ses3",
       kind: "agent_session",
@@ -42,8 +47,7 @@ describe("pageRefs", () => {
       pinned: true,
     });
     expect(pageKindOf("agent_session:ses3")).toBe("agent_session");
-    expect(newSessionRef()).toEqual({ id: "page:new-session", kind: "new-session", payload: null });
-    expect(refFromTabId("page:agent")).toBeNull();
+    expect(newSessionRef()).toEqual({ id: "page:new-session", kind: "page", payload: { extension: null, page: "new-session", params: {} } });
   });
 
   test("a dashboard's ref opens its dashboard page", () => {
@@ -62,8 +66,10 @@ describe("pageRefs", () => {
     const spec = { path: "src/a.ts", leftVersion: "git:abc", rightVersion: "working", baseLabel: "abc" };
     const a = diffRef(spec);
     expect(a.id).toBe("page:diff?path=src/a.ts&left=git:abc&right=working");
-    expect(a.kind).toBe("diff");
-    expect(a.payload).toEqual({ path: "src/a.ts", leftVersion: "git:abc", rightVersion: "working", labelOverride: null });
+    expect(a.kind).toBe("page");
+    // The spec rides along as state; the params rebuild it after a restart.
+    expect(a.payload).toEqual({ extension: null, page: "diff", params: { path: "src/a.ts", left: "git:abc", right: "working" }, state: spec });
+    expect(diffSpecOf((refFromTabId(a.id)!.payload as PagePayload).params)).toEqual({ ...spec, baseLabel: "", labelOverride: undefined });
     // revealLine does not change the id: re-clicking reuses the tab.
     expect(diffRef({ ...spec, revealLine: 7 }).id).toBe(a.id);
     expect(diffRef({ ...spec, rightVersion: "git:xyz" }).id).not.toBe(a.id);
@@ -87,17 +93,22 @@ describe("pageRefs", () => {
   });
 
 
-  test("index pages are `page:<kind>` routes", () => {
-    const ref = indexRef("tasks");
+  test("oxplow's pages are `page:<id>`, any other extension's `page:<ext>/<id>`", () => {
+    const ref = pageTabRef("tasks");
     expect(ref.id).toBe("page:tasks");
-    expect(ref.kind).toBe("tasks");
-    expect(hookEventsRef()).toEqual({ id: "page:oxplow-foundation/hook-events", kind: "ext-page", payload: { extension: "oxplow-foundation", page: "hook-events" } });
+    expect(ref.kind).toBe("page");
+    expect(hookEventsRef()).toEqual({ id: "page:hook-events", kind: "page", payload: { extension: null, page: "hook-events", params: {} } });
+    expect(extPageRef("gh", "open-prs", { ref: "acme_pr:1" })).toEqual({
+      id: "page:gh/open-prs?ref=acme_pr:1",
+      kind: "page",
+      payload: { extension: "gh", page: "open-prs", params: { ref: "acme_pr:1" } },
+    });
     expect(uncommittedChangesRef().id).toBe("page:uncommitted-changes");
   });
 
   test("routes with a subject carry it as query params", () => {
-    expect(goToRef().id).toBe("page:oxplow-foundation/go-to");
-    expect(wikiFreshnessRef("data-model").id).toBe("page:oxplow-foundation/wiki-freshness?slug=data-model");
+    expect(goToRef().id).toBe("page:go-to");
+    expect(wikiFreshnessRef("data-model").id).toBe("page:wiki-freshness?slug=data-model");
     expect(customDashboardRef("dsh3").id).toBe("page:custom-dashboard?id=dsh3");
     expect(streamSettingsRef("str1").id).toBe("page:stream-settings?stream=str1");
     expect(threadSettingsRef("thr1").id).toBe("page:thread-settings?thread=thr1");
@@ -161,7 +172,8 @@ describe("pageRefs", () => {
     );
     expect(a.id).toBe("page:diff-view?start=snap:1&end=snap:9");
     expect(a.id).toBe(b.id);
-    expect(a.kind).toBe("diff-view");
+    expect(a.kind).toBe("page");
+    expect(endpointsOf((a.payload as PagePayload).params)).toEqual({ mode: "endpoints", start: "snap:1", end: "snap:9" });
     const c = endpointDiffRef(null, "git:abc123");
     expect(c.id).toBe("page:diff-view?start=none&end=git:abc123");
     expect(c.id).not.toBe(a.id);
@@ -169,8 +181,8 @@ describe("pageRefs", () => {
 });
 
 describe("refFromTabId — diff-view", () => {
-  test("an effort is its own page now, not a diff-view route", () => {
-    expect(refFromTabId("page:diff-view?effort=eff42")).toBeNull();
+  test("an effort is its own page now: diff-view params without endpoints name none", () => {
+    expect(endpointsOf((refFromTabId("page:diff-view?effort=eff42")!.payload as PagePayload).params)).toBeNull();
   });
 
   test("round-trips snapshot↔snapshot endpoints", () => {
@@ -218,21 +230,25 @@ describe("refFromTabId", () => {
     expect(refFromTabId("page:external-url?url=https://x.test/p")).toEqual(externalUrlRef("https://x.test/p"));
   });
 
-  test("index routes carry no payload", () => {
-    expect(refFromTabId("page:tasks")).toEqual({ id: "page:tasks", kind: "tasks", payload: null });
-    expect(refFromTabId("page:git-dashboard")).toEqual({ id: "page:git-dashboard", kind: "git-dashboard", payload: null });
+  test("a page id rebuilds its page and params", () => {
+    expect(refFromTabId("page:tasks")).toEqual(pageTabRef("tasks"));
+    expect(refFromTabId("page:settings?area=agents")).toEqual(pageTabRef("settings", { area: "agents" }));
+    expect(refFromTabId("page:gh/open-prs")).toEqual(extPageRef("gh", "open-prs"));
   });
 
-  test("text that is not a ref, an unknown kind, or an unknown route is null (a dead row, not a broken tab)", () => {
+  test("text that is not a ref or an unknown kind is null (a dead row, not a broken tab)", () => {
     expect(refFromTabId("tasks")).toBeNull();
     expect(refFromTabId("nope:1")).toBeNull();
-    expect(refFromTabId("page:no-such-page")).toBeNull();
-    expect(refFromTabId("page:diff-view?bogus=1")).toBeNull();
   });
 
-  test("a diff route rebuilds the payload handleOpenDiff registers", () => {
-    const ref = diffRef({ path: "src/a.ts", leftVersion: "snap:3", rightVersion: "git:HEAD", baseLabel: "x", labelOverride: "eff9" });
-    expect(refFromTabId(ref.id)).toEqual(ref);
+  test("a page no extension declares still opens: its page says there's no such page", () => {
+    expect(refFromTabId("page:no-such-page")).toEqual(pageTabRef("no-such-page"));
+  });
+
+  test("a diff page rebuilds the spec handleOpenDiff registers, but its base label", () => {
+    const spec = { path: "src/a.ts", leftVersion: "snap:3", rightVersion: "git:HEAD", baseLabel: "x", labelOverride: "eff9" } as const;
+    const rebuilt = refFromTabId(diffRef(spec).id)!;
+    expect(diffSpecOf((rebuilt.payload as PagePayload).params)).toEqual({ ...spec, baseLabel: "" });
   });
 
   test("diskFilePath names the working-tree file a tab id shows, or null", () => {
@@ -262,8 +278,8 @@ describe("refFromTabId", () => {
       fileRef("src/a.ts"),
       gitCommitRef("abc123"),
       hookEventsRef(),
-      indexRef("tasks"),
-      indexRef("git-dashboard"),
+      pageTabRef("tasks"),
+      pageTabRef("git-dashboard"),
       metricRef("oxplow.todos"),
       snapshotRef(112),
       workItemTabRef("work_item:oxplow:tsk42"),
@@ -286,9 +302,15 @@ describe("refFromTabId", () => {
         rightPath: "b.rs", rightStart: 9, rightEnd: 13, rightVersion: "git:abc",
       }),
     ];
+    // A page's look-aside `state` isn't in its id, by design.
+    const withoutState = (ref: TabRef): TabRef => {
+      if (ref.kind !== "page") return ref;
+      const { state: _state, ...payload } = ref.payload as PagePayload;
+      return { ...ref, payload };
+    };
     for (const ref of refs) {
       const rebuilt = refFromTabId(ref.id);
-      expect(rebuilt, ref.id).toEqual(ref);
+      expect(rebuilt, ref.id).toEqual(withoutState(ref));
     }
   });
 

@@ -3,21 +3,46 @@ import { expect, test } from "bun:test";
 import type { Extension } from "../tauri-bridge/generated/bindings.js";
 import { launcherPages } from "./extensionLauncher.js";
 
+const page = (over: Record<string, unknown>) => ({
+  icon: null,
+  category: null,
+  keywords: null,
+  params: [],
+  count: null,
+  body: { kind: "lens", lens: "x/y" },
+  ...over,
+});
 const ext = (over: Partial<Extension>): Extension =>
   ({ name: "x", enabled: true, lenses: [], pages: [], ...over }) as unknown as Extension;
 
-import { extPageRef, refFromTabId, pageKindOf } from "../tabs/pageRefs.js";
-
-test("an extension's pages open as page:<extension>/<page> and are in the launcher", () => {
-  const ref = extPageRef("gh", "open-prs");
-  expect(ref).toEqual({ id: "page:gh/open-prs", kind: "ext-page", payload: { extension: "gh", page: "open-prs" } });
-  expect(refFromTabId("page:gh/open-prs")).toEqual(ref);
-  expect(pageKindOf("page:gh/open-prs")).toBe("ext-page");
+test("the launcher lists every declared page with a category, by its tab id", () => {
   const out = launcherPages([
     ext({
-      name: "gh",
-      pages: [{ id: "open-prs", extension: "gh", pageRef: "page:gh/open-prs", title: "Open PRs", icon: null, category: "Work", lens: "gh/open" }],
+      name: "oxplow-foundation",
+      pages: [
+        page({ id: "tasks", extension: "oxplow-foundation", pageRef: "page:tasks", title: "Tasks", category: "Work", keywords: "dashboard" }),
+        page({ id: "diff", extension: "oxplow-foundation", pageRef: "page:diff", title: "Diff" }),
+      ],
     } as never),
+    ext({ name: "gh", pages: [page({ id: "open-prs", extension: "gh", pageRef: "page:gh/open-prs", title: "Open PRs", category: "Work" })] } as never),
+    ext({ name: "off", enabled: false, pages: [page({ id: "x", extension: "off", pageRef: "page:off/x", title: "X", category: "Work" })] } as never),
   ]);
-  expect(out.map((p) => [p.label, p.category, p.ref.id])).toContainEqual(["Open PRs", "Work", "page:gh/open-prs"]);
+  const rows = out.map((p) => [p.label, p.category, p.ref.id, p.ref.kind]);
+  expect(rows).toContainEqual(["Tasks", "Work", "page:tasks", "page"]);
+  expect(rows).toContainEqual(["Open PRs", "Work", "page:gh/open-prs", "page"]);
+  // No category: opened from elsewhere, not the launcher. A disabled extension's pages aren't there.
+  expect(rows.map((r) => r[0])).not.toContain("Diff");
+  expect(rows.map((r) => r[0])).not.toContain("X");
+  expect(out.find((p) => p.label === "Tasks")?.keywords).toContain("dashboard");
+});
+
+test("a page's count lens is its badge, and zero shows none", () => {
+  const exts = [
+    ext({
+      name: "oxplow-foundation",
+      pages: [page({ id: "backlog", extension: "oxplow-foundation", pageRef: "page:backlog", title: "Backlog", category: "Work", count: "oxplow-foundation/backlog-count" })],
+    } as never),
+  ];
+  expect(launcherPages(exts, { "oxplow-foundation/backlog-count": 4 })[0]?.badge).toBe(4);
+  expect(launcherPages(exts, { "oxplow-foundation/backlog-count": 0 })[0]?.badge).toBeUndefined();
 });

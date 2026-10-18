@@ -12,7 +12,7 @@ import { recordOpError } from "../components/opErrorsStore.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { streamRowId, threadRowId } from "../modelIds.js";
 import type { Reads, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
-import { refFromTabId } from "./pageRefs.js";
+import { recordedPageKind, refFromTabId } from "./pageRefs.js";
 import type { TabRef } from "./tabState.js";
 import { streamRef, threadRef } from "../refs/ref.js";
 
@@ -99,7 +99,7 @@ function viewerInput(viewer: BookmarkViewer): Record<string, string> {
 }
 
 export function setBookmarkInput(viewer: BookmarkViewer, ref: TabRef, label: string | null, scope: BookmarkScope) {
-  return { ref: ref.id, page_kind: ref.kind, ...(label ? { label } : {}), scope, ...viewerInput(viewer) };
+  return { ref: ref.id, page_kind: recordedPageKind(ref), ...(label ? { label } : {}), scope, ...viewerInput(viewer) };
 }
 
 /** Bookmark `ref` at `scope`, moving it if it's at another. */

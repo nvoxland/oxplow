@@ -452,15 +452,15 @@ through the ref helpers (`fileRef(path).id`, never `` `file:${path}` ``):
 `escapeId` percent-encodes a path's `@` / `#` / `%`, which a hand-built
 id would read as a revision or fragment.
 
-**Shell routes are `page:<name>[?params]`** (`page:agent`, `page:tasks`,
-`page:diff-view?start=s1&end=s9`, `page:external-url?url=…`). A route is a
-page of the shell, not a thing in the graph, so it never appears in
-`page_ref`; its `TabRef.kind` is the route name. The route names keep
-their hyphenated spelling (`diff-view`) — they are ids inside the
-`page` kind, not kinds, and the snake_case rule is for kinds. The
-params grammar, the exhaustive `ROUTES` inverse table and the
-`pageRenderers` registry are described in
-[pages-and-tabs.md](./pages-and-tabs.md).
+**Declared pages are `page:<id>[?params]`** for oxplow's own
+(`page:tasks`, `page:diff-view?start=snap:1&end=snap:9`,
+`page:external-url?url=…`) and `page:<extension>/<id>[?params]` for any
+other extension's. A page is a manifest declaration, not a thing in the
+graph, so it never appears in `page_ref`; its `TabRef.kind` is `page`.
+Page ids keep their hyphenated spelling (`diff-view`) — they are ids
+inside the `page` kind, not kinds, and the snake_case rule is for
+kinds. The params grammar and the one `page` renderer are described in
+[pages-and-tabs.md](./pages-and-tabs.md) "Declared pages".
 
 Decided 2026-09-28: there is no compatibility layer for old ids. Only
 Nathan uses oxplow; stale `page_ref`/`page_visit` rows are wiped in V92

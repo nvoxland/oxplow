@@ -31,7 +31,7 @@ mock.module("../api.js", () => ({
   listExtensions: async () => [
     {
       name: "tracker",
-      enabled: true,
+      enabled: true, pages: [],
       ui: {
         slots: [],
         decorators: [

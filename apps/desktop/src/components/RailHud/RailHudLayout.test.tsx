@@ -23,7 +23,7 @@ mock.module("../../api.js", () => ({
   listExtensions: async () => [
     {
       name: "x",
-      enabled: true,
+      enabled: true, pages: [],
       panels: [
         { id: "x/v", extension: "x", title: "V", icon: null, scope: "project", body: "x/b", badge: null, open: null, collapsed: null, count: null },
         { id: "x/w", extension: "x", title: "W", icon: null, scope: "project", body: "x/b", badge: null, open: null, collapsed: null, count: null },

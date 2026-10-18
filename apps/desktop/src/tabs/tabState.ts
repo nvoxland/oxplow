@@ -11,9 +11,11 @@
  * The kinds of content a tab renders. Every tab id is a canonical ref
  * (`.context/refs.md`). An **entity** page's id is the entity's own ref
  * (`work_item:oxplow:tsk42`, `file:src/a.rs@git:HEAD`), and its kind is
- * the ref's kind. A **route** is a page of the shell rather than a
- * thing in the graph — its id is `page:<name>[?params]` and its kind is
- * the route name. Routes never appear in `page_ref`.
+ * the ref's kind. Every other page is a **declared page** — a `pages:`
+ * entry of an extension's manifest, oxplow's own included — whose id is
+ * `page:<id>[?params]` (oxplow's) or `page:<extension>/<id>[?params]`, and
+ * whose kind is `page`: what draws it comes from its declaration. Pages
+ * never appear in `page_ref`.
  */
 export type EntityPageKind =
   | "file"
@@ -32,39 +34,7 @@ export type EntityPageKind =
   // An agent slot on the thread: its terminal.
   | "agent_session";
 
-export type RoutePageKind =
-  | "new-session"
-  | "diff"
-  | "diff-view"
-  | "duplicate-block"
-  | "tasks"
-  | "backlog"
-  | "files"
-  | "comments"
-  | "local-history"
-  | "local-history-full"
-  | "local-history-by-commit-full"
-  | "git-history"
-  | "git-dashboard"
-  | "uncommitted-changes"
-  | "terminal"
-  | "settings"
-  | "new-stream"
-  | "new-task"
-  | "stream-settings"
-  | "thread-settings"
-  | "alerts"
-  | "external-url"
-  | "metrics-recorded"
-  | "custom-dashboard"
-  | "explore-data"
-  | "board";
-
-/** An extension's page (`page:<extension>/<page>`, P6.G2): a lens
- *  shown full-page. Not a named route — its name is the extension's. */
-export type ExtensionPageKind = "ext-page";
-
-export type PageKind = EntityPageKind | RoutePageKind | ExtensionPageKind;
+export type PageKind = EntityPageKind | "page";
 
 /** Reference to a tab. `id` must be unique across page kinds within a thread. */
 export interface TabRef {

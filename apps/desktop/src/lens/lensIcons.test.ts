@@ -2,6 +2,8 @@ import { expect, test } from "bun:test";
 
 import { LENS_ICON_NAMES, LENS_TONES, lensIcon, toneColor } from "./lensIcons.js";
 import { pageKindIconComponent } from "../pageKinds.js";
+import { REF_KIND_ICONS } from "../refKinds.js";
+import type { Extension } from "../tauri-bridge/generated/bindings.js";
 
 // A column's `icon` names one from a fixed vocabulary — the work
 // glyphs the rail draws today, the page kinds' icons and the ref-kind
@@ -30,11 +32,18 @@ test("tones map to theme variables; anything else is plain", () => {
 });
 
 // Any page kind names its page's icon, so a row of pages (a
-// bookmark, a visit) shows each one's own.
+// bookmark, a visit) shows each one's own: an entity's, or the icon a
+// declared page names.
 test("a page kind draws its page's icon", () => {
-  for (const kind of ["git-dashboard", "alerts", "work_item", "dir", "settings"]) {
+  for (const kind of ["work_item", "dir"]) {
     const spec = lensIcon(kind);
     expect(spec, kind).not.toBeNull();
     expect(spec && "Icon" in spec ? spec.Icon : null, kind).toBe(pageKindIconComponent(kind));
   }
+  const extensions = [
+    { name: "oxplow-foundation", enabled: true, pages: [{ id: "git-dashboard", pageRef: "page:git-dashboard", title: "Git", icon: "git-branch" }] },
+  ] as unknown as Extension[];
+  const spec = lensIcon("git-dashboard", extensions);
+  expect(spec && "Icon" in spec ? spec.Icon : null).toBe(REF_KIND_ICONS["git-branch"]!);
+  expect(spec?.label).toBe("git");
 });

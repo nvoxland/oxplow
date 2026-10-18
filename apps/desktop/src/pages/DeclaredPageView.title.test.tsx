@@ -1,10 +1,10 @@
 import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, render, waitFor } from "@testing-library/react";
 
-import type { Extension, LensRun } from "../tauri-bridge/generated/bindings.js";
+import type { Extension, ExtensionPage, LensRun } from "../tauri-bridge/generated/bindings.js";
 import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
 
-// An extension page's tab says the page's manifest title — what the
+// A declared page's tab says the page's manifest title — what the
 // launcher showed — not its id, and not its lens's title.
 
 const realApi = await import("../api.js");
@@ -12,7 +12,7 @@ const realApi = await import("../api.js");
 mock.module("../api.js", () => ({
   ...realApi,
   listExtensions: async () =>
-    [{ name: "acme", enabled: true, ui: { slots: [], commands: [], decorators: [] }, pages: [{ id: "open-prs", title: "Open Pull Requests", icon: null, category: "Work", lens: "acme/prs" }] }] as unknown as Extension[],
+    [{ name: "acme", enabled: true, ui: { slots: [], commands: [], decorators: [] }, pages: [] }] as unknown as Extension[],
   runLens: async (): Promise<LensRun> =>
     ({
       lens: { id: "acme/prs", title: "PRs (lens)", viz: "table", params: [], columns: [], actions: [], children: [] },
@@ -22,7 +22,20 @@ mock.module("../api.js", () => ({
     }) as unknown as LensRun,
   subscribeOxplowEvents: () => () => {},
 }));
-const { ExtensionPageView } = await import("./ExtensionPageView.js");
+const { DeclaredPageView } = await import("./DeclaredPageView.js");
+
+const declared = {
+  id: "open-prs",
+  extension: "acme",
+  pageRef: "page:acme/open-prs",
+  title: "Open Pull Requests",
+  icon: null,
+  category: "Work",
+  keywords: null,
+  params: [],
+  count: null,
+  body: { kind: "lens", lens: "acme/prs" },
+} as unknown as ExtensionPage;
 
 afterEach(cleanup);
 
@@ -38,7 +51,7 @@ test("the tab title is the page's manifest title", async () => {
   } as unknown as PageNavigation;
   render(
     <PageNavigationContext.Provider value={nav}>
-      <ExtensionPageView extension="acme" page="open-prs" stream={null} onOpenPage={() => {}} />
+      <DeclaredPageView page={{ extension: "acme", page: "open-prs", params: {} }} declared={declared} stream={null} onOpenPage={() => {}} />
     </PageNavigationContext.Provider>,
   );
   await waitFor(() => expect(titles.length).toBeGreaterThan(0));

@@ -27,9 +27,13 @@
   linked cell in lens rows.
 
 - **Pages** give a lens a place of its own: `pages: [{ id, title, icon?,
-  category, lens }]` opens it full-page at `page:<extension>/<id>` and
-  lists it in the launcher under `category` (Work, Code, Git, Activity,
-  Knowledge, Data, Lenses, System).
+  category?, keywords?, params?, count?, lens }]` opens it full-page at
+  `page:<extension>/<id>[?params]` and lists it in the launcher under
+  `category` (Work, Code, Git, Activity, Knowledge, Data, Lenses,
+  System; leave it out for a page only opened from elsewhere).
+  `params` are what its id carries, handed to the lens; `count` names a
+  `number` lens whose value is the launcher badge; `keywords` are more
+  words the launcher matches.
 - **Panels** put a lens in the left nav (`panels: [{ id, title, icon?,
   scope, body, badge?, open?, collapsed?, count? }]`): `body` renders
   compact; `badge` (a lens with an `alert`) gives the panel's count and
