@@ -17,3 +17,27 @@ test("a starred page is in the rail's Go To", async ({ fresh }) => {
   await expect(goTo).toContainText("Metrics");
   await expect(goTo).toContainText("History");
 });
+
+// Go To is the foundation's lens page: the starred page is a bookmark row
+// there, and Recently visited lists pages.
+test("the Go To page lists a starred page and the pages visited", async ({ fresh }) => {
+  const { page } = fresh;
+  await page.goto("/");
+  await openFromLauncher(page, "Metrics");
+  await page.locator('[data-testid="page-nav-bookmark"]:visible').click();
+  await page.locator('[data-testid="page-nav-bookmark-scope-thread"]:visible').click();
+  await openFromLauncher(page, "Go To");
+  const goTo = page.locator('[data-section="bookmarks"]:visible');
+  await expect(goTo).toContainText("Metrics");
+  await expect(page.locator('[data-section="recent"]:visible')).not.toContainText("No visits yet");
+});
+
+// New Dashboard makes an empty dashboard and opens it, as the command's
+// own `open_after` says.
+test("New Dashboard on the Dashboards page opens the new dashboard", async ({ fresh }) => {
+  const { page } = fresh;
+  await page.goto("/");
+  await openFromLauncher(page, "Dashboards");
+  await page.getByRole("button", { name: "New Dashboard" }).filter({ visible: true }).first().click();
+  await expect(page.locator('[data-testid="page-custom-dashboard"]:visible')).toBeVisible();
+});

@@ -1,8 +1,6 @@
 import type { TabRef } from "../../tabs/tabState.js";
 import {
   backlogRef,
-  dashboardRef,
-  dashboardsRef,
   gitDashboardRef,
   indexRef,
   tasksRef,
@@ -67,10 +65,8 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
     { id: "uncommitted-changes", label: "Uncommitted", ref: uncommittedChangesRef(), category: "Git" },
     { id: "local-history", label: "Local History", ref: indexRef("local-history"), category: "Activity" },
     { id: "comments", label: "Comments Dashboard", ref: indexRef("comments"), category: "Activity" },
-    { id: "dashboard-visits", label: "Go To", ref: dashboardRef("visits"), category: "Activity" },
     { id: "explore-data", label: "Explore Data", ref: indexRef("explore-data"), category: "Data", keywords: "sql query schema semantic layer lens" },
     { id: "metrics-recorded", label: "Metrics", ref: indexRef("metrics-recorded"), category: "Data", keywords: "recorded catalog" },
-    { id: "dashboards", label: "Dashboards", ref: dashboardsRef(), category: "Data", keywords: "custom metric tiles lens" },
     { id: "catalog", label: "Catalog", ref: indexRef("catalog"), category: "System", keywords: "ask prompts questions what can i help data config" },
     { id: "terminal", label: "Terminal", ref: indexRef("terminal"), category: "System" },
     { id: "settings", label: "Settings", ref: indexRef("settings"), category: "System" },

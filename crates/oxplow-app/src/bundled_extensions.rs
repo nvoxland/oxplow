@@ -51,6 +51,11 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-foundation", "lenses/effort-files.yaml"),
             ext_file!("oxplow-foundation", "lenses/effort-summary.yaml"),
             ext_file!("oxplow-foundation", "lenses/file-history.yaml"),
+            ext_file!("oxplow-foundation", "lenses/dashboards.yaml"),
+            ext_file!("oxplow-foundation", "lenses/go-to-bookmarks.yaml"),
+            ext_file!("oxplow-foundation", "lenses/go-to-recent.yaml"),
+            ext_file!("oxplow-foundation", "lenses/go-to-top.yaml"),
+            ext_file!("oxplow-foundation", "lenses/go-to.yaml"),
             ext_file!("oxplow-foundation", "lenses/hand-off.yaml"),
             ext_file!("oxplow-foundation", "lenses/handoff-items.yaml"),
             ext_file!("oxplow-foundation", "lenses/handoff-recipients.yaml"),
@@ -2304,6 +2309,8 @@ mod tests {
             ("done-work", "oxplow-foundation/done-work"),
             ("wiki-freshness", "oxplow-foundation/wiki-freshness"),
             ("wiki-index", "oxplow-foundation/wiki-index"),
+            ("go-to", "oxplow-foundation/go-to"),
+            ("dashboards", "oxplow-foundation/dashboards"),
         ] {
             assert!(pages.contains(&(page, lens)), "{page}: {pages:?}");
         }
@@ -2628,6 +2635,143 @@ mod tests {
         assert_eq!(texts(&rows, 0), ["beta"], "{rows}");
         let rows = run_bundled_lens_with(&f, "oxplow-foundation/wiki-visited", &filter("x")).await;
         assert!(texts(&rows, 0).is_empty(), "{rows}");
+    }
+
+    /// Go To (the page): the thread's bookmarks with the scope each is at,
+    /// its recent pages, and the stream's most visited. A bookmark's menu
+    /// moves it to another scope, or removes it.
+    #[tokio::test]
+    async fn the_go_to_page_lenses_list_bookmarks_and_visits_and_act_on_a_bookmark() {
+        use oxplow_db::analytics_stores::PageVisitStore;
+        use oxplow_db::SqlCell::Int;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let thread = f.thread.to_string();
+        let human = oxplow_domain::Actor::Human;
+        f.svc
+            .commands
+            .run(
+                &human,
+                crate::commands::bookmark::SET,
+                serde_json::json!({ "ref": "page:git-dashboard", "page_kind": "git-dashboard",
+                    "label": "Git", "scope": "thread", "thread": format!("thread:{thread}") }),
+                false,
+            )
+            .await
+            .unwrap();
+        for (kind, id, label) in [
+            ("file", "file:DEV.md", "DEV.md"),
+            ("file", "file:DEV.md", "DEV.md"),
+            ("settings", "page:settings", "Settings"),
+            ("agent_session", "agent_session:ses1", "Claude"),
+        ] {
+            f.svc
+                .page_visit_store
+                .record(kind, id, Some(label), None, Some(&thread))
+                .await
+                .unwrap();
+        }
+        let lens = |slug: &'static str| {
+            let f = &f;
+            async move {
+                run_bundled_lens_with(
+                    f,
+                    &format!("oxplow-foundation/{slug}"),
+                    &[("thread_id", Int(f.thread.value()))],
+                )
+                .await
+            }
+        };
+        let rows = lens("go-to-bookmarks").await;
+        assert_eq!(texts(&rows, 0), ["Git"], "{rows}");
+        assert_eq!(texts(&rows, 3), ["thread"], "{rows}");
+        // Recent: newest first, once each, no agent sessions.
+        let rows = lens("go-to-recent").await;
+        assert_eq!(texts(&rows, 2), ["page:settings", "file:DEV.md"], "{rows}");
+        // Most visited: the repeated page first, with its count.
+        let rows = lens("go-to-top").await;
+        assert_eq!(texts(&rows, 2), ["file:DEV.md", "page:settings"], "{rows}");
+        assert_eq!(rows[0][3], serde_json::json!(2), "{rows}");
+
+        // Moving a bookmark to the stream runs the command with the row's
+        // own values; removing it takes it off.
+        let row =
+            |rows: &serde_json::Value| -> std::collections::BTreeMap<String, oxplow_db::SqlCell> {
+                ["title", "page_kind", "ref", "scope", "thread"]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, k)| {
+                        (
+                            k.to_string(),
+                            oxplow_db::SqlCell::Text(rows[0][i].as_str().unwrap().into()),
+                        )
+                    })
+                    .collect()
+            };
+        let act = |action: &'static str, row| {
+            let f = &f;
+            async move {
+                crate::lens_actions::run_lens_action(
+                    &f.svc,
+                    f._dir.path(),
+                    crate::lens_actions::LensActionCall {
+                        lens_id: "oxplow-foundation/go-to-bookmarks".into(),
+                        action_id: action.into(),
+                        params: [("thread_id".to_string(), Int(f.thread.value()))].into(),
+                        row: Some(row),
+                        input: None,
+                        on_behalf_of: oxplow_domain::Actor::Human,
+                        confirmed: false,
+                    },
+                    &crate::extensions::LensContext::default(),
+                )
+                .await
+                .unwrap();
+            }
+        };
+        let before = lens("go-to-bookmarks").await;
+        act("to-stream", row(&before)).await;
+        let moved = lens("go-to-bookmarks").await;
+        assert_eq!(texts(&moved, 3), ["stream"], "{moved}");
+        act("remove", row(&moved)).await;
+        assert!(lens("go-to-bookmarks").await.as_array().unwrap().is_empty());
+    }
+
+    /// The dashboards index lists the dashboards; New Dashboard's command
+    /// names the page to open once it ran.
+    #[tokio::test]
+    async fn the_dashboards_lens_lists_dashboards_and_creating_one_opens_it() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let out = f
+            .svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "oxplow.dashboard.create",
+                serde_json::json!({ "title": "Build health" }),
+                false,
+            )
+            .await
+            .unwrap();
+        let rows = run_bundled_lens_with(&f, "oxplow-foundation/dashboards", &[]).await;
+        assert_eq!(texts(&rows, 0), ["Build health"], "{rows}");
+        let spec = f
+            .svc
+            .commands
+            .list(&oxplow_domain::Actor::Human)
+            .into_iter()
+            .find(|s| s.id == "oxplow.dashboard.create")
+            .unwrap();
+        let opened = spec
+            .ui
+            .unwrap()
+            .open_after_for(&out.result)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            opened,
+            texts(&rows, 1)[0].replace("dashboard:", "page:custom-dashboard?id="),
+            "{rows}"
+        );
     }
 
     /// Finished items come newest first by when they closed, even within
@@ -3201,7 +3345,7 @@ mod tests {
             (
                 "oxplow-bundled/go-to",
                 Some("oxplow-bundled/go-to-bookmarks"),
-                Some("page:dashboard?variant=visits")
+                Some("page:oxplow-foundation/go-to")
             )
         );
         let thread = f.thread.to_string();

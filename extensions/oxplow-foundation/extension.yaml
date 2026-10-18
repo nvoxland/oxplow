@@ -136,6 +136,8 @@ pages:
   - { id: done-work, title: Done Work, icon: circle-check, category: Work, lens: done-work }
   - { id: wiki-index, title: Wiki, icon: book-open, category: Knowledge, lens: wiki-index }
   - { id: wiki-freshness, title: Wiki Freshness, icon: book-open, category: Knowledge, lens: wiki-freshness }
+  - { id: go-to, title: Go To, icon: star, category: Activity, lens: go-to }
+  - { id: dashboards, title: Dashboards, icon: database, category: Data, lens: dashboards }
   - { id: closed-threads, title: Closed Threads, icon: archive, category: System, lens: closed-threads }
 ui:
   slots:
