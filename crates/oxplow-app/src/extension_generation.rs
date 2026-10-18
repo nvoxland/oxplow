@@ -18,9 +18,9 @@ pub struct PreparedExtensionDatabase {
     models: Vec<ExtensionModels>,
     vocabulary: PreparedVocabulary,
     contributions: Vec<oxplow_domain::contribution::Descriptor>,
-    /// The enabled extensions' lenses and every loaded extension, listed.
-    lenses: Vec<oxplow_db::catalog_listing_store::LensRow>,
-    listed: Vec<oxplow_db::catalog_listing_store::ExtensionRow>,
+    /// The enabled extensions' lenses, every loaded extension, what a
+    /// person can ask and what they can configure, listed.
+    listing: oxplow_db::catalog_listing_store::CatalogListing,
     capabilities: Option<PreparedCapabilities>,
     /// The declarations of the extensions whose models read their own
     /// configuration (`config()`): their effective values are resolved in the
@@ -123,6 +123,19 @@ impl PreparedExtensionDatabase {
             .flat_map(|extension| extension.lenses.iter().map(lens_row))
             .collect();
         let listed = snapshot.extensions().iter().map(extension_row).collect();
+        let prompts = crate::prompt_catalog::prompt_catalog(snapshot.extensions())
+            .into_iter()
+            .map(prompt_row)
+            .collect();
+        let config_keys = oxplow_config::keys::config_keys()
+            .into_iter()
+            .map(|k| oxplow_db::catalog_listing_store::ConfigKeyRow {
+                schema_json: json_text(&k.schema),
+                key: k.key,
+                doc: k.doc,
+                human_only: k.human_only,
+            })
+            .collect();
         let configurations = snapshot
             .extensions()
             .iter()
@@ -137,8 +150,12 @@ impl PreparedExtensionDatabase {
             models,
             vocabulary,
             contributions,
-            lenses,
-            listed,
+            listing: oxplow_db::catalog_listing_store::CatalogListing {
+                lenses,
+                extensions: listed,
+                prompts,
+                config_keys,
+            },
             capabilities,
         }
     }
@@ -185,7 +202,7 @@ impl PreparedExtensionDatabase {
             models::replace_extensions(tx, &candidate)?;
             let vocabulary = self.vocabulary.replace_tx(tx, now)?;
             oxplow_db::contribution_store::reset_tx(tx, &self.contributions)?;
-            oxplow_db::catalog_listing_store::reset_tx(tx, &self.lenses, &self.listed)?;
+            oxplow_db::catalog_listing_store::reset_tx(tx, &self.listing)?;
             if let Some(capabilities) = &self.capabilities {
                 capabilities.restate_tx(tx, &vocabulary)?;
             }
@@ -214,6 +231,21 @@ fn variant_name(value: &impl serde::Serialize) -> String {
     match serde_json::to_value(value) {
         Ok(serde_json::Value::String(name)) => name,
         _ => String::new(),
+    }
+}
+
+fn prompt_row(
+    p: crate::prompt_catalog::CatalogPrompt,
+) -> oxplow_db::catalog_listing_store::PromptRow {
+    let (source_kind, source) = match p.source {
+        crate::prompt_catalog::PromptSource::Area(a) => ("area", a),
+        crate::prompt_catalog::PromptSource::Extension(e) => ("extension", e),
+    };
+    oxplow_db::catalog_listing_store::PromptRow {
+        source_kind: source_kind.to_string(),
+        source,
+        prompt: p.prompt,
+        about: p.about,
     }
 }
 

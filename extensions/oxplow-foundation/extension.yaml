@@ -137,6 +137,7 @@ pages:
   - { id: wiki-index, title: Wiki, icon: book-open, category: Knowledge, lens: wiki-index }
   - { id: wiki-freshness, title: Wiki Freshness, icon: book-open, category: Knowledge, lens: wiki-freshness }
   - { id: closed-threads, title: Closed Threads, icon: archive, category: System, lens: closed-threads }
+  - { id: catalog, title: Catalog, icon: book-open, category: System, lens: catalog-overview }
 ui:
   slots:
     - { slot: thread.plan.header, lens: thread-handoffs-in }

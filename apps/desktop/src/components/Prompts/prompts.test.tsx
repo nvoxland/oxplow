@@ -2,8 +2,8 @@ import { afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import { subscribeAgentInput } from "../../agent-input-bus.js";
-import type { CatalogPrompt } from "../../tauri-bridge/generated/bindings.js";
-import { askText, promptsAbout, promptsBySource } from "./promptModel.js";
+import { askText, promptsAbout, type CatalogPrompt } from "./promptModel.js";
+import { promptsOf } from "./usePromptCatalog.js";
 
 // P6.D2: the prompt catalog, contextual suggestions, and EmptyState —
 // every Ask fills the agent's input and never sends.
@@ -15,7 +15,15 @@ const catalog: CatalogPrompt[] = [
 ];
 
 const realApi = await import("../../api.js");
-mock.module("../../api.js", () => ({ ...realApi, promptCatalog: async () => catalog }));
+// What `v_prompt` answers, as rows.
+const rows = catalog.map((p) => [p.source.kind, p.source.name, p.prompt, p.about]);
+mock.module("../../api.js", () => ({
+  ...realApi,
+  querySql: async (sql: string) =>
+    sql.includes("v_prompt")
+      ? { columns: ["source_kind", "source", "prompt", "about"], rows, truncated: false, reads: { models: ["v_prompt"], tables: [], measures: [] } }
+      : realApi.querySql(sql),
+}));
 const { SuggestedPrompts } = await import("./SuggestedPrompts.js");
 const { EmptyState } = await import("./EmptyState.js");
 
@@ -30,14 +38,9 @@ afterEach(() => {
   cleanup();
 });
 
-test("prompts about a kind; grouped by source, core first; asking about a ref leads with it", () => {
+test("v_prompt's rows are the catalog; prompts about a kind; asking about a ref leads with it", () => {
+  expect(promptsOf(rows)).toEqual(catalog);
   expect(promptsAbout(catalog, "effort").map((p) => p.prompt)).toEqual(["Which files did this effort touch?"]);
-  // An area reads as a person names it; its id stays the key.
-  expect(promptsBySource(catalog).map((g) => [g.name, g.label, g.prompts.length])).toEqual([
-    ["vcs", "Version control", 1],
-    ["work_items", "Work items", 1],
-    ["gh", "gh", 1],
-  ]);
   expect(askText("Who has changed this file the most?", "file:src/a.rs")).toBe(
     "[oxplow ref file:src/a.rs] Who has changed this file the most?",
   );

@@ -149,11 +149,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	promptCatalog: () => typedError<CatalogPrompt[], IpcError>(__TAURI_INVOKE("prompt_catalog")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	effectiveConfig: () => typedError<EffectiveSetting[], IpcError>(__TAURI_INVOKE("effective_config")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1484,14 +1479,6 @@ export type BuiltinRole = "main" | "summarize" | "decide";
 
 /**  A size in bytes (the blob store's total, say). */
 export type ByteSize = number;
-
-/**  One question the person can ask, with where it comes from. */
-export type CatalogPrompt = {
-	prompt: string,
-	/**  A ref kind (`file`, `commit`, `effort`): a page for one offers it. */
-	about: string | null,
-	source: PromptSource,
-};
 
 /**  How one thing differs between the installed version and the candidate. */
 export type Change = "added" | "removed" | "changed" | "unchanged";
@@ -5430,16 +5417,6 @@ export type ProjectProgram = {
 	/**  When a person revoked it, if they did and haven't approved it since. */
 	revokedAt?: string | null,
 };
-
-/**  Who offers a prompt. */
-export type PromptSource = 
-/**
- *  One of core's areas (`vcs`, `work_items`, `knowledge`,
- *  `code_intel`, `extensions`).
- */
-{ kind: "area"; name: string } | 
-/**  An extension. */
-{ kind: "extension"; name: string };
 
 /**  A `command_proposal` row: an agent's run waiting on a person. */
 export type ProposalId = number;

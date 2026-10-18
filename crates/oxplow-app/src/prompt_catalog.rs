@@ -1,14 +1,14 @@
 //! What a person can ask: every area's answerability questions
 //! (`oxplow_agent_text::answerability_prompts`) and every enabled
-//! extension's `intent.prompts`, in one list. The catalog page groups it
-//! by source; a page for a ref shows the prompts `about` that ref's kind.
-//! See `.context/extensions.md` → "The prompt catalog".
+//! extension's `intent.prompts`, in one list, restated as `v_prompt` with
+//! each extension generation. The Catalog page groups it by source; a page
+//! for a ref suggests the prompts `about` that ref's kind. See
+//! `.context/extensions.md` → "The prompt catalog".
 
 use crate::extensions::Extension;
 
 /// One question the person can ask, with where it comes from.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CatalogPrompt {
     pub prompt: String,
     /// A ref kind (`file`, `commit`, `effort`): a page for one offers it.
@@ -17,8 +17,7 @@ pub struct CatalogPrompt {
 }
 
 /// Who offers a prompt.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase", tag = "kind", content = "name")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PromptSource {
     /// One of core's areas (`vcs`, `work_items`, `knowledge`,
     /// `code_intel`, `extensions`).

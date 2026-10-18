@@ -1,0 +1,12 @@
+title: What you can configure
+description: The project's settings, in `.oxplow/project.yaml`. Settings shows each one's value and where it comes from.
+query: |
+  SELECT key, doc, CASE human_only WHEN 1 THEN 'Only you' ELSE 'You or the agent' END AS who
+  FROM v_config_key
+  ORDER BY key
+columns:
+  - { key: key, label: Setting, width: 220 }
+  - { key: doc, label: What it does }
+  - { key: who, label: Who sets it, width: 140 }
+empty: Nothing to configure.
+hidden: true

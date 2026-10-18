@@ -246,7 +246,6 @@ macro_rules! oxplow_command_table {
                 search => $crate::commands::search::search { query: String, stream_id: Option<String>, kinds: Option<Vec<String>>, limit: Option<u32> } -> Vec<::oxplow_db::SearchHit>,
                 query_sql => $crate::commands::semantic::query_sql { sql: String, params: Option<Vec<::oxplow_db::SqlCell>>, limit: Option<u32>, raw: Option<bool> } -> ::oxplow_db::SqlQueryResult,
                 list_data_entities => $crate::commands::semantic::list_data_entities {} -> Vec<::oxplow_app::semantic_catalog::DataEntity>,
-                prompt_catalog => $crate::commands::semantic::prompt_catalog {} -> Vec<::oxplow_app::prompt_catalog::CatalogPrompt>,
                 effective_config => $crate::commands::semantic::effective_config {} -> Vec<::oxplow_app::effective_config::EffectiveSetting>,
                 get_panel_layout => $crate::commands::semantic::get_panel_layout {} -> Vec<::oxplow_db::PanelPlacement>,
                 set_panel_layout => $crate::commands::semantic::set_panel_layout { layout: Vec<::oxplow_db::PanelPlacement> } -> (),

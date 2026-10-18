@@ -108,8 +108,6 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return Glasses;
     case "explore-data":
       return Database;
-    case "catalog":
-      return BookOpen;
     case "board":
       return Columns3;
     case "symbol":

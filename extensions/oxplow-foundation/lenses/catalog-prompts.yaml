@@ -1,0 +1,21 @@
+title: What you can ask
+description: Questions oxplow's agent answers, from core's areas and each enabled extension. Ask (right-click a row) puts one in the agent's input for you to edit and send.
+query: |
+  SELECT p.prompt, p.about,
+         CASE WHEN p.source_kind = 'extension' THEN p.source
+              WHEN p.source = 'code_intel' THEN 'Code'
+              WHEN p.source = 'knowledge' THEN 'Wiki'
+              WHEN p.source = 'extensions' THEN 'Extensions'
+              WHEN p.source = 'vcs' THEN 'Version control'
+              WHEN p.source = 'work_items' THEN 'Work items'
+              ELSE p.source END AS offered_by
+  FROM v_prompt p
+  ORDER BY p.position
+group: { by: offered_by }
+columns:
+  - { key: prompt, label: Question }
+  - { key: about, label: Also offered on, width: 140 }
+actions:
+  - { id: ask, label: Ask, command: oxplow.agent.draft, input: { text: "{{row.prompt}}" }, row: true }
+empty: No questions to suggest.
+hidden: true

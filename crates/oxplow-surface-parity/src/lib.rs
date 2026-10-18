@@ -204,10 +204,6 @@ pub const MANIFEST: &[Capability] = &[
         "the Data settings list, which joins the extensions' manifests: an agent reads published entities in `v_model` and one declared but not synced yet in its extension's `extension.yaml`",
     ),
     ui(
-        "prompt_catalog",
-        "what the person can ask oxplow's agent; the agent is who gets asked",
-    ),
-    ui(
         "effective_config",
         "the Settings view of every setting and its origin; an agent reads `oxplow.config.list_keys`",
     ),

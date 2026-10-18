@@ -555,7 +555,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     stream.
   - **Over IPC (the UI)** they show the main worktree's extensions:
     `list_extensions`, `get_lens`, `load_component`,
-    `invoke_component_command` and `prompt_catalog` take no stream;
+    and `invoke_component_command` take no stream;
     `run_lens`, `lens_text`, `lens_form`, `submit_lens_form`,
     `run_component_query` and `run_lens_action` take one only for the
     lens's data context. `validate_extension` and `review_extension` are
@@ -4123,11 +4123,19 @@ tool: open_work              # offered as <namespace>_open_work
     Enter in the terminal, so a multi-line prompt would send itself —
     and `about` a registered ref kind).
   - `prompt_catalog::prompt_catalog(extensions)` merges them (core first,
-    then enabled extensions by name); RPC `prompt_catalog { stream_id }`
-    (UI only) serves it.
-  - The UI: the **Catalog** page (`page:catalog`, `pages/CatalogPage.tsx`:
-    prompts by source, `v_model` by owner, `oxplow.config.list_keys`), the nav
-    bar's Ask menu (suggested prompts for the page's ref kind), and
+    then enabled extensions by name), and each extension generation
+    restates them as the model **`v_prompt`** (`catalog_prompt`, V85:
+    `position`, `source_kind` `area` | `extension`, `source`, `prompt`,
+    `about`), beside **`v_config_key`** (`config_key`: project.yaml's keys
+    with their doc, `human_only` and value schema). An agent reads both
+    with `oxplow_query_sql`; there is no catalog RPC.
+  - The UI: the **Catalog** page, a foundation document lens
+    (`page:oxplow-foundation/catalog`, `catalog-overview`: sections
+    `catalog-prompts` — grouped by who offers each, with an Ask row action
+    on `oxplow.agent.draft` — `catalog` over `v_model`, and
+    `catalog-config-keys`, with Open Settings as a page action on
+    `oxplow.window.navigate`); the nav bar's Ask menu (suggested prompts for
+    the page's ref kind, `usePromptCatalog` over `v_prompt`); and
     `EmptyState`'s prompts (usability.md → "Empty states").
 - **No launcher entries.** The manifest's old `launcher:` list (a ref,
   a command or a prompt) is gone: a page is a `pages:` entry or a lens; a

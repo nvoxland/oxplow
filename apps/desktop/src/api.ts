@@ -43,7 +43,6 @@ import { IpcCallError, ipcErrorCode, ipcErrorField, ipcErrorMessage } from "./ip
 import type {
   AiSettings,
   HarnessListing,
-  CatalogPrompt,
   EffectiveSetting,
   PanelPlacement,
   ChangeRow,
@@ -643,9 +642,6 @@ export async function invokeComponentCommand(
 
 /** What the person can ask: every capability's questions and the enabled
  *  extensions' prompts (the catalog; contextual suggestions). */
-export async function promptCatalog(): Promise<CatalogPrompt[]> {
-  return unwrap(await commands.promptCatalog());
-}
 
 /** Every setting with its value and where it comes from (P6.H1). */
 export async function effectiveConfig(): Promise<EffectiveSetting[]> {

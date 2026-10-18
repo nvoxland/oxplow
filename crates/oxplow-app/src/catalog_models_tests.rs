@@ -1,6 +1,6 @@
 //! The models that restate what the catalog and the page-ref graph hold, so
 //! an agent reads them with `oxplow_query_sql` instead of a tool: `v_lens`,
-//! `v_extension` and `v_page_ref`.
+//! `v_extension`, `v_prompt`, `v_config_key` and `v_page_ref`.
 
 use serde_json::{json, Value};
 
@@ -175,4 +175,63 @@ async fn page_ref_edges_are_a_model_in_both_directions() {
         .await,
         vec![vec![json!("file:src/app.rs")], vec![json!("wiki:other")]]
     );
+}
+
+/// What a person can ask and what they can configure are models too:
+/// core's questions and every enabled extension's `intent.prompts` in
+/// `v_prompt`, project.yaml's keys in `v_config_key`.
+#[tokio::test]
+async fn prompts_and_config_keys_are_models() {
+    let fx = services_with_effort().await;
+    let root = fx.svc.layout.project_dir.clone();
+    write(
+        &root,
+        "extension.yaml",
+        "manifest: 2\nname: acme\nintent:\n  purpose: Count things.\n  prompts:\n    - { prompt: Which acme things changed?, about: file }\n",
+    );
+    crate::test_fixtures::activate(&fx.svc).await;
+
+    assert_eq!(
+        rows(
+            &fx,
+            "SELECT source_kind, source, prompt, about FROM v_prompt WHERE source = 'acme'"
+        )
+        .await,
+        vec![vec![
+            json!("extension"),
+            json!("acme"),
+            json!("Which acme things changed?"),
+            json!("file")
+        ]]
+    );
+    // Core's areas come first, in the catalog's order.
+    let first = rows(
+        &fx,
+        "SELECT source_kind FROM v_prompt ORDER BY position LIMIT 1",
+    )
+    .await;
+    assert_eq!(first, vec![vec![json!("area")]]);
+
+    let keys = rows(
+        &fx,
+        "SELECT key, human_only, doc <> '' FROM v_config_key ORDER BY key",
+    )
+    .await;
+    let mut want: Vec<(String, i64)> = oxplow_config::keys::config_keys()
+        .into_iter()
+        .map(|k| (k.key, i64::from(k.human_only)))
+        .collect();
+    want.sort();
+    assert_eq!(
+        keys,
+        want.into_iter()
+            .map(|(k, h)| vec![json!(k), json!(h), json!(1)])
+            .collect::<Vec<_>>()
+    );
+
+    std::fs::remove_dir_all(root.join("oxplow/extensions/acme")).unwrap();
+    crate::test_fixtures::activate(&fx.svc).await;
+    assert!(rows(&fx, "SELECT 1 FROM v_prompt WHERE source = 'acme'")
+        .await
+        .is_empty());
 }

@@ -60,7 +60,6 @@ export type RoutePageKind =
   | "custom-dashboard"
   | "dashboards"
   | "explore-data"
-  | "catalog"
   | "board";
 
 /** An extension's page (`page:<extension>/<page>`, P6.G2): a lens

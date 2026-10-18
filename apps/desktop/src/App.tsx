@@ -130,7 +130,6 @@ import { LensPage } from "./pages/LensPage.js";
 import { insertIntoAgent } from "./agent-input-bus.js";
 import { getPageDetailStore } from "./tabs/openPageDetail.js";
 import { ExploreDataPage } from "./pages/ExploreDataPage.js";
-import { CatalogPage } from "./pages/CatalogPage.js";
 import { BoardPage } from "./pages/BoardPage.js";
 import { ExtensionPageView } from "./pages/ExtensionPageView.js";
 import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
@@ -3014,12 +3013,6 @@ export function App() {
         render: () => (
           <BoardPage threadId={selectedThreadId ?? null} streamId={stream?.id ?? null} onOpenPage={nav.navOpen} />
         ),
-      }),
-      catalog: (ref, nav) => ({
-        id: ref.id,
-        label: "Catalog",
-        closable: true,
-        render: () => <CatalogPage onOpenPage={nav.navOpen} />,
       }),
       "explore-data": (ref, nav) => {
         return {

@@ -46,6 +46,9 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-foundation", "icons/codex.svg"),
             ext_file!("oxplow-foundation", "icons/opencode.svg"),
             ext_file!("oxplow-foundation", "lenses/catalog.yaml"),
+            ext_file!("oxplow-foundation", "lenses/catalog-config-keys.yaml"),
+            ext_file!("oxplow-foundation", "lenses/catalog-overview.yaml"),
+            ext_file!("oxplow-foundation", "lenses/catalog-prompts.yaml"),
             ext_file!("oxplow-foundation", "lenses/closed-threads.yaml"),
             ext_file!("oxplow-foundation", "lenses/done-work.yaml"),
             ext_file!("oxplow-foundation", "lenses/effort-files.yaml"),
@@ -2304,9 +2307,65 @@ mod tests {
             ("done-work", "oxplow-foundation/done-work"),
             ("wiki-freshness", "oxplow-foundation/wiki-freshness"),
             ("wiki-index", "oxplow-foundation/wiki-index"),
+            ("catalog", "oxplow-foundation/catalog-overview"),
         ] {
             assert!(pages.contains(&(page, lens)), "{page}: {pages:?}");
         }
+    }
+
+    /// The Catalog's sections answer: what can be asked, grouped by who
+    /// offers it with Ask on each, and what can be configured.
+    #[tokio::test]
+    async fn the_catalog_lenses_list_prompts_and_config_keys() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let run = |id: &'static str| {
+            let svc = f.svc.clone();
+            let root = f._dir.path().to_path_buf();
+            async move {
+                crate::extensions::run_lens(
+                    &svc.sql,
+                    &svc.extension_catalog,
+                    &root,
+                    id,
+                    Default::default(),
+                    &crate::extensions::LensContext::default(),
+                )
+                .await
+                .unwrap()
+            }
+        };
+        let prompts = run("oxplow-foundation/catalog-prompts").await;
+        assert!(!prompts.result.rows.is_empty());
+        let offered = prompts
+            .result
+            .columns
+            .iter()
+            .position(|c| c == "offered_by")
+            .unwrap();
+        assert_eq!(
+            prompts.result.rows[0][offered],
+            oxplow_db::SqlCell::Text("Version control".into()),
+            "core's areas come first, by a person's name for them"
+        );
+        assert!(prompts
+            .lens
+            .actions
+            .iter()
+            .any(|a| a.id == "ask" && a.row && a.command == "oxplow.agent.draft"));
+        let keys = run("oxplow-foundation/catalog-config-keys").await;
+        assert_eq!(
+            keys.result.rows.len(),
+            oxplow_config::keys::config_keys().len()
+        );
+        let page = run("oxplow-foundation/catalog-overview").await;
+        assert_eq!(
+            page.lens
+                .parts
+                .iter()
+                .map(|p| p.id.as_str())
+                .collect::<Vec<_>>(),
+            ["ask", "data", "configure"]
+        );
     }
 
     fn texts(rows: &serde_json::Value, i: usize) -> Vec<String> {

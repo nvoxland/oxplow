@@ -178,7 +178,7 @@ moved into the project DB and started fresh again) — see the decision in [refs
 | symbol | `symbol:<path>/<id>` (`v_symbol.ref`, `symbolRef(ref)`) — no revision in the id; never a tab: opening one (`handleOpenPage`, or in-tab navigation) resolves it (`resolve_symbol`) and opens its file at the name's line (`openSymbol`). A pinned one (`@snap:<id>` / `@git:<sha>`) opens the file viewer at that revision; if the version is gone it shows a notice and opens the current symbol | `symbol:src/lib.rs/Widget::spin` |
 | agent_session | `agent_session:<ses id>` (`agentSessionRef(id)`, pinned) — an open agent session's terminal; its tab draws its harness's declared logo (`CenterTab.icon` from `HarnessListing.icon`, `AgentIcon`; the generic robot when it declares none) | `agent_session:ses3` |
 | new-session | `page:new-session` (`newSessionRef()`) — the session picker, a Document page (`DocumentLayout`): **Start a new session**, then **Earlier sessions**, and what extensions mount in `new-session.sections` (ids `start`, `earlier`; it binds `thread_id`). Earlier sessions is a kit toolbar and table (a filter and the thread's closed sessions and saved conversations, `list_earlier_sessions`; ↑/↓/Enter/Escape from the filter; a row reopens, resumes or shows its session by the action the backend chose — `terminal.md` "Earlier sessions") | `page:new-session` |
-| index routes | `page:<kind>` — `tasks`, `backlog`, `archived`, `files`, `comments`, `local-history(-full\|-by-commit-full)`, `git-history`, `git-dashboard`, `uncommitted-changes`, `terminal`, `settings`, `metrics-recorded`, `dashboards`, `explore-data`, `catalog`, `board`, `new-stream`, `new-task` | `page:tasks` |
+| index routes | `page:<kind>` — `tasks`, `backlog`, `archived`, `files`, `comments`, `local-history(-full\|-by-commit-full)`, `git-history`, `git-dashboard`, `uncommitted-changes`, `terminal`, `settings`, `metrics-recorded`, `dashboards`, `explore-data`, `board`, `new-stream`, `new-task` | `page:tasks` |
 | diff | `page:diff?path=<p>&left=<ver>&right=<ver>[&label=<l>]` (versions `disk` / `ref:<x>` / `snap:<id>`; `diffRef(spec)` / `computeDiffId(spec)` — `revealLine` is not in the id, so re-clicking reuses the tab) | `page:diff?path=src/a.ts&left=ref:abc&right=disk` |
 | diff-view | `page:diff-view?snapshot=<N>` \| `?effort=<effortId>` \| `?start=<tok>&end=<tok>` (endpoint tokens `s<snapshotId>` / `c<sha>` / `w` / `none`) | `page:diff-view?effort=eff42` |
 | duplicate-block | `page:duplicate-block?left=<p>&left_lines=<a>-<b>&left_at=<ver>&right=…` | `page:duplicate-block?left=a.rs&left_lines=1-5&left_at=disk&right=b.rs&right_lines=9-13&right_at=ref:abc` |
@@ -216,8 +216,8 @@ section its runs. The firing badges come from the same runs
 proposals, failed operations, undelivered events, firing badges — isn't
 a rail panel: it's the status bar's bell and the Alerts page (see usability.md). A
 layout stored before a core panel existed gets it appended at the bottom.
-The set of extension panels (like extension pages, slot mounts and the
-prompt catalog) reloads on `lensRerun.extensionsChanged`: a file under
+The set of extension panels (like extension pages and slot mounts)
+reloads on `lensRerun.extensionsChanged`: a file under
 `oxplow/extensions/` changed, or the config did — enabling or disabling
 an extension is a `configChanged`, so its panel appears or leaves at once.
 

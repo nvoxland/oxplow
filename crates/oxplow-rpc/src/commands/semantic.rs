@@ -44,20 +44,6 @@ pub async fn list_data_entities(
     )
 }
 
-/// What the person can ask (the catalog page, contextual prompts): every
-/// area's answerability questions and the enabled extensions' prompts
-/// (the main worktree's, for every stream). UI-only: the agent is who
-/// gets asked.
-pub async fn prompt_catalog(
-    svc: &Services,
-) -> Result<Vec<oxplow_app::prompt_catalog::CatalogPrompt>, IpcError> {
-    Ok(oxplow_app::prompt_catalog::prompt_catalog(
-        svc.extension_catalog
-            .get(svc.worktrees.project_dir())
-            .as_ref(),
-    ))
-}
-
 /// Every setting with its value and where it comes from (P6.H1): the
 /// Settings view. UI-only: an agent reads `oxplow.config.list_keys`.
 pub async fn effective_config(
@@ -103,19 +89,6 @@ pub async fn set_panel_layout(
 
 #[cfg(test)]
 mod tests {
-    #[tokio::test]
-    async fn prompt_catalog_dispatches() {
-        let (svc, _dir) = crate::test_support::services().await;
-        let out = crate::dispatch("prompt_catalog", serde_json::json!({}), &svc)
-            .await
-            .unwrap();
-        assert!(out
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|p| p["about"] == "effort" && p["source"]["kind"] == "area"));
-    }
-
     #[tokio::test]
     async fn list_data_entities_dispatches() {
         let (svc, _dir) = crate::test_support::services().await;
