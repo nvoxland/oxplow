@@ -201,8 +201,12 @@ and a test checks they match.
 The desktop draws a `page` tab in one renderer (`App.tsx`,
 `pageRenderers.page`): it finds the declaration (`declaredPage`, by tab
 id among the enabled extensions), draws a built-in from the
-`builtInPages` table by name, and a lens page through
-`DeclaredPageView` (`LensPage` with the id's params). While the
+`builtInPages` table (`pages/builtInPages.tsx`) by name, and a lens page through
+`DeclaredPageView` (`LensPage` with the id's params). Each built-in body is a
+`(ctx) => CenterTab | null` over `{ ref, params, state, nav, scope }`;
+`scope` is the `AppScope` (`pages/appScope.ts`), the explicit list of
+what core offers them (selection, work state, handlers) that `App.tsx`
+builds per render, so a body never reaches into App's locals. While the
 extensions load, an oxplow page whose id is a built-in's name draws the
 built-in straight away. Icons and labels come from the declaration too:
 `kindForTabId` gives a page's id (`tasks`, `gh/open-prs`) as its kind,
