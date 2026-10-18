@@ -11,8 +11,11 @@
   - `work_item.detail.body` and `work_item.detail.sidebar` (a work item's
     page, whichever list) → `ref`;
   - `thread.plan.header` (the Work panel, compact) → `thread_id`;
-  - `settings.section` → no params; Settings shows a section named after
-    the extension with its mounted lenses (its status or setup views).
+  - `settings.<area>.sections` → no params; a section on that Settings
+    area's page (`overview`, `agents`, `lsp`, `extensions`, `data`,
+    `integrations`, `ai`), placed `at` the start, the end or beside one of
+    the area's sections (`{ after: integrations }`): its status or setup
+    views where a person looks for them.
 
   The old names (`task-detail`, `commit`, …) are errors naming the new
   one.

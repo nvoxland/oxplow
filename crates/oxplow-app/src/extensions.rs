@@ -1061,15 +1061,30 @@ pub const SLOTS: &[SlotSpec] = &[
         "diff.file.header",
         &["path", "left_revision", "right_revision", "stream_id"],
     ),
-    // Settings: a section per extension with the lenses it mounts (its
-    // own status or configuration views). No params.
-    SlotSpec::region("settings.section", &[]),
+    // Settings: each area's page and its sections (`pages/settingsAreas.ts`
+    // lists the same ids). An extension's own status or configuration
+    // views go beside the area they belong to. No params.
+    SlotSpec::sections("settings.overview.sections", &[], &["every"]),
+    SlotSpec::sections(
+        "settings.agents.sections",
+        &[],
+        &["agents", "new-threads", "prompt"],
+    ),
+    SlotSpec::sections("settings.lsp.sections", &[], &["servers"]),
+    SlotSpec::sections("settings.extensions.sections", &[], &["installed"]),
+    SlotSpec::sections("settings.data.sections", &[], &["data"]),
+    SlotSpec::sections(
+        "settings.integrations.sections",
+        &[],
+        &["capabilities", "integrations"],
+    ),
+    SlotSpec::sections("settings.ai.sections", &[], &["ai"]),
     // The New Session page's sections: starting one, then the earlier ones.
-    SlotSpec {
-        name: "new-session.sections",
-        params: &["thread_id"],
-        parts: SlotParts::Sections(&["start", "earlier"]),
-    },
+    SlotSpec::sections(
+        "new-session.sections",
+        &["thread_id"],
+        &["start", "earlier"],
+    ),
 ];
 
 /// A place in a core page a lens can be mounted ([`SLOTS`]).
@@ -1087,6 +1102,18 @@ impl SlotSpec {
             name,
             params,
             parts: SlotParts::Region,
+        }
+    }
+
+    const fn sections(
+        name: &'static str,
+        params: &'static [&'static str],
+        ids: &'static [&'static str],
+    ) -> Self {
+        Self {
+            name,
+            params,
+            parts: SlotParts::Sections(ids),
         }
     }
 
@@ -7394,13 +7421,15 @@ commands:
         assert!(e.errors.iter().any(|m| m.contains("sidebar")));
     }
 
+    /// A Settings area's sections take an extension's parameterless lens,
+    /// placed beside one of the area's own sections.
     #[test]
-    fn the_settings_slot_takes_parameterless_lenses() {
+    fn a_settings_area_takes_parameterless_lenses() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
             "oxplow/extensions/mine/extension.yaml",
-            "manifest: 2\nname: mine\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: settings.section, lens: status }\n",
+            "manifest: 2\nname: mine\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: settings.integrations.sections, lens: status, at: { after: integrations } }\n",
         );
         write(
             dir.path(),
@@ -7412,7 +7441,12 @@ commands:
             .find(|e| e.name == "mine")
             .unwrap();
         assert!(e.errors.is_empty(), "{:?}", e.errors);
-        assert_eq!(e.ui.slots[0].slot, "settings.section");
+        assert!(
+            e.warnings.iter().all(|w| !w.contains("has no part")),
+            "{:?}",
+            e.warnings
+        );
+        assert_eq!(e.ui.slots[0].slot, "settings.integrations.sections");
     }
 
     /// A document's sections are lenses or markdown: an id defaults to the

@@ -48,12 +48,15 @@ Things I keep forgetting. Read this before adding any UI.
   add new modal call sites; route new flows through pages or
   slideovers. The page pattern to copy is
   `apps/desktop/src/pages/SettingsPage.tsx` — full Page tab, no backdrop.
-- **A long page has an index, and a link lands on its section**
-  (tsk1040). Settings opens with an index of its sections
-  (`pages/settingsSections.ts`, `SETTINGS_SECTIONS`); an alert or link that
-  means one section calls `goToSettingsSection(id)` before opening the
-  page — an open Settings scrolls there, a closed one takes the pending
-  request when it mounts. A page that shows state from outside any model
+- **A long page splits into pages, and a link lands on its section.**
+  Settings is a Document page per area (`pages/settingsAreas.ts`:
+  overview, Agents, Language Servers, Extensions, Data, Integrations, AI),
+  each its own ref (`settingsRef(area, section)` → `page:settings?area=…`),
+  sharing a rail that lists the areas; the launcher lists each area by
+  name ("Settings: Agents"). A link that means one place opens its area
+  with `section` — one of the area's section ids or an anchor inside one
+  (`settings-data-programs`) — and the page scrolls there. A document of
+  four sections or more lists them in its rail (`DocumentLayout`). A page that shows state from outside any model
   refreshes on the event that says it changed (Integrations and Data on
   `approvalsChanged`, sent when a person approves a program). Integrations
   also re-reads when an instance's health is recorded (`v_contribution_health`,

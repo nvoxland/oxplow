@@ -1,8 +1,10 @@
 import type { TabRef } from "../../tabs/tabState.js";
+import { SETTINGS_AREAS } from "../../pages/settingsAreas.js";
 import {
   backlogRef,
   gitDashboardRef,
   indexRef,
+  settingsRef,
   tasksRef,
   uncommittedChangesRef,
 } from "../../tabs/pageRefs.js";
@@ -68,6 +70,14 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
     { id: "explore-data", label: "Explore Data", ref: indexRef("explore-data"), category: "Data", keywords: "sql query schema semantic layer lens" },
     { id: "metrics-recorded", label: "Metrics", ref: indexRef("metrics-recorded"), category: "Data", keywords: "recorded catalog" },
     { id: "terminal", label: "Terminal", ref: indexRef("terminal"), category: "System" },
-    { id: "settings", label: "Settings", ref: indexRef("settings"), category: "System" },
+    { id: "settings", label: "Settings", ref: settingsRef(), category: "System", keywords: "every setting config preferences" },
+    // Each area is its own page, reachable by name.
+    ...SETTINGS_AREAS.filter((a) => a.id !== "overview").map((a) => ({
+      id: `settings-${a.id}`,
+      label: `Settings: ${a.title}`,
+      ref: settingsRef(a.id),
+      category: "System" as const,
+      keywords: `settings ${a.title} ${a.sections.map((s) => s.title).join(" ")}`,
+    })),
   ];
 }

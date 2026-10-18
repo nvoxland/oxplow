@@ -272,10 +272,10 @@ page's id as a param, so it must declare it:
 | `vcs.status.details` | Uncommitted Changes, below the files | `change_id` |
 | `vcs.history.sidebar` | Git history's side column | `stream_id` |
 | `diff.file.header` | a file diff, above the editor | `path`, `left_revision`, `right_revision`, `stream_id` |
-| `settings.section` | Settings, in a section named after the extension | none |
+| `settings.<area>.sections` | A Settings area's page, as sections: `overview` (part `every`), `agents` (`agents`, `new-threads`, `prompt`), `lsp` (`servers`), `extensions` (`installed`), `data` (`data`), `integrations` (`capabilities`, `integrations`), `ai` (`ai`) | none |
 | `new-session.sections` | The New Session page, as sections (part ids `start`, `earlier`) | `thread_id` |
 
-A lens declares the params its slot passes (a `settings.section` lens needs none). `at` works only on a parts slot such as `new-session.sections`. A region slot refuses it. `change_id` points at
+A lens declares the params its slot passes (a Settings area's lens needs none). `at` works only on a parts slot such as `new-session.sections`. A region slot refuses it. `change_id` points at
 the page's change in `v_change`, with its analysis in `v_change_file`,
 `v_change_function`, `v_change_import`, `v_change_co_change` and
 `v_change_duplicate`.

@@ -11,19 +11,19 @@ import { openFromLauncher } from "../../support/ui.js";
 test("an enabled harness's declared settings are offered and saved", async ({ fresh }) => {
   const { page, daemon } = fresh;
   await page.goto("/");
-  await openFromLauncher(page, "Settings");
+  await openFromLauncher(page, "Settings: Agents");
   await expect(page.getByTestId("settings-agent-opencode-model")).toHaveCount(0);
   await ipc(daemon, "set_agents", { agents: ["terminal", "opencode"] });
   await page.reload();
-  await openFromLauncher(page, "Settings");
+  await openFromLauncher(page, "Settings: Agents");
   const model = page.getByTestId("settings-agent-opencode-model");
   await expect(model).toBeVisible();
   await model.fill("github-copilot/gpt-5");
-  await page.getByTestId("settings-page-save").click();
+  await page.locator('[data-testid="action-save"]:visible').click();
   await expect
     .poll(() => readFileSync(join(daemon.project, ".oxplow", "project.yaml"), "utf8"))
     .toContain("github-copilot/gpt-5");
   await page.reload();
-  await openFromLauncher(page, "Settings");
+  await openFromLauncher(page, "Settings: Agents");
   await expect(page.getByTestId("settings-agent-opencode-model")).toHaveValue("github-copilot/gpt-5");
 });

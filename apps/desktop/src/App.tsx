@@ -100,6 +100,7 @@ import { planCloseOrGoBack } from "./tabs/closeOrGoBack.js";
 import { removeBookmark, setBookmark, useBookmarks } from "./tabs/bookmarks.js";
 import type { BookmarkScope } from "./tabs/bookmarks.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
+import { settingsArea } from "./pages/settingsAreas.js";
 import { LocalHistoryDashboardPage } from "./pages/LocalHistoryDashboardPage.js";
 import { DiffViewPage } from "./pages/DiffViewPage.js";
 import { GitHistoryPage } from "./pages/GitHistoryPage.js";
@@ -2788,11 +2789,13 @@ export function App() {
         };
       },
       settings: (ref, nav) => {
+        const payload = (ref.payload as { area?: string | null; section?: string | null } | null) ?? {};
+        const area = settingsArea(payload.area);
         return {
           id: ref.id,
-          label: "Settings",
+          label: area.id === "overview" ? "Settings" : `Settings: ${area.title}`,
           closable: true,
-          render: () => <SettingsPage onClose={() => closePageTab(ref.id)} />,
+          render: () => <SettingsPage area={area.id} section={payload.section ?? null} onOpenPage={nav.navOpen} />,
         };
       },
       "local-history": (ref, nav) => {

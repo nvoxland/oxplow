@@ -169,13 +169,20 @@ export type IndexKind =
   | "local-history-by-commit-full"
   | "git-history"
   | "terminal"
-  | "settings"
   | "metrics-recorded"
   | "explore-data"
   | "board";
 
 export function indexRef(kind: IndexKind): TabRef {
   return route(kind);
+}
+
+/** A Settings area's page (`page:settings?area=agents`); the overview is
+ *  `page:settings`. `section` is where it lands: an area's section id or
+ *  an anchor inside one (it doesn't change the tab). */
+export function settingsRef(area: string | null = null, section: string | null = null): TabRef {
+  const shown = area && area !== "overview" ? area : null;
+  return route("settings", { area: shown, section }, shown ? { area: shown } : undefined);
 }
 
 export interface DiffPayload {
@@ -461,7 +468,7 @@ const ROUTES: Record<RoutePageKind, (params: URLSearchParams) => TabRef | null> 
   "local-history-by-commit-full": () => indexRef("local-history-by-commit-full"),
   "git-history": () => indexRef("git-history"),
   terminal: () => indexRef("terminal"),
-  settings: () => indexRef("settings"),
+  settings: (p) => settingsRef(p.get("area")),
   "metrics-recorded": () => indexRef("metrics-recorded"),
   "explore-data": () => indexRef("explore-data"),
   board: () => indexRef("board"),

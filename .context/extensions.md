@@ -1778,7 +1778,7 @@ they live under `ui:`.
 | `vcs.status.details` | UncommittedChangesPage | `change_id` |
 | `vcs.history.sidebar` | GitHistoryPage, a side column shown only when something mounts there (`useSlotMounted`) | `stream_id` |
 | `diff.file.header` | a file diff (`DiffPane`), a strip under its header (P9.A2; `DiffFileHeaderSlot`) | `path`, `left_revision`, `right_revision` (each a revision in its wire form: `working`, `snap:<id>`, `git:<sha>`), `stream_id` |
-| `settings.section` | Settings: a section per mounting extension, titled with its name, before AI (tsk330; `SettingsSlotSections`, `slotRuns(…, extension)`) | none |
+| `settings.<area>.sections` (parts per area: `overview` `every`; `agents` `agents`, `new-threads`, `prompt`; `lsp` `servers`; `extensions` `installed`; `data` `data`; `integrations` `capabilities`, `integrations`; `ai` `ai`) | each Settings area's page (`pages/settingsAreas.ts` lists the same ids; a TS test checks they match): an extension's status or setup views go beside the area they belong to | none |
 | `new-session.sections` (parts: `start`, `earlier`) | the New Session page's sections (`DocumentLayout`) | `thread_id` |
 
 The launcher isn't a slot: a lens lists itself with `launcher.category`.
@@ -2128,7 +2128,7 @@ block is gone.
 (`extensionsStore.ts`, `useExtensions()`): one `listExtensions` (the
 main worktree's, the same in every stream) and one event subscription
 however many readers are mounted
-(slots, `useSlotMounted`, `SettingsSlotSections`,
+(slots, `useSlotMounted`,
 decorators, rail panels, extension pages, the launcher), reloaded on
 `extensionsChanged`; the listing lives while something reads it, so a
 later mount loads afresh. Only Settings → Extensions lists them itself — it

@@ -1,5 +1,4 @@
-import type { CSSProperties } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   effectiveConfig,
   getConfig,
@@ -9,67 +8,262 @@ import {
   subscribeOxplowEvents,
 } from "../api.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
-import type { EffectiveSetting } from "../tauri-bridge/generated/bindings.js";
+import type { EffectiveSetting, HarnessListing } from "../tauri-bridge/generated/bindings.js";
 import { askToChange, groupSettings, matchesSearch, valueText } from "./settingsModel.js";
-import { Section } from "../kit/index.js";
-import { Page } from "../tabs/Page.js";
+import { DocumentLayout, type DocSection } from "../kit/DocumentLayout.js";
+import { Toolbar } from "../kit/Toolbar.js";
+import type { PageAction } from "../kit/actions.js";
 import { LspServersSection } from "../components/LspServersSection.js";
 import { ExtensionsSection } from "../components/ExtensionsSection.js";
 import { DataSection } from "../components/DataSection.js";
 import { CapabilitiesSection } from "../components/CapabilitiesSection.js";
 import { IntegrationsSection } from "../components/IntegrationsSection.js";
-import { SettingsSlotSections } from "../lens/SettingsSlotSections.js";
 import { AiSection } from "../components/AiSection.js";
 import { NewThreadSessionSetting } from "../components/NewThreadSessionSetting.js";
 import { ProposalCard } from "../components/Proposals/ProposalCard.js";
 import { decide, proposalForSetting, useProposals, type Proposal } from "../proposals.js";
 import { useAgentHarnesses } from "../useAgentHarnesses.js";
-import type { HarnessListing } from "../tauri-bridge/generated/bindings.js";
-import { onSettingsSection, scrollToSettingsSection, SETTINGS_SECTIONS, takeSettingsSection } from "./settingsSections.js";
+import { settingsRef } from "../tabs/pageRefs.js";
+import type { TabRef } from "../tabs/tabState.js";
+import { SETTINGS_AREAS, settingsArea, settingsSlot, type SettingsArea, type SettingsAreaId } from "./settingsAreas.js";
 
 export interface SettingsPageProps {
-  /** Closes the page (caller closes the tab). Optional — settings can be a
-   *  long-lived tab too. */
-  onClose?(): void;
+  /** Which area (`page:settings?area=…`); the overview when absent. */
+  area?: string | null;
+  /** Where to land: one of the area's section ids, or an anchor inside one. */
+  section?: string | null;
+  /** Opens another area (or a link), in this tab. */
+  onOpenPage(ref: TabRef): void;
 }
 
 /**
- * Settings as a view (P6.H1): every setting that shapes this project —
- * its value and where it comes from (default, your global config, the
- * project, an extension) — searchable, each with Ask the Agent to Change
- * This. Direct controls remain below only for what only a person may set
- * (agents, AI, language servers, extensions, integrations, programs).
+ * Settings, one Document page per area (`settingsAreas.ts`), all sharing a
+ * rail that lists the areas. The overview is Settings as a view (P6.H1):
+ * every setting, its value and where it comes from, with Ask the Agent to
+ * Change This. The other areas hold the direct controls for what only a
+ * person may set. Each area's sections are a slot an extension adds to
+ * (`settings.<area>.sections`).
  */
-export function SettingsPage({ onClose }: SettingsPageProps) {
-  // Land on the section an alert or link asked for (tsk1040): the one
-  // asked before this opened, and each one asked while it's open.
+export function SettingsPage({ area: areaId, section, onOpenPage }: SettingsPageProps) {
+  const area = settingsArea(areaId);
+  // Land on the section (or anchor) the link asked for.
   useEffect(() => {
-    const pending = takeSettingsSection();
-    if (pending) requestAnimationFrame(() => scrollToSettingsSection(pending));
-    return onSettingsSection(scrollToSettingsSection);
+    if (!section) return;
+    const frame = requestAnimationFrame(() => {
+      const target = document.querySelector(`[data-section="${CSS.escape(section)}"]`) ?? document.getElementById(section);
+      target?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [area.id, section]);
+  const open = (id: SettingsAreaId, anchor: string | null = null) => onOpenPage(settingsRef(id, anchor));
+  const { sections, actions } = useAreaContent(area, open);
+  return (
+    <DocumentLayout
+      testId="page-settings"
+      title={area.id === "overview" ? "Settings" : area.title}
+      intro={area.intro}
+      sections={sections}
+      actions={actions}
+      slot={settingsSlot(area.id)}
+      onOpenPage={onOpenPage}
+      rail={<SettingsAreasNav current={area.id} onOpen={(id) => open(id)} />}
+      railTitle="Settings"
+    />
+  );
+}
+
+/** The rail every Settings page shares: the areas, the one shown marked. */
+function SettingsAreasNav({ current, onOpen }: { current: SettingsAreaId; onOpen(id: SettingsAreaId): void }) {
+  return (
+    <nav aria-label="Settings areas" data-testid="settings-areas" style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
+      {SETTINGS_AREAS.map((a) => (
+        <button
+          key={a.id}
+          type="button"
+          data-testid={`settings-area-${a.id}`}
+          aria-current={a.id === current ? "page" : undefined}
+          className="ox-link"
+          onClick={() => onOpen(a.id)}
+          style={{
+            background: "none",
+            border: "none",
+            padding: 0,
+            font: "inherit",
+            textAlign: "left",
+            fontWeight: a.id === current ? "var(--weight-bold)" : undefined,
+            color: a.id === current ? "var(--text-primary)" : undefined,
+          }}
+        >
+          {a.title}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+/** An area's own sections (titled as the area model titles them) and its
+ *  page actions. */
+function useAreaContent(area: SettingsArea, open: (id: SettingsAreaId, anchor?: string | null) => void): { sections: DocSection[]; actions?: PageAction[] } {
+  const agents = useAgentsForm(area.id === "agents");
+  const title = (id: string) => area.sections.find((s) => s.id === id)?.title ?? id;
+  const section = (id: string, body: ReactNode, description?: ReactNode): DocSection => ({
+    id,
+    title: title(id),
+    description,
+    testId: `settings-section-${id}`,
+    body,
+  });
+  switch (area.id) {
+    case "overview":
+      return { sections: [section("every", <EverySetting onOpenControl={(id) => open(id)} />)] };
+    case "agents":
+      return {
+        sections: [
+          section(
+            "agents",
+            agents.agentsBody,
+            "Enabled agents for this project. The first enabled agent is the default for new sessions.",
+          ),
+          section("new-threads", <NewThreadSessionSetting harnesses={agents.harnesses} />),
+          section(
+            "prompt",
+            agents.promptBody,
+            <>
+              Text appended to every agent&apos;s system prompt, in <code>.oxplow/project.yaml</code>. It applies to sessions started after
+              Save; running ones keep the prompt they launched with.
+            </>,
+          ),
+        ],
+        actions: [{ id: "save", label: "Save", primary: true, busy: agents.saving, disabled: !agents.loaded, run: agents.save }],
+      };
+    case "lsp":
+      return {
+        sections: [
+          section(
+            "servers",
+            <LspServersSection />,
+            <>
+              Servers come from <code>.oxplow/project.yaml</code> (<code>lsp.servers</code>) or one-click installs from the Mason registry
+              (in <code>.oxplow/lsp/</code>). Agents can configure these for you too.
+            </>,
+          ),
+        ],
+      };
+    case "extensions":
+      return { sections: [section("installed", <ExtensionsSection />, "Installing and updating apply at once.")] };
+    case "data":
+      return {
+        sections: [
+          section(
+            "data",
+            <DataSection />,
+            "What oxplow can query: its own data and what extension sources bring in. Sources run here, and programs the project's config would run are approved here; set credentials under Extensions.",
+          ),
+        ],
+      };
+    case "integrations":
+      return {
+        sections: [
+          section(
+            "capabilities",
+            <CapabilitiesSection />,
+            <>
+              Which work list tasks are filed on, how efforts open and close, how file versions are kept. The project&apos;s choice is
+              saved in <code>.oxplow/project.yaml</code>; &ldquo;Just for me&rdquo; goes in <code>.oxplow/personal.yaml</code>.
+            </>,
+          ),
+          section(
+            "integrations",
+            <IntegrationsSection />,
+            "Outside systems that extensions connect through a program oxplow runs. Each instance's config is the team's; approving and running the program is per machine, and its credentials go to your OS keychain. Three failures in a row turn an instance off until you enable it again.",
+          ),
+        ],
+      };
+    case "ai":
+      return {
+        sections: [
+          section(
+            "ai",
+            <AiSection />,
+            "AI providers and roles are saved for all your projects; keys go to your OS keychain, never to a file. Changes apply at once.",
+          ),
+        ],
+      };
+  }
+}
+
+/** The overview: every setting, searchable, each with where its value
+ *  comes from, Ask, and — for one only a person sets — its area. */
+function EverySetting({ onOpenControl }: { onOpenControl(area: SettingsAreaId): void }) {
+  const [settings, setSettings] = useState<EffectiveSetting[]>([]);
+  const [search, setSearch] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const proposals = useProposals();
+  // The view re-reads when the config changes, whoever changed it.
+  useEffect(() => {
+    const load = () =>
+      void effectiveConfig()
+        .then(setSettings)
+        .catch((e) => setError(String(e)));
+    load();
+    return subscribeOxplowEvents((event) => {
+      if (event.kind === "configChanged") load();
+    });
   }, []);
-  const [promptAppend, setPromptAppend] = useState("");
+  return (
+    <>
+      <p className="ox-section-desc">
+        When the agent changes a setting only a person may change, its change waits on the setting&apos;s row (and in Approvals) for you to
+        approve — or change it yourself on its area&apos;s page.
+      </p>
+      <Toolbar
+        filter={{
+          value: search,
+          onChange: setSearch,
+          label: "Search settings",
+          placeholder: "Search settings",
+          testId: "settings-search",
+          inputProps: {
+            onKeyDown: (e) => {
+              if (e.key === "Escape") setSearch("");
+            },
+          },
+        }}
+      />
+      {error ? <p className="ox-error">{error}</p> : null}
+      {groupSettings(settings.filter((s) => matchesSearch(s, search))).map((g) => (
+        <div key={g.title} data-testid={`settings-group-${g.title}`} style={{ marginBottom: "var(--space-3)" }}>
+          <div className="ox-heading">{g.title}</div>
+          {g.settings.map((s) => (
+            <SettingRow key={s.key} setting={s} proposal={proposalForSetting(proposals, s.key)} onDecide={decide} onOpenControl={onOpenControl} />
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** The Agents area's form: which agents are on and in what order, each
+ *  one's declared settings, and the prompt additions — saved together. */
+function useAgentsForm(active: boolean) {
   const harnesses = useAgentHarnesses();
+  const [promptAppend, setPromptAppend] = useState("");
   // The enabled harnesses in priority order; `null` until edited, which
   // shows what the project has (every harness when `agents:` names none).
-  const [editedAgents, setAgentsState] = useState<string[] | null>(null);
+  const [editedAgents, setEditedAgents] = useState<string[] | null>(null);
   const agents = editedAgents ?? harnesses.filter((h) => h.enabled).map((h) => h.id);
   // Each harness's settings as loaded (`agentConfig.<harness>.<key>`) and
   // as edited, keyed `<harness>.<key>`.
   const [loadedSettings, setLoadedSettings] = useState<Record<string, string>>({});
   const [harnessSettings, setHarnessSettings] = useState<Record<string, string>>({});
-  const [settings, setSettings] = useState<EffectiveSetting[]>([]);
-  const [search, setSearch] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [savedMessage, setSavedMessage] = useState<string | null>(null);
-  const proposals = useProposals();
+  const [saved, setSaved] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!active) return;
     setLoaded(false);
-    setError(null);
-    setSavedMessage(null);
     void getConfig()
       .then((config) => {
         setPromptAppend(config.agentPromptAppend ?? "");
@@ -82,28 +276,14 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         setError(String(e));
         setLoaded(true);
       });
-  }, []);
+  }, [active]);
 
-  // The view re-reads when the config changes, whoever changed it.
-  useEffect(() => {
-    const load = () =>
-      void effectiveConfig()
-        .then(setSettings)
-        .catch((e) => setError(String(e)));
-    load();
-    return subscribeOxplowEvents((event) => {
-      if (event.kind === "configChanged") load();
-    });
-  }, []);
-
-  async function handleSave() {
+  async function save() {
     setSaving(true);
     setError(null);
-    setSavedMessage(null);
+    setSaved(null);
     try {
-      if (agents.length === 0) {
-        throw new Error("Enable at least one agent.");
-      }
+      if (agents.length === 0) throw new Error("Enable at least one agent.");
       if (editedAgents) await setAgents(editedAgents);
       for (const h of harnesses) {
         for (const s of h.settings) {
@@ -113,7 +293,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         }
       }
       await setAgentPromptAppend(promptAppend);
-      setSavedMessage("Saved. Agent prompt applies to newly-started sessions.");
+      setSaved("Saved. The prompt applies to sessions started from now on.");
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
     } finally {
@@ -121,169 +301,59 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     }
   }
 
-  return (
-    <Page
-      testId="page-settings"
-      title="Settings"
-      actions={onClose ? [{ id: "close", label: "Close", run: onClose }] : undefined}
-    >
-      <div style={{ padding: "20px 24px", maxWidth: 820 }}>
-        <nav data-testid="settings-index" aria-label="Settings sections" style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 20 }}>
-          {SETTINGS_SECTIONS.map((s) => (
-            <button key={s.id} type="button" data-testid={`settings-index-${s.id}`} onClick={() => scrollToSettingsSection(s.id)}>
-              {s.title}
-            </button>
-          ))}
-        </nav>
-        <Section title="Every Setting" id="settings-every">
-          <Hint>
-            What shapes this project, where each value comes from, and Ask the Agent to Change This. When the agent
-            changes a setting only a person may change, its change waits on the setting's row (and in Approvals) for
-            you to approve — or change it yourself below.
-          </Hint>
-          <input
-            data-testid="settings-search"
-            placeholder="Search settings"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") setSearch("");
-            }}
-            style={{ ...numberInputStyle, width: "100%", marginBottom: 10 }}
-          />
-          {groupSettings(settings.filter((s) => matchesSearch(s, search))).map((g) => (
-            <div key={g.title} data-testid={`settings-group-${g.title}`} style={{ marginBottom: 12 }}>
-              <div style={groupTitleStyle}>{g.title}</div>
-              {g.settings.map((s) => (
-                <SettingRow key={s.key} setting={s} proposal={proposalForSetting(proposals, s.key)} onDecide={decide} />
-              ))}
-            </div>
-          ))}
-        </Section>
-
-        <Section title="Agents" id="settings-agents">
-          <Hint>
-            Enabled agents for this project. The first enabled agent is the default for new sessions.
-          </Hint>
-          <AgentPicker harnesses={harnesses} agents={agents} onChange={setAgentsState} disabled={!loaded || saving} />
-          <NewThreadSessionSetting harnesses={harnesses} />
-          {harnesses
-            .filter((h) => agents.includes(h.id))
-            .flatMap((h) =>
-              h.settings.map((s) => {
-                const at = `${h.id}.${s.key}`;
-                return (
-                  <div key={at} style={{ marginTop: 10 }}>
-                    <Hint>
-                      {h.title} — {s.title}: {s.hint}
-                    </Hint>
-                    <input
-                      data-testid={`settings-agent-${h.id}-${s.key}`}
-                      type="text"
-                      value={harnessSettings[at] ?? ""}
-                      onChange={(event) => setHarnessSettings({ ...harnessSettings, [at]: event.target.value })}
-                      disabled={!loaded || saving}
-                      placeholder={s.placeholder}
-                      style={{ ...numberInputStyle, width: 320 }}
-                    />
-                  </div>
-                );
-              }),
-            )}
-        </Section>
-
-        <Section title="Agent Prompt Additions" id="settings-prompt">
-          <Hint>
-            Text appended to every agent's system prompt. Applies to agent sessions started after Save —
-            existing sessions keep the prompt they launched with. Stored in <code>.oxplow/project.yaml</code>.
-          </Hint>
-          <textarea
-            data-testid="settings-page-prompt-append"
-            value={promptAppend}
-            onChange={(event) => setPromptAppend(event.target.value)}
-            disabled={!loaded || saving}
-            rows={10}
-            placeholder="e.g. Prefer red/green TDD. Never run destructive git commands without asking."
-            style={textareaStyle}
-          />
-        </Section>
-
-        <Section title="Language Servers" id="settings-lsp">
-          <Hint>
-            Servers come from <code>.oxplow/project.yaml</code> (<code>lsp.servers</code>) or one-click
-            installs from the Mason registry (landed in <code>.oxplow/lsp/</code>). Changes apply
-            immediately — no Save needed. Agents can also configure these for you.
-          </Hint>
-          <LspServersSection />
-        </Section>
-
-        <Section title="Extensions" id="settings-extensions">
-          <Hint>
-            Extensions add lenses (pages you or your agent build over oxplow&apos;s data). They live in{" "}
-            <code>oxplow/extensions/</code> and are ordinary project files: commit them to share with your
-            team. Installing and updating apply immediately; no Save needed.
-          </Hint>
-          <ExtensionsSection />
-        </Section>
-
-        <Section title="Data" id="settings-data">
-          <Hint>
-            What oxplow can query: its own data and what extension sources bring in, with row counts. Lenses,
-            metrics and agents read these through SQL. Sources run here, and programs the project&apos;s config would run
-            are approved here; set credentials under Extensions.
-          </Hint>
-          <DataSection />
-        </Section>
-
-        <Section title="Capabilities" id="settings-capabilities">
-          <Hint>
-            The capabilities you choose an implementation of: which work list tasks are filed on, how efforts open and close,
-            how file versions are kept. The project&apos;s choice is saved in <code>.oxplow/project.yaml</code> for
-            your team; &ldquo;Just for me&rdquo; is yours alone, in <code>.oxplow/personal.yaml</code>.
-          </Hint>
-          <CapabilitiesSection />
-        </Section>
-
-        <Section title="Integrations" id="settings-integrations">
-          <Hint>
-            Outside systems (an issue tracker, say) that extensions connect through an external provider: a program oxplow runs. Each
-            instance&apos;s config is saved in <code>.oxplow/project.yaml</code> for your team; approving and running
-            the program is per machine. Enabling checks the config first; three failures in a row turn an
-            instance off here until you enable it again. Its credentials go to your OS keychain.
-          </Hint>
-          <IntegrationsSection />
-        </Section>
-
-        <SettingsSlotSections section={(title, body) => <Section title={title}>{body}</Section>} />
-
-        <Section title="AI" id="settings-ai">
-          <Hint>
-            Models oxplow itself can call: for summaries, typed questions, and extensions. Your coding agents
-            are separate. AI providers and roles are saved for all your projects; keys go to your OS keychain,
-            never to a file. Changes apply immediately; no Save needed.
-          </Hint>
-          <AiSection />
-        </Section>
-
-        <div style={actionsRowStyle}>
-          {error ? <span style={{ color: "var(--severity-critical)", fontSize: "var(--text-xs)" }}>{error}</span> : null}
-          {savedMessage ? (
-            <span style={{ color: "var(--text-secondary)", fontSize: "var(--text-xs)" }}>{savedMessage}</span>
-          ) : null}
-          <span style={{ flex: 1 }} />
-          <button
-            type="button"
-            data-testid="settings-page-save"
-            onClick={() => void handleSave()}
-            style={primaryButtonStyle}
-            disabled={!loaded || saving}
-          >
-            {saving ? "Saving…" : "Save"}
-          </button>
-        </div>
-      </div>
-    </Page>
+  const status = error ? (
+    <p className="ox-error" data-testid="settings-save-error">
+      {error}
+    </p>
+  ) : saved ? (
+    <p className="ox-muted ox-small" data-testid="settings-saved">
+      {saved}
+    </p>
+  ) : null;
+  const disabled = !loaded || saving;
+  const agentsBody = (
+    <>
+      {status}
+      <AgentPicker harnesses={harnesses} agents={agents} onChange={setEditedAgents} disabled={disabled} />
+      {harnesses
+        .filter((h) => agents.includes(h.id))
+        .flatMap((h) =>
+          h.settings.map((s) => {
+            const at = `${h.id}.${s.key}`;
+            return (
+              <label key={at} className="ox-field" style={{ marginTop: "var(--space-3)" }}>
+                <span className="ox-label">
+                  {h.title} — {s.title}: {s.hint}
+                </span>
+                <input
+                  data-testid={`settings-agent-${h.id}-${s.key}`}
+                  className="ox-input"
+                  type="text"
+                  value={harnessSettings[at] ?? ""}
+                  onChange={(event) => setHarnessSettings({ ...harnessSettings, [at]: event.target.value })}
+                  disabled={disabled}
+                  placeholder={s.placeholder}
+                  style={{ width: 320 }}
+                />
+              </label>
+            );
+          }),
+        )}
+    </>
   );
+  const promptBody = (
+    <textarea
+      data-testid="settings-page-prompt-append"
+      className="ox-textarea"
+      value={promptAppend}
+      onChange={(event) => setPromptAppend(event.target.value)}
+      disabled={disabled}
+      rows={10}
+      placeholder="e.g. Prefer red/green TDD. Never run destructive git commands without asking."
+      style={{ width: "100%", fontFamily: "var(--font-mono)" }}
+    />
+  );
+  return { harnesses, loaded, saving, save, agentsBody, promptBody };
 }
 
 /// The registered harnesses, the enabled ones first in their order.
@@ -309,22 +379,20 @@ function AgentPicker({
     }
     onChange(agents.filter((a) => a !== agent));
   }
-
   function move(agent: string, direction: -1 | 1) {
     const index = agents.indexOf(agent);
     const nextIndex = index + direction;
     if (index < 0 || nextIndex < 0 || nextIndex >= agents.length) return;
     const next = agents.slice();
-    [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+    [next[index], next[nextIndex]] = [next[nextIndex]!, next[index]!];
     onChange(next);
   }
-
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
       {ordered.map(({ id: agent, title }) => {
         const enabled = agents.includes(agent);
         return (
-          <label key={agent} style={agentRowStyle}>
+          <label key={agent} style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
             <input
               type="checkbox"
               checked={enabled}
@@ -334,17 +402,12 @@ function AgentPicker({
             <span style={{ minWidth: 64 }}>{title}</span>
             {enabled ? (
               <>
-                <button
-                  type="button"
-                  style={smallButtonStyle}
-                  disabled={disabled || agents.indexOf(agent) === 0}
-                  onClick={() => move(agent, -1)}
-                >
+                <button type="button" className="ox-button" disabled={disabled || agents.indexOf(agent) === 0} onClick={() => move(agent, -1)}>
                   Up
                 </button>
                 <button
                   type="button"
-                  style={smallButtonStyle}
+                  className="ox-button"
                   disabled={disabled || agents.indexOf(agent) === agents.length - 1}
                   onClick={() => move(agent, 1)}
                 >
@@ -359,15 +422,13 @@ function AgentPicker({
   );
 }
 
-/** Where a person-only setting's direct control is, if the page has one. */
-function controlFor(key: string): string | null {
-  if (["agents", "agentConfig", "agentPromptAppend", "personal.newThreadSession"].includes(key)) {
-    return "settings-agents";
-  }
-  if (key === "ai" || key.startsWith("ai.")) return "settings-ai";
-  if (key === "lsp") return "settings-lsp";
-  if (key === "extensions") return "settings-extensions";
-  if (key === "extensionInstances") return "settings-integrations";
+/** The area where a person-only setting's direct control is, if any. */
+export function controlFor(key: string): SettingsAreaId | null {
+  if (["agents", "agentConfig", "agentPromptAppend", "personal.newThreadSession"].includes(key)) return "agents";
+  if (key === "ai" || key.startsWith("ai.")) return "ai";
+  if (key === "lsp") return "lsp";
+  if (key === "extensions") return "extensions";
+  if (key === "extensionInstances" || key === "activeProviders") return "integrations";
   return null;
 }
 
@@ -385,34 +446,34 @@ export function SettingRow({
   setting: s,
   proposal,
   onDecide,
+  onOpenControl,
 }: {
   setting: EffectiveSetting;
   proposal: Proposal | undefined;
   onDecide(p: Proposal, approve: boolean): Promise<void>;
+  /** Opens the area that holds a person-only setting's control. */
+  onOpenControl?(area: SettingsAreaId): void;
 }) {
   const control = s.humanOnly ? controlFor(s.key) : null;
   return (
-    <div data-testid={`setting-${s.key}`} style={settingRowStyle}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-        <code style={{ fontSize: "var(--text-sm)" }}>{s.key}</code>
-        <span data-testid={`setting-origin-${s.key}`} style={originChipStyle} title="Where the value comes from">
+    <div data-testid={`setting-${s.key}`} style={{ padding: "var(--space-2)", borderBottom: "1px solid var(--border-subtle)" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: "var(--space-2)", flexWrap: "wrap" }}>
+        <code className="ox-mono">{s.key}</code>
+        <span data-testid={`setting-origin-${s.key}`} className="ox-badge" title="Where the value comes from">
           {ORIGIN_LABEL[s.origin]}
           {s.extension ? `: ${s.extension}` : ""}
         </span>
-        {s.humanOnly ? <span style={hintInlineStyle}>yours to set</span> : null}
+        {s.humanOnly ? <span className="ox-muted ox-small">yours to set</span> : null}
         <span style={{ flex: 1 }} />
-        {control ? (
-          <button
-            type="button"
-            style={linkButtonStyle}
-            onClick={() => document.getElementById(control)?.scrollIntoView({ behavior: "smooth", block: "start" })}
-          >
+        {control && onOpenControl ? (
+          <button type="button" className="ox-link ox-small" style={linkButtonStyle} onClick={() => onOpenControl(control)}>
             Change It Here
           </button>
         ) : null}
         <button
           type="button"
           data-testid={`setting-ask-${s.key}`}
+          className="ox-link ox-small"
           style={linkButtonStyle}
           title="Put a request to change this in the agent's input (it isn't sent)"
           onClick={() => insertIntoAgent(askToChange(s))}
@@ -420,12 +481,12 @@ export function SettingRow({
           Ask the Agent to Change This
         </button>
       </div>
-      <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", color: "var(--text-primary)", marginTop: 2 }}>
+      <div className="ox-mono ox-small" style={{ marginTop: 2 }}>
         {valueText(s.value)}
       </div>
-      {s.doc ? <div style={hintInlineStyle}>{s.doc}</div> : null}
+      {s.doc ? <div className="ox-muted ox-small">{s.doc}</div> : null}
       {proposal ? (
-        <div style={{ marginTop: 4 }}>
+        <div style={{ marginTop: "var(--space-1)" }}>
           <ProposalCard proposal={proposal} compact onDecide={onDecide} />
         </div>
       ) : null}
@@ -433,99 +494,7 @@ export function SettingRow({
   );
 }
 
-const groupTitleStyle: CSSProperties = { fontWeight: 600, fontSize: "var(--text-sm)", margin: "6px 0 4px" };
-const settingRowStyle: CSSProperties = {
-  padding: "6px 8px",
-  borderBottom: "1px solid var(--border-subtle)",
-};
-const originChipStyle: CSSProperties = {
-  fontSize: 10,
-  padding: "1px 6px",
-  borderRadius: 8,
-  border: "1px solid var(--border-subtle)",
-  color: "var(--text-secondary)",
-};
-const hintInlineStyle: CSSProperties = { fontSize: "var(--text-xs)", color: "var(--text-secondary)" };
-const linkButtonStyle: CSSProperties = {
-  background: "none",
-  border: "none",
-  padding: 0,
-  color: "var(--accent)",
-  cursor: "pointer",
-  fontSize: "var(--text-xs)",
-};
-
-function Hint({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 10 }}>
-      {children}
-    </div>
-  );
-}
-
-const textareaStyle: CSSProperties = {
-  width: "100%",
-  background: "var(--surface-card)",
-  color: "var(--text-primary)",
-  border: "1px solid var(--border-subtle)",
-  borderRadius: 6,
-  padding: 10,
-  fontFamily: "ui-monospace, monospace",
-  fontSize: "var(--text-xs)",
-  resize: "vertical",
-  minHeight: 140,
-};
-
-const numberInputStyle: CSSProperties = {
-  background: "var(--surface-card)",
-  color: "var(--text-primary)",
-  border: "1px solid var(--border-subtle)",
-  borderRadius: 6,
-  padding: "6px 10px",
-  fontFamily: "inherit",
-  fontSize: "var(--text-sm)",
-  width: 120,
-};
-
-const buttonStyle: CSSProperties = {
-  background: "var(--surface-tab-inactive)",
-  color: "var(--text-primary)",
-  border: "1px solid var(--border-subtle)",
-  padding: "6px 14px",
-  borderRadius: 6,
-  cursor: "pointer",
-  fontFamily: "inherit",
-  fontSize: "var(--text-sm)",
-};
-
-const smallButtonStyle: CSSProperties = {
-  ...buttonStyle,
-  padding: "3px 8px",
-  fontSize: "var(--text-xs)",
-};
-
-const agentRowStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  color: "var(--text-primary)",
-  fontSize: "var(--text-sm)",
-};
-
-const primaryButtonStyle: CSSProperties = {
-  ...buttonStyle,
-  background: "var(--accent)",
-  borderColor: "var(--accent)",
-  color: "var(--accent-on-accent)",
-};
-
-const actionsRowStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 12,
-  paddingTop: 12,
-  borderTop: "1px solid var(--border-subtle)",
-};
+const linkButtonStyle = { background: "none", border: "none", padding: 0, font: "inherit" } as const;
 
 /// `agentConfig`'s string values, keyed `<harness>.<key>`.
 function harnessSettingValues(agentConfig: Record<string, unknown>): Record<string, string> {
