@@ -94,6 +94,10 @@ empty: Nothing is waiting on you.
   `relative` (how long ago), `bytes`, `duration` (milliseconds),
   `integer` or `percent` (a 0-1 fraction). `format` changes only what
   the person sees. Agents read the raw values.
+- **`columns[].highlight: <param>`** marks the param's current value in
+  the cell's text (every case-insensitive occurrence; nothing when the
+  param is empty). It must name a param the lens declares. Use it on the
+  columns of a search lens, with its filter param.
 - **`link.kind`** makes cells clickable:
   - `page` takes any page's ref — a work item's (`v_work_item.ref`),
     `commit:<sha>`, `page:git-dashboard`, ….

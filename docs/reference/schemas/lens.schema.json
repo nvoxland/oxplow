@@ -453,6 +453,14 @@
             }
           ],
           "default": null
+        },
+        "highlight": {
+          "description": "A param of the lens: the cell's text is drawn with every\ncase-insensitive occurrence of its current value marked.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,

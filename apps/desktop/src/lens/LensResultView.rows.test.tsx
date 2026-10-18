@@ -183,3 +183,18 @@ test("a link to a ref of any kind opens through the page's openRef", () => {
     ["page:tasks", true],
   ]);
 });
+
+test("a highlighted column marks its param's value in the cell, as elements", () => {
+  const run = {
+    ...runOf({ columns: [{ key: "title", label: null, link: null, unit: null, highlight: "filter" }], params: [{ name: "filter", label: null, default: null, options: [] }] }),
+    params: { filter: "ild" },
+  } as unknown as LensRun;
+  const view = render(<LensResultView run={run} compact onOpenPage={() => {}} />);
+  const marks = view.getByTestId("lens-row-1").querySelectorAll("mark.ox-mark");
+  expect(Array.from(marks).map((m) => m.textContent)).toEqual(["ild"]);
+  expect(view.getByTestId("lens-row-1").textContent).toContain("Child");
+  // No value: plain text.
+  cleanup();
+  const plain = render(<LensResultView run={{ ...run, params: { filter: "" } } as unknown as LensRun} compact onOpenPage={() => {}} />);
+  expect(plain.container.querySelector("mark")).toBeNull();
+});

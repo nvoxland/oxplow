@@ -3966,6 +3966,11 @@ export type LensColumn = {
 	 *  local time, a number with its `unit`).
 	 */
 	format?: ColumnFormat | null,
+	/**
+	 *  A param of the lens: the cell's text is drawn with every
+	 *  case-insensitive occurrence of its current value marked.
+	 */
+	highlight?: string | null,
 };
 
 /**  A `custom` lens's component and the props it starts with. */

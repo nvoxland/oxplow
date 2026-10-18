@@ -276,6 +276,8 @@ comment's time and the task panel use it, not their own copies.
 | **Dashboard** | many numbers and charts at a glance | `TileGrid` / `TileSlot` / `Tile` at full width | `viz: dashboard` + `tiles:` |
 | **Custom** | what the kit can't express: editors, terminals, boards, git flows | a React page on `Page`, using kit parts where they fit | `viz: custom` (the sandboxed component) |
 
+A cell's match is drawn with the kit class `.ox-mark` (a lens column's `highlight`, extensions.md "Lenses").
+
 The kit: `Section` (`id`, `title`, `description`, `actions`, `source` —
 the extension that added it), `DocumentLayout` (its own sections plus what
 extensions mount in its parts slot, placed by `placeParts`; a contents list

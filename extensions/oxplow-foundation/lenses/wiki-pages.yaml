@@ -19,8 +19,8 @@ query: |
              ELSE instr(lower(p.title), lower(:filter)) > 0 OR instr(lower(b.body), lower(:filter)) > 0 END
   ORDER BY p.updated_at DESC
 columns:
-  - { key: title, label: Page, link: { kind: wiki, from: slug } }
-  - { key: snippet, label: Text }
+  - { key: title, label: Page, link: { kind: wiki, from: slug }, highlight: filter }
+  - { key: snippet, label: Text, highlight: filter }
   - { key: updated_at, label: Modified, format: relative, width: 120 }
 actions:
   - id: new

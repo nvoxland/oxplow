@@ -1715,7 +1715,13 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
 - **Columns** also take `width` (pixels: the table lays out fixed, so
   columns line up) and `format` (`date`, `datetime`, `relative`, `bytes`,
   `duration` in ms, `integer`, `percent` of a 0–1 fraction), read by
-  `formatCell` in the UI only; an agent reads the raw value.
+  `formatCell` in the UI only; an agent reads the raw value. `highlight:
+  <param>` draws the cell's text with every case-insensitive occurrence of
+  that param's current value marked (`markParts` in `lensModel.ts`,
+  `<mark class="ox-mark">` elements, never innerHTML; empty or missing:
+  plain text). The loader refuses one that names a param the lens doesn't
+  declare (`highlight_problem`). The foundation's `wiki-pages` lens uses
+  it with its `filter`.
 
 > **Not built.** From the original design: a
 > `decision` link kind; `followup-comment` and `open-diff` actions.

@@ -27,6 +27,7 @@ import {
   formatCell,
   hunkRows,
   isTimestamp,
+  markParts,
   limitRows,
   lineSeries,
   rowAsk,
@@ -282,7 +283,23 @@ function RowsBody({
     const raw = row[c.index] ?? null;
     const formatted = formatCell(raw, c.unitIndex === null ? undefined : (row[c.unitIndex] ?? null), c.format);
     // A timestamp keeps its full local time a hover away.
-    const text = isTimestamp(raw) ? <span title={formatFullDateTime(raw)}>{formatted}</span> : formatted;
+    // A highlighted column marks its param's current value in the text.
+    const needle = c.highlight === null ? "" : String(run.params[c.highlight] ?? "");
+    const text = isTimestamp(raw) ? (
+      <span title={formatFullDateTime(raw)}>{formatted}</span>
+    ) : needle !== "" && typeof formatted === "string" ? (
+      markParts(formatted, needle).map((part, i) =>
+        part.mark ? (
+          <mark key={i} className="ox-mark">
+            {part.text}
+          </mark>
+        ) : (
+          part.text
+        ),
+      )
+    ) : (
+      formatted
+    );
     // Its icon and tone, named by other columns of the row.
     const toneName = c.toneIndex === null ? null : (row[c.toneIndex] ?? null);
     const tone = toneColor(toneName);
@@ -695,7 +712,7 @@ function treeLabelColumn(lens: LensRun["lens"], cols: DisplayColumn[], resultCol
   const declared = cols.find((c) => c.key === key);
   if (declared) return declared;
   const index = resultColumns.indexOf(key);
-  return index === -1 ? null : { key, label: key, index, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null };
+  return index === -1 ? null : { key, label: key, index, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null };
 }
 
 interface TreeVizProps {

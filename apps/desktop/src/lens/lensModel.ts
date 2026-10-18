@@ -38,6 +38,25 @@ export interface DisplayColumn {
   width: number | null;
   /** How its value reads (`LensColumn.format`). */
   format: ColumnFormat | null;
+  /** The param whose current value is marked in the cell's text. */
+  highlight: string | null;
+}
+
+/** `text` split around each case-insensitive occurrence of `needle`, the
+ *  occurrences marked. An empty needle marks nothing. */
+export function markParts(text: string, needle: string): { text: string; mark: boolean }[] {
+  if (needle === "") return [{ text, mark: false }];
+  const lower = text.toLowerCase();
+  const find = needle.toLowerCase();
+  const parts: { text: string; mark: boolean }[] = [];
+  let from = 0;
+  for (let at = lower.indexOf(find); at !== -1; at = lower.indexOf(find, from)) {
+    if (at > from) parts.push({ text: text.slice(from, at), mark: false });
+    parts.push({ text: text.slice(at, at + find.length), mark: true });
+    from = at + find.length;
+  }
+  if (from < text.length || parts.length === 0) parts.push({ text: text.slice(from), mark: false });
+  return parts;
 }
 
 /** The columns that style rows rather than show as cells: `group.by`,
@@ -58,7 +77,7 @@ export function displayColumns(lens: Lens, resultColumns: string[]): DisplayColu
   };
   if (lens.columns.length === 0) {
     return resultColumns.flatMap((key, index) =>
-      styling.includes(key) ? [] : [{ key, label: key, index, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null }],
+      styling.includes(key) ? [] : [{ key, label: key, index, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null }],
     );
   }
   const out: DisplayColumn[] = [];
@@ -75,6 +94,7 @@ export function displayColumns(lens: Lens, resultColumns: string[]): DisplayColu
       toneIndex: at(c.tone),
       width: c.width ?? null,
       format: c.format ?? null,
+      highlight: c.highlight ?? null,
     });
   }
   return out;

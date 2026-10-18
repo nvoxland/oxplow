@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens } from "../tauri-bridge/generated/bindings.js";
-import { treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./lensModel.js";
+import { markParts, treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./lensModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 
 const lens = (over: Partial<Lens> = {}): Lens => ({
@@ -30,8 +30,8 @@ const lens = (over: Partial<Lens> = {}): Lens => ({
 describe("displayColumns", () => {
   test("without declared columns shows every result column by name", () => {
     expect(displayColumns(lens(), ["ref", "title"])).toEqual([
-      { key: "ref", label: "ref", index: 0, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null },
-      { key: "title", label: "title", index: 1, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null },
+      { key: "ref", label: "ref", index: 0, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null },
+      { key: "title", label: "title", index: 1, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null },
     ]);
   });
 
@@ -44,8 +44,8 @@ describe("displayColumns", () => {
       ],
     });
     expect(displayColumns(l, ["id", "title", "u"])).toEqual([
-      { key: "title", label: "Task", index: 1, link: { kind: "page", from: "id", line: null, base: null, head: null }, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null },
-      { key: "id", label: "id", index: 0, link: null, unitIndex: 2, iconIndex: null, toneIndex: null, width: null, format: null },
+      { key: "title", label: "Task", index: 1, link: { kind: "page", from: "id", line: null, base: null, head: null }, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null },
+      { key: "id", label: "id", index: 0, link: null, unitIndex: 2, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null },
     ]);
   });
 
@@ -59,7 +59,7 @@ describe("displayColumns", () => {
       columns: [{ key: "title", label: null, link: null, unit: null, icon: "glyph", tone: "hue" }, { key: "bucket", label: null, link: null, unit: null }],
     });
     expect(displayColumns(styled, ["title", "bucket", "glyph", "hue"])).toEqual([
-      { key: "title", label: "title", index: 0, link: null, unitIndex: null, iconIndex: 2, toneIndex: 3, width: null, format: null },
+      { key: "title", label: "title", index: 0, link: null, unitIndex: null, iconIndex: 2, toneIndex: 3, width: null, format: null, highlight: null },
     ]);
     const auto = lens({ group: { by: "bucket", link: null }, emphasis: "on", depth: "d" });
     expect(displayColumns(auto, ["title", "bucket", "on", "d"]).map((c) => c.key)).toEqual(["title"]);
@@ -515,4 +515,25 @@ test("a column's format reads its value; a value it doesn't read shows as withou
   expect(formatCell("2026-10-17T10:00:00Z", undefined, "relative")).toMatch(/ago|just now|\d/);
   expect(formatCell("plain", undefined, "date")).toBe("plain");
   expect(formatCell(3, undefined, "date")).toBe("3");
+});
+
+describe("a column that highlights a param", () => {
+  test("the column names the param, and markParts splits text around each case-insensitive match", () => {
+    const l = lens({ columns: [{ key: "title", label: null, link: null, unit: null, highlight: "filter" }] });
+    expect(displayColumns(l, ["title"])[0]?.highlight).toBe("filter");
+    expect(markParts("The Quick quick fox", "quick")).toEqual([
+      { text: "The ", mark: false },
+      { text: "Quick", mark: true },
+      { text: " ", mark: false },
+      { text: "quick", mark: true },
+      { text: " fox", mark: false },
+    ]);
+    expect(markParts("abc", "")).toEqual([{ text: "abc", mark: false }]);
+    expect(markParts("abc", "z")).toEqual([{ text: "abc", mark: false }]);
+    expect(markParts("a.b", ".")).toEqual([
+      { text: "a", mark: false },
+      { text: ".", mark: true },
+      { text: "b", mark: false },
+    ]);
+  });
 });

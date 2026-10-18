@@ -86,6 +86,11 @@ A column can also set `width` (in pixels) and `format`: `date`,
 (milliseconds), `integer` or `percent` (a 0-1 fraction). `format`
 changes only what you see. Agents read the raw values.
 
+A column can set `highlight: <param>` to mark that param's current value
+in its text, wherever it occurs (any case). A search lens uses it on its
+title and snippet columns, with its filter param. The param must be one
+the lens declares.
+
 `launcher: { category: Activity }` files a lens under that launcher
 heading; `hidden: true` leaves it out (for lenses only a slot shows).
 `actions:` runs commands. Each action names a command and its input,

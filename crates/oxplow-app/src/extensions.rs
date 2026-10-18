@@ -479,6 +479,10 @@ pub struct LensColumn {
     /// local time, a number with its `unit`).
     #[serde(default)]
     pub format: Option<ColumnFormat>,
+    /// A param of the lens: the cell's text is drawn with every
+    /// case-insensitive occurrence of its current value marked.
+    #[serde(default)]
+    pub highlight: Option<String>,
 }
 
 /// How a column's value reads in the UI. An agent reads the raw value.
@@ -3527,7 +3531,10 @@ fn shape_problem(
             )
         })
     };
-    if let Some(problem) = row_style_problem(lens).or_else(|| param_problem(lens)) {
+    if let Some(problem) = row_style_problem(lens)
+        .or_else(|| param_problem(lens))
+        .or_else(|| highlight_problem(lens))
+    {
         return Some(problem);
     }
     let chart = lens.chart.clone().unwrap_or_default();
@@ -3598,6 +3605,19 @@ fn shape_problem(
             None
         }
     }
+}
+
+/// A column that highlights a param the lens doesn't declare.
+fn highlight_problem(lens: &Lens) -> Option<String> {
+    lens.columns.iter().find_map(|c| {
+        let name = c.highlight.as_deref()?;
+        (!lens.params.iter().any(|p| p.name == name)).then(|| {
+            format!(
+                "column `{}`: `highlight: {name}` names a param the lens doesn't declare",
+                c.key
+            )
+        })
+    })
 }
 
 /// Row styling on a viz that doesn't draw rows that way: `group` and
@@ -8569,6 +8589,35 @@ commands:
         for k in ["g1", "g2", "e1", "d1", "i1", "t1"] {
             assert!(errs.contains(&format!("`{k}`")), "{k}: {errs}");
         }
+    }
+
+    /// A column's `highlight` names a param the lens declares: the text of
+    /// the param's value is marked wherever the cell has it.
+    #[test]
+    fn a_columns_highlight_names_a_declared_param() {
+        let (_d, ext) = load_x(
+            &[
+                (
+                    "a",
+                    "title: A\nquery: SELECT 'x' AS t\nparams: [{ name: filter, default: '' }]\ncolumns:\n  - { key: t, highlight: filter }\n",
+                ),
+                (
+                    "b",
+                    "title: B\nquery: SELECT 'x' AS t\ncolumns:\n  - { key: t, highlight: nope }\n",
+                ),
+            ],
+            "",
+        );
+        let a = ext.lenses.iter().find(|l| l.slug == "a").expect("loads");
+        assert_eq!(a.columns[0].highlight.as_deref(), Some("filter"));
+        assert!(ext.lenses.iter().all(|l| l.slug != "b"));
+        assert!(
+            ext.errors
+                .iter()
+                .any(|e| e.contains("b.yaml") && e.contains("`highlight: nope`")),
+            "{:?}",
+            ext.errors
+        );
     }
 
     /// P6.B1: an action is a command. Its placeholders must name a param
