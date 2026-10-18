@@ -171,7 +171,6 @@ export type IndexKind =
   | "terminal"
   | "settings"
   | "metrics-recorded"
-  | "dashboards"
   | "explore-data"
   | "board";
 
@@ -275,9 +274,10 @@ export function customDashboardRef(id: string): TabRef {
   return route("custom-dashboard", { id }, { id });
 }
 
-/** The Dashboards index — the list of the user's custom dashboards. */
+/** The Dashboards index — the list of the user's custom dashboards: the
+ *  foundation's `dashboards` lens page. */
 export function dashboardsRef(): TabRef {
-  return indexRef("dashboards");
+  return extPageRef("oxplow-foundation", "dashboards");
 }
 
 /** The Metrics page — every catalogued definition with latest value, trend
@@ -384,10 +384,9 @@ export function uncommittedChangesRef(): TabRef {
   return route("uncommitted-changes");
 }
 
-export type DashboardKind = "visits";
-
-export function dashboardRef(variant: DashboardKind): TabRef {
-  return route("dashboard", { variant }, { variant });
+/** The Go To page: the foundation's `go-to` lens page. */
+export function goToRef(): TabRef {
+  return extPageRef("oxplow-foundation", "go-to");
 }
 
 /**
@@ -464,7 +463,6 @@ const ROUTES: Record<RoutePageKind, (params: URLSearchParams) => TabRef | null> 
   terminal: () => indexRef("terminal"),
   settings: () => indexRef("settings"),
   "metrics-recorded": () => indexRef("metrics-recorded"),
-  dashboards: () => indexRef("dashboards"),
   "explore-data": () => indexRef("explore-data"),
   board: () => indexRef("board"),
   "git-dashboard": () => gitDashboardRef(),
@@ -499,7 +497,6 @@ const ROUTES: Record<RoutePageKind, (params: URLSearchParams) => TabRef | null> 
     });
   },
   "custom-dashboard": (p) => (p.get("id") ? customDashboardRef(p.get("id")!) : null),
-  dashboard: (p) => (p.get("variant") === "visits" ? dashboardRef("visits") : null),
   "stream-settings": (p) => (p.get("stream") ? streamSettingsRef(p.get("stream")!) : null),
   "thread-settings": (p) => (p.get("thread") ? threadSettingsRef(p.get("thread")!) : null),
   alerts: () => alertsRef(),

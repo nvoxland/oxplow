@@ -1,0 +1,28 @@
+title: Most visited
+description: The pages the stream's threads opened most over the last 30 days.
+params:
+  - { name: thread_id }
+query: |
+  SELECT coalesce(nullif(trim(w.title), ''), nullif(trim(top.label), ''), top.ref) AS title,
+         top.page_kind, top.ref, top.visits
+  FROM (
+    SELECT v.page_id AS ref,
+           max(v.page_kind) AS page_kind,
+           max(v.label) AS label,
+           count(*) AS visits,
+           max(v.visited_at) AS last
+    FROM v_page_visit v
+    JOIN v_thread t ON t.id = v.thread_id
+    WHERE t.stream_id = (SELECT stream_id FROM v_thread WHERE id = :thread_id)
+      AND v.page_kind <> 'agent_session'
+      AND v.visited_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-30 days')
+    GROUP BY v.page_id
+  ) top
+  LEFT JOIN v_knowledge_page w ON w.ref = top.ref
+  ORDER BY top.visits DESC, top.last DESC
+  LIMIT 25
+columns:
+  - { key: title, label: Page, icon: page_kind, link: { kind: page, from: ref } }
+  - { key: visits, label: Visits, width: 80 }
+empty: No visits yet. The pages you open most over the last 30 days show up here.
+hidden: true

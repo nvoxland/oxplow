@@ -20,7 +20,7 @@ describe("kindForTabId", () => {
   test("page routes return the page name, with or without params", () => {
     expect(kindForTabId("page:new-session")).toBe("new-session");
     expect(kindForTabId("page:tasks")).toBe("tasks");
-    expect(kindForTabId("page:dashboard?variant=visits")).toBe("dashboard");
+    expect(kindForTabId("page:oxplow-foundation/go-to")).toBe("ext-page");
     expect(kindForTabId("page:external-url?url=https://example.com")).toBe("external-url");
     expect(kindForTabId("page:diff?path=a/b.ts&left=disk&right=ref:x")).toBe("diff");
   });

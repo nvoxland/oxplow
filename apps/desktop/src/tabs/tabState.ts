@@ -49,7 +49,6 @@ export type RoutePageKind =
   | "uncommitted-changes"
   | "terminal"
   | "settings"
-  | "dashboard"
   | "new-stream"
   | "new-task"
   | "stream-settings"
@@ -58,7 +57,6 @@ export type RoutePageKind =
   | "external-url"
   | "metrics-recorded"
   | "custom-dashboard"
-  | "dashboards"
   | "explore-data"
   | "board";
 

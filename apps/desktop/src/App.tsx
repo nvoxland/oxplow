@@ -125,7 +125,6 @@ import { CommentsInboxPage } from "./pages/CommentsInboxPage.js";
 import { MetricDetailPage } from "./pages/MetricDetailPage.js";
 import { MetricsPage } from "./pages/MetricsPage.js";
 import { CustomDashboardPage } from "./pages/CustomDashboardPage.js";
-import { DashboardsIndexPage } from "./pages/DashboardsIndexPage.js";
 import { LensPage } from "./pages/LensPage.js";
 import { insertIntoAgent } from "./agent-input-bus.js";
 import { getPageDetailStore } from "./tabs/openPageDetail.js";
@@ -135,7 +134,6 @@ import { ExtensionPageView } from "./pages/ExtensionPageView.js";
 import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
 import { WorkItemPage } from "./pages/WorkItemPage.js";
 import { WikiPage } from "./pages/WikiPage.js";
-import { DashboardPage } from "./pages/DashboardPage.js";
 import { StreamSettingsPage } from "./pages/StreamSettingsPage.js";
 import { ThreadSettingsPage } from "./pages/ThreadSettingsPage.js";
 import { NewStreamPage } from "./pages/NewStreamPage.js";
@@ -2996,14 +2994,6 @@ export function App() {
           render: () => <CustomDashboardPage dashboardId={p?.id} onOpenPage={nav.navOpen} />,
         };
       },
-      dashboards: (ref, nav) => {
-        return {
-          id: ref.id,
-          label: "Dashboards",
-          closable: true,
-          render: () => <DashboardsIndexPage onOpenPage={nav.navOpen} />,
-        };
-      },
       // A symbol opens its file at its line (openSymbol); it's never a tab.
       symbol: () => null,
       board: (ref, nav) => ({
@@ -3224,16 +3214,6 @@ export function App() {
               onClose={() => closePageTab(ref.id)}
               onSubmit={(input) => handleCreateTask({ ...input, state: input.state ?? "todo" })}
             />
-          ),
-        };
-      },
-      dashboard: (ref, nav) => {
-        return {
-          id: ref.id,
-          label: "Go To",
-          closable: true,
-          render: () => (
-            <DashboardPage stream={stream} threadId={selectedThreadId} onOpenPage={nav.navOpen} />
           ),
         };
       },

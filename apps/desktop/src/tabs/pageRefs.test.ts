@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   agentSessionRef,
   customDashboardRef,
-  dashboardRef,
+  goToRef,
+  dashboardsRef,
   directoryRef,
   diffRef,
   diskFilePath,
@@ -95,7 +96,7 @@ describe("pageRefs", () => {
   });
 
   test("routes with a subject carry it as query params", () => {
-    expect(dashboardRef("visits").id).toBe("page:dashboard?variant=visits");
+    expect(goToRef().id).toBe("page:oxplow-foundation/go-to");
     expect(wikiFreshnessRef("data-model").id).toBe("page:oxplow-foundation/wiki-freshness?slug=data-model");
     expect(customDashboardRef("dsh3").id).toBe("page:custom-dashboard?id=dsh3");
     expect(streamSettingsRef("str1").id).toBe("page:stream-settings?stream=str1");
@@ -254,7 +255,8 @@ describe("refFromTabId", () => {
     const refs = [
       agentSessionRef("ses3"),
       newSessionRef(),
-      dashboardRef("visits"),
+      goToRef(),
+      dashboardsRef(),
       directoryRef("src/components"),
       externalUrlRef("https://x.test/p"),
       fileRef("src/a.ts"),
@@ -290,8 +292,8 @@ describe("refFromTabId", () => {
     }
   });
 
-  test("the Go To dashboard reopens as itself", () => {
-    expect(refFromTabId(dashboardRef("visits").id)).toEqual(dashboardRef("visits"));
+  test("the Go To page reopens as itself", () => {
+    expect(refFromTabId(goToRef().id)).toEqual(goToRef());
   });
 
   test("a directory page reopens with its path payload", () => {

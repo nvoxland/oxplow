@@ -1,0 +1,20 @@
+title: Recently visited
+description: The thread's most recently visited pages, newest first, each once.
+params:
+  - { name: thread_id }
+query: |
+  SELECT coalesce(nullif(trim(w.title), ''), nullif(trim(v.label), ''), v.ref) AS title, v.page_kind, v.ref
+  FROM (
+    SELECT page_id AS ref, page_kind, label, visited_at,
+           row_number() OVER (PARTITION BY page_id ORDER BY visited_at DESC, id DESC) AS latest
+    FROM v_page_visit
+    WHERE thread_id = :thread_id AND page_kind <> 'agent_session'
+  ) v
+  LEFT JOIN v_knowledge_page w ON w.ref = v.ref
+  WHERE v.latest = 1
+  ORDER BY v.visited_at DESC
+  LIMIT 25
+columns:
+  - { key: title, label: Page, icon: page_kind, link: { kind: page, from: ref } }
+empty: No visits yet. Pages you open show up here, most recent first.
+hidden: true

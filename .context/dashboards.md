@@ -129,10 +129,11 @@ checklist:
   empty state is a dashed drop-zone card. Live-refreshes when `v_dashboard`
   / `v_dashboard_item` change (structure); the metric specs and catalog re-read when their models change
   (`useRerunOnChange`).
-- **`dashboards`** — a literal-id index kind (**in `INDEX_KINDS`**,
-  `dashboardsRef()`): `DashboardsIndexPage` lists the user's dashboards (rows via
-  `RouteLink` → `customDashboardRef`) + a **+ New dashboard** action. In the
-  launcher via a `computePagesDirectory` **Activity** entry.
+- **`dashboards`** — the foundation's `dashboards` lens page
+  (`page:oxplow-foundation/dashboards`, `dashboardsRef()`): the user's
+  dashboards over `v_dashboard` (each row links to its page) + a **New
+  Dashboard** action on `oxplow.dashboard.create`, whose `ui.open_after`
+  opens the new one. In the launcher under **Data**.
 
 **Query tiles (P4.7, tsk492).** A dashboard tile is `query` (pinned SQL
 plus how to show it), `lens` or `text`; the `metric` kind and its

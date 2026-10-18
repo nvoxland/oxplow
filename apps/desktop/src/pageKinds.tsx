@@ -90,7 +90,6 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return GitCommit;
     case "dashboard":
     case "custom-dashboard":
-    case "dashboards":
       return LayoutDashboard;
     case "alerts":
       return Bell;
