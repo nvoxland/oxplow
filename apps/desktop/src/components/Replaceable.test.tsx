@@ -87,7 +87,7 @@ const { Replaceable } = await import("./Replaceable.js");
 /** Extension `name`, replacing the Board with its `board` lens. */
 const replacing = (name: string) => ({
   name,
-  enabled: true,
+  enabled: true, pages: [],
   ui: {
     slots: [],
     commands: [],
@@ -104,7 +104,7 @@ const replacing = (name: string) => ({
 /** Extension `name`, replacing a work item's state control. */
 const stating = (name: string) => ({
   name,
-  enabled: true,
+  enabled: true, pages: [],
   ui: {
     slots: [],
     commands: [],
@@ -277,7 +277,7 @@ test("an older provider read answering late doesn't win", async () => {
 /** Extension `name`, drawing the history graph (a target no provider binds). */
 const graphing = (name: string) => ({
   name,
-  enabled: true,
+  enabled: true, pages: [],
   ui: {
     slots: [],
     commands: [],
@@ -326,7 +326,7 @@ test("an unbound target shows its one replacement, or the person's choice among 
 test("an effort's verdict is only ever an extension's", async () => {
   const judging = (name: string) => ({
     name,
-    enabled: true,
+    enabled: true, pages: [],
     ui: {
       slots: [],
       commands: [],

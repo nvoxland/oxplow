@@ -2863,13 +2863,30 @@ export type ExtensionInstanceConfig = {
 export type ExtensionPage = {
 	id: string,
 	extension: string,
-	/**  Its tab id: `page:<extension>/<id>`. */
+	/**
+	 *  Its tab id: `page:<id>` for the oxplow-namespace extension (its
+	 *  pages are core-named, as its commands are), `page:<extension>/<id>`
+	 *  for any other.
+	 */
 	pageRef: string,
 	title: string,
 	icon: string | null,
-	category: LauncherCategory,
-	/**  The lens it shows (`<extension>/<slug>`). */
-	lens: string,
+	/**
+	 *  Its launcher section; none = not in the launcher (a page only
+	 *  opened from elsewhere: a diff, a form).
+	 */
+	category: LauncherCategory | null,
+	/**  More words the launcher matches it on. */
+	keywords: string | null,
+	/**  The params its id carries (`page:settings?area=agents`). */
+	params: string[],
+	/**
+	 *  The lens whose value (a `number` lens) is the launcher's badge
+	 *  (`<extension>/<slug>`).
+	 */
+	count: string | null,
+	/**  What draws it. */
+	body: PageBody,
 };
 
 /**
@@ -5264,6 +5281,17 @@ export type Pacing = {
 	idleSecs: number | null,
 	force: string[],
 };
+
+/**
+ *  What draws a page: a lens core renders through the kit, or — for the
+ *  required bundled extension only, and shrinking — a built-in component
+ *  core still renders (`built_in_pages::BUILT_IN_PAGES`).
+ */
+export type PageBody = { kind: "lens"; 
+/**  `<extension>/<slug>`. */
+lens: string } | { kind: "builtIn"; 
+/**  A `BUILT_IN_PAGES` name. */
+name: string };
 
 export type PageVisit = {
 	id: string,

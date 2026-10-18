@@ -48,6 +48,7 @@ mock.module("../api.js", () => ({
     {
       name: "x",
       enabled: true,
+      pages: [],
       ui: {
         slots: [
           { slot: "work_item.detail.body", lensId: "x/body" },

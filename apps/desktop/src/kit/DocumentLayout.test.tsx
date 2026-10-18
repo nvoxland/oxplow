@@ -13,7 +13,7 @@ mock.module("../api.js", () => ({
   listExtensions: async () => [
     {
       name: "addon",
-      enabled: true,
+      enabled: true, pages: [],
       lenses: [lens("addon/presets", "Presets"), lens("addon/tips", "Tips")],
       ui: {
         slots: [

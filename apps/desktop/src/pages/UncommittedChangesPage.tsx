@@ -7,7 +7,7 @@ import { vcsCommit } from "../api.js";
 import { opErrorOf, settleGitOp } from "../git-op.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { alertsRef, indexRef } from "../tabs/pageRefs.js";
+import { alertsRef, pageTabRef } from "../tabs/pageRefs.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 import { ChangedFilesTree } from "../components/ChangedFiles/ChangedFilesTree.js";
 import { useChangedFiles } from "../components/ChangedFiles/useChangedFiles.js";
@@ -150,7 +150,7 @@ export function UncommittedChangesPage({
             <span>Working tree is clean.</span>
             <button
               type="button"
-              onClick={(e) => onOpenPage(indexRef("git-history"), { newTab: e.metaKey || e.ctrlKey })}
+              onClick={(e) => onOpenPage(pageTabRef("git-history"), { newTab: e.metaKey || e.ctrlKey })}
               style={historyLink}
             >
               View git history →

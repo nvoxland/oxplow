@@ -128,18 +128,56 @@ metrics:
   - {"key":"oxplow.analysis.warnings","title":"Analysis warnings","sourceMeasure":"oxplow.lint_hit","aggregation":"count","filter":{"severity":"warning"},"unit":"count","direction":"lower-better","displayKind":"gauge","category":"static-quality","description":"Static-analysis warnings in the latest run.","sliceableDims":["oxplow.branch","oxplow.vcs_rev"]}
   - {"key":"work.tasks_completed","title":"Tasks completed","entity":"v_work_item","where":"state = 'done'","time":"closed_at","aggregation":"count","unit":"tasks","category":"operational","description":"Work items done, by the day they were closed."}
   - {"key":"work.open_tasks","title":"Open tasks","entity":"v_work_item","where":"state IN ('todo', 'in_progress', 'blocked')","aggregation":"count","unit":"tasks","category":"operational","description":"Work items ready, in progress or blocked, captured over time."}
-# Pages oxplow shows as lenses, each opened at `page:oxplow-foundation/<id>`.
+# Oxplow's pages. They are core-named (`page:<id>`), as this extension's
+# commands are. A page is drawn by a lens; one the kit can't draw yet names a
+# built-in component (`oxplow:<name>`), until it can — that list only shrinks
+# (crates/oxplow-app/fixtures/built_in_pages.json). No category: not in the
+# launcher (opened from elsewhere).
 pages:
-  - { id: problems, title: Problems, icon: triangle-alert, category: Code, lens: problems }
-  - { id: symbols, title: Symbols, icon: list-tree, category: Code, lens: symbols }
-  - { id: hook-events, title: Hook Events, icon: activity, category: Activity, lens: hook-events }
+  # Work
+  - { id: tasks, title: Tasks, icon: check-square, category: Work, keywords: dashboard work list, component: "oxplow:tasks" }
+  - { id: backlog, title: Backlog, icon: inbox, category: Work, count: backlog-count, component: "oxplow:backlog" }
+  - { id: board, title: Board, icon: columns-3, category: Work, keywords: kanban columns state work items, component: "oxplow:board" }
   - { id: done-work, title: Done Work, icon: circle-check, category: Work, lens: done-work }
+  - { id: go-to, title: Go To, icon: star, category: Work, keywords: bookmarks visits recent history, lens: go-to }
+  # Code
+  - { id: files, title: Files, icon: folder-tree, category: Code, component: "oxplow:files" }
+  - { id: problems, title: Problems, icon: triangle-alert, category: Code, lens: problems }
+  - { id: symbols, title: Symbols, icon: list-tree, category: Code, params: [path, filter], lens: symbols }
+  # Git
+  - { id: git-dashboard, title: Git, icon: git-branch, category: Git, component: "oxplow:git-dashboard" }
+  - { id: git-history, title: Git History, icon: git-merge, category: Git, component: "oxplow:git-history" }
+  - { id: uncommitted-changes, title: Uncommitted, icon: git-branch, category: Git, component: "oxplow:uncommitted-changes" }
+  # Activity
+  - { id: local-history, title: Local History, icon: history, category: Activity, component: "oxplow:local-history" }
+  - { id: comments, title: Comments, icon: inbox, category: Activity, component: "oxplow:comments" }
+  - { id: hook-events, title: Hook Events, icon: activity, category: Activity, lens: hook-events }
+  # Knowledge
   - { id: wiki-index, title: Wiki, icon: book-open, category: Knowledge, lens: wiki-index }
   - { id: wiki-freshness, title: Wiki Freshness, icon: book-open, category: Knowledge, lens: wiki-freshness }
-  - { id: go-to, title: Go To, icon: star, category: Activity, lens: go-to }
-  - { id: dashboards, title: Dashboards, icon: database, category: Data, lens: dashboards }
+  # Data
+  - { id: explore-data, title: Explore Data, icon: database, category: Data, keywords: sql query schema semantic layer lens, component: "oxplow:explore-data" }
+  - { id: metrics-recorded, title: Metrics, icon: bar-chart-3, category: Data, keywords: recorded catalog, component: "oxplow:metrics-recorded" }
+  - { id: dashboards, title: Dashboards, icon: layout-dashboard, category: Data, keywords: custom metric tiles lens, lens: dashboards }
+  # System
+  - { id: terminal, title: Terminal, icon: terminal, category: System, component: "oxplow:terminal" }
+  - { id: settings, title: Settings, icon: settings, category: System, keywords: every setting config preferences, params: [area], component: "oxplow:settings" }
+  - { id: catalog, title: Catalog, icon: book-open, category: System, keywords: ask prompts questions what can i help data config, lens: catalog-overview }
   - { id: closed-threads, title: Closed Threads, icon: archive, category: System, lens: closed-threads }
-  - { id: catalog, title: Catalog, icon: book-open, category: System, lens: catalog-overview }
+  # Opened from elsewhere
+  - { id: alerts, title: Alerts, icon: bell, component: "oxplow:alerts" }
+  - { id: local-history-full, title: All Snapshots, icon: history, component: "oxplow:local-history-full" }
+  - { id: local-history-by-commit-full, title: All Commits, icon: history, component: "oxplow:local-history-by-commit-full" }
+  - { id: custom-dashboard, title: Dashboard, icon: layout-dashboard, params: [id], component: "oxplow:custom-dashboard" }
+  - { id: new-session, title: New Session, icon: plus, component: "oxplow:new-session" }
+  - { id: new-stream, title: New Stream, icon: plus, component: "oxplow:new-stream" }
+  - { id: new-task, title: New Item, icon: plus, component: "oxplow:new-task" }
+  - { id: stream-settings, title: Stream Settings, icon: settings, params: [stream], component: "oxplow:stream-settings" }
+  - { id: thread-settings, title: Thread Settings, icon: settings, params: [thread], component: "oxplow:thread-settings" }
+  - { id: external-url, title: Web Page, icon: external-link, params: [url], component: "oxplow:external-url" }
+  - { id: diff, title: Diff, icon: git-compare, params: [path, left, right, label], component: "oxplow:diff" }
+  - { id: diff-view, title: Changes, icon: git-compare, params: [snapshot, effort, start, end], component: "oxplow:diff-view" }
+  - { id: duplicate-block, title: Duplicate Block, icon: copy, params: [left, left_lines, left_at, right, right_lines, right_at], component: "oxplow:duplicate-block" }
 ui:
   slots:
     - { slot: thread.plan.header, lens: thread-handoffs-in }
@@ -680,7 +718,7 @@ commands:
     scope: knowledge.write
     op: write_page
     invokers: { human: true, agent: true, lens: true }
-    ui: { label: "New Wiki Page…", group: Knowledge, keywords: [wiki, page, note, write], form: "page:oxplow-foundation/wiki-index", open_after: "{{result.page}}" }
+    ui: { label: "New Wiki Page…", group: Knowledge, keywords: [wiki, page, note, write], form: "page:wiki-index", open_after: "{{result.page}}" }
     example: {"slug": "auth-flow", "title": "Auth flow", "body": "# Auth flow\n\nThe callback validates `next` before redirecting. See [[src/auth.rs]].", "verified_refs": ["src/auth.rs"]}
   # lenses.read
   - name: lens.run

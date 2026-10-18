@@ -1661,9 +1661,8 @@ the change loop announces `OxplowEvent::MetricSamplesChanged` for what landed.
 ## UI
 
 The metric UI is **three pages**, each with one job, all reading the one
-fact table — no per-metric UI code. Each is registered like the `usage` index
-page (`tabState.PageKind`, `pageRefs.indexRef`, `RailHud/sections.ts`, `App.tsx`,
-`pageKinds.tsx`) and cross-links to the others in its header. (History: the
+fact table — no per-metric UI code. Recorded Metrics is a declared page (`page:metrics-recorded`, oxplow-foundation's
+`pages:`, a built-in until the kit can draw it); Metric Detail is the `metric:<key>` entity page and cross-links to the others in its header. (History: the
 configure surface was split off as a fourth "Metric Settings" page in
 tsk282/tsk80, then **folded back in by tsk117** — per-metric configuration now
 lives on the Metric Detail page; see "The configure surface" below.) Explorer
@@ -1673,8 +1672,7 @@ the `/oxplow:new-metric` skill, tsk122) — no page writes one; Recorded Metrics
 just carries a Help blurb pointing there.
 
 - **Metrics Explorer** (`MetricsExplorerPage.tsx` wrapping `MetricsExplorer.tsx`)
-  — the marquee page and the rail "Metrics" entry (`indexRef("metrics")` /
-  `metricsExplorerRef()`). Header link: "Recorded metrics →" (the "Configure
+  — the marquee page and the rail "Metrics" entry (`metricsExplorerRef()`). Header link: "Recorded metrics →" (the "Configure
   metrics →" link died with the Settings page, tsk117). A measure's title
   navigates to the metric's **detail page** (via `onOpenDetail` → `metricRef`).
 > ### ⚠️ A seeded spec does NOT mean an enabled metric (tsk87)

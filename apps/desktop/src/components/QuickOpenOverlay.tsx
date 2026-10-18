@@ -27,13 +27,13 @@ import {
   type LauncherSection,
   type QuickOpenResult,
 } from "./quickOpenResults.js";
-import { PageKindIcon, pageKindLabel } from "../pageKinds.js";
+import { kindForTabId, PageKindIcon, pageKindLabel } from "../pageKinds.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./RailHud/history.js";
 import type { PageCategory, PageDirectoryEntry } from "./RailHud/sections.js";
 import { mergeDirectory } from "../lens/lensModel.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
-import { launcherPages } from "./extensionLauncher.js";
+import { launcherPages, useLauncherCounts } from "./extensionLauncher.js";
 
 interface Props {
   open: boolean;
@@ -286,8 +286,9 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
   // Their manifest `launcher:` entries join too: a ref as a page, a
   // command or prompt as an action (P6.D1).
   const exts = useExtensions();
-  const lensPages = useMemo(() => launcherPages(exts ?? []), [exts]);
-  const pages = useMemo(() => mergeDirectory(staticPages, lensPages), [staticPages, lensPages]);
+  const counts = useLauncherCounts(exts, stream?.id ?? null, open);
+  const lensPages = useMemo(() => launcherPages(exts ?? [], counts), [exts, counts]);
+  const pages = useMemo(() => mergeDirectory(lensPages, staticPages), [staticPages, lensPages]);
 
   // Recent pages for the "Recent" start-menu section: the 10 most recent
   // visits (deduped by ref), reusing the rail History source + exclude set.
@@ -498,7 +499,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                     }}
                   >
                     <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}>
-                      <PageKindIcon kind={result.entry.ref.kind} tabId={result.entry.ref.id} size={14} style={{ color: "var(--text-secondary)" }} />
+                      <PageKindIcon kind={kindForTabId(result.entry.ref.id)} size={14} style={{ color: "var(--text-secondary)" }} />
                     </span>
                     <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
                       {result.entry.label}

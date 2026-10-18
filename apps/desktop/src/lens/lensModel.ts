@@ -16,7 +16,7 @@ import {
 } from "../components/format.js";
 import type { ColumnFormat, Extension, Lens, SlotAt, LensChart, LensLink, LensRun, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/RailHud/sections.js";
-import { computeDiffId, duplicateBlockRef, effortDiffRef, fileRef, gitCommitRef, lensRef, metricRef, wikiPageRef } from "../tabs/pageRefs.js";
+import { diffRef, duplicateBlockRef, effortDiffRef, fileRef, gitCommitRef, lensRef, metricRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { formatContextMention, type ContextRef } from "../agent-context-ref.js";
@@ -227,7 +227,7 @@ export function cellLinkRef(
         labelOverride: `${shortRevisionLabel(base)}..${shortRevisionLabel(head)}`,
         revealLine: line > 0 ? line : undefined,
       };
-      return { id: computeDiffId(spec), kind: "diff", payload: spec };
+      return diffRef(spec);
     }
     case "compare": {
       const m = /^(.+):(\d+)-(\d+)\|(.+):(\d+)-(\d+)$/.exec(s);
@@ -333,19 +333,19 @@ export function lensDirectoryEntries(extensions: Extension[]): PageDirectoryEntr
   return out;
 }
 
-/** The launcher directory: static pages plus lens entries, each lens
- *  placed after the static pages of its category, categories in
+/** The launcher directory: two lists of entries, each of `then`'s
+ *  placed after `first`'s of its category, categories in
  *  `PAGE_CATEGORY_ORDER`, so every heading stays contiguous. */
 export function mergeDirectory(
-  staticPages: PageDirectoryEntry[],
-  lensPages: PageDirectoryEntry[],
+  first: PageDirectoryEntry[],
+  then: PageDirectoryEntry[],
 ): PageDirectoryEntry[] {
-  const all = [...staticPages, ...lensPages];
+  const all = [...first, ...then];
   const rank = (c: string) => {
     const i = (PAGE_CATEGORY_ORDER as readonly string[]).indexOf(c);
     return i === -1 ? PAGE_CATEGORY_ORDER.length : i;
   };
-  // Stable sort: within a category, static pages keep their order and come first.
+  // Stable sort: within a category, `first` keeps its order and comes first.
   return all
     .map((p, i) => ({ p, i }))
     .sort((a, b) => rank(a.p.category) - rank(b.p.category) || a.i - b.i)

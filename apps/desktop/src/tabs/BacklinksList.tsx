@@ -5,11 +5,10 @@ import { useMemo } from "react";
 import type { MenuItem } from "../menu.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
-import { PageKindIcon } from "../pageKinds.js";
-import { kindOf, parseRef, refOf } from "../refs/ref.js";
+import { kindForTabId, PageKindIcon } from "../pageKinds.js";
+import { parseRef, refOf } from "../refs/ref.js";
 import { openRefInWindow } from "./openRef.js";
 import { refTargetNow } from "./refOpener.js";
-import { pageKindOf } from "./pageRefs.js";
 import { setContextRefDrag } from "../agent-context-dnd.js";
 import type { ContextRef } from "../agent-context-ref.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
@@ -230,7 +229,7 @@ export function BacklinksList({
           onDragStart={ctxRef !== null ? (e) => setContextRefDrag(e, ctxRef) : undefined}
           style={rowStyle}
         >
-          <PageKindIcon kind={pageKindOf(page) ?? kindOf(page) ?? "page"} tabId={page} size={14} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
+          <PageKindIcon kind={kindForTabId(page)} size={14} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
           <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {entry.label}
           </span>

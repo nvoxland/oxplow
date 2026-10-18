@@ -29,7 +29,7 @@ import { readBranches, readHistory, type History } from "../vcsHistory.js";
 import { sessionStatusKey } from "../agentStatusRollup.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { alertsRef, gitCommitRef, indexRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
+import { alertsRef, gitCommitRef, pageTabRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 import { awaitGitOp, opErrorOf } from "../git-op.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
@@ -389,7 +389,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
               streamId={streamId}
               log={data.recentLog}
               onSelectCommit={handleSelectCommit}
-              onViewFullHistory={() => onOpenPage(indexRef("git-history"))}
+              onViewFullHistory={() => onOpenPage(pageTabRef("git-history"))}
             />
 
             <StreamsCard

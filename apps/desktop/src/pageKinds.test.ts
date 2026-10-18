@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { REF_KIND_ICONS } from "./refKinds.js";
 import type { Extension } from "./tauri-bridge/generated/bindings.js";
-import { extPageIconComponent, kindForTabId, pageKindIconComponent, pageKindLabel } from "./pageKinds.js";
+import { declaredPageIcon, kindForTabId, pageKindIconComponent, pageKindLabel } from "./pageKinds.js";
 
 describe("kindForTabId", () => {
   test("scheme-prefixed ids return the prefix", () => {
@@ -17,10 +17,10 @@ describe("kindForTabId", () => {
     expect(kindForTabId("agent_session:ses3")).toBe("agent_session");
   });
 
-  test("page routes return the page name, with or without params", () => {
+  test("a declared page's id is its kind, with or without params", () => {
     expect(kindForTabId("page:new-session")).toBe("new-session");
     expect(kindForTabId("page:tasks")).toBe("tasks");
-    expect(kindForTabId("page:oxplow-foundation/go-to")).toBe("ext-page");
+    expect(kindForTabId("page:gh/open-prs")).toBe("gh/open-prs");
     expect(kindForTabId("page:external-url?url=https://example.com")).toBe("external-url");
     expect(kindForTabId("page:diff?path=a/b.ts&left=disk&right=ref:x")).toBe("diff");
   });
@@ -31,42 +31,14 @@ describe("kindForTabId", () => {
 });
 
 describe("pageKindIconComponent", () => {
-  test("returns an icon for every supported scheme kind", () => {
-    const supported = [
-      "file",
-      "directory",
-      "wiki",
-      "work_item",
-      "commit",
-      "diff",
-      "duplicate-block",
-      "dashboard",
-      "alerts",
-      "stream-settings",
-      "thread-settings",
-      "settings",
-      "external-url",
-      "uncommitted-changes",
-      "tasks",
-      "backlog",
-      "files",
-      "local-history",
-      "git-history",
-      "git-dashboard",
-      "new-stream",
-      "new-task",
-      "diff-view",
-    ];
-    for (const k of supported) {
-      expect(pageKindIconComponent(k)).not.toBeNull();
+  test("returns an icon for every entity kind", () => {
+    for (const k of ["file", "directory", "dir", "wiki", "work_item", "commit", "diff", "dashboard", "metric", "lens", "symbol"]) {
+      expect(pageKindIconComponent(k), k).not.toBeNull();
     }
   });
 
-  test("an agent session's tab and the session picker have icons and labels", () => {
-    expect(pageKindIconComponent("agent_session")).not.toBeNull();
-    expect(pageKindIconComponent("new-session")).not.toBeNull();
-    expect(pageKindLabel("agent_session")).toBe("agent session");
-    expect(pageKindLabel("new-session")).toBe("new session");
+  test("a page no extension declares draws the lens icon", () => {
+    expect(pageKindIconComponent("page")).not.toBeNull();
   });
 
   test("unknown kinds return null", () => {
@@ -81,9 +53,6 @@ describe("pageKindLabel", () => {
     expect(pageKindLabel("work_item")).toBe("work item");
     expect(pageKindLabel("metric")).toBe("metric");
     expect(pageKindLabel("wiki")).toBe("wiki page");
-    expect(pageKindLabel("local-history")).toBe("local history");
-    expect(pageKindLabel("uncommitted-changes")).toBe("uncommitted");
-    expect(pageKindLabel("new-task")).toBe("new item");
   });
 
   test("passes plain kinds through unchanged", () => {
@@ -121,25 +90,35 @@ describe("core kinds a search hit can be", () => {
   });
 });
 
-describe("an extension page's icon", () => {
+describe("a declared page", () => {
   const extensions = [
     {
       name: "oxplow-foundation",
+      enabled: true,
       pages: [
-        { id: "problems", icon: "triangle-alert" },
-        { id: "plain", icon: null },
+        { id: "local-history", pageRef: "page:local-history", title: "Local History", icon: "history" },
+        { id: "plain", pageRef: "page:plain", title: "Plain", icon: null },
       ],
     },
+    { name: "gh", enabled: true, pages: [{ id: "open-prs", pageRef: "page:gh/open-prs", title: "Open PRs", icon: "git-merge" }] },
+    { name: "off", enabled: false, pages: [{ id: "x", pageRef: "page:off/x", title: "X", icon: "bell" }] },
   ] as unknown as Extension[];
 
-  test("is the one its page declares", () => {
-    expect(extPageIconComponent(extensions, "page:oxplow-foundation/problems")).toBe(REF_KIND_ICONS["triangle-alert"]!);
+  test("draws the icon its declaration names, by its page id", () => {
+    expect(declaredPageIcon(extensions, "local-history")).toBe(REF_KIND_ICONS.history!);
+    expect(declaredPageIcon(extensions, "gh/open-prs")).toBe(REF_KIND_ICONS["git-merge"]!);
+    expect(pageKindIconComponent("gh/open-prs", extensions)).toBe(REF_KIND_ICONS["git-merge"]!);
   });
 
-  test("is none when the page declares none, or is not there", () => {
-    expect(extPageIconComponent(extensions, "page:oxplow-foundation/plain")).toBeNull();
-    expect(extPageIconComponent(extensions, "page:oxplow-foundation/gone")).toBeNull();
-    expect(extPageIconComponent(null, "page:oxplow-foundation/problems")).toBeNull();
-    expect(extPageIconComponent(extensions, "page:tasks")).toBeNull();
+  test("has no icon when it names none, isn't declared, or its extension is off", () => {
+    expect(declaredPageIcon(extensions, "plain")).toBeNull();
+    expect(declaredPageIcon(extensions, "gone")).toBeNull();
+    expect(declaredPageIcon(extensions, "off/x")).toBeNull();
+    expect(declaredPageIcon(null, "local-history")).toBeNull();
+  });
+
+  test("is labelled with its title", () => {
+    expect(pageKindLabel("local-history", extensions)).toBe("local history");
+    expect(pageKindLabel("gh/open-prs", extensions)).toBe("open prs");
   });
 });

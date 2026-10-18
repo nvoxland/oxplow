@@ -37,7 +37,7 @@ describe("an extension's ref kind (P8.D7)", () => {
     const tab = target && "tab" in target ? target.tab : null;
     expect(tab).toEqual({
       id: "page:acme/pr?ref=acme_pr:12",
-      kind: "ext-page",
+      kind: "page",
       payload: { extension: "acme", page: "pr", params: { ref: "acme_pr:12" } },
     });
     // The page id alone (a restored tab) carries the ref back.

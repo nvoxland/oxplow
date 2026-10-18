@@ -593,16 +593,30 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     (IPC and MCP `run_lens`) carries `alert: {firing, count, value,
     message}`; the message is `label: count`, `N rows`, or `label: value`.
   - **Pages** (P6.G2, target §11.3): `pages: [{ id, title, icon?,
-    category, lens }]` — a lens shown full-page at
-    `page:<extension>/<id>` (`Extension.pages`, `ExtensionPage`;
-    checked at load in `parse_pages`: a kebab-case, unique id, a launcher
-    category, a lens that exists), listed in the launcher under its
-    category (`components/extensionLauncher.ts`). A page's `icon` is one
-    of the ref-kind icons (`REF_KIND_ICONS`; an unknown one is a load
-    error); the tab strip, launcher, Go To lists and backlinks draw it
-    (`PageKindIcon`'s `tabId`), the lens icon when it declares none.
-    The foundation uses them for pages oxplow once drew in React: Problems,
-    Symbols and Closed Threads (`page:oxplow-foundation/<id>`).
+    category?, keywords?, params?, count?, lens | component }]` — every
+    page that isn't an entity's is one of these, oxplow's own included
+    (`Extension.pages`, `ExtensionPage`; checked at load in
+    `parse_pages`: a kebab-case, unique id; a lens that exists;
+    lowercase `params`; a `count` lens that exists). Its tab id is
+    `page:<extension>/<id>[?params]`, or `page:<id>` for the extension
+    whose `namespace:` is `oxplow` (oxplow-foundation: its pages are
+    core-named as its commands are, `CORE_NAMESPACE`); `pageRef` carries
+    it. `category` lists it in the launcher (none: a page only opened
+    from elsewhere — a diff, a form); `keywords` are more words the
+    launcher matches; `count` names a `number` lens whose value is its
+    launcher badge (Backlog's ready count). `body` is what draws it:
+    exactly one of `lens:` or `component:`. `component: oxplow:<name>`
+    names a **built-in page** (`built_in_pages::BUILT_IN_PAGES`) and only
+    the required bundled extension may use it — a stepping stone for
+    oxplow's pages the kit can't draw yet, pinned by
+    `fixtures/built_in_pages.json`, which may only shrink. Any other
+    `component` is refused until full-page custom components land. A
+    page's `icon` is one of the ref-kind icons (`REF_KIND_ICONS`; an
+    unknown one is a load error); the tab strip, launcher, Go To lists
+    and backlinks draw it (`PageKindIcon` by the page's id), the lens
+    icon when it declares none. A page whose lens or count lens is
+    pruned (`public_contracts`) goes with it. How the desktop draws one:
+    pages-and-tabs.md "Declared pages".
   - **Panels** (P6.G1, target §11.3): `panels: [{ id, title, icon?,
     scope: project | stream | thread, body, badge?, open?, collapsed?,
     count? }]` put a lens in the
@@ -3111,7 +3125,7 @@ helpers consult and `useRefKinds` subscribes to:
   keeps the two lists equal) and label;
 - `openRef("acme_pr:12", …)` (a link to the ref) opens
   `page:acme/pr?ref=acme_pr:12` through the kind's page template, `page:acme/pr?ref={ref}` (refs.md
-  "Where a ref opens"; `extPageRef` carries params; `ExtensionPageView`
+  "Where a ref opens"; `extPageRef` carries params; `DeclaredPageView`
   hands them to the lens as `initialParams`);
 - `preprocessWikilinks` turns `[[acme_pr:12]]` / `[[pr:12]]` into a link
   when the id matches the kind's pattern (`extensionWikilinkRef`, as the
@@ -4136,7 +4150,7 @@ tool: open_work              # offered as <namespace>_open_work
     with their doc, `human_only` and value schema). An agent reads both
     with `oxplow_query_sql`; there is no catalog RPC.
   - The UI: the **Catalog** page, a foundation document lens
-    (`page:oxplow-foundation/catalog`, `catalog-overview`: sections
+    (`page:catalog`, `catalog-overview`: sections
     `catalog-prompts` — grouped by who offers each, with an Ask row action
     on `oxplow.agent.draft` — `catalog` over `v_model`, and
     `catalog-config-keys`, with Open Settings as a page action on

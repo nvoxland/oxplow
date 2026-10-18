@@ -21,7 +21,7 @@ const ext = (name: string): Extension =>
     collectors: [],
     origin: "project",
     ui: { slots: [], commands: [], decorators: [] },
-    enabled: true,
+    enabled: true, pages: [],
     advisories: [],
     measures: [],
     metrics: [],

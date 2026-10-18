@@ -45,7 +45,7 @@ const instance = {
   provider: "fake",
   instanceId: "fake",
   capability: "work_items",
-  enabled: true,
+  enabled: true, pages: [],
   config: { team: "core" },
   configSchema: { type: "object", properties: { team: { type: "string" } } },
   approved: true,
@@ -81,7 +81,7 @@ mock.module("../api.js", () => ({
   listExtensions: async () =>
     replacements.length === 0
       ? []
-      : [{ name: "tracker", enabled: true, ui: { slots: [], commands: [], decorators: [], replacements }, lenses: [] }],
+      : [{ name: "tracker", enabled: true, pages: [], ui: { slots: [], commands: [], decorators: [], replacements }, lenses: [] }],
   subscribeOxplowEvents: (fn: (event: Record<string, unknown>) => void) => {
     listeners.add(fn);
     return () => listeners.delete(fn);

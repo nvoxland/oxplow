@@ -53,8 +53,8 @@ consumer. It's mounted by two page renderers:
   `paneTarget` the session id (`ses3`). The backend spawns the session's
   harness CLI (Claude, opencode, or Codex's TUI on the thread oxplow
   opened on its daemon).
-- `apps/desktop/src/pages/TerminalPage.tsx` — the "Terminal" Page (rail
-  entry + `indexRef("terminal")`). Hosts **multiple** shells: it mounts
+- `apps/desktop/src/pages/TerminalPage.tsx` — the "Terminal" Page (`page:terminal`,
+  a built-in page oxplow-foundation declares). Hosts **multiple** shells: it mounts
   one `TerminalPane` per terminal, stacked and toggled `display:none`
   (keep-warm), with a vertical initials strip
   (`components/Terminal/TerminalTabStrip.tsx`) on the left to select

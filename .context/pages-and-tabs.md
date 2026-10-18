@@ -59,7 +59,7 @@ pages are THE shell.
 |---|---|
 | `apps/desktop/src/tabs/tabState.ts` | `createTabStore()` — per-thread tab list + active id, with `openTab`, `ensureTab`, `activate`, `closeTab`, `subscribe`. In memory; no cross-restart persistence in v1. |
 | `apps/desktop/src/tabs/useTabStore.ts` | `getTabStore()` singleton + `useThreadTabs(threadId)` hook backed by `useSyncExternalStore`. |
-| `apps/desktop/src/tabs/pageRefs.ts` | Every tab id, built here and nowhere else: entity refs (`fileRef`, `directoryRef`, `wikiPageRef`, `taskRef`, `gitCommitRef`, `metricRef`, `lensRef`, `agentSessionRef`) and shell routes (`newSessionRef`, `indexRef(kind)`, `diffRef(spec)`, `snapshotRef`/`effortDiffRef`/`endpointDiffRef`, `dashboardRef`, …). `refFromTabId(id)` is the inverse of every constructor (via the exhaustive `ROUTES` table for `page:` ids); `pageKindOf(id)` names the kind a tab renders as; `diskFilePath(id)` is the one way to ask "which working-tree file is this tab". |
+| `apps/desktop/src/tabs/pageRefs.ts` | Every tab id, built here and nowhere else: entity refs (`fileRef`, `directoryRef`, `wikiPageRef`, `taskRef`, `gitCommitRef`, `metricRef`, `lensRef`, `agentSessionRef`) and declared pages (`pageTabRef(id, params?, state?)`, `extPageRef`, typed wrappers such as `newSessionRef`, `diffRef(spec)`, `endpointDiffRef`, `settingsRef`; `pagePayload`, `isPage`, `recordedPageKind`). `refFromTabId(id)` is the inverse of every constructor; `pageKindOf(id)` names the kind a tab renders as; `diskFilePath(id)` is the one way to ask "which working-tree file is this tab". |
 | `apps/desktop/src/tabs/Page.tsx` | Shared page chrome: title + kind chip + status chips + actions slot, optional **browser-style nav bar** (back/forward + bookmark + backlinks dropdown — auto-mounted from `PageNavigationContext` when present), body, collapsible legacy Backlinks region. Title can be passed as a `title` prop or registered programmatically by the page via `usePageTitle`; the chrome falls back to the context title when `title` is omitted. Every page shows the nav bar when it has a navigation context (a page outside one — a test — gets the plain header instead); a page doesn't opt out. `titleIcon` draws before the title (an agent's logo). **`titleInBody`** (default false) says the page renders its OWN title as an `<h1>` in the body (use the exported `pageH1Style` for consistency), so the chrome (nav bar / header) suppresses the title to avoid a duplicate — the tab-strip label via `usePageTitle` is unaffected. Adopters: `MetricDetailPage`, `DiffViewPage` (tsk137). **The body** takes `width?: "full" \| "reading"` and an independent `rightRail` (a 320px sticky control panel beside a body of either width); below ~960px the rail moves inline to the top of the body (`RailBody`) — "Body layouts" below. **Actions** are `PageAction[]` drawn in the nav bar, and `pin` adds Pin to Dashboard — "The nav bar is core's". Reads only semantic CSS variables (skin via theme). |
 | `apps/desktop/src/tabs/PageNavBar.tsx` | Dumb nav-bar component: back/forward buttons, optional bookmark toggle, optional backlinks/outbound/snapshots dropdowns (popovers), and an optional **comment navigator** slot (`comments` ReactNode, rendered before Backlinks). Mounted by `Page` when context or explicit `navBar` prop is present. |
 | `apps/desktop/src/components/Comments/CommentNavigator.tsx` | Self-contained per-page comment navigator for the nav bar. `useCommentsForTarget(kind,id)` → shows "Comments (N)", steps through anchored comments with ◀ ▶ (each `requestCommentReveal`s to scroll + open inline on the surface), and a dropdown lists all comments plus an **Orphaned (M)** section. Orphaned entries are clickable too: they `requestCommentReveal`, and the surfaces open the thread popover at a fallback position (no anchor to scroll to) so the comment is readable. The popover then offers a **"Relink to selection"** button (`CommentPopover.onRelink`, wired by RichTextField + MonacoCommentLayer) that re-attaches the comment to the editor's current selection — select the intended text first. (The right-click "Relink orphaned" path still exists.) Comment-bearing pages pass it via `Page`'s `commentsNav` prop (FilePage → file/path, WikiPage → wiki/slug, WorkItemPage → work_item/`<provider>:<id>`). Renders nothing when the page has no comments. Pure helpers (`partitionPageComments`, `stepComment`) live in `pageCommentNav.ts` (unit-tested) and are shared with the per-thread stepper: `CommentPopover` takes an `onStep(dir)` prop so an open comment thread shows ◀ Prev / Next ▶ buttons that scroll to + reopen the adjacent comment (wired by RichTextField + MonacoCommentLayer via `stepComment` + `requestCommentReveal`). |
@@ -74,7 +74,7 @@ pages are THE shell.
 | ~~`apps/desktop/src/tabs/appPageBacklinks.ts`~~ | **Deleted.** Per-kind in-memory backlinks providers used to live here. Cross-page backlinks now come from the persisted `page_ref` graph (`crates/oxplow-db/src/page_ref_store.rs`) via the `list_backlinks` IPC; every page kind goes through the same code path. App pages that need their own provider would register a new `source_kind` writer in the backend instead. |
 | `apps/desktop/src/pages/WorkItemPage.tsx` | Every work item's page (`work_item:<provider>:<id>`), whichever list is active: title and body edited in place (`TaskDetail`), the rail's state pill and the list's declared fields (`TaskDetailRail`), activity (its efforts); Parent, thread/backlog moves, Comment…, Link… and Delete only as the list's features allow (`v_capability_provider`); the `work_item.detail.body` / `.sidebar` slots and the `work_item.detail.state` replacement (beside the state pill, never instead of it). See [work-items.md](./work-items.md). |
 | `apps/desktop/src/pages/GitCommitPage.tsx` | Single-commit page (`commit:<sha>`): commit metadata (collapsing a long body behind "Show more") with cherry-pick / revert, the changed files (`ChangedFilesTree`, parent → commit diffs) and the `vcs.commit.details` lens slot (`change_id` from `useChange`). Routed via `gitCommitRef(sha)`. |
-| `apps/desktop/src/components/RailHud/sections.ts` | Pure helpers: `computeActiveItem`, `computeUpNext`, `computePagesDirectory`. The pages directory is a pure function so it can be unit-tested without mounting the React rail. |
+| `apps/desktop/src/components/RailHud/sections.ts` | The launcher's categories (`PAGE_CATEGORY_ORDER`, `PageDirectoryEntry`) and `settingsAreaEntries` (the Settings areas as launcher entries); every other launcher page is a declared page (`components/extensionLauncher.ts`). |
 | `apps/desktop/src/pages/GitDashboardPage.tsx` | Committed-history rollup: branch header (current branch + upstream + ahead/behind + push), small uncommitted mini-card that links to `UncommittedChangesPage`, recent commits rendered through the shared `CommitGraphTable` (last 5, current branch only via `getGitLog({ all: false })`; click a row → reveal in `GitHistoryPage`), worktrees row with per-row "Merge into current", a **"Merge readiness" card** (cross-stream divergence vs the integration branch via `listStreamDivergences()` — per-stream ahead/behind + a clean/will-conflict/integrated badge, naming the overlapping files on conflict, with a one-click "Merge into &lt;base&gt;" offered only while viewing the base stream), recent remote branches with per-row pull/push. Each action asks first exactly when its command's spec does (`SpecConfirm`, tsk898: merge and rebase, which are `Destructive`; pull and push are `Never`, as everywhere else they run). Routed via `gitDashboardRef()`. |
 | `apps/desktop/src/components/History/CommitGraphTable.tsx` | Pure presentation of the git-log graph (branch/merge dots + lines + sha + ref badges + subject + author + relative date). Used by both `HistoryPanel` (full list with detail pane; `GitHistoryPage` wraps it, with a `vcs.history.sidebar` side column when an extension mounts there) and `GitDashboardPage`'s recent-commits card. `indexRefsBySha(log)` exported alongside groups branch heads + tags by sha so callers feed identical maps. |
 | `apps/desktop/src/pages/UncommittedChangesPage.tsx` | Working-tree changes: a Commit-all form, the changed files (`ChangedFilesTree` via `useChangedFiles({ kind: "working" })`, with a `N changed · +a −d` heading), the `vcs.status.header` strip above them (`stream_id`) and the `vcs.status.details` lens slot below. Distinct from `FilesPage` which is the full project file tree. Routed via `uncommittedChangesRef()`. |
@@ -134,22 +134,29 @@ inside an id (`work_item:oxplow:tsk42`) never splits it. Two families:
 - **Entity pages** (`EntityPageKind`): the tab id of a file, directory,
   wiki page, task, commit, metric or lens *is* its ref, so a `[[…]]`
   link, a `page_ref` row, a backlink and a tab all agree on one string.
-- **Shell routes** (`RoutePageKind`): a page of the shell, not a thing
-  in the graph — `page:<name>[?params]` (`page:tasks`,
-  `page:diff-view?effort=eff9`). The route name is the `TabRef.kind`.
-  Routes never appear in `page_ref`. Params are a query string whose
-  values escape only what would break the id (`&`, `=`, `+`, `%`, `@`,
-  `#`, whitespace), so `path=src/a.ts&left=ref:abc` stays readable; the
-  raw text after `page:` is what gets parsed, not `parseRef`'s decoded
-  id.
+- **Declared pages** (kind `page`): a page an extension's manifest
+  declares under `pages:` — not a thing in the graph. Its id is
+  `page:<id>[?params]` for oxplow's own (oxplow-foundation has
+  `namespace: oxplow`, so its pages are core-named as its commands are:
+  `page:tasks`, `page:settings?area=agents`) and
+  `page:<extension>/<id>[?params]` for any other extension's. Every
+  page tab's `TabRef.kind` is `page`; its payload is `PagePayload
+  { extension, page, params, state? }` (`extension` null for oxplow's).
+  `state` is look-aside data the id doesn't hold (a diff's spec,
+  Settings' landing section, a new item's parent): lost on a restart by
+  design, so a page must draw from its params alone. Pages never appear
+  in `page_ref`. Params are a query string whose values escape only
+  what would break the id (`&`, `=`, `+`, `%`, `@`, `#`, whitespace),
+  so `path=src/a.ts&left=git:abc` stays readable.
 
 `refFromTabId(id)` rebuilds the full ref (with payload) from an id alone
-and returns `null` for text that isn't a ref, an unknown kind, or a route
-whose params don't rebuild — callers (rail History, Go To, the launcher's
-Recent) drop the row rather than open a blank tab. The `ROUTES` table is
-`Record<RoutePageKind, …>`, so a new route can't ship without its
-inverse; the round-trip test in `pageRefs.test.ts` covers every
-constructor. `newTaskRef(payload)`'s defaults deliberately aren't in the
+and returns `null` for text that isn't a ref or an unknown kind —
+callers (rail History, Go To, the launcher's Recent) drop the row rather
+than open a blank tab. Any `page:` id rebuilds (`pageTabRef` /
+`extPageRef`); whether a page by that id exists is the declaration's
+business, and an undeclared one draws "No such page". The round-trip
+test in `pageRefs.test.ts` covers every constructor (a page's `state`
+aside). constructor. `newTaskRef(payload)`'s defaults deliberately aren't in the
 id (stable id → one form tab), so a history reopen starts empty.
 
 There are no sentinel tab ids (`HOME_TAB` in `App.tsx` means "nothing
@@ -159,7 +166,8 @@ chosen", never a tab), and "is this the editor's working-tree file" is
 
 **No compatibility layer for old ids.** When a kind is renamed or a page
 moves into an extension, its saved tabs/bookmarks/history are dropped
-(the `oxplow.layout.v2.*` keys started fresh on 2026-09-28; bookmarks
+(the tab-layout keys started fresh again as `oxplow.layout.v3.*` when
+pages became declared, 2026-10-17; bookmarks
 moved into the project DB and started fresh again) — see the decision in [refs.md](./refs.md).
 
 | Kind | Id format | Example |
@@ -171,20 +179,66 @@ moved into the project DB and started fresh again) — see the decision in [refs
 | commit | `commit:<sha>` | `commit:abc1234` |
 | metric | `metric:<key>` | `metric:oxplow.coverage.abs_pct` |
 | lens | `lens:<extension>/<slug>[?param=value…]` (params sorted; `lensRef(id, params)`) | `lens:review/waiting-on-me`, `lens:oxplow-bundled/effort-tests?effort_id=12` |
-| ext-page | `page:<extension>/<page>` (`extPageRef`; the page contribution's ref) — an extension's `pages:` entry, its lens full-page (`ExtensionPageView` resolves the page from the stream's extensions, so a restored tab opens too, and titles the tab with the page's manifest `title` through `LensPage`'s `title`, and draws its manifest `icon` wherever a page's icon shows: `PageKindIcon` takes the tab id and `extPageIconComponent` resolves it). Not a named route: `PageKind` includes `ExtensionPageKind`, and `refFromTabId` / `pageKindOf` recognise an extension's page by the slash in its id (a shell route has none). Params ride the id (`?ref=`) into the lens's `initialParams`: a ref of an extension's kind (`acme_pr:12`, P8.D7, extensions.md "Ref kinds") opens its kind's page this way | `page:github/open-prs`, `page:acme/pr?ref=acme_pr:12` |
-| foundation lens pages | `page:oxplow-foundation/<id>` — Problems (`problems`), Symbols (`symbols`, `?path=` for one file's outline), Closed Threads (`closed-threads`), Wiki (`wiki-index`, a `document` lens: Recently visited and Wiki pages, a `filter` over titles and bodies; "+ New" and the row actions are lens actions, and creating a page opens it through the command's `ui.open_after`), Wiki Freshness (`wiki-freshness`, `?slug=`; Mark verified runs `oxplow.knowledge.verify_refs`), Go To (`go-to`, a `document` lens: Bookmarks with Move-to-scope and Remove row actions, Recently visited, Most visited; the rail's panel header opens it), Dashboards (`dashboards`, the user's dashboards; New Dashboard opens the new one through the command's `ui.open_after`), Hook Events (`hook-events`, the agent's `agent.*` events from `v_event`) and Done Work (`done-work`, the thread's closed items, with a Reopen row action): lens pages the foundation declares under `pages:`, not core page kinds | `page:oxplow-foundation/symbols?path=src/lib.rs` |
+| page | `page:<id>[?params]` (oxplow's) / `page:<extension>/<id>[?params]` (`pageTabRef(id, params?, state?)`, `extPageRef(ext, id, params?)`, plus typed wrappers: `diffRef`, `endpointDiffRef`, `duplicateBlockRef`, `settingsRef`, `newTaskRef`, …) — a declared page; see "Declared pages" below | `page:tasks`, `page:symbols?path=src/lib.rs`, `page:github/open-prs`, `page:acme/pr?ref=acme_pr:12` |
 | symbol | `symbol:<path>/<id>` (`v_symbol.ref`, `symbolRef(ref)`) — no revision in the id; never a tab: opening one (`handleOpenPage`, or in-tab navigation) resolves it (`resolve_symbol`) and opens its file at the name's line (`openSymbol`). A pinned one (`@snap:<id>` / `@git:<sha>`) opens the file viewer at that revision; if the version is gone it shows a notice and opens the current symbol | `symbol:src/lib.rs/Widget::spin` |
 | agent_session | `agent_session:<ses id>` (`agentSessionRef(id)`, pinned) — an open agent session's terminal; its tab draws its harness's declared logo (`CenterTab.icon` from `HarnessListing.icon`, `AgentIcon`; the generic robot when it declares none) | `agent_session:ses3` |
-| new-session | `page:new-session` (`newSessionRef()`) — the session picker, a Document page (`DocumentLayout`): **Start a new session**, then **Earlier sessions**, and what extensions mount in `new-session.sections` (ids `start`, `earlier`; it binds `thread_id`). Earlier sessions is a kit toolbar and table (a filter and the thread's closed sessions and saved conversations, `list_earlier_sessions`; ↑/↓/Enter/Escape from the filter; a row reopens, resumes or shows its session by the action the backend chose — `terminal.md` "Earlier sessions") | `page:new-session` |
-| index routes | `page:<kind>` — `tasks`, `backlog`, `archived`, `files`, `comments`, `local-history(-full\|-by-commit-full)`, `git-history`, `git-dashboard`, `uncommitted-changes`, `terminal`, `metrics-recorded`, `dashboards`, `explore-data`, `board`, `new-stream`, `new-task` | `page:tasks` |
-| diff | `page:diff?path=<p>&left=<ver>&right=<ver>[&label=<l>]` (versions `disk` / `ref:<x>` / `snap:<id>`; `diffRef(spec)` / `computeDiffId(spec)` — `revealLine` is not in the id, so re-clicking reuses the tab) | `page:diff?path=src/a.ts&left=ref:abc&right=disk` |
-| diff-view | `page:diff-view?snapshot=<N>` \| `?effort=<effortId>` \| `?start=<tok>&end=<tok>` (endpoint tokens `s<snapshotId>` / `c<sha>` / `w` / `none`) | `page:diff-view?effort=eff42` |
-| duplicate-block | `page:duplicate-block?left=<p>&left_lines=<a>-<b>&left_at=<ver>&right=…` | `page:duplicate-block?left=a.rs&left_lines=1-5&left_at=disk&right=b.rs&right_lines=9-13&right_at=ref:abc` |
-| custom-dashboard | `page:custom-dashboard?id=<dashboardId>` | `page:custom-dashboard?id=dsh3` |
-| settings | `page:settings[?area=<area>]` (`settingsRef(area, section)`; `section` rides the payload, not the id) — a Settings area's Document page (`pages/settingsAreas.ts`); no `area` is the overview, every setting | `page:settings?area=agents` |
-| stream-settings / thread-settings | `page:stream-settings?stream=<id>` / `page:thread-settings?thread=<id>` | `page:thread-settings?thread=thr3` |
-| alerts | `page:alerts` | `page:alerts` |
-| external-url | `page:external-url?url=<url>` (`=`, `&`, `#` in the URL are escaped) | `page:external-url?url=https://example.com/path` |
+
+## Declared pages
+
+Every page that isn't an entity's is a `pages:` entry in an extension's
+manifest (`.context/extensions.md` "Pages"); oxplow's own are in
+oxplow-foundation's. The declaration gives the title, icon, launcher
+`category` (none: not in the launcher — a page only opened from
+elsewhere), `keywords`, the `params` its id carries, a `count:` lens for
+the launcher badge, and what draws it: a `lens:` (most pages) or, for
+oxplow's own until the kit can draw them, `component: oxplow:<name>`, a
+**built-in page**. The built-ins are pinned by
+`crates/oxplow-app/src/built_in_pages.rs` and its golden
+`fixtures/built_in_pages.json`, which only shrinks (a page leaves when it
+becomes a lens); `pages/declaredPages.ts`'s `BUILT_IN_PAGES` mirrors it
+and a test checks they match.
+
+The desktop draws a `page` tab in one renderer (`App.tsx`,
+`pageRenderers.page`): it finds the declaration (`declaredPage`, by tab
+id among the enabled extensions), draws a built-in from the
+`builtInPages` table by name, and a lens page through
+`DeclaredPageView` (`LensPage` with the id's params). While the
+extensions load, an oxplow page whose id is a built-in's name draws the
+built-in straight away. Icons and labels come from the declaration too:
+`kindForTabId` gives a page's id (`tasks`, `gh/open-prs`) as its kind,
+which is also what visits and bookmarks record (`recordedPageKind`),
+and `PageKindIcon` / `lensIcon` / `pageKindLabel` resolve it to the
+page's icon and title. The launcher lists the declared pages with a
+category (`launcherPages`), each `count:` lens run when it opens
+(`useLauncherCounts`), plus the Settings areas (`settingsAreaEntries`).
+
+oxplow's pages and their params:
+
+- Lens pages: `problems`, `symbols` (`path`, `filter`), `closed-threads`,
+  `wiki-index`, `wiki-freshness` (`slug`), `go-to`, `dashboards`,
+  `hook-events`, `done-work`, `catalog`.
+- Built-in pages: `tasks`, `backlog` (badge: `backlog-count`), `board`,
+  `files`, `git-dashboard`, `git-history`, `uncommitted-changes`,
+  `local-history`, `local-history-full`, `local-history-by-commit-full`,
+  `comments`, `explore-data`, `metrics-recorded`, `terminal`, `alerts`,
+  `settings` (`area`; `section` rides `state`), `custom-dashboard`
+  (`id`), `new-session`, `new-stream`, `new-task` (`parentRef` rides
+  `state`), `stream-settings` (`stream`), `thread-settings` (`thread`),
+  `external-url` (`url`), `diff` (`path`, `left`, `right`, `label`; the
+  full spec rides `state`, `diffSpecOf` rebuilds it from the params),
+  `diff-view` (`start`, `end`: `none` / `working` / `snap:<id>` /
+  `git:<rev>`; `endpointsOf`), `duplicate-block` (`left`, `left_lines`,
+  `left_at`, `right`, `right_lines`, `right_at`; `duplicateBlockOf`).
+
+New Session (`page:new-session`) is a Document page (`DocumentLayout`):
+**Start a new session**, then **Earlier sessions**, and what extensions
+mount in `new-session.sections` (ids `start`, `earlier`; it binds
+`thread_id`). Earlier sessions is a kit toolbar and table (a filter and
+the thread's closed sessions and saved conversations,
+`list_earlier_sessions`; ↑/↓/Enter/Escape from the filter; a row
+reopens, resumes or shows its session by the action the backend chose —
+`terminal.md` "Earlier sessions"). A diff's `revealLine` is not in its
+id, so re-clicking reuses the tab.
 
 ## Left-nav panels (P6.G1)
 
@@ -403,11 +457,11 @@ zone grouping); each appears only when it has content:
    section**: the launcher is the one discovery surface for all pages,
    and users pin what they want always-visible by starring (the ☆ on each
    page's nav bar, scoped thread / stream / project).
-   `computePagesDirectory` is the launcher's page list (the old
-   `RAIL_PAGE_IDS` filter is gone); every page carries a `category` (Work
-   / Code / Git / Activity / Knowledge / System) so the launcher empty
-   state reads like a start menu. The ↗ opens the **Go To** page
-   (`goToRef()`, `page:oxplow-foundation/go-to`) for the full hub + bookmark management.
+   The launcher's page list is the declared pages with a `category`
+   (`launcherPages`; Work / Code / Git / Activity / Knowledge / Data /
+   System) plus the Settings areas, so the launcher empty state reads
+   like a start menu. The ↗ opens the **Go To** page
+   (`goToRef()`, `page:go-to`) for the full hub + bookmark management.
    With a query, pages rank by `pageRank` (tsk1031): every token starting
    a word of the title, then the title as a subsequence, then the id, then
    the `keywords` — where each token must start a word, since a lens's
@@ -519,7 +573,7 @@ replaced by four focused pages so each has one job:
   it. Header link "View all done →" routes to Done Work; kebab
   carries the `hide-auto` filter and a "View backlog →"
   entry. PageKind is `"tasks"`; ref helper is `tasksRef()`.
-- **Done work** (`page:oxplow-foundation/done-work`, a foundation lens page) —
+- **Done work** (`page:done-work`, a foundation lens page) —
   full descending list of the current thread's closed items (done and canceled).
 - **Backlog** (`page-backlog`) — the active list's items on no thread
   (`v_work_item.thread_id IS NULL`), for a list with the `lists`
@@ -798,11 +852,10 @@ the visible page would. `handleOpenPage` special-cases only `agent_session`
   When nothing is chosen (`HOME_TAB`), a thread shows its home tab —
   its first session's, else the picker (`homeTabOf`).
 
-This is the architectural rule for new tab kinds: add a `PageKind`
-(entity or route), add a `pageRefs.ts` constructor **and** its `ROUTES`
-inverse, render through `Page`, and add the `pageRenderers` entry in
-`App.tsx` (the two `Record`s tell you what's missing). **Don't** add a
-parallel tab track.
+This is the architectural rule for new pages: a page is a `pages:`
+declaration (see "Adding a page"); a new entity kind adds a `PageKind`,
+a `pageRefs.ts` constructor with its `refFromTabId` inverse, and the
+`pageRenderers` entry in `App.tsx`. **Don't** add a parallel tab track.
 
 Files were stream-scoped historically; lifting them into the
 per-thread list means each thread has its own open-file list within
@@ -1013,27 +1066,37 @@ Snapshots are the only path for cross-restart fidelity.
   streams produced colliding ids; today this doesn't happen because
   diff ids include the leftRef which is stream-specific in practice.
 
-## Adding a new tab kind: checklist
+## Adding a page
 
-1. Extend `PageKind` in `tabs/tabState.ts`. Decide whether its tab is
-   `pinned` (leads the strip, never evicted, not dragged) — today only an
-   agent session's is.
-2. Add a `pageRefs.ts` helper (`fooRef(...)`) and document the id
-   format in the table above.
-3. Build a `*Page` component in `apps/desktop/src/pages/` that
-   wraps the body in `<Page>` and (typically) registers a title
-   via `usePageTitle`.
-4. Add the kind to **`handleOpenPage`'s `switch (ref.kind)` allowlist**
-   in `App.tsx` (the per-thread-page-tab `case` group). This is easy to
-   miss: it has a `default: return`, so a kind that isn't listed is
-   silently dropped — the rail/search entry appears but clicking does
-   nothing. An index kind also needs to be in `INDEX_KINDS`
-   (`pageKinds.tsx`) and the `indexRef(...)` param union (`pageRefs.ts`).
-5. Add a `ref.kind === "..."` branch in the `centerTabs` page-tab
-   loop in `App.tsx` to render the page.
-6. Plumb any list rows that target the new kind through
+A page is a declaration, not core code:
+
+1. Add a `pages:` entry to the extension's manifest (oxplow's own:
+   oxplow-foundation's) with its `id`, `title`, `icon`, `category` (or
+   none, if it's only opened from elsewhere), `params` and a `lens:`
+   that draws it. Nothing in the desktop changes: the launcher, icons,
+   labels, tab titles, visits and bookmarks all read the declaration.
+2. Open it with `pageTabRef(id, params)` (oxplow's) or
+   `extPageRef(ext, id, params)`; a typed wrapper in `pageRefs.ts` is
+   worth it only when a payload is typed.
+3. Where the kit can't draw it yet, grow the kit. A new built-in page
+   (`component: oxplow:<name>`) is not an option: the golden refuses an
+   added name.
+
+A new **entity** kind (a thing in the graph whose tab id is its ref):
+
+1. Extend `EntityPageKind` in `tabs/tabState.ts`. Decide whether its tab
+   is `pinned` (leads the strip, never evicted, not dragged) — today only
+   an agent session's is.
+2. Add a `pageRefs.ts` helper (`fooRef(...)`), its `refFromTabId` case,
+   and document the id format in the table above.
+3. Build a `*Page` component in `apps/desktop/src/pages/` that wraps the
+   body in `<Page>` and (typically) registers a title via
+   `usePageTitle`.
+4. Add its `pageRenderers` entry in `App.tsx` (the `Record<PageKind, …>`
+   tells you it's missing) and its icon in `pageKinds.tsx`.
+5. Plumb any list rows that target the new kind through
    `useRouteDispatch` / `RouteLink` so plain-click navigates in-tab.
-7. If the page exposes data that other pages should backlink to,
+6. If the page exposes data that other pages should backlink to,
    register a provider in `appPageBacklinks.ts`.
 
 Do **not** introduce a parallel state slot for the new kind's tab
@@ -1043,8 +1106,9 @@ diff specs), but tab membership goes in `threadPageTabs`.
 
 ## When to update this doc
 
-- Add a new page kind: extend `PageKind`, add a `pageRefs.ts` helper,
-  document the id format here.
+- Add an entity page kind: extend `EntityPageKind`, add a `pageRefs.ts`
+  helper, document the id format here. A declared page needs no change
+  here unless it's oxplow's own (list it under "Declared pages").
 - Add a new rail HUD section: document the data source and trigger
   conditions.
 - Replace a legacy panel with a Page-wrapped renderer: tick the

@@ -20,7 +20,7 @@ import { logUi } from "../logger.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { NavSiblingEntry, NavSiblings } from "../tabs/PageNavigationContext.js";
-import { gitCommitRef, indexRef, snapshotRef } from "../tabs/pageRefs.js";
+import { gitCommitRef, pageTabRef, snapshotRef } from "../tabs/pageRefs.js";
 import { wikiRef } from "../refs/ref.js";
 import { workItemLabel } from "../workItemRef.js";
 import { vcsRevOf } from "../revision.js";
@@ -382,7 +382,7 @@ function DashboardBody({
           overflowCount={recentOverflow}
           showViewAllLink={isDashboard}
           onSelect={(id, siblings) => onOpenPage(snapshotRef(id), { siblings })}
-          onViewAll={() => onOpenPage(indexRef("local-history-full"))}
+          onViewAll={() => onOpenPage(pageTabRef("local-history-full"))}
           refLabels={data.refLabels}
         />
       ) : (
@@ -391,7 +391,7 @@ function DashboardBody({
           overflowCount={commitOverflow}
           showViewAllLink={isDashboard}
           onSelect={(id, siblings) => onOpenPage(snapshotRef(id), { siblings })}
-          onViewAll={() => onOpenPage(indexRef("local-history-by-commit-full"))}
+          onViewAll={() => onOpenPage(pageTabRef("local-history-by-commit-full"))}
           refLabels={data.refLabels}
           onOpenCommit={(sha) => onOpenPage(gitCommitRef(sha))}
         />

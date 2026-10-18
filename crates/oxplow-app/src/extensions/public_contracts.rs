@@ -713,7 +713,12 @@ fn prune_mounts(
                 true
             });
             ext.pages.retain(|page| {
-                if lenses.contains(&page.lens) {
+                if page
+                    .lens()
+                    .into_iter()
+                    .chain(page.count.as_deref())
+                    .all(|lens| lenses.contains(lens))
+                {
                     true
                 } else {
                     removed.insert(ContributionId::new(

@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import type { Extension, Lens } from "../tauri-bridge/generated/bindings.js";
 import { markParts, treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./lensModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
+import { duplicateBlockOf, isPage, pagePayload } from "../tabs/pageRefs.js";
+import type { TabRef } from "../tabs/tabState.js";
 
 const lens = (over: Partial<Lens> = {}): Lens => ({
   id: "review/waiting",
@@ -349,8 +351,9 @@ describe("change links", () => {
       ["src/a.rs", 12, "git:abc1234", "git:def5678", null],
       cols,
     )!;
-    expect(ref.kind).toBe("diff");
-    const p = ref.payload as { path: string; leftVersion: unknown; rightVersion: unknown; revealLine?: number };
+    expect(isPage(ref, "diff")).toBe(true);
+    const spec = (r: TabRef) => pagePayload(r)!.state as { path: string; leftVersion: unknown; rightVersion: unknown; revealLine?: number };
+    const p = spec(ref);
     expect(p.path).toBe("src/a.rs");
     expect(p.leftVersion).toEqual("git:abc1234");
     expect(p.rightVersion).toEqual("git:def5678");
@@ -361,7 +364,7 @@ describe("change links", () => {
       ["src/a.rs", null, "git:HEAD", "working", null],
       cols,
     )!;
-    expect((working.payload as { rightVersion: unknown }).rightVersion).toEqual("working");
+    expect(spec(working).rightVersion).toEqual("working");
     // An effort's change is between two snapshots; those open too.
     const effort = cellLinkRef(
       { kind: "diff-at", from: "path", line: null, base: "base", head: "head" },
@@ -369,8 +372,8 @@ describe("change links", () => {
       ["a", null, "snap:3", "snap:4", null],
       cols,
     )!;
-    expect((effort.payload as { leftVersion: unknown }).leftVersion).toEqual("snap:3");
-    expect((effort.payload as { rightVersion: unknown }).rightVersion).toEqual("snap:4");
+    expect(spec(effort).leftVersion).toEqual("snap:3");
+    expect(spec(effort).rightVersion).toEqual("snap:4");
     // A cell that isn't a revision opens nothing rather than a guess.
     expect(
       cellLinkRef(
@@ -388,8 +391,8 @@ describe("change links", () => {
       ["x", null, null, "git:def5678", "src/b.rs:3-12|src/a.rs:40-49"],
       cols,
     )!;
-    expect(ref.kind).toBe("duplicate-block");
-    expect(ref.payload).toEqual({
+    expect(isPage(ref, "duplicate-block")).toBe(true);
+    expect(duplicateBlockOf(pagePayload(ref)!.params)).toEqual({
       leftPath: "src/b.rs",
       leftStart: 3,
       leftEnd: 12,

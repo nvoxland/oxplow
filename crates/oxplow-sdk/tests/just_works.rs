@@ -1010,7 +1010,7 @@ async fn a_scaffolded_page_checks_tests_and_shows_its_lens() {
     let svc = booted(dir.path()).await;
     let ext = loaded(&svc, dir.path(), "open-work");
     assert_eq!(ext.pages.len(), 1);
-    assert_eq!(ext.pages[0].lens, "open-work/open-work");
+    assert_eq!(ext.pages[0].lens(), Some("open-work/open-work"));
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -723,11 +723,11 @@ declaring *what it is* and mounting the generic layer.
 - **The launcher is the main keyboard lever — keep it populated.** Every
   command the bus offers a person that can run now flows into the
   launcher's typed results (`searchableCommands` over the offers), and
-  every page in `computePagesDirectory` shows in its empty-state start
+  every declared page with a `category` shows in its empty-state start
   menu. When adding a user-visible action, declare it as a command with
   a `ui` over a bespoke button so it stays keyboard-reachable; a new
-  *page* needs no command — adding it to `computePagesDirectory` (with a
-  `category`) is enough.
+  *page* needs no command — declaring it under `pages:` with a
+  `category` is enough.
 
 ## Test-driveability
 

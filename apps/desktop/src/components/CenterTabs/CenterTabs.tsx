@@ -329,7 +329,6 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
               ) : (
                 <PageKindIcon
                   kind={kindForTabId(tab.id)}
-                  tabId={tab.id}
                   size={13}
                   style={{ color: "var(--text-secondary)", flexShrink: 0 }}
                 />

@@ -1334,13 +1334,54 @@ pub struct ExtensionPanel {
 pub struct ExtensionPage {
     pub id: String,
     pub extension: String,
-    /// Its tab id: `page:<extension>/<id>`.
+    /// Its tab id: `page:<id>` for the oxplow-namespace extension (its
+    /// pages are core-named, as its commands are), `page:<extension>/<id>`
+    /// for any other.
     pub page_ref: String,
     pub title: String,
     pub icon: Option<String>,
-    pub category: LauncherCategory,
-    /// The lens it shows (`<extension>/<slug>`).
-    pub lens: String,
+    /// Its launcher section; none = not in the launcher (a page only
+    /// opened from elsewhere: a diff, a form).
+    pub category: Option<LauncherCategory>,
+    /// More words the launcher matches it on.
+    pub keywords: Option<String>,
+    /// The params its id carries (`page:settings?area=agents`).
+    pub params: Vec<String>,
+    /// The lens whose value (a `number` lens) is the launcher's badge
+    /// (`<extension>/<slug>`).
+    pub count: Option<String>,
+    /// What draws it.
+    pub body: PageBody,
+}
+
+/// The namespace oxplow's own extension declares (`namespace: oxplow`): its
+/// commands are `oxplow.<area>.<verb>` and its pages `page:<id>`.
+pub const CORE_NAMESPACE: &str = "oxplow";
+
+/// What draws a page: a lens core renders through the kit, or — for the
+/// required bundled extension only, and shrinking — a built-in component
+/// core still renders (`built_in_pages::BUILT_IN_PAGES`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum PageBody {
+    Lens {
+        /// `<extension>/<slug>`.
+        lens: String,
+    },
+    BuiltIn {
+        /// A `BUILT_IN_PAGES` name.
+        name: String,
+    },
+}
+
+impl ExtensionPage {
+    /// The lens it shows, when it is a lens page.
+    pub fn lens(&self) -> Option<&str> {
+        match &self.body {
+            PageBody::Lens { lens } => Some(lens),
+            _ => None,
+        }
+    }
 }
 
 /// A `pages:` entry as the manifest holds it.
@@ -1351,8 +1392,24 @@ struct PageFile {
     title: String,
     #[serde(default)]
     icon: Option<String>,
-    category: LauncherCategory,
-    lens: String,
+    /// Its launcher section; leave it out for a page only opened from
+    /// elsewhere.
+    #[serde(default)]
+    category: Option<LauncherCategory>,
+    #[serde(default)]
+    keywords: Option<String>,
+    /// The params its id carries.
+    #[serde(default)]
+    params: Vec<String>,
+    /// A `number` lens of this extension whose value is the launcher badge.
+    #[serde(default)]
+    count: Option<String>,
+    /// A lens of this extension that draws the page …
+    #[serde(default)]
+    lens: Option<String>,
+    /// … or `oxplow:<name>`, a built-in (oxplow's own extension only).
+    #[serde(default)]
+    component: Option<String>,
 }
 
 /// A `panels:` entry as the manifest holds it.
@@ -3205,7 +3262,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         ext.errors.extend(errors);
     }
     if let Some(v) = page_files {
-        let (pages, errors) = parse_pages(name, &ext.lenses, v);
+        let (pages, errors) = parse_pages(name, &ext.namespace, &ext.lenses, v);
         ext.pages = pages;
         let lines = item_lines(&manifest, "pages");
         ext.errors.extend(errors.into_iter().map(|(i, e)| {
@@ -3313,6 +3370,7 @@ fn config_key_type<'a>(schema: &'a serde_json::Value, pointer: &str) -> Option<&
 /// category, and a lens that exists. Each error names the entry's index.
 fn parse_pages(
     extension: &str,
+    namespace: &str,
     lenses: &[Lens],
     raw: serde_yaml::Value,
 ) -> (Vec<ExtensionPage>, Vec<(Option<usize>, String)>) {
@@ -3321,17 +3379,50 @@ fn parse_pages(
     let Some(list) = raw.as_sequence() else {
         return (pages, vec![(None, "`pages` must be a list".into())]);
     };
+    // Oxplow's own pages are core-named, as its commands are.
+    let core_named = namespace == CORE_NAMESPACE;
     for (i, v) in list.iter().enumerate() {
         let p = match serde_yaml::from_value::<PageFile>(v.clone()) {
             Ok(p) => p,
             Err(e) => {
                 errors.push((Some(i), format!(
-                    "pages: {e} (a page is `{{ id, title, icon?, category, lens }}`; a category is one of Work, Code, Git, Activity, Knowledge, Data, Lenses, System)"
+                    "pages: {e} (a page is `{{ id, title, icon?, category?, keywords?, params?, count?, lens | component }}`; a category is one of Work, Code, Git, Activity, Knowledge, Data, Lenses, System)"
                 )));
                 continue;
             }
         };
         let err = |e: String| (Some(i), format!("page `{}`: {e}", p.id));
+        let body = match (&p.lens, &p.component) {
+            (Some(_), Some(_)) | (None, None) => {
+                Err("needs exactly one of `lens` and `component`".to_string())
+            }
+            (Some(lens), None) => {
+                if lenses.iter().any(|l| &l.slug == lens) {
+                    Ok(PageBody::Lens {
+                        lens: format!("{extension}/{lens}"),
+                    })
+                } else {
+                    Err(format!("its lens `{lens}` isn't in lenses/"))
+                }
+            }
+            (None, Some(c)) if c.starts_with("oxplow:") => {
+                if !crate::bundled_extensions::is_required(extension) {
+                    Err(format!(
+                        "`{c}` is a built-in page, which only oxplow's own extension declares; draw it with a lens"
+                    ))
+                } else {
+                    match crate::built_in_pages::built_in(c) {
+                        Some(name) => Ok(PageBody::BuiltIn {
+                            name: name.to_string(),
+                        }),
+                        None => Err(format!("`{c}` isn't a built-in page")),
+                    }
+                }
+            }
+            (None, Some(c)) => Err(format!(
+                "`{c}` isn't a built-in page (`oxplow:<name>`); draw the page with a lens"
+            )),
+        };
         if !oxplow_domain::contribution::valid_local(
             oxplow_domain::contribution::ContributionKind::Page,
             &p.id,
@@ -3339,8 +3430,14 @@ fn parse_pages(
             errors.push(err("a page id is lowercase letters, digits and `-`".into()));
         } else if pages.iter().any(|q| q.id == p.id) {
             errors.push(err("declared twice".into()));
-        } else if !lenses.iter().any(|l| l.slug == p.lens) {
-            errors.push(err(format!("its lens `{}` isn't in lenses/", p.lens)));
+        } else if let Err(e) = &body {
+            errors.push(err(e.clone()));
+        } else if let Some(c) = p
+            .count
+            .as_ref()
+            .filter(|c| !lenses.iter().any(|l| &l.slug == *c))
+        {
+            errors.push(err(format!("its count lens `{c}` isn't in lenses/")));
         } else if p
             .icon
             .as_deref()
@@ -3351,15 +3448,31 @@ fn parse_pages(
                 p.icon.as_deref().unwrap_or_default(),
                 crate::extension_ref_kinds::REF_KIND_ICONS.join(", ")
             )));
+        } else if let Some(bad) = p.params.iter().find(|n| {
+            n.is_empty()
+                || !n
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        }) {
+            errors.push(err(format!(
+                "param `{bad}` must be lowercase letters, digits and `_`"
+            )));
         } else {
             pages.push(ExtensionPage {
-                page_ref: oxplow_domain::refs::build::extension_page_ref(extension, &p.id),
+                page_ref: if core_named {
+                    oxplow_domain::refs::build::page_ref(&p.id, None)
+                } else {
+                    oxplow_domain::refs::build::extension_page_ref(extension, &p.id)
+                },
                 id: p.id,
                 extension: extension.to_string(),
                 title: p.title,
                 icon: p.icon,
                 category: p.category,
-                lens: format!("{extension}/{}", p.lens),
+                keywords: p.keywords,
+                params: p.params,
+                count: p.count.map(|c| format!("{extension}/{c}")),
+                body: body.expect("checked above"),
             });
         }
     }
@@ -8840,27 +8953,55 @@ commands:
         );
     }
 
-    /// P6.G2: an extension's page is a lens under a launcher category, at
-    /// `page:<extension>/<page>`.
+    /// An extension's page is a lens (or one of its custom components) at
+    /// `page:<extension>/<page>`, in the launcher under its category when it
+    /// has one.
     #[test]
     fn pages_are_lenses_with_a_route() {
-        let lenses = [("open", "title: Open\nquery: SELECT 1\n")];
+        let lenses = [
+            ("open", "title: Open\nquery: SELECT 1\n"),
+            (
+                "waiting",
+                "title: Waiting\nquery: SELECT 3 AS n\nviz: number\n",
+            ),
+        ];
         let (_d, ext) = load_x(
             &lenses,
-            "manifest: 2\nintent:\n  purpose: p\npages:\n  - { id: open-prs, title: Open PRs, icon: git-pull-request, category: Work, lens: open }\n",
+            "manifest: 2\nintent:\n  purpose: p\npages:\n  - { id: open-prs, title: Open PRs, icon: git-pull-request, category: Work, keywords: pull requests, params: [author], count: waiting, lens: open }\n  - { id: detail, title: Detail, lens: open }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(
             ext.pages,
-            vec![ExtensionPage {
-                id: "open-prs".into(),
-                extension: "x".into(),
-                page_ref: "page:x/open-prs".into(),
-                title: "Open PRs".into(),
-                icon: Some("git-pull-request".into()),
-                category: LauncherCategory::Work,
-                lens: "x/open".into(),
-            }]
+            vec![
+                ExtensionPage {
+                    id: "open-prs".into(),
+                    extension: "x".into(),
+                    page_ref: "page:x/open-prs".into(),
+                    title: "Open PRs".into(),
+                    icon: Some("git-pull-request".into()),
+                    category: Some(LauncherCategory::Work),
+                    keywords: Some("pull requests".into()),
+                    params: vec!["author".into()],
+                    count: Some("x/waiting".into()),
+                    body: PageBody::Lens {
+                        lens: "x/open".into()
+                    },
+                },
+                ExtensionPage {
+                    id: "detail".into(),
+                    extension: "x".into(),
+                    page_ref: "page:x/detail".into(),
+                    title: "Detail".into(),
+                    icon: None,
+                    category: None,
+                    keywords: None,
+                    params: vec![],
+                    count: None,
+                    body: PageBody::Lens {
+                        lens: "x/open".into()
+                    },
+                }
+            ]
         );
         for (page, says) in [
             (
@@ -8878,6 +9019,27 @@ commands:
             (
                 "{ id: a, title: A, icon: nope, category: Work, lens: open }",
                 "icon",
+            ),
+            (
+                "{ id: a, title: A }",
+                "exactly one of `lens` and `component`",
+            ),
+            (
+                "{ id: a, title: A, lens: open, component: c }",
+                "exactly one of `lens` and `component`",
+            ),
+            (
+                "{ id: a, title: A, component: \"oxplow:tasks\" }",
+                "only oxplow's own extension",
+            ),
+            (
+                "{ id: a, title: A, component: nope }",
+                "isn't a built-in page",
+            ),
+            ("{ id: a, title: A, count: nope, lens: open }", "count lens"),
+            (
+                "{ id: a, title: A, params: [Bad], lens: open }",
+                "param `Bad`",
             ),
         ] {
             let (_d, ext) = load_x(
