@@ -1,6 +1,9 @@
 import { expect, test } from "../../support/fixtures.js";
 
-test("the app boots against its daemon: the shell renders and no call fails", async ({ page }) => {
+// A fresh daemon: it expects a thread with no session (the picker), which a
+// shared daemon an earlier spec opened a session on doesn't have.
+test("the app boots against its daemon: the shell renders and no call fails", async ({ fresh }) => {
+  const { page } = fresh;
   const failed: string[] = [];
   page.on("requestfailed", (r) => failed.push(`${r.method()} ${r.url()}: ${r.failure()?.errorText}`));
   // The daemon answers every call 200 with an envelope: a failed call is

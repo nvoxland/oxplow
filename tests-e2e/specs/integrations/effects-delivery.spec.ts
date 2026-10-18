@@ -31,7 +31,7 @@ test("a failed reaction is in Delivery, and a person's Retry composes it afresh"
   const { page, daemon } = fresh;
   await approveProgram(daemon, "effect", "e2e/note-created");
   await page.goto("/");
-  await openFromLauncher(page, "Settings");
+  await openFromLauncher(page, "Settings: Data");
   await run(daemon, "oxplow.work_item.create", { title: "Plum [fail]", thread: daemon.thread });
   const row = page.locator('[data-testid^="reaction-row-e2e/note-created-"]');
   await expect(row).toBeVisible();
@@ -51,7 +51,7 @@ test("a person's Backfill reaches what was logged before the effect was approved
   await run(daemon, "oxplow.work_item.create", { title: "Fig", thread: daemon.thread });
   await approveProgram(daemon, "effect", "e2e/note-created");
   await page.goto("/");
-  await openFromLauncher(page, "Settings");
+  await openFromLauncher(page, "Settings: Data");
   await page.getByTestId(`effect-backfill-${EFFECT}`).click();
   await expect(page.getByTestId(`effect-backfill-ask-${EFFECT}`)).toBeVisible();
   await page.getByTestId(`effect-backfill-run-${EFFECT}`).click();

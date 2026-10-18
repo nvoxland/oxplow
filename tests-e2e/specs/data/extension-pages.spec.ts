@@ -8,7 +8,7 @@ test("an extension's page is offered, and turning the extension off takes it awa
   await searchLauncher(page, "Item");
   await expect(page.getByTestId("launcher-page-page:e2e/item")).toBeVisible();
   await page.keyboard.press("Escape");
-  await openFromLauncher(page, "Settings");
+  await openFromLauncher(page, "Settings: Extensions");
   const toggle = page.getByTestId("extension-toggle-e2e");
   await toggle.click();
   await expect(page.getByTestId("extension-row-e2e")).toContainText(/off|disabled/i);

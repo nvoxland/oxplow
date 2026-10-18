@@ -34,7 +34,7 @@ async function install(daemon: Daemon) {
 
 /** Choose whose view shows for `target` on Settings → Integrations. */
 async function choose(page: Page, target: string, who: string) {
-  await openFromLauncher(page, "Settings");
+  await openFromLauncher(page, "Settings: Integrations");
   const choice = page.getByTestId(`integrations-replacement-choice-${target}`);
   await choice.selectOption(who);
   // The select shows what is saved: it holds the choice once it is stored.

@@ -18,7 +18,7 @@ test("a person configures, checks and enables the fake tracker, and an item reac
   const { page, daemon } = fresh;
   await approveProgram(daemon, "provider", "e2e/fake");
   await page.goto("/");
-  await openFromLauncher(page, "Settings");
+  await openFromLauncher(page, "Settings: Integrations");
   await page.getByTestId("integration-config-e2e/fake-team").fill("core");
   // Check starts it with this config, asks it, and shows what it said —
   // before anything is saved or enabled.
