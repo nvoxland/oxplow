@@ -1137,6 +1137,22 @@ export type Access =
 "write";
 
 /**
+ *  What becomes of the page a lens is on after one of its actions (or its
+ *  form) ran a command whose `ui.open_after` names a page.
+ */
+export type ActionThen = 
+/**  The page opens in this tab; Back returns to the lens's page. */
+"open" | 
+/**
+ *  The page takes this tab and the lens's page leaves its history: Back
+ *  never returns to a submitted form. A page that can't live in a tab
+ *  (an agent session) closes this one and is focused.
+ */
+"replace" | 
+/**  Nothing opens; the lens's page stays (a form for the next entry). */
+"stay";
+
+/**
  *  An MCP server as a provider: oxplow's adapter runs `mcp`'s
  *  server and translates through `mapping`, refusing a server whose tools
  *  aren't `tools`.
@@ -3915,6 +3931,11 @@ export type LensAction = {
 	 *  the choices (`value`, `label`, optional `group`).
 	 */
 	choices: { [key in string]: string },
+	/**
+	 *  What becomes of the lens's page when the command's `ui.open_after`
+	 *  names a page.
+	 */
+	then: ActionThen,
 };
 
 /**
@@ -4021,6 +4042,8 @@ export type LensForm_Deserialize = {
 	 *  `label`, optional `group`).
 	 */
 	choices?: { [key in string]: string },
+	/**  What becomes of the page after a submit whose command opens one. */
+	then?: ActionThen,
 };
 
 /**  `form` viz: the command it submits and the values it starts from. */
@@ -4044,6 +4067,8 @@ export type LensForm_Serialize = {
 	 *  `label`, optional `group`).
 	 */
 	choices?: { [key in string]: string },
+	/**  What becomes of the page after a submit whose command opens one. */
+	then: ActionThen,
 };
 
 /**

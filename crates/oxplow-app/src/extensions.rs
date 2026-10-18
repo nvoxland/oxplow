@@ -280,6 +280,33 @@ pub struct LensSteps {
     pub status: Option<String>,
 }
 
+/// What becomes of the page a lens is on after one of its actions (or its
+/// form) ran a command whose `ui.open_after` names a page.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    specta::Type,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ActionThen {
+    /// The page opens in this tab; Back returns to the lens's page.
+    #[default]
+    Open,
+    /// The page takes this tab and the lens's page leaves its history: Back
+    /// never returns to a submitted form. A page that can't live in a tab
+    /// (an agent session) closes this one and is focused.
+    Replace,
+    /// Nothing opens; the lens's page stays (a form for the next entry).
+    Stay,
+}
+
 /// `form` viz: the command it submits and the values it starts from.
 #[derive(
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
@@ -304,6 +331,9 @@ pub struct LensForm {
     /// `label`, optional `group`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub choices: BTreeMap<String, String>,
+    /// What becomes of the page after a submit whose command opens one.
+    #[serde(default)]
+    pub then: ActionThen,
 }
 
 /// Serialize a JSON value with its numbers as plain numbers, so a YAML
@@ -788,6 +818,9 @@ pub struct LensAction {
     /// (`<extension>/<slug>`) run with the lens's params, whose rows are
     /// the choices (`value`, `label`, optional `group`).
     pub choices: BTreeMap<String, String>,
+    /// What becomes of the lens's page when the command's `ui.open_after`
+    /// names a page.
+    pub then: ActionThen,
 }
 
 /// The `{{param.x}}` / `{{row.x}}` placeholders in `input`, as
@@ -830,6 +863,10 @@ struct ActionFile {
     /// rows are its choices.
     #[serde(default)]
     choices: BTreeMap<String, String>,
+    /// What becomes of the lens's page when the command opens one:
+    /// `open` (default), `replace` or `stay`.
+    #[serde(default)]
+    then: ActionThen,
 }
 
 /// Parse a lens's `actions:`: each `{ id, label, command, input?, row? }`.
@@ -926,6 +963,7 @@ fn parse_actions(
             form: f.form,
             fixed: f.fixed,
             choices: f.choices,
+            then: f.then,
         });
     }
     Ok(out)
@@ -8787,6 +8825,41 @@ commands:
                 ext.errors
             );
         }
+    }
+
+    /// What becomes of the page after an action, or a form lens's submit:
+    /// `then: open` (default) | `replace` | `stay`.
+    #[test]
+    fn an_action_says_what_becomes_of_its_page() {
+        let (_d, ext) = load_x(
+            &[
+                (
+                    "a",
+                    "title: A\nquery: SELECT 1\nactions:\n  - { id: plain, label: P, command: a.b.c }\n  - { id: gone, label: G, command: a.b.c, then: replace }\n  - { id: again, label: A, command: a.b.c, then: stay }\n",
+                ),
+                (
+                    "f",
+                    "title: F\nquery: SELECT 1\nviz: form\nform: { command: a.b.c, then: replace }\n",
+                ),
+                ("b", "title: B\nquery: SELECT 1\nactions: [{ id: x, label: X, command: a.b.c, then: away }]\n"),
+            ],
+            "",
+        );
+        let a = ext.lenses.iter().find(|l| l.slug == "a").expect("a loads");
+        assert_eq!(
+            a.actions.iter().map(|x| x.then).collect::<Vec<_>>(),
+            vec![ActionThen::Open, ActionThen::Replace, ActionThen::Stay]
+        );
+        let f = ext.lenses.iter().find(|l| l.slug == "f").expect("f loads");
+        assert_eq!(f.form.as_ref().map(|x| x.then), Some(ActionThen::Replace));
+        assert!(ext.lenses.iter().all(|l| l.slug != "b"));
+        assert!(
+            ext.errors
+                .iter()
+                .any(|e| e.contains("b.yaml") && e.contains("away")),
+            "{:?}",
+            ext.errors
+        );
     }
 
     /// A row action's `{{row.x}}` must be a column the query returns.

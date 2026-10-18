@@ -1683,7 +1683,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   (`columns` entry for `tree.label`), so its `link`, `icon` and `tone`
   apply.
 - `actions`: commands the lens offers, `{ id, label, command, input?,
-  row?, group?, form?, fixed?, choices? }`, with `{{param.x}}` / `{{row.x}}` placeholders; run as the lens
+  row?, group?, form?, fixed?, choices?, then? }`, with `{{param.x}}` / `{{row.x}}` placeholders; run as the lens
   for whoever pressed, so they grant no power. `form: true` opens the
   command's form instead of running (a slideover: `lens_action_form`
   gives the command and the bound `input` as starting values); what the
@@ -1705,7 +1705,15 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   a command offer does (`lensActions.openAfterAction`). A result that
   can't name the page is the action's recorded failure.
   `oxplow.knowledge.write_page` declares one (the page it wrote), so the
-  Wiki page's "+ New" opens the new page.
+  Wiki page's "+ New" opens the new page. A form lens's submit follows
+  `open_after` the same way. What becomes of the lens's page is the
+  action's `then` (a form lens's `form.then`): `open` (default) — the
+  page opens in this tab and Back returns; `replace` — it takes this tab
+  and the lens's page leaves history (`NavigateOptions.replace`, so Back
+  never returns to a submitted form; a page that can't live in a tab,
+  an agent session, closes this one and is focused); `stay` — nothing
+  opens (a form for the next entry). Outside a page (a panel) a page
+  opens in a new tab whatever `then` says.
 - `alert`: a row-count or threshold condition that shows a panel badge
   (nudging the agent is what advisories are for).
 

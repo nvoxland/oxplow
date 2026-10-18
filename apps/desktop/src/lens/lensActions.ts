@@ -21,7 +21,9 @@ export interface LensActionDeps {
   /** The page the command opens after a run with `result` (its
    *  `ui.open_after`, bound by the server), or null. */
   openAfter(command: string, result: unknown): Promise<string | null>;
-  openPage(page: string): void;
+  /** Open `page` from the lens's page; `replace`: in its place, the lens's
+   *  page leaving history. */
+  openPage(page: string, replace: boolean): void;
 }
 
 /** What pressing an action came to: it ran, the command asks the person
@@ -60,15 +62,18 @@ export async function performLensAction(
 
 /** A command that declares where a person goes after it (`ui.open_after`)
  *  takes them there from a lens action too, as it does from a command
- *  offer. A page the result can't name is the action's failure. */
+ *  offer — as the action's `then` says: `open` (Back returns), `replace`
+ *  (the lens's page leaves history) or `stay` (nothing opens). A page the
+ *  result can't name is the action's failure. */
 export async function openAfterAction(
-  action: Pick<LensAction, "label" | "command">,
+  action: Pick<LensAction, "label" | "command" | "then">,
   outcome: CommandOutcome,
   deps: Pick<LensActionDeps, "openAfter" | "openPage" | "recordError">,
 ): Promise<void> {
+  if (action.then === "stay") return;
   try {
     const page = await deps.openAfter(action.command, outcome.result);
-    if (page) deps.openPage(page);
+    if (page) deps.openPage(page, action.then === "replace");
   } catch (e) {
     deps.recordError(action.label, e instanceof Error ? e.message : String(e));
   }

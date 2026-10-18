@@ -14,6 +14,9 @@ export interface NavigateOptions {
    * disambiguate when an id appears more than once.
    */
   siblings?: NavSiblings;
+  /** In place of the current page, which leaves history: Back won't
+   *  return to it (a submitted form gives way to what it made). */
+  replace?: boolean;
 }
 
 export interface NavSiblingEntry {

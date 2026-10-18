@@ -58,7 +58,7 @@ export interface AppScope {
   /** Opens a page in a new tab. */
   handleOpenPage: (ref: TabRef) => void;
   /** Navigates the slot with this tab id to `ref`. */
-  handleNavigateInTab: (currentTabId: string, ref: TabRef, siblings?: NavSiblings) => void;
+  handleNavigateInTab: (currentTabId: string, ref: TabRef, siblings?: NavSiblings, replace?: boolean) => void;
   closePageTab: (id: string) => void;
   handleOpenFile: (path: string) => Promise<void>;
   handleNavigateToLocation: (target: EditorNavigationTarget) => Promise<void>;

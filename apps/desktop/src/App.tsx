@@ -114,6 +114,7 @@ import { LensPage } from "./pages/LensPage.js";
 import { insertIntoAgent } from "./agent-input-bus.js";
 import { getPageDetailStore } from "./tabs/openPageDetail.js";
 import { DeclaredPageView } from "./pages/DeclaredPageView.js";
+import { navigatedHistory } from "./tabs/tabHistory.js";
 import { kindForTabId } from "./pageKinds.js";
 import { declaredPage, isBuiltInPage } from "./pages/declaredPages.js";
 import { useExtensions } from "./extensionsStore.js";
@@ -168,29 +169,6 @@ import { agentSessionRef as agentSessionTarget, streamRef } from "./refs/ref.js"
 // when this is exceeded, the oldest-touched tab without unsaved changes is
 // closed automatically via enforceOpenFileLimit. Dirty tabs stay pinned.
 const MAX_OPEN_FILE_TABS = 10;
-
-/**
- * Take a caller-supplied siblings record, snap its `index` to the
- * position whose `ref.id` matches the destination, and drop the
- * record entirely if there's no match (a stale list shouldn't drive
- * prev/next on a page that isn't actually in it).
- */
-function resolveSiblings(
-  siblings: import("./tabs/PageNavigationContext.js").NavSiblings | undefined,
-  ref: TabRef,
-): import("./tabs/PageNavigationContext.js").NavSiblings | null {
-  if (!siblings || siblings.entries.length === 0) return null;
-  const matchIdx = siblings.entries.findIndex((e) => e.ref.id === ref.id);
-  if (matchIdx < 0) {
-    // Caller passed `siblings` but the destination isn't in the list.
-    // If the supplied index points at a valid slot, trust it; otherwise
-    // drop. This guards against silently rendering "1 of N" with the
-    // wrong page.
-    if (siblings.index < 0 || siblings.index >= siblings.entries.length) return null;
-    return siblings;
-  }
-  return { entries: siblings.entries, index: matchIdx };
-}
 
 /// Prompt for a folder and open it as an **existing** project.
 /// `newWindow=false` replaces the current window (this process exits
@@ -1866,14 +1844,60 @@ export function App() {
    * If `currentTabId` doesn't refer to a known page tab, falls back to
    * `handleOpenPage` (open in new tab).
    */
+  const closePageTab = useCallback((id: string) => {
+    if (!selectedThreadId) return;
+    // File tabs live in fileSessions for content + dirty state; close
+    // their content cache too when the tab closes from the unified
+    // list so we don't leak buffers. Stream-scoped because the
+    // session map is keyed by stream.
+    const path = diskFilePath(id);
+    if (path !== null && stream) {
+      setFileSessions((prev) => {
+        const session = prev[stream.id];
+        if (!session || !session.files[path]) return prev;
+        return { ...prev, [stream.id]: closeOpenFile(session, path) };
+      });
+    }
+    setThreadPageTabs((prev) => {
+      const existing = prev[selectedThreadId] ?? [];
+      if (!existing.some((t) => t.id === id)) return prev;
+      return { ...prev, [selectedThreadId]: existing.filter((t) => t.id !== id) };
+    });
+    setThreadPageHistory((prev) => {
+      const perThread = prev[selectedThreadId] ?? {};
+      if (!(id in perThread)) return prev;
+      const { [id]: _drop, ...rest } = perThread;
+      return { ...prev, [selectedThreadId]: rest };
+    });
+    setPageTitles((prev) => {
+      if (!(id in prev)) return prev;
+      const { [id]: _drop, ...rest } = prev;
+      return rest;
+    });
+    setThreadPageMru((prev) => {
+      const cur = prev[selectedThreadId] ?? [];
+      const next = dropFromMru(cur, id);
+      return next === cur ? prev : { ...prev, [selectedThreadId]: next };
+    });
+    setCenterActive((current) => (current === id ? HOME_TAB : current));
+    // GC the per-page snapshot so closed tabs don't leak forever.
+    if (selectedThreadId) {
+      const pageKey = `${selectedThreadId}::${id}`;
+      clearPageSnapshot(pageKey);
+    }
+  }, [selectedThreadId, setCenterActive, setThreadPageMru, stream]);
+
   const handleNavigateInTab = useCallback((
     currentTabId: string,
     ref: TabRef,
     siblings?: import("./tabs/PageNavigationContext.js").NavSiblings,
+    replace = false,
   ) => {
     if (!selectedThreadId) return;
-    // A symbol isn't a page: it opens its file at its line.
+    // A symbol isn't a page: it opens its file at its line. Replacing,
+    // the page it's replacing closes first.
     if (ref.kind === "symbol") {
+      if (replace) closePageTab(currentTabId);
       handleOpenPage(ref);
       return;
     }
@@ -1891,6 +1915,7 @@ export function App() {
     // in `diffTabs`; the helper that initiates the navigation
     // (handleOpenDiffInTab) is responsible for that.
     if (ref.kind === "agent_session") {
+      if (replace) closePageTab(currentTabId);
       handleOpenPage(ref);
       return;
     }
@@ -1941,26 +1966,13 @@ export function App() {
       const perThread = prev[selectedThreadId] ?? {};
       const old = perThread[currentTabId] ?? { back: [], forward: [], siblings: null };
       const { [currentTabId]: _drop, ...rest } = perThread;
-      // Snap the siblings index to whatever entry matches `ref.id` in
-      // case the caller passed an out-of-date index.
-      const resolvedSiblings = resolveSiblings(siblings, ref);
       return {
         ...prev,
-        [selectedThreadId]: {
-          ...rest,
-          [ref.id]: {
-            // Capture the prior page's ref AND its siblings so going
-            // back later restores the originating list's prev/next
-            // chain instead of dropping it.
-            back: [...old.back, { ref: oldRef, siblings: old.siblings }],
-            forward: [],
-            siblings: resolvedSiblings,
-          },
-        },
+        [selectedThreadId]: { ...rest, [ref.id]: navigatedHistory(old, oldRef, ref, siblings, replace) },
       };
     });
     setCenterActive(ref.id);
-  }, [handleOpenPage, selectedThreadId, setCenterActive, threadPageTabs]);
+  }, [closePageTab, handleOpenPage, selectedThreadId, setCenterActive, threadPageTabs]);
 
   /**
    * Open a diff *in-tab* — replaces the active page tab's ref with
@@ -2122,48 +2134,6 @@ export function App() {
     setCenterActive(target.id);
   }, [selectedThreadId, setCenterActive, threadPageHistory, threadPageTabs]);
 
-  const closePageTab = useCallback((id: string) => {
-    if (!selectedThreadId) return;
-    // File tabs live in fileSessions for content + dirty state; close
-    // their content cache too when the tab closes from the unified
-    // list so we don't leak buffers. Stream-scoped because the
-    // session map is keyed by stream.
-    const path = diskFilePath(id);
-    if (path !== null && stream) {
-      setFileSessions((prev) => {
-        const session = prev[stream.id];
-        if (!session || !session.files[path]) return prev;
-        return { ...prev, [stream.id]: closeOpenFile(session, path) };
-      });
-    }
-    setThreadPageTabs((prev) => {
-      const existing = prev[selectedThreadId] ?? [];
-      if (!existing.some((t) => t.id === id)) return prev;
-      return { ...prev, [selectedThreadId]: existing.filter((t) => t.id !== id) };
-    });
-    setThreadPageHistory((prev) => {
-      const perThread = prev[selectedThreadId] ?? {};
-      if (!(id in perThread)) return prev;
-      const { [id]: _drop, ...rest } = perThread;
-      return { ...prev, [selectedThreadId]: rest };
-    });
-    setPageTitles((prev) => {
-      if (!(id in prev)) return prev;
-      const { [id]: _drop, ...rest } = prev;
-      return rest;
-    });
-    setThreadPageMru((prev) => {
-      const cur = prev[selectedThreadId] ?? [];
-      const next = dropFromMru(cur, id);
-      return next === cur ? prev : { ...prev, [selectedThreadId]: next };
-    });
-    setCenterActive((current) => (current === id ? HOME_TAB : current));
-    // GC the per-page snapshot so closed tabs don't leak forever.
-    if (selectedThreadId) {
-      const pageKey = `${selectedThreadId}::${id}`;
-      clearPageSnapshot(pageKey);
-    }
-  }, [selectedThreadId, setCenterActive, setThreadPageMru, stream]);
 
   // The window as a command host (`clientHost.ts`): what only it can do,
   // for a command the daemon runs over it — an agent's `oxplow.tab.*`, in
@@ -2778,13 +2748,10 @@ export function App() {
       // mutates the slot — same behavior as the visible page.
       const navOpen = (
         newRef: TabRef,
-        opts?: {
-          newTab?: boolean;
-          siblings?: import("./tabs/PageNavigationContext.js").NavSiblings;
-        },
+        opts?: import("./tabs/PageNavigationContext.js").NavigateOptions,
       ) => {
         if (opts?.newTab) handleOpenPage(newRef);
-        else handleNavigateInTab(slotRef.id, newRef, opts?.siblings);
+        else handleNavigateInTab(slotRef.id, newRef, opts?.siblings, opts?.replace);
       };
       const navOpenFile = (path: string, opts?: { newTab?: boolean }) => {
         if (opts?.newTab) handleOpenPage(fileRef(path));
@@ -2834,14 +2801,14 @@ export function App() {
       const bookmarkScope = ref ? bookmarks.find((b) => b.ref.id === ref.id)?.scope ?? null : null;
       const registeredTitle = pageTitles[tabId];
       const navValue = {
-        navigate: (newRef: TabRef, opts?: { newTab?: boolean; siblings?: import("./tabs/PageNavigationContext.js").NavSiblings }) => {
+        navigate: (newRef: TabRef, opts?: import("./tabs/PageNavigationContext.js").NavigateOptions) => {
           if (opts?.newTab) handleOpenPage(newRef);
-          else handleNavigateInTab(tabId, newRef, opts?.siblings);
+          else handleNavigateInTab(tabId, newRef, opts?.siblings, opts?.replace);
         },
-        openRef: (target: string, how?: { newTab?: boolean; siblings?: import("./tabs/PageNavigationContext.js").NavSiblings }) =>
+        openRef: (target: string, how?: import("./tabs/PageNavigationContext.js").NavigateOptions) =>
           openRefRef.current(target, how ?? {}, (tab, h) => {
             if (h.newTab) handleOpenPage(tab);
-            else handleNavigateInTab(tabId, tab, h.siblings);
+            else handleNavigateInTab(tabId, tab, h.siblings, h.replace);
           }),
         goBack: () => handleGoBack(tabId),
         goForward: () => handleGoForward(tabId),

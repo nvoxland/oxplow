@@ -647,7 +647,8 @@ Mechanics:
   on in-tab navigation only (new-tab escape paths drop it — sibling
   context is in-tab only).
 - Per-tab history entries (`threadPageHistory`) gained a `siblings`
-  field. `handleNavigateInTab` calls `resolveSiblings` to snap the
+  field. `handleNavigateInTab` builds the entry with `navigatedHistory`
+  (`tabs/tabHistory.ts`), whose `resolveSiblings` snaps the
   destination's index against `ref.id`, so a stale list still lands on
   the right row.
 - `handleStepSibling` swaps the active tab to a sibling at the target
@@ -908,7 +909,10 @@ kinds slot in without re-discovering the layout.
 ### Per-tab navigation history
 - **`threadPageHistory: Record<string, Record<string, { back: TabRef[], forward: TabRef[], siblings: NavSiblings | null }>>`**
   — keyed by `threadId` then by the tab's current id. `back` is
-  pushed when `handleNavigateInTab` swaps the tab's ref; `forward`
+  pushed when `handleNavigateInTab` swaps the tab's ref — unless the
+  navigation is a **replace** (`NavigateOptions.replace`, a lens
+  action's `then: replace`), when the page it left goes out of history
+  and Back skips it; `forward`
   is populated by `handleGoBack`. `siblings` carries the list-
   originated prev/next list (cleared on back/forward; preserved on
   sibling-step). New tab kinds participate automatically — the
@@ -973,12 +977,14 @@ caller
 **Navigate in-tab (browser-tab semantic):**
 ```
 in-page row click
-  └→ useRouteDispatch / ctxNav.navigate(ref, { newTab: false, siblings? })
-       └→ handleNavigateInTab(currentTabId, ref, siblings?)
+  └→ useRouteDispatch / ctxNav.navigate(ref, { newTab: false, siblings?, replace? })
+       └→ handleNavigateInTab(currentTabId, ref, siblings?, replace?)
+            ├→ a ref that can't live in a tab (agent session, symbol):
+            │   close this tab first when replacing, then open it
             ├→ register payload if needed (file: handleOpenFile;
             │   diff: handleOpenDiffInTab — both register before
             │   calling handleNavigateInTab)
-            ├→ push prior ref onto back stack
+            ├→ push prior ref onto back stack (not when replacing)
             ├→ replace tab's current ref
             └→ setCenterActive(ref.id)
 ```

@@ -21,7 +21,7 @@ function deps(fail?: Error, openPage: string | null = null) {
       log.push(`open_after ${command} ${JSON.stringify(result)}`);
       return openPage;
     },
-    openPage: (page) => log.push(`open ${page}`),
+    openPage: (page, replace) => log.push(`${replace ? "replace with" : "open"} ${page}`),
   };
   return { d, log };
 }
@@ -40,6 +40,20 @@ test("an action whose command names a page to open opens it once it ran", async 
   const { d, log } = deps(undefined, "wiki:lib");
   expect(await performLensAction(action, run, null, null, false, d)).toBe("done");
   expect(log.slice(-2)).toEqual([`open_after oxplow.work_item.transition {}`, "open wiki:lib"]);
+});
+
+const done = { result: {}, audit_id: 1, event_id: null, inverse: null };
+
+test("`then: replace` opens the page in place of the lens's page", async () => {
+  const { d, log } = deps(undefined, "work_item:oxplow:tsk9");
+  await openAfterAction({ ...action, then: "replace" }, done, d);
+  expect(log.at(-1)).toBe("replace with work_item:oxplow:tsk9");
+});
+
+test("`then: stay` opens nothing, without asking where", async () => {
+  const { d, log } = deps(undefined, "work_item:oxplow:tsk9");
+  await openAfterAction({ ...action, then: "stay" }, done, d);
+  expect(log).toEqual([]);
 });
 
 test("a command that names no page opens nothing, and a refusal to bind is recorded", async () => {
