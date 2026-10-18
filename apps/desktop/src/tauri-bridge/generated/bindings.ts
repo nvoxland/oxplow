@@ -149,11 +149,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	effectiveConfig: () => typedError<EffectiveSetting[], IpcError>(__TAURI_INVOKE("effective_config")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	getPanelLayout: () => typedError<PanelPlacement[], IpcError>(__TAURI_INVOKE("get_panel_layout")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -2192,11 +2187,6 @@ export type ConfigMigration = {
 	entry: string,
 };
 
-/**  Where a setting's value comes from. */
-export type ConfigOrigin = "default" | "global" | "project" | 
-/**  A person's own layer (`.oxplow/personal.yaml`). */
-"personal" | "extension";
-
 /**  A config problem `check` reported. */
 export type ConfigProblem = {
 	/**  A JSON pointer into the config (`/team`), `""` for the whole. */
@@ -2606,24 +2596,6 @@ export type EffectTrigger = {
 	filter: { [key in string]: string },
 	/**  The scopes its script calls. */
 	needs: string[],
-};
-
-/**  One setting as the Settings view shows it. */
-export type EffectiveSetting = {
-	/**
-	 *  A project key (`snapshotRetentionDays`), or a scoped name
-	 *  (`ai.roles.main`, `metrics.<key>`, `dimensions.<key>`).
-	 */
-	key: string,
-	doc: string,
-	value: unknown,
-	origin: ConfigOrigin,
-	/**  The extension a value comes from (`origin: extension`). */
-	extension: string | null,
-	/**  Only a person may set it; an agent's change asks them. */
-	humanOnly: boolean,
-	/**  A project key's value schema; null for the rest. */
-	schema: unknown,
 };
 
 export type Effort = {

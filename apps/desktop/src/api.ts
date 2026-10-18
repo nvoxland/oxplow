@@ -43,7 +43,6 @@ import { IpcCallError, ipcErrorCode, ipcErrorField, ipcErrorMessage } from "./ip
 import type {
   AiSettings,
   HarnessListing,
-  EffectiveSetting,
   PanelPlacement,
   ChangeRow,
   ChangeTarget,
@@ -633,11 +632,6 @@ export async function invokeComponentCommand(
 
 /** What the person can ask: every capability's questions and the enabled
  *  extensions' prompts (the catalog; contextual suggestions). */
-
-/** Every setting with its value and where it comes from (P6.H1). */
-export async function effectiveConfig(): Promise<EffectiveSetting[]> {
-  return unwrap(await commands.effectiveConfig());
-}
 
 /** The person's left-nav layout: each panel's order, and whether it's
  *  hidden or collapsed (P6.G1). */

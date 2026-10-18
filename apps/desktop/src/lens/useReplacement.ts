@@ -18,7 +18,8 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { effectiveConfig, recordUsage, runLens, subscribeOxplowEvents, type LensRun, type SqlCell } from "../api.js";
+import { recordUsage, runLens, subscribeOxplowEvents, type LensRun, type SqlCell } from "../api.js";
+import { settingValue } from "../configValues.js";
 import { useExtensions } from "../extensionsStore.js";
 import type { UiReplacement } from "../tauri-bridge/generated/bindings.js";
 import { readCapabilityProviders } from "../workItems.js";
@@ -49,8 +50,7 @@ export const OXPLOWS_OWN = "oxplow";
 
 /** What the person said, by target: an extension, or `"oxplow"`. */
 async function readChoices(): Promise<Record<string, string>> {
-  const settings = await effectiveConfig();
-  const chosen = settings.find((s) => s.key === "replacements")?.value;
+  const chosen = await settingValue("replacements");
   return chosen !== null && typeof chosen === "object" && !Array.isArray(chosen)
     ? Object.fromEntries(Object.entries(chosen as Record<string, unknown>).map(([k, v]) => [k, String(v)]))
     : {};

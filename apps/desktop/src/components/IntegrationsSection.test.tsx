@@ -53,6 +53,8 @@ const instance = {
   health: { state: { state: "ready" }, consecutiveFailures: 0, lastOkAt: null, meanInvokeMs: null, rateLimitedUntil: null, activity: null },
   collectors: [{ name: "work_items", entity: "work_item", status: "ok", error: null, lastReadAt: "2026-10-01T00:00:00Z", records: 3 }],
 };
+import { configValueResult, readsSettings } from "../configValuesTestSupport.js";
+
 mock.module("../api.js", () => ({
   ...realApi,
   // A fresh copy each read, as over IPC.
@@ -72,10 +74,13 @@ mock.module("../api.js", () => ({
     more = [];
     return [instance];
   },
-  effectiveConfig: async () => [
-    { key: "activeProviders", doc: "", value: active, origin: "default", extension: null, humanOnly: true, schema: {} },
-    { key: "replacements", doc: "", value: chosenReplacements, origin: "default", extension: null, humanOnly: true, schema: {} },
-  ],
+  querySql: async (sql: string, ...rest: unknown[]) =>
+    readsSettings(sql)
+      ? configValueResult([
+          { key: "activeProviders", value: active },
+          { key: "replacements", value: chosenReplacements },
+        ])
+      : (realApi.querySql as (...a: unknown[]) => unknown)(sql, ...rest),
   // Nothing unless a test declares a replacement: this fake outlives the
   // file (a module mock is process-wide).
   listExtensions: async () =>

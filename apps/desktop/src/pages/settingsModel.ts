@@ -1,7 +1,7 @@
 /// Settings as a view (P6.H1): the effective settings (`effective_config`)
 /// grouped, searched, and turned into an Ask for the agent — the person
 /// changes a setting by asking; person-only ones keep a direct control.
-import type { EffectiveSetting } from "../tauri-bridge/generated/bindings.js";
+import type { EffectiveSetting } from "../configValues.js";
 
 export interface SettingsGroup {
   title: string;

@@ -24,7 +24,6 @@ import {
   checkProviderInstance,
   cancelOauthSignIn,
   completeOauthSignIn,
-  effectiveConfig,
   listExtensions,
   listProviderInstances,
   listenForSignInRedirect,
@@ -38,6 +37,7 @@ import {
   subscribeOxplowEvents,
   type ProviderInstanceView,
 } from "../api.js";
+import { settingValue } from "../configValues.js";
 import type { SignInCompletion, SignInState, UiReplacement } from "../tauri-bridge/generated/bindings.js";
 import { readsOf, useRerunOnChange } from "../lens/lensRerun.js";
 import { CredentialRow } from "./ExtensionsSection.js";
@@ -63,14 +63,13 @@ export function IntegrationsSection() {
 
   const refresh = useCallback(async () => {
     try {
-      const [listed, settings, extensions] = await Promise.all([
+      const [listed, choices, extensions] = await Promise.all([
         listProviderInstances(),
-        effectiveConfig(),
+        settingValue("replacements"),
         listExtensions(),
       ]);
       setViews(listed);
       setReplaced(extensions.filter((e) => e.enabled).flatMap((e) => e.ui.replacements));
-      const choices = settings.find((s) => s.key === "replacements")?.value;
       setChosen(
         choices !== null && typeof choices === "object" && !Array.isArray(choices)
           ? Object.fromEntries(Object.entries(choices as Record<string, unknown>).map(([k, v]) => [k, String(v)]))

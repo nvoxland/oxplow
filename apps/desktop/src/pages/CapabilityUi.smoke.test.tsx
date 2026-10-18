@@ -71,7 +71,6 @@ mock.module("../api.js", () => ({
   ...realApi,
   listExtensions: viaBindings("listExtensions"),
   listPersonCommands: viaBindings("listPersonCommands"),
-  effectiveConfig: viaBindings("effectiveConfig"),
   querySql: (sql: string, params: unknown[] = [], limit: number | null = null, raw = false) =>
     viaBindings("querySql")(sql, params, limit, raw),
   runLens: viaBindings("runLens"),

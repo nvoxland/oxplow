@@ -33,6 +33,8 @@ const providerRows = () => [
   ["work_items", "other", "y", "{}", 0],
 ];
 
+import { configValueResult, readsSettings } from "../configValuesTestSupport.js";
+
 mock.module("../api.js", () => ({
   ...realApi,
   listExtensions: async () => extensions,
@@ -40,8 +42,8 @@ mock.module("../api.js", () => ({
     listeners.add(l);
     return () => listeners.delete(l);
   },
-  effectiveConfig: async () => [{ key: "replacements", value: chosen }],
   querySql: async (sql: string) => {
+    if (readsSettings(sql)) return configValueResult([{ key: "replacements", value: chosen }]);
     if (!sql.includes("v_capability_provider")) {
       return { columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} };
     }

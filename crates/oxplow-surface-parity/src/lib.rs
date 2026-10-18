@@ -203,10 +203,6 @@ pub const MANIFEST: &[Capability] = &[
         "list_data_entities",
         "the Data settings list, which joins the extensions' manifests: an agent reads published entities in `v_model` and one declared but not synced yet in its extension's `extension.yaml`",
     ),
-    ui(
-        "effective_config",
-        "the Settings view of every setting and its origin; an agent reads `oxplow.config.list_keys`",
-    ),
     ui("get_panel_layout", "the person's left-nav layout (P6.G1)"),
     ui("set_panel_layout", "the person's left-nav layout (P6.G1)"),
     model("list_extensions", &["v_extension", "v_contribution"]),

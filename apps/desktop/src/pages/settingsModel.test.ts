@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import type { EffectiveSetting } from "../tauri-bridge/generated/bindings.js";
+import type { EffectiveSetting } from "../configValues.js";
 import { askToChange, groupSettings, matchesSearch } from "./settingsModel.js";
 
 const row = (key: string, over: Partial<EffectiveSetting> = {}): EffectiveSetting => ({

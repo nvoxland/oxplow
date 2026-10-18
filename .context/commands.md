@@ -772,7 +772,7 @@ agent — which has no project counterpart and so no `project.yaml`
 schema; the layer's loader validates it); another key there is refused,
 by the command and by the loader. Any write to the personal layer needs
 the person's confirmation, so an agent's change waits as a proposal. `config.changed@2` names the `layer`; `@1`
-payloads were all the project's (V14 moved them). `effective_config`
+payloads were all the project's (V14 moved them). `v_config_value`
 shows the layer as its own `personal.<key>` row, origin `personal`.
 `set_zones` is gone (tsk392): `zones` is just a key.
 
@@ -789,9 +789,10 @@ which once wrote `{$serde_json::private::Number: '5'}` into the committed
 file (P6 review, tsk599); `keys.rs`'s `yaml_to_json` is the same bridge
 the other way.
 
-**Settings is a view** (`crates/oxplow-app/src/effective_config.rs`, UI
-RPC `effective_config`): one `EffectiveSetting { key, doc, value, origin,
-extension?, humanOnly, schema }` per project key (`project` when the file
+**Settings is a view** (`crates/oxplow-app/src/effective_config.rs`, read
+as the live model `v_config_value`; the desktop reads it through
+`configValues.ts`'s `readSettings` / `settingValue`): one setting `{ key,
+value, origin, extension?, human_only, doc, schema }` per project key (`project` when the file
 sets it, else `default` with the default's value), per AI role
 (`ai.roles.<role>`: `project` when the project overrides it, `global`
 from `ai.yaml`, `default` when unbound; person-only), and per metric and

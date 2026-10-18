@@ -1,6 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  effectiveConfig,
   getConfig,
   setAgentSetting,
   setAgents,
@@ -8,7 +7,8 @@ import {
   subscribeOxplowEvents,
 } from "../api.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
-import type { EffectiveSetting, HarnessListing } from "../tauri-bridge/generated/bindings.js";
+import type { HarnessListing } from "../tauri-bridge/generated/bindings.js";
+import { readSettings, type EffectiveSetting } from "../configValues.js";
 import { askToChange, groupSettings, matchesSearch, valueText } from "./settingsModel.js";
 import { DocumentLayout, type DocSection } from "../kit/DocumentLayout.js";
 import { Toolbar } from "../kit/Toolbar.js";
@@ -202,8 +202,8 @@ function EverySetting({ onOpenControl }: { onOpenControl(area: SettingsAreaId): 
   // The view re-reads when the config changes, whoever changed it.
   useEffect(() => {
     const load = () =>
-      void effectiveConfig()
-        .then(setSettings)
+      void readSettings()
+        .then((r) => setSettings(r.settings))
         .catch((e) => setError(String(e)));
     load();
     return subscribeOxplowEvents((event) => {

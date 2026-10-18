@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { Proposal } from "../../proposals.js";
 import { ProposalCard } from "./ProposalCard.js";
 import { SettingRow } from "../../pages/SettingsPage.js";
-import type { EffectiveSetting } from "../../tauri-bridge/generated/bindings.js";
+import type { EffectiveSetting } from "../../configValues.js";
 
 afterEach(cleanup);
 
