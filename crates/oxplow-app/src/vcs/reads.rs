@@ -8,20 +8,8 @@ use oxplow_domain::vcs::{
     WorkspaceStatus,
 };
 use oxplow_domain::DomainError;
-use serde::{Deserialize, Serialize};
-use specta::Type;
 
 use crate::Services;
-
-/// Where a stream's workspace is.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct HeadInfo {
-    /// The head revision; `None` before the first commit.
-    #[specta(type = Option<String>)]
-    pub revision: Option<Revision>,
-    /// The branch checked out; `None` when detached.
-    pub branch: Option<String>,
-}
 
 fn vcs_revision(svc: &Services, rev: String) -> Revision {
     Revision::Vcs {
@@ -47,15 +35,6 @@ async fn provider_rev(svc: &Services, rev: &Revision) -> Result<Option<String>, 
             ))),
         },
     }
-}
-
-pub async fn head(svc: &Services, stream_id: Option<&str>) -> Result<HeadInfo, DomainError> {
-    let ws = svc.worktrees.resolve(stream_id).await.into_local_path();
-    let head = svc.vcs.head(&ws).await?;
-    Ok(HeadInfo {
-        revision: head.revision.map(|r| vcs_revision(svc, r)),
-        branch: head.branch,
-    })
 }
 
 pub async fn status(
@@ -238,7 +217,7 @@ mod tests {
     }
 
     /// P5.B4 (tsk523): the stream reads name versions as revisions — the
-    /// head, a commit's detail, blame of the working file, a merge base.
+    /// commit's detail, blame of the working file, a merge base.
     #[tokio::test]
     async fn stream_reads_speak_revisions() {
         let f = services_with_effort().await;
@@ -247,8 +226,6 @@ mod tests {
         std::fs::write(ws.join("a.txt"), "one\n").unwrap();
         let sha = commit_all(&ws, "c1");
         let rev = Revision::git(sha.clone());
-        let h = head(svc, None).await.unwrap();
-        assert_eq!(h.revision, Some(rev.clone()));
         let detail = revision(svc, None, &Revision::git("HEAD"))
             .await
             .unwrap()

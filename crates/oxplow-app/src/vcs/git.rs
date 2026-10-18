@@ -613,6 +613,9 @@ impl Vcs for GitProvider {
                     name: b.name,
                     remote: b.remote,
                     head: b.head,
+                    upstream: b.upstream,
+                    ahead: b.ahead,
+                    behind: b.behind,
                 })
                 .collect())
         })

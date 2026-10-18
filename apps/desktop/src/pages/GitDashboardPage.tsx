@@ -5,7 +5,8 @@ import type { MergeReadiness, OpOutcome, RemoteBranchEntry, RevisionInfo, Stream
 import {
   countStatus,
   vcsDivergence,
-  vcsHead,
+  streamHead,
+  streamUpstream,
   vcsRevision,
   vcsRevisionsBetween,
   vcsStatus,
@@ -163,7 +164,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
     }
     try {
       setError(null);
-      const head = await vcsHead(streamId);
+      const head = await streamHead(streamId);
       const headSha = vcsRevOf(head.revision);
       const [statusSummary, history, remoteBranches, streams] = await Promise.all([
         vcsStatus(streamId).then(countStatus),
@@ -175,22 +176,9 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
       const log = { ...history, currentBranch: head.branch };
       const branch = stream?.branch ?? head.branch ?? null;
       const headCommit = log.commits.find((c) => c.id === headSha) ?? null;
-      // Find an upstream ref via the remote branches list (best-effort).
-      // remoteBranches[].short_name is "<remote>/<branch>" (e.g.
-      // "origin/main"). Match the trailing branch name.
-      const upstreamRef = branch
-        ? remoteBranches.find((r) => {
-            const idx = r.short_name.indexOf("/");
-            return idx >= 0 && r.short_name.slice(idx + 1) === branch;
-          })?.short_name ?? null
-        : null;
-      let aheadUpstream = 0;
-      let behindUpstream = 0;
-      if (upstreamRef && head.revision) {
-        const counts = await vcsDivergence(streamId, gitRevision(upstreamRef), head.revision);
-        aheadUpstream = counts.ahead;
-        behindUpstream = counts.behind;
-      }
+      // The branch's upstream and how far they have parted: `v_branch`.
+      const { upstream: upstreamRef, ahead: aheadUpstream, behind: behindUpstream } =
+        await streamUpstream(streamId);
       // Show every other stream (not just sibling worktrees). The
       // dashboard always renders against the currently-viewed stream;
       // each row compares its branch to ours via getAheadBehind, and

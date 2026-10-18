@@ -169,7 +169,7 @@
     - { unique: id }
     - { not_null: ref }
 - name: branch
-  version: 1
+  version: 2
   description: "Local and remote-tracking branches, refreshed on boot and whenever refs move."
   columns:
     - { name: "name", type: "TEXT", doc: "Branch name (without the remote)." }
@@ -179,6 +179,9 @@
     - { name: "stream_id", type: "INTEGER", doc: "The stream whose worktree has it checked out (v_stream.id), if any." }
     - { name: "updated_at", type: "TEXT", doc: "When oxplow last read it (RFC 3339)." }
     - { name: "is_default", type: "INTEGER", doc: "1 for the repository's default branch (`main`), else 0." }
+    - { name: "upstream", type: "TEXT", doc: "For a local branch that tracks one, its remote-tracking branch (`origin/main`); NULL otherwise. (v2)" }
+    - { name: "ahead", type: "INTEGER", doc: "Commits a local branch has that its upstream lacks; 0 without an upstream and for a remote-tracking branch. (v2)" }
+    - { name: "behind", type: "INTEGER", doc: "Commits a local branch's upstream has that it lacks; 0 without an upstream and for a remote-tracking branch. (v2)" }
 - name: capture
   version: 1
   description: "Captures: one scan or run that produced facts, with its when/where/who context."
@@ -1070,7 +1073,7 @@
     - { name: "contents", type: "INTEGER", doc: "1 when the take kept file contents; 0 when it recorded identities only ('Track changes only'): a read of that snapshot answers 'no contents', not 'expired'. (v2)" }
     - { name: "handle", type: "TEXT", doc: "A snapshot provider's own name for the state the take marked, which core hands back to it as the next mark's parent; NULL for takes by oxplow's own capture. (v3)" }
 - name: stream
-  version: 3
+  version: 4
   description: "Streams: parallel lines of work, each its own git worktree. Exactly one is `primary` (the repo itself)."
   columns:
     - { name: "id", type: "INTEGER", doc: "Stream id." }
@@ -1083,6 +1086,7 @@
     - { name: "archived_at", type: "TEXT", doc: "Set when the stream was archived; NULL while live." }
     - { name: "ref", type: "TEXT", doc: "`stream:str<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
     - { name: "prompt", type: "TEXT", doc: "The standing instructions the person set for every agent session in this stream (appended to its system prompt); NULL when none. (v3)" }
+    - { name: "head_sha", type: "TEXT", doc: "The commit its workspace is on (HEAD), whether it has a branch checked out or is detached; NULL before its first commit or the first refs scan. Restated whenever refs move. (v4)" }
   tests:
     - { not_null: id }
     - { unique: id }

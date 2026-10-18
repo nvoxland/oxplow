@@ -25,7 +25,7 @@ mock.module("../../api.js", () => ({
   },
   subscribeGitRefsEvents: () => () => {},
   subscribeSnapshotEvents: () => () => {},
-  vcsHead: async () => ({ revision: "git:head", branch: "main" }),
+  streamHead: async () => ({ revision: "git:head", branch: "main" }),
   diffRevisions: async () => {
     diffs += 1;
     return [{ path: "a.ts", status: "modified", additions: 1, deletions: 0 }];

@@ -2,7 +2,7 @@
 //! the head, status, blame, a revision's detail and a merge base — each
 //! over the `Vcs` capability, naming versions as `Revision`s.
 
-use oxplow_app::vcs::reads::{self, HeadInfo};
+use oxplow_app::vcs::reads;
 use oxplow_app::Services;
 use oxplow_domain::vcs::{
     BlameLine, Branch, Divergence, Revision, RevisionDetail, RevisionInfo, VcsWorkspace,
@@ -10,10 +10,6 @@ use oxplow_domain::vcs::{
 };
 
 use crate::error::IpcError;
-
-pub async fn vcs_head(svc: &Services, stream_id: Option<String>) -> Result<HeadInfo, IpcError> {
-    Ok(reads::head(svc, stream_id.as_deref()).await?)
-}
 
 pub async fn vcs_status(
     svc: &Services,
@@ -126,8 +122,6 @@ mod tests {
             let svc = svc.clone();
             async move { crate::dispatch(name, args, &svc).await.unwrap() }
         };
-        let head = call("vcs_head", json!({ "streamId": null })).await;
-        assert_eq!(head["revision"], json!(format!("git:{sha}")));
         let status = call("vcs_status", json!({ "streamId": null })).await;
         assert!(status["entries"].is_array(), "{status}");
         let blame = call(

@@ -462,7 +462,9 @@ invoked as a separate binary, never linked as a library.
 - History and branch lists read the models (`v_commit`, `v_branch`,
   `v_tag`; P5.B5, [vcs.md](./vcs.md)); ahead/behind, divergence,
   commits-ahead and a file's history stay live on `vcs_divergence`,
-  `vcs_revisions_between` and `vcs_file_history`.
+  `vcs_revisions_between` and `vcs_file_history`; a local branch against its own
+  upstream is `v_branch.upstream` / `ahead` / `behind`, and a stream's HEAD is
+  `v_stream.head_sha`.
 - `compute_divergence(repo_path, base, head)` (`src/divergence.rs`,
   behind `Vcs::divergence`) — cross-stream merge-readiness:
   `Divergence { ahead, behind, overlapping_files, readiness }`.

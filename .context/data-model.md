@@ -865,6 +865,11 @@ Time-ordered snapshots in two tables (the actual schema; an earlier
 draft of this doc described a single `snapshot_entry` table with a
 `version_hash`/`source` manifest — that pre-V13 shape is gone):
 
+- **`git_branch`** (V86 adds `upstream`, `ahead`, `behind`) and
+  **`stream_head`** (V86: `stream_id`, `head_sha`) — restated whole by the
+  refs scan (`commit_indexer::refresh_refs`) and read as `v_branch` (v2) and
+  `v_stream.head_sha` (v4): a local branch's tracked branch and how far they
+  have parted, and where each stream's workspace is (detached or not).
 - **`snapshot`** (V13/V16/V42) — the grouping row, one per
   `request_snapshot()` call that had dirty files. Columns: `id,
   stream_id, created_at, revision, branch` (renamed from `git_commit`

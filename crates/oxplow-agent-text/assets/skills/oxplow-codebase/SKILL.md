@@ -30,9 +30,10 @@ every stream. `v_model_column` documents each column.
   Quick answers have a tool each (`references/history.md`, `oxplow_get_skill` reference `history`); history past
   the index (any revision, one path, paged) is `oxplow_vcs_log`; `v_commit` is
   for joins.
-- **`v_branch`** — local and remote-tracking branches (`name`, `kind`,
-  `head_sha`, `is_default`, and the `stream_id` that has it checked
-  out); **`v_tag`** — tags and their commits.
+- **`v_branch`** — branches (`name`, `kind`, `head_sha`, `is_default`,
+  the `stream_id` that has it checked out, and for a local one its
+  `upstream`, `ahead`, `behind`); **`v_tag`** — tags. A `v_stream` row's
+  `head_sha` is where its workspace is.
 
 Changing history (commit, merge, rebase, push, checkout) is the
 `oxplow.vcs.*` commands (`list_commands` shows them) or `git` in your

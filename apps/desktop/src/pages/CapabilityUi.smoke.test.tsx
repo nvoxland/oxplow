@@ -35,9 +35,11 @@ const answers: Record<string, (...args: unknown[]) => Promise<unknown>> = {
       body: "",
       files: [{ path: "b.ts", status: "added", additions: 3, deletions: 0 }],
     }),
-  vcsHead: async () => ok({ revision: `git:${"a".repeat(40)}`, branch: "main" }),
   querySql: async (...args) => {
     const sql = String(args[0]);
+    if (sql.includes("head_sha")) {
+      return ok({ columns: [], rows: [["a".repeat(40), "main"]], truncated: false, reads, freshness: [] });
+    }
     if (sql.includes("FROM v_work_item w")) {
       return ok({
         columns: WORK_ITEM_COLUMNS,

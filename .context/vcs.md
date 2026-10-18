@@ -191,12 +191,12 @@ indexed history (`v_commit`) for joins.
 `revision(revision)` (a commit's message and files) and
 `merge_base(a, b)` — each routed by stream and naming versions as
 `Revision`s (a snapshot answers with the revision its tree equals). RPCs
-`vcs_head`, `vcs_status`, `vcs_blame`, `vcs_revision`, `vcs_merge_base`
+`vcs_status`, `vcs_blame`, `vcs_revision`, `vcs_merge_base`
 replaced `get_repo_conflict_state`,
 `get_workspace_status_summary`, `git_blame`, `local_blame`,
 `get_commit_detail` and `get_branch_changes`; MCP `git_diff` became
 `diff { from?, to, since_fork }`. On the desktop: the changed-files lists
-diff `head → working` (`vcsHead` + `diffRevisions`), the Project panel's
+diff `head → working` (`streamHead` + `diffRevisions`), the Project panel's
 branch and unpushed scopes take `changedPaths` from `vcsMergeBase`,
 rerunning when the set of uncommitted paths or the refs move, the rail's counts and conflicts come from
 `vcsStatus` (`countStatus`), the commit page and dashboard stats from
@@ -208,10 +208,14 @@ over a command Proxy that records any git-shaped call.
 
 The commit indexer walks every stream's head (`Vcs::log`, `revision`)
 into `v_commit` (with `parents`, v2) and `v_commit_file`, and restates
-`v_branch` (`is_default`, v2) and `v_tag` from `Vcs::branches` / `tags`.
+`v_branch` (`is_default`, v2; `upstream` / `ahead` / `behind`, v2 of the
+model — a local branch's tracked branch and how far they have parted,
+from `Vcs::branches`) and `v_tag` from `Vcs::branches` / `tags`, and
+`v_stream.head_sha` (v4: each stream's workspace HEAD, detached or not,
+from the same scan, `commit_indexer::refresh_refs`).
 The desktop reads history from the models (`apps/desktop/src/vcsHistory.ts`):
 a stream's history is a recursive CTE over `json_each(parents)` from its
-head (`vcsHead`), re-run on `modelsChanged` (`useRerunOnChange`), and
+head (`streamHead`: `v_stream.head_sha`), re-run on `modelsChanged` (`useRerunOnChange`), and
 put in `topoOrder` — every child before its parents, else newest first:
 commit times are whole seconds and clocks skew, so a time order can list
 a rebase's parent before its child and break the graph's lanes (tsk565;
@@ -227,7 +231,7 @@ not the stream row, which the branch reconciler updates after (it
 writes only `branch`/`branch_ref`, `StreamStore::set_branch`, so a
 rename in between stays; tsk573). A `v_branch.name` is the branch's local name for both kinds
 (a remote-tracking branch's remote is its own column), so the picker
-checks out and shows `name` as is (`pickedBranch`, tsk567). What is computed stays live: `vcs_divergence`,
+checks out and shows `name` as is (`pickedBranch`, tsk567). What is computed stays live: `vcs_divergence` (any pair of revisions: a stream against the default branch, a remote branch against HEAD — a branch against its own upstream is `v_branch.ahead` / `behind`),
 `vcs_revisions_between`, `vcs_file_history` (the index keeps 500
 commits per head; a file's full history can be older),
 `vcs_list_adoptable_workspaces`, and for agents `v_commit`,

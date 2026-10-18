@@ -1217,6 +1217,61 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "Branch name (without the remote)."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`local` or `remote`."
+        },
+        {
+          "name": "remote",
+          "type": "TEXT",
+          "doc": "Remote name for a remote-tracking branch."
+        },
+        {
+          "name": "head_sha",
+          "type": "TEXT",
+          "doc": "The commit it points at."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream whose worktree has it checked out (v_stream.id), if any."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "When oxplow last read it (RFC 3339)."
+        },
+        {
+          "name": "is_default",
+          "type": "INTEGER",
+          "doc": "1 for the repository's default branch (`main`), else 0."
+        },
+        {
+          "name": "upstream",
+          "type": "TEXT",
+          "doc": "For a local branch that tracks one, its remote-tracking branch (`origin/main`); NULL otherwise. (v2)"
+        },
+        {
+          "name": "ahead",
+          "type": "INTEGER",
+          "doc": "Commits a local branch has that its upstream lacks; 0 without an upstream and for a remote-tracking branch. (v2)"
+        },
+        {
+          "name": "behind",
+          "type": "INTEGER",
+          "doc": "Commits a local branch's upstream has that it lacks; 0 without an upstream and for a remote-tracking branch. (v2)"
+        }
+      ],
+      "key": []
     }
   },
   "capture": {
@@ -6355,6 +6410,66 @@
           "name": "prompt",
           "type": "TEXT",
           "doc": "The standing instructions the person set for every agent session in this stream (appended to its system prompt); NULL when none. (v3)"
+        }
+      ],
+      "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Stream id."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`primary` (the repo) or `worktree`."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Display name."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "Git branch currently checked out in the worktree."
+        },
+        {
+          "name": "worktree_path",
+          "type": "TEXT",
+          "doc": "Absolute path of the stream's worktree."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "archived_at",
+          "type": "TEXT",
+          "doc": "Set when the stream was archived; NULL while live."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`stream:str<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
+        },
+        {
+          "name": "prompt",
+          "type": "TEXT",
+          "doc": "The standing instructions the person set for every agent session in this stream (appended to its system prompt); NULL when none. (v3)"
+        },
+        {
+          "name": "head_sha",
+          "type": "TEXT",
+          "doc": "The commit its workspace is on (HEAD), whether it has a branch checked out or is detached; NULL before its first commit or the first refs scan. Restated whenever refs move. (v4)"
         }
       ],
       "key": []

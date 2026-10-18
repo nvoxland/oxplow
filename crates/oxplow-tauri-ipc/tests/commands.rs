@@ -208,7 +208,6 @@ async fn git_reads_over_primary_worktree() {
     let app = TestApp::build().await;
     let s = app.state();
     let _ = commands::generated::vcs_status(s.clone(), None).await;
-    let _ = commands::generated::vcs_head(s.clone(), None).await;
     let head = || oxplow_domain::vcs::Revision::git("HEAD");
     let _ = commands::generated::vcs_divergence(s.clone(), None, head(), head()).await;
     let _ = commands::generated::git_change_scopes(s.clone(), None).await;

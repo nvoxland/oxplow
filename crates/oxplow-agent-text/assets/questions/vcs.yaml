@@ -26,6 +26,18 @@
   reaches:
     sql: SELECT name, kind, is_default FROM v_branch ORDER BY is_default DESC, name
   shape: { columns: [name, kind, is_default] }
+- question: Which local branches have commits their upstream lacks, or lack its commits?
+  skill: oxplow-codebase
+  reaches:
+    sql: >-
+      SELECT name, upstream, ahead, behind FROM v_branch
+      WHERE kind = 'local' AND upstream IS NOT NULL AND (ahead > 0 OR behind > 0)
+  shape: { columns: [name, upstream, ahead, behind] }
+- question: Which commit is each stream's workspace on?
+  skill: oxplow-codebase
+  reaches:
+    sql: SELECT id, branch, head_sha FROM v_stream WHERE archived_at IS NULL
+  shape: { columns: [id, branch, head_sha] }
 - question: What did this commit change?
   about: commit
   skill: oxplow-codebase

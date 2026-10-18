@@ -153,6 +153,13 @@ pub struct Branch {
     pub head: Option<String>,
     /// The repository's default branch (`main`).
     pub is_default: bool,
+    /// For a local branch that tracks one, its remote-tracking branch
+    /// (`origin/main`).
+    pub upstream: Option<String>,
+    /// Commits the branch has that its upstream lacks; 0 without one.
+    pub ahead: u32,
+    /// Commits its upstream has that the branch lacks; 0 without one.
+    pub behind: u32,
 }
 
 /// A tag: a name fixed to one revision.

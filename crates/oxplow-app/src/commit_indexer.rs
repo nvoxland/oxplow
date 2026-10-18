@@ -254,23 +254,26 @@ pub async fn refresh(svc: &crate::Services) -> usize {
         }
     }
     // Which stream has a branch checked out is its workspace's head —
-    // not the stream row, which the branch reconciler updates later.
+    // not the stream row, which the branch reconciler updates later. The
+    // same scan says where each workspace is, detached or not.
     let mut checkouts: Vec<(i64, String)> = Vec::new();
+    let mut heads: Vec<(i64, String)> = Vec::new();
     for s in &streams {
         let ws = svc
             .worktrees
             .resolve(Some(&s.id.to_string()))
             .await
             .into_local_path();
-        if let Ok(oxplow_domain::vcs::Head {
-            branch: Some(branch),
-            ..
-        }) = svc.vcs.head(&ws).await
-        {
-            checkouts.push((s.id.value(), branch));
+        if let Ok(head) = svc.vcs.head(&ws).await {
+            if let Some(branch) = head.branch {
+                checkouts.push((s.id.value(), branch));
+            }
+            if let Some(revision) = head.revision {
+                heads.push((s.id.value(), revision));
+            }
         }
     }
-    refresh_refs(&*svc.vcs, &primary, &checkouts, &svc.git_store).await;
+    refresh_refs(&*svc.vcs, &primary, &checkouts, &heads, &svc.git_store).await;
     n
 }
 
@@ -329,16 +332,22 @@ fn commit_row(d: &RevisionDetail) -> oxplow_db::GitCommitRow {
 
 /// Restate `v_branch` — every local and remote-tracking branch with its
 /// head, which stream (`(stream_id, branch)` pairs) has a local one
-/// checked out, and the default — and `v_tag`.
+/// checked out, how far each local one has parted from its upstream, and
+/// the default — and `v_tag`, and each stream's HEAD (`heads`, for
+/// `v_stream.head_sha`).
 pub async fn refresh_refs(
     vcs: &dyn Vcs,
     ws: &Path,
     streams: &[(i64, String)],
+    heads: &[(i64, String)],
     git: &oxplow_db::SqliteGitStore,
 ) {
     let branches = vcs.branches(ws).await.unwrap_or_default();
     if let Err(e) = git.replace_branches(branch_rows(&branches, streams)).await {
         tracing::warn!(?e, "branch refresh failed");
+    }
+    if let Err(e) = git.replace_stream_heads(heads.to_vec()).await {
+        tracing::warn!(?e, "stream head refresh failed");
     }
     let tags = vcs
         .tags(ws)
@@ -375,6 +384,9 @@ fn branch_rows(branches: &[Branch], streams: &[(i64, String)]) -> Vec<oxplow_db:
                     None
                 },
                 is_default: b.is_default,
+                upstream: b.upstream.clone(),
+                ahead: b.ahead,
+                behind: b.behind,
             }
         })
         .collect()
@@ -713,6 +725,70 @@ mod tests {
         assert_eq!(pass(2).await, 2);
     }
 
+    /// The refs scan restates where each stream's workspace is and how far
+    /// each local branch has parted from its upstream: `v_stream.head_sha`
+    /// and `v_branch.upstream / ahead / behind`, a detached HEAD included.
+    #[tokio::test]
+    async fn the_refs_scan_says_where_each_stream_is_and_how_far_its_branch_has_parted() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let ws = f._dir.path().to_path_buf();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&ws)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8(out.stdout).unwrap().trim().to_string()
+        };
+        git(&["branch", "-M", "main"]);
+        // A remote with `main`, then one commit here that it lacks.
+        let remote = tempfile::tempdir().unwrap();
+        git(&[
+            "clone",
+            "-q",
+            "--bare",
+            ".",
+            remote.path().to_str().unwrap(),
+        ]);
+        git(&["remote", "add", "origin", remote.path().to_str().unwrap()]);
+        git(&["fetch", "-q", "origin"]);
+        git(&["branch", "-q", "--set-upstream-to=origin/main", "main"]);
+        std::fs::write(ws.join("n.txt"), "1").unwrap();
+        crate::test_fixtures::commit_all(&ws, "ahead");
+        let head = git(&["rev-parse", "HEAD"]);
+        refresh(&f.svc).await;
+
+        let sl = crate::sql_gateway::SqlGateway::new(f.svc.db.clone());
+        let q = |sql: &str| {
+            let (sl, sql) = (sl.clone(), sql.to_string());
+            async move {
+                let r = sl.query_sql(&sql, vec![], None).await.unwrap();
+                serde_json::to_value(&r.rows).unwrap()
+            }
+        };
+        assert_eq!(
+            q("SELECT upstream, ahead, behind FROM v_branch WHERE name = 'main' AND kind = 'local'").await,
+            serde_json::json!([["origin/main", 1, 0]])
+        );
+        assert_eq!(
+            q("SELECT head_sha FROM v_stream WHERE kind = 'primary'").await,
+            serde_json::json!([[head]])
+        );
+        // Detached: the stream is still somewhere.
+        git(&["checkout", "-q", "--detach", "HEAD~1"]);
+        let detached = git(&["rev-parse", "HEAD"]);
+        refresh(&f.svc).await;
+        assert_eq!(
+            q("SELECT head_sha FROM v_stream WHERE kind = 'primary'").await,
+            serde_json::json!([[detached]])
+        );
+    }
+
     #[test]
     fn local_branches_map_to_the_stream_that_checks_them_out() {
         let b = |name: &str, remote: Option<&str>| Branch {
@@ -720,6 +796,9 @@ mod tests {
             remote: remote.map(str::to_string),
             head: Some("abc".into()),
             is_default: name == "main" && remote.is_none(),
+            upstream: None,
+            ahead: 0,
+            behind: 0,
         };
         let rows = branch_rows(
             &[

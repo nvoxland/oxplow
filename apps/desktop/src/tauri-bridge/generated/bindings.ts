@@ -868,11 +868,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	vcsHead: (streamId: string | null) => typedError<HeadInfo, IpcError>(__TAURI_INVOKE("vcs_head", { streamId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	vcsStatus: (streamId: string | null) => typedError<WorkspaceStatus, IpcError>(__TAURI_INVOKE("vcs_status", { streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1461,6 +1456,15 @@ export type Branch = {
 	head: string | null,
 	/**  The repository's default branch (`main`). */
 	is_default: boolean,
+	/**
+	 *  For a local branch that tracks one, its remote-tracking branch
+	 *  (`origin/main`).
+	 */
+	upstream: string | null,
+	/**  Commits the branch has that its upstream lacks; 0 without one. */
+	ahead: number,
+	/**  Commits its upstream has that the branch lacks; 0 without one. */
+	behind: number,
 };
 
 export type BranchChangeEntry = {
@@ -3482,14 +3486,6 @@ export type HarnessSettingListing = {
 export type HarnessUnavailable = {
 	harness: string,
 	reason: string,
-};
-
-/**  Where a stream's workspace is. */
-export type HeadInfo = {
-	/**  The head revision; `None` before the first commit. */
-	revision: string | null,
-	/**  The branch checked out; `None` when detached. */
-	branch: string | null,
 };
 
 /**

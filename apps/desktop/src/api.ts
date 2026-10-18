@@ -355,11 +355,19 @@ export interface WorkspaceRenameResult {
 }
 
 import type { Revision } from "./revision.js";
+import {
+  STREAM_HEAD_SQL,
+  STREAM_UPSTREAM_SQL,
+  streamHeadFromRows,
+  streamUpstreamFromRows,
+  type StreamHead,
+  type StreamUpstream,
+} from "./streamHead.js";
+import { streamRowId } from "./modelIds.js";
 import type {
   BlameLine,
   Divergence,
   FileStatus,
-  HeadInfo,
   InProgressOp,
   RevisionDetail,
   RevisionInfo,
@@ -373,7 +381,6 @@ export type {
   BlameLine,
   Divergence,
   FileStatus,
-  HeadInfo,
   InProgressOp,
   RevisionInfo,
   VcsWorkspace,
@@ -386,9 +393,18 @@ export type {
 
 // ---- The stream's version control, neutral (`.context/vcs.md`) ----
 
-/** Where the stream's workspace is: its head revision and branch. */
-export async function vcsHead(streamId: string): Promise<HeadInfo> {
-  return unwrap(await commands.vcsHead(streamId || null));
+/** Where the stream's workspace is: its head revision and branch, read
+ *  from `v_stream` / `v_branch` (restated whenever refs move). */
+export async function streamHead(streamId: string): Promise<StreamHead> {
+  const res = await querySql(STREAM_HEAD_SQL, [streamRowId(streamId)], 1);
+  return streamHeadFromRows(res.rows);
+}
+
+/** How far the stream's checked-out branch has parted from its upstream
+ *  (`v_branch`, restated whenever refs move). */
+export async function streamUpstream(streamId: string): Promise<StreamUpstream> {
+  const res = await querySql(STREAM_UPSTREAM_SQL, [streamRowId(streamId)], 1);
+  return streamUpstreamFromRows(res.rows);
 }
 
 /** The workspace's changes against its head, plus any paused operation. */

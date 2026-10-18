@@ -2130,7 +2130,8 @@ mod tests {
                 "updated_at",
                 "archived_at",
                 "ref",
-                "prompt"
+                "prompt",
+                "head_sha"
             ]
         );
         let (owner, version): (String, i64) = conn
@@ -2140,15 +2141,22 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        assert_eq!((owner.as_str(), version), ("core", 3));
-        let input: (String, String) = conn
-            .query_row(
-                "SELECT input, kind FROM model_input WHERE view = 'v_stream'",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
+        assert_eq!((owner.as_str(), version), ("core", 4));
+        let mut inputs: Vec<(String, String)> = conn
+            .prepare("SELECT input, kind FROM model_input WHERE view = 'v_stream'")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
             .unwrap();
-        assert_eq!(input, ("streams".to_string(), "source".to_string()));
+        inputs.sort();
+        assert_eq!(
+            inputs,
+            [
+                ("stream_head".to_string(), "source".to_string()),
+                ("streams".to_string(), "source".to_string())
+            ]
+        );
     }
 
     #[test]
