@@ -1721,7 +1721,7 @@ just carries a Help blurb pointing there.
 > ### Sectioning — one rule, both pages (`buildMetricSections`, tsk81)
 >
 > Recorded Metrics renders those sections through the shared
-> `CollapsibleSections` / `CollapsibleSection` primitive (tsk84) — a chevron on
+> `CollapsibleSections` provider and the kit `Section` with `collapsible` — a chevron on
 > each section header, with the **Expand all / Collapse all pair living in the
 > details rail** beside the filters (`SectionCollapseControls`, tsk86). Collapsed
 > state persists under `pageKey: "metrics-recorded"`. The provider wraps the whole

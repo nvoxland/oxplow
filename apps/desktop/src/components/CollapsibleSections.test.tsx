@@ -1,11 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 
-import {
-  CollapsibleSection,
-  CollapsibleSections,
-  SectionCollapseControls,
-} from "./CollapsibleSections.js";
+import { Section } from "../kit/index.js";
+import { CollapsibleSections, SectionCollapseControls } from "./CollapsibleSections.js";
 import { SECTIONS_COLLAPSED_KEY } from "./sectionCollapse.js";
 
 // Mirrors the real adoption: the controls render OUTSIDE the section stack
@@ -18,9 +15,9 @@ function view(sections: Array<{ id: string; label: string }> = SECTIONS, pageKey
       </aside>
       <main>
         {sections.map((s) => (
-          <CollapsibleSection key={s.id} id={s.id} title={s.label} count={2}>
+          <Section key={s.id} id={s.id} title={s.label} collapsible>
             <div data-testid={`body-${s.id}`}>rows for {s.label}</div>
-          </CollapsibleSection>
+          </Section>
         ))}
       </main>
     </CollapsibleSections>,
@@ -163,9 +160,9 @@ describe("CollapsibleSections", () => {
 
   it("renders sections read-only-open outside a provider", () => {
     const { getByTestId } = render(
-      <CollapsibleSection id="solo" title="Solo">
+      <Section id="solo" title="Solo" collapsible>
         <div data-testid="body-solo">rows</div>
-      </CollapsibleSection>,
+      </Section>,
     );
     expect(getByTestId("body-solo")).toBeTruthy();
   });
@@ -174,5 +171,52 @@ describe("CollapsibleSections", () => {
     window.localStorage.setItem(SECTIONS_COLLAPSED_KEY, "not json");
     const { getByTestId } = view();
     expect(getByTestId("body-testing")).toBeTruthy();
+  });
+
+  it("puts the toggle, a real button, inside the heading", () => {
+    const { getByTestId } = view();
+    const toggle = getByTestId("t-section-toggle-testing");
+    expect(toggle.tagName).toBe("BUTTON");
+    expect(toggle.closest("h2")).not.toBeNull();
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("starts a defaultCollapsed section closed, and remembers when it is opened", () => {
+    const sections = (
+      <CollapsibleSections pageKey="d" testIdPrefix="t">
+        <SectionCollapseControls />
+        <Section id="a" title="A" collapsible defaultCollapsed>
+          <div data-testid="body-a">a</div>
+        </Section>
+        <Section id="b" title="B" collapsible>
+          <div data-testid="body-b">b</div>
+        </Section>
+      </CollapsibleSections>
+    );
+    const first = render(sections);
+    expect(first.queryByTestId("body-a")).toBeNull();
+    expect(first.getByTestId("body-b")).toBeTruthy();
+    fireEvent.click(first.getByTestId("t-section-toggle-a"));
+    expect(first.getByTestId("body-a")).toBeTruthy();
+    first.unmount();
+    // A later visit finds it as it was left; the other stays open.
+    const again = render(sections);
+    expect(again.getByTestId("body-a")).toBeTruthy();
+    // Collapse all closes what's rendered, Expand all opens it again.
+    fireEvent.click(again.getByTestId("t-collapse-all"));
+    expect(again.queryByTestId("body-a")).toBeNull();
+    expect(again.queryByTestId("body-b")).toBeNull();
+    fireEvent.click(again.getByTestId("t-expand-all"));
+    expect(again.getByTestId("body-a")).toBeTruthy();
+    expect(again.getByTestId("body-b")).toBeTruthy();
+  });
+
+  it("a section that isn't collapsible has no toggle", () => {
+    const { container } = render(
+      <Section id="plain" title="Plain">
+        <div>rows</div>
+      </Section>,
+    );
+    expect(container.querySelector("button")).toBeNull();
   });
 });

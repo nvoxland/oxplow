@@ -515,10 +515,11 @@ another branch.
 - **A page with stacked sections gets them from the shared primitive**, not
   hand-rolled state — three parts in
   `apps/desktop/src/components/CollapsibleSections.tsx`: `CollapsibleSections`
-  (state provider), `CollapsibleSection` (chevron header + hideable body), and
-  `SectionCollapseControls` (the Expand all / Collapse all pair). Pure state +
-  persistence live in the sibling `sectionCollapse.ts` (unit-tested).
-  Adopters: `RecordedMetricsPage`.
+  (state provider) and `SectionCollapseControls` (the Expand all / Collapse all
+  pair); the section itself is the kit `Section` with `collapsible` (and
+  `defaultCollapsed`), which reads the provider through `useSectionCollapse`.
+  Pure state + persistence live in the sibling `sectionCollapse.ts`
+  (unit-tested). Adopters: `MetricsPage`.
 - **The page places the controls; they are not pinned above the sections
   (tsk86).** `SectionCollapseControls` reads state off context, so it can render
   anywhere under the provider. Recorded Metrics puts it in the **details rail**
@@ -540,7 +541,10 @@ another branch.
   in the rail's **panel header** rather than in the rail body.)
 - **Sections default to expanded**; only the *collapsed* set is stored
   (`oxplow.page.sectionsCollapsed.v1`, keyed by `pageKey`), so a newly added
-  section appears open with no migration.
+  section appears open with no migration. A section with `defaultCollapsed`
+  is the mirror: it starts closed and only the ones the person *opened* are
+  stored (beside the collapsed ids, under `<pageKey>#opened`). Expand all /
+  Collapse all handle both kinds.
 - **Don't reconcile stored ids against the rendered ones** — the opposite of what
   the rail does for its section ORDER. A page's own filter (Recorded Metrics'
   search) can drop a section entirely; it must come back still collapsed.

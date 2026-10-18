@@ -2,19 +2,22 @@ import type { CSSProperties, ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 import {
+  OPENED_SUFFIX,
   SECTIONS_COLLAPSED_KEY,
   allCollapsed,
   allExpanded,
   isExpanded as isExpandedIn,
   parseCollapsed,
   serializeCollapsed,
-  toggleCollapsed,
+  setAll,
+  toggleSection,
 } from "./sectionCollapse.js";
 
 /**
- * Collapsible page sections (tsk84) — a `<CollapsibleSections>` provider wrapping
- * any number of `<CollapsibleSection>`s. Each section header carries an
- * expand/collapse chevron; `<SectionCollapseControls>` renders the "Expand all" /
+ * Collapsible page sections — a `<CollapsibleSections>` provider wrapping any
+ * number of kit `<Section collapsible>`s (`kit/Section.tsx`, which reads the
+ * provider through `useSectionCollapse`). Each section's heading carries an
+ * expand/collapse toggle; `<SectionCollapseControls>` renders the "Expand all" /
  * "Collapse all" pair. The collapsed set persists per page.
  *
  * **Three parts, because the page owns placement (tsk86).** The provider holds
@@ -36,9 +39,9 @@ import {
  * <CollapsibleSections pageKey="metrics-recorded" testIdPrefix="recorded">
  *   <Page width="reading" rightRail={<>…filters… <SectionCollapseControls /></>}>
  *     {groups.map((g) => (
- *       <CollapsibleSection key={g.key} id={g.key} title={g.label} count={g.entries.length}>
+ *       <Section key={g.key} id={g.key} title={g.label} collapsible>
  *         …
- *       </CollapsibleSection>
+ *       </Section>
  *     ))}
  *   </Page>
  * </CollapsibleSections>
@@ -46,15 +49,19 @@ import {
  */
 
 interface SectionsContextValue {
-  isExpanded(id: string): boolean;
-  toggle(id: string): void;
+  isExpanded(id: string, defaultCollapsed: boolean): boolean;
+  toggle(id: string, defaultCollapsed: boolean): void;
   /** Sections announce themselves on mount so the controls know what
-   *  "all" means — only what's rendered right now counts. */
-  register(id: string): void;
+   *  "all" means — only what's rendered right now counts. `startsClosed`:
+   *  the section is `defaultCollapsed`. */
+  register(id: string, startsClosed: boolean): void;
   unregister(id: string): void;
   /** The rendered section ids — what Expand/Collapse-all may act on. */
   rendered: readonly string[];
+  /** Of those, the ones that start closed. */
+  startClosed: ReadonlySet<string>;
   collapsed: ReadonlySet<string>;
+  opened: ReadonlySet<string>;
   expandAll(): void;
   collapseAll(): void;
   testIdPrefix: string;
@@ -82,21 +89,27 @@ export function CollapsibleSections({
   testIdPrefix: string;
   children: ReactNode;
 }) {
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() =>
-    parseCollapsed(readStorage(), pageKey),
-  );
-  // The rendered section ids, in no particular order — only membership matters
-  // (it decides whether Expand all / Collapse all have anything left to do).
-  const [ids, setIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [state, setState] = useState<{ collapsed: ReadonlySet<string>; opened: ReadonlySet<string> }>(() => ({
+    collapsed: parseCollapsed(readStorage(), pageKey),
+    opened: parseCollapsed(readStorage(), pageKey + OPENED_SUFFIX),
+  }));
+  const { collapsed, opened } = state;
+  // The rendered section ids (and whether each starts closed) — only
+  // membership matters (it decides whether Expand all / Collapse all have
+  // anything left to do).
+  const [ids, setIds] = useState<ReadonlyMap<string, boolean>>(() => new Map());
 
   const persist = useCallback(
-    (next: ReadonlySet<string>) => {
-      setCollapsed(next);
+    (next: { collapsed: ReadonlySet<string>; opened: ReadonlySet<string> }) => {
+      setState(next);
       if (typeof window === "undefined") return;
       try {
+        // Only exceptions are stored: collapsed ids of sections that start
+        // open, opened ids of those that start closed.
+        const withCollapsed = serializeCollapsed(readStorage(), pageKey, next.collapsed);
         window.localStorage.setItem(
           SECTIONS_COLLAPSED_KEY,
-          serializeCollapsed(readStorage(), pageKey, next),
+          serializeCollapsed(withCollapsed, pageKey + OPENED_SUFFIX, next.opened),
         );
       } catch {
         // Storage full / disabled — the toggle still works for this session.
@@ -105,13 +118,13 @@ export function CollapsibleSections({
     [pageKey],
   );
 
-  const register = useCallback((id: string) => {
-    setIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+  const register = useCallback((id: string, startsClosed: boolean) => {
+    setIds((prev) => (prev.get(id) === startsClosed ? prev : new Map(prev).set(id, startsClosed)));
   }, []);
   const unregister = useCallback((id: string) => {
     setIds((prev) => {
       if (!prev.has(id)) return prev;
-      const next = new Set(prev);
+      const next = new Map(prev);
       next.delete(id);
       return next;
     });
@@ -119,19 +132,21 @@ export function CollapsibleSections({
 
   const ctx = useMemo<SectionsContextValue>(
     () => ({
-      isExpanded: (id) => isExpandedIn(collapsed, id),
-      toggle: (id) => persist(toggleCollapsed(collapsed, id)),
+      isExpanded: (id, defaultCollapsed) => isExpandedIn(collapsed, id, opened, defaultCollapsed),
+      toggle: (id, defaultCollapsed) => persist(toggleSection(state, id, defaultCollapsed)),
       register,
       unregister,
-      rendered: [...ids],
+      rendered: [...ids.keys()],
+      startClosed: new Set([...ids].filter(([, closed]) => closed).map(([id]) => id)),
       collapsed,
+      opened,
       // Both act ONLY on what's on screen: a section remembered as collapsed but
       // currently filtered out keeps its state untouched.
-      expandAll: () => persist(new Set([...collapsed].filter((id) => !ids.has(id)))),
-      collapseAll: () => persist(new Set([...collapsed, ...ids])),
+      expandAll: () => persist(setAll(state, ids, true)),
+      collapseAll: () => persist(setAll(state, ids, false)),
       testIdPrefix,
     }),
-    [collapsed, ids, persist, register, unregister, testIdPrefix],
+    [state, collapsed, opened, ids, persist, register, unregister, testIdPrefix],
   );
 
   // Rendered bare — no wrapper element. This provider wraps a whole `<Page>` so
@@ -150,14 +165,14 @@ export function CollapsibleSections({
 export function SectionCollapseControls() {
   const ctx = useContext(SectionsContext);
   if (!ctx || ctx.rendered.length === 0) return null;
-  const { rendered, collapsed, testIdPrefix } = ctx;
+  const { rendered, collapsed, opened, startClosed, testIdPrefix } = ctx;
   return (
     <div style={toolbarRow}>
       <button
         type="button"
         data-testid={`${testIdPrefix}-expand-all`}
         onClick={ctx.expandAll}
-        disabled={allExpanded(rendered, collapsed)}
+        disabled={allExpanded(rendered, collapsed, opened, startClosed)}
         title="Expand all sections"
         style={smallButton}
       >
@@ -167,7 +182,7 @@ export function SectionCollapseControls() {
         type="button"
         data-testid={`${testIdPrefix}-collapse-all`}
         onClick={ctx.collapseAll}
-        disabled={allCollapsed(rendered, collapsed)}
+        disabled={allCollapsed(rendered, collapsed, opened, startClosed)}
         title="Collapse all sections"
         style={smallButton}
       >
@@ -177,54 +192,30 @@ export function SectionCollapseControls() {
   );
 }
 
-export function CollapsibleSection({
-  id,
-  title,
-  count,
-  children,
-}: {
-  id: string;
-  title: ReactNode;
-  /** Optional count badge — worth showing when the body is hidden. */
-  count?: number;
-  children: ReactNode;
-}) {
+/**
+ * What a collapsible kit `Section` reads: whether it is open, how to flip it,
+ * and the testid prefix the page's provider chose. Registers the section so
+ * Expand all / Collapse all know it is on screen. `null` outside a provider:
+ * the section is then plain and always open.
+ */
+export function useSectionCollapse(
+  id: string | undefined,
+  enabled: boolean,
+  defaultCollapsed: boolean,
+): { expanded: boolean; toggle(): void; prefix: string } | null {
   const ctx = useContext(SectionsContext);
   const { register, unregister } = ctx ?? {};
   useEffect(() => {
-    if (!register || !unregister) return;
-    register(id);
+    if (!enabled || !id || !register || !unregister) return;
+    register(id, defaultCollapsed);
     return () => unregister(id);
-  }, [id, register, unregister]);
-
-  // Outside a provider the section still renders — just always open, so a
-  // section component is never load-bearing on its context.
-  const expanded = ctx ? ctx.isExpanded(id) : true;
-  const prefix = ctx?.testIdPrefix ?? "section";
-
-  return (
-    <section data-testid={`${prefix}-group-${id}`}>
-      {/* The toggle lives INSIDE an <h2> rather than replacing it: the section
-          heading is still a heading for screen readers + document outline, and
-          the button gets keyboard activation for free. */}
-      <h2 style={headingWrap}>
-        <button
-          type="button"
-          data-testid={`${prefix}-section-toggle-${id}`}
-          onClick={() => ctx?.toggle(id)}
-          aria-expanded={expanded}
-          style={headerButton}
-        >
-          <span aria-hidden style={chevron}>
-            {expanded ? "▾" : "▸"}
-          </span>
-          <span style={{ flex: 1, minWidth: 0, textAlign: "left" }}>{title}</span>
-          {count != null ? <span style={countBadge}>{count}</span> : null}
-        </button>
-      </h2>
-      {expanded ? <div data-testid={`${prefix}-section-body-${id}`}>{children}</div> : null}
-    </section>
-  );
+  }, [enabled, id, defaultCollapsed, register, unregister]);
+  if (!enabled || !id || !ctx) return null;
+  return {
+    expanded: ctx.isExpanded(id, defaultCollapsed),
+    toggle: () => ctx.toggle(id, defaultCollapsed),
+    prefix: ctx.testIdPrefix,
+  };
 }
 
 const toolbarRow: CSSProperties = { display: "flex", gap: 6, alignItems: "center" };
@@ -239,38 +230,3 @@ const smallButton: CSSProperties = {
   fontSize: "var(--text-xs)",
 };
 
-const headingWrap: CSSProperties = {
-  margin: "0 0 8px",
-  paddingBottom: 6,
-  borderBottom: "1px solid var(--border-subtle)",
-  fontSize: 17,
-  fontWeight: 700,
-};
-
-const headerButton: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  width: "100%",
-  border: "none",
-  background: "transparent",
-  color: "inherit",
-  cursor: "pointer",
-  padding: 0,
-  font: "inherit",
-};
-
-const chevron: CSSProperties = {
-  width: 14,
-  flexShrink: 0,
-  color: "var(--text-muted)",
-  fontSize: 15,
-  lineHeight: 1,
-};
-
-const countBadge: CSSProperties = {
-  flexShrink: 0,
-  fontSize: "var(--text-xs)",
-  fontWeight: 500,
-  color: "var(--text-muted)",
-};

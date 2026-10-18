@@ -6,7 +6,9 @@ import {
   isExpanded,
   parseCollapsed,
   serializeCollapsed,
+  setAll,
   toggleCollapsed,
+  toggleSection,
 } from "./sectionCollapse.js";
 
 describe("isExpanded / toggleCollapsed", () => {
@@ -94,5 +96,33 @@ describe("parseCollapsed / serializeCollapsed", () => {
 
   it("drops non-string members rather than trusting storage", () => {
     expect(parseCollapsed(JSON.stringify({ p: ["ok", 3, null] }), "p")).toEqual(new Set(["ok"]));
+  });
+});
+
+describe("sections that start closed", () => {
+  const none = new Set<string>();
+  test("one that starts closed is open only when the person opened it", () => {
+    expect(isExpanded(none, "a", none, true)).toBe(false);
+    expect(isExpanded(none, "a", new Set(["a"]), true)).toBe(true);
+    // A collapsed id means nothing for it, and an opened one nothing for an open-by-default section.
+    expect(isExpanded(new Set(["a"]), "a", none, true)).toBe(false);
+    expect(isExpanded(none, "b", new Set(["b"]), false)).toBe(true);
+  });
+
+  test("toggling records the exception in the set that matches where it starts", () => {
+    const state = { collapsed: none, opened: none };
+    expect(toggleSection(state, "a", true).opened.has("a")).toBe(true);
+    expect(toggleSection(state, "b", false).collapsed.has("b")).toBe(true);
+  });
+
+  test("expand all / collapse all act on what is rendered and leave the rest alone", () => {
+    const state = { collapsed: new Set(["hidden", "b"]), opened: none };
+    const rendered = new Map([["a", true], ["b", false]]);
+    const open = setAll(state, rendered, true);
+    expect([...open.collapsed]).toEqual(["hidden"]);
+    expect([...open.opened]).toEqual(["a"]);
+    const shut = setAll(open, rendered, false);
+    expect([...shut.collapsed].sort()).toEqual(["b", "hidden"]);
+    expect([...shut.opened]).toEqual([]);
   });
 });

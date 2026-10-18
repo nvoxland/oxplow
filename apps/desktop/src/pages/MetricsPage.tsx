@@ -15,7 +15,6 @@ import { NO_READS, unionReads, useRerunOnChange } from "../lens/lensRerun.js";
 import { useRequestGuard } from "../request-guard.js";
 import type { Reads } from "../tauri-bridge/generated/bindings.js";
 import {
-  CollapsibleSection,
   CollapsibleSections,
   SectionCollapseControls,
 } from "../components/CollapsibleSections.js";
@@ -24,7 +23,7 @@ import { metricRef } from "../tabs/pageRefs.js";
 import { Page } from "../tabs/Page.js";
 import { routeDispatch, routeHandlers } from "../tabs/RouteLink.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
-import { DataTable, type DataColumn } from "../kit/index.js";
+import { DataTable, Section, type DataColumn } from "../kit/index.js";
 import type { NavSiblings } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { buildMetricSections } from "./metricCategories.js";
@@ -475,11 +474,11 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
           // what it's given, so filtering a category empty removes its heading too.
           <>
             {sections.map((group) => (
-              <CollapsibleSection
+              <Section
                 key={group.key}
                 id={group.key}
-                title={group.label}
-                count={group.entries.length}
+                title={`${group.label} (${group.entries.length})`}
+                collapsible
               >
                 <MetricsTable
                   entries={group.entries}
@@ -487,7 +486,7 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
                   onOpenPage={onOpenPage}
                   siblings={siblings}
                 />
-              </CollapsibleSection>
+              </Section>
             ))}
           </>
         )}
