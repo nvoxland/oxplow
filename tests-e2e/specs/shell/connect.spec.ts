@@ -22,7 +22,9 @@ test("a token in the URL fragment wins over the stored one", async ({ browser, b
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   await page.goto(`/#oxplow-token=${encodeURIComponent(daemon.token)}`);
-  await expect(page.getByTestId("page-new-session")).toBeVisible();
+  // Connected: the window shows its stream (the home tab varies with what
+  // other specs did on this daemon).
+  await expect(page.getByTestId("title-bar-search")).toBeVisible();
   await expect(page.getByTestId("remote-banner-down")).toHaveCount(0);
   expect(errors).toEqual([]);
   await context.close();

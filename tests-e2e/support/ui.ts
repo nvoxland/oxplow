@@ -29,14 +29,18 @@ export async function searchLauncher(page: Page, query: string): Promise<void> {
 }
 
 /** Open a page through the launcher: search for `query`, take the first
- *  result — once it is a page, command or search hit naming the query,
- *  since Enter takes whatever row is first, the results update after the
- *  typing, and "Ask the Agent: <query>" names any query. */
+ *  result — once it is a page, command or search hit whose title starts
+ *  with the query (after a command's group), since Enter takes whatever row is first, the results
+ *  update after the typing (the pages arrive with the extensions), "Ask
+ *  the Agent: <query>" names any query, and a title merely containing it
+ *  ("Untitled dashboard" for "Board") is another thing. */
 export async function openFromLauncher(page: Page, query: string): Promise<void> {
   await searchLauncher(page, query);
   const first = page.locator(
     '[data-row-index="0"]:is([data-testid^="launcher-page-"], [data-testid^="launcher-command-"], [data-testid^="launcher-hit-"])',
   );
-  await expect(first).toContainText(query, { ignoreCase: true });
+  // A command's row leads with its group ("⌘Tasks›New Agent Session…").
+  const title = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  await expect(first).toHaveText(new RegExp(`(?:^|›)\\s*${title}`, "i"));
   await page.keyboard.press("Enter");
 }

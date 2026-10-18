@@ -69,8 +69,9 @@ function installGithubExample(project: string): void {
 
 /** The environment a daemon runs in: its own home (so a terminal's shell
  *  reads no rc file and writes no history of the person's), a PATH without
- *  the person's own bin dirs, a plain `/bin/sh`, and no global or system
- *  git config. */
+ *  the person's own bin dirs, a plain `/bin/sh`, no global or system git
+ *  config, and not Terminal.app's session (macOS's bash would save one into
+ *  the home after its shell exits, racing the cleanup). */
 function isolated(dir: string, harnessFake: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -92,7 +93,7 @@ function isolated(dir: string, harnessFake: string): NodeJS.ProcessEnv {
     GIT_COMMITTER_EMAIL: "e2e@example.com",
     RUST_LOG: process.env.RUST_LOG ?? "warn",
   };
-  for (const name of ["ZDOTDIR", "BASH_ENV", "ENV", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"]) {
+  for (const name of ["ZDOTDIR", "BASH_ENV", "ENV", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "TERM_SESSION_ID", "TERM_PROGRAM"]) {
     delete env[name];
   }
   return env;

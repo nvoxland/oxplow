@@ -3,8 +3,11 @@ import { expect, test } from "../../support/fixtures.js";
 import { searchLauncher } from "../../support/ui.js";
 
 /// Search offers New Agent Session…; choosing it opens the session picker
-/// rather than starting anything.
-test("search offers a new agent session, which opens the picker", async ({ page }) => {
+/// rather than starting anything. On a fresh daemon: the picker is the home
+/// tab only while the thread has no session, which another spec on the
+/// shared daemon may have started.
+test("search offers a new agent session, which opens the picker", async ({ fresh }) => {
+  const { page } = fresh;
   await page.goto("/");
   await expect(page.getByTestId("page-new-session")).toBeVisible();
   await page.getByTestId("new-session-start").click();
