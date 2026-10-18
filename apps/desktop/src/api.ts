@@ -355,45 +355,52 @@ export interface WorkspaceRenameResult {
 }
 
 import type { Revision } from "./revision.js";
+import {
+  STREAM_HEAD_SQL,
+  STREAM_UPSTREAM_SQL,
+  streamHeadFromRows,
+  streamUpstreamFromRows,
+  statusCountsFromRows,
+  STATUS_COUNTS_SQL,
+  type StreamHead,
+  type StreamUpstream,
+} from "./streamHead.js";
+import { streamRowId } from "./modelIds.js";
 import type {
   BlameLine,
   Divergence,
   FileStatus,
-  HeadInfo,
-  InProgressOp,
   RevisionDetail,
   RevisionInfo,
   VcsWorkspace,
-  StatusEntry,
   WorkspaceEntry,
   WorkspaceIndexedFile,
-  WorkspaceStatus,
 } from "./tauri-bridge/generated/bindings.js";
 export type {
   BlameLine,
   Divergence,
   FileStatus,
-  HeadInfo,
-  InProgressOp,
   RevisionInfo,
   VcsWorkspace,
   RevisionDetail,
-  StatusEntry,
   WorkspaceEntry,
   WorkspaceIndexedFile,
-  WorkspaceStatus,
 };
 
 // ---- The stream's version control, neutral (`.context/vcs.md`) ----
 
-/** Where the stream's workspace is: its head revision and branch. */
-export async function vcsHead(streamId: string): Promise<HeadInfo> {
-  return unwrap(await commands.vcsHead(streamId || null));
+/** Where the stream's workspace is: its head revision and branch, read
+ *  from `v_stream` / `v_branch` (restated whenever refs move). */
+export async function streamHead(streamId: string): Promise<StreamHead> {
+  const res = await querySql(STREAM_HEAD_SQL, [streamRowId(streamId)], 1);
+  return streamHeadFromRows(res.rows);
 }
 
-/** The workspace's changes against its head, plus any paused operation. */
-export async function vcsStatus(streamId: string): Promise<WorkspaceStatus> {
-  return unwrap(await commands.vcsStatus(streamId || null));
+/** How far the stream's checked-out branch has parted from its upstream
+ *  (`v_branch`, restated whenever refs move). */
+export async function streamUpstream(streamId: string): Promise<StreamUpstream> {
+  const res = await querySql(STREAM_UPSTREAM_SQL, [streamRowId(streamId)], 1);
+  return streamUpstreamFromRows(res.rows);
 }
 
 /** Who last changed each line of `path` at `revision` (the working tree:
@@ -470,22 +477,6 @@ export interface StatusCounts {
   total: number;
 }
 
-export function countStatus(status: WorkspaceStatus): StatusCounts {
-  const counts: StatusCounts = {
-    added: 0,
-    modified: 0,
-    deleted: 0,
-    renamed: 0,
-    untracked: 0,
-    conflicted: 0,
-    total: 0,
-  };
-  for (const e of status.entries) {
-    counts[e.status] += 1;
-    counts.total += 1;
-  }
-  return counts;
-}
 import type { InstalledLspPackage, LspServerListing } from "./tauri-bridge/generated/bindings.js";
 export type { InstalledLspPackage, LspServerListing };
 
@@ -2240,15 +2231,23 @@ export async function listWorkspaceEntries(streamId: string, path = ""): Promise
   );
 }
 
+/** The stream's uncommitted files counted by status (`v_change_file`, its
+ *  working change), and what the read read, to re-run it on. */
+export async function streamStatusCounts(streamId: string): Promise<{ counts: StatusCounts; reads: Reads }> {
+  const res = await querySql(STATUS_COUNTS_SQL, [streamRowId(streamId)], 100);
+  return { counts: statusCountsFromRows(res.rows), reads: res.reads };
+}
+
 export async function listWorkspaceFiles(streamId: string): Promise<{
   files: WorkspaceIndexedFile[];
   summary: StatusCounts;
+  summaryReads: Reads;
 }> {
-  const [filesRes, summary] = await Promise.all([
+  const [filesRes, status] = await Promise.all([
     commands.listWorkspaceFiles(streamId || null),
-    vcsStatus(streamId),
+    streamStatusCounts(streamId),
   ]);
-  return { files: unwrap(filesRes), summary: countStatus(summary) };
+  return { files: unwrap(filesRes), summary: status.counts, summaryReads: status.reads };
 }
 
 export async function readWorkspaceFile(streamId: string, path: string): Promise<WorkspaceFile> {

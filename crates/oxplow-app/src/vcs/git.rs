@@ -565,10 +565,12 @@ impl Vcs for GitProvider {
         blocking(move || {
             repo_check(&ws)?;
             let conflicted = oxplow_git::list_conflicted_paths(&ws);
+            let staged = oxplow_git::list_staged_paths(&ws);
             let mut entries: Vec<StatusEntry> = oxplow_git::list_git_statuses(&ws)
                 .into_iter()
                 .filter(|(p, _)| !conflicted.contains(p))
                 .map(|(path, s)| StatusEntry {
+                    staged: staged.contains(&path),
                     path,
                     status: match s {
                         oxplow_git::GitFileStatus::Added => FileStatus::Added,
@@ -581,6 +583,7 @@ impl Vcs for GitProvider {
                 .chain(conflicted.iter().map(|p| StatusEntry {
                     path: p.clone(),
                     status: FileStatus::Conflicted,
+                    staged: false,
                 }))
                 .collect();
             entries.sort_by(|a, b| a.path.cmp(&b.path));
@@ -613,6 +616,9 @@ impl Vcs for GitProvider {
                     name: b.name,
                     remote: b.remote,
                     head: b.head,
+                    upstream: b.upstream,
+                    ahead: b.ahead,
+                    behind: b.behind,
                 })
                 .collect())
         })

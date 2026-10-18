@@ -62,6 +62,35 @@ pub fn list_git_statuses(repo_path: &Path) -> HashMap<String, GitFileStatus> {
     out
 }
 
+/// Every path with a change in the index (`git add`ed): new, modified,
+/// deleted or renamed against HEAD. Empty when not a repo.
+pub fn list_staged_paths(repo_path: &Path) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    let Ok(repo) = git2::Repository::open(repo_path) else {
+        return out;
+    };
+    let mut opts = git2::StatusOptions::new();
+    opts.include_untracked(false)
+        .include_ignored(false)
+        .include_unmodified(false);
+    let Ok(statuses) = repo.statuses(Some(&mut opts)) else {
+        return out;
+    };
+    let in_index = git2::Status::INDEX_NEW
+        | git2::Status::INDEX_MODIFIED
+        | git2::Status::INDEX_DELETED
+        | git2::Status::INDEX_RENAMED
+        | git2::Status::INDEX_TYPECHANGE;
+    for entry in statuses.iter() {
+        if entry.status().intersects(in_index) {
+            if let Ok(path) = entry.path() {
+                out.insert(path.to_string());
+            }
+        }
+    }
+    out
+}
+
 /// mtime as `(unix seconds, nanoseconds)` — compared at nanosecond
 /// precision (like git) so a checkout that lands files and the index in
 /// the same wall-clock second isn't spuriously treated as racy.
@@ -246,6 +275,22 @@ mod tests {
         repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
             .unwrap();
         dir
+    }
+
+    /// Paths whose change is in the index (`git add`ed) are listed; an
+    /// edit not yet added, and an untracked file, are not.
+    #[test]
+    fn staged_paths_are_those_with_a_change_in_the_index() {
+        let dir = init_repo();
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        std::fs::write(dir.path().join("added.txt"), "a").unwrap();
+        std::fs::write(dir.path().join("loose.txt"), "l").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("added.txt")).unwrap();
+        index.write().unwrap();
+        let staged = list_staged_paths(dir.path());
+        assert!(staged.contains("added.txt"), "{staged:?}");
+        assert!(!staged.contains("loose.txt"), "{staged:?}");
     }
 
     #[test]

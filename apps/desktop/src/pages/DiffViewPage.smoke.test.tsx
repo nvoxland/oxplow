@@ -63,7 +63,6 @@ const neutral: Record<string, (...args: unknown[]) => Promise<unknown>> = {
       body: "",
       files: [{ path: "b.ts", status: "added", additions: 3, deletions: 0 }],
     }),
-  vcsHead: async () => ok({ revision: `git:${HEAD}`, branch: "main" }),
   querySql: async (...args) => {
     const sql = String(args[0]);
     sqlCalls.push(sql);
@@ -78,6 +77,9 @@ const neutral: Record<string, (...args: unknown[]) => Promise<unknown>> = {
         reads,
         freshness: [],
       });
+    }
+    if (sql.includes("head_sha")) {
+      return ok({ columns: [], rows: [[HEAD, "main"]], truncated: false, reads, freshness: [] });
     }
     if (sql.includes("v_branch")) {
       return ok({ columns: [], rows: [["main", HEAD]], truncated: false, reads, freshness: [] });

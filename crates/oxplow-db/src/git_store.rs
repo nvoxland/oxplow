@@ -45,6 +45,12 @@ pub struct GitBranchRow {
     pub stream_id: Option<i64>,
     /// The repository's default branch.
     pub is_default: bool,
+    /// For a local branch that tracks one, its remote-tracking branch.
+    pub upstream: Option<String>,
+    /// Commits it has that its upstream lacks; 0 without one.
+    pub ahead: u32,
+    /// Commits its upstream has that it lacks; 0 without one.
+    pub behind: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -166,8 +172,9 @@ impl SqliteGitStore {
                 for b in &rows {
                     tx.execute(
                         "INSERT OR REPLACE INTO git_branch
-                           (name, kind, remote, head_sha, stream_id, updated_at, is_default)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                           (name, kind, remote, head_sha, stream_id, updated_at, is_default,
+                            upstream, ahead, behind)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                         rusqlite::params![
                             b.name,
                             b.kind,
@@ -175,7 +182,10 @@ impl SqliteGitStore {
                             b.head_sha,
                             b.stream_id,
                             at,
-                            b.is_default
+                            b.is_default,
+                            b.upstream,
+                            b.ahead,
+                            b.behind
                         ],
                     )
                     .map_err(map_sql_err)?;
@@ -187,6 +197,24 @@ impl SqliteGitStore {
 }
 
 impl SqliteGitStore {
+    /// Replace where each stream's workspace is (`stream_id`, its HEAD).
+    pub async fn replace_stream_heads(&self, rows: Vec<(i64, String)>) -> Result<(), DomainError> {
+        self.db
+            .transaction(move |tx| {
+                tx.execute("DELETE FROM stream_head", [])
+                    .map_err(map_sql_err)?;
+                for (stream_id, sha) in &rows {
+                    tx.execute(
+                        "INSERT OR REPLACE INTO stream_head (stream_id, head_sha) VALUES (?1, ?2)",
+                        rusqlite::params![stream_id, sha],
+                    )
+                    .map_err(map_sql_err)?;
+                }
+                Ok(())
+            })
+            .await
+    }
+
     /// Replace the tag list.
     pub async fn replace_tags(&self, rows: Vec<GitTagRow>) -> Result<(), DomainError> {
         let at = ts_to_string(Timestamp::now());
@@ -220,6 +248,20 @@ mod tests {
     async fn commits_files_and_branches_read_through_their_views() {
         let db = Database::in_memory();
         let store = SqliteGitStore::new(db.clone());
+        db.call(|c| {
+            for id in [1, 2] {
+                c.execute(
+                    "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source,
+                                          worktree_path, created_at, updated_at)
+                     VALUES (?1, CASE ?1 WHEN 1 THEN 'primary' ELSE 'worktree' END, 's', 'main', 'r', 'r',
+                             '/r' || ?1, 'now', 'now')",
+                    [id],
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
         let sl = SemanticLayer::new(db);
         assert!(!store.has_commit("abc").await.unwrap());
         let commit = GitCommitRow {
@@ -263,6 +305,9 @@ mod tests {
                     head_sha: Some("abc".into()),
                     stream_id: Some(1),
                     is_default: true,
+                    upstream: Some("origin/main".into()),
+                    ahead: 2,
+                    behind: 1,
                 },
                 GitBranchRow {
                     name: "main".into(),
@@ -271,6 +316,9 @@ mod tests {
                     head_sha: Some("abc".into()),
                     stream_id: None,
                     is_default: false,
+                    upstream: None,
+                    ahead: 0,
+                    behind: 0,
                 },
             ])
             .await
@@ -278,13 +326,22 @@ mod tests {
         assert_eq!(
             rows(
                 &sl,
-                "SELECT name, kind, remote, head_sha, stream_id FROM v_branch ORDER BY kind"
+                "SELECT name, kind, remote, head_sha, stream_id, upstream, ahead, behind FROM v_branch ORDER BY kind"
             )
             .await,
             json!([
-                ["main", "local", null, "abc", 1],
-                ["main", "remote", "origin", "abc", null]
+                ["main", "local", null, "abc", 1, "origin/main", 2, 1],
+                ["main", "remote", "origin", "abc", null, null, 0, 0]
             ])
+        );
+        // Where each stream's workspace is, read beside the stream.
+        store
+            .replace_stream_heads(vec![(1, "abc".into()), (3, "def".into())])
+            .await
+            .unwrap();
+        assert_eq!(
+            rows(&sl, "SELECT id, head_sha FROM v_stream ORDER BY id").await,
+            json!([[1, "abc"], [2, null]])
         );
     }
 }

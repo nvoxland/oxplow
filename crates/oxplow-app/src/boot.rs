@@ -522,6 +522,10 @@ pub async fn run_boot_orchestration(
         });
     }
 
+    // Each stream's working-tree file list (`v_change_file`, staged and
+    // untracked included): listed at boot and whenever its refs or index move.
+    tokio::spawn(crate::change_reactor::watch_working_files(state.clone()));
+
     // LSP diagnostics → `v_diagnostic` (live state; cleared here first).
     crate::lsp_diagnostics::spawn(state.clone());
 

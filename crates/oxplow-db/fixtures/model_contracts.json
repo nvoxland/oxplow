@@ -1217,6 +1217,61 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "Branch name (without the remote)."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`local` or `remote`."
+        },
+        {
+          "name": "remote",
+          "type": "TEXT",
+          "doc": "Remote name for a remote-tracking branch."
+        },
+        {
+          "name": "head_sha",
+          "type": "TEXT",
+          "doc": "The commit it points at."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream whose worktree has it checked out (v_stream.id), if any."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "When oxplow last read it (RFC 3339)."
+        },
+        {
+          "name": "is_default",
+          "type": "INTEGER",
+          "doc": "1 for the repository's default branch (`main`), else 0."
+        },
+        {
+          "name": "upstream",
+          "type": "TEXT",
+          "doc": "For a local branch that tracks one, its remote-tracking branch (`origin/main`); NULL otherwise. (v2)"
+        },
+        {
+          "name": "ahead",
+          "type": "INTEGER",
+          "doc": "Commits a local branch has that its upstream lacks; 0 without an upstream and for a remote-tracking branch. (v2)"
+        },
+        {
+          "name": "behind",
+          "type": "INTEGER",
+          "doc": "Commits a local branch's upstream has that it lacks; 0 without an upstream and for a remote-tracking branch. (v2)"
+        }
+      ],
+      "key": []
     }
   },
   "capture": {
@@ -1617,6 +1672,56 @@
           "name": "is_test",
           "type": "INTEGER",
           "doc": "1 if the path looks like a test file."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "change_id",
+          "type": "INTEGER",
+          "doc": "The change (v_change.id)."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "Repo-relative path."
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "doc": "`added`, `modified` or `deleted`."
+        },
+        {
+          "name": "additions",
+          "type": "INTEGER",
+          "doc": "Lines added."
+        },
+        {
+          "name": "deletions",
+          "type": "INTEGER",
+          "doc": "Lines deleted."
+        },
+        {
+          "name": "zone",
+          "type": "TEXT",
+          "doc": "Architectural zone from the project's zone rules (`other` when none match)."
+        },
+        {
+          "name": "is_test",
+          "type": "INTEGER",
+          "doc": "1 if the path looks like a test file."
+        },
+        {
+          "name": "staged",
+          "type": "INTEGER",
+          "doc": "For a `working` change: 1 when the file's change is in the index (staged, ready to commit), else 0; NULL for the other kinds of change. (v2)"
+        },
+        {
+          "name": "untracked",
+          "type": "INTEGER",
+          "doc": "For a `working` change: 1 when git doesn't track the file yet (it shows as `added`), else 0; NULL for the other kinds of change. (v2)"
         }
       ],
       "key": []
@@ -6303,6 +6408,121 @@
         }
       ],
       "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Stream id."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`primary` (the repo) or `worktree`."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Display name."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "Git branch currently checked out in the worktree."
+        },
+        {
+          "name": "worktree_path",
+          "type": "TEXT",
+          "doc": "Absolute path of the stream's worktree."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "archived_at",
+          "type": "TEXT",
+          "doc": "Set when the stream was archived; NULL while live."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`stream:str<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
+        },
+        {
+          "name": "prompt",
+          "type": "TEXT",
+          "doc": "The standing instructions the person set for every agent session in this stream (appended to its system prompt); NULL when none. (v3)"
+        }
+      ],
+      "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Stream id."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`primary` (the repo) or `worktree`."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Display name."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "Git branch currently checked out in the worktree."
+        },
+        {
+          "name": "worktree_path",
+          "type": "TEXT",
+          "doc": "Absolute path of the stream's worktree."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "archived_at",
+          "type": "TEXT",
+          "doc": "Set when the stream was archived; NULL while live."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`stream:str<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
+        },
+        {
+          "name": "prompt",
+          "type": "TEXT",
+          "doc": "The standing instructions the person set for every agent session in this stream (appended to its system prompt); NULL when none. (v3)"
+        },
+        {
+          "name": "head_sha",
+          "type": "TEXT",
+          "doc": "The commit its workspace is on (HEAD), whether it has a branch checked out or is detached; NULL before its first commit or the first refs scan. Restated whenever refs move. (v4)"
+        }
+      ],
+      "key": []
     }
   },
   "struggle": {
@@ -7305,6 +7525,66 @@
           "name": "mark",
           "type": "TEXT",
           "doc": "The person's colour for its tab — `amber`, `red`, `green`, `blue` or `violet` — or NULL when unmarked. It changes nothing else. (v4)"
+        }
+      ],
+      "key": []
+    },
+    "5": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Thread id."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Owning stream (v_stream.id)."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Display name."
+        },
+        {
+          "name": "sort_index",
+          "type": "INTEGER",
+          "doc": "Order within the stream."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "closed_at",
+          "type": "TEXT",
+          "doc": "Set when the thread was closed; NULL while it is open. Open or closed is all a thread's state is (v4: `status` is gone)."
+        },
+        {
+          "name": "archived_at",
+          "type": "TEXT",
+          "doc": "Set when the thread was archived."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`thread:thr<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
+        },
+        {
+          "name": "mark",
+          "type": "TEXT",
+          "doc": "The person's colour for its tab — `amber`, `red`, `green`, `blue` or `violet` — or NULL when unmarked. It changes nothing else. (v4)"
+        },
+        {
+          "name": "prompt",
+          "type": "TEXT",
+          "doc": "The standing instructions the person set for this thread's agent sessions (appended to its system prompt, after the stream's); NULL when none. (v5)"
         }
       ],
       "key": []

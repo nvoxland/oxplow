@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Stream } from "../../api.js";
-import { vcsHead } from "../../api.js";
+import { streamHead } from "../../api.js";
 import { NO_READS, readsOf, useRerunOnChange } from "../../lens/lensRerun.js";
 import { logUi } from "../../logger.js";
 import { vcsRevOf } from "../../revision.js";
@@ -42,7 +42,7 @@ export function HistoryPanel({ stream, onSelectCommit, onOpenPage, revealSha }: 
   const loadHead = useCallback(async () => {
     if (!streamId) return;
     try {
-      const h = await vcsHead(streamId);
+      const h = await streamHead(streamId);
       setHead({ streamId, sha: vcsRevOf(h.revision), branch: h.branch });
       setError(null);
     } catch (err) {

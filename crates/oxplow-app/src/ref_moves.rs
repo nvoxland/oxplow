@@ -18,13 +18,36 @@ use crate::events::{EventBus, OxplowEvent};
 #[derive(Clone)]
 pub struct RefMoves {
     tx: broadcast::Sender<StreamId>,
+    /// A stream's index or working tree moved by a VCS write (stage,
+    /// discard, …) without its refs moving.
+    index_tx: broadcast::Sender<StreamId>,
     events: EventBus,
 }
 
 impl RefMoves {
     pub fn new(events: EventBus) -> Self {
         let (tx, _) = broadcast::channel(256);
-        Self { tx, events }
+        let (index_tx, _) = broadcast::channel(256);
+        Self {
+            tx,
+            index_tx,
+            events,
+        }
+    }
+
+    /// `stream`'s index or working tree changed through a VCS write (a
+    /// stage, a discard), whether or not its refs moved: the backend that
+    /// lists the working tree's files hears it here. The UI has
+    /// `WorkspaceChanged` for these.
+    pub fn index_moved(&self, stream: StreamId) {
+        let _ = self.index_tx.send(stream);
+    }
+
+    /// The listener for [`Self::index_moved`].
+    pub fn subscribe_index(&self) -> Listener {
+        Listener {
+            rx: self.index_tx.subscribe(),
+        }
     }
 
     /// `stream`'s refs moved: the backend hears it here, the UI as

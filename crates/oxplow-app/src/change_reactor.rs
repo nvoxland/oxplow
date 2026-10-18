@@ -90,6 +90,57 @@ pub fn target_of(job: &str) -> Option<ChangeTarget> {
     }
 }
 
+/// Keep every stream's working-tree file list in `v_change_file` current
+/// where no snapshot says so: once at boot (so a stream has its `working`
+/// change before anything is edited), and whenever its refs move or a VCS
+/// write (stage, discard, commit, …) changes its index. Stage one only —
+/// the deep analysis stays the pump consumer's. Runs until the services go.
+pub async fn watch_working_files(svc: Arc<Services>) {
+    use crate::ref_moves::Moved;
+    use oxplow_domain::stores::StreamStore as _;
+    let streams = svc.stream_store.list().await.unwrap_or_default();
+    // Listen before the first pass, so a move during it isn't lost.
+    let mut refs = svc.ref_moves.subscribe();
+    let mut index = svc.ref_moves.subscribe_index();
+    let list = |stream: oxplow_domain::StreamId| {
+        let svc = svc.clone();
+        async move {
+            if let Err(error) = crate::change_analysis::refresh_files(
+                &svc,
+                ChangeTarget::Working {
+                    stream_id: stream.to_string(),
+                },
+            )
+            .await
+            {
+                tracing::debug!(%error, %stream, "listing a working tree's files failed");
+            }
+        }
+    };
+    for s in &streams {
+        if s.archived_at.is_none() {
+            list(s.id).await;
+        }
+    }
+    loop {
+        let moved = tokio::select! {
+            m = refs.recv() => m,
+            m = index.recv() => m,
+        };
+        match moved {
+            Some(Moved::Stream(s)) => list(s).await,
+            Some(Moved::Missed) => {
+                for s in svc.stream_store.list().await.unwrap_or_default() {
+                    if s.archived_at.is_none() {
+                        list(s.id).await;
+                    }
+                }
+            }
+            None => break,
+        }
+    }
+}
+
 /// The owner of core's paced jobs.
 pub const CORE: &str = "core";
 
@@ -431,6 +482,121 @@ mod tests {
         assert_eq!(
             working_paths(&f.svc).await,
             serde_json::json!([["src/lib.rs"], ["src/other.rs"]])
+        );
+    }
+
+    /// The working tree's files say which are staged and which untracked,
+    /// and a deep analysis of them keeps that; an effort's say neither.
+    #[tokio::test]
+    async fn the_working_files_say_which_are_staged_and_which_untracked() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let root = f.svc.layout.project_dir.clone();
+        repo(&root);
+        std::fs::write(root.join("src/staged.rs"), "fn s() {}\n").unwrap();
+        std::fs::write(root.join("src/loose.rs"), "fn l() {}\n").unwrap();
+        let out = std::process::Command::new("git")
+            .args(["add", "src/staged.rs"])
+            .current_dir(&root)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
+        let ev = log(&f.svc, taken(false, 1)).await;
+        reactor.handle(&ev).await.unwrap();
+        let flags = || async {
+            let out = f
+                .svc
+                .sql
+                .query_sql(
+                    "SELECT f.path, f.staged, f.untracked FROM v_change c
+                     JOIN v_change_file f ON f.change_id = c.id
+                     WHERE c.kind = 'working' ORDER BY f.path",
+                    vec![],
+                    None,
+                )
+                .await
+                .unwrap();
+            serde_json::to_value(out.rows).unwrap()
+        };
+        let want = serde_json::json!([
+            ["src/lib.rs", 0, 0],
+            ["src/loose.rs", 0, 1],
+            ["src/staged.rs", 1, 0]
+        ]);
+        assert_eq!(flags().await, want);
+        // The deep analysis rewrites the rows and keeps the flags.
+        crate::change_analysis::refresh_change(
+            &f.svc,
+            ChangeTarget::Working {
+                stream_id: f.svc.streams.list_streams().await.unwrap()[0]
+                    .id
+                    .to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(flags().await, want);
+    }
+
+    /// Every stream's working change is there from boot, before anything
+    /// is edited, and a stage moves its staged flag with no snapshot.
+    #[tokio::test]
+    async fn the_working_files_follow_the_index_and_exist_from_boot() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let root = f.svc.layout.project_dir.clone();
+        repo(&root);
+        std::fs::write(root.join("src/new.rs"), "fn n() {}\n").unwrap();
+        tokio::spawn(watch_working_files(f.svc.clone()));
+        let staged = |path: &'static str| {
+            let svc = f.svc.clone();
+            async move {
+                let out = svc
+                    .sql
+                    .query_sql(
+                        "SELECT f.staged FROM v_change c JOIN v_change_file f ON f.change_id = c.id
+                         WHERE c.kind = 'working' AND f.path = ?1",
+                        vec![oxplow_db::SqlCell::Text(path.into())],
+                        None,
+                    )
+                    .await
+                    .unwrap();
+                out.rows.first().map(|r| r[0].clone())
+            }
+        };
+        let wait = |want: Option<oxplow_db::SqlCell>, path: &'static str| {
+            let staged = &staged;
+            async move {
+                for _ in 0..100 {
+                    if staged(path).await == want {
+                        return true;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+                false
+            }
+        };
+        assert!(
+            wait(Some(oxplow_db::SqlCell::Int(0)), "src/new.rs").await,
+            "listed at boot, unstaged"
+        );
+        f.svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "oxplow.vcs.stage",
+                serde_json::json!({
+                    "stream": oxplow_domain::refs::build::stream_ref(
+                        f.svc.streams.list_streams().await.unwrap()[0].id
+                    ),
+                    "paths": ["src/new.rs"]
+                }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(
+            wait(Some(oxplow_db::SqlCell::Int(1)), "src/new.rs").await,
+            "a stage marks it staged"
         );
     }
 

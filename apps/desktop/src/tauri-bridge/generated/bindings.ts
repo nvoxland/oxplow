@@ -868,16 +868,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	vcsHead: (streamId: string | null) => typedError<HeadInfo, IpcError>(__TAURI_INVOKE("vcs_head", { streamId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	vcsStatus: (streamId: string | null) => typedError<WorkspaceStatus, IpcError>(__TAURI_INVOKE("vcs_status", { streamId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	vcsBlame: (streamId: string | null, path: string, revision: string) => typedError<BlameLine[], IpcError>(__TAURI_INVOKE("vcs_blame", { streamId, path, revision })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1461,6 +1451,15 @@ export type Branch = {
 	head: string | null,
 	/**  The repository's default branch (`main`). */
 	is_default: boolean,
+	/**
+	 *  For a local branch that tracks one, its remote-tracking branch
+	 *  (`origin/main`).
+	 */
+	upstream: string | null,
+	/**  Commits the branch has that its upstream lacks; 0 without one. */
+	ahead: number,
+	/**  Commits its upstream has that the branch lacks; 0 without one. */
+	behind: number,
 };
 
 export type BranchChangeEntry = {
@@ -3501,14 +3500,6 @@ export type HarnessUnavailable = {
 	reason: string,
 };
 
-/**  Where a stream's workspace is. */
-export type HeadInfo = {
-	/**  The head revision; `None` before the first commit. */
-	revision: string | null,
-	/**  The branch checked out; `None` when detached. */
-	branch: string | null,
-};
-
 /**
  *  What the hook subprocess sends us.
  * 
@@ -3670,9 +3661,6 @@ export type ImportGuard = {
 	imports: string[],
 	source: DeclaredAt,
 };
-
-/**  An operation paused mid-way, waiting on its conflicts. */
-export type InProgressOp = "merge" | "rebase" | "cherry_pick" | "revert";
 
 export type InstalledLspPackage = {
 	name: string,
@@ -6221,12 +6209,6 @@ export type SqlQueryResult = {
 	coverage?: SourceCoverage[],
 };
 
-/**  One changed path in a workspace. */
-export type StatusEntry = {
-	path: string,
-	status: FileStatus,
-};
-
 export type Stream = {
 	id: StreamId,
 	kind: StreamKind,
@@ -6625,14 +6607,6 @@ export type WorkspaceFile = {
 export type WorkspaceIndexedFile = {
 	path: string,
 	status: FileStatus | null,
-};
-
-/**  A workspace's changes against its head. */
-export type WorkspaceStatus = {
-	/**  Changed paths, sorted. */
-	entries: StatusEntry[],
-	/**  The operation in progress, if one is. */
-	in_progress: InProgressOp | null,
 };
 
 /**

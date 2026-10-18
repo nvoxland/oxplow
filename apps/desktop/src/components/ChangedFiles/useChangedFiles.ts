@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   diffRevisions,
-  vcsHead,
+  streamHead,
   subscribeGitRefsEvents,
   subscribeSnapshotEvents,
   subscribeWorkspaceEvents,
@@ -41,7 +41,7 @@ async function load(
     case "working": {
       // The working tree against its head (from nothing before the first
       // commit).
-      const head = (await vcsHead(source.streamId)).revision;
+      const head = (await streamHead(source.streamId)).revision;
       const files = await diffRevisions(source.streamId, head, WORKING);
       return { files, base: head, head: WORKING };
     }
