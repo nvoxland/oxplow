@@ -293,7 +293,7 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
         "collector `todos` (collectors/todos.star):\n  \
          sql.read: declared, used\n  \
          tree.read: implied, used\n  \
-         ai.compute: declared, used — a person approves it\n\
+         ai.compute: declared, used\n\
          command `triage.todos.decide` (commands/decide.star):\n  \
          state.read: declared, used\n\
          command `triage.todos.decisions` (commands/decisions.star):\n  \

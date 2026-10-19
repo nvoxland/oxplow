@@ -283,12 +283,7 @@ pub fn scaffold_with(
                 Some(builtin) => format!(" ({builtin}())"),
                 None => String::new(),
             };
-            let approval = if service.approval {
-                ", you approve it"
-            } else {
-                ""
-            };
-            format!("{}{via}{approval}", service.scope)
+            format!("{}{via}", service.scope)
         })
         .collect::<Vec<_>>()
         .join(", ");
@@ -1312,12 +1307,7 @@ pub fn render_services(report: &CheckReport) -> String {
                 Declared::Undeclared => "NOT declared",
             };
             let used = if u.used { "used" } else { "not used" };
-            let approval = if u.approval {
-                " — a person approves it"
-            } else {
-                ""
-            };
-            out.push_str(&format!("  {}: {declared}, {used}{approval}\n", u.scope));
+            out.push_str(&format!("  {}: {declared}, {used}\n", u.scope));
         }
     }
     out

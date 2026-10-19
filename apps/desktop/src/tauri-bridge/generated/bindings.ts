@@ -5423,11 +5423,6 @@ export type ProviderImpact = {
 	 *  line shows the change.
 	 */
 	firstDifference: string | null,
-	/**
-	 *  What approving it would change, as sentences ([`approval_lines`]):
-	 *  what Settings → Data shows before a person approves.
-	 */
-	lines: string[],
 };
 
 /**  An instance as Settings → Integrations shows it. */
@@ -5888,8 +5883,6 @@ export type ServiceListing = {
 	/**  "Read the captured tree". */
 	title: string,
 	summary: string,
-	/**  A person approves a script that uses it. */
-	approval: boolean,
 };
 
 /**  One service of a script. */
@@ -5899,8 +5892,6 @@ export type ServiceUse = {
 	declared: Declared,
 	/**  Its script names one of the service's builtins. */
 	used: boolean,
-	/**  A person approves a script that uses it. */
-	approval: boolean,
 };
 
 /**  How handing a redirect to a sign-in went (`complete_oauth_sign_in`). */

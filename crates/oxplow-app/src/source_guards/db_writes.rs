@@ -337,11 +337,8 @@ pub fn denied(root: &Path) -> Vec<(String, &'static str)> {
         };
         out.insert(path, DB_REASON);
     }
-    // Consent and credentials, every call.
-    for (krate, module, owner) in [
-        ("oxplow-app", "oxplow_app::exec_consent", "ApprovalStore"),
-        ("oxplow-ai", "oxplow_ai::secrets", "SecretStore"),
-    ] {
+    // Credentials, every call.
+    for (krate, module, owner) in [("oxplow-ai", "oxplow_ai::secrets", "SecretStore")] {
         let name = krate.replace('-', "_");
         for f in functions(&root.join("crates").join(krate), &name) {
             let mine = match &f.owner {

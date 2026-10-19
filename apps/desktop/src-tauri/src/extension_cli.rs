@@ -441,9 +441,7 @@ mod tests {
             "{out}"
         );
         assert!(
-            out.contains(
-                "collector `kinds` (kinds.star):\n  ai.compute: implied, used — a person approves it\n"
-            ),
+            out.contains("collector `kinds` (kinds.star):\n  ai.compute: implied, used\n"),
             "{out}"
         );
         let (_, out, _) = cli(&["check", "svc", "--root", root, "--json"]);
