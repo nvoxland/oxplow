@@ -31,6 +31,22 @@ pub struct Deployed {
     pub hash: String,
     /// It was already the active deployment: nothing changed.
     pub already: bool,
+    /// What the person should know, the deployment went live regardless.
+    pub warnings: Vec<String>,
+}
+
+/// An extension this big says so when it deploys: each deployment is a
+/// whole copy of its folder.
+const BIG_DEPLOYMENT: u64 = 25 * 1024 * 1024;
+
+fn size_warnings(name: &str, bytes: u64) -> Vec<String> {
+    if bytes <= BIG_DEPLOYMENT {
+        return Vec::new();
+    }
+    vec![format!(
+        "extension `{name}` is {:.1} MiB: every deployment copies its whole folder, so keep build inputs and dependencies out of it",
+        bytes as f64 / (1024.0 * 1024.0)
+    )]
 }
 
 fn invalid(message: impl Into<String>) -> DomainError {
@@ -120,11 +136,16 @@ pub async fn deploy(
     valid(name)?;
     let project = svc.layout.project_dir.clone();
     let source = source_of(&project, root, name)?;
-    let (hash, loaded) = {
+    let (hash, size, loaded) = {
         let (source, owned) = (source.clone(), name.to_string());
         tokio::task::spawn_blocking(move || {
             let hash = extension_store::source_hash(&source)?;
-            Ok::<_, std::io::Error>((hash, crate::extensions::load_extension_at(&source, &owned)))
+            let size = extension_store::source_size(&source)?;
+            Ok::<_, std::io::Error>((
+                hash,
+                size,
+                crate::extensions::load_extension_at(&source, &owned),
+            ))
         })
         .await
         .map_err(storage)?
@@ -137,6 +158,7 @@ pub async fn deploy(
             name: name.to_string(),
             hash,
             already: true,
+            warnings: Vec::new(),
         });
     }
     if !loaded.errors.is_empty() {
@@ -186,6 +208,7 @@ pub async fn deploy(
         name: name.to_string(),
         hash,
         already: false,
+        warnings: size_warnings(name, size),
     })
 }
 
@@ -261,6 +284,7 @@ pub async fn rollback(
             name: name.to_string(),
             hash: shown,
             already: true,
+            warnings: Vec::new(),
         });
     }
     activate(svc, &LiveChanges::from([(name.to_string(), hash)])).await?;
@@ -268,6 +292,7 @@ pub async fn rollback(
         name: name.to_string(),
         hash: shown,
         already: false,
+        warnings: Vec::new(),
     })
 }
 
@@ -840,6 +865,83 @@ mod tests {
             .unwrap();
         assert_eq!(ghost.deployment, Deployment::NotHere);
         assert!(!ghost.enabled && ghost.errors.is_empty());
+    }
+
+    /// Foundation is always on: a deployment of it that doesn't load at
+    /// boot (one an older oxplow wrote, a bad deploy from the repo) gives
+    /// way to the shipped one, never to no foundation, and says so.
+    #[tokio::test]
+    async fn a_foundation_deployment_that_fails_at_boot_falls_back_to_the_shipped_one() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let project = svc.layout.project_dir.clone();
+        let name = "oxplow-foundation";
+        let hash = "00000000000000ba";
+        let dir = extension_store::deployment_dir(&project, name, hash);
+        write(
+            &dir,
+            "extension.yaml",
+            "manifest: 2\nname: oxplow-foundation\nnot_a_key: 1\n",
+        );
+        let row = store_rows::DeploymentRow {
+            name: name.into(),
+            hash: hash.into(),
+            deployed_at: "2026-10-19T00:00:00Z".into(),
+            from_stream: None,
+            source: "extensions/oxplow-foundation".into(),
+            active: false,
+        };
+        svc.db
+            .transaction(move |tx| {
+                store_rows::record_tx(tx, &row)?;
+                store_rows::set_active_tx(tx, &[(name.to_string(), hash.to_string())])
+            })
+            .await
+            .unwrap();
+
+        svc.extension_activation
+            .initialize(svc.clone())
+            .await
+            .expect("foundation activates");
+        let active = svc.extension_catalog.active().unwrap();
+        let foundation = active.extensions().iter().find(|e| e.name == name).unwrap();
+        assert!(
+            matches!(foundation.deployment, Deployment::Shipped { .. }),
+            "{:?}",
+            foundation.deployment
+        );
+        assert!(foundation.errors.is_empty(), "{:?}", foundation.errors);
+        let problems = svc.extension_activation.problems();
+        assert!(
+            problems
+                .get(name)
+                .is_some_and(|p| p.iter().any(|m| m.contains("the shipped version runs"))),
+            "{problems:?}"
+        );
+        assert!(!svc.extension_catalog.live().contains_key(name));
+    }
+
+    /// Everything in an extension's folder is copied into each deployment,
+    /// so a big one deploys and says how big it is.
+    #[tokio::test]
+    async fn a_big_extension_deploys_with_a_warning() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        let dir = source(svc, "One");
+        std::fs::write(dir.join("data.bin"), vec![0u8; 26 * 1024 * 1024]).unwrap();
+        let deployed = deploy(svc, "acme", &root, None).await.unwrap();
+        assert!(
+            deployed
+                .warnings
+                .iter()
+                .any(|w| w.contains("acme") && w.contains("26.0 MiB")),
+            "{:?}",
+            deployed.warnings
+        );
+        std::fs::remove_file(dir.join("data.bin")).unwrap();
+        let small = deploy(svc, "acme", &root, None).await.unwrap();
+        assert!(small.warnings.is_empty(), "{:?}", small.warnings);
     }
 
     /// A restart starts from the recorded deployments: the core baseline

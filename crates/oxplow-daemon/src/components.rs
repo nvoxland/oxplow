@@ -4,12 +4,14 @@
 //! serves it because the shell holds no project state and browser mode has
 //! no custom scheme.
 //!
-//! **What it serves is a snapshot.** The host loads the component's bundle
-//! (`load_component`) into `Services::component_bundles`, keyed by its
-//! version — the component's approval hash over exactly those files — and
-//! the frame is served from that snapshot alone, so it runs what was
-//! hashed: a file edited on disk after loading isn't what runs, and the
-//! frame's `invoke` names the version it loaded, which must be approved.
+//! **What it serves is a deployment.** The host loads the component's
+//! bundle (`load_component`) into `Services::component_bundles`, keyed by
+//! its version — the component's approval hash over its files — and the
+//! frame is served from that bundle's folder in its deployment, which
+//! never changes, so it runs what was hashed: an edit to the source isn't
+//! what runs until it is deployed, and the frame's `invoke` names the
+//! version it loaded, which must be approved. A version whose deployment
+//! was pruned serves nothing; its frame reloads.
 //!
 //! **Ungated** like `/health`: a frame can't carry the UI token, and what
 //! it serves is an extension's own files — never project data, which the
@@ -156,7 +158,7 @@ pub async fn component_index(
     AxumPath(version): AxumPath<String>,
     headers: HeaderMap,
 ) -> Response {
-    serve(state, version, String::new(), headers)
+    serve(state, version, String::new(), headers).await
 }
 
 /// `/components/v/{version}/{*path}` — one of the bundle's files.
@@ -165,12 +167,13 @@ pub async fn component_file(
     AxumPath((version, path)): AxumPath<(String, String)>,
     headers: HeaderMap,
 ) -> Response {
-    serve(state, version, path, headers)
+    serve(state, version, path, headers).await
 }
 
 /// `path` (`""`: `index.html`) of the bundle loaded at `version`, exactly
-/// one of its files — a map lookup, so nothing else can be named.
-fn serve(
+/// one of its files — a name it lists, so nothing else can be named — read
+/// from its deployment on disk.
+async fn serve(
     State(state): State<DaemonState>,
     version: String,
     path: String,
@@ -182,7 +185,8 @@ fn serve(
     let Some(snapshot) = state.ctx.services.component_bundles.get(&version) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let Some(bytes) = snapshot.file(&path) else {
+    let rel = path.clone();
+    let Ok(Some(bytes)) = tokio::task::spawn_blocking(move || snapshot.file(&rel)).await else {
         return StatusCode::NOT_FOUND.into_response();
     };
     let name = if path.is_empty() {
@@ -191,7 +195,7 @@ fn serve(
         path.as_str()
     };
     let source = format!("http://{host}/components/v/{version}/");
-    let mut response = bytes.to_vec().into_response();
+    let mut response = bytes.into_response();
     let h = response.headers_mut();
     let set = |h: &mut HeaderMap, name: header::HeaderName, value: &str| {
         if let Ok(v) = HeaderValue::from_str(value) {

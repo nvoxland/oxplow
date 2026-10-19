@@ -24,10 +24,6 @@ use serde::{Deserialize, Serialize};
 
 use super::manifest_v2::{at, item_lines, key_line};
 
-/// The most a bundle may hold.
-pub const MAX_BUNDLE_BYTES: u64 = 5 * 1024 * 1024;
-pub const MAX_BUNDLE_FILES: usize = 256;
-
 /// A declared component (valid ones; invalid ones are in the extension's
 /// `errors`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -66,7 +62,6 @@ pub(crate) struct ComponentFile {
 pub struct BundleStat {
     pub has_index: bool,
     pub files: usize,
-    pub bytes: u64,
     /// A symlink found inside it (its path in the bundle), if any.
     pub symlink: Option<String>,
 }
@@ -82,18 +77,17 @@ pub enum BundleLook {
     Found(BundleStat),
 }
 
-/// What files under `rel` say about a bundle, for a tree of paths and
-/// contents (a revision): their count, size and an `index.html`; `Unknown`
-/// when none are there.
-pub fn look_in_paths<'a>(rel: &str, files: impl Iterator<Item = (&'a str, usize)>) -> BundleLook {
+/// What files under `rel` say about a bundle, for a tree of paths (a
+/// revision): their count and an `index.html`; `Unknown` when none are
+/// there.
+pub fn look_in_paths<'a>(rel: &str, files: impl Iterator<Item = &'a str>) -> BundleLook {
     let prefix = format!("{}/", rel.trim_end_matches('/'));
     let mut stat = BundleStat::default();
-    for (path, len) in files {
+    for path in files {
         let Some(inner) = path.strip_prefix(&prefix) else {
             continue;
         };
         stat.files += 1;
-        stat.bytes += len as u64;
         if inner == "index.html" {
             stat.has_index = true;
         }
@@ -146,7 +140,6 @@ pub fn stat_bundle(dir: &Path) -> Option<BundleStat> {
                 stack.push(path);
             } else {
                 stat.files += 1;
-                stat.bytes += meta.len();
             }
         }
     }
@@ -531,15 +524,6 @@ pub fn parse_custom_components(
                     "custom component `{}`: bundle `{bundle}` has no `index.html`",
                     c.id
                 )),
-                BundleLook::Found(s)
-                    if s.files > MAX_BUNDLE_FILES || s.bytes > MAX_BUNDLE_BYTES =>
-                {
-                    Some(format!(
-                        "custom component `{}`: bundle `{bundle}` is {} files, {} bytes; the most \
-                         is {MAX_BUNDLE_FILES} files, {MAX_BUNDLE_BYTES} bytes",
-                        c.id, s.files, s.bytes
-                    ))
-                }
                 BundleLook::Found(_) => None,
             }
         };
@@ -832,6 +816,28 @@ mod tests {
         assert!(!problems.contains("comes with oxplow"), "{problems}");
     }
 
+    /// A bundle has no size limit: it is served from its deployment on
+    /// disk, never held in memory (a deploy warns when an extension is big).
+    #[test]
+    fn a_bundle_of_any_size_loads() {
+        let d = tempfile::tempdir().unwrap();
+        write(
+            d.path(),
+            ".oxplow/extensions/x/components/burndown/index.html",
+            "x",
+        );
+        for i in 0..300 {
+            write(
+                d.path(),
+                &format!(".oxplow/extensions/x/components/burndown/f{i}.js"),
+                "x",
+            );
+        }
+        let ext = load(d.path(), "  - { id: burndown }\n");
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        assert_eq!(ext.custom_components.len(), 1);
+    }
+
     #[test]
     fn a_private_extension_loads_a_component_and_its_lens() {
         let d = tempfile::tempdir().unwrap();
@@ -882,7 +888,6 @@ mod tests {
                 "index-dir",
                 "has no `index.html`",
             ),
-            ("{ id: c, bundle: big }", "big", "the most is 256 files"),
             (
                 "{ id: c, bundle: components/burndown, assets: [nope] }",
                 "",
@@ -926,12 +931,6 @@ mod tests {
                     ".oxplow/extensions/x/dirindex/index.html/a.js",
                     "x",
                 ),
-                "big" => {
-                    write(d.path(), ".oxplow/extensions/x/big/index.html", "x");
-                    for i in 0..256 {
-                        write(d.path(), &format!(".oxplow/extensions/x/big/f{i}.js"), "x");
-                    }
-                }
                 _ => {}
             }
             let ext = load(d.path(), &format!("  - {entry}\n  - {{ id: burndown }}\n"));

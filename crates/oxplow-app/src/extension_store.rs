@@ -36,6 +36,14 @@ pub fn source_hash(source: &Path) -> std::io::Result<String> {
     ))
 }
 
+/// How many bytes a deployment of `source` copies.
+pub fn source_size(source: &Path) -> std::io::Result<u64> {
+    source_files(source)?
+        .into_iter()
+        .map(|(_, path)| Ok(std::fs::metadata(path)?.len()))
+        .sum()
+}
+
 /// The hash of `(relative path, bytes)` files, by [`source_hash`]'s rule.
 pub fn files_hash<'a>(files: impl IntoIterator<Item = (&'a str, &'a [u8])>) -> String {
     let mut files: Vec<(&str, &[u8])> = files

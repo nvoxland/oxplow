@@ -1362,6 +1362,39 @@ actions:
         assert_eq!(state(&fx.svc, fx.task).await, "done");
     }
 
+    /// A frame is served from its deployment on disk: an open frame on an
+    /// older version keeps loading that version's files while its
+    /// deployment is in the store, and once the deployment is pruned the
+    /// frame has nothing to load and must reload its lens.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_open_frame_is_served_from_its_deployment_on_disk() {
+        let (fx, root) = component_fixture().await;
+        let first = load_board(&fx, &root).await;
+        let first_hash = fx.svc.extension_catalog.live()["acme"].clone();
+        std::fs::write(
+            root.join(".oxplow/extensions/acme/components/board/index.html"),
+            "<!doctype html><p>2</p>",
+        )
+        .unwrap();
+        let second = load_board(&fx, &root).await;
+        assert_ne!(first, second);
+        let file = |version: &str| {
+            fx.svc
+                .component_bundles
+                .get(version)
+                .and_then(|bundle| bundle.file(""))
+        };
+        assert_eq!(file(&first).as_deref(), Some(&b"<!doctype html>"[..]));
+        assert_eq!(
+            file(&second).as_deref(),
+            Some(&b"<!doctype html><p>2</p>"[..])
+        );
+
+        crate::extension_store::remove(&root, "acme", &[first_hash]);
+        assert_eq!(file(&first), None);
+        assert!(file(&second).is_some());
+    }
+
     /// tsk984: the bundle is read as it is served — the extension's folder
     /// joined with the manifest's `bundle` — so on a case-insensitive disk a
     /// spelling that differs only in case still covers every file it
@@ -1389,7 +1422,7 @@ actions:
         .unwrap();
         let first = load_board(&fx, &root).await;
         let served = fx.svc.component_bundles.get(&first).unwrap();
-        assert_eq!(served.file(""), Some(&b"<!doctype html>"[..]));
+        assert_eq!(served.file("").as_deref(), Some(&b"<!doctype html>"[..]));
         std::fs::write(ext.join("components/board/index.html"), "<!doctype html>2").unwrap();
         assert_ne!(load_board(&fx, &root).await, first);
         let program = programs(&fx, &root)

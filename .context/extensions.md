@@ -1103,8 +1103,8 @@ error, so a teammate's personal extension in the team list breaks nothing.
   `extensions::load_extensions`.
 
 **Deploy** (`oxplow.extension.deploy { name, stream? }`, the agent's
-`run_command`, CLI `oxplow extension deploy <name>` through the running
-daemon; `extension_deploy::deploy`): source in the stream's checkout (the
+`run_command`; the CLI has no way to reach the running daemon yet, so it
+has no deploy; `extension_deploy::deploy`): source in the stream's checkout (the
 caller's when not named) → hash → already active is `already: true` →
 source load, whose errors refuse it → copy into the store and record the
 row → turn it on in the person's layer when nothing turns it on → stage the
@@ -1113,7 +1113,9 @@ check's `snapshot()` then reads) and publish. An extension the staging holds
 back (it doesn't prepare) keeps its previous deployment and the deploy
 fails with its problems; a candidate overtaken by another change is staged
 again. The command returns once the deployment runs. Any stream may
-deploy; restart starts from the recorded live set.
+deploy; restart starts from the recorded live set. Nothing caps an
+extension's size: a deployment over 25 MiB goes live with a warning in the
+result's `warnings` (every deployment copies the whole folder).
 `oxplow.extension.rollback { name, to? }` makes an earlier deployment
 active (`to` a hash or its start; a bundled one with nothing older returns
 to the shipped deployment). `oxplow.extension.enable` / `disable` write the
@@ -1126,6 +1128,11 @@ live set starts from the active rows whose folder is still in the store;
 each extension that is on with no deployment here (a fresh clone, a
 just-pulled teammate's) is staged from the main checkout's source and
 activates with the rest — one that doesn't prepare is held, as any is.
+Foundation can't be held: a deployment of it that doesn't load or whose
+core baseline doesn't activate gives way to the shipped one
+(`ExtensionActivation::initialize`), which the next publication records
+as the live set, and its problems say "the shipped version runs until it
+is deployed again". Boot never runs without foundation.
 
 **Sharing is one explicit act.** `.oxplow/.gitignore` ignores everything
 but `project.yaml`, so a new extension's source is personal.
@@ -2174,23 +2181,23 @@ under the frame (`custom-component-refused`, `componentRefusal`) — the
 component's own code may not. A component that declares no commands
 only shows and reads, and isn't a program.
 
-**What runs is what was approved** (tsk984). Before it shows a frame the
-host loads the component's bundle (`load_component`, from the main
-worktree, as the lens itself is: the RPCs read the project's extensions
-whatever the stream) into `Services::component_bundles`
-(`component_bundles.rs`): every file of the folder, read once, keyed by
-its **version** — the component's approval hash over exactly those files
-and its commands (`ProjectProgram::component_hash`, the same function
-Programs lists the version with). The daemon serves the frame from that
-snapshot alone (`/components/v/<version>/…`), and the frame's `invoke`
-names the version it loaded: it runs only when that version is
-approved and declares the command. So a bundle edited on disk after the
-frame loaded changes nothing that runs, and one loaded while edited
-can't act on the approval of what the disk says later. The folder is
-read as served — the extension's path joined with the manifest's
-`bundle` — so a spelling that differs from the disk's only in case still
-covers every file. The snapshots kept are the 16 newest; an older
-frame's invoke is refused with "reload its lens".
+**What runs is what was approved.** Before it shows a frame the host
+loads the component's bundle (`load_component`, from the deployed
+catalog, the same whatever the stream) into `Services::component_bundles`
+(`component_bundles.rs`): the bundle's folder in its deployment and its
+file names, keyed by its **version** — the component's approval hash over
+those files and its commands (`ProjectProgram::component_hash`, the same
+function Programs lists the version with). No bytes are held: the daemon
+serves the frame (`/components/v/<version>/…`) by reading the named file
+from that folder, which never changes, and the frame's `invoke` names the
+version it loaded: it runs only when that version is approved and
+declares the command. So an edit to the source changes nothing that runs
+until it is deployed. The folder is read as served — the extension's path
+joined with the manifest's `bundle` — so a spelling that differs from the
+disk's only in case still covers every file. Every version loaded in the
+process stays servable while its deployment is in the store (a folder
+and a list of names each, so nothing is dropped); once the deployment is
+pruned its files 404 and the frame reloads.
 
 **A hot update reaches a mounted frame.** Activation stages every
 enabled extension's bundles into the generation it publishes
@@ -2204,12 +2211,10 @@ person approves its code; the old approval doesn't carry over
 (`an_activated_edit_needs_a_reload_and_its_own_approval`).
 
 **Bundled and project components share one runtime.** A bundled
-extension's files are embedded as bytes (`bundled_extensions.rs`,
-`include_bytes!`), so its component's assets ship as they are; its
-bundle is found from the embedded paths (`Embedded::bundle_stat`),
-staged, hashed (the same `component_hash` over `bundled:<name>/…`),
-served at `/components/v/<version>/` under the same CSP, and — when it
-declares `commands` — listed on Programs and approved like a project's.
+extension runs from its shipped deployment on disk (`Sources and
+deployments`), so its component's bundle is staged, hashed, served at
+`/components/v/<version>/` under the same CSP and — when it declares
+`commands` — listed on Programs and approved exactly like a project's.
 What still differs by origin, none of it about components: a bundled
 advisory needs no approval, the `oxplow` command namespace is reserved
 for bundled extensions, and a bundled extension's name wins a clash with
@@ -2236,8 +2241,8 @@ custom: { component: burndown, props: { color: accent } }
 accepting SQL from the frame; a component that needs a model writes a
 `hidden: true` lens over it. Load checks, each at its line: the id, a
 duplicate, `bundle` a relative folder without `..` that holds
-`index.html`, no symlink anywhere in it, at most 256 files and 5 MiB
-(`stat_bundle`; a bundled extension has none), each asset a lens id
+`index.html`, no symlink anywhere in it (`stat_bundle`; a bundle has no
+size limit, see Deploy), each asset a lens id
 alone (no `?params`, `@rev` or `#fragment` — `query(asset)` names the
 lens) — this extension's must be among its lenses — and each command a
 command name. A `custom` lens needs `custom.component` naming one of the
@@ -4509,18 +4514,19 @@ propagate into spawned tasks. Provider host-call registration is cancellation-sa
 across candidate publication. Native/background and synchronous metadata
 entrypoints still need a complete audit. Metric declaration rows now join the
 publication transaction; state-value recapture remains a post-publication reader. The renderer receives the published metadata change signal;
-raw filesystem changes continue to trigger candidate preparation. Until the first
+a deploy, a rollback or a config change triggers candidate preparation (file changes never do). Until the first
 generation is activated (boot's `initialize`, before ingress opens), no reader is
 served: the generation is the only publisher of commands, models, vocabulary,
 providers and capabilities.
 
-Custom component preparation reads immutable bundle bytes on a blocking worker,
-with at most 64 bundles and 128 MiB in a candidate. Publication swaps the whole
-active bundle map without rereading files. Active bytes remain available independently
-of the sixteen-entry history used by previous frames. A retained frame from a
-different activated generation must reload before invoking a query or command;
-a bundle of another root (a stream's lens) is built from that root's files. This check requires the owning
-runtime reader scope for atomicity with command or query execution.
+Custom component preparation hashes each bundle's files in its deployment and
+keeps their names, never their bytes. Publication swaps the whole active bundle
+map and adds its bundles to the process's loaded versions, which a previous
+frame is still served from while its deployment is on disk. A retained frame
+from a different activated generation must reload before invoking a query or
+command; a bundle of another root is built from that root's files. This check
+requires the owning runtime reader scope for atomicity with command or query
+execution.
 
 ## Runtime ingress and entity refresh
 

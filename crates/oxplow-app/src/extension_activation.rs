@@ -239,11 +239,50 @@ impl ExtensionActivation {
                 LiveChanges::new()
             }
         };
+        // A required extension (foundation) is always on: a deployment of
+        // it that doesn't load or activate gives way to the shipped one.
+        let project = svc.layout.project_dir.clone();
+        let mut fell_back = VocabularyErrors::new();
+        for ext in svc.extension_catalog.snapshot(&project).extensions().iter() {
+            if crate::bundled_extensions::is_required(&ext.name)
+                && matches!(
+                    ext.deployment,
+                    crate::extensions::Deployment::Deployed { .. }
+                )
+                && !ext.errors.is_empty()
+            {
+                fell_back.insert(ext.name.clone(), ext.errors.clone());
+            }
+        }
+        self.give_way(&svc, &fell_back);
         if let Err(error) = self.activate_core(svc.clone()).await {
-            self.record_failure(&svc, error);
-            return Err(DomainError::Invalid(
-                "required extension baseline could not activate".into(),
-            ));
+            let deployed: Vec<String> = svc
+                .extension_catalog
+                .live()
+                .into_keys()
+                .filter(|name| crate::bundled_extensions::is_required(name))
+                .collect();
+            let retried = if deployed.is_empty() {
+                Err(error)
+            } else {
+                let why = match &error {
+                    TxError::Aborted(problems) => problems.values().flatten().cloned().collect(),
+                    TxError::Storage(_) => Vec::new(),
+                };
+                let now: VocabularyErrors = deployed
+                    .into_iter()
+                    .map(|name| (name, why.clone()))
+                    .collect();
+                self.give_way(&svc, &now);
+                fell_back.extend(now);
+                self.activate_core(svc.clone()).await
+            };
+            if let Err(error) = retried {
+                self.record_failure(&svc, error);
+                return Err(DomainError::Invalid(
+                    "required extension baseline could not activate".into(),
+                ));
+            }
         }
         // A candidate overtaken by a change made while it was staged is
         // staged again: the startup deploys must not be lost with it.
@@ -261,7 +300,31 @@ impl ExtensionActivation {
                 }
             }
         }
+        if !fell_back.is_empty() {
+            let mut problems = self.problems.lock();
+            for (name, mut why) in fell_back {
+                why.push(
+                    "its deployment doesn't activate; the shipped version runs until it is deployed again"
+                        .into(),
+                );
+                problems.entry(name).or_default().extend(why);
+            }
+            drop(problems);
+            svc.extension_catalog.runtime_changed();
+        }
         Ok(())
+    }
+
+    /// Run the shipped version of each of `names` instead of its
+    /// deployment.
+    fn give_way(&self, svc: &Services, names: &VocabularyErrors) {
+        if names.is_empty() {
+            return;
+        }
+        tracing::warn!(names = ?names.keys().collect::<Vec<_>>(), "a required extension's deployment doesn't activate; running the shipped one");
+        let mut live = svc.extension_catalog.live();
+        live.retain(|name, _| !names.contains_key(name));
+        svc.extension_catalog.set_live(live);
     }
 
     fn record_failure(&self, svc: &Services, error: TxError<VocabularyErrors>) {

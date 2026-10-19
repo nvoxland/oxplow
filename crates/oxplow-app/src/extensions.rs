@@ -2393,7 +2393,7 @@ impl ExtensionFiles for Tree {
     /// built bundle usually isn't committed, so none is `Unknown`, not an
     /// error (tsk784).
     fn bundle_stat(&self, rel: &str) -> custom_components::BundleLook {
-        custom_components::look_in_paths(rel, self.0.iter().map(|(p, b)| (p.as_str(), b.len())))
+        custom_components::look_in_paths(rel, self.0.keys().map(String::as_str))
     }
 }
 
