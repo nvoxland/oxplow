@@ -33,7 +33,7 @@ command):
 | workspace file write / create / rename / delete, applying an LSP edit | the person's own hands on their worktree, like their terminal; snapshots record it |
 | a change's analysis (`oxplow_ensure_change`) | a derived cache, recomputed from the VCS on demand like a materialized model — not an intent |
 | a model call's record (`ai_call`, `ai_result`) | the computation as it happened (`AiCompute`), like a test run's capture — the run that asked for it is what's audited |
-| AI providers and roles, credentials, approving a program or source | secrets and consent: unreachable from `run_command`, so no invoker list can ever open them to an agent, and no audit row holds a secret |
+| AI providers and roles, credentials | secrets: unreachable from `run_command`, so no invoker list can ever open them to an agent, and no audit row holds a secret |
 | a person's global external provider instances (`instances.yaml`, P9.B2: `add_provider_instance` / `set_provider_instance` / `remove_provider_instance` on a global one) | the person's own machine-level settings, like `ai.yaml`: what runs in every project of theirs is theirs alone to say — the registry writes the file only for `Actor::Human` (a project's instances still go through `oxplow.config.set`) |
 
 **Guards** (`crates/oxplow-app/src/source_guards.rs`). The thin
@@ -43,7 +43,7 @@ are **denied every database write by type** (tsk903): each has a
 generated `clippy.toml` whose `disallowed-methods` lists every public
 function of oxplow-db that writes (the store traits' methods by their
 trait, `Database::transaction` / `rehearse` included) and every
-`ApprovalStore` / `SecretStore` call, and CI's clippy runs with `-D
+`SecretStore` call, and CI's clippy runs with `-D
 warnings`. Since the compiler resolves the call, an alias, a store
 built in place, a trait path or a turbofish is the same call, and
 clippy itself warns on a listed path that no longer resolves.
@@ -104,7 +104,7 @@ remain unapplied. Opaque versioned host secret references can be stored as
 identity-only settings; the separate human settings ingress writes machine
 keychain values and returns only references/presence. No script, native command
 or MCP service resolves them. The first consumer is the shipped remote MCP HTTP
-transport, after exact declaration approval and live owner checks. Secret
+transport, after the extension's `secrets` declaration and live owner checks. Secret
 rotation/revocation changes a synchronous authority revision and schedules
 cancellation-safe consumer cleanup. References are always scoped to the primary
 project and owning extension, including for globally configured instances.
@@ -299,8 +299,7 @@ orphaned, an agent's status, `ConfigChanged` for the Settings view).
 Settings list (Extensions, Data, Capabilities, Integrations) loads each
 part on its own trigger: the catalog or config change
 (`extensionsChanged`) for extensions and their checks, entities and
-programs; an approval (`approvalsChanged`) for programs and collectors;
-`useRerunOnChange` over the models the part read (`v_collector_run` for
+collectors; `useRerunOnChange` over the models the part read (`v_collector_run` for
 the collector list, `v_extension_run` for the last runs); and a model's
 row count when that model's own `ModelsChanged` names it
 (`DataSection`, from each count query's `reads`). A collector run

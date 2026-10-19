@@ -5,8 +5,9 @@ import { join } from "node:path";
 // The triage example's TODO board: its bundle's own script against its own
 // page, with a stand-in for the client library. Each card has a form to
 // decide what to do about the TODO; it runs the extension's own command
-// and reads the decisions back. Until the board is approved, reading them
-// is refused: it shows the TODOs without decisions, and says why.
+// and reads the decisions back. While its commands are refused (the
+// extension isn't deployed, or is disabled), it shows the TODOs without
+// decisions, and says why.
 
 const dir = join(import.meta.dir, "../../../../examples/extensions/triage/components/todo-board");
 const page = readFileSync(join(dir, "index.html"), "utf8").replace(/<script[\s\S]*?<\/script>/g, "");
@@ -19,7 +20,7 @@ const run = {
 };
 
 let decisions: Record<string, string> = {};
-let approved = true;
+let allowed = true;
 let invoked: Array<[string, unknown]> = [];
 let refuseDecide: { code: string; message: string; field?: string } | null = null;
 
@@ -36,7 +37,7 @@ async function start() {
       navigate: async () => null,
       invoke: async (command: string, input: { path: string; line: number; decision: string }) => {
         invoked.push([command, input]);
-        if (!approved) throw { code: "DENIED", message: "approve it first" };
+        if (!allowed) throw { code: "DENIED", message: "not deployed" };
         if (command === "triage.todos.decide") {
           if (refuseDecide) throw refuseDecide;
           decisions[`${input.path}:${input.line}`] = input.decision;
@@ -62,7 +63,7 @@ const form = () => document.querySelector<HTMLFormElement>("form.decide")!;
 
 beforeEach(() => {
   decisions = {};
-  approved = true;
+  allowed = true;
   invoked = [];
   refuseDecide = null;
 });
@@ -100,10 +101,10 @@ test("a refused decision shows under the form, and an empty one is never sent", 
   expect(form().querySelector(".ox-error")!.textContent).toContain("must be one of");
 });
 
-test("until the board is approved it shows the TODOs, can't decide, and says why", async () => {
-  approved = false;
+test("while its commands are refused it shows the TODOs, can't decide, and says why", async () => {
+  allowed = false;
   await start();
   expect(document.querySelectorAll(".card")).toHaveLength(1);
   expect(select().disabled).toBe(true);
-  expect(document.getElementById("status")!.textContent).toContain("Settings → Data → Programs");
+  expect(document.getElementById("status")!.textContent).toContain("Settings → Extensions");
 });

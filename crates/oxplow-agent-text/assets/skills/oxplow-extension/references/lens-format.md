@@ -159,7 +159,7 @@ empty: Nothing is waiting on you.
   An action runs as the lens acting for whoever pressed it, so it can't do
   anything they couldn't: you can press one with `oxplow_run_lens_action`, but a
   command you can't run (or that needs a person's confirmation, like
-  approving an exec collector) is refused.
+  deleting a file) is refused.
 - **Unknown keys are errors.** Only the keys shown here exist today.
 
 ## Document and dashboard lenses

@@ -18,13 +18,16 @@ request's title, opens its page, and is found by search.
 2. Make sure `jq` is installed, and either `gh` is logged in or you set
    `GITHUB_TOKEN` under the `github` extension in Settings → Extensions (it's
    stored in your keychain).
-3. Settings → Data → **Approve & Run** on the `github/prs` source.
+   The deploy asks you to approve what `extension.yaml` declares under
+   `permissions:`: it runs programs (`jq`, `gh`, `git`), reaches
+   `api.github.com` and reads `GITHUB_TOKEN`.
+3. Settings → Data → **Sync Now** on the `github/prs` source.
 
 It re-syncs every 15 minutes after that. **PR Lifetimes** is a custom
-component: its Sync button runs that sync with your rights, so it works once
-you also approve **Component github/pr-lifetimes** in Settings → Data →
-Programs. Until then it still draws, filters and opens pull requests. The repo comes from `git remote get-url
-origin`, or set `GITHUB_REPOSITORY=owner/name`.
+component: its Sync button runs that sync with your rights, under the
+extension's permissions, so it works as soon as the extension is deployed.
+The repo comes from `git remote get-url origin`, or set
+`GITHUB_REPOSITORY=owner/name`.
 
 ## Files
 

@@ -50,4 +50,5 @@ with `name: oxplow-extension` and `reference: <name>`):
 Rules that live in other skills: wikilinks and refs in prose, see
 `oxplow-wiki-capture`; waiting on the person, `oxplow-runtime`; test
 commands run in the foreground, `oxplow-collection`; metrics, `oxplow-metrics`.
-A person approves programs and collectors; you can't.
+An extension declares `permissions:`; a person approves them when it is
+deployed. You can't approve; your deploy that adds one becomes a proposal.

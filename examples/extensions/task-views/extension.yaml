@@ -16,12 +16,12 @@ intent:
     - name: swimlanes-reads
       input: { component: swimlanes }
       expect: the board reads its cards and the active provider's features
-    - name: swimlanes-needs-approval
+    - name: swimlanes-refuses-a-missing-item
       input: { component: swimlanes }
-      expect: changing an item is refused until the person approves the board
+      expect: changing an item that isn't there is refused, with the command's reason
     - name: swimlanes-renames
       input: { component: swimlanes }
-      expect: once the board is approved, renaming an item through it goes through
+      expect: renaming an item through the board goes through
     - name: edit-item
       input: { form: edit-item, params: { ref: "work_item:oxplow:1" } }
       expect: a form for the item's title and body, its ref fixed

@@ -8,7 +8,8 @@ feature, next to the number of open work items. It's one fact collector
   snapshot. A fact collector reads its tree without declaring it.
 - **`sql.read`**: `scope("sql.read", …)` counts the open work items.
 - **`ai.compute`**: `ai_classify()` sorts each TODO. It spends your AI
-  provider's key, so the collector runs only once you approve it. Each
+  provider's key, so the extension declares `permissions.ai` and the
+  collector runs once it is deployed with that approved. Each
   answer is recorded, so an unchanged TODO isn't asked about again.
 
 ```yaml
@@ -28,7 +29,7 @@ and whether it declared it:
 collector `todos` (collectors/todos.star):
   sql.read: declared, used
   tree.read: implied, used
-  ai.compute: declared, used — a person approves it
+  ai.compute: declared, used — under permissions.ai
 ```
 
 ## A summary job, and a board you decide on
@@ -47,19 +48,18 @@ collector `todos` (collectors/todos.star):
   reads them back beside the TODOs.
 - **The TODO board** (`components/todo-board`) shows the TODOs by kind,
   each card with a form to decide on it. It runs the two commands above,
-  so you approve it in Settings → Data → Programs; until then it shows
-  the TODOs without decisions and says so. The `todos` lens (under Code in
+  so it works once the extension is deployed; if they are refused (not
+  deployed, or disabled) it shows the TODOs without decisions and says so. The `todos` lens (under Code in
   the launcher) has the same decision as a row action, `Decide…`, which
   opens a form.
 
 **What survives.** Decisions are in the extension's private state, in
 oxplow's database, so they outlive what a person does around them: a
-restart finds them; revoking the board's approval stops the board
-deciding or reading them until it is approved again, and approving
-brings them back; editing the bundle asks for the approval again (a
-comment in `extension.yaml` doesn't, since it isn't what was reviewed),
-and the decisions read back once it is approved. Uninstalling keeps the
-rows, but nothing reads them. Two decisions in a row each read the stamp
+restart finds them; disabling the extension stops the board deciding or
+reading them until it is enabled again, and enabling brings them back;
+editing the bundle takes a redeploy (the deploy asks again only when it
+adds a permission), and the decisions read back once it is live.
+Removing the extension keeps the rows, but nothing reads them. Two decisions in a row each read the stamp
 the last left; a write holding an old stamp is refused rather than
 overwriting. `oxplow-sdk/tests/trials.rs` runs each of these over an
 on-disk database.
@@ -72,8 +72,9 @@ metric (`metric_findings('triage.todos')`).
 1. Copy this folder to `.oxplow/extensions/triage/` in your repo.
 2. Settings → AI: bind **triage/sort** to a model, or give the **Decide**
    role one and it is used instead.
-3. Settings → Data: approve **triage/todos**. Any change to its files
-   asks again.
+3. Deploy it (`oxplow.extension.deploy { name: "triage" }`, or Deploy on
+   Settings → Extensions) and approve what it asks for. A later deploy
+   asks again only if it adds a permission.
 4. The next snapshot records `triage.todos`, one fact per TODO with its
    kind in `rule`, and `triage.open_items`.
 

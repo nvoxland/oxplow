@@ -42,12 +42,11 @@ developer-facing mechanics.
   tsk948): the same `oxplow_daemon::run_main` (arguments, boot, server),
   with its secrets in memory (`MemorySecrets`) instead of the keychain,
   so a headless CI runner needs none and a local run writes no test key
-  into the person's. They go with the process — a restarted sim no
-  longer trusts an approval it recorded. Dev-only: nothing that ships
+  into the person's. They go with the process. Dev-only: nothing that ships
   depends on it (`no_test_double_is_a_production_dependency`), and the
   shipped `oxplow-daemon` always passes `KeychainSecrets` —
   `Services::boot(layout, secrets)` takes the store, no flag skips it.
-  Isolate its global config (approvals, `ai.yaml`) with `OXPLOW_HOME`.
+  Isolate its global config (`ai.yaml`, instances) with `OXPLOW_HOME`.
 - **Facade guard** — `@tauri-apps/*` may only be imported under
   `apps/desktop/src/tauri-bridge/`; everywhere else funnels native
   access through a bridge module (e.g. `nativeDialog.ts` wraps the OS
@@ -233,7 +232,7 @@ token**; only the person's renderer holds it.
 /components/v/{version}/{*path}` serves a custom component's bundle as
 its host loaded it (`load_component`, tsk984): a snapshot of the
 bundle's files held in `Services::component_bundles`, keyed by its
-version (the component's approval hash), so the frame runs exactly what
+version (a hash over the bundle's files and what it may query and run), so the frame runs exactly what
 was hashed. The version is a path segment, so the bundle's relative URLs
 stay in it; the bare folder URL redirects to the raw path plus `/`. It
 can't take the token — a frame can't carry it — and needn't: it serves

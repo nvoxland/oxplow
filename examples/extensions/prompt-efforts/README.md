@@ -22,9 +22,10 @@ core's events and answers with the commands to run.
 ## Use it
 
 1. Copy this folder to `.oxplow/extensions/prompt-efforts/` in your repo.
-2. Settings → Data → Programs: approve **Effort policy
-   prompt-efforts/prompt_efforts** (it reads your efforts and turns
-   through `sql.read`; any change to its files asks again).
+2. Deploy it: `oxplow.extension.deploy { name: "prompt-efforts" }`, or
+   Deploy on Settings → Extensions. The deploy asks you to approve what it
+   declares in `permissions:` (it reads your efforts through `sql.read` and
+   opens and closes efforts); a change that adds a permission asks again.
 3. Settings → Capabilities: choose **One effort per prompt** as the effort
    policy. Switching closes every open effort; the next prompt that changes
    files opens the first one.

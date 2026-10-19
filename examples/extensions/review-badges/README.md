@@ -25,9 +25,8 @@ version it declared.
 
 Install both: copy `effort-review/` and `review-badges/` into
 `.oxplow/extensions/`, then follow effort-review's README (a model on the
-**Summarize** role, its job approved). Reviews appear as efforts finish.
-review-badges itself runs no program, so there is nothing of its own to
-approve.
+**Summarize** role, deployed). Reviews appear as efforts finish.
+review-badges itself runs no program and declares no permissions.
 
 ## Without effort-review
 

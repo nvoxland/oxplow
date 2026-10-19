@@ -1,4 +1,4 @@
-# The job runs once a person approved it; its model call answers with the
+# The job runs in the throwaway host; its model call answers with the
 # fixture model's reply — no provider, nothing spent.
 input:
   job: summarize

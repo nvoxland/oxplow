@@ -54,7 +54,7 @@ will be too numerous and change too quickly to depend on many reviewers
 examining every version.
 
 Safety therefore belongs in the host's enforceable contracts: constrained
-execution, explicit access, version-bound consent, shared action gates,
+execution, explicit access, declared permissions approved at deploy, shared action gates,
 resource limits, and inspectable behavior. Give extensions useful host
 services and controlled escape paths instead of making them recreate
 credentials, persistence, or authorization themselves.
@@ -62,7 +62,7 @@ credentials, persistence, or authorization themselves.
 The current product already has constrained scripts, declared provider
 access, audited commands, and sandboxed UI components. Execution
 containment and consistency across extension kinds remain work to do;
-approval alone is not a guarantee that arbitrary code is harmless.
+an approved permission is not a guarantee that arbitrary code is harmless.
 
 ## The platform boundary
 

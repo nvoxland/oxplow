@@ -88,7 +88,7 @@ page. Share the extension (`oxplow.extension.share`) and commit its files to giv
 
 If the data is missing, a collector can add it; metrics and dimensions
 can turn it into comparisons over time. Extensions that run programs or
-call models need the relevant approvals. See [Lenses](../guide/lenses.md)
+call models need the relevant permissions, which you approve when you deploy them. See [Lenses](../guide/lenses.md)
 and [Metrics](../guide/metrics.md).
 
 ## 7. What to read next

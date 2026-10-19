@@ -29,7 +29,7 @@ Only from oxplow's public contracts, so nothing in oxplow changed for it:
   `ALTER TABLE` and `DROP TABLE` in each `migrations/**/*.sql` file of
   every snapshot: a `schema_review.ddl` fact per file and kind, sliced by
   its own `schema_review.ddl_kind` dimension. It runs no program and asks
-  no model, so there is nothing to approve.
+  no model, so it asks for nothing beyond `files: read`.
 - **oxplow's evidence.** The `verdict` model joins those facts to the
   effort's files (`v_effort_file`), its latest test run (`v_test_run`, with
   its provenance), its diff coverage (`v_effort_observation`) and the

@@ -2,9 +2,9 @@
 // the model sorted them into. A card opens its file at the comment's line,
 // and has a form to decide what to do about it — keep it, fix it now, or
 // won't fix — kept in the extension's private state through its own
-// commands (`triage.todos.decide`, read back with `triage.todos.decisions`). Until a
-// person approves the board (Settings → Data → Programs) it shows the
-// TODOs without their decisions, and says so.
+// commands (`triage.todos.decide`, read back with `triage.todos.decisions`). If
+// those commands are refused (the extension isn't deployed, or is disabled) it
+// shows the TODOs without their decisions, and says so.
 (function () {
   "use strict";
 
@@ -45,7 +45,7 @@
       } catch (e) {
         status.textContent =
           e && e.code === "DENIED"
-            ? "Approve the TODO board in Settings → Data → Programs to record decisions."
+            ? "Deploy the triage extension in Settings → Extensions to record decisions."
             : "Couldn't read the decisions: " + (e && e.message ? e.message : e);
         return { todos: fromRun(component.run), decides: false };
       }

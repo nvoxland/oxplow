@@ -1,5 +1,5 @@
-# The collector asks a model once approved; `extension test` approves it in
-# its throwaway and the fixture model answers.
+# The collector asks a model (`permissions.ai`); `extension test` runs it
+# in its throwaway and the fixture model answers.
 input:
   collector: todos
   files:

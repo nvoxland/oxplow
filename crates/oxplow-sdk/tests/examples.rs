@@ -518,7 +518,7 @@ async fn the_task_views_example_checks_and_its_fixtures_pass() {
     for name in [
         "compact-list",
         "swimlanes-reads",
-        "swimlanes-needs-approval",
+        "swimlanes-refuses-a-missing-item",
         "swimlanes-renames",
         "edit-item",
     ] {

@@ -64,7 +64,7 @@ metrics:
 collectors:
   # On each snapshot: its tree (a fact collector reads it without asking),
   # the open work items (`sql.read`) and a model for each TODO
-  # (`ai.compute`, which a person approves in Settings → Data).
+  # (`ai.compute`, under `permissions.ai`, approved when the extension is deployed).
   - id: todos
     runtime: starlark
     entry: collectors/todos.star
@@ -72,8 +72,8 @@ collectors:
     needs: [sql.read, ai.compute]
     facts: [triage.todos, triage.open_items]
 # A person asks for a summary of the TODOs (`triage.summary.ask`); a model
-# answers it as a durable job, outside any transaction, once a person has
-# approved the job. Its answer streams into `v_job_run_output` as it comes; it
+# answers it as a durable job, outside any transaction, under the
+# extension's permissions. Its answer streams into `v_job_run_output` as it comes; it
 # may look closer at a file (`todos.in_file`) or query oxplow's models
 # (`query_sql`, from `sql.read`) before it answers. When it finishes,
 # `publish-summary` writes the answer to the wiki.
@@ -157,9 +157,9 @@ effects:
     entry: effects/publish_summary.star
     needs: [jobs.read]
 # The TODOs as a board, grouped by what the model said they ask for, each
-# card with a form to decide on it. It runs `decisions` and `decide`, so a
-# person approves it (Settings → Data → Programs); until then it shows the
-# board without the decisions.
+# card with a form to decide on it. It runs `decisions` and `decide`, its
+# own commands; if they are refused (the extension isn't deployed or is
+# disabled) it shows the board without the decisions.
 custom_components:
   - id: todo-board
     title: TODO board

@@ -5,7 +5,7 @@ docs system's — that implements one of oxplow's capabilities outside the
 app (P5.D): one core gives a provider contract (the work list, the effort
 policy; "What a provider may implement"). This doc
 covers the protocol (D1), the fake provider (D2), what a provider may
-implement, the host with its consent and spawn rules (D3), instances with health (D4), the
+implement, the host with its permission and spawn rules (D3), instances with health (D4), the
 conformance kit with `oxplow extension test` (D5), which trackers are
 backends, and the MCP adapter (P7.A6).
 
@@ -14,11 +14,12 @@ backends, and the MCP adapter (P7.A6).
 **Host secret references.** A remote MCP provider may declare its fixed
 `OXPLOW_MCP_BEARER` credential as `{name, secretRef:{schemaVersion:1,id}}`.
 The reference is scoped to the primary project and owning extension, including
-for global instances; it is inert without the exact reviewed program approval.
+for global instances; it is inert unless the extension declares `secrets` and
+the deployment is live.
 Only the shipped HTTP transport receives the resolved bearer. Package programs,
 stdio servers, OAuth declarations and arbitrary environment variable names
 cannot consume a reference. The host brackets resolution with live owner and
-approval checks. Save/revoke invalidates a synchronous admission revision, stops
+deployment checks. Save/revoke invalidates a synchronous admission revision, stops
 old consumers and requests coherent reconciliation even if the RPC is cancelled.
 Normal instance credential setters refuse these declarations; human host-secret
 ingress returns only reference/presence. See [extensions.md](./extensions.md)
@@ -80,8 +81,8 @@ of them when none) now rather than at the next poll.
 
 `PROTOCOL_VERSION` is `"4"` (P10: `InvokeParams.idempotency_key`; 3:
 `host/call`; 4: `host/changed`). A
-provider's declarations carry the version, so a bump changes what was
-approved: every provider is approved again.
+provider's declarations carry the version, so a bump changes the declarations:
+a provider is deployed again to speak it.
 
 **Errors** (`errors.rs`): JSON-RPC's standard codes plus
 `NotConfigured` (-32001), `Auth` (-32002, `data.credential` — the
@@ -163,7 +164,7 @@ re-sends against (tsk916). Fixtures that launch it through an
 extension (`providers/tests.rs` `write_extension`, the SDK's
 `just_works.rs`, the desktop `extension_cli.rs`) set it to
 `<project>/.oxplow/fake-state-$OXPLOW_PROVIDER_ID.json` — outside the
-extension folder, whose contents its consent covers — and the kit tests
+extension folder, whose contents are the deployment — and the kit tests
 clear it before each run, since the golden transcript records the refs
 handed out. Without it the fake forgets on exit, and a declared
 `idempotent_writes` fails the kit's restart check.
@@ -269,11 +270,10 @@ over the server's stdio; the server inherits the sandbox and the
 credentials. The loader refuses an adapter whose server, mapping or tools
 isn't inside the folder (a path check: a server that doesn't exist fails
 when the adapter spawns it, at `check`), an `args:` beside it, and tools
-that aren't a JSON list of named tools. **The approval covers it all**: the program hashed is the server's
-file, the mapping and tools are named in its args, and the tree hash
-covers the folder, so changing the mapping, a pin or the server needs
-approving again; the approval row lists the server and each pinned tool
-added, removed or changed (`ProviderImpact.tools`).
+that aren't a JSON list of named tools. **The deployment holds it all**: the server's file, the mapping and the
+tools are in the deployment folder, so changing the mapping, a pin or the
+server needs a new deploy; `declaration_impact` lists the server and each
+pinned tool added, removed or changed (`ProviderImpact.tools`).
 
 **A server by `url`** (P9.B4): `mcp` names exactly one of `command` and
 `url` (`spec::McpServer`, an enum — the rule is the type):
@@ -314,20 +314,14 @@ added, removed or changed (`ProviderImpact.tools`).
   grant — it is an ordinary failure naming the scope the server wants
   (from its `insufficient_scope` challenge). The notes server's
   `Refusal` (`Challenge | Bare | Forbidden`) serves each.
-- **What the approval covers** is the url, the mapping, the pins, the
-  declarations and the grants — **not the server's code**, which runs
-  elsewhere (`ProjectProgram.remote`: the hash covers the url's bytes
-  where a local program's file would be; `args` carry the mapping, the
-  tools file and `--auth-env <NAME>`). The approval's credentials line
-  marks the one sent as the bearer (`NAME (sent to the server as its
-  bearer token)`, `ProviderSpec::credential_grants`), so moving `auth` to
-  another declared credential shows in the diff as its own `now reads …`
-  line beside any other change (tsk834). What stands between a changed
-  server and the project is the pin: `check` refuses a server whose
-  tools aren't exactly `tools.json`. Data → Programs says so on its row
-  ("The server runs elsewhere: its code isn't part of this approval…"),
-  and the approval's diff words it as "runs oxplow's MCP adapter against
-  <url>".
+- **What the deployment holds** is the url, the mapping, the pins, the
+  declarations and the permissions — **not the server's code**, which runs
+  elsewhere (`args` carry the mapping, the tools file and
+  `--auth-env <NAME>`). What stands between a changed server and the
+  project is the pin: `check` refuses a server whose tools aren't exactly
+  `tools.json`. The permissions a deploy asks about (`network` for the
+  url's host, `secrets` for the bearer) say what the adapter reaches; the
+  server's own code is not covered.
 - Everything after the transport is the same: the pin, the mapping, the
   checks on what the mapping returns.
 
@@ -339,8 +333,7 @@ added, removed or changed (`ProviderImpact.tools`).
   schemas, annotations (`destructiveHint`), so no hint changes under the
   pin (§6.8; tsk719) — or that lists a tool twice, is a problem at `""`
   naming the first difference,
-  and no handle (a changed server needs its pins updated and a person's
-  approval). A clean check keeps the config under a handle. Starting the
+  and no handle (a changed server needs its pins updated and a new deploy). A clean check keeps the config under a handle. Starting the
   server holds nothing else, so a server that hangs starting never stops
   the adapter answering `$/cancel` or `shutdown`; `shutdown` stops the
   calls in flight first, then the server (tsk720).
@@ -546,13 +539,13 @@ body }` → `{ subagent }` (a `SubagentStart`/`SubagentStop`'s), both its
 export's) → `{ readings }`. An optional verb it doesn't declare answers
 none, uncalled. `tool_use` and `render` are on the hook route's path:
 each is bounded at 1 s (`HOOK_VERB_TIMEOUT`, inside the route's 5 s), and
-a late or failed answer reads as no call and `{}`. Approving one is
-approving what its launch answers: that command runs in the person's
-terminal with their rights, outside the provider's own grants, so its
-Programs row says so. The live proof is
+a late or failed answer reads as no call and `{}`. Deploying one is
+admitting what its launch answers: that command runs in the person's
+terminal with their rights, outside the provider's own permissions, so the
+deploy's `process` line says so. The live proof is
 `crates/oxplow-control-plane/tests/observe_conformance.rs`
 `a_provider_launched_session_is_recorded_canonically`: the fake provider
-in harness mode (`relay`, approved and enabled in the project, the
+in harness mode (`relay`, deployed and enabled in the project, the
 in-process fake not registered) launches the fake harness's scripted
 session, whose hooks the route maps and answers through the provider's
 `tool_use` / `render`, and the observe suite finds it recorded
@@ -649,19 +642,18 @@ One spelling everywhere, because the id is used as it stands:
 
 | Keyed on the **instance id** | Keyed on the **provider (program)** |
 |---|---|
-| the ref segment (`work_item:issues_acme:ENG-1`) and `check_subject` | the consent key `provider:<ext>/<provider id>` and its hash |
-| an extension command's `instance` (`tracker.item.estimate { instance: issues_acme }`) | the approved copy (`copies/<ext>/<provider id>/<hash>`) |
-| the work-items registry id, `v_capability_provider.provider`, the `activeProviders` value | Data → Programs' row, `declaration_impact` |
+| the ref segment (`work_item:issues_acme:ENG-1`) and `check_subject` | the extension's deployment (`.oxplow/runtime/extensions/<ext>/<hash>/`) |
+| an extension command's `instance` (`tracker.item.estimate { instance: issues_acme }`) | the extension's permissions (`permissions.process`, `network`, `secrets`) |
+| the work-items registry id, `v_capability_provider.provider`, the `activeProviders` value | the Extensions page's provider row, `declaration_impact` |
 | `OXPLOW_PROVIDER_ID` (the provider is told which instance it is) | the kit's fixtures and transcripts (it tests the program, as its default instance) |
 | `contribution_health.contribution`, `provider_collector_state.instance` (the name) | |
 | the credential accounts (`instance:<project>:<ext>/<id>:<name>`) | |
 
-Consent stays per program: its hash covers the folder, the entry, args
-and the *names* of its grants; two instances differ only in config and
-credential *values*, which it never covered, so a second approval would
-review nothing. Approving a program restarts every running instance of
-it, and starts an enabled one that was down for want of approval
-(`ProviderRegistry::approved` reconciles, tsk1062).
+Permissions stay per extension: they cover the folder, the entry, args
+and the *names* of its credentials; two instances differ only in config and
+credential *values*, which they never covered, so a second instance asks
+nothing. A deploy that changes the program restarts every running instance
+of it, in the same activation.
 
 `ProviderRegistry::resolve(instance)` is the one mapping from a name to
 `{ ext, spec, id }` (`enable` / `check` are the default instance's;
@@ -722,10 +714,9 @@ config, provider? } }`, the same entries and the same validation):
   its per-minute tick (`reconcile_if_global_changed`), restarts a global
   instance whose count moved since it last started it — so a rotated and
   revoked token never keeps running elsewhere on the old value;
-- **consent stays per project**: the hash is of *this* project's
-  extension folder and approvals are kept per project, so a global
-  instance in a project that hasn't approved the program is `unapproved`
-  there, and its row says so;
+- **the program is the project's**: a global instance runs *this* project's
+  deployment of the extension, under the permissions deployed here, so in a
+  project that hasn't deployed the extension it is not listed at all (above);
 - it is written where it lives (`set_instance`: the project's entry if
   there is one, else the file; `add_instance(…, scope)`;
   `remove_instance` takes a project's replacement first, and the global
@@ -853,11 +844,11 @@ form; sign-in is a provider's.
   that's still good is used as it is.
 - **Signing in** is a person's: IPC `begin_oauth_sign_in { instance,
   name, redirect_port }` (`ProviderRegistry::begin_sign_in`, UI-only)
-  returns the page to open — **only for a provider approved as it is now** (tsk824): the
-  endpoints, client id and client-secret name are part of the approval,
+  returns the page to open — **only for a provider as its deployment declares it**: the
+  endpoints, client id and client-secret name are part of the deployment,
   and a sign-in sends the code, the PKCE verifier and the client secret
-  to them, so an edited endpoint is refused until a person approves it
-  again (the row's Sign in is off meanwhile); the renderer opens it in **the person's own browser**
+  to them, so an edited endpoint is refused until it is deployed
+  (the row's Sign in is off meanwhile); the renderer opens it in **the person's own browser**
   (`tauri-bridge/systemBrowser.ts`, not the sandboxed external-URL
   window — their sessions live there and services refuse embedded
   webviews). The row runs it (`SignInRow`): the shell listens
@@ -875,7 +866,7 @@ form; sign-in is a provider's.
   socket is closed — the row awaits it before listening again. `SignInCompletion` is
   `signed_in`, `failed { error }`, or `not_this_sign_in { reason }` —
   refused, nothing done, the wait goes on. A match ends the sign-in: the
-  provider is re-checked as approved with the declaration it began with
+  provider is re-checked against the declaration it began with
   (an endpoint edited meanwhile gets nothing) and with its credentials
   where they were (a global instance turned off here, or a project entry of
   its name arriving, moves them: `failed`, sign in again — tsk909), the
@@ -951,8 +942,8 @@ form; sign-in is a provider's.
   metadata`), however its manifest spells the dependency.
 
 The key is human-only (`HUMAN_ONLY_KEYS`: enabling runs a program) and
-shared with the team; whether it *runs* is per machine (approval,
-credentials, health). The config object is the provider's
+shared with the team; whether it *runs* is per machine (the
+deployment, credentials, health). The config object is the provider's
 `config_schema`'s; `check` validates it.
 
 **The registry** (`registry.rs`, `Services.providers`) keeps the running
@@ -963,13 +954,14 @@ extension catalog's change signal and on an `extensionInstances` /
 `ProviderRegistry::reconcile()` is only the request for a generation. A
 generation starts every enabled instance that isn't already running unchanged
 and stops the rest. A running instance whose identity is the same in the new
-generation — its program (the extension's files, so its approval hash), its
-config, scope, declarations and spec, a live connection, and an approval that still
-covers its program (`authority_current`; a re-approved edit replaces it in the same
+generation — its program (the extension's deployment), its
+config, scope, declarations and spec, a live connection, and a live owner
+(`authority_current`: its extension is still enabled at that version; a
+redeployed edit replaces it in the same
 activation rather than rejecting the generation at `validate_live`) — is carried over
 with its process; only a changed instance is replaced, and a removed or turned-off
 one stopped (the extension's place among the others doesn't count). An instance that can't run never rejects the
-generation: one that is unapproved, unconfigured, refused (its id is another
+generation: one that is unconfigured, refused (its id is another
 owner's), missing, or disabled is left out with that state on its row, and one
 whose start failed or hung is published failing, restarting with backoff and
 counted by `contribution_health` — every other extension and instance
@@ -984,7 +976,7 @@ input checked against its declared schema first) in
 required like any command's; confirm / access / undoable as declared). Its capability's verbs are never
 commands of their own: `work_item.<verb>` is the one write surface
 (P7.A1). A refusal —
-unapproved, unconfigured, a handshake that doesn't match — registers
+unconfigured, a handshake that doesn't match — registers
 nothing; a start that merely failed (it may come up) registers and
 counts as a failure, and its next call restarts it after a backoff that
 doubles from `MachineEnv.provider_backoff` (1 s in the app, 0 in
@@ -1075,8 +1067,8 @@ it, and a restarted instance never inherits the old one's results.
 `stopped` before it ends its process, and `connection()` refuses to
 start one that is (and ends a process whose start finished after the
 stop). So a `oxplow.provider.sync` still holding the old instance when a person
-turned it off and on, or when an approval restarted it, can't bring a
-process back — nor report its restart's `unapproved`, `unconfigured`,
+turned it off and on, or when a deploy restarted it, can't bring a
+process back — nor report its restart's `unconfigured`,
 changed declarations or failure against the successor. An enable's first
 start, before the instance runs, reports by name (`made_by: None`).
 
@@ -1084,7 +1076,7 @@ start, before the instance runs, reports by name (`made_by: None`).
 mean_invoke_ms, rate_limited_until, activity }`, per machine, in memory): `state` is `off`,
 `missing { reason }` (configured, but it names no provider an enabled
 extension declares; the reason says what to add), `refused { reason }`
-(enabled, but it can't run as configured — above), `unapproved`, `unconfigured { problems }`, `checking`, `ready`,
+(enabled, but it can't run as configured — above), `unconfigured { problems }`, `checking`, `ready`,
 `failing { errors }` (the last five) or `disabled { reason }`. A failed
 start or call counts (a refused input or a cancel doesn't); a success
 resets the count and updates `last_ok_at` and the moving-average
@@ -1098,7 +1090,7 @@ the same composition: `Instance::failed_keys`, tsk913), so one outage
 that a reaction retries through doesn't halt it: it stops, and the row (`disabled`, its reason) and
 `contribution.disabled@1 { contribution, reason }` (`contribution` the provider's ref) commit
 together (source `system:extensions`, subject `extension:<extension>`). So is
-a handshake that doesn't match the approved declarations. The row is
+a handshake that doesn't match the deployed declarations. The row is
 what keeps it off, across generations and restarts, and one whose row
 can't be read stays off too (`failing`, naming the error — not knowing
 isn't a yes). `InstanceHealth` is the process's state, showing the
@@ -1161,12 +1153,12 @@ restated by the next read.
 
 **Settings → Integrations** (`IntegrationsSection.tsx`, IPC UI-only in
 the parity table): `list_provider_instances` (every declared provider and
-configured instance, with health, approval, credential status and the
+configured instance, with health, credential status and the
 config schema), `check_provider_instance { instance, config }` (start
 it with that config and `check`, enabling and saving nothing — the
 outcome is the view's state) and `set_provider_instance { instance,
 enabled, config }` (`ProviderRegistry::set_instance`: enabling checks
-first and refuses an unapproved or unconfigured instance, writing
+first and refuses an unconfigured instance, writing
 nothing, with the problem's field as `/config/<path>`; then `oxplow.config.set`
 of `extensionInstances` — to enable, `oxplow.contribution.enable` runs **first**, so
 a failed enable writes nothing and the config never says enabled for
@@ -1193,17 +1185,16 @@ removed. The page is covered by `IntegrationsSection.test.tsx` and
 whole in a browser by the suite's `integrations/fake-provider` spec
 (`tests-e2e/`, P11): a person fills the fake's Team, presses Check and
 Enable, makes it the project's work list in Settings → Capabilities; an item created on it reaches the
-fake's service, and after Sync Now it is on the Board. Approving the
-program stays in Data → Programs; approving a provider restarts its
-running instance on what was approved (`ProviderRegistry::approved`,
-called by `approve_project_program`), so updated declarations take
-effect instead of disabling it at its next start as changed — and starts
-an enabled instance that was waiting for the approval.
+fake's service, and after Sync Now it is on the Board. Admitting the
+program is the extension's deploy (the Extensions page); a deploy restarts
+its running instances on the new declarations in the same activation, so
+updated declarations take effect instead of disabling an instance at its
+next start as changed.
 
 **Tests** (`providers/tests.rs`) run the real fake binary (built beside
 the test binary by the workspace build) through a script entry in a
-temp extension: an unapproved provider is refused and registers
-nothing; an edited declarations file is shown unapproved and refused;
+temp extension: a provider whose extension doesn't declare `permissions.process` is refused
+at load and registers nothing; an edited declarations file is refused;
 the `bad-declarations` hook is refused naming `/commands` and disables
 the instance; an unconfigured instance can't be enabled (nothing
 written) and a configured one enables, writes `extensionInstances` and
@@ -1277,8 +1268,8 @@ session: [agent-model.md](./agent-model.md) "Observe conformance".)
 
 What `oxplow extension test <name> [--bless] [--json]` runs for each
 provider an extension declares, after its check and its lens and
-collector examples ([extensions.md](./extensions.md) "The SDK"). The person running it runs their own program, so there is no
-approval check; credentials come from the environment (the declared
+collector examples ([extensions.md](./extensions.md) "The SDK"). The person running it runs their own program, so no deploy
+approval is asked; credentials come from the environment (the declared
 names — for a signed-in credential, an access token the author got
 themselves: the kit never signs in — and never a client secret).
 The report's **`left`** lists what the run made in a provider's own
@@ -1331,7 +1322,7 @@ and the throwaway host the conformance suite runs in
 - **The capability suite** runs through a throwaway host: a temp
   project (`GitProvider::init_repository`: an empty root commit) with a
   copy of the extension, `Services::in_memory` over it, the provider
-  approved there and enabled with the fixture config, then its
+  enabled there with the fixture config, then its
   capability's suite: `work_items_conformance::suite` against its
   `ExternalWorkItems`, or — the instance made the project's effort policy —
   `effort_policy_conformance::suite` (an agent starting an item on its
@@ -1359,16 +1350,16 @@ blocked stdin reader).
 ## External execution authority
 
 Providers, including MCP adapters, run with the person's file, network
-and process authority; the approval says so and oxplow doesn't confine them
+and process authority; the deploy's `process` line says so and oxplow doesn't confine them
 (there is no execution tier, and confinement is shelved until real OS
 confinement exists). Network declarations plus the macOS egress proxy limit
 direct network paths but do not promise confinement against local brokers or
 other code.
 
-The host launches the verified private approval copy and pins consent to its
-hash. `host/call` rechecks that gate and applies model/path service needs to
-the registered run. A connection monitor checks consent every 100 ms and
-kills its owned process group when revoked or changed. Shutdown, natural exit
+The host launches the entry from the immutable deployment. `host/call`
+rechecks the live-owner gate and applies model/path service needs to
+the registered run. A connection monitor checks the live owner every 100 ms and
+kills its owned process group when the extension is disabled or changed. Shutdown, natural exit
 and dropped connections clean up ordinary children and disarm group tracking;
 processes deliberately escaping the group keep the person's authority. Changing a working-tree script does not change the frozen
 provider that is already running.
@@ -1383,10 +1374,10 @@ replaced with a FIFO cannot block copy preparation before launch.
 
 `host/call` with `scope: state.read` and `{scope: project|personal,
 area: state|cache}` returns null or a private `{stamp, values}` snapshot. The
-provider must declare that need, name an in-flight invoke key, retain live
-consent and match the current generation/version/enabled descriptor. The owner
+provider must declare that need, name an in-flight invoke key, stay a live
+owner and match the current generation/version/enabled descriptor. The owner
 is captured from an exact active catalog declaration when the instance is
-built, and requires the same generation before and after approved-copy preparation; a command in another extension cannot redirect it to that extension's
+built, and requires the same generation before and after the deployment is resolved; a command in another extension cannot redirect it to that extension's
 namespace, and a candidate check cannot borrow the installed owner. No request
 selects an extension or DB path. Each call owns a short read transaction;
 provider execution and waiting hold none. Late catalog changes conservatively
@@ -1401,7 +1392,7 @@ Provider choice and scope use that captured mapping, so an override removed
 mid-resolution cannot pair project config with global credentials. A reconcile
 pass uses one such mapping and one extension declaration snapshot for every
 instance; async stops/starts do not make later instance resolution reread a
-newer config/catalog. Existing approval and approved-copy/live-owner checks
+newer config/catalog. Existing live-owner checks
 still apply before execution.
 
 Bundled declaration ownership wins before enabled filtering. A disabled bundled
@@ -1425,7 +1416,7 @@ permit. This ordering is required because a stop or failure can hold that map
 while awaiting a database write. The reservation verifies that the incumbent
 map still matches the captured base and rechecks effective configuration,
 scope, global-file mtime, catalog generation, disable epoch, candidate peer
-liveness and current pinned consent/hash. Candidate event declarations must
+liveness and the current deployment. Candidate event declarations must
 also match the vocabulary prepared for the same generation. Candidate
 `check`-time `host/changed` notifications are ignored until the instance is
 admitted.

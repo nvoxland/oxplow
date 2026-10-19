@@ -55,10 +55,10 @@ Things I keep forgetting. Read this before adding any UI.
   sharing a rail that lists the areas; the launcher lists each area by
   name ("Settings: Agents"). A link that means one place opens its area
   with `section` — one of the area's section ids or an anchor inside one
-  (`settings-data-programs`) — and the page scrolls there. A document of
+  (`settings-data-delivery`) — and the page scrolls there. A document of
   four sections or more lists them in its rail (`DocumentLayout`). A page that shows state from outside any model
-  refreshes on the event that says it changed (Integrations and Data on
-  `approvalsChanged`, sent when a person approves a program). Integrations
+  refreshes on the event that says it changed (Integrations on
+  `configChanged` and `credentialChanged`, Data on `extensionsChanged`). Integrations
   also re-reads when an instance's health is recorded (`v_contribution_health`,
   through `useRerunOnChange`): Enable's own `configChanged` can be read
   before the instance has started, and nothing else says it finished
@@ -68,7 +68,7 @@ Things I keep forgetting. Read this before adding any UI.
   saved value, so a form resets its fields on the *content* changing, not
   the object: `SchemaForm` keys on `JSON.stringify` of both, and a row
   holding a draft beside it (`IntegrationRow`'s `config`) does the same.
-  Otherwise any event that re-reads — an approval, a config change
+  Otherwise any event that re-reads — a deploy, a config change
   elsewhere, a health record — silently drops unsaved input, and the next
   action sends the old value.
 - **A command's form follows its input schema** (`SchemaForm`): a
@@ -117,15 +117,14 @@ Things I keep forgetting. Read this before adding any UI.
   `oxplow-codebase` skill say so, so "can you see that error?" needs no
   screenshot). A report that fails is logged with
   `logUi`, never recorded as another op error (it would loop).
-- **Settings → Data → Programs shows the grant, not only the verdict.**
-  Each row says when it was approved ("Approved …") or revoked, and what the
-  grant doesn't hold on this machine ("not held here: …", the review line's
-  wording: `ProjectProgram.unenforced`). **Revoking is destructive, so it is
-  on right-click** ("Revoke approval…", approved rows only), asks in a strip
-  under the row (Escape or Cancel backs out) and then runs
-  `revokeProjectProgram(kind, name)` — or `revokeCollector(owner, id)` for an
-  extension's exec or model-calling collector on the Collectors list. The row
-  model is `dataSectionModel.ts` (`programRow`, `collectorRevoke`).
+- **Settings → Extensions shows the grant, not only the verdict.** Each
+  row lists the extension's permissions, and what a deploy, roll back or
+  enable would add is shown in the confirmation before it runs
+  (`CommandConfirm` lists one line per added permission; `process` says
+  that oxplow does not confine the program). **Roll Back and Remove are
+  destructive, so they are on right-click** like the other row actions,
+  and a row action that adds a permission asks inline, where the person
+  clicked.
 - **Settings → Extensions shows each extension's last run.** One line under
   the row from `v_extension_run` (`latest = 1` per contribution): the **worst
   current warning** (denied, then stale, then failed; the newest of equals) so a
@@ -139,7 +138,7 @@ Things I keep forgetting. Read this before adding any UI.
 - **Settings → Extensions says what each script is given.** Under the
   row, one muted line per Starlark script that has services: its name, then
   the service titles ("Collector triage — Read the captured tree · Ask a
-  model (you approve it)"). A service the script uses without naming it in
+  model (needs `permissions.ai`)"). A service the script uses without naming it in
   `needs` says "(not in its needs)". The install/update review lists the
   same lines above the impact report. `serviceLines` in
   `extensionRowModel.ts`.
@@ -354,7 +353,7 @@ click is the confirmation — plus saying what is about to happen.
   (`reaction-retry-<effect>-<event>-trigger` / `-confirm`).
 - **A count a person should see comes before the confirming click**
   (P9.D5). A command's confirmation shows its summary and input, not
-  something computed; so **Backfill…** on an approved effect's row first
+  something computed; so **Backfill…** on a deployed effect's row first
   reads the plan (`oxplow.effect.backfill_plan`), says how many events the
   effect never reacted to and that it may call outside oxplow for each,
   and offers "Run on N events" beside Cancel. Escape cancels; nothing to
@@ -823,7 +822,7 @@ declaring *what it is* and mounting the generic layer.
   person can hand the agent. Each prompt is an Ask — it fills the agent's
   input and never sends. `compact` is the one-line form (rail sections). A loading state isn't an empty one: "Starting the
   agent…" is plain text, and only the empty transcript is an `EmptyState`. Don't offer prompts for what an agent can't do
-  (AI providers, keys, consent): say who does it instead. The session
+  (AI providers, keys, permissions): say who does it instead. The session
   picker (`NewSessionPage`, a thread with no agent session) offers **no**
   prompts — there is no agent here yet to hand one to — only the agent
   choice and Start, which opens the slot and nothing else. Its root

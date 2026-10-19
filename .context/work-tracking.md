@@ -132,10 +132,10 @@ commands: [{ name, input }] }` or `{ skip }` (events are refused).
 `effort_policy::prepare_built_ins` registers it as an
 `effort_policy_script::ScriptedPolicy`, which `effects::run_over` runs
 under the effects' sandbox, its `scope("sql.read", …)` limited to its
-`needs`. It runs only while a person has approved it as it is
-(`ProgramKind::EffortPolicy`, `exec_consent::script_gate`, asked before
-each event): unapproved, each event it's offered fails saying so and the
-pump dead-letters it — nothing falls back. Its reads are counted on a
+`needs`. It runs under its extension's permissions (a declared
+`sql.read` need requires `permissions.sql`; the loader refuses the extension
+otherwise), as deployed: a failed event is dead-lettered by the pump —
+nothing falls back. Its reads are counted on a
 pure child of the policy's run. `examples/extensions/prompt-efforts` is one:
 an effort per prompt that changes files (checked by `oxplow extension
 test` and run over real turns in `effort_policy_script`'s tests).

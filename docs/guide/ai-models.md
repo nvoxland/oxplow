@@ -23,17 +23,16 @@ directory and apply to all your projects.
 **Test** makes one small call with the model you name, so you can check
 the key, URL and model name before using them.
 
-### Approving a provider
+### Provider permissions
 
 Each provider is a small script that shapes the calls oxplow makes to
 that service, including the ones that come with oxplow. A call carries
-your key and your prompts, so a provider runs only once you've approved
-its script in **Settings → Data → Programs**. **Read the script** shows
-you what it does. Until then, calls through it fail and say where to
-approve it.
+your key and your prompts, so the extension that supplies a provider
+declares `permissions: { ai: true }`. You approve that when you deploy the
+extension (Settings → Extensions).
 
-An upgrade that changes a provider's script asks again: AI calls through
-it stop until you approve the new version.
+A changed script needs a redeploy. It asks you again only if the new
+version adds a permission.
 
 An extension can add a provider of its own the same way (see the
 [Extensions reference](../reference/extensions.md)).
@@ -91,9 +90,8 @@ something its model is restricted from.
   claim. They're guesses, and your agent never sees them. The model is the
   one you bind to `oxplow-bundled/reasoning` in Settings → AI, or your
   `main` model until you do. Nothing runs until one of them has a model,
-  and you approve its programs first (Settings → Data → Programs: the
-  `reasoning` job and the `infer-reasoning` and `store-reasoning`
-  effects). **Infer Again** on the list asks once more, say after you bind
+  and its extension is deployed with the permissions it declares (Settings →
+  Extensions). **Infer Again** on the list asks once more, say after you bind
   another model.
 
 ## What your agent can do

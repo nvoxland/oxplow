@@ -125,5 +125,6 @@ extension folder; `report.path` stays project-relative), not inline in
 the yaml. Prefer `jaq` (jq) — the host pre-parses the report
 (`format`) so the script just reshapes JSON. Use `starlark` for logic jq
 can't express, or `exec` (`entry` is the executable; the raw report on
-stdin, JSON on stdout) as a last resort: a program runs only once a
-person approves it on their machine (Settings → Data → Programs).
+stdin, JSON on stdout) as a last resort: a program needs the extension to
+declare `permissions: { process: true }`, which a person approves when it
+is deployed.

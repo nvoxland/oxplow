@@ -44,8 +44,8 @@
   and its files, at most 256 files / 5 MiB) runs sandboxed — no network,
   no storage, no token — and reaches oxplow only by asking the host to
   run one of its `assets` lenses, invoke one of its `commands` (a
-  component that declares any is a program a person approves on
-  Settings → Data → Programs before its `invoke` runs; a command that asks
+  component that declares any runs them under the extension's
+  permissions, approved when it was deployed; a command that asks
   still asks) or navigate. Its `index.html` loads
   oxplow's client library with a plain `<script
   src="/component-lib/oxplow-component.js">` before its own plain script

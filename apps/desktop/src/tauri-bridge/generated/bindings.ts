@@ -867,31 +867,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	writeWorkspaceFile: (streamId: string | null, relativePath: string, content: string) => typedError<WorkspaceFile, IpcError_Serialize>(__TAURI_INVOKE("write_workspace_file", { streamId, relativePath, content })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	createWorkspaceFile: (streamId: string | null, relativePath: string, content: string) => typedError<WorkspaceFile, IpcError_Serialize>(__TAURI_INVOKE("create_workspace_file", { streamId, relativePath, content })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	createWorkspaceDirectory: (streamId: string | null, relativePath: string) => typedError<string, IpcError_Serialize>(__TAURI_INVOKE("create_workspace_directory", { streamId, relativePath })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	renameWorkspacePath: (streamId: string | null, fromPath: string, toPath: string) => typedError<[string, string], IpcError_Serialize>(__TAURI_INVOKE("rename_workspace_path", { streamId, fromPath, toPath })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	deleteWorkspacePath: (streamId: string | null, relativePath: string) => typedError<string, IpcError_Serialize>(__TAURI_INVOKE("delete_workspace_path", { streamId, relativePath })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listBackgroundTasks: () => typedError<BackgroundTask[], IpcError_Serialize>(__TAURI_INVOKE("list_background_tasks")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the

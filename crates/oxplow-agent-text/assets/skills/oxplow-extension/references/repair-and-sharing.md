@@ -41,7 +41,8 @@ in `v_contribution_health` (`extension`, `contribution`, `kind`, `state` = `ok` 
   commits. `oxplow.extension.unshare { name }` reverses it.
 - **Use someone else's extension:** only when the user asks. Clone it into
   `.oxplow/extensions/<name>/` (or point `extensionSources` at the clone),
-  list it in `extensions:` or `enableExtensions`, and deploy it. Read what
-  it declares first (the programs its collectors run, the hosts they reach,
-  the credentials they read). Do not hand-edit a clone you want to update
+  list it in `extensions:` or `enableExtensions`, and deploy it. Read its
+  `permissions:` first (the programs it runs, the hosts it reaches, the
+  secrets it reads): the deploy asks the person to approve them.
+  Do not hand-edit a clone you want to update
   later; copy it into a new extension instead.
