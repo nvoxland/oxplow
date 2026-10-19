@@ -53,7 +53,9 @@
   `oxplow.connect().then((component) => …)` for `component.run`,
   `onUpdate`, `query`, `invoke` and `navigate`. `oxplow extension new
   component <name>` scaffolds a working one; `docs/guide/lenses.md` has
-  the reference.
+  the reference. A component written in TypeScript or with a library is
+  built at deploy: a `build:` block, with `bundle:` under its `output`
+  (`repair-and-sharing.md`).
 
 ## Forms
 

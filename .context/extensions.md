@@ -1065,6 +1065,11 @@ source directly: an edit changes nothing until it is deployed.
   over each file's relative path and bytes, dot entries skipped, cut to 16
   hex characters). The hash is the extension's identity; a deployment
   folder is written whole (copied beside, then renamed) and never changed.
+  A source with a `build:` hashes its **inputs** — every file but
+  `build.output` and the `build.exclude` folders — plus its `build.run`
+  text (`extension_store::Inputs`; a manifest without `build` hashes as it
+  always did), and its deployment holds those inputs and the built output,
+  never the excluded folders ("Builds").
   Everything oxplow reads for a deployed extension — manifest, lenses,
   Starlark, models, component bundles, provider entries, skills — comes
   from that folder. Its `Extension.path` is the folder's absolute path, so
@@ -1129,6 +1134,33 @@ person's lists (enable deploys one with no deployment here).
 `oxplow.extension.remove` takes it out of both lists, stops it, forgets its
 deployments, private state and settings, and never deletes its source.
 
+**Builds.** `build: { run, output, exclude? }` is for a component or a
+program that needs a tool to make (TypeScript, a bundler). Deploy runs
+`run` with `/bin/sh -c` in the source folder (`extension_build::run`:
+this process's environment with the person's `PATH` and `HOME` from the
+host env, a process group, a 10-minute timeout, the end of its output in
+a failure), then copies the inputs and `output` into the deployment and
+loads the deployment folder: one that doesn't load once built (a bundle
+the build didn't write) is refused (``extension `x` doesn't load once
+built``) and leaves nothing behind. A build that fails, or doesn't write
+`output`, refuses the deploy with ``building `x`: …``. A build runs with
+the person's authority and oxplow doesn't confine it, so its command is
+approved like a permission: a new or changed `run` adds ``build — runs
+`…` in <source> with your authority, on every deploy`` to what the deploy
+asks (`extension_deploy::build_line`); the same command never asks again.
+The approval covers the command text only — what `npm run build` does is
+whatever `package.json` says. The recorded command
+(`extension_deployment.build_run`, `v_extension_deployment.build`) is what
+rollback compares; rollback never rebuilds, and neither does a deploy whose
+hash is already in the store. A component bundle under `output` loads from
+the source as declared (`BundleLook::Unknown`) while `output` doesn't
+exist yet, so validate and preview pass before any build. Shipped
+(bundled) extensions have no build; one that did would need
+`extract_shipped` to hash by the same input rule. `oxplow extension check`
+runs no build (the built source isn't deployed in its throwaway);
+`extension test` builds, as the author's own run; its copy links the
+`exclude` folders instead of copying them.
+
 **Startup** (`extension_deploy::start`, before the first activation): the
 live set starts from the active rows whose folder is still in the store;
 each extension that is on with no deployment here (a fresh clone, a
@@ -1136,7 +1168,9 @@ just-pulled teammate's) is staged from the main checkout's source and
 activates with the rest — one that doesn't prepare is held, as any is. One
 whose source declares permissions (beyond what ships, for a bundled one)
 isn't: it stays `undeployed` and `v_extension.pending` says what it asks
-for, until a person deploys it ("Permissions").
+for, until a person deploys it ("Permissions"). A source with a `build:`
+waits the same way, its pending line naming the build: nothing has
+approved its command on this machine.
 Foundation can't be held: a deployment of it that doesn't load or whose
 core baseline doesn't activate gives way to the shipped one
 (`ExtensionActivation::initialize`), which the next publication records
@@ -1149,7 +1183,11 @@ but `project.yaml`, so a new extension's source is personal.
 `!extensions/<name>/` and `!extensions/<name>/**` (git can't re-include a
 file under an excluded folder, and `*` matches files at every depth) and
 moves the name from the person's `enableExtensions` to the team's
-`extensions`; the person commits. `oxplow.extension.unshare` reverses it.
+`extensions`; the person commits. A built extension's `output` and
+`exclude` folders get their own ignore lines (`extensions/<name>/dist/`)
+after those: they aren't source. `oxplow.extension.unshare` reverses it,
+removing every line under `extensions/<name>/` whatever the manifest says
+now.
 Only a source in `.oxplow/extensions/` is shared this way.
 
 **Requires.** `requires: [name, …]` names the other extensions this one
@@ -1274,6 +1312,7 @@ description: …
 engine: ">=0.7"          # optional: the oxplow it targets
 permissions: { ai: true } # optional: what it reaches beyond the baseline ("Permissions")
 requires: [tracker]      # optional: other extensions it needs on ("Sources and deployments" → Requires)
+build: { run: bun run build, output: dist, exclude: [node_modules] } # optional: built at deploy ("Builds")
 intent:                  # required
   purpose: What question it answers, or what job it does
   origin: effort:eff42   # the thread/effort ref that created it, or null

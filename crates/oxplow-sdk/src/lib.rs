@@ -1042,8 +1042,9 @@ pub async fn check(
     let host = match commands {
         Some(_) => None,
         None => Some(
-            // Check runs no program: it sees no environment.
-            throwaway::Host::start(root, name, std::sync::Arc::new(|_: &str| None))
+            // Check runs no program: it sees no environment and builds
+            // nothing (a built source loads as written).
+            throwaway::Host::start(root, name, std::sync::Arc::new(|_: &str| None), false)
                 .await
                 .map_err(SdkError::Invalid)?,
         ),

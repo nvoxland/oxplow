@@ -51,4 +51,5 @@ Rules that live in other skills: wikilinks and refs in prose, see
 `oxplow-wiki-capture`; waiting on the person, `oxplow-runtime`; test
 commands run in the foreground, `oxplow-collection`; metrics, `oxplow-metrics`.
 An extension declares `permissions:`; a person approves them when it is
-deployed. You can't approve; your deploy that adds one becomes a proposal.
+deployed, and also a new or changed `build:` command. You can't approve;
+your deploy that adds one becomes a proposal.

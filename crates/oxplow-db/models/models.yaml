@@ -1363,7 +1363,7 @@
     - { not_null: ref }
     - { unique: ref }
 - name: extension_deployment
-  version: 2
+  version: 3
   key: [ref]
   description: "Each deployment of an extension: an immutable copy of its source in the store (`.oxplow/runtime/extensions/<name>/<hash>/`), named by the hash of the source it was copied from, and which one runs now (`active`). `oxplow.extension.deploy` makes one; `oxplow.extension.rollback` makes an older one active again. The store keeps the active one and the five newest. A bundled extension with no active row runs the copy that ships with oxplow."
   columns:
@@ -1376,6 +1376,7 @@
     - { name: "source", type: "TEXT", doc: "The source folder it was copied from." }
     - { name: "active", type: "INTEGER", doc: "1 for the deployment the extension runs now." }
     - { name: "permissions", type: "TEXT", doc: "What it declares it may reach beyond the baseline, as a JSON object (`v_extension.permissions`'s shape): what a person approved when it was deployed. (v2)" }
+    - { name: "build", type: "TEXT", doc: "The command it was built with (its manifest's `build.run`), which a person approved when it was deployed; NULL when it has no build. (v3)" }
   tests:
     - { not_null: ref }
     - { unique: ref }

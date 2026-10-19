@@ -1392,6 +1392,56 @@ export type BranchChangeEntry = {
 };
 
 /**
+ *  What a deploy builds before it copies: `run` in the source folder, as
+ *  the person, then `output` is copied into the deployment. The hash is of
+ *  the inputs — every file but `output` and the `exclude` folders — and
+ *  `run` itself, so a build's output never changes what is deployed.
+ */
+export type Build = Build_Serialize | Build_Deserialize;
+
+/**
+ *  What a deploy builds before it copies: `run` in the source folder, as
+ *  the person, then `output` is copied into the deployment. The hash is of
+ *  the inputs — every file but `output` and the `exclude` folders — and
+ *  `run` itself, so a build's output never changes what is deployed.
+ */
+export type Build_Deserialize = {
+	/**
+	 *  The command, run with `/bin/sh -c` in the source folder with the
+	 *  person's environment. A new or changed one is approved at deploy.
+	 */
+	run: string,
+	/**
+	 *  The folder it writes (`dist`), relative to the extension: copied
+	 *  into the deployment, never hashed.
+	 */
+	output: string,
+	/**  Folders neither hashed nor deployed (`node_modules`). */
+	exclude?: string[],
+};
+
+/**
+ *  What a deploy builds before it copies: `run` in the source folder, as
+ *  the person, then `output` is copied into the deployment. The hash is of
+ *  the inputs — every file but `output` and the `exclude` folders — and
+ *  `run` itself, so a build's output never changes what is deployed.
+ */
+export type Build_Serialize = {
+	/**
+	 *  The command, run with `/bin/sh -c` in the source folder with the
+	 *  person's environment. A new or changed one is approved at deploy.
+	 */
+	run: string,
+	/**
+	 *  The folder it writes (`dist`), relative to the extension: copied
+	 *  into the deployment, never hashed.
+	 */
+	output: string,
+	/**  Folders neither hashed nor deployed (`node_modules`). */
+	exclude?: string[],
+};
+
+/**
  *  The jobs oxplow itself gives models. Every extension can name them,
  *  and each extension AI profile falls back to one.
  */
@@ -2966,11 +3016,14 @@ export type Extension_Deserialize = {
 	permissions?: Permissions_Deserialize,
 	/**  The other extensions it needs on (`requires:`). */
 	requires?: string[],
+	/**  What a deploy builds before it copies (`build:`). */
+	build?: Build_Deserialize | null,
 	/**
 	 *  What it waits on a person for when it is on but undeployed: the
 	 *  permissions its source would add, one line each
-	 *  ([`Permissions::added_over`]); startup deploys only one that asks
-	 *  for nothing.
+	 *  ([`Permissions::added_over`]), and its build command when it has one
+	 *  (`extension_deploy::build_line`); startup deploys only one that
+	 *  asks for nothing.
 	 */
 	pending?: string[],
 	/**
@@ -3111,11 +3164,14 @@ export type Extension_Serialize = {
 	permissions: Permissions_Serialize,
 	/**  The other extensions it needs on (`requires:`). */
 	requires: string[],
+	/**  What a deploy builds before it copies (`build:`). */
+	build: Build_Serialize | null,
 	/**
 	 *  What it waits on a person for when it is on but undeployed: the
 	 *  permissions its source would add, one line each
-	 *  ([`Permissions::added_over`]); startup deploys only one that asks
-	 *  for nothing.
+	 *  ([`Permissions::added_over`]), and its build command when it has one
+	 *  (`extension_deploy::build_line`); startup deploys only one that
+	 *  asks for nothing.
 	 */
 	pending: string[],
 	/**

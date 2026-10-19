@@ -31,8 +31,15 @@ pub(crate) struct Host {
 
 impl Host {
     /// A throwaway over `project`'s extensions with `testing` on too,
-    /// activated. Its programs see `env`.
-    pub(crate) async fn start(project: &Path, testing: &str, env: HostEnv) -> Result<Host, String> {
+    /// activated. Its programs see `env`. With `builds`, a copied source
+    /// with a `build:` is built and deployed like the rest; without (a
+    /// check, which runs no program), it isn't deployed.
+    pub(crate) async fn start(
+        project: &Path,
+        testing: &str,
+        env: HostEnv,
+        builds: bool,
+    ) -> Result<Host, String> {
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
         let root = dir.path().to_path_buf();
         let settings = oxplow_config::extension_settings(project);
@@ -92,7 +99,11 @@ impl Host {
         // own test run deploys what it copied, as they would, confirmed.
         let mut deploys = Vec::new();
         for name in &on {
-            if root.join(EXTENSIONS_DIR).join(name).is_dir() {
+            let copied = root.join(EXTENSIONS_DIR).join(name);
+            let built = oxplow_app::extension_store::Inputs::of(&copied)
+                .run
+                .is_some();
+            if copied.is_dir() && (builds || !built) {
                 if let Err(e) =
                     oxplow_app::extension_deploy::deploy(&svc, name, &root, None, true).await
                 {
@@ -163,13 +174,27 @@ impl Host {
     }
 }
 
+/// Copy an extension's source; a folder its `build:` excludes
+/// (`node_modules`) is linked instead, so a build in the copy still finds
+/// it.
 pub(crate) fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    let exclude = oxplow_app::extension_store::Inputs::of(from).exclude;
+    copy_tree(from, to, &exclude, "")
+}
+
+fn copy_tree(from: &Path, to: &Path, exclude: &[String], prefix: &str) -> std::io::Result<()> {
     std::fs::create_dir_all(to)?;
     for entry in std::fs::read_dir(from)? {
         let entry = entry?;
         let target = to.join(entry.file_name());
+        let rel = format!("{prefix}{}", entry.file_name().to_string_lossy());
+        if exclude.iter().any(|d| d.trim_end_matches('/') == rel) {
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(entry.path(), &target)?;
+            continue;
+        }
         if entry.file_type()?.is_dir() {
-            copy_dir(&entry.path(), &target)?;
+            copy_tree(&entry.path(), &target, exclude, &format!("{rel}/"))?;
         } else {
             std::fs::copy(entry.path(), &target)?;
         }

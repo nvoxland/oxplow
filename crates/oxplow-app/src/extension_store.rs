@@ -21,14 +21,67 @@ pub fn deployment_dir(project: &Path, name: &str, hash: &str) -> PathBuf {
     project.join(STORE_DIR).join(name).join(hash)
 }
 
-/// The hash of a source folder: sha256 over each file's path (relative,
-/// `/`-separated) and bytes, in path order, skipping every entry whose name
-/// starts with `.`. Cut to 16 hex characters: it names a folder.
+/// What of a source is its input (`.context/extensions.md` "Builds"):
+/// with a `build:`, the output it writes and the folders it excludes
+/// aren't, and its command is. Read from `extension.yaml` leniently: a
+/// manifest that doesn't parse has no build, and its load says why.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Inputs {
+    pub run: Option<String>,
+    pub output: Option<String>,
+    pub exclude: Vec<String>,
+}
+
+impl Inputs {
+    pub fn of(source: &Path) -> Inputs {
+        let build = std::fs::read_to_string(source.join("extension.yaml"))
+            .ok()
+            .and_then(|text| serde_yaml::from_str::<serde_yaml::Value>(&text).ok())
+            .and_then(|manifest| manifest.get("build").cloned());
+        let Some(build) = build else {
+            return Inputs::default();
+        };
+        let text = |key: &str| build.get(key).and_then(|v| v.as_str()).map(str::to_string);
+        Inputs {
+            run: text("run"),
+            output: text("output"),
+            exclude: build
+                .get("exclude")
+                .and_then(|v| v.as_sequence())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }
+    }
+
+    /// The folders that aren't inputs: the output and the excluded ones.
+    fn skipped(&self) -> Vec<&str> {
+        self.output
+            .iter()
+            .chain(&self.exclude)
+            .map(|dir| dir.trim_end_matches('/'))
+            .collect()
+    }
+}
+
+/// The hash of a source folder: sha256 over each input file's path
+/// (relative, `/`-separated) and bytes, in path order, skipping every entry
+/// whose name starts with `.`, plus a built source's command ([`Inputs`]).
+/// Cut to 16 hex characters: it names a folder.
 pub fn source_hash(source: &Path) -> std::io::Result<String> {
-    let files = source_files(source)?
+    let inputs = Inputs::of(source);
+    let mut files = source_files(source, &inputs.skipped())?
         .into_iter()
         .map(|(rel, path)| Ok((rel, std::fs::read(&path)?)))
         .collect::<std::io::Result<Vec<_>>>()?;
+    if let Some(run) = &inputs.run {
+        // Not a path any file can have.
+        files.push(("\0build".to_string(), run.clone().into_bytes()));
+    }
     Ok(files_hash(
         files
             .iter()
@@ -36,9 +89,9 @@ pub fn source_hash(source: &Path) -> std::io::Result<String> {
     ))
 }
 
-/// How many bytes a deployment of `source` copies.
+/// How many bytes of input a deployment of `source` copies.
 pub fn source_size(source: &Path) -> std::io::Result<u64> {
-    source_files(source)?
+    source_files(source, &Inputs::of(source).skipped())?
         .into_iter()
         .map(|(_, path)| Ok(std::fs::metadata(path)?.len()))
         .sum()
@@ -147,10 +200,16 @@ fn remove_tree(dir: &Path) {
 }
 
 /// Every file under `source` as `(relative path, absolute path)`, in path
-/// order, without dot entries. Symlinks are refused: a deployment is a copy
-/// of files, not of what they point at.
-fn source_files(source: &Path) -> std::io::Result<Vec<(String, PathBuf)>> {
-    fn walk(dir: &Path, prefix: &str, out: &mut Vec<(String, PathBuf)>) -> std::io::Result<()> {
+/// order, without dot entries or the `skip` folders (relative paths).
+/// Symlinks are refused: a deployment is a copy of files, not of what they
+/// point at.
+fn source_files(source: &Path, skip: &[&str]) -> std::io::Result<Vec<(String, PathBuf)>> {
+    fn walk(
+        dir: &Path,
+        prefix: &str,
+        skip: &[&str],
+        out: &mut Vec<(String, PathBuf)>,
+    ) -> std::io::Result<()> {
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
             let name = entry.file_name().to_string_lossy().into_owned();
@@ -162,6 +221,9 @@ fn source_files(source: &Path) -> std::io::Result<Vec<(String, PathBuf)>> {
             } else {
                 format!("{prefix}/{name}")
             };
+            if skip.contains(&rel.as_str()) {
+                continue;
+            }
             let kind = entry.file_type()?;
             if kind.is_symlink() {
                 return Err(std::io::Error::other(format!(
@@ -169,7 +231,7 @@ fn source_files(source: &Path) -> std::io::Result<Vec<(String, PathBuf)>> {
                 )));
             }
             if kind.is_dir() {
-                walk(&entry.path(), &rel, out)?;
+                walk(&entry.path(), &rel, skip, out)?;
             } else {
                 out.push((rel, entry.path()));
             }
@@ -177,14 +239,15 @@ fn source_files(source: &Path) -> std::io::Result<Vec<(String, PathBuf)>> {
         Ok(())
     }
     let mut out = Vec::new();
-    walk(source, "", &mut out)?;
+    walk(source, "", skip, &mut out)?;
     out.sort();
     Ok(out)
 }
 
 /// Copy `source` into the store as `name`'s deployment `hash`, unless it is
-/// there already. The copy is written beside it and renamed into place, so
-/// a deployment folder is either whole or absent.
+/// there already: its inputs, and a built source's output. The copy is
+/// written beside it and renamed into place, so a deployment folder is
+/// either whole or absent.
 pub fn copy_into_store(
     project: &Path,
     name: &str,
@@ -195,8 +258,19 @@ pub fn copy_into_store(
     if target.is_dir() {
         return Ok(target);
     }
+    let inputs = Inputs::of(source);
     write_whole(&target, |staging| {
-        for (rel, path) in source_files(source)? {
+        let mut files = source_files(source, &inputs.skipped())?;
+        if let Some(output) = inputs.output.as_deref().map(|o| o.trim_end_matches('/')) {
+            if source.join(output).is_dir() {
+                files.extend(
+                    source_files(&source.join(output), &[])?
+                        .into_iter()
+                        .map(|(rel, path)| (format!("{output}/{rel}"), path)),
+                );
+            }
+        }
+        for (rel, path) in files {
             let to = staging.join(&rel);
             std::fs::create_dir_all(to.parent().expect("a file has a parent"))?;
             std::fs::copy(&path, &to)?;
@@ -267,6 +341,76 @@ mod tests {
         write(c.path(), "extension.yaml", "name: x\n");
         write(c.path(), "one.yaml", "title: One\n");
         assert_ne!(hash, source_hash(c.path()).unwrap());
+    }
+
+    /// A manifest with a `build` hashes its inputs and its command: not
+    /// what the build wrote, nor the folders it leaves out. One without a
+    /// `build` hashes every file, as it always has.
+    #[test]
+    fn the_build_command_and_only_the_inputs_make_the_hash() {
+        let plain = tempfile::tempdir().unwrap();
+        write(plain.path(), "extension.yaml", "name: x\n");
+        write(plain.path(), "dist/a.js", "built");
+        assert_eq!(
+            source_hash(plain.path()).unwrap(),
+            files_hash([
+                ("extension.yaml", b"name: x\n".as_slice()),
+                ("dist/a.js", b"built".as_slice()),
+            ])
+        );
+
+        let built = tempfile::tempdir().unwrap();
+        let manifest = |run: &str| {
+            format!("name: x\nbuild: {{ run: {run}, output: dist, exclude: [node_modules] }}\n")
+        };
+        write(built.path(), "extension.yaml", &manifest("make"));
+        write(built.path(), "src/a.ts", "source");
+        let hash = source_hash(built.path()).unwrap();
+        write(built.path(), "dist/a.js", "built");
+        write(built.path(), "node_modules/x/index.js", "dep");
+        assert_eq!(hash, source_hash(built.path()).unwrap());
+        assert_eq!(
+            source_size(built.path()).unwrap(),
+            (manifest("make").len() + "source".len()) as u64
+        );
+        write(built.path(), "src/a.ts", "changed");
+        assert_ne!(hash, source_hash(built.path()).unwrap());
+        write(built.path(), "src/a.ts", "source");
+        write(built.path(), "extension.yaml", &manifest("other"));
+        let other = source_hash(built.path()).unwrap();
+        write(built.path(), "extension.yaml", &manifest("make"));
+        assert_eq!(hash, source_hash(built.path()).unwrap());
+        assert_ne!(
+            other,
+            files_hash([
+                ("extension.yaml", manifest("other").as_bytes()),
+                ("src/a.ts", b"source".as_slice()),
+            ])
+        );
+    }
+
+    /// The deployment of a built source holds its inputs and the build's
+    /// output, never the folders it excludes.
+    #[test]
+    fn a_copy_carries_the_built_output_and_not_the_excluded_folders() {
+        let project = tempfile::tempdir().unwrap();
+        let source = tempfile::tempdir().unwrap();
+        write(
+            source.path(),
+            "extension.yaml",
+            "name: x\nbuild: { run: make, output: dist, exclude: [node_modules] }\n",
+        );
+        write(source.path(), "src/a.ts", "source");
+        write(source.path(), "dist/w/index.html", "built");
+        write(source.path(), "node_modules/x/index.js", "dep");
+        let hash = source_hash(source.path()).unwrap();
+        let dir = copy_into_store(project.path(), "x", source.path(), &hash).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("dist/w/index.html")).unwrap(),
+            "built"
+        );
+        assert!(dir.join("src/a.ts").is_file());
+        assert!(!dir.join("node_modules").exists());
     }
 
     /// A deployment's files are read-only once written: a program running

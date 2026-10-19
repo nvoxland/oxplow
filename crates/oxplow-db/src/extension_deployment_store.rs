@@ -23,21 +23,25 @@ pub struct DeploymentRow {
     /// What it declares it may reach: what a person approved when it was
     /// deployed.
     pub permissions: oxplow_domain::permissions::Permissions,
+    /// The command it was built with (`build.run`): what a person approved
+    /// when it was deployed. `None` when it has no build.
+    pub build_run: Option<String>,
 }
 
 /// Record a deployment (inactive). One already recorded keeps its row.
 pub fn record_tx(conn: &rusqlite::Connection, row: &DeploymentRow) -> Result<(), DomainError> {
     conn.execute(
         "INSERT OR IGNORE INTO extension_deployment
-           (name, hash, deployed_at, from_stream, source, active, permissions_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)",
+           (name, hash, deployed_at, from_stream, source, active, permissions_json, build_run)
+         VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?7)",
         params![
             row.name,
             row.hash,
             row.deployed_at,
             row.from_stream,
             row.source,
-            serde_json::to_string(&row.permissions).expect("permissions serialize")
+            serde_json::to_string(&row.permissions).expect("permissions serialize"),
+            row.build_run
         ],
     )
     .map_err(map_sql_err)?;
@@ -68,7 +72,8 @@ pub fn list_tx(
 ) -> Result<Vec<DeploymentRow>, DomainError> {
     let mut stmt = conn
         .prepare(
-            "SELECT name, hash, deployed_at, from_stream, source, active, permissions_json
+            "SELECT name, hash, deployed_at, from_stream, source, active, permissions_json,
+                    build_run
              FROM extension_deployment
              WHERE ?1 IS NULL OR name = ?1
              ORDER BY name, deployed_at DESC, hash",
@@ -84,6 +89,7 @@ pub fn list_tx(
                 source: r.get(4)?,
                 active: r.get::<_, i64>(5)? != 0,
                 permissions: serde_json::from_str(&r.get::<_, String>(6)?).unwrap_or_default(),
+                build_run: r.get(7)?,
             })
         })
         .map_err(map_sql_err)?
@@ -132,6 +138,7 @@ mod tests {
             source: format!("/src/{name}"),
             active: false,
             permissions: Default::default(),
+            build_run: None,
         }
     }
 
@@ -141,13 +148,33 @@ mod tests {
         db.transaction(|tx| {
             record_tx(tx, &row("a", "h1", "2026-10-18T10:00:00Z"))?;
             record_tx(tx, &row("a", "h2", "2026-10-18T11:00:00Z"))?;
-            record_tx(tx, &row("b", "h3", "2026-10-18T09:00:00Z"))?;
+            record_tx(
+                tx,
+                &DeploymentRow {
+                    build_run: Some("make".into()),
+                    ..row("b", "h3", "2026-10-18T09:00:00Z")
+                },
+            )?;
             // Recording one again keeps its first row.
             record_tx(tx, &row("a", "h1", "2026-10-18T12:00:00Z"))?;
             set_active_tx(tx, &[("a".into(), "h2".into()), ("b".into(), "h3".into())])
         })
         .await
         .unwrap();
+        let b = db.read(|c| list_tx(c, Some("b"))).await.unwrap();
+        assert_eq!(b[0].build_run.as_deref(), Some("make"));
+        let built: Option<String> = db
+            .read(|c| {
+                c.query_row(
+                    "SELECT build FROM v_extension_deployment WHERE name = 'b'",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(built.as_deref(), Some("make"));
         let a = db.read(|c| list_tx(c, Some("a"))).await.unwrap();
         assert_eq!(
             a.iter()

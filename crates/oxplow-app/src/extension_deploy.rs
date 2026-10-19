@@ -93,10 +93,9 @@ fn shipped_permissions(b: &crate::bundled_extensions::BundledExtension) -> Permi
         .unwrap_or_default()
 }
 
-/// What `name` may reach as it runs now: the approved set a deploy is
-/// compared with. Nothing running is the baseline.
-fn active_permissions(svc: &Services, name: &str) -> Permissions {
-    let running = svc.extension_catalog.active().and_then(|snapshot| {
+/// `name`'s deployment as it runs now, if one does.
+fn running(svc: &Services, name: &str) -> Option<crate::extensions::Extension> {
+    svc.extension_catalog.active().and_then(|snapshot| {
         snapshot
             .extensions()
             .iter()
@@ -108,22 +107,60 @@ fn active_permissions(svc: &Services, name: &str) -> Permissions {
                             | crate::extensions::Deployment::Shipped { .. }
                     )
             })
-            .map(|e| e.permissions.clone())
-    });
-    running
+            .cloned()
+    })
+}
+
+/// What `name` may reach as it runs now: the approved set a deploy is
+/// compared with. Nothing running is the baseline.
+fn active_permissions(svc: &Services, name: &str) -> Permissions {
+    running(svc, name)
+        .map(|e| e.permissions)
         .or_else(|| crate::bundled_extensions::find(name).map(shipped_permissions))
         .unwrap_or_default()
 }
 
-/// Going from what `name` runs now to `declared` may add permissions: a
-/// person confirms that first.
+/// The build command `name`'s running deployment was approved with.
+fn active_build(svc: &Services, name: &str) -> Option<String> {
+    running(svc, name).and_then(|e| e.build).map(|b| b.run)
+}
+
+/// What a deploy that runs a new or changed build command asks a person:
+/// the command runs with their authority (`.context/extensions.md`
+/// "Builds"). `shown` is the source folder as the person knows it.
+pub(crate) fn build_line(run: &str, shown: &str) -> String {
+    format!("build — runs `{run}` in {shown} with your authority, on every deploy")
+}
+
+/// What going from what `name` runs now to one declaring `declared` and
+/// built with `build` (from source `shown`) adds.
+fn approval_lines(
+    svc: &Services,
+    name: &str,
+    declared: &Permissions,
+    build: Option<&str>,
+    shown: &str,
+) -> Vec<String> {
+    let mut adds = declared.added_over(&active_permissions(svc, name));
+    if let Some(run) = build {
+        if active_build(svc, name).as_deref() != Some(run) {
+            adds.push(build_line(run, shown));
+        }
+    }
+    adds
+}
+
+/// Going from what `name` runs now to `declared` and `build` may add
+/// permissions or a build command: a person confirms that first.
 fn approved(
     svc: &Services,
     name: &str,
     declared: &Permissions,
+    build: Option<&str>,
+    shown: &str,
     confirmed: bool,
 ) -> Result<(), DeployError> {
-    let adds = declared.added_over(&active_permissions(svc, name));
+    let adds = approval_lines(svc, name, declared, build, shown);
     if adds.is_empty() || confirmed {
         Ok(())
     } else {
@@ -307,7 +344,14 @@ pub async fn deploy(
             ))
             .into());
         }
-        approved(svc, name, &loaded.permissions, confirmed)?;
+        approved(
+            svc,
+            name,
+            &loaded.permissions,
+            loaded.build.as_ref().map(|b| b.run.as_str()),
+            &crate::extensions::shown(&project, &source),
+            confirmed,
+        )?;
     }
     let enabled_now = turn_on(svc, name)?;
     if live_now {
@@ -319,6 +363,26 @@ pub async fn deploy(
         });
     }
     if target.is_some() {
+        let built_before = extension_store::deployment_dir(&project, name, &hash).is_dir();
+        if let (Some(build), false) = (&loaded.build, built_before) {
+            let (dir, run, env) = (source.clone(), build.run.clone(), svc.providers.host_env());
+            let ran = tokio::task::spawn_blocking(move || {
+                crate::extension_build::run(&dir, &run, &env, crate::extension_build::TIMEOUT)
+            })
+            .await
+            .map_err(storage)?;
+            let ran = ran.and_then(|()| {
+                if source.join(&build.output).is_dir() {
+                    Ok(())
+                } else {
+                    Err(format!("`{}` didn't write `{}`", build.run, build.output))
+                }
+            });
+            if let Err(e) = ran {
+                undo_turn_on(svc, name, enabled_now);
+                return Err(invalid(format!("building `{name}`: {e}")).into());
+            }
+        }
         let copied = {
             let (project, source, name, hash) = (
                 project.clone(),
@@ -332,9 +396,30 @@ pub async fn deploy(
             .await
             .map_err(storage)?
         };
-        if let Err(e) = copied {
-            undo_turn_on(svc, name, enabled_now);
-            return Err(storage(format!("deploy `{name}`: {e}")).into());
+        let deployed_dir = match copied {
+            Ok(dir) => dir,
+            Err(e) => {
+                undo_turn_on(svc, name, enabled_now);
+                return Err(storage(format!("deploy `{name}`: {e}")).into());
+            }
+        };
+        if loaded.build.is_some() && !built_before {
+            // What the build wrote is checked where it runs from.
+            let (dir, owned) = (deployed_dir.clone(), name.to_string());
+            let built = tokio::task::spawn_blocking(move || {
+                crate::extensions::load_extension_at(&dir, &owned)
+            })
+            .await
+            .map_err(storage)?;
+            if !built.errors.is_empty() {
+                extension_store::remove(&project, name, std::slice::from_ref(&hash));
+                undo_turn_on(svc, name, enabled_now);
+                return Err(invalid(format!(
+                    "extension `{name}` doesn't load once built:\n{}",
+                    built.errors.join("\n")
+                ))
+                .into());
+            }
         }
         let row = DeploymentRow {
             name: name.to_string(),
@@ -344,6 +429,7 @@ pub async fn deploy(
             source: source.to_string_lossy().into_owned(),
             active: false,
             permissions: loaded.permissions.clone(),
+            build_run: loaded.build.as_ref().map(|b| b.run.clone()),
         };
         svc.db
             .transaction(move |tx| store_rows::record_tx(tx, &row))
@@ -444,17 +530,28 @@ pub async fn rollback(
             warnings: Vec::new(),
         });
     }
+    let target_row = hash
+        .as_ref()
+        .and_then(|hash| rows.iter().find(|r| &r.hash == hash));
     let target_permissions = match &hash {
-        Some(hash) => rows
-            .iter()
-            .find(|r| &r.hash == hash)
+        Some(_) => target_row
             .map(|r| r.permissions.clone())
             .unwrap_or_default(),
         None => crate::bundled_extensions::find(name)
             .map(shipped_permissions)
             .unwrap_or_default(),
     };
-    approved(svc, name, &target_permissions, confirmed)?;
+    let shown_source = target_row
+        .map(|r| crate::extensions::shown(&svc.layout.project_dir, Path::new(&r.source)))
+        .unwrap_or_default();
+    approved(
+        svc,
+        name,
+        &target_permissions,
+        target_row.and_then(|r| r.build_run.as_deref()),
+        &shown_source,
+        confirmed,
+    )?;
     activate(svc, &LiveChanges::from([(name.to_string(), hash)])).await?;
     Ok(Deployed {
         name: name.to_string(),
@@ -633,14 +730,20 @@ fn write_team(svc: &Services, team: &[String]) -> Result<(), DomainError> {
 
 /// The lines of `.oxplow/.gitignore` that let git see `name`'s source:
 /// the folder above it un-ignored but not its other entries, then its own
-/// folder and, since `*` matches a file at any depth, everything in it.
-fn share_lines(name: &str) -> [String; 4] {
-    [
+/// folder and, since `*` matches a file at any depth, everything in it —
+/// but a build's output and excluded folders (`inputs`), which aren't
+/// source.
+fn share_lines(name: &str, inputs: &extension_store::Inputs) -> Vec<String> {
+    let mut lines = vec![
         "!extensions/".to_string(),
         "extensions/*".to_string(),
         format!("!extensions/{name}/"),
         format!("!extensions/{name}/**"),
-    ]
+    ];
+    for dir in inputs.output.iter().chain(&inputs.exclude) {
+        lines.push(format!("extensions/{name}/{}/", dir.trim_end_matches('/')));
+    }
+    lines
 }
 
 /// Commit `name` for the team: let git see its source (`.oxplow/.gitignore`)
@@ -661,7 +764,7 @@ pub fn share(svc: &Services, name: &str) -> Result<(), DomainError> {
     let ignore = project.join(".oxplow/.gitignore");
     let text = std::fs::read_to_string(&ignore).unwrap_or_default();
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
-    for line in share_lines(name) {
+    for line in share_lines(name, &extension_store::Inputs::of(&source)) {
         if !lines.contains(&line) {
             lines.push(line);
         }
@@ -682,11 +785,16 @@ pub fn unshare(svc: &Services, name: &str) -> Result<(), DomainError> {
     valid(name)?;
     let project = &svc.layout.project_dir;
     let ignore = project.join(".oxplow/.gitignore");
-    let [_, _, folder, files] = share_lines(name);
+    // Every line naming its folder, whatever its manifest says now.
+    let (folder, files, inside) = (
+        format!("!extensions/{name}/"),
+        format!("!extensions/{name}/**"),
+        format!("extensions/{name}/"),
+    );
     let text = std::fs::read_to_string(&ignore).unwrap_or_default();
     let lines: Vec<&str> = text
         .lines()
-        .filter(|l| *l != folder && *l != files)
+        .filter(|l| *l != folder && *l != files && !l.starts_with(&inside))
         .collect();
     std::fs::write(&ignore, lines.join("\n") + "\n").map_err(storage)?;
     let mut settings = oxplow_config::extension_settings(project);
@@ -746,6 +854,7 @@ async fn stage(
         source: source.to_string_lossy().into_owned(),
         active: false,
         permissions,
+        build_run: None,
     };
     svc.db
         .transaction(move |tx| store_rows::record_tx(tx, &row))
@@ -789,11 +898,13 @@ pub(crate) async fn start(svc: &Arc<Services>) -> Result<LiveChanges, DomainErro
         // One that would add permissions waits for a person to deploy it
         // (its listing says what for); a bundled one's baseline is what
         // ships.
-        let declared = crate::extensions::load_extension_at(&source, &name).permissions;
+        // One with a build waits too: nothing has approved its command.
+        let loaded = crate::extensions::load_extension_at(&source, &name);
+        let declared = loaded.permissions;
         let baseline = crate::bundled_extensions::find(&name)
             .map(shipped_permissions)
             .unwrap_or_default();
-        if !declared.added_over(&baseline).is_empty() {
+        if !declared.added_over(&baseline).is_empty() || loaded.build.is_some() {
             continue;
         }
         match stage(svc, &name, &source, None, declared).await {
@@ -1040,6 +1151,194 @@ mod tests {
         );
         assert!(!oxplow_config::extension_settings(&root).is_enabled("acme"));
         remove(svc, "tracker").await.unwrap();
+    }
+
+    /// `acme`'s source with a `build:` of `run` writing `dist/`, a
+    /// component bundled at `dist/widget`, and an excluded `node_modules`.
+    fn source_built(svc: &Services, title: &str, run: &str) -> PathBuf {
+        let dir = source(svc, title);
+        write(
+            &dir,
+            "extension.yaml",
+            &format!(
+                "manifest: 2\nname: acme\nbuild: {{ run: {run:?}, output: dist, exclude: [node_modules] }}\n\
+                 custom_components:\n  - {{ id: widget, bundle: dist/widget }}\nintent:\n  purpose: test\n"
+            ),
+        );
+        write(&dir, "src/widget.html", "<!doctype html>");
+        write(&dir, "node_modules/x.txt", "dep");
+        dir
+    }
+
+    const BUILD: &str = "mkdir -p dist/widget && cp src/widget.html dist/widget/index.html";
+
+    fn build_line(run: &str) -> String {
+        format!(
+            "build — runs `{run}` in .oxplow/extensions/acme with your authority, on every deploy"
+        )
+    }
+
+    /// A deploy runs the build, and the deployment holds its output but
+    /// not the excluded folders. What the build wrote isn't the hash: an
+    /// edit there redeploys nothing, a changed command does.
+    #[tokio::test]
+    async fn a_build_runs_on_deploy_and_its_output_is_in_the_deployment_but_not_its_hash() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        let dir = source_built(svc, "One", BUILD);
+        let first = deploy(svc, "acme", &root, None, true).await.unwrap();
+        let deployed = extension_store::deployment_dir(&root, "acme", &first.hash);
+        assert!(deployed.join("dist/widget/index.html").is_file());
+        assert!(deployed.join("src/widget.html").is_file());
+        assert!(!deployed.join("node_modules").exists());
+        assert_eq!(lens_title(svc).as_deref(), Some("One"));
+        let recorded = svc
+            .db
+            .read(|c| store_rows::list_tx(c, Some("acme")))
+            .await
+            .unwrap();
+        assert_eq!(recorded[0].build_run.as_deref(), Some(BUILD));
+
+        write(&dir, "dist/widget/index.html", "edited by hand");
+        assert!(
+            deploy(svc, "acme", &root, None, true)
+                .await
+                .unwrap()
+                .already
+        );
+        source_built(svc, "One", &format!("{BUILD} && true"));
+        let second = deploy(svc, "acme", &root, None, true).await.unwrap();
+        assert!(!second.already);
+        assert_ne!(first.hash, second.hash);
+    }
+
+    /// A build runs with the person's authority: a new or changed command
+    /// asks first, as a permission does; the same one asks nothing, and
+    /// rolling back to another command asks again.
+    #[tokio::test]
+    async fn a_new_or_changed_build_command_asks_first() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        source_built(svc, "One", BUILD);
+        assert_eq!(
+            asked(deploy(svc, "acme", &root, None, false).await),
+            vec![build_line(BUILD)]
+        );
+        assert!(rows(svc).await.is_empty());
+        assert!(!root.join(".oxplow/extensions/acme/dist").exists());
+        deploy(svc, "acme", &root, None, true).await.unwrap();
+        source_built(svc, "Two", BUILD);
+        deploy(svc, "acme", &root, None, false).await.unwrap();
+        assert_eq!(lens_title(svc).as_deref(), Some("Two"));
+        let changed = format!("{BUILD} && true");
+        source_built(svc, "Three", &changed);
+        assert_eq!(
+            asked(deploy(svc, "acme", &root, None, false).await),
+            vec![build_line(&changed)]
+        );
+        deploy(svc, "acme", &root, None, true).await.unwrap();
+        assert_eq!(
+            asked(rollback(svc, "acme", None, false).await),
+            vec![build_line(BUILD)]
+        );
+        rollback(svc, "acme", None, true).await.unwrap();
+        assert_eq!(lens_title(svc).as_deref(), Some("Two"));
+    }
+
+    /// A build that fails deploys nothing: not turned on, no row, nothing
+    /// in the store, and the error says why.
+    #[tokio::test]
+    async fn a_failing_build_changes_nothing() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        source_built(svc, "One", "echo broken >&2; exit 3");
+        let e = deploy(svc, "acme", &root, None, true)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("building `acme`") && e.contains("exited 3") && e.contains("broken"),
+            "{e}"
+        );
+        assert!(rows(svc).await.is_empty());
+        assert!(!oxplow_config::extension_settings(&root).is_enabled("acme"));
+        assert!(!root.join(extension_store::STORE_DIR).join("acme").exists());
+    }
+
+    /// The deployment is loaded once built: a build that doesn't write the
+    /// bundle the manifest declares is refused and leaves nothing behind.
+    #[tokio::test]
+    async fn a_build_that_doesnt_write_what_it_declares_is_refused() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        source_built(
+            svc,
+            "One",
+            "mkdir -p dist/elsewhere && touch dist/elsewhere/a",
+        );
+        let e = deploy(svc, "acme", &root, None, true)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("extension `acme` doesn't load once built"),
+            "{e}"
+        );
+        assert!(rows(svc).await.is_empty());
+        assert!(!oxplow_config::extension_settings(&root).is_enabled("acme"));
+        let store = root.join(extension_store::STORE_DIR).join("acme");
+        assert!(!store.exists() || std::fs::read_dir(&store).unwrap().next().is_none());
+    }
+
+    /// Sharing a built extension leaves its output and excluded folders
+    /// out of git, and unsharing takes those lines back out too.
+    #[tokio::test]
+    async fn sharing_ignores_the_build_output() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        source_built(svc, "One", BUILD);
+        deploy(svc, "acme", &root, None, true).await.unwrap();
+        let ignored = |rel: &str| {
+            std::process::Command::new("git")
+                .args(["check-ignore", "-q", rel])
+                .current_dir(&root)
+                .status()
+                .unwrap()
+                .success()
+        };
+        share(svc, "acme").unwrap();
+        assert!(!ignored(".oxplow/extensions/acme/extension.yaml"));
+        assert!(!ignored(".oxplow/extensions/acme/src/widget.html"));
+        assert!(ignored(".oxplow/extensions/acme/dist/widget/index.html"));
+        assert!(ignored(".oxplow/extensions/acme/node_modules/x.txt"));
+        unshare(svc, "acme").unwrap();
+        let text = std::fs::read_to_string(root.join(".oxplow/.gitignore")).unwrap();
+        assert!(!text.contains("extensions/acme/"), "{text}");
+    }
+
+    /// At startup a built extension with no deployment here waits for a
+    /// person, its listing naming the build it would run.
+    #[tokio::test]
+    async fn startup_leaves_a_built_extension_undeployed_with_the_build_line_pending() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        source_built(svc, "One", BUILD);
+        write(&root, ".oxplow/personal.yaml", "enableExtensions: [acme]\n");
+        svc.reload_config_from_disk().unwrap();
+        svc.extension_activation
+            .initialize(svc.clone())
+            .await
+            .unwrap();
+        let acme = acme(svc).unwrap();
+        assert_eq!(acme.deployment, Deployment::Undeployed);
+        assert_eq!(acme.pending, vec![build_line(BUILD)]);
+        assert!(!root.join(".oxplow/extensions/acme/dist").exists());
     }
 
     /// At startup an extension that is on but undeployed deploys by itself
@@ -1450,6 +1749,7 @@ mod tests {
             source: "extensions/oxplow-foundation".into(),
             active: false,
             permissions: Permissions::default(),
+            build_run: None,
         };
         svc.db
             .transaction(move |tx| {

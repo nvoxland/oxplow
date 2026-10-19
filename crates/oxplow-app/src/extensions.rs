@@ -1699,10 +1699,14 @@ pub struct Extension {
     /// The other extensions it needs on (`requires:`).
     #[serde(default)]
     pub requires: Vec<String>,
+    /// What a deploy builds before it copies (`build:`).
+    #[serde(default)]
+    pub build: Option<manifest_v2::Build>,
     /// What it waits on a person for when it is on but undeployed: the
     /// permissions its source would add, one line each
-    /// ([`Permissions::added_over`]); startup deploys only one that asks
-    /// for nothing.
+    /// ([`Permissions::added_over`]), and its build command when it has one
+    /// (`extension_deploy::build_line`); startup deploys only one that
+    /// asks for nothing.
     #[serde(default)]
     pub pending: Vec<String>,
     /// It is the team's: the project's own list names it
@@ -1945,10 +1949,17 @@ pub fn load_deployed(
             }
             let source = settings.source(project, name);
             if source.is_dir() {
-                let declared = load_extension_at(&source, name).permissions;
+                let loaded = load_extension_at(&source, name);
+                let mut pending = loaded.permissions.added_over(&Permissions::default());
+                if let Some(build) = &loaded.build {
+                    pending.push(crate::extension_deploy::build_line(
+                        &build.run,
+                        &shown(project, &source),
+                    ));
+                }
                 Some(Extension {
-                    pending: declared.added_over(&Permissions::default()),
-                    permissions: declared,
+                    pending,
+                    permissions: loaded.permissions,
                     ..listed_only(name, &shown(project, &source), Deployment::Undeployed)
                 })
             } else if settings.is_enabled(name) {
@@ -1967,6 +1978,13 @@ pub fn load_deployed(
     }
     out.sort_by(|a, b| a.name.cmp(&b.name).then(a.origin.cmp(&b.origin)));
     resolve_catalog(out, settings)
+}
+
+/// `rel` is `dir` or inside it, by `/` segments.
+fn under(dir: &str, rel: &str) -> bool {
+    let dir: Vec<&str> = dir.trim_end_matches('/').split('/').collect();
+    let rel: Vec<&str> = rel.trim_end_matches('/').split('/').collect();
+    rel.starts_with(&dir)
 }
 
 /// Extensions whose `requires` lead back to themselves could never be
@@ -2737,6 +2755,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         deployment: Deployment::Source,
         permissions: Permissions::default(),
         requires: Vec::new(),
+        build: None,
         pending: Vec::new(),
         shared: false,
     }
@@ -2819,6 +2838,9 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             None => ext.requires.push(required.clone()),
         }
     }
+    let (build, errors) = manifest_v2::build_of(&m, &file, &manifest);
+    ext.build = build;
+    ext.errors.extend(errors);
     ext.intent = manifest_v2::intent_of(&m, &file, &manifest).0;
     ext.description = m.description.clone();
     ext.configuration = manifest_v2::configuration_of(&m, &file, &manifest).0;
@@ -3071,7 +3093,20 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         if let Some(v) = &m.custom_components {
             let (components, errors) =
                 custom_components::parse_custom_components(name, v, &file, &manifest, &|rel| {
-                    files.bundle_stat(rel)
+                    match (files.bundle_stat(rel), &ext.build) {
+                        // Not built yet (no output at all): the deployment's
+                        // load checks it.
+                        (custom_components::BundleLook::Absent, Some(build))
+                            if under(&build.output, rel)
+                                && matches!(
+                                    files.bundle_stat(&build.output),
+                                    custom_components::BundleLook::Absent
+                                ) =>
+                        {
+                            custom_components::BundleLook::Unknown
+                        }
+                        (look, _) => look,
+                    }
                 });
             ext.custom_components = components;
             ext.errors.extend(errors);
@@ -5521,6 +5556,68 @@ mod tests {
             selfish.contains("extension.yaml:5:") && selfish.contains("itself"),
             "{selfish}"
         );
+    }
+
+    /// A `build:` needs a command, and its output and excluded folders are
+    /// relative folders inside the extension that leave its manifest alone.
+    #[test]
+    fn a_build_block_is_checked_for_shape() {
+        let d = tempfile::tempdir().unwrap();
+        let exts = load_named(
+            d.path(),
+            &[
+                (
+                    "good",
+                    "build: { run: make, output: dist, exclude: [node_modules] }\n",
+                ),
+                ("norun", "build: { run: \"\", output: dist }\n"),
+                ("escape", "build: { run: make, output: ../dist }\n"),
+                ("dot", "build: { run: make, output: . }\n"),
+                (
+                    "same",
+                    "build: { run: make, output: dist, exclude: [dist] }\n",
+                ),
+                ("unknown", "build: { run: make, output: dist, bogus: 1 }\n"),
+            ],
+        );
+        assert_eq!(errors_of(&exts, "good"), "");
+        let good = exts.iter().find(|e| e.name == "good").unwrap();
+        assert_eq!(good.build.as_ref().map(|b| b.run.as_str()), Some("make"));
+        for (name, says) in [
+            ("norun", "build: `run` is empty"),
+            (
+                "escape",
+                "build: `../dist` isn't a folder inside the extension",
+            ),
+            ("dot", "build: `.` isn't a folder inside the extension"),
+            (
+                "same",
+                "build: `dist` is the output; it can't be excluded too",
+            ),
+            ("unknown", "bogus"),
+        ] {
+            let errors = errors_of(&exts, name);
+            assert!(
+                errors.contains("extension.yaml:5:") && errors.contains(says),
+                "{name}: {errors}"
+            );
+        }
+    }
+
+    /// A component bundle under the build's output isn't there until it is
+    /// built: the source loads with it taken as declared.
+    #[test]
+    fn a_bundle_under_the_build_output_loads_as_declared_before_it_is_built() {
+        let d = tempfile::tempdir().unwrap();
+        let exts = load_named(
+            d.path(),
+            &[
+                ("built", "build: { run: make, output: dist }\ncustom_components:\n  - { id: w, bundle: dist/w }\n"),
+                ("unbuilt", "custom_components:\n  - { id: w, bundle: dist/w }\n"),
+            ],
+        );
+        assert_eq!(errors_of(&exts, "built"), "");
+        assert!(!errors_of(&exts, "unbuilt").is_empty());
     }
 
     /// Two extensions that require each other could never be turned on:

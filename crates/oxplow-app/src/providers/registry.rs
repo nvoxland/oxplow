@@ -1509,6 +1509,12 @@ fn listed_or_none(ids: &[&str]) -> String {
 }
 
 impl ProviderRegistry {
+    /// The person's environment programs start with: a provider's, a
+    /// build's.
+    pub fn host_env(&self) -> super::host::HostEnv {
+        self.deps.host_env.clone()
+    }
+
     /// A registry over `hosts`, one for each capability a provider may
     /// implement.
     pub fn new(

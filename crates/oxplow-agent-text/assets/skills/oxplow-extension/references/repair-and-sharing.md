@@ -35,6 +35,15 @@ in `v_contribution_health` (`extension`, `contribution`, `kind`, `state` = `ok` 
   returns once it runs. If the extension does not prepare, the deploy fails
   with the problems and the old deployment keeps running.
   `oxplow.extension.rollback { name, to? }` makes an earlier deployment live.
+- **Needs a tool to build** (TypeScript, a bundler): declare
+  `build: { run: <command>, output: dist, exclude: [node_modules] }`.
+  The deploy runs `run` in the source folder, then deploys the inputs plus
+  `output`; editing `output` by hand changes nothing. A new or changed
+  `run` is approved by the person like a permission, so your deploy then
+  becomes a proposal. Point a component's `bundle:` into `output`
+  (`dist/<id>`); validate accepts it before the first build.
+- **Needs another extension on** without importing from it: `requires:
+  [<name>]`. Deploying refuses while it is off.
 - **Team:** a new extension's source is personal. `.oxplow/.gitignore` keeps
   it out of git. `oxplow.extension.share { name }` un-ignores it and moves
   the name to the team list in `.oxplow/project.yaml`; the person then

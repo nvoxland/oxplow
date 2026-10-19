@@ -118,6 +118,17 @@
         "type": "string"
       }
     },
+    "build": {
+      "description": "A command a deploy runs in the source folder before it copies\n(`.context/extensions.md` \"Builds\"). Read raw so a broken block is\nits own error at its line.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Build"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "permissions": {
       "description": "What it may reach beyond the baseline (`.context/extensions.md`\n\"Permissions\"): checked against what it contains when it loads,\napproved when it is deployed.",
       "allOf": [
@@ -511,6 +522,32 @@
         "from",
         "to",
         "entry"
+      ]
+    },
+    "Build": {
+      "description": "What a deploy builds before it copies: `run` in the source folder, as\nthe person, then `output` is copied into the deployment. The hash is of\nthe inputs — every file but `output` and the `exclude` folders — and\n`run` itself, so a build's output never changes what is deployed.",
+      "type": "object",
+      "properties": {
+        "run": {
+          "description": "The command, run with `/bin/sh -c` in the source folder with the\nperson's environment. A new or changed one is approved at deploy.",
+          "type": "string"
+        },
+        "output": {
+          "description": "The folder it writes (`dist`), relative to the extension: copied\ninto the deployment, never hashed.",
+          "type": "string"
+        },
+        "exclude": {
+          "description": "Folders neither hashed nor deployed (`node_modules`).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "run",
+        "output"
       ]
     },
     "Permissions": {

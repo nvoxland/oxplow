@@ -100,7 +100,7 @@ pub async fn test_extension_in(
     bless: bool,
     env: host::HostEnv,
 ) -> Result<TestReport, SdkError> {
-    let host = Host::start(root, name, env.clone())
+    let host = Host::start(root, name, env.clone(), true)
         .await
         .map_err(SdkError::Invalid)?;
     host.start_runtime().map_err(SdkError::Invalid)?;

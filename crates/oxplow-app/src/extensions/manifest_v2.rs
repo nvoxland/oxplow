@@ -175,6 +175,12 @@ pub struct ManifestV2 {
     /// and turning one off refuses while this is on.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub requires: Vec<String>,
+    /// A command a deploy runs in the source folder before it copies
+    /// (`.context/extensions.md` "Builds"). Read raw so a broken block is
+    /// its own error at its line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<Build>")]
+    pub build: Option<Value>,
     /// What it may reach beyond the baseline (`.context/extensions.md`
     /// "Permissions"): checked against what it contains when it loads,
     /// approved when it is deployed.
@@ -464,6 +470,69 @@ where
     D: serde::Deserializer<'de>,
 {
     Value::deserialize(deserializer).map(Some)
+}
+
+/// What a deploy builds before it copies: `run` in the source folder, as
+/// the person, then `output` is copied into the deployment. The hash is of
+/// the inputs — every file but `output` and the `exclude` folders — and
+/// `run` itself, so a build's output never changes what is deployed.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct Build {
+    /// The command, run with `/bin/sh -c` in the source folder with the
+    /// person's environment. A new or changed one is approved at deploy.
+    pub run: String,
+    /// The folder it writes (`dist`), relative to the extension: copied
+    /// into the deployment, never hashed.
+    pub output: String,
+    /// Folders neither hashed nor deployed (`node_modules`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude: Vec<String>,
+}
+
+/// The manifest's `build:`, checked: errors at its line.
+pub fn build_of(m: &ManifestV2, file: &str, text: &str) -> (Option<Build>, Vec<String>) {
+    let Some(raw) = &m.build else {
+        return (None, Vec::new());
+    };
+    let line = key_line(text, "build");
+    let build = match serde_yaml::from_value::<Build>(raw.clone()) {
+        Ok(build) => build,
+        Err(e) => return (None, vec![at(file, line, format!("build: {e}"))]),
+    };
+    let mut errors = Vec::new();
+    if build.run.trim().is_empty() {
+        errors.push(at(file, line, "build: `run` is empty"));
+    }
+    for dir in std::iter::once(&build.output).chain(&build.exclude) {
+        let inside = oxplow_domain::service::valid_path(dir)
+            && !dir.split('/').any(|part| part == "extension.yaml");
+        if !inside {
+            errors.push(at(
+                file,
+                line,
+                format!("build: `{dir}` isn't a folder inside the extension"),
+            ));
+        }
+    }
+    let trim = |d: &str| d.trim_end_matches('/').to_string();
+    if build.exclude.iter().any(|d| trim(d) == trim(&build.output)) {
+        errors.push(at(
+            file,
+            line,
+            format!(
+                "build: `{}` is the output; it can't be excluded too",
+                build.output
+            ),
+        ));
+    }
+    if errors.is_empty() {
+        (Some(build), errors)
+    } else {
+        (None, errors)
+    }
 }
 
 /// Parse and validate settings without echoing raw YAML/JSON in errors.
