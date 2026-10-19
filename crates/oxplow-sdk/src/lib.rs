@@ -1226,7 +1226,10 @@ pub fn import_lines(ext: &Extension) -> Vec<String> {
                     why.describe(b.contribution.producer_label())
                 ),
             };
-            format!("`{}` → {} v{}: {state}", b.id, b.contribution, b.version)
+            let version = b
+                .version
+                .map_or("at any version".to_string(), |v| format!("v{v}"));
+            format!("`{}` → {} {version}: {state}", b.id, b.contribution)
         })
         .collect()
 }

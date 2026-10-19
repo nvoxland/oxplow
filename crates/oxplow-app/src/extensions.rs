@@ -1696,6 +1696,9 @@ pub struct Extension {
     /// (`permissions:`).
     #[serde(default)]
     pub permissions: Permissions,
+    /// The other extensions it needs on (`requires:`).
+    #[serde(default)]
+    pub requires: Vec<String>,
     /// What it waits on a person for when it is on but undeployed: the
     /// permissions its source would add, one line each
     /// ([`Permissions::added_over`]); startup deploys only one that asks
@@ -1966,6 +1969,39 @@ pub fn load_deployed(
     resolve_catalog(out, settings)
 }
 
+/// Extensions whose `requires` lead back to themselves could never be
+/// turned on: each member of the cycle is an error naming the next.
+fn refuse_requires_cycles(out: &mut [Extension]) {
+    let requires: BTreeMap<String, Vec<String>> = out
+        .iter()
+        .map(|e| (e.name.clone(), e.requires.clone()))
+        .collect();
+    for ext in out.iter_mut() {
+        for next in &ext.requires {
+            // Walk on from `next`; reaching `ext` again is a cycle.
+            let mut seen = vec![next.as_str()];
+            let mut i = 0;
+            let mut back = false;
+            while i < seen.len() {
+                for r in requires.get(seen[i]).into_iter().flatten() {
+                    if *r == ext.name {
+                        back = true;
+                    } else if !seen.contains(&r.as_str()) {
+                        seen.push(r.as_str());
+                    }
+                }
+                i += 1;
+            }
+            if back {
+                ext.errors.push(format!(
+                    "{}/extension.yaml: it requires `{next}`, which requires it back",
+                    ext.path
+                ));
+            }
+        }
+    }
+}
+
 /// Whether the settings leave `name` off. A required extension is never off.
 pub(crate) fn is_off(settings: &oxplow_config::ExtensionSettings, name: &str) -> bool {
     !crate::bundled_extensions::is_required(name) && !settings.is_enabled(name)
@@ -2005,6 +2041,7 @@ pub(super) fn resolve_catalog(
                     .any(|lens| lens.slug == descriptor.id.local)
         });
     }
+    refuse_requires_cycles(&mut out);
     let mut out: Vec<Extension> = out
         .into_iter()
         .map(|mut e| {
@@ -2699,6 +2736,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         public_contracts: Default::default(),
         deployment: Deployment::Source,
         permissions: Permissions::default(),
+        requires: Vec::new(),
         pending: Vec::new(),
         shared: false,
     }
@@ -2762,6 +2800,23 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             Err(e) => ext
                 .errors
                 .push(at(&file, key_line(&manifest, "namespace"), e)),
+        }
+    }
+    for required in &m.requires {
+        let problem = if required == name {
+            Some("an extension can't require itself".to_string())
+        } else if !oxplow_domain::contribution::valid_extension_name(required) {
+            Some(format!("`{required}` isn't an extension name"))
+        } else {
+            None
+        };
+        match problem {
+            Some(p) => ext.errors.push(at(
+                &file,
+                key_line(&manifest, "requires"),
+                format!("requires: {p}"),
+            )),
+            None => ext.requires.push(required.clone()),
         }
     }
     ext.intent = manifest_v2::intent_of(&m, &file, &manifest).0;
@@ -5417,6 +5472,75 @@ mod tests {
             .into_iter()
             .filter(|e| e.contains("permissions."))
             .collect()
+    }
+
+    fn load_named(root: &Path, exts: &[(&str, &str)]) -> Vec<Extension> {
+        for (name, body) in exts {
+            let dir = root.join(".oxplow/extensions").join(name);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("extension.yaml"),
+                format!("manifest: 2\nname: {name}\nintent:\n  purpose: p\n{body}"),
+            )
+            .unwrap();
+        }
+        load_extensions(root)
+    }
+
+    fn errors_of(exts: &[Extension], name: &str) -> String {
+        exts.iter()
+            .find(|e| e.name == name)
+            .unwrap()
+            .errors
+            .join("\n")
+    }
+
+    /// `requires` names other extensions: a bad name or the extension's
+    /// own is an error at its line.
+    #[test]
+    fn a_requires_entry_must_name_another_valid_extension() {
+        let d = tempfile::tempdir().unwrap();
+        let exts = load_named(
+            d.path(),
+            &[
+                ("good", "requires: [other]\n"),
+                ("bad", "requires: [Not_A_Name]\n"),
+                ("selfish", "requires: [selfish]\n"),
+            ],
+        );
+        assert_eq!(errors_of(&exts, "good"), "");
+        let good = exts.iter().find(|e| e.name == "good").unwrap();
+        assert_eq!(good.requires, vec!["other".to_string()]);
+        let bad = errors_of(&exts, "bad");
+        assert!(
+            bad.contains("extension.yaml:5:") && bad.contains("`Not_A_Name`"),
+            "{bad}"
+        );
+        let selfish = errors_of(&exts, "selfish");
+        assert!(
+            selfish.contains("extension.yaml:5:") && selfish.contains("itself"),
+            "{selfish}"
+        );
+    }
+
+    /// Two extensions that require each other could never be turned on:
+    /// each is an error naming the other.
+    #[test]
+    fn a_requires_cycle_is_an_error_on_each_member() {
+        let d = tempfile::tempdir().unwrap();
+        let exts = load_named(
+            d.path(),
+            &[
+                ("a", "requires: [b]\n"),
+                ("b", "requires: [a]\n"),
+                ("c", "requires: [a]\n"),
+            ],
+        );
+        let a = errors_of(&exts, "a");
+        assert!(a.contains("it requires `b`, which requires it back"), "{a}");
+        let b = errors_of(&exts, "b");
+        assert!(b.contains("it requires `a`, which requires it back"), "{b}");
+        assert_eq!(errors_of(&exts, "c"), "");
     }
 
     /// A provider runs a program with the person's authority and reaches

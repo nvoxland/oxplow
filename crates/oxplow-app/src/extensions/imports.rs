@@ -36,7 +36,8 @@ pub struct Export {
 pub struct Import {
     pub binding: String,
     pub target: ContributionId,
-    pub version: u32,
+    /// Absent, whatever the producer exports binds.
+    pub version: Option<u32>,
     pub optional: bool,
     pub source: DeclaredAt,
 }
@@ -66,7 +67,9 @@ pub struct ResolvedImport {
     pub consumer: String,
     pub binding: String,
     pub target: ContributionId,
-    pub version: u32,
+    /// The version bound: the producer's export when available, else the
+    /// one asked for.
+    pub version: Option<u32>,
     pub status: ImportStatus,
 }
 
@@ -474,7 +477,7 @@ pub fn validate_with_blocked(
                 );
                 invalid = true;
             }
-            if import.version == 0 {
+            if import.version == Some(0) {
                 diagnostic(
                     &mut resolution,
                     candidate,
@@ -552,7 +555,7 @@ pub fn validate_with_blocked(
                     severity,
                     code,
                     format!(
-                        "{} import `{}` for `{}` v{} is unavailable: {}",
+                        "{} import `{}` for `{}` {} is unavailable: {}",
                         if import.optional && !invalid_contract {
                             "optional"
                         } else {
@@ -560,7 +563,9 @@ pub fn validate_with_blocked(
                         },
                         import.binding,
                         import.target,
-                        import.version,
+                        import
+                            .version
+                            .map_or("at any version".to_string(), |v| format!("v{v}")),
                         reason.describe(import.target.producer_label())
                     ),
                 );
@@ -568,11 +573,18 @@ pub fn validate_with_blocked(
                     blocked_indices.insert(candidate_index);
                 }
             }
+            let bound = match status {
+                ImportStatus::Available => export_positions
+                    .get(&import.target)
+                    .and_then(|e| e.first())
+                    .map(|&(owner, index)| catalog[owner].exports[index].version),
+                _ => import.version,
+            };
             resolution.imports.push(ResolvedImport {
                 consumer: candidate.name.clone(),
                 binding: import.binding.clone(),
                 target: import.target.clone(),
-                version: import.version,
+                version: bound,
                 status: status.clone(),
             });
             if let Some(producer) = producer {
@@ -748,7 +760,7 @@ fn resolve_import(
         }
         ExportVisibility::Experimental | ExportVisibility::Stable => {}
     }
-    if export.version != import.version {
+    if import.version.is_some_and(|v| v != export.version) {
         return (
             unavailable(UnavailableReason::Incompatible {
                 actual: export.version,

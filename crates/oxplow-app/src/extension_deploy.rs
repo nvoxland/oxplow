@@ -134,6 +134,59 @@ fn approved(
     }
 }
 
+/// `name` as the active generation knows it, on or off.
+fn active_entry(svc: &Services, name: &str) -> Option<crate::extensions::Extension> {
+    svc.extension_catalog.active().and_then(|snapshot| {
+        snapshot
+            .extensions()
+            .iter()
+            .find(|e| e.name == name)
+            .cloned()
+    })
+}
+
+/// Each extension `name` requires is on (`.context/extensions.md`
+/// "Requires").
+fn requirements_met(
+    settings: &ExtensionSettings,
+    name: &str,
+    requires: &[String],
+) -> Result<(), DomainError> {
+    match requires
+        .iter()
+        .find(|r| !settings.is_enabled(r) && !crate::bundled_extensions::is_required(r))
+    {
+        Some(r) => Err(invalid(format!(
+            "`{name}` requires `{r}`, which is off (turn it on first)"
+        ))),
+        None => Ok(()),
+    }
+}
+
+/// No enabled extension requires `name`: it may go off.
+fn not_required(svc: &Services, name: &str) -> Result<(), DomainError> {
+    let by: Vec<String> = svc
+        .extension_catalog
+        .active()
+        .map(|snapshot| {
+            snapshot
+                .extensions()
+                .iter()
+                .filter(|e| e.enabled && e.name != name && e.requires.iter().any(|r| r == name))
+                .map(|e| format!("`{}`", e.name))
+                .collect()
+        })
+        .unwrap_or_default();
+    if by.is_empty() {
+        Ok(())
+    } else {
+        Err(invalid(format!(
+            "`{name}` is required by {}; turn that off first",
+            by.join(", ")
+        )))
+    }
+}
+
 fn invalid(message: impl Into<String>) -> DomainError {
     DomainError::Invalid(message.into())
 }
@@ -241,6 +294,11 @@ pub async fn deploy(
     };
     let target = target_of(name, &hash);
     let live_now = svc.extension_catalog.live().get(name) == target.as_ref();
+    requirements_met(
+        &oxplow_config::extension_settings(&project),
+        name,
+        &loaded.requires,
+    )?;
     if !live_now {
         if !loaded.errors.is_empty() {
             return Err(invalid(format!(
@@ -496,6 +554,13 @@ pub async fn set_enabled(
     }
     let mut settings = oxplow_config::extension_settings(&svc.layout.project_dir);
     if enabled {
+        if let Some(running) = active_entry(svc, name) {
+            requirements_met(&settings, name, &running.requires)?;
+        }
+    } else {
+        not_required(svc, name)?;
+    }
+    if enabled {
         settings.personal.disable.retain(|n| n != name);
         if !settings.is_enabled(name) {
             settings.personal.enable.push(name.to_string());
@@ -527,6 +592,7 @@ pub async fn remove(svc: &Arc<Services>, name: &str) -> Result<(), DomainError> 
             "`{name}` ships with oxplow; turn it off instead"
         )));
     }
+    not_required(svc, name)?;
     let project = svc.layout.project_dir.clone();
     let mut settings = oxplow_config::extension_settings(&project);
     settings.personal.enable.retain(|n| n != name);
@@ -906,6 +972,74 @@ mod tests {
         assert_eq!(lens_title(svc).as_deref(), Some("Two"));
         rollback(svc, "acme", None, true).await.unwrap();
         assert_eq!(lens_title(svc).as_deref(), Some("One"));
+    }
+
+    /// `name`'s source in the project with a lens and the `extra` manifest
+    /// lines.
+    fn other(svc: &Services, name: &str, extra: &str) {
+        let dir = svc.layout.project_dir.join(".oxplow/extensions").join(name);
+        write(
+            &dir,
+            "extension.yaml",
+            &format!("manifest: 2\nname: {name}\n{extra}intent:\n  purpose: test\n"),
+        );
+        write(
+            &dir,
+            "lenses/one.yaml",
+            "title: T\nquery: \"SELECT 1 AS n\"\n",
+        );
+    }
+
+    /// Deploying an extension whose requirement is off refuses and changes
+    /// nothing; once the requirement is deployed, it goes.
+    #[tokio::test]
+    async fn a_deploy_refuses_when_a_required_extension_is_off() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        other(svc, "tracker", "");
+        source_with(svc, "One", "requires: [tracker]\n");
+        let e = deploy(svc, "acme", &root, None, true).await.unwrap_err();
+        assert!(
+            e.to_string()
+                .contains("`acme` requires `tracker`, which is off (turn it on first)"),
+            "{e}"
+        );
+        assert!(rows(svc).await.is_empty());
+        assert!(!oxplow_config::extension_settings(&root).is_enabled("acme"));
+        deploy(svc, "tracker", &root, None, true).await.unwrap();
+        deploy(svc, "acme", &root, None, true).await.unwrap();
+        assert_eq!(lens_title(svc).as_deref(), Some("One"));
+    }
+
+    /// While an enabled extension requires `tracker`, turning `tracker`
+    /// off or removing it refuses; once the dependant is off, both go —
+    /// and the dependant can't come back on without it.
+    #[tokio::test]
+    async fn disabling_a_required_extension_is_refused_while_something_requires_it() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        other(svc, "tracker", "");
+        source_with(svc, "One", "requires: [tracker]\n");
+        deploy(svc, "tracker", &root, None, true).await.unwrap();
+        deploy(svc, "acme", &root, None, true).await.unwrap();
+        let refused = "`tracker` is required by `acme`; turn that off first";
+        let e = set_enabled(svc, "tracker", false, true).await.unwrap_err();
+        assert!(e.to_string().contains(refused), "{e}");
+        let e = remove(svc, "tracker").await.unwrap_err();
+        assert!(e.to_string().contains(refused), "{e}");
+        assert!(oxplow_config::extension_settings(&root).is_enabled("tracker"));
+        set_enabled(svc, "acme", false, true).await.unwrap();
+        set_enabled(svc, "tracker", false, true).await.unwrap();
+        let e = set_enabled(svc, "acme", true, true).await.unwrap_err();
+        assert!(
+            e.to_string()
+                .contains("`acme` requires `tracker`, which is off"),
+            "{e}"
+        );
+        assert!(!oxplow_config::extension_settings(&root).is_enabled("acme"));
+        remove(svc, "tracker").await.unwrap();
     }
 
     /// At startup an extension that is on but undeployed deploys by itself

@@ -150,8 +150,11 @@ and returns resolved binding states, blocked extension names, activation order
 and source-located diagnostics. It is deterministic and does no I/O.
 
 Manifest declarations are `exports: [{contribution, version, visibility}]`,
-`imports: [{id, contribution, version, optional}]` and
-`import_guards: [{contribution, imports: [binding]}]`. Guards name this
+`imports: [{id, contribution, version?, optional}]` and
+`import_guards: [{contribution, imports: [binding]}]`. An import's
+`version` is optional: absent, whatever version the producer exports
+binds; given, it must equal the export's. The binding records the version
+it bound (`publicContracts.bindings[].version`). Guards name this
 extension's models, lenses, collectors, commands, effects, advisories, skills
 or providers. A guard's bindings must be declared and nonempty; unknown or
 duplicate names are errors. Models and lenses can read a public model with
@@ -1151,6 +1154,20 @@ moves the name from the person's `enableExtensions` to the team's
 `extensions`; the person commits. `oxplow.extension.unshare` reverses it.
 Only a source in `.oxplow/extensions/` is shared this way.
 
+**Requires.** `requires: [name, …]` names the other extensions this one
+needs on (`extension_deploy::requirements_met` / `not_required`). Deploying
+or enabling it refuses while one is off (``"`acme` requires `tracker`,
+which is off (turn it on first)"``); disabling or removing one refuses
+while an enabled extension requires it. Activation holds an enabled
+extension whose requirement isn't among the admitted ones, with the same
+last-working-version rule as an unavailable import
+(`CatalogSnapshot::admitted`: "it requires `x`, which isn't active"). An
+entry must be a valid extension name other than its own, and a cycle is a
+load error on each member (`refuse_requires_cycles`). A required bundled
+extension (foundation) always counts as on. Unlike `imports:`, `requires`
+names no contract: it is for composing another extension's commands or
+reading its models without an export.
+
 **Keep This** (`oxplow.lens.keep`) writes the lens into the extension's
 source (`my-lenses` unless named; created when missing) in the stream's
 checkout and deploys it; it returns once the lens is live. A failed deploy
@@ -1258,6 +1275,7 @@ namespace: oxplow      # its command ids' namespace (default: the name, `-` → 
 description: …
 engine: ">=0.7"          # optional: the oxplow it targets
 permissions: { ai: true } # optional: what it reaches beyond the baseline ("Permissions")
+requires: [tracker]      # optional: other extensions it needs on ("Sources and deployments" → Requires)
 intent:                  # required
   purpose: What question it answers, or what job it does
   origin: effort:eff42   # the thread/effort ref that created it, or null

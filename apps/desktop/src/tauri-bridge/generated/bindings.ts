@@ -3025,6 +3025,8 @@ export type Extension_Deserialize = {
 	 *  (`permissions:`).
 	 */
 	permissions?: Permissions_Deserialize,
+	/**  The other extensions it needs on (`requires:`). */
+	requires?: string[],
 	/**
 	 *  What it waits on a person for when it is on but undeployed: the
 	 *  permissions its source would add, one line each
@@ -3168,6 +3170,8 @@ export type Extension_Serialize = {
 	 *  (`permissions:`).
 	 */
 	permissions: Permissions_Serialize,
+	/**  The other extensions it needs on (`requires:`). */
+	requires: string[],
 	/**
 	 *  What it waits on a person for when it is on but undeployed: the
 	 *  permissions its source would add, one line each
@@ -3556,7 +3560,7 @@ export type ImplementationDecl = {
 export type ImportDeclaration = {
 	id: string,
 	contribution: ContributionId,
-	version: number,
+	version: number | null,
 	optional: boolean,
 	source: DeclaredAt,
 };
@@ -5545,7 +5549,8 @@ export type ProviderStatus = {
 export type PublicBinding = {
 	id: string,
 	contribution: ContributionId,
-	version: number,
+	/**  The version it bound: the producer's export when available. */
+	version: number | null,
 	available: boolean,
 	unavailableReason: UnavailableReason | null,
 };

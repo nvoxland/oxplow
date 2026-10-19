@@ -121,4 +121,10 @@ SELECT work_item, review FROM import_ref('reviews')
   (``import `reviews` → model:effort-review/reviews v2: available``, or
   why not).
 - The producer bumping its model's version is a break: your import of
-  the old version goes unavailable until you change it.
+  the old version goes unavailable until you change it. Leave `version`
+  off to bind whatever version it exports (fine for extensions you own
+  together; pin it for one someone else changes).
+- An extension you need on but import nothing from (you run its
+  commands, read its models by name) goes in `requires: [<name>]`:
+  deploying yours refuses while it's off, and turning it off refuses
+  while yours is on.

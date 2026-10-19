@@ -111,6 +111,13 @@
         }
       ]
     },
+    "requires": {
+      "description": "The other extensions it needs on (`.context/extensions.md`\n\"Requires\"): deploying or turning it on refuses while one is off,\nand turning one off refuses while this is on.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "permissions": {
       "description": "What it may reach beyond the baseline (`.context/extensions.md`\n\"Permissions\"): checked against what it contains when it loads,\napproved when it is deployed.",
       "allOf": [
@@ -414,9 +421,14 @@
           "type": "string"
         },
         "version": {
-          "type": "integer",
+          "description": "The contract version it was written for; absent, whatever the\nproducer exports binds.",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint32",
-          "minimum": 1
+          "minimum": 1,
+          "default": null
         },
         "optional": {
           "type": "boolean",
@@ -426,8 +438,7 @@
       "additionalProperties": false,
       "required": [
         "id",
-        "contribution",
-        "version"
+        "contribution"
       ]
     },
     "ImportGuardFile": {

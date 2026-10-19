@@ -42,8 +42,11 @@ pub struct ExportFile {
 pub struct ImportFile {
     pub id: String,
     pub contribution: String,
+    /// The contract version it was written for; absent, whatever the
+    /// producer exports binds.
+    #[serde(default)]
     #[schemars(range(min = 1))]
-    pub version: u32,
+    pub version: Option<u32>,
     #[serde(default)]
     pub optional: bool,
 }
@@ -69,7 +72,7 @@ pub struct ExportDeclaration {
 pub struct ImportDeclaration {
     pub id: String,
     pub contribution: ContributionId,
-    pub version: u32,
+    pub version: Option<u32>,
     pub optional: bool,
     pub source: DeclaredAt,
 }
@@ -87,7 +90,8 @@ pub struct ImportGuard {
 pub struct PublicBinding {
     pub id: String,
     pub contribution: ContributionId,
-    pub version: u32,
+    /// The version it bound: the producer's export when available.
+    pub version: Option<u32>,
     pub available: bool,
     pub unavailable_reason: Option<imports::UnavailableReason>,
 }

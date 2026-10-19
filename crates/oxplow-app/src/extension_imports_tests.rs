@@ -17,8 +17,9 @@ struct Ext<'a> {
     model_version: u32,
     /// `(visibility, export version)` of its `items` model.
     export: Option<(&'a str, u32)>,
-    /// `(producer, version, optional)` read as `import_ref('dep')`.
-    import: Option<(&'a str, u32, bool)>,
+    /// `(producer, version, optional)` read as `import_ref('dep')`; no
+    /// version binds whatever the producer exports.
+    import: Option<(&'a str, Option<u32>, bool)>,
     /// Other contributions it declares, one of each kind asked for.
     declares: Vec<Kind>,
     /// `(kind, visibility)` exports of those, at contract version 1.
@@ -104,7 +105,12 @@ impl<'a> Ext<'a> {
         self
     }
     fn imports(mut self, producer: &'a str, version: u32, optional: bool) -> Self {
-        self.import = Some((producer, version, optional));
+        self.import = Some((producer, Some(version), optional));
+        self
+    }
+    /// Import `producer`'s `items` at whatever version it exports.
+    fn imports_any(mut self, producer: &'a str) -> Self {
+        self.import = Some((producer, None, false));
         self
     }
 }
@@ -160,8 +166,11 @@ fn put_in(dir: &Path, e: &Ext) {
     let mut imports = String::new();
     let mut sql = "SELECT ref FROM ref('work_item')";
     if let Some((target, version, optional)) = e.import {
+        let version = version
+            .map(|v| format!(", version: {v}"))
+            .unwrap_or_default();
         imports += &format!(
-            "  - {{ id: dep, contribution: model:{target}/items, version: {version}, optional: {optional} }}\n"
+            "  - {{ id: dep, contribution: model:{target}/items{version}, optional: {optional} }}\n"
         );
         sql = "SELECT ref FROM import_ref('dep')";
         let params = if e.mounted {
@@ -772,6 +781,35 @@ async fn a_producer_at_the_right_version_after_a_mismatch_recovers_its_consumer(
     activate(&svc).await;
     assert!(svc.extension_activation.problems().is_empty());
     assert!(readable(&svc, "v_cons_items").await);
+}
+
+/// An import with no version binds whatever its producer exports, and
+/// keeps binding when the producer moves on.
+#[tokio::test]
+async fn an_import_without_a_version_binds_whatever_is_exported() {
+    let (dir, svc) = project(&[
+        Ext::new("prod").at_version(2).exports("stable"),
+        Ext::new("cons").imports_any("prod"),
+    ])
+    .await;
+    activate(&svc).await;
+    assert!(svc.extension_activation.problems().is_empty());
+    assert!(readable(&svc, "v_cons_items").await);
+    let bound = |e: crate::extensions::Extension| {
+        e.public_contracts
+            .bindings
+            .iter()
+            .find(|b| b.id == "dep")
+            .map(|b| (b.version, b.available))
+    };
+    assert_eq!(bound(listed(&svc, "cons").await), Some((Some(2), true)));
+    put(
+        dir.path(),
+        &Ext::new("prod").at_version(3).exports("stable"),
+    );
+    activate(&svc).await;
+    assert!(svc.extension_activation.problems().is_empty());
+    assert_eq!(bound(listed(&svc, "cons").await), Some((Some(3), true)));
 }
 
 /// A lens withheld by an unavailable optional import takes the slot mount

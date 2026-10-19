@@ -170,6 +170,11 @@ pub struct ManifestV2 {
         skip_serializing_if = "Option::is_none"
     )]
     pub configuration: Option<Value>,
+    /// The other extensions it needs on (`.context/extensions.md`
+    /// "Requires"): deploying or turning it on refuses while one is off,
+    /// and turning one off refuses while this is on.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requires: Vec<String>,
     /// What it may reach beyond the baseline (`.context/extensions.md`
     /// "Permissions"): checked against what it contains when it loads,
     /// approved when it is deployed.

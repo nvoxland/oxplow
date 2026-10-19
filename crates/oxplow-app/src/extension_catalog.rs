@@ -121,15 +121,21 @@ impl CatalogSnapshot {
                 .filter(|e| e.enabled)
                 .map(|e| e.name.clone())
                 .collect();
+            let absent =
+                |r: &String| !present.contains(r) && !crate::bundled_extensions::is_required(r);
             let missing = admitted.iter().position(|e| {
                 e.enabled
                     && !crate::bundled_extensions::is_required(&e.name)
-                    && e.public_contracts.imports.iter().any(|import| {
+                    && (e.public_contracts.imports.iter().any(|import| {
                         !import.optional && !present.contains(&import.contribution.extension)
-                    })
+                    }) || e.requires.iter().any(absent))
             });
             let Some(index) = missing else { break };
             let out = admitted.remove(index);
+            let why = held.entry(out.name.clone()).or_default();
+            for r in out.requires.iter().filter(|r| absent(r)) {
+                why.push(format!("it requires `{r}`, which isn't active"));
+            }
             let owners: Vec<String> = out
                 .public_contracts
                 .imports
@@ -137,10 +143,12 @@ impl CatalogSnapshot {
                 .filter(|i| !i.optional && !present.contains(&i.contribution.extension))
                 .map(|i| format!("`{}`", i.contribution.extension))
                 .collect();
-            held.entry(out.name.clone()).or_default().push(format!(
-                "it imports from {}, which isn't active",
-                owners.join(", ")
-            ));
+            if !owners.is_empty() {
+                why.push(format!(
+                    "it imports from {}, which isn't active",
+                    owners.join(", ")
+                ));
+            }
         }
         if held.is_empty() {
             return (
@@ -725,6 +733,44 @@ mod tests {
             "{held:?}"
         );
         assert_ne!(next.generation(), catalog.snapshot(dir.path()).generation());
+    }
+
+    /// An extension whose requirement isn't active is held with it, and
+    /// so is one that requires that one in turn.
+    #[test]
+    fn an_extension_whose_requirement_is_off_is_held_at_activation() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest = |name: &str, extra: &str| {
+            format!("manifest: 2\nname: {name}\ndescription: d\n{extra}intent:\n  purpose: x\n  examples: [{{ name: a }}]\n")
+        };
+        for (name, extra) in [
+            ("alone", ""),
+            ("needy", "requires: [ghost]\n"),
+            ("chained", "requires: [needy]\n"),
+            ("fine", "requires: [alone]\n"),
+        ] {
+            write(
+                dir.path(),
+                &format!(".oxplow/extensions/{name}/extension.yaml"),
+                &manifest(name, extra),
+            );
+        }
+        let catalog = ExtensionCatalog::new();
+        let (admitted, held) = catalog.snapshot(dir.path()).admitted(None, &Failed::new());
+        assert_eq!(names(&admitted), ["alone:d", "fine:d"]);
+        assert_eq!(held.keys().collect::<Vec<_>>(), ["chained", "needy"]);
+        assert!(
+            held["needy"]
+                .iter()
+                .any(|e| e == "it requires `ghost`, which isn't active"),
+            "{held:?}"
+        );
+        assert!(
+            held["chained"]
+                .iter()
+                .any(|e| e == "it requires `needy`, which isn't active"),
+            "{held:?}"
+        );
     }
 
     #[test]
