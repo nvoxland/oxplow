@@ -11,7 +11,7 @@ use std::sync::Arc;
 use oxplow_domain::events::{Anchors, Envelope, EventView, StoredEvent};
 use serde_json::{json, Value};
 
-use crate::collector_runner::{approval_hash, approve, run_for_event, Collectors};
+use crate::collector_runner::{run_for_event, Collectors};
 use crate::Services;
 
 fn write(root: &Path, rel: &str, body: &str) {
@@ -167,22 +167,6 @@ async fn every_path_hands_over_the_same_envelope() {
     assert_eq!(seen(svc, "v_acme_seen_star").await, expected);
 
     // An exec collector's stdin: `{ event }`.
-    let ext_dir = root.join(".oxplow/extensions/acme");
-    let spec = crate::extensions::load_extensions(&root)
-        .into_iter()
-        .find(|e| e.name == "acme")
-        .unwrap()
-        .collectors
-        .into_iter()
-        .find(|c| c.id == "prog")
-        .unwrap();
-    approve(
-        &svc.approvals,
-        "acme",
-        "prog",
-        &approval_hash(&ext_dir, &spec).unwrap(),
-    )
-    .unwrap();
     run_for_event(&collectors, "acme", "prog", Arc::new(event.clone()))
         .await
         .unwrap();

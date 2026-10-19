@@ -14,7 +14,6 @@ use oxplow_domain::Actor;
 use serde_json::{json, Value};
 
 use crate::collector_runner::{run_for_event, Collectors};
-use crate::exec_consent::ProgramKind;
 use crate::Services;
 
 fn write(root: &Path, rel: &str, body: &str) {
@@ -29,6 +28,7 @@ fn acme(root: &Path, task: &str) {
         root,
         ".oxplow/extensions/acme/extension.yaml",
         "manifest: 2\nname: acme\nversion: 1.2.0\nintent: { purpose: Runs., origin: null, examples: [] }\n\
+         permissions: { commands: [oxplow.work_item.update] }\n\
          event_types:\n  types:\n    - { type: acme.merged, v: 1, schema: merged.json, summary: A merge. }\n\
          collectors:\n\
          \x20 - id: star\n    runtime: starlark\n    entry: star.star\n    trigger: { on: [acme.merged] }\n    entities:\n      - { name: seen, key: k, columns: { k: text } }\n\
@@ -148,24 +148,14 @@ async fn every_run_is_recorded_once_as_itself() {
 
     // The effect, as itself, caused by the event; its attempt and the run
     // of what it composed name its run.
-    let (ext, decl) = crate::effect_triggers::effects(svc)
+    let (_, decl) = crate::effect_triggers::effects(svc)
         .into_iter()
         .find(|(e, _)| e.name == "acme")
         .unwrap();
-    let program = crate::effects::effect_program(&ext, &decl);
-    crate::exec_consent::approve_program(
-        &svc.approvals,
-        &root,
-        std::slice::from_ref(&ext),
-        ProgramKind::Effect,
-        &program.name,
-        &program.hash(&root).unwrap(),
-    )
-    .unwrap();
-    crate::effects::approved(&svc.db, &decl.name())
+    crate::effects::start_at_head(&svc.db, &decl.name())
         .await
         .unwrap();
-    // Logged after the approval: an effect never reacts to the past.
+    // Logged after the start: an effect never reacts to the past.
     let env = Envelope::new("acme.merged", 1, "test", json!({ "number": 2 }))
         .unwrap()
         .with_anchors(Anchors {
@@ -264,7 +254,7 @@ async fn a_run_records_what_its_grant_decided() {
         &root,
         ".oxplow/extensions/acme/extension.yaml",
         "manifest: 2\nname: acme\nintent: { purpose: Runs., origin: null, examples: [] }\n\
-         permissions: { process: true, secrets: [GH_TOKEN], network: [api.github.com], sql: read }\n\
+         permissions: { process: true, secrets: [GH_TOKEN], network: [api.github.com], sql: read, commands: [oxplow.work_item.update] }\n\
          collectors:\n\
          \x20 - id: gh\n    runtime: exec\n    entry: sync.sh\n    credentials: [GH_TOKEN]\n    network: [api.github.com]\n    entities:\n      - { name: pr, key: n, columns: { n: int } }\n\
          commands:\n\
@@ -287,15 +277,6 @@ async fn a_run_records_what_its_grant_decided() {
     );
     crate::test_fixtures::activate(svc).await;
     let collectors = Collectors::of(svc, &root);
-    let (ext, spec) = svc
-        .extension_catalog
-        .unpinned(&root, "a test reads declarations")
-        .iter()
-        .find(|e| e.name == "acme")
-        .map(|e| (e.clone(), e.collectors[0].clone()))
-        .unwrap();
-    let hash = crate::collector_runner::approval_hash(&root.join(&ext.path), &spec).unwrap();
-    crate::collector_runner::approve(&svc.approvals, "acme", "gh", &hash).unwrap();
     crate::collector_runner::run_collector(
         &collectors,
         &oxplow_domain::run::RunContext::core(Actor::Human, oxplow_domain::run::Mode::External),

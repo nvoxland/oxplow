@@ -564,7 +564,7 @@ fn declaring(scope: &str, run: RunContext) -> RunContext {
             scopes: [scope.to_string()].into(),
             ..Default::default()
         },
-        grant: None,
+        grant: oxplow_domain::grant::Grant::none(),
         enforcement: crate::grants::enforcement(),
     })
 }

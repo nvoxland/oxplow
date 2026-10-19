@@ -1,5 +1,5 @@
 //! A job's durability under the things that go wrong around it: a lease
-//! that runs out, a revoked approval, a changed declaration, a restart, a
+//! that runs out, an extension turned off, a changed declaration, a restart, a
 //! full queue, a stalled model, and a person cancelling a queued job. All
 //! against the in-process fixture model, as `extension_job_stream_tests`.
 
@@ -36,6 +36,33 @@ pub(super) async fn state(fx: &Fixture, id: &str) -> Value {
         json!({ "job_run": oxplow_domain::refs::build::job_run_ref(id) }),
     )
     .await
+}
+
+/// A job's state and the text it streamed, read from the models: the
+/// extension's commands are gone while it is off.
+pub(super) async fn recorded(fx: &Fixture, id: &str) -> (String, String) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let state = rows(
+            fx,
+            "SELECT state FROM v_job_run WHERE id = ?1",
+            vec![json!(id)],
+        )
+        .await;
+        let state = state[0][0].as_str().unwrap_or_default().to_string();
+        if state != "running" {
+            let text = rows(
+                fx,
+                "SELECT COALESCE(group_concat(text, ''), '') FROM
+                   (SELECT text FROM v_job_run_output WHERE job_id = ?1 AND kind = 'text' ORDER BY seq)",
+                vec![json!(id)],
+            )
+            .await;
+            return (state, text[0][0].as_str().unwrap_or_default().to_string());
+        }
+        assert!(tokio::time::Instant::now() < deadline, "still {state}");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
 }
 
 /// Make the running attempt's lease a thing of the past, as if oxplow had
@@ -90,21 +117,6 @@ pub(super) async fn observations(fx: &Fixture, id: &str) -> i64 {
         .expect("observations are counted")
 }
 
-/// The key the fixture job's approval is recorded under (not a bundled
-/// extension's job).
-pub(super) fn job_key(fx: &Fixture) -> String {
-    let project = fx.svc.layout.project_dir.clone();
-    let extensions = fx
-        .svc
-        .extension_catalog
-        .unpinned(&project, "a test reads declarations");
-    crate::exec_consent::list(&fx.svc.approvals, &project, &extensions)
-        .into_iter()
-        .find(|p| p.kind == crate::exec_consent::ProgramKind::Job && p.name.starts_with("triage/"))
-        .expect("the job is a program")
-        .key()
-}
-
 /// A `never` job whose lease ran out ends `interrupted` — it isn't
 /// replayed, and nothing the stopped worker says later changes that.
 #[tokio::test(flavor = "multi_thread")]
@@ -124,23 +136,22 @@ async fn a_job_whose_lease_ran_out_is_interrupted() {
     assert_eq!(completions(&fx, &id).await, ["interrupted"]);
 }
 
-/// Revoking the job's approval while it streams stops it: it ends
+/// Turning the job's extension off while it streams stops it: it ends
 /// `cancelled`, keeping the partial reply.
 #[tokio::test(flavor = "multi_thread")]
-async fn revoking_the_approval_stops_a_streaming_job() {
+async fn turning_the_extension_off_stops_a_streaming_job() {
     let fx = fixture(MANIFEST, vec![slow(&words(200), 20)]).await;
     let id = ask(&fx, "revoke").await;
     streaming(&fx, &id).await;
 
-    assert!(fx.svc.approvals.revoke(&job_key(&fx)).unwrap());
-    let done = until(&fx, &id, |s| s["state"] != json!("running")).await;
-    assert_eq!(done["state"], json!("cancelled"), "{done}");
-    let text = done["result"]["parts"][0]["text"]
-        .as_str()
-        .unwrap_or_default();
+    crate::extension_deploy::set_enabled(&fx.svc, "triage", false, true)
+        .await
+        .unwrap();
+    let (state, text) = recorded(&fx, &id).await;
+    assert_eq!(state, "cancelled");
     assert!(
         text.starts_with("w0 ") && text.len() < words(200).len(),
-        "{done}"
+        "{text}"
     );
     assert_eq!(completions(&fx, &id).await, ["cancelled"]);
 }
@@ -191,7 +202,7 @@ async fn an_activation_does_not_wait_for_a_running_job() {
     assert_eq!(done["text"], json!(words(60)), "{done}");
 }
 
-/// A declaration changed (and re-approved) while the job streams: the
+/// A declaration changed while the job streams: the
 /// activation stops it, and what it had is not published as the old
 /// declaration's success.
 #[tokio::test(flavor = "multi_thread")]
@@ -209,8 +220,6 @@ async fn a_job_does_not_succeed_across_a_change_to_its_declaration() {
     )
     .unwrap();
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    crate::exec_consent::approve_every(&fx.svc, crate::exec_consent::ProgramKind::Job).unwrap();
-    crate::test_fixtures::activate(&fx.svc).await;
 
     let done = until(&fx, &id, |s| s["state"] != json!("running")).await;
     assert_eq!(done["state"], json!("cancelled"), "{done}");

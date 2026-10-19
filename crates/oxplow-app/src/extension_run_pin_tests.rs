@@ -50,18 +50,6 @@ async fn long_collector(fx: &TaskEffortFixture) {
     );
     std::fs::set_permissions(&sync, std::fs::Permissions::from_mode(0o755)).unwrap();
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    let ext = fx
-        .svc
-        .extension_catalog
-        .snapshot(&root)
-        .extensions()
-        .iter()
-        .find(|e| e.name == "acme")
-        .cloned()
-        .unwrap();
-    let spec = ext.collectors[0].clone();
-    let hash = crate::collector_runner::approval_hash(&root.join(&ext.path), &spec).unwrap();
-    crate::collector_runner::approve(&fx.svc.approvals, "acme", "sync", &hash).unwrap();
 }
 
 /// Start the collector through the bus, as a person would, and wait until

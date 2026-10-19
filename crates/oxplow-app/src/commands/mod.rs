@@ -1124,6 +1124,16 @@ impl CommandBus {
         input: Value,
         confirmed: bool,
     ) -> Result<CommandOutcome, CommandError> {
+        // An extension's run (a policy's reaction, a job's tool) may call
+        // its own extension's commands; any other one its
+        // `permissions.commands` must name. Core's runs have no authority.
+        if let oxplow_domain::grant::Decision::Denied(why) =
+            run.decide(oxplow_domain::grant::Need::Command(name.to_string()))
+        {
+            return Err(CommandError::Denied {
+                reason: format!("`{name}`: {why}"),
+            });
+        }
         self.run_inner(run, name, input, confirmed, RunOrigin::Call)
             .await
     }

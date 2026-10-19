@@ -28,6 +28,7 @@ intent:
       expect: the item's open effort closes
 permissions:
   sql: read
+  commands: [oxplow.effort.open, oxplow.effort.close, oxplow.effort.link]
 implementations:
   # The project's effort policy once chosen in Settings → Capabilities. It
   # runs once a person approves it (Settings → Data → Programs) and reads

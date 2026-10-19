@@ -56,7 +56,7 @@ impl Drop for ProcessGroup {
 pub struct RevocationWatch(tokio::task::JoinHandle<()>);
 
 impl RevocationWatch {
-    pub fn start(group: ProcessGroup, gate: crate::exec_consent::Gate) -> Self {
+    pub fn start(group: ProcessGroup, gate: crate::run_context::LiveCheck) -> Self {
         Self(tokio::spawn(async move {
             loop {
                 let check = gate.clone();
@@ -176,7 +176,7 @@ mod tests {
         let group = ProcessGroup::new(shell.id());
         let grandchild = pid_of(&pidfile);
         let approved = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-        let gate: crate::exec_consent::Gate = {
+        let gate: crate::run_context::LiveCheck = {
             let approved = approved.clone();
             std::sync::Arc::new(move || {
                 if approved.load(std::sync::atomic::Ordering::Acquire) {

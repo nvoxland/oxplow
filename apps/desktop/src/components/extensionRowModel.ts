@@ -69,7 +69,6 @@ export interface CollectorRowModel {
   /** Unapproved collectors need a person to approve the script first; the
    *  project's own are approved under Programs (they have their own row
    *  there), not by this button. */
-  action: "approve" | "approve-in-programs" | "sync";
   actionLabel: string;
   /** Hover text saying exactly what running it does. */
   actionTitle: string;
@@ -118,40 +117,15 @@ export function collectorRowModel(l: CollectorListing): CollectorRowModel {
           .join(" · ") ||
         // A fact collector records facts, not rows (tsk1044).
         (l.spec.facts.length > 0 ? "Recorded facts" : "0 rows");
-  const passed = [
-    l.spec.env.length > 0 ? `${l.spec.env.join(", ")} from your environment` : null,
-    l.spec.credentials.length > 0 ? `${l.spec.credentials.join(", ")} from your keychain` : null,
-  ].filter(Boolean);
-  const env = passed.length > 0 ? ` with ${passed.join(" and ")}` : "";
-  const hosts = l.spec.network;
-  const network =
-    hosts.length === 0
-      ? l.networkEnforced
-        ? " It gets no network access."
-        : " Network access isn't restricted on this OS."
-      : l.networkEnforced
-        ? ` It can reach only ${hosts.join(", ")}.`
-        : ` It declares ${hosts.join(", ")} (not enforced on this OS).`;
   const missing = l.credentials.filter((c) => !c.set).map((c) => c.name);
-  const program = `${l.owner}/${l.spec.entry ?? l.spec.id}`;
-  // A derived collector asks only when its script calls a model.
-  const consent =
-    l.spec.runtime === "starlark"
-      ? `${program} calls a model through your AI provider, with its key, each time it runs (${triggerLabel(l.spec.trigger)}).`
-      : `Runs ${program} on this machine${env}.${network}`;
   return {
     id: l.spec.id,
     trigger: triggerLabel(l.spec.trigger),
     status,
     lastRunAt: st?.lastRunAt ?? null,
     error: st?.status === "error" ? (st.error ?? "Unknown error") : null,
-    action: l.approved ? "sync" : l.owner === "project" ? "approve-in-programs" : "approve",
-    actionLabel: l.approved ? "Sync Now" : l.owner === "project" ? "Approve under Programs" : "Approve & Run",
-    actionTitle: l.approved
-      ? `Run ${l.spec.entry ?? l.spec.id} now`
-      : l.owner === "project"
-        ? `${l.spec.entry ?? l.spec.id} runs a program from this project's config. Approve it in its row under Programs below, then sync it here.`
-        : `${consent} Approve only if you trust this extension; a changed script or host list needs approval again.`,
+    actionLabel: "Sync Now",
+    actionTitle: `Run ${l.spec.entry ?? l.spec.id} now`,
     credentials: l.credentials,
     missingCredentials: missing.length > 0 ? `Needs ${missing.join(", ")} (set it under Extensions).` : null,
     disabled: l.disabled ? `Off on this machine: ${l.disabled}` : null,

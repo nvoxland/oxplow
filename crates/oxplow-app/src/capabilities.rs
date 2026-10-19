@@ -1197,13 +1197,13 @@ fn scripted_implementation(
 }
 
 /// Every skill and slash command the agent gets now: core's, and each
-/// consented extension's that's offered — what it needs is active, and,
+/// extension's that's offered (one with skills declares `agent`: it doesn't
+/// load otherwise) — what it needs is active, and,
 /// when an implementation lists it, that implementation is the active one.
 /// A name another extension already took is left out (logged).
 pub fn agent_text(svc: &crate::Services) -> oxplow_domain::agent::text::AgentText {
     let project_dir = svc.worktrees.project_dir();
-    let extensions =
-        crate::advisories::consented(&svc.approvals, &svc.extension_catalog.get(project_dir));
+    let extensions = svc.extension_catalog.get(project_dir).to_vec();
     let config = crate::config_service::read_config(&svc.config);
     offered_text(&svc.capabilities, &config, &extensions, |path, file| {
         crate::extensions::read_extension_file(project_dir, path, file)

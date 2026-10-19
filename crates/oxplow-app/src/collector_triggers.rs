@@ -12,8 +12,8 @@
 //! together — so a redelivered event writes nothing.
 //! A collector that fails is recorded and announced like any run; it
 //! doesn't dead-letter the event, so one broken collector never holds up
-//! the others. An exec collector nobody approved is recorded as
-//! `needs_approval` and doesn't run.
+//! the others. One whose extension lacks a permission it needs is
+//! recorded as an `error` and doesn't run.
 //!
 //! `after_for(event)` is the union of the `after:` lists of the
 //! collectors that event triggers (limited to consumers the pump has): an
@@ -350,7 +350,7 @@ impl CollectorTriggers {
                     EventRun::Guarded => {
                         tracing::warn!(collector = %format!("{owner}/{}", spec.id), "collector skipped by the loop guard");
                     }
-                    EventRun::Ran(Ok(_)) | EventRun::Skipped | EventRun::NeedsApproval => {}
+                    EventRun::Ran(Ok(_)) | EventRun::Skipped | EventRun::Denied => {}
                 }
             }
         }
@@ -628,32 +628,6 @@ mod tests {
         assert_eq!(
             rows(&fx.svc, "SELECT json_extract(payload, '$.status') FROM v_event WHERE type = 'collector.synced' ORDER BY seq").await,
             json!([["error"], ["ok"]])
-        );
-    }
-
-    /// An exec collector on an event runs only once a person approved it;
-    /// until then each event records `needs_approval` and runs nothing.
-    #[tokio::test]
-    async fn an_unapproved_exec_collector_records_needs_approval() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        extension(&fx.svc,
-            "  - id: pull\n    runtime: exec\n    entry: pull.sh\n    trigger: { on: [effort.claim_verified] }\n    entities:\n      - { name: pr, key: n, columns: { n: int } }\n",
-            &[("pull.sh", "#!/bin/sh\necho '{\"entities\":{\"pr\":[{\"n\":1}]}}'\n")],
-        ).await;
-        let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
-        let ev = log(&fx.svc, fx.effort, "reviewer").await;
-        consumer.handle(&ev).await.unwrap();
-        assert_eq!(
-            rows(&fx.svc, "SELECT status, last_event_id FROM v_collector_run").await,
-            json!([["needs_approval", ev.seq]])
-        );
-        assert_eq!(
-            rows(
-                &fx.svc,
-                "SELECT count(*) FROM v_event WHERE type = 'collector.synced'"
-            )
-            .await,
-            json!([[0]])
         );
     }
 

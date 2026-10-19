@@ -95,9 +95,10 @@ fn write_whole(
     let staging = parent.join(format!(".tmp-{}", uuid::Uuid::new_v4()));
     let written = std::fs::create_dir_all(&staging)
         .and_then(|()| fill(&staging))
+        .and_then(|()| set_read_only(&staging, true))
         .and_then(|()| std::fs::rename(&staging, target));
     if let Err(error) = written {
-        let _ = std::fs::remove_dir_all(&staging);
+        remove_tree(&staging);
         // Another writer of the same hash may have won the rename.
         if target.is_dir() {
             return Ok(());
@@ -105,6 +106,44 @@ fn write_whole(
         return Err(error);
     }
     Ok(())
+}
+
+/// Make every file under `dir` read-only (the write bits off, the rest
+/// kept), or writable again. A deployment's files never change: a program
+/// running from it can't rewrite what it runs by accident. Its folders stay
+/// writable — a same-user process could undo either with `chmod`, so this
+/// guards against mistakes, not against a program — and so a temporary
+/// project holding one still cleans up.
+fn set_read_only(dir: &Path, read_only: bool) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for entry in std::fs::read_dir(dir)? {
+            let path = entry?.path();
+            let meta = std::fs::symlink_metadata(&path)?;
+            if meta.is_dir() {
+                set_read_only(&path, read_only)?;
+            } else {
+                let mode = meta.permissions().mode();
+                let mode = if read_only {
+                    mode & !0o222
+                } else {
+                    mode | 0o200
+                };
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))?;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (dir, read_only);
+    }
+    Ok(())
+}
+
+/// Remove `dir`, a deployment or the folder of them.
+fn remove_tree(dir: &Path) {
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// Every file under `source` as `(relative path, absolute path)`, in path
@@ -170,13 +209,13 @@ pub fn copy_into_store(
 /// Remove `name`'s deployment folders `hashes`.
 pub fn remove(project: &Path, name: &str, hashes: &[String]) {
     for hash in hashes {
-        let _ = std::fs::remove_dir_all(deployment_dir(project, name, hash));
+        remove_tree(&deployment_dir(project, name, hash));
     }
 }
 
 /// Remove every deployment of `name`.
 pub fn remove_all(project: &Path, name: &str) {
-    let _ = std::fs::remove_dir_all(project.join(STORE_DIR).join(name));
+    remove_tree(&project.join(STORE_DIR).join(name));
 }
 
 /// Of `name`'s deployments, newest first, the hashes past the active one and
@@ -228,6 +267,24 @@ mod tests {
         write(c.path(), "extension.yaml", "name: x\n");
         write(c.path(), "one.yaml", "title: One\n");
         assert_ne!(hash, source_hash(c.path()).unwrap());
+    }
+
+    /// A deployment's files are read-only once written: a program running
+    /// from it can't rewrite what it runs by accident. Pruning still
+    /// removes it.
+    #[cfg(unix)]
+    #[test]
+    fn a_deployment_is_read_only_and_still_pruned() {
+        let project = tempfile::tempdir().unwrap();
+        let source = tempfile::tempdir().unwrap();
+        write(source.path(), "extension.yaml", "name: x\n");
+        write(source.path(), "bin/run.sh", "#!/bin/sh\n");
+        let hash = source_hash(source.path()).unwrap();
+        let dir = copy_into_store(project.path(), "x", source.path(), &hash).unwrap();
+        assert!(std::fs::write(dir.join("bin/run.sh"), "changed").is_err());
+        assert!(std::fs::write(dir.join("extension.yaml"), "changed").is_err());
+        remove(project.path(), "x", &[hash]);
+        assert!(!dir.exists());
     }
 
     #[test]

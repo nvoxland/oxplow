@@ -310,14 +310,6 @@ pub async fn new_thread(
     serde_json::from_value(out.result).unwrap()
 }
 
-/// Approve every AI provider script the project's extensions declare —
-/// the shipped ones too — as a person does in Settings → Data → Programs,
-/// so a test's model calls go out.
-pub fn approve_ai_providers(svc: &crate::Services) {
-    crate::exec_consent::approve_every(svc, crate::exec_consent::ProgramKind::AiProvider)
-        .expect("approved");
-}
-
 /// A tool hook's call as the hook route maps it (`AgentHarness::tool_use`
 /// of the bearer's harness), for a test posting Claude Code's bodies;
 /// `None` for any other hook.
@@ -368,36 +360,10 @@ pub fn generated_section(doc: &str, name: &str, generated: &str) {
     );
 }
 
-/// A person approves bundled effect `id` (`<extension>/<effect>`) as it is
-/// now: its files, and events from now on.
-pub async fn approve_effect(svc: &Arc<crate::Services>, id: &str) {
-    let (ext, decl) = crate::effect_triggers::find_effect(svc, id).expect("its effect");
-    let program = crate::effects::effect_program(&ext, &decl);
-    let root = svc.layout.project_dir.clone();
-    crate::exec_consent::approve_program(
-        &svc.approvals,
-        &root,
-        std::slice::from_ref(&ext),
-        crate::exec_consent::ProgramKind::Effect,
-        &program.name,
-        &program.hash(&root).unwrap(),
-    )
-    .unwrap();
-    crate::effects::approved(&svc.db, id).await.unwrap();
-}
-
-/// A person takes their approval of effect `id` back.
-pub fn revoke_effect(svc: &Arc<crate::Services>, id: &str) {
-    let (ext, decl) = crate::effect_triggers::find_effect(svc, id).expect("its effect");
-    let program = crate::effects::effect_program(&ext, &decl);
-    crate::exec_consent::revoke_program(
-        &svc.approvals,
-        &svc.layout.project_dir,
-        std::slice::from_ref(&ext),
-        crate::exec_consent::ProgramKind::Effect,
-        &program.name,
-    )
-    .unwrap();
+/// Start effect `id` (`<extension>/<effect>`) at the log's head now: it
+/// reacts to what is logged from here on.
+pub async fn start_effect(svc: &Arc<crate::Services>, id: &str) {
+    crate::effects::start_at_head(&svc.db, id).await.unwrap();
 }
 
 /// Disable collector `extension`/`contribution` for `reason`, as three

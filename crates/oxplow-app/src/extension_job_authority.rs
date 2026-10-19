@@ -15,9 +15,9 @@ use oxplow_domain::{
 };
 
 use crate::{
-    exec_consent::Gate,
     extension_catalog::ExtensionCatalog,
     extension_job_operations::{JobOperationKey, JobOperationRegistry, JobOperations},
+    run_context::LiveCheck,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -31,22 +31,24 @@ pub enum JobAuthorityError {
 }
 
 /// This is a host value, without a wire representation. Its live guard must
-/// recheck current consent and scheduling-principal policy at sensitive calls.
+/// recheck the job's extension and scheduling-principal policy at sensitive
+/// calls.
 pub struct JobPermission {
     authority: Authority,
-    live: Gate,
+    live: LiveCheck,
 }
 
 impl JobPermission {
-    pub fn new(authority: Authority, live: Gate) -> Self {
+    pub fn new(authority: Authority, live: LiveCheck) -> Self {
         Self { authority, live }
     }
 }
 
 #[async_trait]
 pub trait JobGrantResolver: Send + Sync {
-    /// Resolve present grants and approval hashes; never revive a persisted
-    /// grant or confirmation. Check the scheduling principal's current policy.
+    /// Resolve the job's present declaration and its extension's
+    /// permissions; never revive a persisted grant or confirmation. Check
+    /// the scheduling principal's current policy.
     async fn resolve(
         &self,
         owner: &JobOwner,
@@ -55,25 +57,17 @@ pub trait JobGrantResolver: Send + Sync {
     ) -> Result<JobPermission, JobAuthorityError>;
 }
 
-/// Current consent for a manifest-declared host job. No request or persisted
-/// provenance can choose an approval key, source hash or authority scope.
+/// The authority of a manifest-declared host job: its declaration as the
+/// live catalog has it, within its extension's permissions. No request or
+/// persisted provenance can choose an authority scope.
 pub struct DeclaredJobGrants {
     catalog: Arc<ExtensionCatalog>,
     project: PathBuf,
-    approvals: Arc<crate::exec_consent::ApprovalStore>,
 }
 
 impl DeclaredJobGrants {
-    pub fn new(
-        catalog: Arc<ExtensionCatalog>,
-        project: PathBuf,
-        approvals: Arc<crate::exec_consent::ApprovalStore>,
-    ) -> Self {
-        Self {
-            catalog,
-            project,
-            approvals,
-        }
+    pub fn new(catalog: Arc<ExtensionCatalog>, project: PathBuf) -> Self {
+        Self { catalog, project }
     }
 }
 
@@ -108,29 +102,17 @@ impl JobGrantResolver for DeclaredJobGrants {
                     && extension.version == owner.package_version
             })
             .ok_or(JobAuthorityError::Unavailable)?;
-        let declaration = extension
-            .jobs
-            .iter()
-            .find(|job| {
-                job.id == owner.contribution.local
-                    && Some(job.version) == owner.contract_version
-                    && job.needs == descriptor.needs
-            })
-            .ok_or(JobAuthorityError::Unavailable)?;
-        let program = crate::exec_consent::job_program(extension, declaration);
-        let gate = crate::exec_consent::script_gate(
-            self.approvals.clone(),
-            self.project.clone(),
-            program.clone(),
-        );
-        gate().map_err(|_| JobAuthorityError::Denied)?;
-        let authority = crate::grants::authority(
-            &self.approvals,
-            &program.key(),
-            true,
-            crate::grants::script_request(&descriptor.needs),
-        );
-        Ok(JobPermission::new(authority, gate))
+        // Its declaration, as the live catalog has it, must still be this.
+        if !extension.jobs.iter().any(|job| {
+            job.id == owner.contribution.local
+                && Some(job.version) == owner.contract_version
+                && job.needs == descriptor.needs
+        }) {
+            return Err(JobAuthorityError::Unavailable);
+        }
+        let authority =
+            crate::grants::authority(extension, crate::grants::script_request(&descriptor.needs));
+        Ok(JobPermission::new(authority, Arc::new(|| Ok(()))))
     }
 }
 
@@ -146,7 +128,7 @@ pub struct JobAuthorityHost {
 #[derive(Clone)]
 pub struct JobExecution {
     run: RunContext,
-    live: Gate,
+    live: LiveCheck,
     /// It declares a need that changes the workspace: its thread must be
     /// open.
     needs_thread: bool,
@@ -310,17 +292,9 @@ impl JobAuthorityHost {
             .await?;
         // This initial dispatcher supports declared host services, not raw
         // process authority. Such operations require their own consent host.
-        let declared = crate::grants::script_request(&descriptor.needs);
-        if !permission.authority.declared.widening(&declared).is_empty()
-            || permission.authority.grant.as_ref().is_some_and(|grant| {
-                !grant
-                    .request
-                    .widening(&permission.authority.declared)
-                    .is_empty()
-                    || grant.revoked_at.is_some()
-            })
-            || (permission.authority.declared.scopes.contains("ai.compute")
-                && permission.authority.grant.is_none())
+        // A job that asks a model needs its extension's `ai` permission.
+        if permission.authority.declared.scopes.contains("ai.compute")
+            && !permission.authority.grant.permissions.ai
         {
             return Err(JobAuthorityError::Denied);
         }
@@ -330,10 +304,10 @@ impl JobAuthorityHost {
             job.job.owner.clone(),
             permission.live,
         );
-        let live: Gate = Arc::new(move || {
+        let live: LiveCheck = Arc::new(move || {
             current_descriptor(&catalog, &project, &owner)
                 .map_err(|_| "job ownership is no longer current".to_string())?;
-            approved().map_err(|_| "job approval or policy was revoked".to_string())
+            approved().map_err(|_| "the job's policy no longer allows it".to_string())
         });
         live().map_err(|_| JobAuthorityError::Denied)?;
         let run = RunContext::job(

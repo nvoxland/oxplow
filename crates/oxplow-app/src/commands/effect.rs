@@ -1,14 +1,14 @@
 //! The commands a person runs an extension's effects with (P9.D4–D5,
 //! `.context/extensions.md` → "Effects"). The live consumer
 //! (`effect.triggers`) reacts to each event once, and only to events
-//! logged after the effect's approval; everything else is a person's:
+//! logged after the effect started; everything else is a person's:
 //!
 //! - **`oxplow.effect.retry`** — have an effect react again to an event its
 //!   reaction to **failed**: the one way a failed reaction is ever
 //!   attempted again;
 //! - **`oxplow.effect.backfill`** — have it react to matching events it never
-//!   reacted to, whenever they were logged (before its approval, or while
-//!   it waited to be re-approved): the one way the past is reacted to;
+//!   reacted to, whenever they were logged (before it started): the one way
+//!   the past is reacted to;
 //! - **`oxplow.effect.backfill_plan`** — a read: what a backfill would do.
 //!
 //! Both writes are a person's, asked first every time
@@ -23,7 +23,7 @@
 //!
 //! Each is an attempt recorded like any (`effect_run`, `effect.result@4 {
 //! attempt, origin }`), run by [`run_reaction`] as the effect is **now**:
-//! it must be enabled and approved as it is, it composes afresh from the
+//! it must be enabled, it composes afresh from the
 //! event, it passes the loop guard, and it counts toward the effect's
 //! health — three failures in a row disable it, and stop a backfill.
 //!
@@ -138,8 +138,7 @@ fn outcome(effect: &str, event: &str, attempt: i64, reacted: &Reacted) -> serde_
     out
 }
 
-/// The enabled effect `name`, ready to run for a person: not disabled,
-/// and approved as it is now.
+/// The enabled effect `name`, ready to run for a person: not disabled.
 async fn ready(
     svc: &Arc<Services>,
     name: &str,
@@ -160,16 +159,6 @@ async fn ready(
             format!(
                 "effect `{name}` is disabled ({why}): enable it first (`oxplow.contribution.enable`, \
                  Settings → Extensions)"
-            ),
-        ));
-    }
-    let program = crate::effects::effect_program(&ext, &decl);
-    if !effect_triggers::approved_now(svc, &program) {
-        return Err(invalid(
-            "/effect",
-            format!(
-                "effect `{name}` isn't approved as it is now: a person approves it first \
-                 (Settings → Data → Programs)"
             ),
         ));
     }
@@ -218,9 +207,9 @@ pub(crate) fn unreacted_tx(
         n3 = decl.on.len() + 3,
         n4 = decl.on.len() + 4,
     );
-    // What was logged after its approval is the live consumer's: a
-    // backfill stops there, so the two never attempt one event at once
-    // (tsk847). Never approved, it has nothing to backfill.
+    // What was logged after it started is the live consumer's: a backfill
+    // stops there, so the two never attempt one event at once (tsk847).
+    // Never started, it has nothing to backfill.
     let live_from = oxplow_db::effect_state_store::start_after_tx(tx, &decl.name())?.unwrap_or(-1);
     let to = range.to_seq.unwrap_or(i64::MAX).min(live_from);
     let own = oxplow_domain::refs::build::effect_source(&decl.name());
@@ -298,7 +287,7 @@ pub struct Backfilled {
 /// Have `decl` react to the events in `range` it never reacted to, oldest
 /// first, at most `batch` of them — each an attempt like a live one
 /// (deduped, loop-guarded, counted toward its health). It stops when the
-/// effect is disabled or stops being approved as it is, or after three
+/// effect is disabled, or after three
 /// failures in a row of its own — one
 /// that will be sent again by itself counts here too, though its health
 /// waits for the retry (tsk932): a provider that's down stops the run.
@@ -324,18 +313,9 @@ pub async fn backfill(
     };
     let mut attempted = 0;
     let mut in_a_row = 0;
-    let program = crate::effects::effect_program(ext, decl);
     for event in &planned.first {
         if let Some(why) = health.disabled_reason(&key).await? {
             out.stopped = Some(format!("the effect was disabled: {why}"));
-            break;
-        }
-        // Each reaction runs the effect as it is now, approved: one whose
-        // approval stopped holding (its script changed) stops the run.
-        if !effect_triggers::approved_now(svc, &program) {
-            out.stopped = Some(
-                "the effect isn't approved as it is now: a person approves it again first".into(),
-            );
             break;
         }
         if in_a_row >= crate::contribution_health::FAILURES_TO_DISABLE {
@@ -346,8 +326,7 @@ pub async fn backfill(
             break;
         }
         let started = std::time::Instant::now();
-        let reacted =
-            run_reaction(svc, ext, decl, true, event, ReactionOrigin::Backfill, under).await?;
+        let reacted = run_reaction(svc, ext, decl, event, ReactionOrigin::Backfill, under).await?;
         effect_triggers::count(&health, decl, &reacted, started.elapsed()).await;
         attempted += 1;
         match reacted {
@@ -490,7 +469,6 @@ pub fn retry_op(services: ServicesSlot) -> Op {
                     &svc,
                     &ext,
                     &decl,
-                    true,
                     &stored,
                     ReactionOrigin::Retry,
                     Some(&invocation.run),

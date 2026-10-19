@@ -3,6 +3,8 @@ name: schema-review
 description: Reviews an agent's schema migrations — a dropped table, untested or under-covered work, or a complicated new function asks for changes — as the effort's verdict.
 engine: ">=0.7"
 version: 0.1.0
+# Its collector reads the project's migration files.
+permissions: { files: read }
 intent:
   purpose: >-
     A review policy of its own for work that touches database migrations.

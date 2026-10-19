@@ -131,10 +131,10 @@ async fn language_servers_are_read_live() {
 
 const MANIFEST: &str = "manifest: 2\nname: acme\nintent:\n  purpose: Pull.\npermissions: { process: true, secrets: [TOKEN] }\ncollectors:\n  - id: pull\n    runtime: exec\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - { name: item, key: id, columns: { id: int } }\n";
 
-/// A collector's approval and its credentials' state (set or not, never the
+/// A collector's state and its credentials' state (set or not, never the
 /// value) are read live.
 #[tokio::test]
-async fn collector_approval_and_credentials_are_read_live() {
+async fn collector_state_and_credentials_are_read_live() {
     let fx = services_with_effort().await;
     let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
     std::fs::create_dir_all(&dir).unwrap();
@@ -142,14 +142,15 @@ async fn collector_approval_and_credentials_are_read_live() {
     std::fs::write(dir.join("sync.sh"), "#!/bin/sh\necho '[]'\n").unwrap();
     crate::test_fixtures::activate(&fx.svc).await;
 
-    let state = "SELECT ref, owner, id, approved FROM v_collector_state WHERE owner = 'acme'";
+    let state =
+        "SELECT ref, owner, id, network_enforced FROM v_collector_state WHERE owner = 'acme'";
     assert_eq!(
         rows(&fx, state).await,
         vec![vec![
             json!("collector:acme/pull"),
             json!("acme"),
             json!("pull"),
-            json!(0)
+            json!(if crate::net_sandbox::enforced() { 1 } else { 0 })
         ]]
     );
     let credentials = "SELECT collector, name, is_set FROM v_collector_credential WHERE collector = 'collector:acme/pull'";

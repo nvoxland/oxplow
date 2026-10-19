@@ -1162,6 +1162,8 @@ fn provider_command(
 #[derive(Clone, PartialEq)]
 struct RegisteredCommands {
     namespace: String,
+    /// What its extension may reach: its scripts' runs are within it.
+    grant: oxplow_domain::grant::Grant,
     commands: Vec<ExtensionCommand>,
     version: Option<String>,
     generation: String,
@@ -1252,6 +1254,7 @@ impl ExtensionCommands {
                     e.name.clone(),
                     RegisteredCommands {
                         namespace: e.namespace.clone(),
+                        grant: crate::grants::grant_of(e),
                         commands: e.commands.clone(),
                         version: e.version.clone(),
                         generation: snapshot.generation().to_string(),
@@ -1402,6 +1405,7 @@ impl ExtensionCommands {
                     }
                 }
                 let declared = crate::grants::script_request(&needs);
+                let grant = registration.grant.clone();
                 let (catalog, root, owner) = (
                     self.catalog.clone(),
                     self.root.clone(),
@@ -1423,8 +1427,8 @@ impl ExtensionCommands {
                     });
                 let named: std::sync::Arc<crate::commands::ContributionOf> =
                     std::sync::Arc::new(move |parent: &oxplow_domain::run::RunContext| {
-                        // A script command needs no person's approval: it
-                        // may do what it declares.
+                        // A script command may do what it declares, within its
+                        // extension's permissions.
                         parent
                             .child(
                                 Some(contribution.clone()),
@@ -1432,7 +1436,7 @@ impl ExtensionCommands {
                             )
                             .authorized(oxplow_domain::run::Authority {
                                 declared: declared.clone(),
-                                grant: None,
+                                grant: grant.clone(),
                                 enforcement: crate::grants::enforcement(),
                             })
                             .guarded(live.clone())
@@ -1643,7 +1647,7 @@ mod tests {
         write(
             root,
             &format!(".oxplow/extensions/{name}/extension.yaml"),
-            &format!("manifest: 2\nname: {name}\nintent:\n  purpose: p\npermissions: {{ sql: read }}\ncommands:\n{commands}"),
+            &format!("manifest: 2\nname: {name}\nintent:\n  purpose: p\npermissions: {{ sql: read, commands: [oxplow.work_item.*] }}\ncommands:\n{commands}"),
         );
         for (rel, body) in files {
             write(root, &format!(".oxplow/extensions/{name}/{rel}"), body);

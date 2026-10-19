@@ -173,7 +173,7 @@ impl Mode {
 #[derive(Debug, Clone)]
 pub struct Authority {
     pub declared: crate::grant::GrantRequest,
-    pub grant: Option<crate::grant::Grant>,
+    pub grant: crate::grant::Grant,
     pub enforcement: crate::grant::Enforcement,
 }
 
@@ -287,7 +287,7 @@ impl RunContext {
             .about(provenance.subject().to_vec())
             .authorized(Authority {
                 declared: crate::grant::GrantRequest::default(),
-                grant: None,
+                grant: crate::grant::Grant::none(),
                 enforcement: crate::grant::Enforcement { hosts: false },
             });
         run.parent = Some(provenance.originating_run_id().clone());
@@ -368,23 +368,15 @@ impl RunContext {
     /// A bounded SQL grant needs a policy at preparation, before any rows
     /// are evaluated. Bare `sql.read` explicitly grants the whole layer.
     pub fn has_model_bounds(&self) -> bool {
-        self.authority.as_ref().is_some_and(|a| {
-            !a.grant
-                .as_ref()
-                .map_or(&a.declared, |g| &g.request)
-                .scopes
-                .contains("sql.read")
-        })
+        self.authority
+            .as_ref()
+            .is_some_and(|a| !a.declared.scopes.contains("sql.read"))
     }
 
     pub fn has_path_bounds(&self) -> bool {
-        self.authority.as_ref().is_some_and(|a| {
-            !a.grant
-                .as_ref()
-                .map_or(&a.declared, |g| &g.request)
-                .scopes
-                .contains("tree.read")
-        })
+        self.authority
+            .as_ref()
+            .is_some_and(|a| !a.declared.scopes.contains("tree.read"))
     }
 
     /// Filtering a captured tree is not an attempted read of every
@@ -395,8 +387,8 @@ impl RunContext {
                 matches!(
                     crate::grant::decide(
                         &crate::grant::Need::Path(path.into()),
-                        a.grant.as_ref(),
                         &a.declared,
+                        &a.grant,
                         a.enforcement
                     ),
                     crate::grant::Decision::Allowed
@@ -578,9 +570,7 @@ impl RunContext {
         let decision = match self.check_authority() {
             Err(reason) => crate::grant::Decision::Denied(reason),
             Ok(()) => match &self.authority {
-                Some(a) => {
-                    crate::grant::decide(&need, a.grant.as_ref(), &a.declared, a.enforcement)
-                }
+                Some(a) => crate::grant::decide(&need, &a.declared, &a.grant, a.enforcement),
                 None => crate::grant::Decision::Allowed,
             },
         };
@@ -739,7 +729,14 @@ mod tests {
         let authority = |mode| {
             RunContext::contribution(effect("g1"), Actor::System, mode).authorized(Authority {
                 declared: declared.clone(),
-                grant: None,
+                grant: crate::grant::Grant::from_permissions(
+                    "g",
+                    &crate::permissions::Permissions {
+                        ai: true,
+                        files: Some(crate::permissions::FilesAccess::Read),
+                        ..Default::default()
+                    },
+                ),
                 enforcement: crate::grant::Enforcement { hosts: true },
             })
         };

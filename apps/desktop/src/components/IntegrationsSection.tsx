@@ -4,9 +4,8 @@
 /// from the provider's `config_schema`, P6.B2), Check, and Enable /
 /// Disable. Between the two, the core components an extension replaces
 /// (P9.A1), each with a choice of whose shows (`replacements`).
-/// Enabling checks first;
-/// an unapproved provider is approved under Data → Programs. See
-/// `.context/providers.md`.
+/// Enabling checks first. A provider runs under the permissions its
+/// extension was deployed with. See `.context/providers.md`.
 ///
 /// Usability contract (.context/usability.md): inline edits, Escape
 /// resets an edit, the actions disabled while a field has a problem,
@@ -87,7 +86,7 @@ export function IntegrationsSection() {
       // A sign-in finishing changes only the keychain, and an approval only
       // this machine's approvals: there is no model to re-read, so the
       // instances are read again (tsk1040).
-      if (event.kind === "configChanged" || event.kind === "credentialChanged" || event.kind === "approvalsChanged") {
+      if (event.kind === "configChanged" || event.kind === "credentialChanged") {
         void refresh();
       }
     });
@@ -295,7 +294,6 @@ function SignInRow({
   name,
   state,
   redirectPort,
-  approved,
   onChanged,
 }: {
   instance: string;
@@ -303,8 +301,6 @@ function SignInRow({
   state: SignInState;
   /** The port its service has registered for the redirect, if any. */
   redirectPort: number | null;
-  /** Its program is approved as it is: where it signs in is part of that. */
-  approved: boolean;
   onChanged(): void;
 }) {
   const [waiting, setWaiting] = useState(false);
@@ -427,13 +423,11 @@ function SignInRow({
       <button
         type="button"
         data-testid={`sign-in-button-${id}`}
-        disabled={!approved || starting || !shell}
+        disabled={starting || !shell}
         title={
           !shell
             ? "Signing in needs the oxplow desktop app: the service sends your browser back to this machine, where only the app can listen"
-            : approved
-              ? "Open the service's sign-in page in your browser; the token it gives is kept in this machine's keychain"
-              : "Approve its program on Settings → Data → Programs first: where it signs in is part of what you approve"
+            : "Open the service's sign-in page in your browser; the token it gives is kept in this machine's keychain"
         }
         onClick={() => void signIn()}
       >
@@ -613,11 +607,6 @@ function IntegrationRow({
           </div>
         );
       })}
-      {m.needsApproval ? (
-        <div style={mutedStyle} data-testid={`integration-needs-approval-${m.key}`}>
-          Its program isn&apos;t approved on this machine yet: see Data → Programs.
-        </div>
-      ) : null}
       {view.credentials.map((c) =>
         c.signIn ? (
           <SignInRow
@@ -626,7 +615,6 @@ function IntegrationRow({
             name={c.name}
             state={c.signIn}
             redirectPort={c.redirectPort}
-            approved={view.approved}
             onChanged={onCredentialChanged}
           />
         ) : (

@@ -8,11 +8,12 @@ intent:
   origin: null
   examples: []
 # Its providers run programs, its model provider asks models, its effect
-# reads with its own SQL.
+# reads with its own SQL and comments on (or deletes) work items.
 permissions:
   process: true
   ai: true
   sql: read
+  commands: [oxplow.work_item.comment, oxplow.work_item.delete]
 # `bin/provider` and `bin/terminal` are written when a suite daemon starts:
 # they run the oxplow-provider-fake binary this checkout built, the second in
 # harness mode.

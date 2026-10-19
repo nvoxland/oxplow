@@ -222,10 +222,9 @@ async fn a_scaffolded_command_checks_tests_and_runs_through_the_bus() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_scaffolded_effect_checks_tests_and_once_approved_reacts() {
+async fn a_scaffolded_effect_checks_tests_and_once_started_reacts() {
     use oxplow_app::effect_triggers::EffectTriggers;
     use oxplow_app::event_pump::AsyncEventConsumer as _;
-    use oxplow_app::exec_consent::{approve_program, ProgramKind};
     let dir = project().await;
     scaffolded(dir.path(), "effect", "done-notes").await;
     assert!(tested(dir.path(), "done-notes")
@@ -234,17 +233,7 @@ async fn a_scaffolded_effect_checks_tests_and_once_approved_reacts() {
     let svc = booted(dir.path()).await;
     let ext = loaded(&svc, dir.path(), "done-notes");
     let decl = &ext.effects[0];
-    let program = oxplow_app::effects::effect_program(&ext, decl);
-    approve_program(
-        &svc.approvals,
-        dir.path(),
-        std::slice::from_ref(&ext),
-        ProgramKind::Effect,
-        &program.name,
-        &program.hash(dir.path()).unwrap(),
-    )
-    .unwrap();
-    oxplow_app::effects::approved(&svc.db, &decl.name())
+    oxplow_app::effects::start_at_head(&svc.db, &decl.name())
         .await
         .unwrap();
     svc.streams.ensure_primary().await.unwrap();

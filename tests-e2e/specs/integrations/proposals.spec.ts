@@ -1,4 +1,4 @@
-import { approveProgram, ipc, run } from "../../support/daemon.js";
+import { ipc, run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 
 // The test extension's effect deletes a task titled "[delete]": a
@@ -7,7 +7,6 @@ import { expect, test } from "../../support/fixtures.js";
 
 test("an effect's destructive step waits in Alerts until a person approves it", async ({ fresh }) => {
   const { page, daemon } = fresh;
-  await approveProgram(daemon, "effect", "e2e/note-created");
   await page.goto("/");
   await run(daemon, "oxplow.work_item.create", { title: "Pear [delete]", thread: daemon.thread });
   // The status bar's bell counts it once the effect has run (it runs in the

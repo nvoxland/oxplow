@@ -157,8 +157,6 @@ fn emitters() -> BTreeSet<(String, String)> {
 /// their writes move onto the command bus and the desktop reads the model.
 #[rustfmt::skip]
 const EMITTERS: &[(&str, &str)] = &[
-    // A person's approval is per machine, in no model (tsk1040).
-    ("ApprovalsChanged", "crates/oxplow-rpc/src/commands/collectors.rs"),
     ("AgentStatusChanged", "crates/oxplow-app/src/agent_stall_watch.rs"),
     ("AgentStatusChanged", "crates/oxplow-app/src/hook_ingest.rs"),
     ("BackgroundTasksChanged", "crates/oxplow-app/src/lib.rs"),
@@ -289,7 +287,6 @@ fn the_write_classifier_tells_writes_from_reads() {
         "oxplow_domain::stores::ThreadStore::upsert",
         "oxplow_db::database::Database::transaction",
         "oxplow_db::database::Database::rehearse",
-        "oxplow_app::exec_consent::ApprovalStore::approve",
     ] {
         assert!(denied.contains(write), "{write} isn't denied");
     }

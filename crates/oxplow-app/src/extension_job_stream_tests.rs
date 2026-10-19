@@ -54,7 +54,7 @@ pub(super) struct Fixture {
 }
 
 /// `svc` with the summarize role on a fixture model answering `replies` in
-/// turn, the extensions it has deployed and every job approved.
+/// turn, the extensions it has deployed and its jobs.
 pub(super) async fn prepare(
     svc: &Arc<crate::Services>,
     replies: Vec<FixtureReply>,
@@ -77,14 +77,12 @@ pub(super) async fn prepare(
             Some(RoleBinding::new("fixture", "fixture")),
         )
         .unwrap();
-    // The extension the test wrote is deployed, then its jobs approved.
-    crate::test_fixtures::activate(svc).await;
-    crate::exec_consent::approve_every(svc, crate::exec_consent::ProgramKind::Job).unwrap();
+    // The extension the test wrote is deployed.
     crate::test_fixtures::activate(svc).await;
     model
 }
 
-/// The `triage` extension with its `review` job approved, and the
+/// The `triage` extension with its `review` job, and the
 /// summarize role on a fixture model answering `replies` in turn.
 pub(super) async fn fixture(manifest: &str, replies: Vec<FixtureReply>) -> Fixture {
     let fx = fixture_idle(manifest, replies).await;

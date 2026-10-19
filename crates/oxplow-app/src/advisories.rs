@@ -6,8 +6,6 @@
 //! its next prompt or tool call, stamped when they do. See
 //! `.context/extensions.md` → "Advisories".
 
-use std::path::Path;
-
 use async_trait::async_trait;
 use oxplow_db::{OnceScope, SqlCell, SqliteAgentNudgeStore};
 use oxplow_domain::events::schema::{EventType as _, ThreadCheckpoint};
@@ -276,7 +274,6 @@ pub struct AdvisoryDeps {
     pub effort_store: std::sync::Arc<oxplow_db::SqliteEffortStore>,
     pub thread_store: std::sync::Arc<oxplow_db::SqliteThreadStore>,
     pub worktrees: std::sync::Arc<crate::worktrees::WorktreeRouter>,
-    pub approvals: std::sync::Arc<crate::exec_consent::ApprovalStore>,
     pub extension_catalog: std::sync::Arc<crate::extension_catalog::ExtensionCatalog>,
     pub db: oxplow_db::Database,
     pub sql: crate::sql_gateway::SqlGateway,
@@ -335,16 +332,18 @@ async fn for_thread_in_generation(
     let active = svc
         .capabilities
         .snapshot(&crate::config_service::read_config(&svc.config));
-    let extensions: Vec<Extension> = consented(
-        &svc.approvals,
-        &svc.extension_catalog.get(svc.worktrees.project_dir()),
-    )
-    .into_iter()
-    .map(|mut e| {
-        e.advisories.retain(|a| active.unmet(&a.needs).is_empty());
-        e
-    })
-    .collect();
+    // An extension with advisories declares `agent` (it doesn't load
+    // otherwise): what it says was approved when it was deployed.
+    let extensions: Vec<Extension> = svc
+        .extension_catalog
+        .get(svc.worktrees.project_dir())
+        .iter()
+        .cloned()
+        .map(|mut e| {
+            e.advisories.retain(|a| active.unmet(&a.needs).is_empty());
+            e
+        })
+        .collect();
     let scope = AdvisoryScope {
         thread: thread.value(),
         stream: stream.map(|s| s.value()),
@@ -439,27 +438,6 @@ impl AsyncEventConsumer for TurnEndAdvisories {
         for_thread(&self.deps, &thread, AdvisoryOn::TurnEnd, Some(&cause)).await;
         Ok(())
     }
-}
-
-/// The extensions whose advisories may run: bundled ones, and shared ones
-/// a person approved as they are now. A teammate's or a
-/// git-installed extension can't speak into the agent's context unseen.
-pub fn consented(
-    approvals: &crate::exec_consent::ApprovalStore,
-    extensions: &[Extension],
-) -> Vec<Extension> {
-    extensions
-        .iter()
-        .filter(|e| {
-            if e.origin == "bundled" || e.advisories.is_empty() {
-                return true;
-            }
-            let p = crate::exec_consent::advisory_program(e);
-            p.hash(Path::new(""))
-                .is_ok_and(|h| approvals.is_approved(&p.key(), &h))
-        })
-        .cloned()
-        .collect()
 }
 
 fn cell_text(c: &SqlCell) -> String {
@@ -651,24 +629,6 @@ mod tests {
         )
         .unwrap();
         crate::test_fixtures::activate(&f.svc).await;
-        // A project extension's advisories are silent until a person
-        // approves them.
-        assert!(for_thread(
-            &f.svc.advisory_deps(),
-            &f.thread,
-            AdvisoryOn::PostToolUse,
-            None
-        )
-        .await
-        .is_empty());
-        let exts = crate::extensions::load_extensions(&f.svc.layout.project_dir);
-        let program =
-            crate::exec_consent::advisory_program(exts.iter().find(|e| e.name == "guide").unwrap());
-        f.svc
-            .approvals
-            .approve(&program.key(), &program.hash(Path::new("")).unwrap())
-            .unwrap();
-        crate::test_fixtures::activate(&f.svc).await;
         let hits = for_thread(
             &f.svc.advisory_deps(),
             &f.thread,
@@ -749,12 +709,6 @@ mod tests {
             ),
         )
         .unwrap();
-        let exts = crate::extensions::load_extensions(&svc.layout.project_dir);
-        let program =
-            crate::exec_consent::advisory_program(exts.iter().find(|e| e.name == name).unwrap());
-        svc.approvals
-            .approve(&program.key(), &program.hash(Path::new("")).unwrap())
-            .unwrap();
         crate::test_fixtures::activate(svc).await;
     }
 
@@ -1727,48 +1681,5 @@ mod tests {
         )
         .await;
         assert!(hits.is_empty(), "{hits:?}");
-    }
-
-    #[test]
-    fn a_shared_extensions_advisories_speak_only_once_approved() {
-        let dir = tempfile::tempdir().unwrap();
-        let approvals = crate::exec_consent::ApprovalStore::for_tests(dir.path());
-        let mut shared = ext(vec![adv(
-            "nag",
-            AdvisoryOn::Prompt,
-            AdvisoryOncePer::Effort,
-            "SELECT 'x' AS message",
-        )]);
-        shared.origin = "project".into();
-        shared.name = "team".into();
-        let mut bundled = ext(vec![adv(
-            "b",
-            AdvisoryOn::Prompt,
-            AdvisoryOncePer::Effort,
-            "SELECT 'y' AS message",
-        )]);
-        bundled.origin = "bundled".into();
-        let names = |exts: Vec<Extension>| exts.into_iter().map(|e| e.name).collect::<Vec<_>>();
-        let all = vec![shared.clone(), bundled.clone()];
-
-        assert_eq!(
-            names(consented(&approvals, &all)),
-            vec![bundled.name.clone()]
-        );
-
-        let program = crate::exec_consent::advisory_program(&shared);
-        let version = program.hash(dir.path()).unwrap();
-        approvals.approve(&program.key(), &version).unwrap();
-        assert_eq!(
-            names(consented(&approvals, &all)),
-            vec!["team".to_string(), bundled.name.clone()]
-        );
-
-        // Changing what it says needs approving again.
-        shared.advisories[0].query = "SELECT 'rm -rf everything' AS message".into();
-        assert_eq!(
-            names(consented(&approvals, &[shared, bundled.clone()])),
-            vec![bundled.name]
-        );
     }
 }

@@ -90,7 +90,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                         p.owner, p.id
                     ),
                 ),
-                RunCollectorError::NeedsApproval(m)
+                RunCollectorError::Denied(m)
                 | RunCollectorError::Failed(m)
                 | RunCollectorError::Disabled(m) => invalid("/id", m),
                 RunCollectorError::Storage(e) => failed(e),

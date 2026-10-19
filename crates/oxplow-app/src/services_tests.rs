@@ -160,7 +160,7 @@ async fn a_commands_script_cant_ask_a_model_or_read_the_tree() {
 }
 
 /// A fact collector that declares `sql.read` reads the semantic layer
-/// inside its script; one that asks a model runs only once approved.
+/// inside its script; a pure run can't ask a model.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fact_collector_reads_the_layer_it_declares() {
     let fx = crate::test_fixtures::services_with_task_effort().await;
@@ -170,7 +170,7 @@ async fn a_fact_collector_reads_the_layer_it_declares() {
         &root,
         ".oxplow/extensions/acme/extension.yaml",
         "manifest: 2\nname: acme\nintent: { purpose: Counts., origin: null, examples: [] }\n\
-         permissions: { sql: read, ai: true }\n\
+         permissions: { sql: read, files: read, ai: true }\n\
          collectors:\n\
          \x20 - id: items\n    runtime: starlark\n    entry: items.star\n    needs: [sql.read]\n    facts: [acme.items]\n\
          \x20 - id: asks\n    runtime: starlark\n    entry: asks.star\n    needs: [ai.compute]\n    facts: [acme.items]\n",
@@ -214,5 +214,5 @@ async fn a_fact_collector_reads_the_layer_it_declares() {
         )
         .await
         .unwrap_err();
-    assert!(err.contains("needs a person's approval first"), "{err}");
+    assert!(err.contains("a pure run can't use `ai.compute`"), "{err}");
 }

@@ -1,4 +1,3 @@
 SELECT CAST(NULL AS TEXT) AS ref, CAST(NULL AS TEXT) AS owner, CAST(NULL AS TEXT) AS id,
-       CAST(NULL AS INTEGER) AS approved, CAST(NULL AS INTEGER) AS network_enforced,
-       CAST(NULL AS TEXT) AS version, CAST(NULL AS TEXT) AS disabled
+       CAST(NULL AS INTEGER) AS network_enforced, CAST(NULL AS TEXT) AS disabled
 WHERE 0

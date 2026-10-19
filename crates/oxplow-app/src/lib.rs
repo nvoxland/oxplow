@@ -19,7 +19,6 @@ pub mod agent_tools;
 pub mod ai_calls;
 pub mod ai_compute;
 pub mod ai_service;
-pub(crate) mod approved_code;
 pub mod assets;
 pub mod attribution;
 pub mod background_task;
@@ -80,7 +79,6 @@ pub mod event_pump;
 #[cfg(test)]
 mod event_view_tests;
 pub mod events;
-pub mod exec_consent;
 pub mod extension_activation;
 #[cfg(test)]
 mod extension_activation_tests;
@@ -504,17 +502,13 @@ mod instance_lock_tests {
 }
 
 /// What differs between the app and [`Services::in_memory`]: this
-/// machine's keychain, global config dir and approvals (stand-ins in
-/// tests), and how long a failed provider waits before restarting.
+/// machine's keychain and global config dir (stand-ins in tests), and how
+/// long a failed provider waits before restarting.
 struct MachineEnv {
     secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
     config_dir: Option<PathBuf>,
-    /// Where program approvals live; `None` = this machine's oxplow home.
-    approvals_file: Option<PathBuf>,
     /// A failed provider's first restart wait (doubling from there).
     provider_backoff: std::time::Duration,
-    /// Where approved provider copies run from, outside the repo.
-    provider_copies: PathBuf,
     /// How long a provider's `check` or `invoke` may take.
     provider_call_timeout: std::time::Duration,
     /// How long a provider asked to `shutdown` has to exit.
@@ -732,8 +726,6 @@ pub struct Services {
     /// Open ACP agent sessions (tsk281). Sessions get a
     /// `chat::host::ServicesChatHost` holding `Services` weakly.
     pub chat: Arc<chat::manager::ChatManager>,
-    /// This machine's approvals of the project's programs (`exec_consent`).
-    pub approvals: Arc<exec_consent::ApprovalStore>,
     pub lsp_installer: lsp_installer::LspInstallerService,
     pub terminal_sessions: terminal_sessions::TerminalSessionRegistry,
     /// Shared per-thread PTY liveness, written by the terminal forwarder
@@ -941,7 +933,6 @@ impl Services {
             effort_store: self.effort_store.clone(),
             thread_store: self.thread_store.clone(),
             worktrees: self.worktrees.clone(),
-            approvals: self.approvals.clone(),
             extension_catalog: self.extension_catalog.clone(),
             db: self.db.clone(),
             sql: self.sql.clone(),
@@ -984,12 +975,7 @@ impl Services {
         let machine = MachineEnv {
             secrets,
             config_dir: oxplow_config::global_config_dir(),
-            approvals_file: None,
             provider_backoff: std::time::Duration::from_secs(1),
-            provider_copies: oxplow_config::global_config_dir()
-                .unwrap_or_else(|| layout.state_dir.join("global-config"))
-                .join("provider-copies")
-                .join(collector_runner::project_key(&layout.project_dir)),
             provider_call_timeout: std::time::Duration::from_secs(60),
             provider_shutdown_grace: std::time::Duration::from_secs(5),
             provider_max_uncheckpointed: 10_000,
@@ -1140,16 +1126,6 @@ impl Services {
         // Lazily-built per-(stream, language) LSP proxies. Spawn cost
         // is paid on first request, not at boot.
         let project_config = config_arc.clone();
-        // Program approvals: this machine's, outside the repo (tsk344).
-        let approvals = Arc::new(match machine.approvals_file.clone() {
-            Some(f) => {
-                exec_consent::ApprovalStore::at(f, &layout.project_dir, machine.secrets.clone())
-            }
-            None => exec_consent::ApprovalStore::for_project(
-                &layout.project_dir,
-                machine.secrets.clone(),
-            ),
-        });
         // The model providers foundation declares, registered with the
         // other declarations below.
         let model_providers = oxplow_ai::client::ModelProviders::default();
@@ -1298,7 +1274,6 @@ impl Services {
             lsp: lsp.clone(),
             worktrees: worktrees.clone(),
             project: collector_runner::project_key(&layout.project_dir),
-            approvals: approvals.clone(),
             collector_store: collector_store.clone(),
             db: db.clone(),
             vocabulary: event_log_store.vocabulary().clone(),
@@ -1322,7 +1297,6 @@ impl Services {
                 catalog: extension_catalog.clone(),
                 root: layout.project_dir.clone(),
                 ai: ai_compute.clone(),
-                approvals: approvals.clone(),
                 threads: thread_store.clone(),
                 vocabulary: vocabulary.clone(),
                 sql: sql.clone(),
@@ -1404,7 +1378,6 @@ impl Services {
         )
         .with_fact_store(fact_store.clone())
         .with_background_tasks(background_tasks.clone())
-        .with_approvals(approvals.clone())
         .with_extension_catalog(extension_catalog.clone())
         .with_snapshot_captures(snapshot_captures.clone())
         .with_run_log(collector_runner::RunLog {
@@ -1636,7 +1609,6 @@ impl Services {
             providers::HostDeps {
                 project_dir: layout.project_dir.clone(),
                 project: collector_runner::project_key(&layout.project_dir),
-                approvals: approvals.clone(),
                 secrets: machine.secrets.clone(),
                 config: config_arc.clone(),
                 catalog: extension_catalog.clone(),
@@ -1646,7 +1618,6 @@ impl Services {
                 log: (*event_log_store).clone(),
                 host_env: machine.host_env.clone(),
                 backoff: machine.provider_backoff,
-                copies: machine.provider_copies.clone(),
                 call_timeout: machine.provider_call_timeout,
                 shutdown_grace: machine.provider_shutdown_grace,
                 max_uncheckpointed: machine.provider_max_uncheckpointed,
@@ -1715,7 +1686,6 @@ impl Services {
             config_arc.clone(),
             metric_engine.clone(),
         )
-        .with_approvals(approvals.clone())
         .with_extensions(extension_catalog.clone())
         .with_marks(snapshots.clone())
         .with_vocabulary(vocabulary.clone())
@@ -1726,7 +1696,6 @@ impl Services {
         });
         let collector_runner = collector_runner::CollectorRunner {
             project_dir: layout.project_dir.clone(),
-            approvals: approvals.clone(),
             store: collector_store.clone(),
             db: db.clone(),
             vocabulary: event_log_store.vocabulary().clone(),
@@ -1877,7 +1846,6 @@ impl Services {
             effort_store: effort_store.clone(),
             thread_store: thread_store.clone(),
             worktrees: worktrees.clone(),
-            approvals: approvals.clone(),
             extension_catalog: extension_catalog.clone(),
             db: db.clone(),
             sql: sql.clone(),
@@ -1984,7 +1952,6 @@ impl Services {
             agent_context: Arc::new(agent_context::AgentContext::default()),
             context_changes,
             chat,
-            approvals,
             lsp_installer: lsp_installer_svc,
             terminal_sessions,
             output_activity,
@@ -2100,12 +2067,8 @@ impl Services {
         let machine = MachineEnv {
             secrets,
             config_dir: Some(global_dir.clone()),
-            approvals_file: Some(exec_consent::approvals_file(&global_dir, &project_dir)),
             // A test's failing provider restarts at once.
             provider_backoff: std::time::Duration::ZERO,
-            provider_copies: global_dir
-                .join("provider-copies")
-                .join(collector_runner::project_key(&project_dir)),
             // A test's hung provider fails fast.
             provider_call_timeout: std::time::Duration::from_secs(2),
             provider_shutdown_grace: std::time::Duration::from_secs(1),

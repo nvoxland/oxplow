@@ -1,17 +1,15 @@
-//! Starting a provider: consent, the spawn and the handshake.
+//! Starting a provider: the spawn and the handshake.
 //!
-//! Consent precedes execution: a provider runs only at the version a
-//! person approved (`exec_consent`, [`ProgramKind::Provider`]) — its
-//! extension folder's files, its entry, args, env, credentials and
-//! network, and so its declarations file. The spawn mirrors an `exec`
+//! A provider runs from its extension's deployment, which never changes,
+//! under the `process` permission (and the `network` and `secrets` its
+//! extension declares) a person approved when they deployed it
+//! (`.context/extensions.md` "Permissions"). The spawn mirrors an `exec`
 //! source: a scrubbed environment (PATH, HOME, the declared `env` names,
 //! the credentials from the keychain, `OXPLOW_*` context), the egress
 //! proxy and `sandbox-exec` where the OS enforces `network`, and the
 //! process ends with its connection: asked to `shutdown` first, killed
 //! once its grace is up ([`Connection::shutdown`]). After the spawn, the
-//! live `initialize` must equal the approved declarations.
-//!
-//! [`ProgramKind::Provider`]: crate::exec_consent::ProgramKind::Provider
+//! live `initialize` must equal the deployment's declarations.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -34,14 +32,10 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Why a provider isn't running.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum HostError {
-    /// Nobody on this machine approved this version. Nothing ran.
+    /// It ran, but what it says it is isn't what its deployment declares.
     #[error(
-        "provider `{0}` needs a person's approval first (Settings → Data → Programs). \
-         Approval is per machine and per version of the provider and its declarations."
+        "provider `{name}` declares something other than its deployment's declarations: {detail}"
     )]
-    Unapproved(String),
-    /// It ran, but what it says it is isn't what was approved.
-    #[error("provider `{name}` declares something other than its approved declarations: {detail}")]
     DeclarationsChanged { name: String, detail: String },
     /// It runs, but its `check` found problems with the instance's config.
     #[error("provider `{name}` isn't configured: {}", problems.iter().map(|p| format!("{} {}", if p.path.is_empty() { "/" } else { &p.path }, p.message)).collect::<Vec<_>>().join("; "))]
@@ -93,7 +87,7 @@ pub struct Launch {
     pub instance_id: String,
     pub ext_dir: PathBuf,
     pub spec: ProviderSpec,
-    /// The declarations as approved.
+    /// The declarations its deployment holds.
     pub declared: InitializeResult,
     /// Credential name → value (from the keychain).
     pub credentials: BTreeMap<String, String>,
@@ -303,7 +297,7 @@ pub fn initialize_params() -> InitializeParams {
     }
 }
 
-/// Spawn the approved provider and handshake with it: the live
+/// Spawn the provider and handshake with it: the live
 /// `initialize` must equal `launch.declared`.
 pub async fn connect(launch: &Launch) -> Result<Connection, HostError> {
     let failed = |message: String| HostError::Failed {
@@ -409,8 +403,10 @@ pub fn serve_incoming(
 /// so the run's audit row records it. A call naming no invoke under way
 /// is refused: nothing a provider does of oxplow is outside a run.
 pub struct HostCalls {
-    gate: parking_lot::Mutex<Option<crate::exec_consent::Gate>>,
+    gate: parking_lot::Mutex<Option<crate::run_context::LiveCheck>>,
     needs: Vec<String>,
+    /// What its extension may reach: its calls are decided within it.
+    grant: oxplow_domain::grant::Grant,
     /// What its `sql.read` reads through, the metric functions included.
     sql: crate::sql_gateway::SqlGateway,
     state: Option<(
@@ -437,6 +433,7 @@ impl Drop for Registration<'_> {
 impl HostCalls {
     pub fn new(
         needs: Vec<String>,
+        grant: oxplow_domain::grant::Grant,
         sql: crate::sql_gateway::SqlGateway,
         state: Option<(
             crate::extension_state::StateSource,
@@ -447,13 +444,14 @@ impl HostCalls {
         Arc::new(Self {
             gate: parking_lot::Mutex::new(None),
             needs,
+            grant,
             sql,
             state,
             runs: parking_lot::Mutex::default(),
         })
     }
 
-    pub fn set_gate(&self, gate: crate::exec_consent::Gate) {
+    pub fn set_gate(&self, gate: crate::run_context::LiveCheck) {
         *self.gate.lock() = Some(gate);
     }
 
@@ -524,19 +522,20 @@ impl HostCalls {
                 None => "a `host/call` names the invoke it serves (`key`)".to_string(),
             }));
         };
-        let (needs, sql, gate, state) = (
+        let (needs, grant, sql, gate, state) = (
             self.needs.clone(),
+            self.grant.clone(),
             self.sql.clone(),
             self.gate.lock().clone(),
             self.state.clone(),
         );
         let runtime = tokio::runtime::Handle::current();
         tokio::task::spawn_blocking(move || {
-            // Decided against the provider's own declaration, on the run
-            // it serves.
+            // Decided against the provider's own declaration, within its
+            // extension's permissions, on the run it serves.
             let mut run = run.clone().authorized(oxplow_domain::run::Authority {
                 declared: crate::grants::script_request(&needs),
-                grant: None,
+                grant: grant.clone(),
                 enforcement: crate::grants::enforcement(),
             });
             if let Some(gate) = gate {
@@ -554,7 +553,7 @@ impl HostCalls {
                     .child(Some(owner), oxplow_domain::run::Mode::External)
                     .authorized(oxplow_domain::run::Authority {
                         declared: crate::grants::script_request(&needs),
-                        grant: None,
+                        grant,
                         enforcement: crate::grants::enforcement(),
                     });
                 let configuration_run = state_run.clone();
@@ -587,166 +586,44 @@ impl HostCalls {
 }
 
 /// Where two declarations first differ, for the person reading why.
-pub fn first_difference(approved: &InitializeResult, live: &InitializeResult) -> String {
-    let a = serde_json::to_value(approved).unwrap_or_default();
+pub fn first_difference(declared: &InitializeResult, live: &InitializeResult) -> String {
+    let a = serde_json::to_value(declared).unwrap_or_default();
     let b = serde_json::to_value(live).unwrap_or_default();
     crate::extension_impact::json_difference(&a, &b)
-        .map(|(path, a, b)| format!("at `{path}`: approved {a}, running {b}"))
+        .map(|(path, a, b)| format!("at `{path}`: declared {a}, running {b}"))
         .unwrap_or_else(|| "they differ".into())
 }
 
 /// The host environment every provider is given, besides what its spec
 /// names. `LLVM_PROFILE_FILE` is set only in a coverage run, to an absolute
-/// path: without it an instrumented provider writes its `.profraw` into its
-/// working directory — the approved copy — which changes the copy's hash
-/// and loses the baseline `last_approved` reads.
+/// path: without it an instrumented provider would write its `.profraw`
+/// into its working directory — its deployment, which is read-only.
 pub(crate) const PASSED_ENV: [&str; 3] = ["PATH", "HOME", "LLVM_PROFILE_FILE"];
 
-/// An approved provider, as a start runs it: from its extension's
-/// deployment, which nothing changes after it is made, checked against
-/// what this machine approved — the bytes that run are the bytes whose
-/// hash was approved.
-pub struct ApprovedCopy {
-    pub hash: String,
-    /// Where `hash` is computed from (the project; the deployment's path is
-    /// whole).
-    pub root: PathBuf,
+/// A provider as a start runs it: from its extension's deployment, which
+/// nothing changes after it is made — under the `process` permission the
+/// person approved when they deployed it.
+pub struct Deployment {
     /// The provider's folder: its extension's deployment.
     pub ext_dir: PathBuf,
     /// Its declarations, read from the deployment.
     pub declared: InitializeResult,
 }
 
-/// The record of what a start of a program last ran (`copies/<ext>/<id>/last`):
-/// its hash and its deployment's folder.
-fn last_record(copies: &Path, ext: &str, id: &str) -> PathBuf {
-    copies.join(ext).join(id).join("last")
-}
-
-/// Check that `ext`'s provider `spec`, as its deployment holds it, is
-/// approved on this machine, and record that a start ran it — what
-/// [`last_approved`] reads.
-///
-/// One start of a program records at a time (tsk839), under an advisory
-/// lock on `copies/<ext>/<id>.lock`, which threads and processes alike
-/// wait on.
-pub fn approved_copy(
+/// `ext`'s provider `spec` in its deployment, its declarations read.
+pub fn deployment(
     project_dir: &Path,
-    copies: &Path,
-    approvals: &crate::exec_consent::ApprovalStore,
     ext: &crate::extensions::Extension,
     spec: &ProviderSpec,
-) -> Result<ApprovedCopy, HostError> {
-    let name = spec.approval_name(&ext.name);
-    let failed = |message: String| HostError::Failed {
-        name: name.clone(),
-        message,
-    };
-    let program = crate::exec_consent::provider_program(ext, spec);
+) -> Result<Deployment, HostError> {
     let ext_dir = ext_dir(project_dir, ext);
-    let base = copies.join(&ext.name).join(&spec.id);
-    let _one_at_a_time =
-        lock_copies(&base).map_err(|e| failed(format!("checking it to run: {e}")))?;
-    let hash = program
-        .hash(project_dir)
-        .map_err(|e| failed(format!("checking it to run: {e}")))?;
-    if !approvals.is_approved(&program.key(), &hash) {
-        return Err(HostError::Unapproved(name));
-    }
-    std::fs::create_dir_all(&base)
-        .and_then(|()| {
-            std::fs::write(
-                last_record(copies, &ext.name, &spec.id),
-                format!("{hash}\n{}\n", ext_dir.display()),
-            )
-        })
-        .map_err(|e| failed(format!("recording what ran: {e}")))?;
     let declared =
         super::spec::read_declarations(spec, &|f| std::fs::read_to_string(ext_dir.join(f)).ok())
-            .map_err(&failed)?;
-    Ok(ApprovedCopy {
-        ext_dir,
-        declared,
-        hash,
-        root: project_dir.to_path_buf(),
-    })
-}
-
-/// The extension a start of `ext`'s provider `id` last ran, loaded from its
-/// deployment, when that deployment is still in the store and unchanged.
-fn last_ran(copies: &Path, ext: &str, id: &str) -> Option<(String, crate::extensions::Extension)> {
-    let text = std::fs::read_to_string(last_record(copies, ext, id)).ok()?;
-    let mut lines = text.lines();
-    let (hash, dir) = (lines.next()?.to_string(), PathBuf::from(lines.next()?));
-    dir.is_dir()
-        .then(|| (hash, crate::extensions::load_extension_at(&dir, ext)))
-}
-
-/// The advisory lock on a program's copies (`<base>.lock`, beside the
-/// folder its cleanup empties), held until the file is dropped.
-pub(crate) fn lock_copies(base: &Path) -> std::io::Result<std::fs::File> {
-    use fs2::FileExt;
-    let parent = base.parent().unwrap_or(base);
-    std::fs::create_dir_all(parent)?;
-    let mut name = base.file_name().unwrap_or_default().to_os_string();
-    name.push(".lock");
-    let lock = std::fs::OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .truncate(false)
-        .open(parent.join(name))?;
-    lock.lock_exclusive()?;
-    Ok(lock)
-}
-
-/// The provider `spec` as a start last ran it: its spec and declarations,
-/// read from that deployment — what the person approved last, whether or
-/// not an instance runs now. `None` before it first ran, or once that
-/// deployment left the store.
-pub fn last_approved(
-    copies: &Path,
-    ext: &crate::extensions::Extension,
-    spec: &ProviderSpec,
-) -> Option<super::spec::DeclaredProvider> {
-    let base = copies.join(&ext.name).join(&spec.id);
-    if !base.is_dir() {
-        return None;
-    }
-    let _one_at_a_time = lock_copies(&base).ok()?;
-    let (hash, ran) = last_ran(copies, &ext.name, &spec.id)?;
-    let ran_spec = ran.providers.iter().find(|p| p.id == spec.id)?;
-    let program = crate::exec_consent::provider_program(&ran, ran_spec);
-    let dir = PathBuf::from(&ran.path);
-    if program.hash(&dir).ok()? != hash {
-        return None;
-    }
-    let declared = super::spec::DeclaredProvider::read(ran_spec, &|f| {
-        std::fs::read_to_string(dir.join(f)).ok()
-    });
-    declared.declarations.is_some().then_some(declared)
-}
-
-/// The credentials provider `provider` of extension `ext` declared in the
-/// deployment a start of it last ran: what a removed instance's are when
-/// the extension no longer declares the provider (tsk841). None when it
-/// never ran.
-pub fn last_ran_credentials(copies: &Path, ext: &str, provider: &str) -> Vec<String> {
-    let base = copies.join(ext).join(provider);
-    if !base.is_dir() {
-        return Vec::new();
-    }
-    let Ok(_one_at_a_time) = lock_copies(&base) else {
-        return Vec::new();
-    };
-    last_ran(copies, ext, provider)
-        .and_then(|(_, ran)| {
-            ran.providers
-                .into_iter()
-                .find(|p| p.id == provider)
-                .map(|p| p.credential_names())
-        })
-        .unwrap_or_default()
+            .map_err(|message| HostError::Failed {
+                name: spec.approval_name(&ext.name),
+                message,
+            })?;
+    Ok(Deployment { ext_dir, declared })
 }
 
 /// oxplow's MCP adapter (`oxplow-provider-mcp`, P7.A6): shipped beside

@@ -2722,62 +2722,52 @@ uses):
 
 ## Grants
 
-A **need** is what a contribution declares; a **grant** is what a person
-approved; a **decision** is what a run was allowed (`oxplow_domain::grant`,
-`grants.rs`).
+A **need** is what a contribution declares; a **grant** is what its
+extension may reach (its `permissions:`, approved when it was deployed —
+"Permissions"); a **decision** is what a run was allowed
+(`oxplow_domain::grant`, `grants.rs`).
 
 - **The request.** `GrantRequest { scopes, program, hosts, credentials,
   env, commands }`, derived from the declaration: an exec collector's
   entry, `network`, `credentials` and `env`; a collector's services
   (`services::collector_needs`: declared ∪ implied, `ai.compute` among
-  them for a model-calling script — a model is a scope, not a flag); a
-  script's (effect, command, effort policy) scopes from its `needs`; a
-  project program's from its listing (`program_request`).
-  `widening(granted)` names what a new request asks beyond a grant; a
-  narrower one asks nothing new.
-- **The grant.** `Grant { request, granted_at, granted_by, revoked_at }`.
-  What a run decides against is always the request derived from the
-  declaration *now* — the approval's hash proves that declaration is the
-  approved one — never a request stored in the approvals file, which a
-  process writing that file could widen.
+  them for a model-calling script); a script's (effect, command, effort
+  policy, job, provider `host/call`) scopes from its `needs`.
+- **The grant.** `Grant { namespace, permissions }` (`grants::grant_of`):
+  the extension's command namespace and its declared permissions. There is
+  no approvals store and nothing hashed per program: the deployment is
+  immutable, so what runs is what was deployed, and the deployment's
+  permissions are what a person approved.
 - **The authority** a run carries (`RunContext::authorized`,
-  `run::Authority { declared, grant, enforcement }`): the grant when a
-  person's approval is what lets it run (a program, a model-calling
-  script, an effect), else its declaration alone (a script command, a
-  policy's script, a provider's `host/call`s — decided against the
-  provider's own `needs`). Core's own work has none and is allowed what
-  it does.
-- **The loaded-vs-disk gate.** Every script kind a person approves — an
-  effect, an effort policy, a model-calling collector or provider script —
-  runs under `exec_consent::loaded_script_gate`: besides the approval hash of
-  the folder as it is on disk, it refuses (at each host call and at
-  publication) when the script *as the catalog loaded it* differs from the
-  file now ("the loaded script differs from the approved version; reload
-  it"). Approving an edited file therefore never lets the older cached text
-  run; the next catalog publication loads the new one. Pinned for effects by
-  `an_effect_whose_file_changed_since_it_loaded_is_refused`.
-- **Revocation stops every kind of run, which records `cancelled`.** A
-  program's whole process group is killed (`external_process::RevocationWatch`),
-  a job's supervisor cancels its attempt, and an in-process script — a
-  Starlark or jaq collector, a fact collector, an effect, an effort-policy
-  script — runs under `run_context::watch_authority(run)`: a task checking the
-  run's guards every 100 ms until it is dropped, which sets the run's cancel
-  flag when one fails; the script worker polls that flag. Without it a script
-  computing with no host call would run on to its timeout (120 s by default)
-  and only be discarded at publication. Pinned by
-  `disabling_an_extension_stops_a_collector_script_that_is_computing` and
-  `revoking_an_effect_stops_a_script_that_is_computing`.
+  `run::Authority { declared, grant, enforcement }`,
+  `grants::authority(ext, declared)`). Every extension run has one: a
+  collector, an effect, a job, a script command, a scripted effort policy,
+  a provider's `host/call`s. Core's own work has none and is allowed what
+  it does (core's built-in effort policy, core commands).
 - **Decisions.** `run.decide(Need)` → `Allowed`, `Denied(why)` or
-  `Unenforced(why)`, recorded on the run (`v_extension_run.decisions`):
-  each scope call (`Calls::serve`); a program collector's `program`,
-  `files`, each `env` name, each `host` and each `credential` — a
-  credential its grant doesn't name is never read from the keychain; a
-  script's services (`scope` `tree.read` / `ai.compute`, by the router).
-  A denied need stops what asked for it.
-  `Enforcement { hosts }` is the one table of what this machine holds.
-  A program's file and network decisions remain `unenforced`: macOS's
-  proxy and direct-network sandbox do not prevent local brokers or file
-  access. `grants::gaps` reports this in Programs and review grant lines.
+  `Unenforced(why)`, recorded on the run (`v_extension_run.decisions`).
+  `grant::decide` refuses what the contribution didn't declare ("not
+  declared"), then what its extension's permissions don't allow — the
+  refusal names the permission: ``needs `permissions.ai` in the
+  extension's manifest`` (`Grant::permits`: `sql.read` → `sql`;
+  `tree.read` and paths → `files`; `ai.compute`/`ai.discover` → `ai`; a
+  program, its files and env → `process`; a host → `network`; a
+  credential → `secrets`; a command outside the extension's namespace →
+  `commands`). Then `Enforcement { hosts }` says what this machine can't
+  hold it to: a program's files always, its hosts wherever the network
+  isn't confined — `Unenforced`, said rather than passed off as held.
+  Decided: each scope call (`Calls::serve`); a program collector's
+  `program`, `files`, each `env` name, each `host` and each `credential` —
+  one not permitted is never read from the keychain; a script's services
+  (`scope` `tree.read` / `ai.compute`, by the router). A denied need stops
+  what asked for it. A model-calling Starlark collector or fact collector
+  is refused at its `ai.compute` decision when its extension lacks `ai`
+  (`RunCollectorError::Denied`, recorded as the run's `error`).
+- **What the loader already refused.** Most of this is decided before
+  anything runs: an extension whose contents need a permission it doesn't
+  declare doesn't load ("Permissions"). The runtime decisions are for what
+  only a run reveals — a script's composed commands, a path or model it
+  reads.
 - **Bounded reads.** `sql.read:v_work_item` names an exact published
   model; use multiple needs for multiple models. SQLite preparation checks
   the query's models and transitive registered `ref` inputs, including
@@ -2789,75 +2779,46 @@ approved; a **decision** is what a run was allowed (`oxplow_domain::grant`,
   directory. Absolute paths, traversal, backslashes and globs are refused.
   The host filters its captured tree before giving it to a script; these
   needs do not grant raw filesystem access. Bare `tree.read` grants the
-  whole captured tree.
-  Manifest validation, capability availability, command script checks and grant
-  request construction recognize the validated service prefix while preserving
-  the original qualifier. Transactional command composers still refuse bounded
-  tree reads because their tree service is unavailable inside the transaction.
+  whole captured tree. A collector's `input:` query is the host's, under
+  its declared model bounds, and needs no `sql` permission.
 - **External execution.** Every external program (an exec collector, a
-  project fact program, a report parser, an external provider, a harness
-  or MCP stdio server) runs with the person's file, network and process
-  authority. Nothing declares that, and the approval says so plainly: a
-  program "runs with your file, network and process authority; oxplow
-  cleans up its processes but doesn't confine it". Confining external
-  processes is shelved (the owner's decision); a confinement tier is
-  deferred until real OS confinement exists, and there is no `execution:`
-  key (a manifest still declaring it is a load error). A program's file and
-  network decisions stay `unenforced`. What oxplow does do is cleanup, not
-  confinement: on Unix each program runs in an owned process group, killed
-  on completion, timeout, cancellation or revocation. A process can escape
-  its group. Platforms without owned-group cleanup just run the program.
-  Pipe I/O also has a deadline, so escaped children cannot leave host
-  drain/writer threads blocked indefinitely.
-  Environment/credential delivery is deliberately process-readable;
-  contained script services never receive keychain values.
-  Entity collector programs run from a private per-run copy, verified against
-  the approved declaration and code hash before launch and during execution.
-  Their working directory and `OXPLOW_EXTENSION_DIR` name that copy, so helpers
-  load the approved code. The complete copied folder is limited to 500 files
-  and 16 MiB, including its manifest and lenses; oversized folders fail before
-  launch. Entries under normally excluded metadata paths are hashed explicitly
-  and need renewed approval. Copy preparation rejects symlinks and special
-  files; the copy is removed when the run releases it. Original-tree edits or
-  copy changes stop the run under the live authority policy.
-  Disk extension reads also refuse special files and files larger than 16 MiB;
-  Unix opens refuse a final symlink and avoid blocking on replacement FIFOs.
-  Project fact programs and report parsers use the same bounded copy helper,
-  with their project-relative code layout preserved. Their guard owns the copy;
-  `OXPLOW_CODE_DIR` names its root and `OXPLOW_PROJECT_DIR` names the original
-  checkout for their approved data access.
+  fact program, a report parser, an external provider, a harness or MCP
+  stdio server) runs from its extension's deployment — working directory
+  and `OXPLOW_EXTENSION_DIR` both — under the `process` permission, with
+  the person's file, network and process authority, and a deploy that adds
+  `process` says so plainly. Confining external processes is shelved (the
+  owner's decision); there is no `execution:` key. What oxplow does do is
+  cleanup, not confinement: on Unix each program runs in an owned process
+  group, killed on completion, timeout, cancellation or when its extension
+  stops being live; a process can escape its group. Pipe I/O has a
+  deadline, so escaped children cannot leave host threads blocked.
+  Credentials are handed to a process at spawn and are process-readable;
+  contained script services never receive keychain values. Disk extension
+  reads refuse special files and files larger than 16 MiB; Unix opens
+  refuse a final symlink and avoid blocking on replacement FIFOs.
+- **Live checks.** A run that outlives a generation holds a
+  `run_context::LiveCheck` (`live_owner`: its extension still enabled, at
+  its version, still declaring it), composed through nested runs and
+  rechecked before sensitive calls and publication. A program's process
+  group is killed when it fails (`external_process`); an in-process script
+  runs under `run_context::watch_authority(run)`, which sets the run's
+  cancel flag (the script worker polls it). Disabling or redeploying an
+  extension therefore stops its running work. This cannot undo an external
+  side effect already performed.
 - **Collector previews.** A preview stores no rows, but receives the same
-  contribution authority and pinned live consent as an ordinary entity
-  collector run. Previewing cannot bypass declared model/path access or
-  continue an AI/program call after its approval changes.
-- **Revoking** removes the approval ([architecture.md](./architecture.md)
-  "A repo's config never runs a program without consent"). Host-owned
-  `RunContext::guarded` checks pin the approved version, compose through
-  nested runs and recheck before sensitive calls/publication. Replacement
-  approval cannot authorize an already loaded old script. External hosts
-  poll live consent with 100 ms between checks; entity collector processes
-  use 25 ms and report/fact programs 10 ms between checks. In-flight AI futures are dropped and their results discarded.
-  This cannot undo an external side effect already performed.
+  authority as an ordinary run; it never runs a program.
 - **Component authority.** Query messages carry the loaded bundle version.
-  Asset and command allowlists come from that immutable bundle; adding
-  manifest permissions cannot widen a running frame. Asset declarations
-  are included in component approval hashes.
+  Asset and command allowlists come from that bundle; a component's
+  commands outside its namespace need `permissions.commands` (the loader
+  checks them).
 - **Not yet:** OS confinement and model call-count/monetary budgets.
-- **Deliberately still open** (audited sound by design; the hardening is
-  deferred until the extension API settles):
+- **Deliberately still open:**
   - adversarial tests for bounded `sql.read` (CTEs, UNIONs, table-valued
     and pragma functions, the `metric_grid()` refusal) and bounded
-    `tree.read:` (sibling prefixes, `..`), and for `copy_directory`'s
-    refusals and a file changed mid-copy;
-  - the approved copy is writable, so a same-user process could rewrite
-    it between the last re-hash and `execve` (the poll then kills it);
-  - a shebang's interpreter resolves from `PATH` and isn't part of the
-    approval;
-  - `extension.yaml` and `lenses/` are copied into a program's copy but
-    not hashed;
-  - credentials are handed to a process at spawn: revocation kills it
-    but can't take a credential back, and a keychain deletion mid-run
-    isn't watched;
+    `tree.read:` (sibling prefixes, `..`);
+  - a shebang's interpreter resolves from `PATH`;
+  - credentials are handed to a process at spawn: stopping it can't take
+    a credential back, and a keychain deletion mid-run isn't watched;
   - a run built without authority is unbounded (core's own runs, by
     design; not yet a tested invariant);
   - network confinement is `sandbox-exec` on macOS only.

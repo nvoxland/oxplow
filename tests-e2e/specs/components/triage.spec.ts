@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import type { Page } from "@playwright/test";
 
-import { approveCollector, approveProgram, installExample, ipc, run, until, type Daemon } from "../../support/daemon.js";
+import { installExample, ipc, run, until, type Daemon } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
@@ -69,14 +69,12 @@ test("TODOs are sorted by the scripted model, and a decision from the board or t
   try {
     await install(daemon);
     // The model: the suite extension's scripted provider, at the echo server.
-    await approveProgram(daemon, "ai-provider", "e2e/sorter");
     await ipc(daemon, "save_ai_provider", { provider: { id: "sorter", kind: "sorter", baseUrl: model.url }, key: null });
     await ipc(daemon, "set_ai_role", { role: "decide", binding: { provider: "sorter", model: "sorter" } });
     await until("the todos collector to be listed", 60_000, async () => {
       const collectors = await ipc<Array<{ owner: string; spec: { id: string } }>>(daemon, "list_collectors");
       return collectors.some((c) => c.owner === "triage" && c.spec.id === "todos");
     });
-    await approveCollector(daemon, "triage", "todos");
 
     mkdirSync(join(daemon.project, "src"), { recursive: true });
     writeFileSync(
@@ -96,11 +94,6 @@ test("TODOs are sorted by the scripted model, and a decision from the board or t
     const card = (line: number) => frame.locator(".card", { hasText: `src/lib.rs:${line}` });
     await expect(frame.locator(".column", { hasText: "bug" }).locator(".card")).toHaveCount(1);
     await expect(card(3)).toBeVisible();
-    // Until the board is approved it shows the TODOs and says so.
-    await expect(frame.locator("#status")).toContainText("Approve");
-    await approveProgram(daemon, "component", "triage/todo-board");
-    await reload(page);
-    await openFromLauncher(page, "TODO Board");
     await expect(frame.locator("#status")).toHaveText("");
 
     // A decision from the board's card form.

@@ -692,6 +692,19 @@ impl ExtensionActivation {
                             &live,
                         )
                         .map_err(TxError::Storage)?;
+                        // An effect starts when a generation that runs it
+                        // first publishes: it never reacts to the past.
+                        let now = Timestamp::now().to_string();
+                        for ext in published.extensions().iter().filter(|e| e.enabled) {
+                            for effect in &ext.effects {
+                                oxplow_db::effect_state_store::start_if_new_tx(
+                                    publication.transaction()?,
+                                    &effect.name(),
+                                    &now,
+                                )
+                                .map_err(TxError::Storage)?;
+                            }
+                        }
                     }
                     // Stored settings behind an extension's declared schema
                     // are carried forward in this transaction: a step that

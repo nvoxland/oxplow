@@ -572,62 +572,23 @@ provider's program must be findable where a person's would be; `ran`
 shows `agent_harness suite`. The MCP adapter
 (`oxplow-provider-mcp`) still maps work-item refs only.
 
-**Consent precedes execution** (`exec_consent`, `ProgramKind::Provider`,
-key `provider:<ext>/<id>`): the approval hash covers every file in the
-extension folder but the manifest and `lenses/` — dot-files, the entry
-and the declarations file among them; a symlink anywhere makes it
-unapprovable — plus the entry path, `args` (hashed relative to the
-folder, where it runs; an arg path leaving the folder is refused at
-load), `env` names, `credentials` (each as `CredentialDecl::grant` renders
-it — a signed-in one with its endpoints, client id, OAuth scopes, client secret's
-name and redirect port, so changing where it signs in asks again) and
-`network`, and the scopes it `needs`. So a changed declaration is a new
-version, shown unapproved in Settings → Data → Programs (with its grants listed)
-until a person approves it again. Every start re-checks it, restarts
-included.
+**A provider runs under its extension's permissions** (`.context/extensions.md`
+"Permissions"): its manifest declares `process` (an `entry` or an MCP
+`command`), the `network` hosts it reaches and the `secrets` its credentials
+name — the loader refuses it otherwise, naming what to declare — and a person
+approved them when they deployed the extension (a deploy that adds one asks
+first; an agent's becomes a proposal). There is no per-program approval.
 
-**The approval shows what it changes**: an unapproved
-provider's row loads `provider_declaration_impact { instance }`
-(`ProviderRegistry::declaration_impact`: the spec and declarations on
-disk against the last approved copy's — `host::last_approved`, the
-intact `copies/<ext>/<id>/<hash>` a start last ran, so a changed spec
-that stopped the instance, or a restart, still shows what changed — or
-everything it declares when it never ran; read, never run) and lists
-its hosts, credentials, commands added, removed or changed (destructive
-ones marked), features, or — when none of those shows the change — where
-the declarations first differ (`ProviderImpact.lines`, worded in Rust
-by `extension_impact::approval_lines`). Its Approve stays disabled
-until that diff has loaded (`canApprove`), on top of the reviewed
-`version` round trip; a diff that fails to load is shown on the row
-("Couldn't compare its declarations: …") and Approve stays disabled with
-that reason. The diffs reload only when the set of unapproved providers
-or their on-disk `version` changes.
-
-**What runs is a verified copy** (`host::approved_copy`, tsk547). Each
-start copies the extension folder into `<oxplow home>/provider-copies/
-<project>/<ext>/<id>/<hash>/` (in-memory services: under the state
-dir), hashes the copy, and runs only if that hash is approved — then
-spawns the entry from the copy and reads the declarations from it. So
-what runs is exactly what was approved: a checkout or an edit to the
-live tree between the check and the exec, or under a provider that
-loads its modules lazily, can't slip in. An existing copy is re-hashed
-before each run (a process running as the person can still write
-there) and replaced if it changed; older copies go. The provider's
-working directory and `OXPLOW_EXTENSION_DIR` are the copy — so a file the
-provider writes there changes the copy's hash: the next start copies
-afresh, and `last_approved` (the impact baseline) finds nothing until it
-does. The host's env passthrough is `PATH`, `HOME` and the spec's `env`,
-plus `LLVM_PROFILE_FILE` (set only in a coverage run, to an absolute path)
-so an instrumented provider doesn't write its `.profraw` into the copy
-(`host::PASSED_ENV`). Instances of
-one program share its copies and start together routinely, so one start
-of a program copies at a time (tsk839): the copy, keep and cleanup run
-under an advisory lock on `<ext>/<id>.lock` (`fs2`, beside the folder
-the cleanup empties) that threads and processes alike wait on — no
-start removes another's temp copy or the copy another just kept, and a
-temp copy found under the lock was abandoned. Readers of the copies take
-the same lock (`last_approved`, `last_ran_credentials`), so a review never
-sees a copy a start is half way through replacing.
+**What runs is its deployment** (`host::deployment`). A start reads the
+provider's declarations from its extension's deployment
+(`.oxplow/runtime/extensions/<name>/<hash>/`), which nothing changes after it
+is made, and spawns the entry there; its working directory and
+`OXPLOW_EXTENSION_DIR` are that folder. A changed source changes nothing that
+runs until it is deployed, and a deployment changes what runs by
+activation, which restarts the instances it touches. The host's env
+passthrough is `PATH`, `HOME` and the spec's `env`, plus `LLVM_PROFILE_FILE`
+(set only in a coverage run, to an absolute path) so an instrumented provider
+doesn't write its `.profraw` into the deployment (`host::PASSED_ENV`).
 
 **The spawn** (`host.rs`, `connect`) mirrors an `exec` source: a
 scrubbed environment (PATH, HOME, the declared `env` names, the
@@ -637,7 +598,7 @@ credentials from the instance's keychain accounts
 `sandbox-exec` where the OS enforces `network`, stderr to the log, and
 `kill_on_drop` as the last resort. **A process is ended the orderly
 way** (`Connection::shutdown`): every stop — reconcile, a config or
-approval change, a disable, a sign-in renewal (`Instance::end`, outside
+deployment change, a disable, a sign-in renewal (`Instance::end`, outside
 the `live` lock; the renewal is recorded first, so a call it cuts off
 knows why), `check_as`, and the daemon's exit (`Services::shutdown` → `shutdown_all`, every
 instance at once, within 2 s of the supervisor's grace; `process::exit`
@@ -645,7 +606,7 @@ runs no destructors, so without it the processes were orphaned) — sends
 `shutdown` and waits `HostDeps.shutdown_grace`
 (`MachineEnv.provider_shutdown_grace`: 5 s in the app, 1 s in
 `Services::in_memory`) for the process to exit, then kills it. Then **the handshake**: the live `initialize` must equal
-the approved declarations (`HostError::DeclarationsChanged` names the
+the deployment's declarations (`HostError::DeclarationsChanged` names the
 first difference), and `check` of the instance's config must return a
 handle (`HostError::Unconfigured { problems }` otherwise). A request
 from the provider is answered `MethodNotFound` but `host/call`, served by

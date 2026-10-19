@@ -3,7 +3,7 @@
 // boots the worker's daemon: only `page` (through `storageState`) asks for it.
 import { test as base, expect, type Page } from "@playwright/test";
 
-import { approveProgram, deploy, ipc, settle, startDaemon, until, type Daemon } from "./daemon.js";
+import { deploy, ipc, settle, startDaemon, until, type Daemon } from "./daemon.js";
 
 type Stream = { id: string };
 type Thread = { id: string };
@@ -43,10 +43,7 @@ async function workspace(): Promise<Workspace> {
       });
       return out.rows.length > 0;
     });
-    // Its pages open on the fake harness, a provider from the project:
-    // approved first, as a person does before using it, so no spec
-    // depends on another having approved it.
-    await approveProgram(daemon, "provider", "e2e/terminal");
+    // Its pages open on the fake harness, a provider from the project.
     await until("the fake harness to be registered", 60_000, async () => {
       const harnesses = await ipc<Array<{ id: string; enabled: boolean }>>(daemon, "list_agent_harnesses");
       return harnesses.some((h) => h.id === "terminal" && h.enabled);

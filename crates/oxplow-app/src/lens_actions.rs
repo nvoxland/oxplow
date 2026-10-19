@@ -599,16 +599,6 @@ async fn invoke_component_command_unpinned(
             ),
         });
     }
-    let program = crate::exec_consent::component_program(&ext, &component);
-    if !svc.approvals.is_approved(&program.key(), &loaded.version) {
-        return Err(CommandError::Denied {
-            reason: crate::exec_consent::needs_approval(
-                program.kind,
-                &program.name,
-                &program.program,
-            ),
-        });
-    }
     svc.commands
         .run(
             &Actor::Lens {
@@ -1138,22 +1128,6 @@ actions:
         (fx, root)
     }
 
-    /// Approve `acme/board` as it is now, as a person on Programs does.
-    async fn approve_board(fx: &crate::test_fixtures::EffortFixture, root: &Path) {
-        let ext = fx.svc.extension_catalog.named(root, "acme").unwrap();
-        let program = crate::exec_consent::component_program(&ext, &ext.custom_components[0]);
-        crate::exec_consent::approve_program(
-            &fx.svc.approvals,
-            root,
-            std::slice::from_ref(&ext),
-            crate::exec_consent::ProgramKind::Component,
-            &program.name,
-            &program.hash(root).unwrap(),
-        )
-        .unwrap();
-        crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    }
-
     /// Load `acme/view`'s bundle as its frame does: the version it runs.
     async fn load_board(fx: &crate::test_fixtures::EffortFixture, root: &Path) -> String {
         // Whatever was edited since is published first, as the owner of
@@ -1178,79 +1152,6 @@ actions:
         }
     }
 
-    /// The programs a person is asked to approve, as Programs lists them.
-    fn programs(
-        fx: &crate::test_fixtures::EffortFixture,
-        root: &Path,
-    ) -> Vec<crate::exec_consent::ProjectProgram> {
-        crate::exec_consent::list(
-            &fx.svc.approvals,
-            root,
-            fx.svc
-                .extension_catalog
-                .unpinned(root, "a test reads declarations")
-                .as_ref(),
-        )
-    }
-
-    /// P11 (tsk960): a component that declares commands acts with a
-    /// person's rights, so it is a program a person approves — its bundle
-    /// and the commands it may run. Until then its invoke is refused and
-    /// nothing runs; approved as it is now, it runs; a changed bundle asks
-    /// again.
-    #[tokio::test]
-    async fn an_unapproved_components_invoke_is_refused() {
-        let (fx, root) = component_fixture().await;
-        let listed = programs(&fx, &root);
-        let board = listed
-            .iter()
-            .find(|p| p.kind == crate::exec_consent::ProgramKind::Component)
-            .expect("listed on Programs");
-        assert_eq!(board.name, "acme/board");
-        assert_eq!(
-            board.commands,
-            vec!["oxplow.work_item.transition".to_string()]
-        );
-        assert!(!board.approved);
-        let version = load_board(&fx, &root).await;
-        assert_eq!(
-            board.version.as_deref(),
-            Some(version.as_str()),
-            "the listing's version is the frame's"
-        );
-        let invoke = || board_invoke(&fx, "oxplow.work_item.transition", &version);
-        refused(
-            invoke_component_command(&fx.svc, &root, invoke())
-                .await
-                .unwrap_err(),
-            "approval",
-        );
-        assert_ne!(state(&fx.svc, fx.task).await, "done");
-        approve_board(&fx, &root).await;
-        invoke_component_command(&fx.svc, &root, invoke())
-            .await
-            .unwrap();
-        assert_eq!(state(&fx.svc, fx.task).await, "done");
-        // A changed bundle is another version: loaded again, it asks again.
-        std::fs::write(
-            root.join(".oxplow/extensions/acme/components/board/index.html"),
-            "<!doctype html><script src=other.js></script>",
-        )
-        .unwrap();
-        let changed = load_board(&fx, &root).await;
-        assert_ne!(changed, version);
-        refused(
-            invoke_component_command(
-                &fx.svc,
-                &root,
-                board_invoke(&fx, "oxplow.work_item.transition", &changed),
-            )
-            .await
-            .unwrap_err(),
-            "approval",
-        );
-    }
-
     /// `err` is a refusal saying `why`.
     fn refused(err: CommandError, why: &str) {
         assert!(
@@ -1260,33 +1161,14 @@ actions:
         );
     }
 
-    /// tsk984: what acts is what the frame loaded. A frame loaded while the
-    /// bundle was edited can't act on the approval of what the disk says
-    /// once it's put back; one loaded at the approved version keeps acting
-    /// whatever the disk says later — it runs what was approved. A version
-    /// that isn't loaded, or is another component's, is refused.
+    /// tsk984: what acts is what the frame loaded. A frame keeps acting at
+    /// the version it loaded whatever the disk says later. A version that
+    /// isn't loaded, or is another component's, is refused.
     #[tokio::test]
-    async fn an_invoke_acts_only_for_the_version_its_frame_loaded() {
+    async fn an_invoke_acts_only_for_a_version_that_is_loaded() {
         let (fx, root) = component_fixture().await;
         let index = root.join(".oxplow/extensions/acme/components/board/index.html");
-        let approved = load_board(&fx, &root).await;
-        approve_board(&fx, &root).await;
-        std::fs::write(&index, "<!doctype html><script src=evil.js></script>").unwrap();
-        let tampered = load_board(&fx, &root).await;
-        refused(
-            invoke_component_command(
-                &fx.svc,
-                &root,
-                board_invoke(&fx, "oxplow.work_item.transition", &tampered),
-            )
-            .await
-            .unwrap_err(),
-            "approval",
-        );
-        assert_ne!(state(&fx.svc, fx.task).await, "done");
-        // Put back, the next generation serves the approved bytes again.
-        std::fs::write(&index, "<!doctype html>").unwrap();
-        assert_eq!(load_board(&fx, &root).await, approved);
+        let loaded = load_board(&fx, &root).await;
         refused(
             invoke_component_command(
                 &fx.svc,
@@ -1301,7 +1183,7 @@ actions:
         invoke_component_command(
             &fx.svc,
             &root,
-            board_invoke(&fx, "oxplow.work_item.transition", &approved),
+            board_invoke(&fx, "oxplow.work_item.transition", &loaded),
         )
         .await
         .unwrap();
@@ -1310,17 +1192,15 @@ actions:
 
     /// A hot update: once a changed bundle is activated, a frame still on
     /// the old version can't act — it's told to reload — and the version
-    /// it reloads at acts only once a person approves that code; the old
-    /// approval doesn't carry over.
+    /// it reloads at acts.
     #[tokio::test(flavor = "multi_thread")]
-    async fn an_activated_edit_needs_a_reload_and_its_own_approval() {
+    async fn an_activated_edit_needs_a_reload() {
         let (fx, root) = component_fixture().await;
         let activate = || async {
             crate::test_fixtures::activate_with_problems(&fx.svc).await;
         };
         activate().await;
         let old = load_board(&fx, &root).await;
-        approve_board(&fx, &root).await;
 
         std::fs::write(
             root.join(".oxplow/extensions/acme/components/board/index.html"),
@@ -1340,18 +1220,7 @@ actions:
         );
         let new = load_board(&fx, &root).await;
         assert_ne!(new, old);
-        refused(
-            invoke_component_command(
-                &fx.svc,
-                &root,
-                board_invoke(&fx, "oxplow.work_item.transition", &new),
-            )
-            .await
-            .unwrap_err(),
-            "approval",
-        );
         assert_ne!(state(&fx.svc, fx.task).await, "done");
-        approve_board(&fx, &root).await;
         invoke_component_command(
             &fx.svc,
             &root,
@@ -1425,17 +1294,12 @@ actions:
         assert_eq!(served.file("").as_deref(), Some(&b"<!doctype html>"[..]));
         std::fs::write(ext.join("components/board/index.html"), "<!doctype html>2").unwrap();
         assert_ne!(load_board(&fx, &root).await, first);
-        let program = programs(&fx, &root)
-            .into_iter()
-            .find(|p| p.kind == crate::exec_consent::ProgramKind::Component)
-            .unwrap();
-        assert_ne!(program.version.as_deref(), Some(first.as_str()));
     }
 
     /// P11 (tsk960): a component that declares no commands can only show
-    /// and query — nothing to approve, and it isn't listed.
+    /// and query.
     #[tokio::test]
-    async fn a_component_without_commands_needs_no_approval() {
+    async fn a_component_without_commands_can_query() {
         let (fx, root) = fixture().await;
         let ext = root.join(".oxplow/extensions/acme");
         std::fs::write(
@@ -1450,9 +1314,6 @@ actions:
             "title: View\nquery: SELECT 1 AS n\nviz: custom\ncustom: { component: board }\n",
         )
         .unwrap();
-        assert!(programs(&fx, &root)
-            .iter()
-            .all(|p| p.kind != crate::exec_consent::ProgramKind::Component));
         let ctx = extensions::LensContext::default();
         run_component_query(
             &fx.svc,
@@ -1528,7 +1389,6 @@ actions:
                 .contains("isn't one of component `board`'s commands"),
             "{err}"
         );
-        approve_board(&fx, &root).await;
         let out = invoke_component_command(&fx.svc, &root, invoke("oxplow.work_item.transition"))
             .await
             .unwrap();
@@ -1554,7 +1414,6 @@ actions:
     async fn a_component_invoke_with_a_non_object_input_is_invalid() {
         let (fx, root) = component_fixture().await;
         let version = load_board(&fx, &root).await;
-        approve_board(&fx, &root).await;
         for input in [
             serde_json::json!([1, 2]),
             serde_json::json!("done"),

@@ -234,15 +234,13 @@ async fn a_service_the_script_did_not_declare_is_refused() {
     );
 }
 
-mod approved_code {
+mod program_collectors {
     use std::os::unix::fs::PermissionsExt;
 
     use oxplow_domain::run::{Mode, RunContext};
 
     use super::*;
-    use crate::collector_runner::{
-        approval_hash, approve, run_collector, Collectors, RunCollectorError, RunTrigger,
-    };
+    use crate::collector_runner::{run_collector, Collectors, RunCollectorError, RunTrigger};
 
     const MANIFEST: &str = "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: { process: true }\ncollectors:
   - id: sync
@@ -280,75 +278,8 @@ mod approved_code {
         .await
     }
 
-    async fn approve_current(fx: &TaskEffortFixture) {
-        // The approval is of what is deployed.
-        crate::test_fixtures::activate_with_problems(&fx.svc).await;
-        let root = fx.svc.layout.project_dir.clone();
-        let ext = fx
-            .svc
-            .extension_catalog
-            .snapshot(&root)
-            .extensions()
-            .iter()
-            .find(|e| e.name == "acme")
-            .cloned()
-            .unwrap();
-        let spec = ext.collectors[0].clone();
-        let hash = approval_hash(&root.join(&ext.path), &spec).unwrap();
-        approve(&fx.svc.approvals, "acme", "sync", &hash).unwrap();
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_program_runs_only_once_approved_and_asks_again_when_edited() {
-        let fx = services_with_task_effort().await;
-        let root = fx.svc.layout.project_dir.clone();
-        write(&root, ".oxplow/extensions/acme/extension.yaml", MANIFEST);
-        let marker = root.join("ran");
-        let program = |entities: &str| {
-            format!(
-                "#!/bin/sh\ntouch {}\necho '{{\"entities\":{{\"seen\":{entities}}}}}'\n",
-                marker.display()
-            )
-        };
-        script(&root, "sync.sh", &program("[{\"k\":\"a\",\"v\":\"one\"}]"));
-
-        let refused = go(&fx).await.unwrap_err();
-        assert!(
-            matches!(refused, RunCollectorError::NeedsApproval(_)),
-            "{refused:?}"
-        );
-        assert!(!marker.exists(), "an unapproved program never starts");
-
-        approve_current(&fx).await;
-        go(&fx).await.unwrap();
-        assert!(marker.exists());
-
-        // Any edit to the program asks again, and the edited program doesn't run.
-        std::fs::remove_file(&marker).unwrap();
-        script(&root, "sync.sh", &program("[]"));
-        let refused = go(&fx).await.unwrap_err();
-        assert!(
-            matches!(refused, RunCollectorError::NeedsApproval(_)),
-            "{refused:?}"
-        );
-        assert!(
-            !marker.exists(),
-            "an edited program does not run unapproved"
-        );
-
-        // So does a helper added beside it, which the approval covers.
-        approve_current(&fx).await;
-        go(&fx).await.unwrap();
-        script(&root, "helper.txt", "added later");
-        let refused = go(&fx).await.unwrap_err();
-        assert!(
-            matches!(refused, RunCollectorError::NeedsApproval(_)),
-            "{refused:?}"
-        );
-    }
-
-    /// Disabling the extension revokes both its command and its approved
-    /// program on their next call, with no restart.
+    /// Disabling the extension revokes both its command and its program on
+    /// their next call, with no restart.
     #[tokio::test(flavor = "multi_thread")]
     async fn disabling_the_extension_stops_its_next_command_and_collector_run() {
         let fx = services_with_task_effort().await;
@@ -373,7 +304,6 @@ mod approved_code {
             "#!/bin/sh\necho '{\"entities\":{\"seen\":[]}}'\n",
         );
         crate::test_fixtures::activate(&fx.svc).await;
-        approve_current(&fx).await;
         assert!(super::run(&fx, "acme.read.all").await.is_ok());
         go(&fx).await.unwrap();
 
@@ -396,136 +326,11 @@ mod approved_code {
             "{refused:?}"
         );
 
-        // Enabling it again restores both; the approval was kept.
+        // Enabling it again restores both.
         std::fs::remove_file(root.join(".oxplow/personal.yaml")).unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
         assert!(super::run(&fx, "acme.read.all").await.is_ok());
         go(&fx).await.unwrap();
-    }
-
-    /// The rows the collector published, read from its entity table.
-    async fn seen(fx: &TaskEffortFixture) -> Vec<(String, String)> {
-        fx.svc
-            .db
-            .read(|c| {
-                // The table appears with the first write.
-                let exists: bool = c
-                    .query_row(
-                        "SELECT count(*) > 0 FROM sqlite_master WHERE name = 'ext__acme__seen'",
-                        [],
-                        |r| r.get(0),
-                    )
-                    .map_err(oxplow_db::map_sql_err)?;
-                if !exists {
-                    return Ok(Vec::new());
-                }
-                let mut s = c
-                    .prepare("SELECT k, v FROM ext__acme__seen ORDER BY k")
-                    .map_err(oxplow_db::map_sql_err)?;
-                let rows = s
-                    .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-                    .map_err(oxplow_db::map_sql_err)?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(oxplow_db::map_sql_err)?;
-                Ok(rows)
-            })
-            .await
-            .unwrap()
-    }
-
-    /// A waiting program: reports where it ran, and what its helper said
-    /// once the test released it.
-    async fn waiting_program(fx: &TaskEffortFixture) -> (std::path::PathBuf, std::path::PathBuf) {
-        let root = fx.svc.layout.project_dir.clone();
-        write(&root, ".oxplow/extensions/acme/extension.yaml", MANIFEST);
-        script(&root, "helper.txt", "approved");
-        let started = root.join("started");
-        let release = root.join("release");
-        script(
-            &root,
-            "sync.sh",
-            &format!(
-                "#!/bin/sh\ntouch {started}\nwhile [ ! -f {release} ]; do sleep 0.05; done\nprintf '{{\"entities\":{{\"seen\":[{{\"k\":\"dir\",\"v\":\"%s\"}},{{\"k\":\"helper\",\"v\":\"%s\"}}]}}}}' \"$OXPLOW_EXTENSION_DIR\" \"$(cat helper.txt)\"\n",
-                started = started.display(),
-                release = release.display()
-            ),
-        );
-        crate::test_fixtures::activate_with_problems(&fx.svc).await;
-        approve_current(fx).await;
-        (started, release)
-    }
-
-    async fn start(
-        fx: &TaskEffortFixture,
-        started: &Path,
-    ) -> tokio::task::JoinHandle<
-        Result<crate::collector_runner::CollectorRunReport, RunCollectorError>,
-    > {
-        let svc = fx.svc.clone();
-        let root = fx.svc.layout.project_dir.clone();
-        let run = tokio::spawn(async move {
-            let collectors = Collectors::of(&svc, &root);
-            run_collector(
-                &collectors,
-                &as_person(),
-                "acme",
-                "sync",
-                RunTrigger::Manual,
-            )
-            .await
-        });
-        for _ in 0..200 {
-            if started.exists() {
-                return run;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-        }
-        panic!("the program started");
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn the_program_runs_from_a_private_copy_removed_afterwards() {
-        let fx = services_with_task_effort().await;
-        let original = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
-        let (started, release) = waiting_program(&fx).await;
-        let run = start(&fx, &started).await;
-        std::fs::write(&release, "").unwrap();
-        run.await.unwrap().unwrap();
-
-        let rows = seen(&fx).await;
-        let find = |key: &str| rows.iter().find(|(k, _)| k == key).unwrap().1.clone();
-        assert_eq!(find("helper"), "approved");
-        let dir = find("dir");
-        assert_ne!(
-            Path::new(&dir),
-            original,
-            "it ran beside a copy, not in the tree"
-        );
-        assert!(
-            !Path::new(&dir).exists(),
-            "the copy is removed after the run"
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn an_edit_during_the_run_stops_it_and_publishes_nothing() {
-        let fx = services_with_task_effort().await;
-        let (started, release) = waiting_program(&fx).await;
-        let run = start(&fx, &started).await;
-        // The program is approved as deployed: tampering with the deployed
-        // folder while it runs is what stops it.
-        let (deployed, _) = spec_of(&fx).await;
-        std::fs::write(deployed.join("helper.txt"), "EDITED").unwrap();
-        std::fs::write(&release, "").unwrap();
-        let error = run
-            .await
-            .unwrap()
-            .expect_err("the edited program is not approved");
-        let RunCollectorError::Failed(message) = &error else {
-            panic!("{error:?}");
-        };
-        assert!(message.contains("changed during its run"), "{message}");
-        assert!(seen(&fx).await.is_empty(), "nothing it produced was kept");
     }
 
     async fn spec_of(
@@ -665,4 +470,50 @@ mod approved_code {
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         }
     }
+}
+
+/// A script composes commands of its own extension freely; one outside its
+/// namespace needs a `permissions.commands` pattern naming it — what it
+/// may do with the person's rights is what was approved at deploy.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_script_composing_a_command_outside_its_namespace_needs_the_commands_permission() {
+    let fx = services_with_task_effort().await;
+    let root = fx.svc.layout.project_dir.clone();
+    let item = oxplow_tasks::work_item_ref(fx.task);
+    let manifest = |permissions: &str| {
+        format!(
+            "manifest: 2\nname: acme\nintent:\n  purpose: p\n{permissions}commands:\n  - name: notes.add\n    summary: Comments.\n    input_schema: {{ type: object }}\n    entry: note.star\n    {HUMAN}\n"
+        )
+    };
+    write(
+        &root,
+        ".oxplow/extensions/acme/note.star",
+        &format!(
+            "def transform(x):\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.comment\", \"input\": {{\"ref\": \"{item}\", \"body\": \"noted\"}}}}]}}\n"
+        ),
+    );
+    write(
+        &root,
+        ".oxplow/extensions/acme/extension.yaml",
+        &manifest(""),
+    );
+    crate::test_fixtures::activate(&fx.svc).await;
+    let refused = run(&fx, "acme.notes.add")
+        .await
+        .expect_err("outside its namespace");
+    let message = format!("{refused:?}");
+    assert!(
+        message.contains("oxplow.work_item.comment") && message.contains("permissions.commands"),
+        "{message}"
+    );
+
+    write(
+        &root,
+        ".oxplow/extensions/acme/extension.yaml",
+        &manifest("permissions: { commands: [oxplow.work_item.*] }\n"),
+    );
+    crate::test_fixtures::activate(&fx.svc).await;
+    run(&fx, "acme.notes.add")
+        .await
+        .expect("its pattern names it");
 }

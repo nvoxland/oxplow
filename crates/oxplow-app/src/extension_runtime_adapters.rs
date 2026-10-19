@@ -28,12 +28,7 @@ impl PreparedRuntimeAdapters {
         let declared = crate::capabilities::declared_by(snapshot.extensions());
         let jobs = svc.jobs.prepare_registry(snapshot)?;
         let mut errors = VocabularyErrors::new();
-        let models = crate::ai_service::prepare_built_ins(
-            &declared,
-            &svc.approvals,
-            &svc.layout.project_dir,
-        )
-        .map_err(|failures| {
+        let models = crate::ai_service::prepare_built_ins(&declared).map_err(|failures| {
             for (id, message) in failures {
                 errors.insert(format!("<ai:{id}>"), vec![message]);
             }
@@ -47,13 +42,7 @@ impl PreparedRuntimeAdapters {
             generation: snapshot.generation().to_string(),
             work_items: crate::work_items::prepare_built_ins(&declared, &svc.db),
             harnesses: crate::harnesses::prepare_built_ins(&declared),
-            policies: crate::effort_policy::prepare_built_ins(
-                &declared,
-                &svc.sql,
-                &trees,
-                &svc.approvals,
-                &svc.layout.project_dir,
-            ),
+            policies: crate::effort_policy::prepare_built_ins(&declared, &svc.sql, &trees),
             knowledge: crate::knowledge::prepare_built_ins(&declared, &svc.layout.project_dir),
             snapshots: crate::snapshots::prepare_built_ins(
                 &declared,

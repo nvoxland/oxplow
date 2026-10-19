@@ -104,85 +104,50 @@ describe("collectorRowModel", () => {
       facts: [],
     },
     run: null,
-    approved: false,
     networkEnforced: true,
     credentials: [],
     ...over,
   });
 
-  test("an unapproved collector asks for approval and says what it will run", () => {
+  test("a collector shows its status and trigger, and syncs by hand", () => {
     const m = collectorRowModel(listing());
-    expect(m.action).toBe("approve");
-    expect(m.actionLabel).toBe("Approve & Run");
-    expect(m.actionTitle).toContain("bin/sync.sh");
-    expect(m.actionTitle).toContain("GITHUB_TOKEN");
+    expect(m.actionLabel).toBe("Sync Now");
+    expect(m.actionTitle).toBe("Run bin/sync.sh now");
     expect(m.status).toBe("Never run");
     expect(m.trigger).toBe("every 10m");
   });
 
-  // A Starlark collector asks for approval only when it calls a model: each
-  // run spends the AI provider's key, on its trigger, as nobody.
-  test("an unapproved Starlark collector's approval says it calls a model on its trigger", () => {
-    const m = collectorRowModel(
-      listing({ spec: { ...listing().spec, runtime: "starlark", entry: "kind.star", env: [] } }),
-    );
-    expect(m.action).toBe("approve");
-    expect(m.actionTitle).toContain("my-gh/kind.star");
-    expect(m.actionTitle).toContain("calls a model through your AI provider");
-    expect(m.actionTitle).toContain("every 10m");
-    expect(m.actionTitle).not.toContain("network");
-  });
-
-  test("the approval names the hosts a collector may reach, and whether that's enforced", () => {
-    const withHosts = (networkEnforced: boolean) =>
-      listing({ networkEnforced, spec: { ...listing().spec, network: ["api.github.com"] } });
-    expect(collectorRowModel(withHosts(true)).actionTitle).toContain("reach only api.github.com");
-    expect(collectorRowModel(withHosts(false)).actionTitle).toContain("not enforced on this OS");
-    expect(collectorRowModel(listing()).actionTitle).toContain("no network access");
-  });
-
   // The project's own collectors (its report collectors among them), listed
   // beside the extensions': owner `project`.
-  test("a report collector says when it runs, and syncs without an approval", () => {
+  test("a report collector says when it runs, and syncs by hand", () => {
     const m = collectorRowModel(
       listing({
         owner: "project",
-        approved: true,
         spec: { ...listing().spec, id: "tests.cov", runtime: "jaq", entry: "oxplow:lcov", trigger: { kind: "onRun", run: "test" }, env: [] },
       }),
     );
     expect(m.trigger).toBe("after a test run");
-    expect(m.action).toBe("sync");
     expect(m.actionLabel).toBe("Sync Now");
     const analysis = collectorRowModel(
-      listing({ owner: "project", approved: true, spec: { ...listing().spec, trigger: { kind: "onRun", run: "analysis" } } }),
+      listing({ owner: "project", spec: { ...listing().spec, trigger: { kind: "onRun", run: "analysis" } } }),
     );
     expect(analysis.trigger).toBe("after an analysis run");
   });
 
-  test("a project collector's approval is the Programs row's, not this button's", () => {
-    const m = collectorRowModel(listing({ owner: "project", version: "h1" }));
-    expect(m.action).toBe("approve-in-programs");
-    expect(m.actionLabel).toBe("Approve under Programs");
-    expect(m.actionTitle).toMatch(/Programs/);
-  });
-
   test("a collector failures disabled says why and offers Enable Again", () => {
-    const m = collectorRowModel(listing({ approved: true, disabled: "failed 3 times in a row: report not found" }));
+    const m = collectorRowModel(listing({ disabled: "failed 3 times in a row: report not found" }));
     expect(m.disabled).toBe("Off on this machine: failed 3 times in a row: report not found");
     expect(m.canEnableAgain).toBe(true);
-    expect(collectorRowModel(listing({ approved: true })).disabled).toBeNull();
-    expect(collectorRowModel(listing({ approved: true })).canEnableAgain).toBe(false);
+    expect(collectorRowModel(listing()).disabled).toBeNull();
+    expect(collectorRowModel(listing()).canEnableAgain).toBe(false);
   });
 
-  test("an approved collector syncs and summarizes its last run", () => {
+  test("a collector summarizes its last run", () => {
     const m = collectorRowModel(
       listing({
-        approved: true,
         run: { owner: "my-gh", id: "gh", status: "ok", lastRunAt: "2026-09-27T01:00:00Z", error: null, rowCounts: { pr: 12, review: 3 }, cursor: null, lastEventId: null },
       }),
     );
-    expect(m.action).toBe("sync");
     expect(m.actionLabel).toBe("Sync Now");
     expect(m.status).toBe("12 pr · 3 review");
     expect(m.error).toBeNull();
@@ -191,7 +156,6 @@ describe("collectorRowModel", () => {
   test("a failed run surfaces the error", () => {
     const m = collectorRowModel(
       listing({
-        approved: true,
         run: { owner: "my-gh", id: "gh", status: "error", lastRunAt: "2026-09-27T01:00:00Z", error: "boom", rowCounts: {}, cursor: null, lastEventId: null },
       }),
     );
@@ -204,7 +168,7 @@ describe("collectorRowModel", () => {
       ).trigger,
     ).toBe("on snapshot.taken, vcs.head.moved");
   });
-  test("unset credentials are listed and flagged; the approval hover names them", () => {
+  test("unset credentials are listed and flagged", () => {
     const m = collectorRowModel(
       listing({
         spec: { ...listing().spec, trigger: { kind: "manual" }, env: [], credentials: ["GH_PAT", "OTHER"] },
@@ -219,7 +183,6 @@ describe("collectorRowModel", () => {
       { name: "OTHER", set: false },
     ]);
     expect(m.missingCredentials).toBe("Needs OTHER (set it under Extensions).");
-    expect(m.actionTitle).toContain("GH_PAT");
   });
 });
 

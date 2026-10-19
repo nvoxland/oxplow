@@ -4144,55 +4144,9 @@ mod tests {
             .unwrap()
     }
 
-    /// A person approves the review follow-up as it is now: its bundled
-    /// files, and events from now on.
-    async fn approve_follow_up(f: &crate::test_fixtures::EffortFixture) {
-        let (ext, decl) = crate::effect_triggers::find_effect(&f.svc, VERIFY).expect("its effect");
-        let program = crate::effects::effect_program(&ext, &decl);
-        let root = f.svc.layout.project_dir.clone();
-        crate::exec_consent::approve_program(
-            &f.svc.approvals,
-            &root,
-            std::slice::from_ref(&ext),
-            crate::exec_consent::ProgramKind::Effect,
-            &program.name,
-            &program.hash(&root).unwrap(),
-        )
-        .unwrap();
-        crate::effects::approved(&f.svc.db, VERIFY).await.unwrap();
-    }
-
-    /// P11 (tsk956): the review follow-up comes with oxplow, and runs only
-    /// once a person approves it: it is listed with a version to approve,
-    /// and until then a forced acceptance files nothing.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn the_review_follow_up_waits_for_a_persons_approval() {
-        let f = review_fixture().await;
-        let root = f.svc.layout.project_dir.clone();
-        let programs = crate::exec_consent::list(
-            &f.svc.approvals,
-            &root,
-            f.svc
-                .extension_catalog
-                .unpinned(&root, "a test reads declarations")
-                .as_ref(),
-        );
-        let follow_up = programs
-            .iter()
-            .find(|p| p.kind == crate::exec_consent::ProgramKind::Effect && p.name == VERIFY)
-            .expect("listed");
-        assert!(!follow_up.approved);
-        assert!(follow_up.version.is_some(), "it has a version to approve");
-        review(
-            &f,
-            &oxplow_domain::Actor::Human,
-            "oxplow.review.accept",
-            serde_json::json!({ "ref": effort_ref(&f), "force": true }),
-        )
-        .await
-        .unwrap();
-        deliver_acceptance(&f).await;
-        assert!(follow_ups(&f).await.is_empty());
+    /// Starts the review follow-up: events from now on.
+    async fn start_follow_up(f: &crate::test_fixtures::EffortFixture) {
+        crate::test_fixtures::start_effect(&f.svc, VERIFY).await;
     }
 
     /// P11 (tsk956): approved, a forced acceptance files one item to verify
@@ -4202,7 +4156,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_forced_acceptance_files_one_verify_follow_up() {
         let f = review_fixture().await;
-        approve_follow_up(&f).await;
+        start_follow_up(&f).await;
         let accept = || {
             review(
                 &f,
@@ -4300,7 +4254,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_disabled_contribution_files_a_repair_item_and_a_repeat_comments() {
         let f = crate::test_fixtures::services_with_effort().await;
-        crate::test_fixtures::approve_effect(&f.svc, REPAIR).await;
+        crate::test_fixtures::start_effect(&f.svc, REPAIR).await;
 
         let first = crate::test_fixtures::disable_collector(
             &f.svc,
@@ -4379,38 +4333,6 @@ mod tests {
         assert_eq!(repair_items(&f.svc).await.len(), 2);
     }
 
-    /// Core reports a disabled contribution whether or not the repair
-    /// effect runs: until a person approves it, and once they take the
-    /// approval back, no item is filed — and health still says disabled.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn without_the_repair_effect_approved_nothing_is_filed_and_core_still_reports() {
-        let f = crate::test_fixtures::services_with_effort().await;
-        let before = crate::test_fixtures::disable_collector(&f.svc, "work", "hot", "boom").await;
-        crate::test_fixtures::deliver(&f.svc, &before).await;
-        assert!(repair_items(&f.svc).await.is_empty(), "never approved");
-
-        crate::test_fixtures::approve_effect(&f.svc, REPAIR).await;
-        crate::test_fixtures::revoke_effect(&f.svc, REPAIR);
-        let after = crate::test_fixtures::disable_collector(&f.svc, "work", "hot", "boom").await;
-        crate::test_fixtures::deliver(&f.svc, &after).await;
-        assert!(repair_items(&f.svc).await.is_empty(), "approval taken back");
-
-        let health = f
-            .svc
-            .sql
-            .query_sql(
-                "SELECT state, reason FROM v_contribution_health WHERE extension = 'work'",
-                vec![],
-                None,
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            health.rows[0][0],
-            oxplow_db::SqlCell::Text("disabled".into())
-        );
-    }
-
     /// No running work list: the effect skips (not a failure that would
     /// count against it) and files nowhere.
     #[tokio::test(flavor = "multi_thread")]
@@ -4423,7 +4345,7 @@ mod tests {
             .active_providers
             .insert("work_items".into(), "tracker".into());
         crate::test_fixtures::activate(&f.svc).await;
-        crate::test_fixtures::approve_effect(&f.svc, REPAIR).await;
+        crate::test_fixtures::start_effect(&f.svc, REPAIR).await;
         let ev = crate::test_fixtures::disable_collector(&f.svc, "work", "hot", "boom").await;
         crate::test_fixtures::deliver(&f.svc, &ev).await;
         assert!(repair_items(&f.svc).await.is_empty());
@@ -4452,7 +4374,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn the_follow_up_reads_the_acceptance_from_its_envelope() {
         let f = review_fixture().await;
-        approve_follow_up(&f).await;
+        start_follow_up(&f).await;
         review(
             &f,
             &oxplow_domain::Actor::Human,
@@ -4468,10 +4390,10 @@ mod tests {
     }
 
     /// tsk991: an earlier forced acceptance stops a second follow-up only
-    /// when the effect filed one for it — not one from before the effect was
-    /// approved (it never reacted), which would leave the second unfollowed.
+    /// when the effect filed one for it — not one from before the effect
+    /// started (it never reacted), which would leave the second unfollowed.
     #[tokio::test(flavor = "multi_thread")]
-    async fn an_acceptance_from_before_approval_doesnt_stop_the_follow_up() {
+    async fn an_acceptance_from_before_the_effect_started_doesnt_stop_the_follow_up() {
         let f = review_fixture().await;
         let accept = || {
             review(
@@ -4482,7 +4404,7 @@ mod tests {
             )
         };
         accept().await.unwrap();
-        approve_follow_up(&f).await;
+        start_follow_up(&f).await;
         accept().await.unwrap();
         deliver_acceptance(&f).await;
         assert_eq!(follow_ups(&f).await.len(), 1);
@@ -4516,7 +4438,7 @@ mod tests {
             })
             .await
             .unwrap();
-        approve_follow_up(&f).await;
+        start_follow_up(&f).await;
         review(
             &f,
             &oxplow_domain::Actor::Human,
@@ -4538,7 +4460,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_clean_acceptance_files_nothing() {
         let f = review_fixture().await;
-        approve_follow_up(&f).await;
+        start_follow_up(&f).await;
         let human = oxplow_domain::Actor::Human;
         let ids: (i64, i64) = f
             .svc

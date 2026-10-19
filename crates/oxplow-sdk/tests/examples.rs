@@ -120,8 +120,7 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
 
     // P11 (tsk962): PR Lifetimes — the component made `custom_components`
     // stable. Its lens filters by state; the component acts (it runs the
-    // sync), so it's a program on Programs, unapproved until a person
-    // approves it.
+    // sync).
     svc.db
         .transaction(|tx| {
             tx.execute(
@@ -168,19 +167,6 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
     );
     assert_eq!(lifetimes("open").await, [serde_json::json!(12)]);
     assert_eq!(lifetimes("merged").await, [serde_json::json!(11)]);
-    let programs = oxplow_app::exec_consent::list(
-        &svc.approvals,
-        root,
-        svc.extension_catalog.get(root).as_ref(),
-    );
-    let component = programs
-        .iter()
-        .find(|p| p.kind == oxplow_app::exec_consent::ProgramKind::Component)
-        .expect("the component is on Programs");
-    assert_eq!(component.name, "github/pr-lifetimes");
-    assert_eq!(component.commands, ["oxplow.collector.sync"]);
-    assert!(!component.approved);
-
     // tsk935: `searchable: pull_request` — site search finds the pull
     // request by its title, under its kind, the ref a hit opens.
     svc.assets.sync_search_kinds().await.unwrap();
@@ -282,8 +268,8 @@ async fn the_prompt_efforts_example_tests_clean() {
 
 /// The triage example uses all three host services in one fact collector:
 /// the tree it implies, the semantic layer and a model it declares. It
-/// checks clean and lists them; `test` skips it until a person approves
-/// it; and in a real oxplow, approved, one snapshot's TODO becomes a
+/// checks clean and lists them; `test` runs its fixtures; and in a real
+/// oxplow one snapshot's TODO becomes a
 /// classified fact beside the open work, every service decided on its
 /// run.
 #[tokio::test(flavor = "multi_thread")]
@@ -364,7 +350,7 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
     assert!(!root.join(".oxplow/local.sqlite").exists());
 
     // A real oxplow: a source file with a TODO, one open work item, a
-    // model that calls everything a bug, and the person's approval.
+    // model that calls everything a bug.
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(
         root.join("src/lib.rs"),
@@ -418,29 +404,6 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
             Some(RoleBinding::new("m", "x")),
         )
         .unwrap();
-    // The provider kind is itself a script a person approves.
-    let extensions = svc.extension_catalog.get(root);
-    let provider = oxplow_app::exec_consent::list(&svc.approvals, root, &extensions)
-        .into_iter()
-        .find(|p| {
-            p.kind == oxplow_app::exec_consent::ProgramKind::AiProvider
-                && p.name.ends_with("/openai_compatible")
-        })
-        .expect("the provider is on Programs");
-    oxplow_app::exec_consent::approve_program(
-        &svc.approvals,
-        root,
-        &extensions,
-        oxplow_app::exec_consent::ProgramKind::AiProvider,
-        &provider.name,
-        provider.version.as_deref().unwrap(),
-    )
-    .unwrap();
-    let ext = svc.extension_catalog.named(root, "triage").unwrap();
-    let hash =
-        oxplow_app::collector_runner::approval_hash(&root.join(&ext.path), &ext.collectors[0])
-            .unwrap();
-    oxplow_app::collector_runner::approve(&svc.approvals, "triage", "todos", &hash).unwrap();
     let stream = svc.streams.list_streams().await.unwrap()[0].id;
     let capture = svc.snapshot_captures.get(&stream).unwrap();
     capture.enqueue_startup_diff().await.unwrap();
@@ -526,8 +489,7 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
 
 /// The task-views example replaces the Board, the Tasks list and the editor
 /// with no provider of its own. It checks clean and every one of its
-/// fixtures passes: the list, the board's reads and its refused update
-/// until approved, and the editor's form.
+/// fixtures passes: the list, the board's reads and its update, and the editor's form.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_task_views_example_checks_and_its_fixtures_pass() {
     let dir = tempfile::tempdir().unwrap();
@@ -607,7 +569,6 @@ async fn until_row(svc: &oxplow_app::Services, sql: &str) -> Vec<serde_json::Val
 #[tokio::test(flavor = "multi_thread")]
 async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
     use oxplow_app::ai_service::{ProviderConfig, Role, RoleBinding};
-    use oxplow_app::exec_consent::{approve_every, ProgramKind};
     use serde_json::json;
 
     let dir = tempfile::tempdir().unwrap();
@@ -650,12 +611,9 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
             Some(RoleBinding::new("fixture", "fixture")),
         )
         .unwrap();
-    // A person approves the job and the two effects.
-    approve_every(&svc, ProgramKind::Job).unwrap();
-    approve_every(&svc, ProgramKind::Effect).unwrap();
     let ext = svc.extension_catalog.named(root, "effort-review").unwrap();
     for decl in &ext.effects {
-        oxplow_app::effects::approved(&svc.db, &decl.name())
+        oxplow_app::effects::start_at_head(&svc.db, &decl.name())
             .await
             .unwrap();
     }
@@ -844,7 +802,6 @@ async fn inferred_reasoning_run(
     std::sync::Arc<oxplow_ai::fixture::FixtureModel>,
 ) {
     use oxplow_app::ai_service::{ProviderConfig, Role, RoleBinding};
-    use oxplow_app::exec_consent::{approve_every, ProgramKind};
     use serde_json::json;
 
     let dir = tempfile::tempdir().unwrap();
@@ -879,15 +836,12 @@ async fn inferred_reasoning_run(
             )
             .unwrap();
     }
-    // A person approves the job and the effects.
-    approve_every(&svc, ProgramKind::Job).unwrap();
-    approve_every(&svc, ProgramKind::Effect).unwrap();
     let ext = svc
         .extension_catalog
         .named(root, "oxplow-bundled")
         .expect("oxplow-bundled is active");
     for decl in &ext.effects {
-        oxplow_app::effects::approved(&svc.db, &decl.name())
+        oxplow_app::effects::start_at_head(&svc.db, &decl.name())
             .await
             .unwrap();
     }
@@ -1261,7 +1215,6 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
 #[tokio::test(flavor = "multi_thread")]
 async fn a_review_effort_review_wrote_shows_in_review_badges() {
     use oxplow_app::ai_service::{ProviderConfig, Role, RoleBinding};
-    use oxplow_app::exec_consent::{approve_every, ProgramKind};
     use serde_json::json;
 
     let dir = review_project(true).await;
@@ -1289,7 +1242,6 @@ async fn a_review_effort_review_wrote_shows_in_review_badges() {
             Some(RoleBinding::new("fixture", "fixture")),
         )
         .unwrap();
-    approve_every(&svc, ProgramKind::Job).unwrap();
     svc.extension_activation
         .activate(svc.clone())
         .await

@@ -12,7 +12,6 @@ import type {
   OpOutcome,
   OxplowConfig,
   OxplowEvent,
-  ProviderImpact,
   Reads,
   SymbolLocation,
   Scope,
@@ -69,8 +68,6 @@ import type {
   CommandOutcome,
   CommandSpec,
   FormStart,
-  ProgramKind,
-  ProjectProgram,
   ProviderInstanceView,
   SearchHit,
   SqlCell,
@@ -673,24 +670,12 @@ export async function reportTabs(report: TabReport): Promise<void> {
   unwrap(await commands.reportTabs(report));
 }
 
-/// Extension-declared collectors with their last run and consent.
+/// Extension-declared collectors with their last run.
 export async function listCollectors(): Promise<CollectorListing[]> {
   return unwrap(await commands.listCollectors());
 }
 
-/** A person approves an exec collector at the listing's `version` they
- *  reviewed (refused if it changed since). */
-export async function approveCollector(owner: string, id: string, version: string): Promise<void> {
-  unwrap(await commands.approveCollector(owner, id, version));
-}
-
-/// A person takes back a collector's approval: its next run is refused
-/// until they approve it again.
-export async function revokeCollector(owner: string, id: string): Promise<void> {
-  unwrap(await commands.revokeCollector(owner, id));
-}
-
-/** Run a collector now (`oxplow.collector.sync`); it never approves. */
+/** Run a collector now (`oxplow.collector.sync`). */
 export async function syncCollector(collector: string): Promise<CollectorRunReport> {
   return (await runCommand("oxplow.collector.sync", { collector })).result as CollectorRunReport;
 }
@@ -777,43 +762,6 @@ export async function keepLensSpec(
   if (streamId) input.stream = streamRef(streamId);
   const outcome = await runCommand("oxplow.lens.keep", input);
   return keptLens(outcome.result);
-}
-
-/// Programs the project's config would run, and whether each is approved.
-export async function listProjectPrograms(): Promise<ProjectProgram[]> {
-  return unwrap(await commands.listProjectPrograms());
-}
-
-/** What approving provider `instance` as it is on disk would change
- *  against what was approved last. */
-export async function providerDeclarationImpact(instance: string): Promise<ProviderImpact> {
-  return unwrap(await commands.providerDeclarationImpact(instance));
-}
-
-/// A person approves one of the project's programs (Settings → Data).
-/// `version` is the listing's, the one the person reviewed; a program that
-/// changed since is refused.
-export async function approveProjectProgram(
-  kind: ProgramKind,
-  name: string,
-  version: string,
-): Promise<ProjectProgram[]> {
-  return unwrap(await commands.approveProjectProgram(kind, name, version));
-}
-
-/// A person takes back a program's approval: from the next thing it does,
-/// nothing it was granted holds.
-export async function revokeProjectProgram(
-  kind: ProgramKind,
-  name: string,
-): Promise<ProjectProgram[]> {
-  return unwrap(await commands.revokeProjectProgram(kind, name));
-}
-
-/// A program's entry, to read before approving it (a bundled extension's
-/// comes from its embedded files).
-export async function programSource(kind: ProgramKind, name: string): Promise<string> {
-  return unwrap(await commands.programSource(kind, name));
 }
 
 /// Extension providers' instances on this machine, with health

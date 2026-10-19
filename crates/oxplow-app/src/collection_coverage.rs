@@ -123,9 +123,6 @@ fn status_of(
         (Some((status, at, error)), _) if status == "error" => {
             ("failed", Some(at.clone()), error.clone())
         }
-        (Some((status, at, _)), _) if status == "needs_approval" => {
-            ("needs_approval", Some(at.clone()), None)
-        }
         (Some((_, at, _)), Some((_, _, Some(due)))) if due.as_str() < now => {
             ("stale", Some(at.clone()), None)
         }

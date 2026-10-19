@@ -264,14 +264,6 @@ pub const MANIFEST: &[Capability] = &[
     // The `oxplow.collector.sync` command: the UI runs it through `run_command`,
     // an agent through this tool (as itself, so it never approves).
     ui(
-        "approve_collector",
-        "consent to run a collector's program is a person's",
-    ),
-    ui(
-        "revoke_collector",
-        "consent is a person's to take back, as it is to give",
-    ),
-    ui(
         "set_credential",
         "secrets are a person's to set; an agent only sees whether one is set",
     ),
@@ -286,26 +278,6 @@ pub const MANIFEST: &[Capability] = &[
     ui(
         "revoke_extension_secret",
         "a person takes a host secret back, as they gave it",
-    ),
-    ui(
-        "list_project_programs",
-        "the programs waiting on a person's consent (tsk331); an agent learns of an unapproved one from the run's error",
-    ),
-    ui(
-        "approve_project_program",
-        "consent to run a program from the repo is a person's (tsk331)",
-    ),
-    ui(
-        "revoke_project_program",
-        "consent is a person's to take back, as it is to give",
-    ),
-    ui(
-        "program_source",
-        "a person reads what they're asked to approve; an agent reads its worktree's files",
-    ),
-    ui(
-        "provider_declaration_impact",
-        "what a provider's approval would change, shown before a person approves it (P6b.E3)",
     ),
     ui(
         "list_provider_instances",

@@ -637,7 +637,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: project\nintent:\n  purpose: test\ncollectors:\n  - { id: repo.answer, doc: answer, runtime: starlark, entry: count.star, facts: [oxplow.ast_hit] }\n",
+            "manifest: 2\nname: project\nintent:\n  purpose: test\npermissions: { files: read }\ncollectors:\n  - { id: repo.answer, doc: answer, runtime: starlark, entry: count.star, facts: [oxplow.ast_hit] }\n",
         )
         .unwrap();
         crate::test_fixtures::activate_with_problems(&svc).await;
@@ -688,7 +688,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: project\nintent:\n  purpose: test\ncollectors:\n  - { id: repo.bad, runtime: starlark, entry: bad.star, facts: [oxplow.ast_hit] }\n",
+            "manifest: 2\nname: project\nintent:\n  purpose: test\npermissions: { files: read }\ncollectors:\n  - { id: repo.bad, runtime: starlark, entry: bad.star, facts: [oxplow.ast_hit] }\n",
         )
         .unwrap();
         crate::test_fixtures::activate_with_problems(&svc).await;

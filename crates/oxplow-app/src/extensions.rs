@@ -2221,6 +2221,9 @@ pub fn read_extension_file(root: &Path, path: &str, rel: &str) -> Option<String>
     files_at(root, path).ok()?.read(rel)
 }
 
+/// The most an extension file read from disk may hold.
+const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
+
 /// The files at an extension's `path` as a listing gives it: the folder
 /// `project_dir/path` on disk (an absolute `path`, a deployment's, is
 /// itself) — one resolver, so what an approval covers is read the same way
@@ -2320,9 +2323,8 @@ impl ExtensionFiles for Disk {
             ));
         }
         let mut bytes = Vec::new();
-        file.take(crate::exec_consent::TREE_MAX_BYTES + 1)
-            .read_to_end(&mut bytes)?;
-        if bytes.len() as u64 > crate::exec_consent::TREE_MAX_BYTES {
+        file.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > MAX_FILE_BYTES {
             return Err(std::io::Error::other(
                 "extension file exceeds the 16 MiB limit",
             ));
@@ -3442,7 +3444,9 @@ fn needed_permissions(
         out.push((line("providers", i), format!("provider `{}`", p.id), needed));
     }
     for (i, c) in ext.collectors.iter().enumerate() {
-        let mut needed = needs_permissions(&c.needs);
+        // Its declared needs and what its kind implies: a Starlark fact
+        // collector reads the project's code (`tree.read`).
+        let mut needed = needs_permissions(&c.service_needs());
         if c.runtime == oxplow_config::collectors::CollectorRuntime::Exec
             && c.bundled_parser().is_none()
         {
@@ -7527,7 +7531,7 @@ commands:
         write(
             dir.path(),
             ".oxplow/extensions/x/extension.yaml",
-            "manifest: 2\nname: x\nintent:\n  purpose: test\nmeasures:\n  - { key: acme.todo }\ncollectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, trigger: { on: [snapshot.taken] }, facts: [acme.todo] }\n",
+            "manifest: 2\nname: x\nintent:\n  purpose: test\npermissions: { files: read }\nmeasures:\n  - { key: acme.todo }\ncollectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, trigger: { on: [snapshot.taken] }, facts: [acme.todo] }\n",
         );
         write(
             dir.path(),

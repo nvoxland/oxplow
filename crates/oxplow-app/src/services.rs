@@ -469,7 +469,15 @@ mod tests {
                 scopes: scopes.iter().map(|s| s.to_string()).collect(),
                 ..GrantRequest::default()
             },
-            grant: None,
+            grant: oxplow_domain::grant::Grant::from_permissions(
+                "acme",
+                &oxplow_domain::permissions::Permissions {
+                    sql: Some(oxplow_domain::permissions::SqlAccess::Read),
+                    files: Some(oxplow_domain::permissions::FilesAccess::Read),
+                    ai: true,
+                    ..Default::default()
+                },
+            ),
             enforcement: Enforcement { hosts: true },
         })
     }

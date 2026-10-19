@@ -2,8 +2,8 @@
 //! models whose rows are read from live state when a query names them,
 //! because that state has no change hook to restate it from — the keychain
 //! (is a key set), `ai.yaml` and `project.yaml` (edited by hand), the
-//! language-server process table and the binaries on disk, a machine's
-//! approvals, the worktree's files, the harnesses' saved conversations. A
+//! language-server process table and the binaries on disk, the
+//! worktree's files, the harnesses' saved conversations. A
 //! restated table would be wrong between the change and the next
 //! restatement; reading when asked is always right.
 //!
@@ -79,15 +79,7 @@ pub fn columns(name: &str) -> &'static [&'static str] {
             "running_streams",
             "completion_trigger_characters",
         ],
-        "collector_state" => &[
-            "ref",
-            "owner",
-            "id",
-            "approved",
-            "network_enforced",
-            "version",
-            "disabled",
-        ],
+        "collector_state" => &["ref", "owner", "id", "network_enforced", "disabled"],
         "collector_credential" => &["collector", "name", "is_set"],
         "zone" => &["position", "zone", "patterns", "color", "files"],
         "zone_unmatched" => &["path"],
@@ -140,10 +132,7 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
             "lsp_server" => matches!(event, E::LspServersChanged | E::ConfigChanged),
             "collector_state" | "collector_credential" => matches!(
                 event,
-                E::ApprovalsChanged
-                    | E::CredentialChanged { .. }
-                    | E::ExtensionsChanged
-                    | E::ConfigChanged
+                E::CredentialChanged { .. } | E::ExtensionsChanged | E::ConfigChanged
             ),
             "zone" | "zone_unmatched" => {
                 matches!(event, E::ConfigChanged | E::WorkspaceChanged { .. })
@@ -175,7 +164,6 @@ pub struct LiveSources {
     pub lsp: LspSessionManager,
     pub worktrees: Arc<crate::worktrees::WorktreeRouter>,
     pub project: String,
-    pub approvals: Arc<crate::exec_consent::ApprovalStore>,
     pub collector_store: Arc<oxplow_db::SqliteCollectorStore>,
     pub db: oxplow_db::Database,
     pub vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
@@ -426,7 +414,6 @@ impl LiveSources {
         crate::collector_runner::list_with(&crate::collector_runner::Listing {
             root: &root,
             project: &self.project,
-            approvals: &self.approvals,
             store: &self.collector_store,
             db: self.db.clone(),
             vocabulary: self.vocabulary.clone(),
@@ -448,9 +435,7 @@ impl LiveSources {
                     )),
                     text(l.owner.clone()),
                     text(l.spec.id.clone()),
-                    flag(l.approved),
                     flag(l.network_enforced),
-                    opt(l.version.clone()),
                     opt(l.disabled.clone()),
                 ]
             })

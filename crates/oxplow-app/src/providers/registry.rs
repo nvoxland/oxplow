@@ -41,7 +41,6 @@ use super::host::{self, Connection, HostError, Launch};
 use super::oauth;
 use super::spec::{self, ProviderSpec};
 use crate::commands::{CommandBus, HandlerOutput};
-use crate::exec_consent::ApprovalStore;
 use crate::extension_catalog::ExtensionCatalog;
 use crate::extensions::Extension;
 
@@ -74,7 +73,6 @@ pub struct HostDeps {
     pub project_dir: PathBuf,
     /// The project's key (credentials are scoped by it).
     pub project: String,
-    pub approvals: Arc<ApprovalStore>,
     pub secrets: Arc<dyn SecretStore>,
     pub config: Arc<RwLock<oxplow_config::OxplowConfig>>,
     pub catalog: Arc<ExtensionCatalog>,
@@ -89,9 +87,6 @@ pub struct HostDeps {
     /// The first restart's wait; each failure doubles it, up to
     /// [`MAX_BACKOFF`].
     pub backoff: Duration,
-    /// Where approved copies of providers are kept and run from, outside
-    /// the repo (`host::approved_copy`).
-    pub copies: PathBuf,
     /// How long a `check` or `invoke` may take before it is cancelled and
     /// counted as a failure.
     pub call_timeout: Duration,
@@ -166,8 +161,6 @@ pub enum InstanceState {
     Refused {
         reason: String,
     },
-    /// Enabled, but this machine hasn't approved this version of it.
-    Unapproved,
     /// Enabled, but its `check` found problems with its config.
     Unconfigured {
         problems: Vec<ConfigProblem>,
@@ -180,7 +173,7 @@ pub enum InstanceState {
         errors: Vec<String>,
     },
     /// Stopped after repeated failures (or a handshake that didn't match
-    /// its approved declarations), until a person enables it again.
+    /// its deployment's declarations), until a person enables it again.
     Disabled {
         reason: String,
     },
@@ -303,8 +296,6 @@ pub struct ProviderInstanceView {
     /// JSON Schema of `config`, from its declarations.
     #[specta(type = oxplow_domain::Json)]
     pub config_schema: Value,
-    /// This machine approved it as it is now.
-    pub approved: bool,
     /// Each credential it declares and where it stands on this machine.
     pub credentials: Vec<InstanceCredential>,
     pub health: InstanceHealth,
@@ -555,8 +546,7 @@ impl Instance {
         }
     }
 
-    /// Consent (a verified copy of the approved folder), spawn from that
-    /// copy, handshake, check. A `check` its service refuses for its
+    /// Its deployment, spawn from it, handshake, check. A `check` its service refuses for its
     /// credentials (`Auth`) is tried once more on a renewed token, when
     /// the refusal points at a signed-in credential ([`Self::renewable`]).
     async fn start(&self) -> Result<Live, HostError> {
@@ -582,7 +572,7 @@ impl Instance {
         refused: Option<(&str, &str)>,
     ) -> Result<Live, (HostError, Option<CheckRefusal>)> {
         let plain = |e: HostError| (e, None);
-        let copy = copy_approved(&self.deps, &self.ext, &self.spec)
+        let copy = deployment_of(&self.deps, &self.ext, &self.spec)
             .await
             .map_err(plain)?;
         if copy.declared != self.declared {
@@ -591,12 +581,6 @@ impl Instance {
                 detail: "its declarations changed since it was enabled".into(),
             }));
         }
-        let program = crate::exec_consent::provider_program(&self.ext, &self.spec);
-        let gate = self
-            .deps
-            .approvals
-            .pinned_gate(program.key(), copy.hash.clone());
-        let (copy_root, pinned) = (copy.root.clone(), copy.hash.clone());
         let (stopped, admitted, registry, name, scope, ext, spec) = (
             self.stopped.clone(),
             self.admitted.clone(),
@@ -639,7 +623,6 @@ impl Instance {
             if stopped.load(std::sync::atomic::Ordering::Acquire) {
                 return Err("the provider instance was stopped".into());
             }
-            gate()?;
             if secret_revisions.iter().any(|(revision, expected)| {
                 revision.load(std::sync::atomic::Ordering::Acquire) != *expected
             }) {
@@ -672,11 +655,7 @@ impl Instance {
                     return Err("the provider's owning declaration is no longer active".into());
                 }
             }
-            if program.hash(&copy_root).is_ok_and(|hash| hash == pinned) {
-                Ok(())
-            } else {
-                Err("the approved provider copy changed during execution".into())
-            }
+            Ok(())
         }));
         let (dir, declared) = (copy.ext_dir, copy.declared);
         let credentials = self.credentials(refused).await.map_err(plain)?;
@@ -1487,23 +1466,16 @@ pub(super) fn contribution_key(instance: &str) -> ContributionKey {
 struct Gone {
     ext: String,
     id: String,
-    /// The provider it was an instance of.
-    provider: String,
     /// Its credentials' names, when its extension still declares it.
     credentials: Option<Vec<String>>,
 }
 
 impl Gone {
-    fn of(
-        instance: &str,
-        resolved: Option<Resolved>,
-        configured: Option<&oxplow_config::ExtensionInstanceConfig>,
-    ) -> Gone {
+    fn of(instance: &str, resolved: Option<Resolved>) -> Gone {
         match resolved {
             Some(r) => Gone {
                 ext: r.ext.name.clone(),
                 id: r.id.clone(),
-                provider: r.spec.id.clone(),
                 credentials: Some(r.spec.credential_names()),
             },
             None => {
@@ -1511,9 +1483,6 @@ impl Gone {
                 Gone {
                     ext: ext.to_string(),
                     id: id.to_string(),
-                    provider: configured
-                        .and_then(|c| c.provider.clone())
-                        .unwrap_or_else(|| id.to_string()),
                     credentials: None,
                 }
             }
@@ -1807,35 +1776,6 @@ impl ProviderRegistry {
         true
     }
 
-    /// What approving `instance` as it is on disk would change against
-    /// what was approved last — the approved copy a start last ran
-    /// (`host::last_approved`), whether or not it runs now: its
-    /// grants, each declared command and its features. Never run,
-    /// everything is new. Reads files; runs nothing.
-    pub async fn declaration_impact(
-        &self,
-        instance: &str,
-    ) -> Result<crate::extension_impact::ProviderImpact, DomainError> {
-        let Resolved { ext, spec, .. } =
-            self.resolve(instance).map_err(|_| DomainError::NotFound)?;
-        let dir = host::ext_dir(&self.deps.project_dir, &ext);
-        let read = |rel: &str| std::fs::read_to_string(dir.join(rel)).ok();
-        spec::read_declarations(&spec, &read).map_err(DomainError::Invalid)?;
-        let on_disk = spec::DeclaredProvider::read(&spec, &read);
-        let (copies, ext_c, spec_c) = (self.deps.copies.clone(), ext.clone(), spec.clone());
-        let approved =
-            tokio::task::spawn_blocking(move || host::last_approved(&copies, &ext_c, &spec_c))
-                .await
-                .map_err(|e| DomainError::Invariant(format!("reading the approved copy: {e}")))?;
-        crate::extension_impact::providers_diff(
-            &approved.into_iter().collect::<Vec<_>>(),
-            &[on_disk],
-        )
-        .into_iter()
-        .next()
-        .ok_or(DomainError::NotFound)
-    }
-
     /// One instance's view, before its collectors' read states.
     fn view_of(
         &self,
@@ -1878,12 +1818,6 @@ impl ProviderRegistry {
             enabled: cfg.is_some_and(|c| c.enabled),
             config: cfg.map(|c| c.config.clone()).unwrap_or_else(|| json!({})),
             config_schema,
-            approved: crate::exec_consent::may_run_provider(
-                &self.deps.approvals,
-                &self.deps.project_dir,
-                ext,
-                spec,
-            ),
             credentials: spec
                 .credentials
                 .iter()
@@ -1975,7 +1909,6 @@ impl ProviderRegistry {
                         enabled: cfg.enabled,
                         config: cfg.config.clone(),
                         config_schema: Value::Null,
-                        approved: false,
                         credentials: Vec::new(),
                         health: InstanceHealth::new(InstanceState::Missing { reason }),
                         collectors: Vec::new(),
@@ -2077,7 +2010,7 @@ impl ProviderRegistry {
         config: Value,
     ) -> Result<Arc<Instance>, HostError> {
         let name = spec::instance_name(&ext.name, id);
-        let declared = copy_approved(&self.deps, ext, spec).await?.declared;
+        let declared = deployment_of(&self.deps, ext, spec).await?.declared;
         let unchanged = self
             .deps
             .catalog
@@ -2146,6 +2079,7 @@ impl ProviderRegistry {
             reading: parking_lot::Mutex::new(std::collections::HashMap::new()),
             host_calls: host::HostCalls::new(
                 spec.needs.clone(),
+                crate::grants::grant_of(ext),
                 self.deps.sql.clone(),
                 state.clone(),
             ),
@@ -2326,30 +2260,10 @@ impl ProviderRegistry {
         running.end(ended).await;
     }
 
-    /// A person approved program `<extension>/<provider id>` as it is
-    /// now: every running instance of it restarts on what was approved
-    /// (its declarations may have changed, and a start checks them against
-    /// what it was enabled with), and an enabled one that was down for want
-    /// of approval starts (tsk1062).
-    pub async fn approved(&self, program: &str) {
-        let of_it: Vec<String> = self
-            .running
-            .lock()
-            .await
-            .values()
-            .filter(|i| i.spec.approval_name(&i.ext.name) == program)
-            .map(|i| i.name.clone())
-            .collect();
-        for name in of_it {
-            self.stop(&name).await;
-        }
-        self.reconcile().await;
-    }
-
     /// A person's Check / Enable / Disable on Settings → Integrations:
     /// write `extensionInstances.<instance>` through `oxplow.config.set` and, to
     /// enable, run `oxplow.contribution.enable`. Enabling checks first: an
-    /// unapproved or unconfigured instance is refused and nothing is
+    /// unconfigured instance is refused and nothing is
     /// written.
     pub async fn set_instance(
         &self,
@@ -2562,7 +2476,6 @@ impl ProviderRegistry {
         let (gone, home, still_there) = {
             let gate = self.instances_gate.lock().await;
             let resolved = self.resolve(instance).ok();
-            let configured = self.instances_config().get(instance).cloned();
             let in_project = self.project_instances().contains_key(instance);
             let in_global = self.global_instances().contains_key(instance);
             // A project's replacement of a global one: the global one stays.
@@ -2575,22 +2488,14 @@ impl ProviderRegistry {
                 all.remove(instance).map(|_| ()).ok_or_else(missing)
             })
             .await?;
-            (
-                Gone::of(instance, resolved, configured.as_ref()),
-                home,
-                in_project && in_global,
-            )
+            (Gone::of(instance, resolved), home, in_project && in_global)
         };
         self.reconcile().await;
         // Its credentials go with it — a project's replacement's are its
         // own, never the global one's that now shows through (tsk838) —
-        // named by the extension, or, when it no longer declares the
-        // provider (when Remove is offered), by the copy it last ran
-        // (tsk841).
-        let names = match &gone.credentials {
-            Some(names) => names.clone(),
-            None => host::last_ran_credentials(&self.deps.copies, &gone.ext, &gone.provider),
-        };
+        // named by the extension; one that no longer declares the
+        // provider (when Remove is offered) has none left to name.
+        let names = gone.credentials.clone().unwrap_or_default();
         for name in &names {
             let account = crate::collector_runner::instance_credential_account(
                 credential_scope(&self.deps, home),
@@ -2829,10 +2734,8 @@ impl ProviderRegistry {
             )));
         };
         // Where it signs in, and where the code, the verifier and the
-        // client secret go, are part of what a person approved: only as
-        // they were approved (tsk824). The declaration kept below is the
-        // one this checks, and finishing checks it again.
-        self.approved_for_sign_in(&resolved, name)?;
+        // client secret go, are its deployment's declaration (tsk824): the
+        // declaration kept below is the one finishing checks again.
         let client_secret = match &oauth_decl.client_secret {
             None => None,
             Some(secret) => {
@@ -2931,23 +2834,6 @@ impl ProviderRegistry {
             });
     }
 
-    /// Refused unless `resolved`'s provider is approved as it is now.
-    fn approved_for_sign_in(&self, resolved: &Resolved, name: &str) -> Result<(), DomainError> {
-        if crate::exec_consent::may_run_provider(
-            &self.deps.approvals,
-            &self.deps.project_dir,
-            &resolved.ext,
-            &resolved.spec,
-        ) {
-            return Ok(());
-        }
-        Err(DomainError::Invalid(format!(
-            "provider `{}` isn't approved as it is now (where `{name}` signs in is part of \
-             what you approve): approve it on Settings → Data → Programs first",
-            resolved.spec.approval_name(&resolved.ext.name)
-        )))
-    }
-
     /// The redirect the shell caught for `instance`'s sign-in for `name`:
     /// `redirect` is the path and query the browser asked for. One that
     /// isn't that sign-in's is refused and the sign-in waits on; one that
@@ -3008,7 +2894,7 @@ impl ProviderRegistry {
         let outcome = match redirected {
             oauth::Redirected::Refused(why) => Err(why),
             oauth::Redirected::Code(code) => {
-                match self.still_approved(&instance, &name, &under_way) {
+                match self.still_declared(&instance, &name, &under_way) {
                     Err(why) => Err(why),
                     Ok(()) => match under_way.pending.exchange(&code).await {
                         Ok(token) => {
@@ -3036,26 +2922,23 @@ impl ProviderRegistry {
     }
 
     /// A sign-in being finished may send its code, verifier and client
-    /// secret only where it was approved to: its provider is approved as
-    /// it is now, still declares the sign-in it began with, and the
+    /// secret only where its provider still declares the sign-in it began
+    /// with, and the
     /// instance still keeps its credentials where it did — a global one
     /// turned off here, or a project entry of its name arriving, moves
     /// them, and the token mustn't go to the old place (tsk909).
-    fn still_approved(
+    fn still_declared(
         &self,
         instance: &str,
         name: &str,
         under_way: &SignInUnderWay,
     ) -> Result<(), String> {
-        let (account, decl, resolved) =
-            self.credential(instance, name).map_err(|e| e.to_string())?;
+        let (account, decl, _) = self.credential(instance, name).map_err(|e| e.to_string())?;
         if account != under_way.account {
             return Err(format!(
                 "`{instance}` keeps its credentials elsewhere since the sign-in began; sign in again"
             ));
         }
-        self.approved_for_sign_in(&resolved, name)
-            .map_err(|e| e.to_string())?;
         if decl.oauth.as_ref() != Some(under_way.pending.decl()) {
             return Err(format!(
                 "where `{name}` signs in changed since the sign-in began; sign in again"
@@ -3151,7 +3034,6 @@ impl ProviderRegistry {
         let mut view = self.view(instance).await?;
         view.health.state = match self.check_as(&ext, &spec, &id, scope, config).await {
             Ok(()) => InstanceState::Ready,
-            Err(HostError::Unapproved(_)) => InstanceState::Unapproved,
             Err(HostError::Unconfigured { problems, .. }) => InstanceState::Unconfigured {
                 problems: problems
                     .into_iter()
@@ -3204,7 +3086,6 @@ impl ProviderRegistry {
         e: HostError,
     ) {
         let unstarted = match e {
-            HostError::Unapproved(_) => InstanceState::Unapproved,
             HostError::Unconfigured { problems, .. } => InstanceState::Unconfigured {
                 problems: problems
                     .into_iter()
@@ -3214,7 +3095,7 @@ impl ProviderRegistry {
                     })
                     .collect(),
             },
-            // It isn't what was approved: off until a person looks.
+            // It isn't what its deployment declares: off until a person looks.
             HostError::DeclarationsChanged { .. } => {
                 return self.disable(instance, made_by, e.to_string()).await;
             }
@@ -3451,27 +3332,21 @@ async fn call_within<P: Serialize, R: serde::de::DeserializeOwned>(
     }
 }
 
-/// [`host::approved_copy`] off the runtime (it copies and hashes files).
-async fn copy_approved(
+/// `ext`'s provider `spec` in its deployment, read off the async workers.
+async fn deployment_of(
     deps: &HostDeps,
     ext: &Extension,
     spec: &ProviderSpec,
-) -> Result<host::ApprovedCopy, HostError> {
-    let (project, copies, approvals) = (
-        deps.project_dir.clone(),
-        deps.copies.clone(),
-        deps.approvals.clone(),
-    );
+) -> Result<host::Deployment, HostError> {
+    let project = deps.project_dir.clone();
     let (ext, spec) = (ext.clone(), spec.clone());
     let name = spec.approval_name(&ext.name);
-    tokio::task::spawn_blocking(move || {
-        host::approved_copy(&project, &copies, &approvals, &ext, &spec)
-    })
-    .await
-    .map_err(|e| HostError::Failed {
-        name,
-        message: format!("copying it to run: {e}"),
-    })?
+    tokio::task::spawn_blocking(move || host::deployment(&project, &ext, &spec))
+        .await
+        .map_err(|e| HostError::Failed {
+            name,
+            message: format!("reading its deployment: {e}"),
+        })?
 }
 
 /// Whether `instance` is the one running under its name: a stopped

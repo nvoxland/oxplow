@@ -99,9 +99,8 @@ async fn a_signed_in_bearer_renews_once_when_its_server_stops_taking_it() {
     .await
     .unwrap();
 
-    // The person deploys it (it runs a program: boot waits for them),
-    // approves the provider (where it signs in is part of it) and enables
-    // the instance.
+    // The person deploys it (it runs a program: boot waits for them) and
+    // enables the instance.
     oxplow_app::extension_deploy::deploy(&svc, "notes", project, None, true)
         .await
         .unwrap();
@@ -113,18 +112,6 @@ async fn a_signed_in_bearer_renews_once_when_its_server_stops_taking_it() {
         .cloned()
         .unwrap();
     assert_eq!(hosted.errors, Vec::<String>::new());
-    let spec = hosted.providers[0].clone();
-    let program = oxplow_app::exec_consent::provider_program(&hosted, &spec);
-    let version = program.hash(project).unwrap();
-    oxplow_app::exec_consent::approve_program(
-        &svc.approvals,
-        project,
-        std::slice::from_ref(&hosted),
-        oxplow_app::exec_consent::ProgramKind::Provider,
-        &program.name,
-        &version,
-    )
-    .unwrap();
     // Every create files on the notes tracker.
     svc.config
         .write()

@@ -254,16 +254,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	approveCollector: (owner: string, id: string, version: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("approve_collector", { owner, id, version })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	revokeCollector: (owner: string, id: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("revoke_collector", { owner, id })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	setCredential: (extension: string, name: string, value: string | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("set_credential", { extension, name, value })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -283,31 +273,6 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	revokeExtensionSecret: (extension: string, reference: SecretRef) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("revoke_extension_secret", { extension, reference })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	listProjectPrograms: () => typedError<ProjectProgram[], IpcError_Serialize>(__TAURI_INVOKE("list_project_programs")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	approveProjectProgram: (kind: ProgramKind, name: string, version: string) => typedError<ProjectProgram[], IpcError_Serialize>(__TAURI_INVOKE("approve_project_program", { kind, name, version })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	revokeProjectProgram: (kind: ProgramKind, name: string) => typedError<ProjectProgram[], IpcError_Serialize>(__TAURI_INVOKE("revoke_project_program", { kind, name })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	programSource: (kind: ProgramKind, name: string) => typedError<string, IpcError_Serialize>(__TAURI_INVOKE("program_source", { kind, name })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	providerDeclarationImpact: (instance: string) => typedError<ProviderImpact, IpcError_Serialize>(__TAURI_INVOKE("provider_declaration_impact", { instance })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1674,27 +1639,16 @@ export type CollectorInput = {
 	limit: number | null,
 };
 
-/**  A declared collector with its last run and consent status. */
+/**  A declared collector with its last run. */
 export type CollectorListing = {
 	/**  The extension that declares it. */
 	owner: string,
 	spec: CollectorSpec,
 	run: CollectorRun | null,
-	/**
-	 *  This machine approved the entry script (and its `network` list) as
-	 *  it is now.
-	 */
-	approved: boolean,
 	/**  Whether this OS enforces the collector's `network` list. */
 	networkEnforced: boolean,
 	/**  Each declared credential and whether it has a value (never the value). */
 	credentials: CredentialStatus[],
-	/**
-	 *  Its approval hash as it is now: the person's Approve & Run sends
-	 *  back the version they reviewed (tsk349). `None` for derived
-	 *  collectors and unreadable entries.
-	 */
-	version: string | null,
 	/**  Why failures disabled it on this machine, when they did (P7.C2). */
 	disabled: string | null,
 };
@@ -1713,7 +1667,7 @@ export type CollectorRun = {
 	/**  The declaring extension, or `project`. */
 	owner: string,
 	id: string,
-	/**  `ok`, `error`, `needs_approval` or `skipped` (the loop guard). */
+	/**  `ok`, `error` or `skipped` (the loop guard). */
 	status: string,
 	lastRunAt: string,
 	error: string | null,
@@ -3665,8 +3619,6 @@ export type InstanceState =
  *  `reason` says which (tsk840).
  */
 { state: "refused"; reason: string } | 
-/**  Enabled, but this machine hasn't approved this version of it. */
-{ state: "unapproved" } | 
 /**  Enabled, but its `check` found problems with its config. */
 { state: "unconfigured"; problems: ConfigProblem[] } | 
 /**  Being checked or started. */
@@ -3675,7 +3627,7 @@ export type InstanceState =
 { state: "failing"; errors: string[] } | 
 /**
  *  Stopped after repeated failures (or a handshake that didn't match
- *  its approved declarations), until a person enables it again.
+ *  its deployment's declarations), until a person enables it again.
  */
 { state: "disabled"; reason: string };
 
@@ -5222,13 +5174,6 @@ client: string; threadId: ThreadId | null;
 /**  Who ran the command (`agent:thr3`, `human`). */
 actor: string; scope: string; op: string; input: unknown } | 
 /**
- *  A person approved a program on this machine (a provider, collector,
- *  effect, component, ACP agent): what shows approval state —
- *  Settings → Integrations and Data — refreshes (tsk1040). Approvals
- *  are per machine, not config, so `ConfigChanged` never said so.
- */
-{ kind: "approvalsChanged" } | 
-/**
  *  `.git` directory appeared/disappeared at the project root —
  *  "is this a git workspace" flipped. Renderer hides/restores the
  *  git-aware UI on receipt.
@@ -5426,99 +5371,6 @@ export type PersonalExtensions = {
 	disable: string[],
 };
 
-/**  What kind of project program it is. */
-export type ProgramKind = 
-/**
- *  A shared extension's advisories: SQL whose results go into the
- *  agent's context (tsk352). Bundled extensions' aren't gated.
- */
-"advisories" | 
-/**
- *  An extension's provider (`providers:`): a long-lived program
- *  implementing a capability, approved with its declarations.
- */
-"provider" | 
-/**
- *  An extension's effect (`effects:`, P8.D9): a script that reacts to
- *  events by running commands, approved over its extension's folder.
- */
-"effect" | 
-/**
- *  A custom component that declares `commands` (P11, tsk960): a bundle
- *  that may run them with the viewer's rights, approved over its
- *  bundle and the commands it names. One that declares none only shows
- *  and queries, and needs no approval.
- */
-"component" | 
-/**
- *  An AI provider written as a script (`implementations:` with a
- *  `.star` entry): its calls carry the person's key and prompts,
- *  approved over its script and the base URL it sends to — a shipped
- *  one too, so a changed script asks again.
- */
-"ai-provider" | 
-/**
- *  An effort policy written as a script (`implementations:` with a
- *  `.star` entry): it composes commands for core's events, as an
- *  effect does, approved over its extension's folder (the manifest's
- *  `needs` says what it reads).
- */
-"effort-policy" | 
-/**  A declared durable operation; approval covers its declaration and AI use. */
-"job";
-
-/**  A program the project's config would run. */
-export type ProjectProgram = {
-	kind: ProgramKind,
-	/**
-	 *  The capability it implements (a provider): what approving it lets
-	 *  it do (an agent harness launches the person's agent sessions).
-	 */
-	capability: string | null,
-	/**  The collector, agent, extension or component it belongs to. */
-	name: string,
-	/**  Project-relative path of the program. */
-	program: string,
-	args: string[],
-	/**  The host variables it gets by name (a provider). */
-	env: string[],
-	/**  Keychain credentials it gets, by name (a provider). */
-	credentials: string[],
-	/**  Hosts it may reach (a provider). */
-	network: string[],
-	/**  The commands it may run with the viewer's rights (a component). */
-	commands: string[],
-	/**  The scopes it may call (a provider's `needs`). */
-	scopes: string[],
-	/**
-	 *  The project-relative folder whose every file the approval covers
-	 *  (a provider's extension, declarations included).
-	 */
-	tree: string | null,
-	/**
-	 *  `program` is a url — a server run elsewhere (an MCP server by
-	 *  `url`) — not a file: the approval covers the url itself, and what
-	 *  the server is isn't in it.
-	 */
-	remote: boolean,
-	/**  This machine approved it as it is now. */
-	approved: boolean,
-	/**
-	 *  Its approval hash as it is now (`None` when it can't be read). The
-	 *  person's approve click sends back the version they reviewed.
-	 */
-	version: string | null,
-	/**
-	 *  What approving it grants that this machine can't hold it to
-	 *  (`grants::gaps`): files a program touches, network off macOS.
-	 */
-	unenforced?: string[],
-	/**  When this machine approved it, while it is (RFC 3339). */
-	grantedAt?: string | null,
-	/**  When a person revoked it, if they did and haven't approved it since. */
-	revokedAt?: string | null,
-};
-
 /**  A `command_proposal` row: an agent's run waiting on a person. */
 export type ProposalId = number;
 
@@ -5594,8 +5446,6 @@ export type ProviderInstanceView = {
 	config: unknown,
 	/**  JSON Schema of `config`, from its declarations. */
 	configSchema: unknown,
-	/**  This machine approved it as it is now. */
-	approved: boolean,
 	/**  Each credential it declares and where it stands on this machine. */
 	credentials: InstanceCredential[],
 	health: InstanceHealth,
@@ -6236,7 +6086,7 @@ export type SourceCoverage = {
 	source: string,
 	/**
 	 *  `current`, `stale` (past its next due run), `failed` (its last run
-	 *  errored), `disabled`, `needs_approval` or `never` (it hasn't run).
+	 *  errored), `disabled` or `never` (it hasn't run).
 	 */
 	status: string,
 	/**  Its last run (RFC 3339), when it has one. */

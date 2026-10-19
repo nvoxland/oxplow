@@ -284,30 +284,6 @@ export async function waitForModels<T>(daemon: Daemon, models: string[], write: 
   }
 }
 
-type Program = { kind: string; name: string; version: string | null; approved: boolean };
-
-/** Approve one of the project's programs (`<kind>`, `<name>`: `provider`,
- *  `e2e/fake`) as a person does, at the version it is now. */
-export async function approveProgram(daemon: Daemon, kind: string, name: string): Promise<void> {
-  const programs = await ipc<Program[]>(daemon, "list_project_programs");
-  const program = programs.find((p) => p.kind === kind && p.name === name);
-  if (!program) throw new Error(`no program ${kind}:${name}`);
-  if (program.approved) return;
-  await ipc(daemon, "approve_project_program", { kind, name, version: program.version });
-}
-
-type Collector = { owner: string; spec: { id: string }; approved: boolean; version: string | null };
-
-/** Approve an extension's collector (`owner`/`id`) as a person does on
- *  Settings → Data, at the version listed now. */
-export async function approveCollector(daemon: Daemon, owner: string, id: string): Promise<void> {
-  const collectors = await ipc<Collector[]>(daemon, "list_collectors");
-  const collector = collectors.find((c) => c.owner === owner && c.spec.id === id);
-  if (!collector?.version) throw new Error(`no collector ${owner}/${id} to approve`);
-  if (collector.approved) return;
-  await ipc(daemon, "approve_collector", { owner, id, version: collector.version });
-}
-
 type SearchHit = { kind: string; title: string };
 
 /** Wait until site search finds `query` among `kind` hits (`task`,

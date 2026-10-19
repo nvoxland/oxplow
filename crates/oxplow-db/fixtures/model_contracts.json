@@ -7884,6 +7884,61 @@
         }
       ],
       "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "owner",
+          "type": "TEXT",
+          "doc": "The extension that declares it, `project` for `.oxplow/project.yaml`, or `built-in`."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "The collector's id within its owner (may be dotted: `repo.scan_clone`)."
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "doc": "`ok`, `error` (what failed, or a permission its extension lacks; v4), or `skipped` (the loop guard refused its run for an event; `error` says why)."
+        },
+        {
+          "name": "last_run_at",
+          "type": "TEXT",
+          "doc": "When it last ran (RFC 3339)."
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "The last run's error, when it failed."
+        },
+        {
+          "name": "row_counts_json",
+          "type": "TEXT",
+          "doc": "Rows per entity after the last successful run, as JSON."
+        },
+        {
+          "name": "cursor_json",
+          "type": "TEXT",
+          "doc": "Its checkpoint: the opaque state its script or provider read returned last."
+        },
+        {
+          "name": "last_event_id",
+          "type": "INTEGER",
+          "doc": "The seq of the last trigger event it ran for."
+        },
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "doc": "Its last run (`v_extension_run.run_id`); NULL for a run before runs were recorded. (v2)"
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`collector:<owner>/<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
+        }
+      ],
+      "key": []
     }
   },
   "capability_provider": {
@@ -13230,6 +13285,38 @@
           "name": "version",
           "type": "TEXT",
           "doc": "Its approval hash as it is now — what a person's approval names; NULL for a collector needing none."
+        },
+        {
+          "name": "disabled",
+          "type": "TEXT",
+          "doc": "Why failures disabled it on this machine; NULL when it isn't."
+        }
+      ],
+      "key": [
+        "ref"
+      ]
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`collector:<owner>/<id>`."
+        },
+        {
+          "name": "owner",
+          "type": "TEXT",
+          "doc": "The extension that declares it."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "Its id within the extension."
+        },
+        {
+          "name": "network_enforced",
+          "type": "INT",
+          "doc": "1 when this OS enforces the collector's `network` list."
         },
         {
           "name": "disabled",

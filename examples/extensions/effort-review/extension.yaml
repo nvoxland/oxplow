@@ -44,6 +44,7 @@ intent:
 permissions:
   sql: read
   ai: true
+  commands: [oxplow.effort.*, oxplow.work_item.comment, oxplow.work_item.create, oxplow.test.record_run]
 ai_profiles:
   - id: review
     description: Reviews one finished effort from the evidence oxplow collected about it.

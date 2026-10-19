@@ -28,7 +28,7 @@ intent:
       expect: publish-summary writes the triage-summary page
     - name: todo-board
       input: { component: todo-board }
-      expect: the board reads its lens; approved, it records a decision on a TODO and reads it back
+      expect: the board reads its lens, records a decision on a TODO and reads it back
     - name: decide-a-todo
       input: { command: triage.todos.decide }
       expect: deciding composes the state write against the stamp it read
@@ -38,6 +38,8 @@ intent:
 permissions:
   sql: read
   ai: true
+  files: read
+  commands: [oxplow.command.sequence, oxplow.knowledge.write_page]
 measures:
   - key: triage.todos
     title: TODO comments

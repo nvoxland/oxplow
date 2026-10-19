@@ -634,7 +634,7 @@ mod tests {
              intent:\n  purpose: Open and close efforts as items start and finish.\n  examples:\n\
              \x20   - name: basic\n      input: { command: react, input: { event: { id: e1, type: thread.checkpoint, v: 1, seq: 1, source: system, subject: [], payload: {}, anchors: {} } } }\n\
              \x20     expect: nothing to do\n\
-             permissions: { process: true, sql: read }\n\
+             permissions: { process: true, sql: read, commands: [oxplow.effort.*] }\n\
              providers:\n  - id: steward\n    capability: effort_policy\n    entry: bin/provider\n    declarations: provider.json\n    needs: [sql.read]\n",
         )
         .unwrap();

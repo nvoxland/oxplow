@@ -18,7 +18,6 @@ use std::sync::Arc;
 
 use common::boot;
 
-use oxplow_app::exec_consent;
 use oxplow_app::observe_conformance::{suite, Expect};
 use oxplow_domain::agent::harness::{Endpoints, LaunchInput, LaunchSpec, SessionIds};
 use oxplow_domain::agent::text::AgentText;
@@ -194,7 +193,7 @@ async fn the_fake_harness_session_is_recorded_canonically() {
 }
 
 /// The same session, its harness a provider's process: the fake provider
-/// in harness mode, approved and enabled in the project as a person would,
+/// in harness mode, deployed and enabled in the project as a person would,
 /// registered under its instance id. Its launch, every tool hook's mapping
 /// and every answer's rendering go through that process — and core records
 /// it canonically.
@@ -234,19 +233,6 @@ async fn a_provider_launched_session_is_recorded_canonically() {
         .cloned()
         .expect("the harness extension loads");
     assert_eq!(ext.errors, Vec::<String>::new());
-    let program = exec_consent::list(&svc.approvals, &root, &extensions)
-        .into_iter()
-        .find(|p| p.kind == exec_consent::ProgramKind::Provider)
-        .expect("the provider is a program");
-    exec_consent::approve_program(
-        &svc.approvals,
-        &root,
-        &extensions,
-        program.kind,
-        &program.name,
-        program.version.as_deref().unwrap(),
-    )
-    .unwrap();
     // Deployed (which turns it on, reloading the config), then its
     // instance enabled as a person would, then activated.
     oxplow_app::extension_deploy::deploy(&svc, "relay", &root, None, true)

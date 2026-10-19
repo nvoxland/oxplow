@@ -424,10 +424,10 @@ fn unsupported(ext: &Extension) -> Vec<String> {
 /// `{ effects: [{ id, state? }], commands: [names] }` (`$any` matches).
 async fn event_example(host: &Host, ext: &Extension, ex: &Example<'_>, report: &mut TestReport) {
     let shown = ex.shown;
-    if let Err(e) = approve_effects(host, ext).await {
+    if let Err(e) = start_effects(host, ext).await {
         report
             .errors
-            .push(format!("{shown}:1: approving its effects: {e}"));
+            .push(format!("{shown}:1: starting its effects: {e}"));
         return;
     }
     let Some(view) = example_event(host, ex, report) else {
@@ -516,15 +516,11 @@ async fn effect_outcome(host: &Host, seq: i64, at: &str) -> (Vec<Value>, Vec<Str
     (effects, commands)
 }
 
-/// Approve `ext`'s effects in the throwaway as a person does, each
-/// starting at the log's head.
-async fn approve_effects(host: &Host, ext: &Extension) -> Result<(), String> {
-    oxplow_app::exec_consent::approve_every(
-        &host.svc,
-        oxplow_app::exec_consent::ProgramKind::Effect,
-    )?;
+/// Start `ext`'s effects at the log's head, so they react to what the
+/// example logs next.
+async fn start_effects(host: &Host, ext: &Extension) -> Result<(), String> {
     for decl in &ext.effects {
-        oxplow_app::effects::approved(&host.svc.db, &decl.name())
+        oxplow_app::effects::start_at_head(&host.svc.db, &decl.name())
             .await
             .map_err(|e| e.to_string())?;
     }
@@ -572,23 +568,14 @@ async fn job_example(
         ));
         return;
     };
-    if let Err(e) = oxplow_app::exec_consent::approve_every(
-        &host.svc,
-        oxplow_app::exec_consent::ProgramKind::Job,
-    ) {
-        report
-            .errors
-            .push(format!("{shown}:1: approving its jobs: {e}"));
-        return;
-    }
     let delivers = ["effects", "commands", "pages"]
         .iter()
         .any(|k| ex.expect.get(k).is_some());
     if delivers {
-        if let Err(e) = approve_effects(host, ext).await {
+        if let Err(e) = start_effects(host, ext).await {
             report
                 .errors
-                .push(format!("{shown}:1: approving its effects: {e}"));
+                .push(format!("{shown}:1: starting its effects: {e}"));
             return;
         }
     }
@@ -997,17 +984,6 @@ async fn component_example(
         .cloned()
         .unwrap_or_default()
     {
-        if i.get("approved").and_then(Value::as_bool).unwrap_or(false) {
-            if let Err(e) = oxplow_app::exec_consent::approve_every(
-                &host.svc,
-                oxplow_app::exec_consent::ProgramKind::Component,
-            ) {
-                report
-                    .errors
-                    .push(format!("{shown}:1: approving its component: {e}"));
-                return;
-            }
-        }
         let out = invoke_component_command(
             &host.svc,
             &host.root,
@@ -1610,33 +1586,19 @@ async fn collector_example(
         ));
         return;
     };
-    if oxplow_app::collector_runner::needs_approval(&host.root, ext, spec) {
+    {
         use oxplow_config::collectors::CollectorRuntime as R;
         let does = match spec.runtime {
-            // Calls a model: approved here as a person would, then run
-            // against the fixture model.
-            R::Starlark | R::Jaq => None,
             R::Read => Some("reads a provider"),
-            R::Exec => Some("runs a program"),
+            R::Exec if spec.bundled_parser().is_none() => Some("runs a program"),
+            _ => None,
         };
         if let Some(does) = does {
             report.warnings.push(format!(
                 "{shown}:1: example `{example}` runs collector `{id}`, which {does}: `extension \
-                 test` doesn't run it (it needs a person's approval) — fix: none; run it from \
-                 Settings → Data"
+                 test` doesn't run programs or providers — fix: none; run it with \
+                 `oxplow.collector.sync` once it's deployed"
             ));
-            return;
-        }
-        let approved =
-            oxplow_app::collector_runner::approval_hash(&host.root.join(&ext.path), spec).and_then(
-                |hash| {
-                    oxplow_app::collector_runner::approve(&host.svc.approvals, &ext.name, id, &hash)
-                },
-            );
-        if let Err(e) = approved {
-            report
-                .errors
-                .push(format!("{shown}:1: approving collector `{id}`: {e}"));
             return;
         }
     }
@@ -1663,7 +1625,7 @@ async fn collector_example(
             use oxplow_app::collector_runner::RunCollectorError as E;
             let why = match e {
                 E::NotFound => "it isn't loaded".to_string(),
-                E::NeedsApproval(m) | E::Failed(m) | E::Disabled(m) => m,
+                E::Denied(m) | E::Failed(m) | E::Disabled(m) => m,
                 E::Storage(e) => e.to_string(),
             };
             report.errors.push(format!(
@@ -2429,25 +2391,7 @@ async fn policy_suite(
     let manifest = format!("{}/extension.yaml", ext.path.trim_end_matches('/'));
     report.ran.push(format!("{EFFORT_POLICY} suite"));
     let run = async {
-        let (tmp, svc, hosted) = suite_host(root, ext, env).await?;
-        let program = oxplow_app::exec_consent::effort_policy_program(
-            &hosted.path,
-            &hosted.name,
-            &decl.id,
-            &decl.entry,
-            &decl.needs,
-        );
-        let version = program
-            .hash(tmp.path())
-            .map_err(|e| format!("hashing it: {e}"))?;
-        oxplow_app::exec_consent::approve_program(
-            &svc.approvals,
-            tmp.path(),
-            std::slice::from_ref(&hosted),
-            oxplow_app::exec_consent::ProgramKind::EffortPolicy,
-            &program.name,
-            &version,
-        )?;
+        let (_tmp, svc, _) = suite_host(root, ext, env).await?;
         svc.config
             .write()
             .map_err(|e| e.to_string())?
@@ -2485,19 +2429,7 @@ async fn suite(
     let manifest = format!("{}/extension.yaml", ext.path.trim_end_matches('/'));
     report.ran.push(format!("{} suite", spec.capability));
     let run = async {
-        let (tmp, svc, hosted) = suite_host(root, ext, env).await?;
-        let program = oxplow_app::exec_consent::provider_program(&hosted, spec);
-        let version = program
-            .hash(tmp.path())
-            .map_err(|e| format!("hashing it: {e}"))?;
-        oxplow_app::exec_consent::approve_program(
-            &svc.approvals,
-            tmp.path(),
-            std::slice::from_ref(&hosted),
-            oxplow_app::exec_consent::ProgramKind::Provider,
-            &program.name,
-            &version,
-        )?;
+        let (tmp, svc, _) = suite_host(root, ext, env).await?;
         let project = oxplow_app::collector_runner::project_key(tmp.path());
         for (name, value) in env_credentials(spec, env) {
             svc.secrets
@@ -3158,7 +3090,7 @@ intent:
     - { name: basic, expect: nothing to do }
     - { name: start, expect: its effort opens }
     - { name: finish, expect: its effort closes }
-permissions: { sql: read }
+permissions: { sql: read, commands: [oxplow.effort.*] }
 implementations:
   - { capability: effort_policy, id: tidy, title: Tidy, entry: policies/tidy.star, needs: [sql.read] }
 ",

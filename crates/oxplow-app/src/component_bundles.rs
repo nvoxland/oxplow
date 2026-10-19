@@ -1,11 +1,10 @@
 //! What a custom component's frame runs (tsk984): its bundle, keyed by its
-//! **version** — the component's approval hash over the bundle's files and
-//! the commands it may run
-//! ([`crate::exec_consent::ProjectProgram::component_hash`]). The daemon
+//! **version** — a hash over the bundle's files and what it may query and
+//! run ([`bundle_version`]). The daemon
 //! serves the frame at `/components/v/<version>/…` from the bundle's folder
 //! in its deployment on disk: deployments are immutable, so what is served
 //! is what was hashed, and the frame's `invoke` names the version it was
-//! loaded at, which must be the approved one. Nothing holds a bundle's
+//! loaded at. Nothing holds a bundle's
 //! bytes: an open frame on an older version loads from that deployment
 //! while the store keeps it, and once it's pruned the frame must reload.
 //!
@@ -19,7 +18,6 @@ use std::sync::Arc;
 
 use oxplow_domain::DomainError;
 
-use crate::exec_consent::component_program;
 use crate::extension_catalog::CatalogSnapshot;
 use crate::extensions::custom_components::CustomComponent;
 use crate::extensions::Extension;
@@ -199,17 +197,18 @@ fn build_snapshot(
     component: &CustomComponent,
     generation: Option<String>,
 ) -> Result<Arc<BundleSnapshot>, DomainError> {
-    let program = component_program(ext, component);
-    let invalid = |e: std::io::Error| DomainError::Invalid(format!("{}: {e}", program.program));
-    let source = crate::extensions::files_at(root, &program.program).map_err(invalid)?;
+    let folder = format!(
+        "{}/{}",
+        ext.path.trim_end_matches('/'),
+        component.bundle.trim_end_matches('/')
+    );
+    let invalid = |e: std::io::Error| DomainError::Invalid(format!("{folder}: {e}"));
+    let source = crate::extensions::files_at(root, &folder).map_err(invalid)?;
     let files: BTreeSet<String> = source.paths().map_err(invalid)?.into_iter().collect();
     if !files.contains("index.html") {
-        return Err(DomainError::Invalid(format!(
-            "{}: no `index.html`",
-            program.program
-        )));
+        return Err(DomainError::Invalid(format!("{folder}: no `index.html`")));
     }
-    let version = program.component_hash(source.as_ref()).map_err(invalid)?;
+    let version = bundle_version(component, source.as_ref()).map_err(invalid)?;
     Ok(Arc::new(BundleSnapshot {
         version,
         extension: ext.name.clone(),
@@ -217,9 +216,42 @@ fn build_snapshot(
         generation,
         commands: component.commands.clone(),
         assets: component.assets.clone(),
-        dir: root.join(&program.program),
+        dir: root.join(&folder),
         files,
     }))
+}
+
+/// A bundle's version: a hash over its files, what it may query (its
+/// assets) and what it may run (its commands). Any change is a new version,
+/// so a mounted frame of the old one reloads.
+pub(crate) fn bundle_version(
+    component: &CustomComponent,
+    files: &dyn crate::extensions::ExtensionFiles,
+) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+    let contents = files
+        .paths()?
+        .into_iter()
+        .map(|rel| Ok((files.bytes(&rel)?, rel)))
+        .collect::<std::io::Result<Vec<_>>>()?;
+    let tree = crate::extension_store::files_hash(
+        contents
+            .iter()
+            .map(|(bytes, rel)| (rel.as_str(), bytes.as_slice())),
+    );
+    let mut h = Sha256::new();
+    h.update(component.id.as_bytes());
+    h.update([0u8]);
+    h.update(tree.as_bytes());
+    for c in &component.commands {
+        h.update([7u8]);
+        h.update(c.as_bytes());
+    }
+    for asset in &component.assets {
+        h.update([8u8]);
+        h.update(asset.as_bytes());
+    }
+    Ok(hex::encode(h.finalize()))
 }
 
 fn add_error(errors: &mut VocabularyErrors, owner: &str, message: &str) {
@@ -268,8 +300,6 @@ mod tests {
             bundle.file("app.js").unwrap(),
             shipped.bytes("components/history-graph/app.js").unwrap()
         );
-        let program = component_program(&ext, &component);
-        assert_eq!(program.hash(dir.path()).unwrap(), bundle.version);
 
         let prepared = PreparedComponentBundles::prepare(dir.path(), &snapshot).expect("staged");
         let registry = ComponentBundles::new();

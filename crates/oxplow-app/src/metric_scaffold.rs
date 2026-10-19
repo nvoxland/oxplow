@@ -169,7 +169,9 @@ pub fn extension_files(
         example_expect: "one fact per file with functions over the limit, in its area",
     });
     manifest.push_str(&format!(
-        "measures:\n\
+        "# Its collector reads the project's code.\n\
+         permissions: {{ files: read }}\n\
+         measures:\n\
          \x20 # One fact per file: how many of its functions are over the limit. `per-path`\n\
          \x20 # because a snapshot rescans only the files it changed; `semi-additive`\n\
          \x20 # because the latest count is the answer, not a sum over time.\n\

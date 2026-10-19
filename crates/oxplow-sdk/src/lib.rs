@@ -304,6 +304,10 @@ pub fn scaffold_with(
             if starter.needs.is_some_and(|needs| needs.contains("sql.read")) {
                 manifest.push_str("  sql: read\n");
             }
+            if capability == "effort_policy" {
+                // The efforts it opens, closes and links are core commands.
+                manifest.push_str("  commands: [oxplow.effort.*]\n");
+            }
             manifest.push_str(&format!(
                 "providers:\n  - id: {provider_id}\n    capability: {capability}\n    entry: bin/provider\n    declarations: provider.json\n"
             ));
@@ -333,7 +337,9 @@ pub fn scaffold_with(
              \x20     - {{ name: title, type: TEXT, doc: \"Its title.\" }}\n"
         )),
         Kind::Command => manifest.push_str(&format!(
-            "commands:\n\
+            "# Its script runs core commands as the caller.\n\
+             permissions: {{ commands: [oxplow.work_item.comment] }}\n\
+             commands:\n\
              \x20 # Registered as {ns}.notes.add (<namespace>.<area>.<verb>); its script composes core commands, run as the\n\
              \x20 # caller: in one transaction when every one can, else as steps (a work list's verbs run outside it).\n\
              \x20 - name: notes.add\n\
@@ -353,7 +359,9 @@ pub fn scaffold_with(
              \x20     - {{ name: happy, input: {{ ref: \"{work_item}\" }}, expect_commands: [oxplow.work_item.comment] }}\n"
         )),
         Kind::Effect => manifest.push_str(
-            "effects:\n\
+            "# Its script runs core commands as the caller.\n\
+             permissions: { commands: [oxplow.work_item.comment] }\n\
+             effects:\n\
              \x20 # Reacts to a logged event by composing commands, run with an agent's\n\
              \x20 # rights only once a person approves it (Settings → Data), and only on\n\
              \x20 # events logged after; a command that asks becomes a proposal.\n\
@@ -374,8 +382,9 @@ pub fn scaffold_with(
              \x20   commands: []\n"
         )),
         Kind::Policy => manifest.push_str(&format!(
-            "# Its script reads oxplow with its own SQL (`needs: [sql.read]`).\n\
-             permissions: {{ sql: read }}\n\
+            "# Its script reads oxplow with its own SQL (`needs: [sql.read]`) and\n\
+             # runs the core commands that open and close efforts.\n\
+             permissions: {{ sql: read, commands: [oxplow.effort.*] }}\n\
              implementations:\n\
              \x20 # The project's effort policy, once chosen in Settings → Capabilities: its\n\
              \x20 # script hears core's events and composes the commands that open, close\n\
