@@ -386,6 +386,7 @@ pub(super) fn run_composed(
                 summary: parent.summary.clone(),
                 input: composed.preview_input(),
                 destructive,
+                details: Vec::new(),
             }),
         });
     }
@@ -598,6 +599,7 @@ impl CommandBus {
                     summary: spec.summary.clone(),
                     input: plan.preview_input(),
                     destructive,
+                    details: Vec::new(),
                 }),
             });
         }

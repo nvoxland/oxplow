@@ -39,7 +39,7 @@ import {
   type MetricSpec,
   type SeriesPoint,
 } from "./metricsSql.js";
-import { IpcCallError, ipcErrorCode, ipcErrorField, ipcErrorMessage } from "./ipc-error.js";
+import { IpcCallError, ipcErrorCode, ipcErrorDetails, ipcErrorField, ipcErrorMessage } from "./ipc-error.js";
 import type {
   AiSettings,
   HarnessListing,
@@ -90,7 +90,12 @@ export type { ProviderInstanceView };
 /// instead of collapsing to a generic "ipc error" (see ipc-error.ts).
 function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error: unknown }): T {
   if (result.status === "ok") return result.data;
-  throw new IpcCallError(ipcErrorMessage(result.error), ipcErrorCode(result.error), ipcErrorField(result.error));
+  throw new IpcCallError(
+    ipcErrorMessage(result.error),
+    ipcErrorCode(result.error),
+    ipcErrorField(result.error),
+    ipcErrorDetails(result.error),
+  );
 }
 
 /// Pure slug derivation: lowercase ASCII alphanumerics, runs of any

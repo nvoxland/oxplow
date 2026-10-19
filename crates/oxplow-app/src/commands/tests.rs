@@ -1201,6 +1201,7 @@ fn kv_set_if_confirmed() -> Handler {
                     summary: "asks".into(),
                     input: input.clone(),
                     destructive: false,
+                    details: Vec::new(),
                 }),
             });
         }

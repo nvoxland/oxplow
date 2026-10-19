@@ -99,8 +99,12 @@ async fn a_signed_in_bearer_renews_once_when_its_server_stops_taking_it() {
     .await
     .unwrap();
 
-    // The person approves the provider (where it signs in is part of it)
-    // and enables the instance.
+    // The person deploys it (it runs a program: boot waits for them),
+    // approves the provider (where it signs in is part of it) and enables
+    // the instance.
+    oxplow_app::extension_deploy::deploy(&svc, "notes", project, None, true)
+        .await
+        .unwrap();
     let hosted = svc
         .extension_catalog
         .get(project)

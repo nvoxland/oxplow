@@ -481,7 +481,15 @@ skipping.
    confirmation is needed — a composite whose child asks — raises
    `NeedsConfirmation` itself, and the bus treats it as this step would
    (rolled back, nothing audited; a person asked, an agent's run
-   proposed) (P6b.A1). Only a plain call is proposed: an agent's
+   proposed) (P6b.A1). An `External` handler learns it the same way:
+   `Invocation::confirmed` is the person's confirmation, and a handler
+   that finds it needs one (a deploy that adds permissions) raises
+   `NeedsConfirmation` while it is false; the proposal's approval runs it
+   again confirmed. `Preview::details` carries what the person is asked
+   about beyond the command, one line each (the permissions a deploy
+   adds): over IPC as `IpcError::details` (`IpcCallError.details`), shown
+   in `CommandConfirm` and the proposal's card, and in the error's text an
+   agent reads. Only a plain call is proposed: an agent's
    **undo** that needs a person is `Denied` (a proposal is a plain call
    and would lose the row it undoes).
 5. **Run and record in one transaction**: the handler, a `command_audit`

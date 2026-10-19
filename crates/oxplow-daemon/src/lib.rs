@@ -514,7 +514,7 @@ mod tests {
         component: &str,
     ) -> String {
         // What was written is deployed first, as a person or agent does.
-        oxplow_app::extension_deploy::deploy(svc, ext, root, None)
+        oxplow_app::extension_deploy::deploy(svc, ext, root, None, true)
             .await
             .expect("the extension deploys");
         let ext = svc.extension_catalog.named(root, ext).unwrap();

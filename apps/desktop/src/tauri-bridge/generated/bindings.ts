@@ -8,22 +8,22 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	appVersion: () => typedError<AppVersion, IpcError>(__TAURI_INVOKE("app_version")),
+	appVersion: () => typedError<AppVersion, IpcError_Serialize>(__TAURI_INVOKE("app_version")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	ping: () => typedError<string, IpcError>(__TAURI_INVOKE("ping")),
+	ping: () => typedError<string, IpcError_Serialize>(__TAURI_INVOKE("ping")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	logUi: (entry: UiLogEntry) => typedError<null, IpcError>(__TAURI_INVOKE("log_ui", { entry })),
+	logUi: (entry: UiLogEntry) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("log_ui", { entry })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listStreams: () => typedError<Stream[], IpcError>(__TAURI_INVOKE("list_streams")),
+	listStreams: () => typedError<Stream[], IpcError_Serialize>(__TAURI_INVOKE("list_streams")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -57,7 +57,7 @@ export const commands = {
 	 *  dangle.
 	 */
 	archived_at: Timestamp | null,
-} | null, IpcError>(__TAURI_INVOKE("get_primary_stream")),
+} | null, IpcError_Serialize>(__TAURI_INVOKE("get_primary_stream")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -91,37 +91,37 @@ export const commands = {
 	 *  dangle.
 	 */
 	archived_at: Timestamp | null,
-} | null, IpcError>(__TAURI_INVOKE("get_current_stream")),
+} | null, IpcError_Serialize>(__TAURI_INVOKE("get_current_stream")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	switchStream: (id: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("switch_stream", { id })),
+	switchStream: (id: string | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("switch_stream", { id })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listThreads: (streamId: StreamId) => typedError<Thread[], IpcError>(__TAURI_INVOKE("list_threads", { streamId })),
+	listThreads: (streamId: StreamId) => typedError<Thread[], IpcError_Serialize>(__TAURI_INVOKE("list_threads", { streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listAgentHarnesses: () => typedError<HarnessListing[], IpcError>(__TAURI_INVOKE("list_agent_harnesses")),
+	listAgentHarnesses: () => typedError<HarnessListing[], IpcError_Serialize>(__TAURI_INVOKE("list_agent_harnesses")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	selectThread: (req: SelectThreadRequest) => typedError<null, IpcError>(__TAURI_INVOKE("select_thread", { req })),
+	selectThread: (req: SelectThreadRequest) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("select_thread", { req })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getThreadState: (streamId: StreamId) => typedError<ThreadState, IpcError>(__TAURI_INVOKE("get_thread_state", { streamId })),
+	getThreadState: (streamId: StreamId) => typedError<ThreadState, IpcError_Serialize>(__TAURI_INVOKE("get_thread_state", { streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listDashboards: () => typedError<Dashboard[], IpcError>(__TAURI_INVOKE("list_dashboards")),
+	listDashboards: () => typedError<Dashboard[], IpcError_Serialize>(__TAURI_INVOKE("list_dashboards")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -129,142 +129,142 @@ export const commands = {
 	getDashboard: (id: DashboardId) => typedError<{
 	dashboard: Dashboard,
 	items: DashboardItem[],
-} | null, IpcError>(__TAURI_INVOKE("get_dashboard", { id })),
+} | null, IpcError_Serialize>(__TAURI_INVOKE("get_dashboard", { id })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	search: (query: string, streamId: string | null, kinds: string[] | null, limit: number | null) => typedError<SearchHit[], IpcError>(__TAURI_INVOKE("search", { query, streamId, kinds, limit })),
+	search: (query: string, streamId: string | null, kinds: string[] | null, limit: number | null) => typedError<SearchHit[], IpcError_Serialize>(__TAURI_INVOKE("search", { query, streamId, kinds, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	querySql: (sql: string, params: SqlCell[] | null, limit: number | null, raw: boolean | null) => typedError<SqlQueryResult, IpcError>(__TAURI_INVOKE("query_sql", { sql, params, limit, raw })),
+	querySql: (sql: string, params: SqlCell[] | null, limit: number | null, raw: boolean | null) => typedError<SqlQueryResult, IpcError_Serialize>(__TAURI_INVOKE("query_sql", { sql, params, limit, raw })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listDataEntities: () => typedError<DataEntity[], IpcError>(__TAURI_INVOKE("list_data_entities")),
+	listDataEntities: () => typedError<DataEntity[], IpcError_Serialize>(__TAURI_INVOKE("list_data_entities")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getPanelLayout: () => typedError<PanelPlacement[], IpcError>(__TAURI_INVOKE("get_panel_layout")),
+	getPanelLayout: () => typedError<PanelPlacement[], IpcError_Serialize>(__TAURI_INVOKE("get_panel_layout")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setPanelLayout: (layout: PanelPlacement[]) => typedError<null, IpcError>(__TAURI_INVOKE("set_panel_layout", { layout })),
+	setPanelLayout: (layout: PanelPlacement[]) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("set_panel_layout", { layout })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listExtensions: () => typedError<Extension_Serialize[], IpcError>(__TAURI_INVOKE("list_extensions")),
+	listExtensions: () => typedError<Extension_Serialize[], IpcError_Serialize>(__TAURI_INVOKE("list_extensions")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getLens: (id: string) => typedError<Lens_Serialize, IpcError>(__TAURI_INVOKE("get_lens", { id })),
+	getLens: (id: string) => typedError<Lens_Serialize, IpcError_Serialize>(__TAURI_INVOKE("get_lens", { id })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	runLens: (id: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<LensRun_Serialize, IpcError>(__TAURI_INVOKE("run_lens", { id, params, streamId })),
+	runLens: (id: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<LensRun_Serialize, IpcError_Serialize>(__TAURI_INVOKE("run_lens", { id, params, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	runLensAction: (press: LensPress, streamId: string | null, confirmed: boolean) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("run_lens_action", { press, streamId, confirmed })),
+	runLensAction: (press: LensPress, streamId: string | null, confirmed: boolean) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("run_lens_action", { press, streamId, confirmed })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	lensText: (id: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<string, IpcError>(__TAURI_INVOKE("lens_text", { id, params, streamId })),
+	lensText: (id: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<string, IpcError_Serialize>(__TAURI_INVOKE("lens_text", { id, params, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	runAnswer: (answer: string) => typedError<LensRun_Serialize, IpcError>(__TAURI_INVOKE("run_answer", { answer })),
+	runAnswer: (answer: string) => typedError<LensRun_Serialize, IpcError_Serialize>(__TAURI_INVOKE("run_answer", { answer })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	lensForm: (id: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<FormStart, IpcError>(__TAURI_INVOKE("lens_form", { id, params, streamId })),
+	lensForm: (id: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<FormStart, IpcError_Serialize>(__TAURI_INVOKE("lens_form", { id, params, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	lensActionForm: (press: LensPress, streamId: string | null) => typedError<FormStart, IpcError>(__TAURI_INVOKE("lens_action_form", { press, streamId })),
+	lensActionForm: (press: LensPress, streamId: string | null) => typedError<FormStart, IpcError_Serialize>(__TAURI_INVOKE("lens_action_form", { press, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	submitLensForm: (id: string, input: unknown, params: { [key in string]: SqlCell } | null, streamId: string | null, confirmed: boolean) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("submit_lens_form", { id, input, params, streamId, confirmed })),
+	submitLensForm: (id: string, input: unknown, params: { [key in string]: SqlCell } | null, streamId: string | null, confirmed: boolean) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("submit_lens_form", { id, input, params, streamId, confirmed })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	runComponentQuery: (id: string, asset: string, params: { [key in string]: SqlCell } | null, streamId: string | null, version: string) => typedError<LensRun_Serialize, IpcError>(__TAURI_INVOKE("run_component_query", { id, asset, params, streamId, version })),
+	runComponentQuery: (id: string, asset: string, params: { [key in string]: SqlCell } | null, streamId: string | null, version: string) => typedError<LensRun_Serialize, IpcError_Serialize>(__TAURI_INVOKE("run_component_query", { id, asset, params, streamId, version })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	loadComponent: (id: string) => typedError<string, IpcError>(__TAURI_INVOKE("load_component", { id })),
+	loadComponent: (id: string) => typedError<string, IpcError_Serialize>(__TAURI_INVOKE("load_component", { id })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	invokeComponentCommand: (id: string, command: string, input: unknown, confirmed: boolean, version: string) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("invoke_component_command", { id, command, input, confirmed, version })),
+	invokeComponentCommand: (id: string, command: string, input: unknown, confirmed: boolean, version: string) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("invoke_component_command", { id, command, input, confirmed, version })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listServices: () => typedError<ServiceListing[], IpcError>(__TAURI_INVOKE("list_services")),
+	listServices: () => typedError<ServiceListing[], IpcError_Serialize>(__TAURI_INVOKE("list_services")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	validateExtension: (name: string, streamId: string | null) => typedError<CheckReport_Serialize, IpcError>(__TAURI_INVOKE("validate_extension", { name, streamId })),
+	validateExtension: (name: string, streamId: string | null) => typedError<CheckReport_Serialize, IpcError_Serialize>(__TAURI_INVOKE("validate_extension", { name, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	reportTabs: (report: TabReport) => typedError<null, IpcError>(__TAURI_INVOKE("report_tabs", { report })),
+	reportTabs: (report: TabReport) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("report_tabs", { report })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listNativeConversations: (sessionId: string) => typedError<ListedConversation[], IpcError>(__TAURI_INVOKE("list_native_conversations", { sessionId })),
+	listNativeConversations: (sessionId: string) => typedError<ListedConversation[], IpcError_Serialize>(__TAURI_INVOKE("list_native_conversations", { sessionId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listEarlierSessions: (threadId: string) => typedError<EarlierSessions, IpcError>(__TAURI_INVOKE("list_earlier_sessions", { threadId })),
+	listEarlierSessions: (threadId: string) => typedError<EarlierSessions, IpcError_Serialize>(__TAURI_INVOKE("list_earlier_sessions", { threadId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	renameNativeConversation: (sessionId: string, name: string) => typedError<null, IpcError>(__TAURI_INVOKE("rename_native_conversation", { sessionId, name })),
+	renameNativeConversation: (sessionId: string, name: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("rename_native_conversation", { sessionId, name })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listCollectors: () => typedError<CollectorListing[], IpcError>(__TAURI_INVOKE("list_collectors")),
+	listCollectors: () => typedError<CollectorListing[], IpcError_Serialize>(__TAURI_INVOKE("list_collectors")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	approveCollector: (owner: string, id: string, version: string) => typedError<null, IpcError>(__TAURI_INVOKE("approve_collector", { owner, id, version })),
+	approveCollector: (owner: string, id: string, version: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("approve_collector", { owner, id, version })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	revokeCollector: (owner: string, id: string) => typedError<null, IpcError>(__TAURI_INVOKE("revoke_collector", { owner, id })),
+	revokeCollector: (owner: string, id: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("revoke_collector", { owner, id })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setCredential: (extension: string, name: string, value: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("set_credential", { extension, name, value })),
+	setCredential: (extension: string, name: string, value: string | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("set_credential", { extension, name, value })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -272,138 +272,138 @@ export const commands = {
 	saveExtensionSecret: (extension: string, reference: {
 	schemaVersion: number,
 	id: string,
-} | null, value: string) => typedError<SecretRef, IpcError>(__TAURI_INVOKE("save_extension_secret", { extension, reference, value })),
+} | null, value: string) => typedError<SecretRef, IpcError_Serialize>(__TAURI_INVOKE("save_extension_secret", { extension, reference, value })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	extensionSecretIsSet: (extension: string, reference: SecretRef) => typedError<boolean, IpcError>(__TAURI_INVOKE("extension_secret_is_set", { extension, reference })),
+	extensionSecretIsSet: (extension: string, reference: SecretRef) => typedError<boolean, IpcError_Serialize>(__TAURI_INVOKE("extension_secret_is_set", { extension, reference })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	revokeExtensionSecret: (extension: string, reference: SecretRef) => typedError<null, IpcError>(__TAURI_INVOKE("revoke_extension_secret", { extension, reference })),
+	revokeExtensionSecret: (extension: string, reference: SecretRef) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("revoke_extension_secret", { extension, reference })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listProjectPrograms: () => typedError<ProjectProgram[], IpcError>(__TAURI_INVOKE("list_project_programs")),
+	listProjectPrograms: () => typedError<ProjectProgram[], IpcError_Serialize>(__TAURI_INVOKE("list_project_programs")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	approveProjectProgram: (kind: ProgramKind, name: string, version: string) => typedError<ProjectProgram[], IpcError>(__TAURI_INVOKE("approve_project_program", { kind, name, version })),
+	approveProjectProgram: (kind: ProgramKind, name: string, version: string) => typedError<ProjectProgram[], IpcError_Serialize>(__TAURI_INVOKE("approve_project_program", { kind, name, version })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	revokeProjectProgram: (kind: ProgramKind, name: string) => typedError<ProjectProgram[], IpcError>(__TAURI_INVOKE("revoke_project_program", { kind, name })),
+	revokeProjectProgram: (kind: ProgramKind, name: string) => typedError<ProjectProgram[], IpcError_Serialize>(__TAURI_INVOKE("revoke_project_program", { kind, name })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	programSource: (kind: ProgramKind, name: string) => typedError<string, IpcError>(__TAURI_INVOKE("program_source", { kind, name })),
+	programSource: (kind: ProgramKind, name: string) => typedError<string, IpcError_Serialize>(__TAURI_INVOKE("program_source", { kind, name })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	providerDeclarationImpact: (instance: string) => typedError<ProviderImpact, IpcError>(__TAURI_INVOKE("provider_declaration_impact", { instance })),
+	providerDeclarationImpact: (instance: string) => typedError<ProviderImpact, IpcError_Serialize>(__TAURI_INVOKE("provider_declaration_impact", { instance })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listProviderInstances: () => typedError<ProviderInstanceView[], IpcError>(__TAURI_INVOKE("list_provider_instances")),
+	listProviderInstances: () => typedError<ProviderInstanceView[], IpcError_Serialize>(__TAURI_INVOKE("list_provider_instances")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	checkProviderInstance: (instance: string, config: unknown) => typedError<ProviderInstanceView, IpcError>(__TAURI_INVOKE("check_provider_instance", { instance, config })),
+	checkProviderInstance: (instance: string, config: unknown) => typedError<ProviderInstanceView, IpcError_Serialize>(__TAURI_INVOKE("check_provider_instance", { instance, config })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setProviderInstance: (instance: string, enabled: boolean, config: unknown) => typedError<ProviderInstanceView[], IpcError>(__TAURI_INVOKE("set_provider_instance", { instance, enabled, config })),
+	setProviderInstance: (instance: string, enabled: boolean, config: unknown) => typedError<ProviderInstanceView[], IpcError_Serialize>(__TAURI_INVOKE("set_provider_instance", { instance, enabled, config })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	addProviderInstance: (instance: string, provider: string, scope: Scope) => typedError<ProviderInstanceView[], IpcError>(__TAURI_INVOKE("add_provider_instance", { instance, provider, scope })),
+	addProviderInstance: (instance: string, provider: string, scope: Scope) => typedError<ProviderInstanceView[], IpcError_Serialize>(__TAURI_INVOKE("add_provider_instance", { instance, provider, scope })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	removeProviderInstance: (instance: string) => typedError<ProviderInstanceView[], IpcError>(__TAURI_INVOKE("remove_provider_instance", { instance })),
+	removeProviderInstance: (instance: string) => typedError<ProviderInstanceView[], IpcError_Serialize>(__TAURI_INVOKE("remove_provider_instance", { instance })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	turnOffProviderInstanceHere: (instance: string) => typedError<ProviderInstanceView[], IpcError>(__TAURI_INVOKE("turn_off_provider_instance_here", { instance })),
+	turnOffProviderInstanceHere: (instance: string) => typedError<ProviderInstanceView[], IpcError_Serialize>(__TAURI_INVOKE("turn_off_provider_instance_here", { instance })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setInstanceCredential: (instance: string, name: string, value: string | null) => typedError<ProviderInstanceView[], IpcError>(__TAURI_INVOKE("set_instance_credential", { instance, name, value })),
+	setInstanceCredential: (instance: string, name: string, value: string | null) => typedError<ProviderInstanceView[], IpcError_Serialize>(__TAURI_INVOKE("set_instance_credential", { instance, name, value })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	beginOauthSignIn: (instance: string, name: string, redirectPort: number) => typedError<BegunSignIn, IpcError>(__TAURI_INVOKE("begin_oauth_sign_in", { instance, name, redirectPort })),
+	beginOauthSignIn: (instance: string, name: string, redirectPort: number) => typedError<BegunSignIn, IpcError_Serialize>(__TAURI_INVOKE("begin_oauth_sign_in", { instance, name, redirectPort })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	cancelOauthSignIn: (instance: string, name: string, signIn: number) => typedError<null, IpcError>(__TAURI_INVOKE("cancel_oauth_sign_in", { instance, name, signIn })),
+	cancelOauthSignIn: (instance: string, name: string, signIn: number) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("cancel_oauth_sign_in", { instance, name, signIn })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	completeOauthSignIn: (instance: string, name: string, redirect: string) => typedError<SignInCompletion, IpcError>(__TAURI_INVOKE("complete_oauth_sign_in", { instance, name, redirect })),
+	completeOauthSignIn: (instance: string, name: string, redirect: string) => typedError<SignInCompletion, IpcError_Serialize>(__TAURI_INVOKE("complete_oauth_sign_in", { instance, name, redirect })),
 	/**
 	 *  Listen on loopback for a sign-in's redirect — on `port` when the
 	 *  service has one registered, any free port otherwise.
 	 */
-	listenForOauthRedirect: (port: number | null) => typedError<OAuthListener, IpcError>(__TAURI_INVOKE("listen_for_oauth_redirect", { port })),
+	listenForOauthRedirect: (port: number | null) => typedError<OAuthListener, IpcError_Serialize>(__TAURI_INVOKE("listen_for_oauth_redirect", { port })),
 	/**
 	 *  The next redirect to listener `listener`: the path and query the
 	 *  browser asked for, to hand to the core. Its browser waits for
 	 *  [`answer_oauth_redirect`]. Ends when the sign-in is over (answered,
 	 *  stopped, or out of time).
 	 */
-	awaitOauthRedirect: (listener: number) => typedError<string, IpcError>(__TAURI_INVOKE("await_oauth_redirect", { listener })),
+	awaitOauthRedirect: (listener: number) => typedError<string, IpcError_Serialize>(__TAURI_INVOKE("await_oauth_redirect", { listener })),
 	/**
 	 *  Answer the browser waiting on listener `listener` with how its
 	 *  redirect went (the core's answer): a redirect that wasn't the
 	 *  sign-in's is refused and the listener waits on; otherwise the sign-in
 	 *  is over and it stops listening.
 	 */
-	answerOauthRedirect: (listener: number, outcome: SignInCompletion) => typedError<null, IpcError>(__TAURI_INVOKE("answer_oauth_redirect", { listener, outcome })),
+	answerOauthRedirect: (listener: number, outcome: SignInCompletion) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("answer_oauth_redirect", { listener, outcome })),
 	/**
 	 *  Stop listener `listener` (the sign-in was replaced, cancelled or
 	 *  left): a browser it holds is told, its wait ends, and when this
 	 *  returns its socket is closed — so the next sign-in can listen on the
 	 *  same port at once.
 	 */
-	stopOauthRedirect: (listener: number) => typedError<null, IpcError>(__TAURI_INVOKE("stop_oauth_redirect", { listener })),
+	stopOauthRedirect: (listener: number) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("stop_oauth_redirect", { listener })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	ensureChange: (target: ChangeTarget) => typedError<ChangeRow, IpcError>(__TAURI_INVOKE("ensure_change", { target })),
+	ensureChange: (target: ChangeTarget) => typedError<ChangeRow, IpcError_Serialize>(__TAURI_INVOKE("ensure_change", { target })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	aiSettings: () => typedError<AiSettings, IpcError>(__TAURI_INVOKE("ai_settings")),
+	aiSettings: () => typedError<AiSettings, IpcError_Serialize>(__TAURI_INVOKE("ai_settings")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	saveAiProvider: (provider: ProviderConfig, key: string | null) => typedError<AiSettings, IpcError>(__TAURI_INVOKE("save_ai_provider", { provider, key })),
+	saveAiProvider: (provider: ProviderConfig, key: string | null) => typedError<AiSettings, IpcError_Serialize>(__TAURI_INVOKE("save_ai_provider", { provider, key })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	removeAiProvider: (id: string) => typedError<AiSettings, IpcError>(__TAURI_INVOKE("remove_ai_provider", { id })),
+	removeAiProvider: (id: string) => typedError<AiSettings, IpcError_Serialize>(__TAURI_INVOKE("remove_ai_provider", { id })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -418,12 +418,12 @@ export const commands = {
 	 *  chose the binding. Empty: nothing forbidden.
 	 */
 	restrict?: AiRestriction[],
-} | null) => typedError<AiSettings, IpcError>(__TAURI_INVOKE("set_ai_role", { role, binding })),
+} | null) => typedError<AiSettings, IpcError_Serialize>(__TAURI_INVOKE("set_ai_role", { role, binding })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	testAiProvider: (id: string, model: string) => typedError<string, IpcError>(__TAURI_INVOKE("test_ai_provider", { id, model })),
+	testAiProvider: (id: string, model: string) => typedError<string, IpcError_Serialize>(__TAURI_INVOKE("test_ai_provider", { id, model })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -432,97 +432,97 @@ export const commands = {
 	text: string,
 	size: number,
 	truncated: boolean,
-} | null, IpcError>(__TAURI_INVOKE("read_ai_call", { id, body })),
+} | null, IpcError_Serialize>(__TAURI_INVOKE("read_ai_call", { id, body })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listThreadNotes: (threadId: ThreadId) => typedError<ThreadNote[], IpcError>(__TAURI_INVOKE("list_thread_notes", { threadId })),
+	listThreadNotes: (threadId: ThreadId) => typedError<ThreadNote[], IpcError_Serialize>(__TAURI_INVOKE("list_thread_notes", { threadId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listCommentsForTarget: (targetKind: string, targetId: string) => typedError<CommentThread[], IpcError>(__TAURI_INVOKE("list_comments_for_target", { targetKind, targetId })),
+	listCommentsForTarget: (targetKind: string, targetId: string) => typedError<CommentThread[], IpcError_Serialize>(__TAURI_INVOKE("list_comments_for_target", { targetKind, targetId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listCommentsForStream: (streamId: StreamId) => typedError<CommentThread[], IpcError>(__TAURI_INVOKE("list_comments_for_stream", { streamId })),
+	listCommentsForStream: (streamId: StreamId) => typedError<CommentThread[], IpcError_Serialize>(__TAURI_INVOKE("list_comments_for_stream", { streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listDeadLetters: (all: boolean | null) => typedError<DeadLetter[], IpcError>(__TAURI_INVOKE("list_dead_letters", { all })),
+	listDeadLetters: (all: boolean | null) => typedError<DeadLetter[], IpcError_Serialize>(__TAURI_INVOKE("list_dead_letters", { all })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	retryDeadLetter: (id: DeadLetterId) => typedError<DeadLetter, IpcError>(__TAURI_INVOKE("retry_dead_letter", { id })),
+	retryDeadLetter: (id: DeadLetterId) => typedError<DeadLetter, IpcError_Serialize>(__TAURI_INVOKE("retry_dead_letter", { id })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	discardDeadLetter: (id: DeadLetterId) => typedError<DeadLetter, IpcError>(__TAURI_INVOKE("discard_dead_letter", { id })),
+	discardDeadLetter: (id: DeadLetterId) => typedError<DeadLetter, IpcError_Serialize>(__TAURI_INVOKE("discard_dead_letter", { id })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listBacklinks: (targetKind: string, targetId: string, limit: number | null) => typedError<BacklinkEdge[], IpcError>(__TAURI_INVOKE("list_backlinks", { targetKind, targetId, limit })),
+	listBacklinks: (targetKind: string, targetId: string, limit: number | null) => typedError<BacklinkEdge[], IpcError_Serialize>(__TAURI_INVOKE("list_backlinks", { targetKind, targetId, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listOutbound: (sourceKind: string, sourceId: string, limit: number | null) => typedError<BacklinkEdge[], IpcError>(__TAURI_INVOKE("list_outbound", { sourceKind, sourceId, limit })),
+	listOutbound: (sourceKind: string, sourceId: string, limit: number | null) => typedError<BacklinkEdge[], IpcError_Serialize>(__TAURI_INVOKE("list_outbound", { sourceKind, sourceId, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	recordPageVisit: (pageKind: string, pageId: string, label: string | null, durationMs: number | null, threadId: string | null) => typedError<PageVisit, IpcError>(__TAURI_INVOKE("record_page_visit", { pageKind, pageId, label, durationMs, threadId })),
+	recordPageVisit: (pageKind: string, pageId: string, label: string | null, durationMs: number | null, threadId: string | null) => typedError<PageVisit, IpcError_Serialize>(__TAURI_INVOKE("record_page_visit", { pageKind, pageId, label, durationMs, threadId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listRecentPageVisits: (limit: number, threadId: string | null) => typedError<PageVisit[], IpcError>(__TAURI_INVOKE("list_recent_page_visits", { limit, threadId })),
+	listRecentPageVisits: (limit: number, threadId: string | null) => typedError<PageVisit[], IpcError_Serialize>(__TAURI_INVOKE("list_recent_page_visits", { limit, threadId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	topVisitedPages: (limit: number, threadId: string | null) => typedError<VisitedPage[], IpcError>(__TAURI_INVOKE("top_visited_pages", { limit, threadId })),
+	topVisitedPages: (limit: number, threadId: string | null) => typedError<VisitedPage[], IpcError_Serialize>(__TAURI_INVOKE("top_visited_pages", { limit, threadId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	forgetPage: (pageKind: string, pageId: string) => typedError<null, IpcError>(__TAURI_INVOKE("forget_page", { pageKind, pageId })),
+	forgetPage: (pageKind: string, pageId: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("forget_page", { pageKind, pageId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	recordUsage: (kind: string, payloadJson: string) => typedError<UsageEvent, IpcError>(__TAURI_INVOKE("record_usage", { kind, payloadJson })),
+	recordUsage: (kind: string, payloadJson: string) => typedError<UsageEvent, IpcError_Serialize>(__TAURI_INVOKE("record_usage", { kind, payloadJson })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listFileSnapshots: (path: string) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_file_snapshots", { path })),
+	listFileSnapshots: (path: string) => typedError<FileSnapshot[], IpcError_Serialize>(__TAURI_INVOKE("list_file_snapshots", { path })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listSnapshotsForStream: (streamId: StreamId, limit: number | null) => typedError<Snapshot[], IpcError>(__TAURI_INVOKE("list_snapshots_for_stream", { streamId, limit })),
+	listSnapshotsForStream: (streamId: StreamId, limit: number | null) => typedError<Snapshot[], IpcError_Serialize>(__TAURI_INVOKE("list_snapshots_for_stream", { streamId, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listSnapshotOps: (streamId: StreamId, limit: number | null) => typedError<SnapshotOp[], IpcError>(__TAURI_INVOKE("list_snapshot_ops", { streamId, limit })),
+	listSnapshotOps: (streamId: StreamId, limit: number | null) => typedError<SnapshotOp[], IpcError_Serialize>(__TAURI_INVOKE("list_snapshot_ops", { streamId, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listFilesForSnapshot: (snapshotId: SnapshotId) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_files_for_snapshot", { snapshotId })),
+	listFilesForSnapshot: (snapshotId: SnapshotId) => typedError<FileSnapshot[], IpcError_Serialize>(__TAURI_INVOKE("list_files_for_snapshot", { snapshotId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listWikiSlugsForSnapshots: (snapshotIds: SnapshotId[]) => typedError<([SnapshotId, string])[], IpcError>(__TAURI_INVOKE("list_wiki_slugs_for_snapshots", { snapshotIds })),
+	listWikiSlugsForSnapshots: (snapshotIds: SnapshotId[]) => typedError<([SnapshotId, string])[], IpcError_Serialize>(__TAURI_INVOKE("list_wiki_slugs_for_snapshots", { snapshotIds })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -567,47 +567,47 @@ export const commands = {
 	 *  [`capture_batch`]: SqliteSnapshotStore::capture_batch
 	 */
 	content_hash: string | null,
-} | null, IpcError>(__TAURI_INVOKE("get_file_snapshot", { fileSnapshotId })),
+} | null, IpcError_Serialize>(__TAURI_INVOKE("get_file_snapshot", { fileSnapshotId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	diff: (streamId: string | null, from: string | null, to: string) => typedError<DiffEntry[], IpcError>(__TAURI_INVOKE("diff", { streamId, from, to })),
+	diff: (streamId: string | null, from: string | null, to: string) => typedError<DiffEntry[], IpcError_Serialize>(__TAURI_INVOKE("diff", { streamId, from, to })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	changedPaths: (streamId: string | null, from: string | null, to: string) => typedError<ChangedPath[], IpcError>(__TAURI_INVOKE("changed_paths", { streamId, from, to })),
+	changedPaths: (streamId: string | null, from: string | null, to: string) => typedError<ChangedPath[], IpcError_Serialize>(__TAURI_INVOKE("changed_paths", { streamId, from, to })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	extensionImpactBetween: (streamId: string | null, start: string | null, end: string) => typedError<ExtensionChange[], IpcError>(__TAURI_INVOKE("extension_impact_between", { streamId, start, end })),
+	extensionImpactBetween: (streamId: string | null, start: string | null, end: string) => typedError<ExtensionChange[], IpcError_Serialize>(__TAURI_INVOKE("extension_impact_between", { streamId, start, end })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getSnapshotStats: (snapshotId: SnapshotId) => typedError<SnapshotStats, IpcError>(__TAURI_INVOKE("get_snapshot_stats", { snapshotId })),
+	getSnapshotStats: (snapshotId: SnapshotId) => typedError<SnapshotStats, IpcError_Serialize>(__TAURI_INVOKE("get_snapshot_stats", { snapshotId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getBlobStorageBytes: () => typedError<ByteSize, IpcError>(__TAURI_INVOKE("get_blob_storage_bytes")),
+	getBlobStorageBytes: () => typedError<ByteSize, IpcError_Serialize>(__TAURI_INVOKE("get_blob_storage_bytes")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	gitResolveCommitRefLabels: (shas: string[]) => typedError<{ [key in string]: CommitRefLabel[] }, IpcError>(__TAURI_INVOKE("git_resolve_commit_ref_labels", { shas })),
+	gitResolveCommitRefLabels: (shas: string[]) => typedError<{ [key in string]: CommitRefLabel[] }, IpcError_Serialize>(__TAURI_INVOKE("git_resolve_commit_ref_labels", { shas })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	gitListRecentRemoteBranches: (limit: number | null) => typedError<RemoteBranchEntry[], IpcError>(__TAURI_INVOKE("git_list_recent_remote_branches", { limit })),
+	gitListRecentRemoteBranches: (limit: number | null) => typedError<RemoteBranchEntry[], IpcError_Serialize>(__TAURI_INVOKE("git_list_recent_remote_branches", { limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	readAt: (streamId: string | null, path: string, revision: string) => typedError<string | null, IpcError>(__TAURI_INVOKE("read_at", { streamId, path, revision })),
+	readAt: (streamId: string | null, path: string, revision: string) => typedError<string | null, IpcError_Serialize>(__TAURI_INVOKE("read_at", { streamId, path, revision })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -622,22 +622,22 @@ export const commands = {
 	 *  is the current symbol instead.
 	 */
 	versionGone: boolean,
-} | null, IpcError>(__TAURI_INVOKE("resolve_symbol", { streamId, symbol })),
+} | null, IpcError_Serialize>(__TAURI_INVOKE("resolve_symbol", { streamId, symbol })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	searchWorkspaceText: (streamId: string | null, query: string, limit: number | null) => typedError<TextSearchHit[], IpcError>(__TAURI_INVOKE("search_workspace_text", { streamId, query, limit })),
+	searchWorkspaceText: (streamId: string | null, query: string, limit: number | null) => typedError<TextSearchHit[], IpcError_Serialize>(__TAURI_INVOKE("search_workspace_text", { streamId, query, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	gitChangeScopes: (streamId: string | null) => typedError<ChangeScopes, IpcError>(__TAURI_INVOKE("git_change_scopes", { streamId })),
+	gitChangeScopes: (streamId: string | null) => typedError<ChangeScopes, IpcError_Serialize>(__TAURI_INVOKE("git_change_scopes", { streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	ingestHookEvent: (envelope: HookEnvelope) => typedError<null, IpcError>(__TAURI_INVOKE("ingest_hook_event", { envelope })),
+	ingestHookEvent: (envelope: HookEnvelope) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("ingest_hook_event", { envelope })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -646,17 +646,17 @@ export const commands = {
 	text: string,
 	size: number,
 	truncated: boolean,
-} | null, IpcError>(__TAURI_INVOKE("read_event_content", { eventId, body })),
+} | null, IpcError_Serialize>(__TAURI_INVOKE("read_event_content", { eventId, body })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listAgentStatuses: () => typedError<AgentStatus[], IpcError>(__TAURI_INVOKE("list_agent_statuses")),
+	listAgentStatuses: () => typedError<AgentStatus[], IpcError_Serialize>(__TAURI_INVOKE("list_agent_statuses")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listOpenAgentTurns: (threadId: ThreadId) => typedError<AgentTurn[], IpcError>(__TAURI_INVOKE("list_open_agent_turns", { threadId })),
+	listOpenAgentTurns: (threadId: ThreadId) => typedError<AgentTurn[], IpcError_Serialize>(__TAURI_INVOKE("list_open_agent_turns", { threadId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -686,42 +686,42 @@ export const commands = {
 	 *  `turn_end` take); `None` while running.
 	 */
 	snapshot_id: number | null,
-} | null, IpcError>(__TAURI_INVOKE("get_agent_turn", { turnId })),
+} | null, IpcError_Serialize>(__TAURI_INVOKE("get_agent_turn", { turnId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getConfig: () => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("get_config")),
+	getConfig: () => typedError<OxplowConfig, IpcError_Serialize>(__TAURI_INVOKE("get_config")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setAgentPromptAppend: (text: string) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agent_prompt_append", { text })),
+	setAgentPromptAppend: (text: string) => typedError<OxplowConfig, IpcError_Serialize>(__TAURI_INVOKE("set_agent_prompt_append", { text })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setAgents: (agents: string[]) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agents", { agents })),
+	setAgents: (agents: string[]) => typedError<OxplowConfig, IpcError_Serialize>(__TAURI_INVOKE("set_agents", { agents })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setGenerated: (generated: GeneratedConfig) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_generated", { generated })),
+	setGenerated: (generated: GeneratedConfig) => typedError<OxplowConfig, IpcError_Serialize>(__TAURI_INVOKE("set_generated", { generated })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setAgentSetting: (agent: string, key: string, value: string | null) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agent_setting", { agent, key, value })),
+	setAgentSetting: (agent: string, key: string, value: string | null) => typedError<OxplowConfig, IpcError_Serialize>(__TAURI_INVOKE("set_agent_setting", { agent, key, value })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getWorkspaceContext: () => typedError<WorkspaceContext, IpcError>(__TAURI_INVOKE("get_workspace_context")),
+	getWorkspaceContext: () => typedError<WorkspaceContext, IpcError_Serialize>(__TAURI_INVOKE("get_workspace_context")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getEffortFiles: (effortId: EffortId) => typedError<EffortFile[], IpcError>(__TAURI_INVOKE("get_effort_files", { effortId })),
+	getEffortFiles: (effortId: EffortId) => typedError<EffortFile[], IpcError_Serialize>(__TAURI_INVOKE("get_effort_files", { effortId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -747,72 +747,72 @@ export const commands = {
 	end_snapshot_id: number | null,
 	/**  The effort's summary prose — the canonical text. */
 	summary: string | null,
-} | null, IpcError>(__TAURI_INVOKE("get_effort", { effortId })),
+} | null, IpcError_Serialize>(__TAURI_INVOKE("get_effort", { effortId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listEffortsAtSnapshots: (snapshotIds: SnapshotId[]) => typedError<EffortAtSnapshot[], IpcError>(__TAURI_INVOKE("list_efforts_at_snapshots", { snapshotIds })),
+	listEffortsAtSnapshots: (snapshotIds: SnapshotId[]) => typedError<EffortAtSnapshot[], IpcError_Serialize>(__TAURI_INVOKE("list_efforts_at_snapshots", { snapshotIds })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listEffortsOverlappingRange: (rangeStart: SnapshotId, rangeEnd: SnapshotId) => typedError<Effort[], IpcError>(__TAURI_INVOKE("list_efforts_overlapping_range", { rangeStart, rangeEnd })),
+	listEffortsOverlappingRange: (rangeStart: SnapshotId, rangeEnd: SnapshotId) => typedError<Effort[], IpcError_Serialize>(__TAURI_INVOKE("list_efforts_overlapping_range", { rangeStart, rangeEnd })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listEffortsInWindow: (windowStart: Timestamp, windowEnd: Timestamp) => typedError<Effort[], IpcError>(__TAURI_INVOKE("list_efforts_in_window", { windowStart, windowEnd })),
+	listEffortsInWindow: (windowStart: Timestamp, windowEnd: Timestamp) => typedError<Effort[], IpcError_Serialize>(__TAURI_INVOKE("list_efforts_in_window", { windowStart, windowEnd })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	enableMetrics: (keys: string[], enabled: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("enable_metrics", { keys, enabled })),
+	enableMetrics: (keys: string[], enabled: boolean) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("enable_metrics", { keys, enabled })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	runCommand: (id: string, input: unknown, confirmed: boolean) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("run_command", { id, input, confirmed })),
+	runCommand: (id: string, input: unknown, confirmed: boolean) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("run_command", { id, input, confirmed })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	commandOpenAfter: (id: string, result: unknown) => typedError<string | null, IpcError>(__TAURI_INVOKE("command_open_after", { id, result })),
+	commandOpenAfter: (id: string, result: unknown) => typedError<string | null, IpcError_Serialize>(__TAURI_INVOKE("command_open_after", { id, result })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getCommand: (name: string) => typedError<CommandSpec, IpcError>(__TAURI_INVOKE("get_command", { name })),
+	getCommand: (name: string) => typedError<CommandSpec, IpcError_Serialize>(__TAURI_INVOKE("get_command", { name })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listPersonCommands: () => typedError<CommandSpec[], IpcError>(__TAURI_INVOKE("list_person_commands")),
+	listPersonCommands: () => typedError<CommandSpec[], IpcError_Serialize>(__TAURI_INVOKE("list_person_commands")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	registerClientHost: (client: string, scopes: string[]) => typedError<null, IpcError>(__TAURI_INVOKE("register_client_host", { client, scopes })),
+	registerClientHost: (client: string, scopes: string[]) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("register_client_host", { client, scopes })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	unregisterClientHost: (client: string) => typedError<null, IpcError>(__TAURI_INVOKE("unregister_client_host", { client })),
+	unregisterClientHost: (client: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("unregister_client_host", { client })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	answerClientCall: (client: string, id: string, result: unknown | null, error: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("answer_client_call", { client, id, result, error })),
+	answerClientCall: (client: string, id: string, result: unknown | null, error: string | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("answer_client_call", { client, id, result, error })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	runCommandForCall: (client: string, call: string, id: string, input: unknown) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("run_command_for_call", { client, call, id, input })),
+	runCommandForCall: (client: string, call: string, id: string, input: unknown) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("run_command_for_call", { client, call, id, input })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	undoCommand: (auditId: AuditId, confirmed: boolean) => typedError<CommandOutcome, IpcError>(__TAURI_INVOKE("undo_command", { auditId, confirmed })),
+	undoCommand: (auditId: AuditId, confirmed: boolean) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("undo_command", { auditId, confirmed })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -828,32 +828,32 @@ export const commands = {
 	 *  runs it.
 	 */
 	inverse: CommandCall | null,
-} | null, IpcError>(__TAURI_INVOKE("decide_proposal", { proposal, approve })),
+} | null, IpcError_Serialize>(__TAURI_INVOKE("decide_proposal", { proposal, approve })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listWorkspaceEntries: (streamId: string | null, relativePath: string) => typedError<WorkspaceEntry[], IpcError>(__TAURI_INVOKE("list_workspace_entries", { streamId, relativePath })),
+	listWorkspaceEntries: (streamId: string | null, relativePath: string) => typedError<WorkspaceEntry[], IpcError_Serialize>(__TAURI_INVOKE("list_workspace_entries", { streamId, relativePath })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listWorkspaceFiles: (streamId: string | null) => typedError<WorkspaceIndexedFile[], IpcError>(__TAURI_INVOKE("list_workspace_files", { streamId })),
+	listWorkspaceFiles: (streamId: string | null) => typedError<WorkspaceIndexedFile[], IpcError_Serialize>(__TAURI_INVOKE("list_workspace_files", { streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	readWorkspaceFile: (streamId: string | null, relativePath: string) => typedError<WorkspaceFile, IpcError>(__TAURI_INVOKE("read_workspace_file", { streamId, relativePath })),
+	readWorkspaceFile: (streamId: string | null, relativePath: string) => typedError<WorkspaceFile, IpcError_Serialize>(__TAURI_INVOKE("read_workspace_file", { streamId, relativePath })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	filesAt: (streamId: string | null, revision: string) => typedError<string[], IpcError>(__TAURI_INVOKE("files_at", { streamId, revision })),
+	filesAt: (streamId: string | null, revision: string) => typedError<string[], IpcError_Serialize>(__TAURI_INVOKE("files_at", { streamId, revision })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	vcsBlame: (streamId: string | null, path: string, revision: string) => typedError<BlameLine[], IpcError>(__TAURI_INVOKE("vcs_blame", { streamId, path, revision })),
+	vcsBlame: (streamId: string | null, path: string, revision: string) => typedError<BlameLine[], IpcError_Serialize>(__TAURI_INVOKE("vcs_blame", { streamId, path, revision })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -862,72 +862,72 @@ export const commands = {
 	info: RevisionInfo,
 	body: string,
 	files: RevisionFile[],
-} | null, IpcError>(__TAURI_INVOKE("vcs_revision", { streamId, revision })),
+} | null, IpcError_Serialize>(__TAURI_INVOKE("vcs_revision", { streamId, revision })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	vcsMergeBase: (streamId: string | null, a: string, b: string) => typedError<string | null, IpcError>(__TAURI_INVOKE("vcs_merge_base", { streamId, a, b })),
+	vcsMergeBase: (streamId: string | null, a: string, b: string) => typedError<string | null, IpcError_Serialize>(__TAURI_INVOKE("vcs_merge_base", { streamId, a, b })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	vcsLog: (streamId: string | null, limit: number | null, all: boolean) => typedError<RevisionInfo[], IpcError>(__TAURI_INVOKE("vcs_log", { streamId, limit, all })),
+	vcsLog: (streamId: string | null, limit: number | null, all: boolean) => typedError<RevisionInfo[], IpcError_Serialize>(__TAURI_INVOKE("vcs_log", { streamId, limit, all })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	vcsBranches: (streamId: string | null) => typedError<Branch[], IpcError>(__TAURI_INVOKE("vcs_branches", { streamId })),
+	vcsBranches: (streamId: string | null) => typedError<Branch[], IpcError_Serialize>(__TAURI_INVOKE("vcs_branches", { streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	vcsDivergence: (streamId: string | null, base: string, head: string) => typedError<Divergence, IpcError>(__TAURI_INVOKE("vcs_divergence", { streamId, base, head })),
+	vcsDivergence: (streamId: string | null, base: string, head: string) => typedError<Divergence, IpcError_Serialize>(__TAURI_INVOKE("vcs_divergence", { streamId, base, head })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	vcsRevisionsBetween: (streamId: string | null, base: string, head: string, limit: number) => typedError<RevisionInfo[], IpcError>(__TAURI_INVOKE("vcs_revisions_between", { streamId, base, head, limit })),
+	vcsRevisionsBetween: (streamId: string | null, base: string, head: string, limit: number) => typedError<RevisionInfo[], IpcError_Serialize>(__TAURI_INVOKE("vcs_revisions_between", { streamId, base, head, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	vcsFileHistory: (streamId: string | null, path: string, limit: number) => typedError<RevisionInfo[], IpcError>(__TAURI_INVOKE("vcs_file_history", { streamId, path, limit })),
+	vcsFileHistory: (streamId: string | null, path: string, limit: number) => typedError<RevisionInfo[], IpcError_Serialize>(__TAURI_INVOKE("vcs_file_history", { streamId, path, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	vcsListAdoptableWorkspaces: () => typedError<VcsWorkspace[], IpcError>(__TAURI_INVOKE("vcs_list_adoptable_workspaces")),
+	vcsListAdoptableWorkspaces: () => typedError<VcsWorkspace[], IpcError_Serialize>(__TAURI_INVOKE("vcs_list_adoptable_workspaces")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	writeWorkspaceFile: (streamId: string | null, relativePath: string, content: string) => typedError<WorkspaceFile, IpcError>(__TAURI_INVOKE("write_workspace_file", { streamId, relativePath, content })),
+	writeWorkspaceFile: (streamId: string | null, relativePath: string, content: string) => typedError<WorkspaceFile, IpcError_Serialize>(__TAURI_INVOKE("write_workspace_file", { streamId, relativePath, content })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	createWorkspaceFile: (streamId: string | null, relativePath: string, content: string) => typedError<WorkspaceFile, IpcError>(__TAURI_INVOKE("create_workspace_file", { streamId, relativePath, content })),
+	createWorkspaceFile: (streamId: string | null, relativePath: string, content: string) => typedError<WorkspaceFile, IpcError_Serialize>(__TAURI_INVOKE("create_workspace_file", { streamId, relativePath, content })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	createWorkspaceDirectory: (streamId: string | null, relativePath: string) => typedError<string, IpcError>(__TAURI_INVOKE("create_workspace_directory", { streamId, relativePath })),
+	createWorkspaceDirectory: (streamId: string | null, relativePath: string) => typedError<string, IpcError_Serialize>(__TAURI_INVOKE("create_workspace_directory", { streamId, relativePath })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	renameWorkspacePath: (streamId: string | null, fromPath: string, toPath: string) => typedError<[string, string], IpcError>(__TAURI_INVOKE("rename_workspace_path", { streamId, fromPath, toPath })),
+	renameWorkspacePath: (streamId: string | null, fromPath: string, toPath: string) => typedError<[string, string], IpcError_Serialize>(__TAURI_INVOKE("rename_workspace_path", { streamId, fromPath, toPath })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	deleteWorkspacePath: (streamId: string | null, relativePath: string) => typedError<string, IpcError>(__TAURI_INVOKE("delete_workspace_path", { streamId, relativePath })),
+	deleteWorkspacePath: (streamId: string | null, relativePath: string) => typedError<string, IpcError_Serialize>(__TAURI_INVOKE("delete_workspace_path", { streamId, relativePath })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listBackgroundTasks: () => typedError<BackgroundTask[], IpcError>(__TAURI_INVOKE("list_background_tasks")),
+	listBackgroundTasks: () => typedError<BackgroundTask[], IpcError_Serialize>(__TAURI_INVOKE("list_background_tasks")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -949,27 +949,27 @@ export const commands = {
 	 *  is expected to JSON-stringify before passing.
 	 */
 	result_json: string | null,
-} | null, IpcError>(__TAURI_INVOKE("get_background_task", { id })),
+} | null, IpcError_Serialize>(__TAURI_INVOKE("get_background_task", { id })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	startBackgroundTask: (kind: BackgroundTaskKind, label: string, detail: string | null) => typedError<BackgroundTask, IpcError>(__TAURI_INVOKE("start_background_task", { kind, label, detail })),
+	startBackgroundTask: (kind: BackgroundTaskKind, label: string, detail: string | null) => typedError<BackgroundTask, IpcError_Serialize>(__TAURI_INVOKE("start_background_task", { kind, label, detail })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	completeBackgroundTask: (id: string, resultJson: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("complete_background_task", { id, resultJson })),
+	completeBackgroundTask: (id: string, resultJson: string | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("complete_background_task", { id, resultJson })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	failBackgroundTask: (id: string, error: string) => typedError<null, IpcError>(__TAURI_INVOKE("fail_background_task", { id, error })),
+	failBackgroundTask: (id: string, error: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("fail_background_task", { id, error })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	updateBackgroundTask: (id: string, label: string | null, detail: string | null, progress: number | null) => typedError<null, IpcError>(__TAURI_INVOKE("update_background_task", { id, label, detail, progress })),
+	updateBackgroundTask: (id: string, label: string | null, detail: string | null, progress: number | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("update_background_task", { id, label, detail, progress })),
 	/**
 	 *  Open an external URL in a sandboxed `WebviewWindow`.
 	 * 
@@ -978,72 +978,72 @@ export const commands = {
 	 *  `apps/desktop/src-tauri/capabilities/external-url.json`, which
 	 *  grants zero oxplow commands and zero Tauri plugin permissions.
 	 */
-	openExternalUrl: (url: string) => typedError<string, IpcError>(__TAURI_INVOKE("open_external_url", { url })),
+	openExternalUrl: (url: string) => typedError<string, IpcError_Serialize>(__TAURI_INVOKE("open_external_url", { url })),
 	/**
 	 *  Read clipboard text via the OS. Routed through Rust so we don't
 	 *  have to grant the renderer the broader Tauri clipboard plugin permission.
 	 */
-	clipboardReadText: () => typedError<string, IpcError>(__TAURI_INVOKE("clipboard_read_text")),
+	clipboardReadText: () => typedError<string, IpcError_Serialize>(__TAURI_INVOKE("clipboard_read_text")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listInstalledLspPackages: () => typedError<InstalledLspPackage[], IpcError>(__TAURI_INVOKE("list_installed_lsp_packages")),
+	listInstalledLspPackages: () => typedError<InstalledLspPackage[], IpcError_Serialize>(__TAURI_INVOKE("list_installed_lsp_packages")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	lspRequest: (streamId: string, languageId: string, method: string, paramsJson: string) => typedError<string, IpcError>(__TAURI_INVOKE("lsp_request", { streamId, languageId, method, paramsJson })),
+	lspRequest: (streamId: string, languageId: string, method: string, paramsJson: string) => typedError<string, IpcError_Serialize>(__TAURI_INVOKE("lsp_request", { streamId, languageId, method, paramsJson })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	lspNotify: (streamId: string, languageId: string, method: string, paramsJson: string) => typedError<null, IpcError>(__TAURI_INVOKE("lsp_notify", { streamId, languageId, method, paramsJson })),
+	lspNotify: (streamId: string, languageId: string, method: string, paramsJson: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("lsp_notify", { streamId, languageId, method, paramsJson })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listLspServers: () => typedError<LspServerListing[], IpcError>(__TAURI_INVOKE("list_lsp_servers")),
+	listLspServers: () => typedError<LspServerListing[], IpcError_Serialize>(__TAURI_INVOKE("list_lsp_servers")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	restartLspServer: (streamId: string, languageId: string) => typedError<null, IpcError>(__TAURI_INVOKE("restart_lsp_server", { streamId, languageId })),
+	restartLspServer: (streamId: string, languageId: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("restart_lsp_server", { streamId, languageId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	respondLspApplyEdit: (token: number, applied: boolean, failureReason: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("respond_lsp_apply_edit", { token, applied, failureReason })),
+	respondLspApplyEdit: (token: number, applied: boolean, failureReason: string | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("respond_lsp_apply_edit", { token, applied, failureReason })),
 	/**
 	 *  Open a renderer-attached terminal session: the agent CLI or a shell,
 	 *  run directly in a PTY (`oxplow_rpc::commands::terminal`).
 	 */
-	openTerminalSession: (paneTarget: string, cols: number, rows: number) => typedError<AttachResult, IpcError>(__TAURI_INVOKE("open_terminal_session", { paneTarget, cols, rows })),
+	openTerminalSession: (paneTarget: string, cols: number, rows: number) => typedError<AttachResult, IpcError_Serialize>(__TAURI_INVOKE("open_terminal_session", { paneTarget, cols, rows })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	forwardTerminalInput: (sessionId: string, message: string) => typedError<null, IpcError>(__TAURI_INVOKE("forward_terminal_input", { sessionId, message })),
+	forwardTerminalInput: (sessionId: string, message: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("forward_terminal_input", { sessionId, message })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	closeTerminalSession: (sessionId: string) => typedError<null, IpcError>(__TAURI_INVOKE("close_terminal_session", { sessionId })),
+	closeTerminalSession: (sessionId: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("close_terminal_session", { sessionId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	terminalSessionCwd: (sessionId: string) => typedError<string | null, IpcError>(__TAURI_INVOKE("terminal_session_cwd", { sessionId })),
+	terminalSessionCwd: (sessionId: string) => typedError<string | null, IpcError_Serialize>(__TAURI_INVOKE("terminal_session_cwd", { sessionId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	terminateTerminalSession: (sessionId: string) => typedError<null, IpcError>(__TAURI_INVOKE("terminate_terminal_session", { sessionId })),
+	terminateTerminalSession: (sessionId: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("terminate_terminal_session", { sessionId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	lookupTerminalSession: (sessionId: AgentSessionId) => typedError<string | null, IpcError>(__TAURI_INVOKE("lookup_terminal_session", { sessionId })),
+	lookupTerminalSession: (sessionId: AgentSessionId) => typedError<string | null, IpcError_Serialize>(__TAURI_INVOKE("lookup_terminal_session", { sessionId })),
 	/**
 	 *  Replace the native menu with the calling window's snapshot. Each
 	 *  activation fires `menu:command` with `{ id: "<command-id>" }` back
@@ -1053,14 +1053,14 @@ export const commands = {
 	 *  window owns the menu bar (see [`MenuRegistry`]), so a background
 	 *  window's menu churn can't overwrite the foreground one's.
 	 */
-	setNativeMenu: (groups: MenuGroupSnapshot[]) => typedError<null, IpcError>(__TAURI_INVOKE("set_native_menu", { groups })),
+	setNativeMenu: (groups: MenuGroupSnapshot[]) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("set_native_menu", { groups })),
 	/**
 	 *  Recent projects, most-recently-opened first, each tagged with
 	 *  whether its directory still exists.
 	 */
-	listRecentProjects: () => typedError<RecentProjectView[], IpcError>(__TAURI_INVOKE("list_recent_projects")),
+	listRecentProjects: () => typedError<RecentProjectView[], IpcError_Serialize>(__TAURI_INVOKE("list_recent_projects")),
 	/**  Forget a recent project (exact match on the stored path). */
-	removeRecentProject: (path: string) => typedError<null, IpcError>(__TAURI_INVOKE("remove_recent_project", { path })),
+	removeRecentProject: (path: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("remove_recent_project", { path })),
 	/**
 	 *  Open `path` as an existing project: start its daemon and put a
 	 *  window in front of it, or focus the window that already has it. When
@@ -1068,7 +1068,7 @@ export const commands = {
 	 *  is up. A folder that isn't a project yet is an error, not an implicit
 	 *  create; see `create_project`.
 	 */
-	openProject: (path: string, newWindow: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("open_project", { path, newWindow })),
+	openProject: (path: string, newWindow: boolean) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("open_project", { path, newWindow })),
 	/**
 	 *  Create a new project in `path`: initialize `.oxplow/` and open the
 	 *  result in a **new** window. Backs File ▸ New Project… and the
@@ -1079,14 +1079,14 @@ export const commands = {
 	 *  launcher or the window the user ran the command from. `path` must not
 	 *  already be a project.
 	 */
-	createProject: (path: string) => typedError<null, IpcError>(__TAURI_INVOKE("create_project", { path })),
+	createProject: (path: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("create_project", { path })),
 	/**
 	 *  Confirm first-run setup: create `.oxplow/` in `path` and open it,
 	 *  replacing this setup window.
 	 */
-	setupProject: (path: string) => typedError<null, IpcError>(__TAURI_INVOKE("setup_project", { path })),
+	setupProject: (path: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("setup_project", { path })),
 	/**  Decline first-run setup: close this window. */
-	abortSetup: () => typedError<null, IpcError>(__TAURI_INVOKE("abort_setup")),
+	abortSetup: () => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("abort_setup")),
 };
 
 /* Types */
@@ -3071,6 +3071,13 @@ export type Extension_Deserialize = {
 	 *  (`permissions:`).
 	 */
 	permissions?: Permissions_Deserialize,
+	/**
+	 *  What it waits on a person for when it is on but undeployed: the
+	 *  permissions its source would add, one line each
+	 *  ([`Permissions::added_over`]); startup deploys only one that asks
+	 *  for nothing.
+	 */
+	pending?: string[],
 };
 
 /**  A loaded extension and anything wrong with it. */
@@ -3202,6 +3209,13 @@ export type Extension_Serialize = {
 	 *  (`permissions:`).
 	 */
 	permissions: Permissions_Serialize,
+	/**
+	 *  What it waits on a person for when it is on but undeployed: the
+	 *  permissions its source would add, one line each
+	 *  ([`Permissions::added_over`]); startup deploys only one that asks
+	 *  for nothing.
+	 */
+	pending: string[],
 };
 
 /**
@@ -3722,7 +3736,17 @@ export type Invokers = {
  *  same shape. Internal errors from the service layer are converted here
  *  so the JS side never has to reason about Rust-specific error types.
  */
-export type IpcError = {
+export type IpcError = IpcError_Serialize | IpcError_Deserialize;
+
+/**
+ *  Frontend-facing error envelope.
+ * 
+ *  All command cores return `Result<T, IpcError>`, and the Tauri
+ *  `#[tauri::command]` wrappers + the daemon's HTTP routes surface this
+ *  same shape. Internal errors from the service layer are converted here
+ *  so the JS side never has to reason about Rust-specific error types.
+ */
+export type IpcError_Deserialize = {
 	code: string,
 	message: string,
 	cause: string | null,
@@ -3731,6 +3755,37 @@ export type IpcError = {
 	 *  so a form shows the message under that field.
 	 */
 	field?: string | null,
+	/**
+	 *  For `NEEDS_CONFIRMATION` and `PROPOSED`, what the person is asked
+	 *  about beyond the command, one line each (the permissions a deploy
+	 *  adds).
+	 */
+	details?: string[],
+};
+
+/**
+ *  Frontend-facing error envelope.
+ * 
+ *  All command cores return `Result<T, IpcError>`, and the Tauri
+ *  `#[tauri::command]` wrappers + the daemon's HTTP routes surface this
+ *  same shape. Internal errors from the service layer are converted here
+ *  so the JS side never has to reason about Rust-specific error types.
+ */
+export type IpcError_Serialize = {
+	code: string,
+	message: string,
+	cause: string | null,
+	/**
+	 *  For `INVALID` input, the field it names (a JSON pointer, `/title`),
+	 *  so a form shows the message under that field.
+	 */
+	field: string | null,
+	/**
+	 *  For `NEEDS_CONFIRMATION` and `PROPOSED`, what the person is asked
+	 *  about beyond the command, one line each (the permissions a deploy
+	 *  adds).
+	 */
+	details?: string[],
 };
 
 /**  A host-recognized operation owned by one extension contribution. */

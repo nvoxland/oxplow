@@ -1357,11 +1357,12 @@
     - { name: "errors", type: "TEXT", doc: "Problems reported while loading it that did not hold it back, as a JSON array of strings; `[]` when healthy." }
     - { name: "warnings", type: "TEXT", doc: "Things worth fixing that don't stop it loading, as a JSON array of strings." }
     - { name: "permissions", type: "TEXT", doc: "What its manifest declares it may reach beyond the baseline (`permissions:`: `sql`, `commands`, `files`, `ai`, `network`, `process`, `secrets`, `agent`), as a JSON object; `{}` is the baseline. Approved when it is deployed. (v3)" }
+    - { name: "pending", type: "TEXT", doc: "What an extension that is on but undeployed waits on a person for: the permissions its source would add, one line each, as a JSON array; `[]` when nothing waits. Startup deploys an undeployed extension only when it asks for nothing. (v3)" }
   tests:
     - { not_null: ref }
     - { unique: ref }
 - name: extension_deployment
-  version: 1
+  version: 2
   key: [ref]
   description: "Each deployment of an extension: an immutable copy of its source in the store (`.oxplow/runtime/extensions/<name>/<hash>/`), named by the hash of the source it was copied from, and which one runs now (`active`). `oxplow.extension.deploy` makes one; `oxplow.extension.rollback` makes an older one active again. The store keeps the active one and the five newest. A bundled extension with no active row runs the copy that ships with oxplow."
   columns:
@@ -1373,6 +1374,7 @@
     - { name: "stream_id", type: "INTEGER", doc: "The stream whose checkout it was deployed from; NULL when oxplow deployed it at startup." }
     - { name: "source", type: "TEXT", doc: "The source folder it was copied from." }
     - { name: "active", type: "INTEGER", doc: "1 for the deployment the extension runs now." }
+    - { name: "permissions", type: "TEXT", doc: "What it declares it may reach beyond the baseline, as a JSON object (`v_extension.permissions`'s shape): what a person approved when it was deployed. (v2)" }
   tests:
     - { not_null: ref }
     - { unique: ref }

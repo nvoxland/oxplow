@@ -137,6 +137,13 @@ async fn an_approval_lives_and_dies_with_the_memory_secrets() {
     .unwrap();
 
     let first = start(&project, &home);
+    // It declares a permission, so boot waits for the person to deploy it.
+    ipc(
+        &first,
+        "run_command",
+        json!({ "id": "oxplow.extension.deploy", "input": { "name": "project" }, "confirmed": true }),
+    )
+    .await;
     let programs = ipc(&first, "list_project_programs", json!({})).await;
     let mine = programs
         .as_array()

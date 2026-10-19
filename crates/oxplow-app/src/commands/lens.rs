@@ -535,7 +535,11 @@ fn keep(target: LensTarget) -> Op {
             // Kept is live: the extension is deployed with the lens in it.
             // A deploy that fails takes the lens back out.
             let svc = target.services.get()?;
-            if let Err(e) = crate::extension_deploy::deploy(&svc, &extension, &root, None).await {
+            // Keeping a lens adds no permission; one the extension's source
+            // gained since its last deploy waits for a person to deploy it.
+            if let Err(e) =
+                crate::extension_deploy::deploy(&svc, &extension, &root, None, false).await
+            {
                 let _ = std::fs::remove_file(root.join(&lens.path));
                 if let Some(id) = answer {
                     let lens_id = claim.clone();
@@ -544,7 +548,10 @@ fn keep(target: LensTarget) -> Op {
                         .transaction(move |tx| answers::release_kept_tx(tx, id, &lens_id))
                         .await;
                 }
-                return Err(domain(e));
+                return Err(match e {
+                    crate::extension_deploy::DeployError::Failed(e) => domain(e),
+                    asks => domain(oxplow_domain::DomainError::Invalid(asks.to_string())),
+                });
             }
             let subject: Vec<String> = answer
                 .map(answer_ref)

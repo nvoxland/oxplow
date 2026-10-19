@@ -535,19 +535,19 @@ commands:
     example: {"name": "my-extension"}
   # extensions.deploy
   - name: extension.deploy
-    summary: "Deploy an extension from its source: check it, copy it into the store (`.oxplow/runtime/extensions/<name>/<hash>/`) and make that deployment the one oxplow runs. The source is the stream's checkout (`stream`, else yours): `.oxplow/extensions/<name>/`, or where `extensionSources` points. Nothing runs an edit to a source until it is deployed. The same source again is `already: true`. A deployment that doesn't load or prepare changes nothing and its problems are the error. Turns the extension on for the person when nothing turns it on yet. Returns `{ name, hash, already }` once the deployment runs."
+    summary: "Deploy an extension from its source: check it, copy it into the store (`.oxplow/runtime/extensions/<name>/<hash>/`) and make that deployment the one oxplow runs. The source is the stream's checkout (`stream`, else yours): `.oxplow/extensions/<name>/`, or where `extensionSources` points. Nothing runs an edit to a source until it is deployed. The same source again is `already: true`. A deployment that doesn't load or prepare changes nothing and its problems are the error. Turns the extension on for the person when nothing turns it on yet. A source whose `permissions:` add to what the extension runs with now asks a person first — an agent's deploy becomes a proposal naming each permission it adds, and runs once a person approves it. Returns `{ name, hash, already, warnings }` once the deployment runs."
     scope: extensions.deploy
     op: deploy
     invokers: { human: true, agent: true, lens: true }
     example: {"name": "my-extension"}
   - name: extension.rollback
-    summary: "Make an earlier deployment of an extension the one oxplow runs: `to` (a hash or its start, from `v_extension_deployment`), else the one before the active one. A bundled extension with nothing older returns to the deployment that ships with oxplow."
+    summary: "Make an earlier deployment of an extension the one oxplow runs: `to` (a hash or its start, from `v_extension_deployment`), else the one before the active one. A bundled extension with nothing older returns to the deployment that ships with oxplow. Rolling back to one with more `permissions:` than what runs asks a person first, as a deploy does."
     scope: extensions.deploy
     op: rollback
     invokers: { human: true, agent: true, lens: true }
     example: {"name": "my-extension"}
   - name: extension.enable
-    summary: "Turn an extension on for you (`.oxplow/personal.yaml`), over the project's list. One with no deployment here is deployed from the main checkout's source."
+    summary: "Turn an extension on for you (`.oxplow/personal.yaml`), over the project's list. One with no deployment here is deployed from the main checkout's source (asking first when it declares `permissions:`)."
     scope: extensions.deploy
     op: enable
     invokers: { human: true, agent: false, lens: true }

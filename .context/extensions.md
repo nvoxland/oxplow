@@ -1127,7 +1127,10 @@ deployments, private state and settings, and never deletes its source.
 live set starts from the active rows whose folder is still in the store;
 each extension that is on with no deployment here (a fresh clone, a
 just-pulled teammate's) is staged from the main checkout's source and
-activates with the rest — one that doesn't prepare is held, as any is.
+activates with the rest — one that doesn't prepare is held, as any is. One
+whose source declares permissions (beyond what ships, for a bundled one)
+isn't: it stays `undeployed` and `v_extension.pending` says what it asks
+for, until a person deploys it ("Permissions").
 Foundation can't be held: a deployment of it that doesn't load or whose
 core baseline doesn't activate gives way to the shipped one
 (`ExtensionActivation::initialize`), which the next publication records
@@ -1197,7 +1200,29 @@ outside its namespace → `commands`. A script's composed commands can't be
 known before it runs, so they are checked when it runs. `intent.prompts`
 are suggestions a person picks, not agent text, and need nothing.
 
-`v_extension.permissions` is the declaration as JSON (`{}`: baseline).
+**Approval is the deploy** (`extension_deploy::approved`). The approved
+set is what runs: the active deployment's permissions (the running catalog
+entry's; a bundled extension with no deployment of its own runs what ships,
+`shipped_permissions`). A deploy, rollback or enable whose permissions add
+nothing to that goes live at once — a narrower one too. One that adds a
+permission changes nothing (no copy, no row, not turned on) and returns
+`DeployError::NeedsApproval { adds }`, one line per added permission
+(`Permissions::added_over`: "process — runs programs with your authority;
+oxplow does not confine them", "network — may reach api.github.com", …).
+The command (`oxplow.extension.deploy`, `rollback`, `enable`) raises that
+as `NeedsConfirmation` with the lines in `Preview::details`: a person
+confirms inline (`CommandConfirm` lists them), an agent's call becomes a
+proposal naming them (an agent can't confirm), and the approval deploys it.
+There is no separate approval store: each deployment row records the
+permissions it was approved with (`v_extension_deployment.permissions`).
+Keep This (`oxplow.lens.keep`) never asks: it fails, saying why, when the
+extension's source gained a permission since it was last deployed. A
+fresh machine has nothing running, so a teammate's extension that
+declares permissions waits for its first deploy here (Startup).
+
+`v_extension.permissions` is the declaration as JSON (`{}`: baseline);
+`v_extension.pending` is what an undeployed extension waits on a person
+for (the same lines; `[]` when nothing).
 The shipped extensions declare theirs like any other: `oxplow-foundation`
 `{ ai: true }` (its AI providers), `oxplow-bundled` `{ sql: read, ai: true,
 agent: true }`.

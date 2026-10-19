@@ -88,11 +88,24 @@ impl Host {
         )
         .await
         .map_err(|e| e.to_string())?;
+        // Startup holds back one that declares permissions; the author's
+        // own test run deploys what it copied, as they would, confirmed.
+        let mut deploys = Vec::new();
+        for name in &on {
+            if root.join(EXTENSIONS_DIR).join(name).is_dir() {
+                if let Err(e) =
+                    oxplow_app::extension_deploy::deploy(&svc, name, &root, None, true).await
+                {
+                    deploys.push(format!("{name}: {e}"));
+                }
+            }
+        }
         let problems = svc
             .extension_activation
             .problems()
             .into_iter()
             .flat_map(|(owner, why)| why.into_iter().map(move |w| format!("{owner}: {w}")))
+            .chain(deploys)
             .collect();
         Ok(Host {
             _dir: dir,

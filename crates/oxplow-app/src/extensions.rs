@@ -1683,6 +1683,12 @@ pub struct Extension {
     /// (`permissions:`).
     #[serde(default)]
     pub permissions: Permissions,
+    /// What it waits on a person for when it is on but undeployed: the
+    /// permissions its source would add, one line each
+    /// ([`Permissions::added_over`]); startup deploys only one that asks
+    /// for nothing.
+    #[serde(default)]
+    pub pending: Vec<String>,
 }
 
 impl Extension {
@@ -1919,11 +1925,12 @@ pub fn load_deployed(
             }
             let source = settings.source(project, name);
             if source.is_dir() {
-                Some(listed_only(
-                    name,
-                    &shown(project, &source),
-                    Deployment::Undeployed,
-                ))
+                let declared = load_extension_at(&source, name).permissions;
+                Some(Extension {
+                    pending: declared.added_over(&Permissions::default()),
+                    permissions: declared,
+                    ..listed_only(name, &shown(project, &source), Deployment::Undeployed)
+                })
             } else if settings.is_enabled(name) {
                 Some(listed_only(
                     name,
@@ -2670,6 +2677,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         public_contracts: Default::default(),
         deployment: Deployment::Source,
         permissions: Permissions::default(),
+        pending: Vec::new(),
     }
 }
 

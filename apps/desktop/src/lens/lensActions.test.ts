@@ -68,9 +68,11 @@ test("a command that names no page opens nothing, and a refusal to bind is recor
   expect(log).toEqual([`error Finish: its result has no \`page\` to open`]);
 });
 
-test("a command that asks returns needs-confirmation, then runs confirmed", async () => {
-  const { d, log } = deps(new IpcCallError("`x` needs confirmation", "NEEDS_CONFIRMATION"));
-  expect(await performLensAction(action, run, null, null, false, d)).toBe("needs-confirmation");
+test("a command that asks returns what it asks about, then runs confirmed", async () => {
+  const { d, log } = deps(
+    new IpcCallError("`x` needs confirmation", "NEEDS_CONFIRMATION", null, ["process — runs programs"]),
+  );
+  expect(await performLensAction(action, run, null, null, false, d)).toEqual({ confirm: ["process — runs programs"] });
   expect(await performLensAction(action, run, null, null, true, d)).toBe("done");
   expect(log.filter((l) => l.startsWith("error"))).toEqual([]);
 });

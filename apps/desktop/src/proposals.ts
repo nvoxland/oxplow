@@ -21,6 +21,9 @@ export interface ProposalPreview {
   summary: string;
   input: unknown;
   destructive: boolean;
+  /** What it asks about beyond the command, one line each (the
+   *  permissions a deploy adds). */
+  details?: string[];
 }
 
 /** One pending proposal. */
@@ -63,6 +66,9 @@ export interface ProposalSummary {
   /** A composite's commands, in order. */
   children: string[];
   destructive: boolean;
+  /** What it asks about beyond the command (the permissions a deploy
+   *  adds). */
+  details: string[];
 }
 
 const json = (text: SqlCell): unknown => {
@@ -154,6 +160,7 @@ export function summarizeProposal(p: Proposal): ProposalSummary {
     change: hasChange ? { before: shown(field(p.dryRun, "before")), after: shown(field(p.dryRun, "after")) } : null,
     children: Array.isArray(children) ? children.map((c) => String(field(c, "name"))) : [],
     destructive: Boolean(p.preview?.destructive),
+    details: p.preview?.details ?? [],
   };
 }
 

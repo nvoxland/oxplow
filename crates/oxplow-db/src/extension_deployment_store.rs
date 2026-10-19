@@ -20,20 +20,24 @@ pub struct DeploymentRow {
     /// The source folder it was copied from.
     pub source: String,
     pub active: bool,
+    /// What it declares it may reach: what a person approved when it was
+    /// deployed.
+    pub permissions: oxplow_domain::permissions::Permissions,
 }
 
 /// Record a deployment (inactive). One already recorded keeps its row.
 pub fn record_tx(conn: &rusqlite::Connection, row: &DeploymentRow) -> Result<(), DomainError> {
     conn.execute(
         "INSERT OR IGNORE INTO extension_deployment
-           (name, hash, deployed_at, from_stream, source, active)
-         VALUES (?1, ?2, ?3, ?4, ?5, 0)",
+           (name, hash, deployed_at, from_stream, source, active, permissions_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)",
         params![
             row.name,
             row.hash,
             row.deployed_at,
             row.from_stream,
-            row.source
+            row.source,
+            serde_json::to_string(&row.permissions).expect("permissions serialize")
         ],
     )
     .map_err(map_sql_err)?;
@@ -64,7 +68,7 @@ pub fn list_tx(
 ) -> Result<Vec<DeploymentRow>, DomainError> {
     let mut stmt = conn
         .prepare(
-            "SELECT name, hash, deployed_at, from_stream, source, active
+            "SELECT name, hash, deployed_at, from_stream, source, active, permissions_json
              FROM extension_deployment
              WHERE ?1 IS NULL OR name = ?1
              ORDER BY name, deployed_at DESC, hash",
@@ -79,6 +83,7 @@ pub fn list_tx(
                 from_stream: r.get(3)?,
                 source: r.get(4)?,
                 active: r.get::<_, i64>(5)? != 0,
+                permissions: serde_json::from_str(&r.get::<_, String>(6)?).unwrap_or_default(),
             })
         })
         .map_err(map_sql_err)?
@@ -126,6 +131,7 @@ mod tests {
             from_stream: Some(1),
             source: format!("/src/{name}"),
             active: false,
+            permissions: Default::default(),
         }
     }
 

@@ -183,6 +183,11 @@ pub struct Invocation {
     /// trace and recorded with the command's run.
     pub run: RunContext,
     pub idempotency_key: Option<String>,
+    /// A person confirmed this call. An External handler that finds it
+    /// needs a person's word (a deploy that adds permissions) raises
+    /// `NeedsConfirmation` while this is false: a person is asked, an
+    /// agent's call becomes a proposal.
+    pub confirmed: bool,
 }
 
 impl Invocation {
@@ -265,6 +270,8 @@ struct ExternalRun {
     input: Value,
     origin: RunOrigin,
     gates: Gates,
+    /// A person confirmed it.
+    confirmed: bool,
 }
 
 /// What settling a run's outcome needs of it.
@@ -748,6 +755,7 @@ impl RunOrigin {
                 RunOrigin::Effect(key, _) => Some(effect_step_key(key, index, call, input)),
                 _ => None,
             },
+            confirmed: false,
         }
     }
 }
@@ -1383,6 +1391,7 @@ impl CommandBus {
                 summary: spec.summary.clone(),
                 input: input.clone(),
                 destructive: matches!(confirm, oxplow_domain::Confirm::Destructive),
+                details: Vec::new(),
             };
             let prepared = Prepared {
                 command: &command,
@@ -1553,6 +1562,7 @@ impl CommandBus {
                     input,
                     origin,
                     gates,
+                    confirmed,
                 })));
             }
         };
@@ -1581,6 +1591,7 @@ impl CommandBus {
             input,
             origin,
             gates,
+            confirmed,
         } = external;
         let spec = &command.spec;
         let Resolved::External(handler) = &resolved else {
@@ -1592,6 +1603,7 @@ impl CommandBus {
             // a provider's `host/call`s) is part of the run audited.
             let invocation = Invocation {
                 run: run.clone(),
+                confirmed,
                 ..origin.invocation(&run, 0, &spec.id, &input)
             };
             let called = invocation.run.clone();
@@ -1765,6 +1777,7 @@ impl CommandBus {
                 let invocation = Invocation {
                     run: run.child(None, Mode::External),
                     idempotency_key: None,
+                    confirmed: false,
                 };
                 handler(invocation, input).await?
             }

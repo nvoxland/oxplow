@@ -101,6 +101,23 @@ test("a composite lists its children; anything else uses its summary; destructiv
   expect(summarizeProposal(proposal({ actorKind: "lens", actorId: "acme/x" })).who).toBe("A lens (acme/x) for the agent");
 });
 
+test("a deploy's proposal lists what it adds", () => {
+  const s = summarizeProposal(
+    proposal({
+      command: "oxplow.extension.deploy",
+      preview: {
+        command: "oxplow.extension.deploy",
+        summary: "`acme` asks for more than it runs with now",
+        input: { name: "acme" },
+        destructive: false,
+        details: ["process — runs programs with your authority; oxplow does not confine them"],
+      },
+    }),
+  );
+  expect(s.details).toEqual(["process — runs programs with your authority; oxplow does not confine them"]);
+  expect(summarizeProposal(proposal({})).details).toEqual([]);
+});
+
 test("a setting's pending proposal is the one keyed on it", () => {
   const list = [proposal({ id: 1, key: "config:zones" }), proposal({ id: 2, key: "config:ai" })];
   expect(proposalForSetting(list, "ai")?.id).toBe(2);

@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use oxplow_domain::{CommandError, Confirm, Invokers};
+use oxplow_domain::{CommandError, Confirm, Invokers, Preview};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +14,7 @@ use super::agent_reads::stream_or_actors;
 use super::ops::Op;
 use super::util::{failed, parse, schema, ServicesSlot};
 use super::{Handler, HandlerOutput, Invocation};
+use crate::extension_deploy::DeployError;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -54,6 +55,25 @@ fn domain(e: oxplow_domain::DomainError) -> CommandError {
     }
 }
 
+/// A deploy, rollback or enable that adds permissions asks a person
+/// first: the bus asks them inline, or turns an agent's call into a
+/// proposal; their confirmed call runs it.
+fn deploy_error(command: &str, input: &serde_json::Value) -> impl Fn(DeployError) -> CommandError {
+    let (command, input) = (command.to_string(), input.clone());
+    move |e| match e {
+        DeployError::NeedsApproval { name, adds } => CommandError::NeedsConfirmation {
+            preview: Box::new(Preview {
+                command: command.clone(),
+                summary: format!("`{name}` asks for more than it runs with now"),
+                input: input.clone(),
+                destructive: false,
+                details: adds,
+            }),
+        },
+        DeployError::Failed(e) => domain(e),
+    }
+}
+
 fn output(value: impl Serialize) -> HandlerOutput {
     HandlerOutput {
         result: serde_json::to_value(value).expect("a result serializes"),
@@ -82,6 +102,7 @@ fn deploy_op(services: ServicesSlot) -> Op {
         Handler::External(Arc::new(move |invocation: Invocation, input| {
             let services = services.clone();
             Box::pin(async move {
+                let raw = input.clone();
                 let input: DeployInput = parse(input)?;
                 let svc = services.get()?;
                 let stream = stream_or_actors(&svc, invocation.actor(), input.stream).await?;
@@ -98,9 +119,15 @@ fn deploy_op(services: ServicesSlot) -> Op {
                     .as_deref()
                     .and_then(oxplow_domain::StreamId::try_from_str)
                     .map(|s| s.value());
-                let deployed = crate::extension_deploy::deploy(&svc, &input.name, &root, from)
-                    .await
-                    .map_err(domain)?;
+                let deployed = crate::extension_deploy::deploy(
+                    &svc,
+                    &input.name,
+                    &root,
+                    from,
+                    invocation.confirmed,
+                )
+                .await
+                .map_err(deploy_error("oxplow.extension.deploy", &raw))?;
                 Ok(output(deployed))
             })
         })),
@@ -113,15 +140,20 @@ fn rollback_op(services: ServicesSlot) -> Op {
         "rollback",
         schema::<RollbackInput>(),
         false,
-        Handler::External(Arc::new(move |_: Invocation, input| {
+        Handler::External(Arc::new(move |invocation: Invocation, input| {
             let services = services.clone();
             Box::pin(async move {
+                let raw = input.clone();
                 let input: RollbackInput = parse(input)?;
                 let svc = services.get()?;
-                let done =
-                    crate::extension_deploy::rollback(&svc, &input.name, input.to.as_deref())
-                        .await
-                        .map_err(domain)?;
+                let done = crate::extension_deploy::rollback(
+                    &svc,
+                    &input.name,
+                    input.to.as_deref(),
+                    invocation.confirmed,
+                )
+                .await
+                .map_err(deploy_error("oxplow.extension.rollback", &raw))?;
                 Ok(output(done))
             })
         })),
@@ -134,14 +166,20 @@ fn enable_op(services: ServicesSlot, op: &'static str, enabled: bool) -> Op {
         op,
         schema::<NameInput>(),
         false,
-        Handler::External(Arc::new(move |_: Invocation, input| {
+        Handler::External(Arc::new(move |invocation: Invocation, input| {
             let services = services.clone();
             Box::pin(async move {
+                let raw = input.clone();
                 let input: NameInput = parse(input)?;
                 let svc = services.get()?;
-                crate::extension_deploy::set_enabled(&svc, &input.name, enabled)
-                    .await
-                    .map_err(domain)?;
+                crate::extension_deploy::set_enabled(
+                    &svc,
+                    &input.name,
+                    enabled,
+                    invocation.confirmed,
+                )
+                .await
+                .map_err(deploy_error(&format!("oxplow.extension.{op}"), &raw))?;
                 Ok(output(
                     serde_json::json!({ "name": input.name, "enabled": enabled }),
                 ))

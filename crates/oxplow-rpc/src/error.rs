@@ -24,6 +24,11 @@ pub struct IpcError {
     /// so a form shows the message under that field.
     #[serde(default)]
     pub field: Option<String>,
+    /// For `NEEDS_CONFIRMATION` and `PROPOSED`, what the person is asked
+    /// about beyond the command, one line each (the permissions a deploy
+    /// adds).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub details: Vec<String>,
 }
 
 impl IpcError {
@@ -33,6 +38,7 @@ impl IpcError {
             message: msg.into(),
             cause: None,
             field: None,
+            details: Vec::new(),
         }
     }
 
@@ -42,6 +48,7 @@ impl IpcError {
             message: msg.into(),
             cause: None,
             field: None,
+            details: Vec::new(),
         }
     }
 
@@ -51,6 +58,7 @@ impl IpcError {
             message: "not found".into(),
             cause: None,
             field: None,
+            details: Vec::new(),
         }
     }
 
@@ -74,6 +82,12 @@ impl From<oxplow_domain::CommandError> for IpcError {
             E::Invalid { field, .. } => field.clone(),
             _ => None,
         };
+        let details = match &value {
+            E::NeedsConfirmation { preview } | E::Proposed { preview, .. } => {
+                preview.details.clone()
+            }
+            _ => Vec::new(),
+        };
         let code = match &value {
             E::Unknown { .. } => "NOT_FOUND",
             E::Invalid { .. } => "INVALID",
@@ -89,6 +103,7 @@ impl From<oxplow_domain::CommandError> for IpcError {
             message,
             cause: None,
             field,
+            details,
         }
     }
 }
@@ -101,6 +116,7 @@ impl From<DomainError> for IpcError {
                 message: msg.clone(),
                 cause: None,
                 field: None,
+                details: Vec::new(),
             },
             DomainError::NotFound => Self::not_found(),
             DomainError::Invariant(msg) => Self {
@@ -108,24 +124,28 @@ impl From<DomainError> for IpcError {
                 message: msg.clone(),
                 cause: None,
                 field: None,
+                details: Vec::new(),
             },
             DomainError::Constraint(msg) => Self {
                 code: "CONSTRAINT".into(),
                 message: msg.clone(),
                 cause: None,
                 field: None,
+                details: Vec::new(),
             },
             DomainError::Busy(msg) => Self {
                 code: "BUSY".into(),
                 message: msg.clone(),
                 cause: None,
                 field: None,
+                details: Vec::new(),
             },
             DomainError::Storage(msg) => Self {
                 code: "STORAGE".into(),
                 message: msg.clone(),
                 cause: None,
                 field: None,
+                details: Vec::new(),
             },
         }
     }
@@ -139,30 +159,35 @@ impl From<SessionError> for IpcError {
                 message: format!("not a git repo: {}", p.display()),
                 cause: None,
                 field: None,
+                details: Vec::new(),
             },
             SessionError::InWorktree(p) => Self {
                 code: "IN_WORKTREE".into(),
                 message: format!("workspace is a secondary git worktree: {}", p.display()),
                 cause: None,
                 field: None,
+                details: Vec::new(),
             },
             SessionError::PrimaryExists => Self {
                 code: "PRIMARY_EXISTS".into(),
                 message: "primary stream already exists".into(),
                 cause: None,
                 field: None,
+                details: Vec::new(),
             },
             SessionError::PrimaryMissing => Self {
                 code: "PRIMARY_MISSING".into(),
                 message: "primary stream missing".into(),
                 cause: None,
                 field: None,
+                details: Vec::new(),
             },
             SessionError::DuplicateWorktreeSlug(slug) => Self {
                 code: "DUPLICATE_WORKTREE_SLUG".into(),
                 message: format!("worktree slug \"{slug}\" already exists"),
                 cause: None,
                 field: None,
+                details: Vec::new(),
             },
             SessionError::Vcs(e) => IpcError::from(DomainError::from(e.clone())),
             SessionError::Storage(e) => IpcError::from(e.clone()),
@@ -179,6 +204,7 @@ impl From<ThreadError> for IpcError {
                 message: format!("thread is closed: {id}"),
                 cause: None,
                 field: None,
+                details: Vec::new(),
             },
             ThreadError::Storage(e) => IpcError::from(e),
         }

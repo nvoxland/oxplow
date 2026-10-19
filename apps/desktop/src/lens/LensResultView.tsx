@@ -81,6 +81,7 @@ export function LensResultView(props: LensResultViewProps) {
     <CommandConfirm
       label={actions.pending.action.label}
       command={actions.pending.action.command}
+      details={actions.pending.details}
       onConfirm={actions.confirm}
       onCancel={actions.cancel}
       testIdPrefix="lens-action-confirm"
@@ -145,7 +146,11 @@ function useOpenAfter() {
 function useLensActions(run: LensRun, streamId: string | null) {
   const openAfter = useOpenAfter();
   const [busy, setBusy] = useState<string | null>(null);
-  const [pending, setPending] = useState<{ action: LensAction; row: Record<string, SqlCell> | null } | null>(null);
+  const [pending, setPending] = useState<{
+    action: LensAction;
+    row: Record<string, SqlCell> | null;
+    details: string[];
+  } | null>(null);
   // A form action pressed: its form is open until it runs or is closed.
   const [form, setForm] = useState<{ action: LensAction; row: Record<string, SqlCell> | null } | null>(null);
   const deps = {
@@ -157,7 +162,7 @@ function useLensActions(run: LensRun, streamId: string | null) {
     setBusy(action.id);
     try {
       const outcome = await performLensAction(action, run, row, streamId, confirmed, deps);
-      setPending(outcome === "needs-confirmation" ? { action, row } : null);
+      setPending(typeof outcome === "object" ? { action, row, details: outcome.confirm } : null);
     } finally {
       setBusy(null);
     }

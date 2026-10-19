@@ -44,6 +44,8 @@ pub struct ExtensionRow {
     pub warnings_json: String,
     /// What it declares it may reach beyond the baseline, as JSON.
     pub permissions_json: String,
+    /// What an undeployed extension waits on a person for, as a JSON array.
+    pub pending_json: String,
 }
 
 /// One question a person can ask, as `v_prompt` lists it.
@@ -109,8 +111,9 @@ pub fn reset_tx(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result
         .prepare(
             "INSERT OR REPLACE INTO extension_listing
                (name, namespace, description, path, origin, version, enabled,
-                purpose, deployment, hash, errors_json, warnings_json, permissions_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                purpose, deployment, hash, errors_json, warnings_json, permissions_json,
+                pending_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         )
         .map_err(map_sql_err)?;
     for e in extensions {
@@ -128,6 +131,7 @@ pub fn reset_tx(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result
             e.errors_json,
             e.warnings_json,
             e.permissions_json,
+            e.pending_json,
         ])
         .map_err(map_sql_err)?;
     }

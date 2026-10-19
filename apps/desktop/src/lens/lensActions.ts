@@ -4,7 +4,7 @@
 /// Agent Context are on every lens (kit affordances, not declared). See
 /// `.context/extensions.md`.
 import { formatContextMention } from "../agent-context-ref.js";
-import { needsConfirmation } from "../ipc-error.js";
+import { IpcCallError, needsConfirmation } from "../ipc-error.js";
 import type { CommandOutcome, LensAction, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 
 export interface LensActionDeps {
@@ -27,8 +27,9 @@ export interface LensActionDeps {
 }
 
 /** What pressing an action came to: it ran, the command asks the person
- *  first (press again confirmed), or it failed (recorded). */
-export type LensActionOutcome = "done" | "needs-confirmation" | "failed";
+ *  first (press again confirmed; `confirm` is what it asks about beyond
+ *  itself, one line each), or it failed (recorded). */
+export type LensActionOutcome = "done" | { confirm: string[] } | "failed";
 
 /** A row as its column → value map (what a row action binds `{{row.*}}`
  *  to). */
@@ -54,7 +55,7 @@ export async function performLensAction(
     await openAfterAction(action, outcome, deps);
     return "done";
   } catch (e) {
-    if (!confirmed && needsConfirmation(e)) return "needs-confirmation";
+    if (!confirmed && needsConfirmation(e)) return { confirm: e instanceof IpcCallError ? e.details : [] };
     deps.recordError(action.label, e instanceof Error ? e.message : String(e));
     return "failed";
   }

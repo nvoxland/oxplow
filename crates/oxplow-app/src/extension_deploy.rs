@@ -20,6 +20,7 @@ use serde::Serialize;
 
 use crate::extension_catalog::LiveChanges;
 use crate::extension_store;
+use crate::extensions::Permissions;
 use crate::vocabulary_reactor::VocabularyErrors;
 use crate::Services;
 
@@ -47,6 +48,90 @@ fn size_warnings(name: &str, bytes: u64) -> Vec<String> {
         "extension `{name}` is {:.1} MiB: every deployment copies its whole folder, so keep build inputs and dependencies out of it",
         bytes as f64 / (1024.0 * 1024.0)
     )]
+}
+
+/// Why a deploy, rollback or enable didn't go live.
+#[derive(Debug)]
+pub enum DeployError {
+    /// It adds permissions over what runs now: a person confirms first
+    /// (`adds`, one line each), and an agent's becomes a proposal.
+    NeedsApproval {
+        name: String,
+        adds: Vec<String>,
+    },
+    Failed(DomainError),
+}
+
+impl From<DomainError> for DeployError {
+    fn from(e: DomainError) -> Self {
+        DeployError::Failed(e)
+    }
+}
+
+impl std::fmt::Display for DeployError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DeployError::NeedsApproval { name, adds } => write!(
+                f,
+                "deploying `{name}` adds permissions a person approves first: {}",
+                adds.join("; ")
+            ),
+            DeployError::Failed(e) => e.fmt(f),
+        }
+    }
+}
+
+/// The permissions a bundled extension ships with.
+fn shipped_permissions(b: &crate::bundled_extensions::BundledExtension) -> Permissions {
+    b.files
+        .iter()
+        .find(|(rel, _)| *rel == "extension.yaml")
+        .and_then(|(_, bytes)| {
+            serde_yaml::from_slice::<crate::extensions::manifest_v2::ManifestV2>(bytes).ok()
+        })
+        .map(|m| m.permissions)
+        .unwrap_or_default()
+}
+
+/// What `name` may reach as it runs now: the approved set a deploy is
+/// compared with. Nothing running is the baseline.
+fn active_permissions(svc: &Services, name: &str) -> Permissions {
+    let running = svc.extension_catalog.active().and_then(|snapshot| {
+        snapshot
+            .extensions()
+            .iter()
+            .find(|e| {
+                e.name == name
+                    && matches!(
+                        e.deployment,
+                        crate::extensions::Deployment::Deployed { .. }
+                            | crate::extensions::Deployment::Shipped { .. }
+                    )
+            })
+            .map(|e| e.permissions.clone())
+    });
+    running
+        .or_else(|| crate::bundled_extensions::find(name).map(shipped_permissions))
+        .unwrap_or_default()
+}
+
+/// Going from what `name` runs now to `declared` may add permissions: a
+/// person confirms that first.
+fn approved(
+    svc: &Services,
+    name: &str,
+    declared: &Permissions,
+    confirmed: bool,
+) -> Result<(), DeployError> {
+    let adds = declared.added_over(&active_permissions(svc, name));
+    if adds.is_empty() || confirmed {
+        Ok(())
+    } else {
+        Err(DeployError::NeedsApproval {
+            name: name.to_string(),
+            adds,
+        })
+    }
 }
 
 fn invalid(message: impl Into<String>) -> DomainError {
@@ -126,13 +211,16 @@ fn target_of(name: &str, hash: &str) -> Option<String> {
 
 /// Deploy `name` from its source in the checkout at `root`, made from
 /// `from_stream` (`None`: oxplow itself, at startup). Turns it on in the
-/// person's layer when nothing turns it on yet.
+/// person's layer when nothing turns it on yet. A source that declares
+/// permissions beyond what runs now goes live only `confirmed` by a
+/// person; otherwise nothing changes and it says what it would add.
 pub async fn deploy(
     svc: &Arc<Services>,
     name: &str,
     root: &Path,
     from_stream: Option<i64>,
-) -> Result<Deployed, DomainError> {
+    confirmed: bool,
+) -> Result<Deployed, DeployError> {
     valid(name)?;
     let project = svc.layout.project_dir.clone();
     let source = source_of(&project, root, name)?;
@@ -152,21 +240,25 @@ pub async fn deploy(
         .map_err(|e| invalid(format!("extension `{name}`: {e}")))?
     };
     let target = target_of(name, &hash);
+    let live_now = svc.extension_catalog.live().get(name) == target.as_ref();
+    if !live_now {
+        if !loaded.errors.is_empty() {
+            return Err(invalid(format!(
+                "extension `{name}` doesn't load:\n{}",
+                loaded.errors.join("\n")
+            ))
+            .into());
+        }
+        approved(svc, name, &loaded.permissions, confirmed)?;
+    }
     let enabled_now = turn_on(svc, name)?;
-    if svc.extension_catalog.live().get(name) == target.as_ref() {
+    if live_now {
         return Ok(Deployed {
             name: name.to_string(),
             hash,
             already: true,
             warnings: Vec::new(),
         });
-    }
-    if !loaded.errors.is_empty() {
-        undo_turn_on(svc, name, enabled_now);
-        return Err(invalid(format!(
-            "extension `{name}` doesn't load:\n{}",
-            loaded.errors.join("\n")
-        )));
     }
     if target.is_some() {
         let copied = {
@@ -184,7 +276,7 @@ pub async fn deploy(
         };
         if let Err(e) = copied {
             undo_turn_on(svc, name, enabled_now);
-            return Err(storage(format!("deploy `{name}`: {e}")));
+            return Err(storage(format!("deploy `{name}`: {e}")).into());
         }
         let row = DeploymentRow {
             name: name.to_string(),
@@ -193,6 +285,7 @@ pub async fn deploy(
             from_stream,
             source: source.to_string_lossy().into_owned(),
             active: false,
+            permissions: loaded.permissions.clone(),
         };
         svc.db
             .transaction(move |tx| store_rows::record_tx(tx, &row))
@@ -201,7 +294,7 @@ pub async fn deploy(
     let changes = LiveChanges::from([(name.to_string(), target)]);
     if let Err(error) = activate(svc, &changes).await {
         undo_turn_on(svc, name, enabled_now);
-        return Err(error);
+        return Err(error.into());
     }
     prune(svc, name).await?;
     Ok(Deployed {
@@ -219,7 +312,8 @@ pub async fn rollback(
     svc: &Arc<Services>,
     name: &str,
     to: Option<&str>,
-) -> Result<Deployed, DomainError> {
+    confirmed: bool,
+) -> Result<Deployed, DeployError> {
     valid(name)?;
     let rows = {
         let name = name.to_string();
@@ -241,12 +335,15 @@ pub async fn rollback(
                     {
                         None
                     }
-                    _ => return Err(invalid(format!("`{name}` has no deployment `{prefix}`"))),
+                    _ => {
+                        return Err(invalid(format!("`{name}` has no deployment `{prefix}`")).into())
+                    }
                 },
                 _ => {
                     return Err(invalid(format!(
                         "`{prefix}` names more than one deployment of `{name}`"
-                    )))
+                    ))
+                    .into())
                 }
             }
         }
@@ -262,7 +359,8 @@ pub async fn rollback(
                 _ => {
                     return Err(invalid(format!(
                         "`{name}` has no earlier deployment to roll back to"
-                    )))
+                    ))
+                    .into())
                 }
             }
         }
@@ -271,7 +369,8 @@ pub async fn rollback(
         if !extension_store::deployment_dir(&svc.layout.project_dir, name, hash).is_dir() {
             return Err(invalid(format!(
                 "deployment `{hash}` of `{name}` is no longer in the store"
-            )));
+            ))
+            .into());
         }
     }
     let shown = hash.clone().unwrap_or_else(|| {
@@ -287,6 +386,17 @@ pub async fn rollback(
             warnings: Vec::new(),
         });
     }
+    let target_permissions = match &hash {
+        Some(hash) => rows
+            .iter()
+            .find(|r| &r.hash == hash)
+            .map(|r| r.permissions.clone())
+            .unwrap_or_default(),
+        None => crate::bundled_extensions::find(name)
+            .map(shipped_permissions)
+            .unwrap_or_default(),
+    };
+    approved(svc, name, &target_permissions, confirmed)?;
     activate(svc, &LiveChanges::from([(name.to_string(), hash)])).await?;
     Ok(Deployed {
         name: name.to_string(),
@@ -378,12 +488,11 @@ pub async fn set_enabled(
     svc: &Arc<Services>,
     name: &str,
     enabled: bool,
-) -> Result<(), DomainError> {
+    confirmed: bool,
+) -> Result<(), DeployError> {
     valid(name)?;
     if crate::bundled_extensions::is_required(name) {
-        return Err(invalid(format!(
-            "`{name}` is part of oxplow; it is always on"
-        )));
+        return Err(invalid(format!("`{name}` is part of oxplow; it is always on")).into());
     }
     let mut settings = oxplow_config::extension_settings(&svc.layout.project_dir);
     if enabled {
@@ -403,10 +512,10 @@ pub async fn set_enabled(
         && !svc.extension_catalog.live().contains_key(name);
     if undeployed {
         let root = svc.layout.project_dir.clone();
-        deploy(svc, name, &root, None).await?;
+        deploy(svc, name, &root, None, confirmed).await?;
         return Ok(());
     }
-    activate(svc, &LiveChanges::new()).await
+    Ok(activate(svc, &LiveChanges::new()).await?)
 }
 
 /// Take `name` out of both lists, stop running it, and forget its
@@ -541,6 +650,7 @@ async fn stage(
     name: &str,
     source: &Path,
     from_stream: Option<i64>,
+    permissions: Permissions,
 ) -> Result<Option<String>, DomainError> {
     let hash = {
         let (project, owned, source) = (
@@ -569,6 +679,7 @@ async fn stage(
         from_stream,
         source: source.to_string_lossy().into_owned(),
         active: false,
+        permissions,
     };
     svc.db
         .transaction(move |tx| store_rows::record_tx(tx, &row))
@@ -609,7 +720,17 @@ pub(crate) async fn start(svc: &Arc<Services>) -> Result<LiveChanges, DomainErro
         if !source.join("extension.yaml").is_file() {
             continue;
         }
-        match stage(svc, &name, &source, None).await {
+        // One that would add permissions waits for a person to deploy it
+        // (its listing says what for); a bundled one's baseline is what
+        // ships.
+        let declared = crate::extensions::load_extension_at(&source, &name).permissions;
+        let baseline = crate::bundled_extensions::find(&name)
+            .map(shipped_permissions)
+            .unwrap_or_default();
+        if !declared.added_over(&baseline).is_empty() {
+            continue;
+        }
+        match stage(svc, &name, &source, None, declared).await {
             Ok(Some(target)) => {
                 changes.insert(name, Some(target));
             }
@@ -636,7 +757,8 @@ pub(crate) async fn stage_sources(svc: &Arc<Services>) -> LiveChanges {
         if !source.join("extension.yaml").is_file() || settings.personal.disable.contains(&name) {
             continue;
         }
-        let target = stage(svc, &name, &source, None)
+        let declared = crate::extensions::load_extension_at(&source, &name).permissions;
+        let target = stage(svc, &name, &source, None, declared)
             .await
             .expect("a source stages");
         if svc.extension_catalog.live().get(&name) != target.as_ref() {
@@ -705,6 +827,198 @@ mod tests {
             .collect()
     }
 
+    /// `acme`'s source declaring `permissions`, its lens titled `title`.
+    fn source_with(svc: &Services, title: &str, permissions: &str) -> PathBuf {
+        let dir = source(svc, title);
+        write(
+            &dir,
+            "extension.yaml",
+            &format!("manifest: 2\nname: acme\n{permissions}intent:\n  purpose: test\n"),
+        );
+        dir
+    }
+
+    const AI: &str = "permissions: { ai: true }\n";
+
+    fn asked(result: Result<Deployed, DeployError>) -> Vec<String> {
+        match result {
+            Err(DeployError::NeedsApproval { adds, .. }) => adds,
+            other => panic!("expected it to ask, got {other:?}"),
+        }
+    }
+
+    /// A deploy that reaches no further than what runs goes live at once.
+    #[tokio::test]
+    async fn a_deploy_within_the_active_permissions_goes_live_at_once() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        source_with(svc, "One", AI);
+        deploy(svc, "acme", &root, None, true).await.unwrap();
+        source_with(svc, "Two", AI);
+        deploy(svc, "acme", &root, None, false).await.unwrap();
+        assert_eq!(lens_title(svc).as_deref(), Some("Two"));
+        source_with(svc, "Three", "");
+        deploy(svc, "acme", &root, None, false).await.unwrap();
+        assert_eq!(lens_title(svc).as_deref(), Some("Three"));
+    }
+
+    /// A deploy that adds a permission asks before anything changes: it
+    /// names what it adds, writes nothing, and goes live once confirmed.
+    #[tokio::test]
+    async fn a_deploy_that_adds_a_permission_pauses_until_confirmed() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        source(svc, "One");
+        deploy(svc, "acme", &root, None, false).await.unwrap();
+        source_with(svc, "Two", AI);
+        assert_eq!(
+            asked(deploy(svc, "acme", &root, None, false).await),
+            vec!["ai — may call your AI provider with your key"]
+        );
+        assert_eq!(lens_title(svc).as_deref(), Some("One"));
+        assert_eq!(rows(svc).await.len(), 1);
+        deploy(svc, "acme", &root, None, true).await.unwrap();
+        assert_eq!(lens_title(svc).as_deref(), Some("Two"));
+        let recorded = svc
+            .db
+            .read(|c| store_rows::list_tx(c, Some("acme")))
+            .await
+            .unwrap();
+        assert!(recorded[0].active && recorded[0].permissions.ai);
+    }
+
+    /// Rolling back to a deployment that reaches further asks the same way.
+    #[tokio::test]
+    async fn rollback_to_a_wider_deployment_asks_too() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        source_with(svc, "One", AI);
+        deploy(svc, "acme", &root, None, true).await.unwrap();
+        source_with(svc, "Two", "");
+        deploy(svc, "acme", &root, None, false).await.unwrap();
+        assert_eq!(
+            asked(rollback(svc, "acme", None, false).await),
+            vec!["ai — may call your AI provider with your key"]
+        );
+        assert_eq!(lens_title(svc).as_deref(), Some("Two"));
+        rollback(svc, "acme", None, true).await.unwrap();
+        assert_eq!(lens_title(svc).as_deref(), Some("One"));
+    }
+
+    /// At startup an extension that is on but undeployed deploys by itself
+    /// only when it asks for nothing; one that declares permissions waits,
+    /// and says what for.
+    #[tokio::test]
+    async fn startup_leaves_a_declaring_extension_undeployed_and_says_what_it_needs() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        source_with(svc, "One", AI);
+        write(&root, ".oxplow/personal.yaml", "enableExtensions: [acme]\n");
+        svc.reload_config_from_disk().unwrap();
+        svc.extension_activation
+            .initialize(svc.clone())
+            .await
+            .unwrap();
+        let acme = acme(svc).unwrap();
+        assert_eq!(acme.deployment, Deployment::Undeployed);
+        assert_eq!(
+            acme.pending,
+            vec!["ai — may call your AI provider with your key"]
+        );
+        assert_eq!(lens_title(svc), None);
+        let listed = svc
+            .sql
+            .query_sql(
+                "SELECT pending FROM v_extension WHERE name = 'acme'",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            listed.rows,
+            vec![vec![oxplow_db::SqlCell::Text(
+                "[\"ai — may call your AI provider with your key\"]".into()
+            )]]
+        );
+    }
+
+    /// An agent can't approve: its deploy that adds a permission becomes a
+    /// proposal naming what it adds, and a person's approval deploys it.
+    #[tokio::test]
+    async fn an_agents_deploy_that_adds_permissions_becomes_a_proposal_whose_approval_deploys() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        source_with(svc, "One", AI);
+        let agent = oxplow_domain::Actor::Agent {
+            session_id: None,
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let err = svc
+            .commands
+            .run(
+                &agent,
+                "oxplow.extension.deploy",
+                serde_json::json!({ "name": "acme" }),
+                true,
+            )
+            .await
+            .unwrap_err();
+        let oxplow_domain::CommandError::Proposed { proposal, .. } = err else {
+            panic!("{err:?}");
+        };
+        assert_eq!(lens_title(svc), None);
+        let id: i64 = proposal.strip_prefix("proposal:").unwrap().parse().unwrap();
+        let kept = svc
+            .commands
+            .proposal_store()
+            .get(id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            kept.preview["details"],
+            serde_json::json!(["ai — may call your AI provider with your key"])
+        );
+        svc.commands
+            .approve(&oxplow_domain::Actor::Human, id)
+            .await
+            .unwrap();
+        assert_eq!(lens_title(svc).as_deref(), Some("One"));
+    }
+
+    /// A bundled extension's source that declares what ships asks nothing:
+    /// the shipped deployment's permissions are what runs.
+    #[tokio::test]
+    async fn a_bundled_deploy_with_the_shipped_permissions_asks_nothing() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        let dir = root.join(".oxplow/extensions/oxplow-bundled");
+        for (rel, bytes) in crate::bundled_extensions::find("oxplow-bundled")
+            .unwrap()
+            .files
+        {
+            let path = dir.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, bytes).unwrap();
+        }
+        write(
+            &dir,
+            "lenses/extra.yaml",
+            "title: Extra\nquery: \"SELECT 1 AS n\"\n",
+        );
+        let deployed = deploy(svc, "oxplow-bundled", &root, None, false)
+            .await
+            .unwrap();
+        assert!(!deployed.already);
+    }
+
     /// `v_extension` says what each extension declares it may reach:
     /// `{}` for the baseline.
     #[tokio::test]
@@ -713,7 +1027,7 @@ mod tests {
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source(svc, "One");
-        deploy(svc, "acme", &root, None).await.unwrap();
+        deploy(svc, "acme", &root, None, true).await.unwrap();
         let listed = svc
             .sql
             .query_sql(
@@ -755,7 +1069,7 @@ mod tests {
         assert_eq!(lens_title(svc), None);
         assert_eq!(acme(svc).unwrap().deployment, Deployment::Undeployed);
 
-        let deployed = deploy(svc, "acme", &root, Some(1)).await.unwrap();
+        let deployed = deploy(svc, "acme", &root, Some(1), true).await.unwrap();
         assert!(!deployed.already);
         assert_eq!(lens_title(svc).as_deref(), Some("One"));
         assert_eq!(
@@ -771,7 +1085,7 @@ mod tests {
         assert_eq!(rows(svc).await, [(deployed.hash.clone(), true)]);
         assert!(extension_store::deployment_dir(&root, "acme", &deployed.hash).is_dir());
 
-        let again = deploy(svc, "acme", &root, Some(1)).await.unwrap();
+        let again = deploy(svc, "acme", &root, Some(1), true).await.unwrap();
         assert!(again.already);
         assert_eq!(again.hash, deployed.hash);
 
@@ -782,7 +1096,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(lens_title(svc).as_deref(), Some("One"));
-        let second = deploy(svc, "acme", &root, Some(1)).await.unwrap();
+        let second = deploy(svc, "acme", &root, Some(1), true).await.unwrap();
         assert_eq!(lens_title(svc).as_deref(), Some("Uno"));
         assert_eq!(
             rows(svc).await,
@@ -790,9 +1104,9 @@ mod tests {
         );
 
         // Back to the one before, and forward again by its hash.
-        rollback(svc, "acme", None).await.unwrap();
+        rollback(svc, "acme", None, true).await.unwrap();
         assert_eq!(lens_title(svc).as_deref(), Some("One"));
-        rollback(svc, "acme", Some(&second.hash[..6]))
+        rollback(svc, "acme", Some(&second.hash[..6]), true)
             .await
             .unwrap();
         assert_eq!(lens_title(svc).as_deref(), Some("Uno"));
@@ -807,7 +1121,7 @@ mod tests {
         let root = svc.layout.project_dir.clone();
         let dir = source(svc, "One");
         write(&dir, "extension.yaml", "manifest: 2\nname: acme\n");
-        let err = deploy(svc, "acme", &root, None).await.unwrap_err();
+        let err = deploy(svc, "acme", &root, None, true).await.unwrap_err();
         assert!(err.to_string().contains("doesn't load"), "{err}");
         assert!(!oxplow_config::extension_settings(&root).is_enabled("acme"));
         assert!(rows(svc).await.is_empty());
@@ -822,11 +1136,11 @@ mod tests {
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         let dir = source(svc, "One");
-        let deployed = deploy(svc, "acme", &root, None).await.unwrap();
+        let deployed = deploy(svc, "acme", &root, None, true).await.unwrap();
 
-        set_enabled(svc, "acme", false).await.unwrap();
+        set_enabled(svc, "acme", false, true).await.unwrap();
         assert_eq!(lens_title(svc), None);
-        set_enabled(svc, "acme", true).await.unwrap();
+        set_enabled(svc, "acme", true, true).await.unwrap();
         assert_eq!(lens_title(svc).as_deref(), Some("One"));
 
         remove(svc, "acme").await.unwrap();
@@ -845,7 +1159,7 @@ mod tests {
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source(svc, "One");
-        deploy(svc, "acme", &root, None).await.unwrap();
+        deploy(svc, "acme", &root, None, true).await.unwrap();
         let ignored = |rel: &str| {
             std::process::Command::new("git")
                 .args(["check-ignore", "-q", rel])
@@ -924,6 +1238,7 @@ mod tests {
             from_stream: None,
             source: "extensions/oxplow-foundation".into(),
             active: false,
+            permissions: Permissions::default(),
         };
         svc.db
             .transaction(move |tx| {
@@ -964,7 +1279,7 @@ mod tests {
         let root = svc.layout.project_dir.clone();
         let dir = source(svc, "One");
         std::fs::write(dir.join("data.bin"), vec![0u8; 26 * 1024 * 1024]).unwrap();
-        let deployed = deploy(svc, "acme", &root, None).await.unwrap();
+        let deployed = deploy(svc, "acme", &root, None, true).await.unwrap();
         assert!(
             deployed
                 .warnings
@@ -974,7 +1289,7 @@ mod tests {
             deployed.warnings
         );
         std::fs::remove_file(dir.join("data.bin")).unwrap();
-        let small = deploy(svc, "acme", &root, None).await.unwrap();
+        let small = deploy(svc, "acme", &root, None, true).await.unwrap();
         assert!(small.warnings.is_empty(), "{:?}", small.warnings);
     }
 
@@ -986,7 +1301,7 @@ mod tests {
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source(svc, "One");
-        deploy(svc, "acme", &root, None).await.unwrap();
+        deploy(svc, "acme", &root, None, true).await.unwrap();
         source(svc, "Uno");
         svc.extension_catalog.set_live(Default::default());
         svc.extension_activation
