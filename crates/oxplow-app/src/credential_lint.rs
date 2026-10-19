@@ -220,9 +220,9 @@ mod tests {
     #[test]
     fn a_finding_names_the_file_and_line_and_hides_the_value() {
         let text = format!("a: 1\nb: ghp_{}\n", "Zz9Yy8Xx7W".repeat(4));
-        let w = warnings("oxplow/extensions/x/extension.yaml", &text);
+        let w = warnings(".oxplow/extensions/x/extension.yaml", &text);
         assert_eq!(w.len(), 1);
-        assert!(w[0].starts_with("oxplow/extensions/x/extension.yaml:2: looks like a GitHub token (`ghp_…`, 44 characters)"), "{w:?}");
+        assert!(w[0].starts_with(".oxplow/extensions/x/extension.yaml:2: looks like a GitHub token (`ghp_…`, 44 characters)"), "{w:?}");
         assert!(!w[0].contains("Zz9Yy8Xx7W"));
     }
 }

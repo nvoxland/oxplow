@@ -3,7 +3,7 @@
 // boots the worker's daemon: only `page` (through `storageState`) asks for it.
 import { test as base, expect, type Page } from "@playwright/test";
 
-import { approveProgram, ipc, settle, startDaemon, until, type Daemon } from "./daemon.js";
+import { deploy, ipc, settle, startDaemon, until, type Daemon } from "./daemon.js";
 
 type Stream = { id: string };
 type Thread = { id: string };
@@ -32,6 +32,9 @@ async function workspace(): Promise<Workspace> {
   const daemon = await startDaemon();
   try {
     await settle(daemon);
+    // The suite's extensions declare permissions, so boot waits for a
+    // person to deploy them: deployed as they would, confirmed.
+    for (const name of ["e2e", "github"]) await deploy(daemon, name);
     // Extensions' models compile in the background after boot: the test
     // extension's is published once they are.
     await until("the extensions' models to publish", 60_000, async () => {
@@ -40,10 +43,7 @@ async function workspace(): Promise<Workspace> {
       });
       return out.rows.length > 0;
     });
-    // Its pages open on the fake harness, a provider from the project:
-    // approved first, as a person does before using it, so no spec
-    // depends on another having approved it.
-    await approveProgram(daemon, "provider", "e2e/terminal");
+    // Its pages open on the fake harness, a provider from the project.
     await until("the fake harness to be registered", 60_000, async () => {
       const harnesses = await ipc<Array<{ id: string; enabled: boolean }>>(daemon, "list_agent_harnesses");
       return harnesses.some((h) => h.id === "terminal" && h.enabled);

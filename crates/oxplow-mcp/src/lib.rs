@@ -671,6 +671,25 @@ mod tests {
     use super::*;
     use oxplow_app::commands::agent_reads::ai::AI_TEXT_MAX;
 
+    /// Only deployed extensions run: deploy the sources a test wrote
+    /// under the project's `.oxplow/extensions/`.
+    async fn deploy_sources(svc: &std::sync::Arc<oxplow_app::Services>) {
+        let root = svc.layout.project_dir.clone();
+        let mut names: Vec<String> = std::fs::read_dir(root.join(".oxplow/extensions"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .filter_map(|e| e.file_name().into_string().ok())
+            .collect();
+        names.sort();
+        for name in names {
+            oxplow_app::extension_deploy::deploy(svc, &name, &root, None, true)
+                .await
+                .unwrap_or_else(|e| panic!("deploy `{name}`: {e}"));
+        }
+    }
+
     async fn boot() -> (tempfile::TempDir, Arc<Services>, OxplowMcp) {
         boot_with_config("").await
     }
@@ -778,10 +797,10 @@ mod tests {
         .unwrap();
         assert_eq!(none["open"], serde_json::Value::Null);
 
-        let p = proj.path().join("oxplow/extensions/demo/lenses");
+        let p = proj.path().join(".oxplow/extensions/demo/lenses");
         std::fs::create_dir_all(&p).unwrap();
         std::fs::write(
-            proj.path().join("oxplow/extensions/demo/extension.yaml"),
+            proj.path().join(".oxplow/extensions/demo/extension.yaml"),
             "manifest: 2\nname: demo\nintent:\n  purpose: test\n",
         )
         .unwrap();
@@ -790,11 +809,7 @@ mod tests {
             "title: Kinds\nparams:\n  - { name: kind, default: worktree }\nquery: SELECT kind FROM v_stream WHERE kind = :kind\n",
         )
         .unwrap();
-        services
-            .extension_activation
-            .activate(services.clone())
-            .await
-            .unwrap();
+        deploy_sources(&services).await;
         services.client_reports.report(
             oxplow_app::client_reports::TabReport {
                 client: "window".into(),
@@ -852,26 +867,22 @@ mod tests {
             std::fs::write(p, body).unwrap();
         };
         w(
-            "oxplow/extensions/demo/extension.yaml",
+            ".oxplow/extensions/demo/extension.yaml",
             "manifest: 2\nname: demo\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: effort.review.details, lens: review }\n",
         );
         w(
-            "oxplow/extensions/demo/lenses/review.yaml",
+            ".oxplow/extensions/demo/lenses/review.yaml",
             "title: Review\nparams:\n  - { name: effort_id }\nquery: SELECT :effort_id AS effort\n",
         );
         w(
-            "oxplow/extensions/demo/lenses/streams.yaml",
+            ".oxplow/extensions/demo/lenses/streams.yaml",
             "title: Streams\nparams:\n  - { name: kind, default: primary }\nquery: SELECT kind FROM v_stream WHERE kind = :kind\n",
         );
         w(
-            "oxplow/extensions/demo/lenses/broken.yaml",
+            ".oxplow/extensions/demo/lenses/broken.yaml",
             "title: Broken\nquery: SELECT x FROM v_nope\n",
         );
-        services
-            .extension_activation
-            .activate(services.clone())
-            .await
-            .unwrap();
+        deploy_sources(&services).await;
 
         // A lens's definition is what `read` gives for its ref.
         let read: serde_json::Value = serde_json::from_str(&text_payload(
@@ -1187,7 +1198,7 @@ mod tests {
     #[tokio::test]
     async fn preview_collector_returns_rows_without_storing() {
         let (proj, svc, server) = boot().await;
-        let ext = proj.path().join("oxplow/extensions/work");
+        let ext = proj.path().join(".oxplow/extensions/work");
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
@@ -1195,10 +1206,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(ext.join("one.jq"), "{entities: {nums: .rows}}").unwrap();
-        svc.extension_activation
-            .activate(svc.clone())
-            .await
-            .unwrap();
+        deploy_sources(&svc).await;
         let r = call(
             &server,
             &rmcp::model::Extensions::new(),
@@ -1217,11 +1225,11 @@ mod tests {
     #[tokio::test]
     async fn preview_collector_returns_a_fact_collectors_facts() {
         let (proj, svc, server) = boot().await;
-        let ext = proj.path().join("oxplow/extensions/work");
+        let ext = proj.path().join(".oxplow/extensions/work");
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: files\n    runtime: starlark\n    entry: files.star\n    needs: [tree.read]\n    facts: [work.files]\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: { files: read }\ncollectors:\n  - id: files\n    runtime: starlark\n    entry: files.star\n    needs: [tree.read]\n    facts: [work.files]\n",
         )
         .unwrap();
         std::fs::write(
@@ -1229,10 +1237,7 @@ mod tests {
             "def transform(x):\n    return {\"facts\": [{\"measure\": \"work.files\", \"value\": len(files(\"**\")), \"subject\": ref.build(\"file\", \"src/a.rs\")}]}\n",
         )
         .unwrap();
-        svc.extension_activation
-            .activate(svc.clone())
-            .await
-            .unwrap();
+        deploy_sources(&svc).await;
         let primary = svc.streams.list_streams().await.unwrap()[0].id;
         let snap = svc.snapshot_store.create_snapshot(primary).await.unwrap();
         svc.snapshot_store
@@ -1751,7 +1756,7 @@ mod tests {
         let (_proj, services, server) = boot().await;
         let primary = services.stream_store.list().await.unwrap().pop().unwrap();
         let elsewhere = tempfile::tempdir().unwrap();
-        let ext = elsewhere.path().join("oxplow/extensions/mine");
+        let ext = elsewhere.path().join(".oxplow/extensions/mine");
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
@@ -1861,23 +1866,6 @@ mod tests {
     /// Point the in-memory services' `role` at a mock provider at `base`.
     fn assign_mock_role(services: &Services, base: String, role: &str) {
         use oxplow_app::ai_service::{ProviderConfig, Role, RoleBinding};
-        use oxplow_app::exec_consent::{approve_program, list, ProgramKind};
-        // The shipped providers are scripts a person approves first.
-        let project = services.layout.project_dir.clone();
-        let extensions = services.extension_catalog.get(&project);
-        for p in list(&services.approvals, &project, &extensions) {
-            if p.kind == ProgramKind::AiProvider {
-                approve_program(
-                    &services.approvals,
-                    &project,
-                    &extensions,
-                    p.kind,
-                    &p.name,
-                    p.version.as_deref().unwrap(),
-                )
-                .unwrap();
-            }
-        }
         services
             .ai
             .save_provider(

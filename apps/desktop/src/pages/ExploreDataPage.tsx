@@ -7,12 +7,11 @@ import { keepLensSpec, querySql, type LensRun, type LensViz } from "../api.js";
 import { LensResultView } from "../lens/LensResultView.js";
 import { ModelLineage } from "./ModelLineage.js";
 import { PinToDashboard } from "../components/Dashboard/PinToDashboard.js";
-import { adHocLens, KEPT_IN_STREAM, NEW_LENS_COMMAND, slugify } from "../lens/lensModel.js";
+import { adHocLens, NEW_LENS_COMMAND, slugify } from "../lens/lensModel.js";
 import { useCommandDraft } from "../commandDraft.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { recordOpError } from "../components/opErrorsStore.js";
-import { showToast } from "../components/toastStore.js";
 import { DataTable, type DataColumn } from "../kit/index.js";
 import { useRequestGuard } from "../request-guard.js";
 import type { LensChart, Reads, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
@@ -423,8 +422,7 @@ export function SaveAsLens({
       );
       setOpen(false);
       setTitle("");
-      if (kept.live) onOpenPage(lensRef(kept.lens));
-      else showToast({ message: KEPT_IN_STREAM });
+      onOpenPage(lensRef(kept.lens));
     } catch (e) {
       recordOpError({ label: "Save lens", message: e instanceof Error ? e.message : String(e) });
     }
@@ -454,7 +452,7 @@ export function SaveAsLens({
         value={extension}
         onChange={(e) => setExtension(e.target.value)}
         onKeyDown={onKey}
-        title="Extension (folder under oxplow/extensions/)"
+        title="Extension (folder under .oxplow/extensions/)"
         style={{ width: 90 }}
       />
       <input

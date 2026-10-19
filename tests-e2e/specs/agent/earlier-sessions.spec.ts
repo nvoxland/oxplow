@@ -2,7 +2,7 @@ import { cpSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ipc, run, searchable, until } from "../../support/daemon.js";
+import { installExample, ipc, run, searchable, until } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { searchLauncher } from "../../support/ui.js";
 
@@ -88,14 +88,7 @@ test("picking a session open here shows it and keeps the New Session page", asyn
 /// and marked as the extension's.
 test("an extension's section lands where its `at` says on the New Session page", async ({ fresh }) => {
   const { page, daemon } = fresh;
-  const here = dirname(fileURLToPath(import.meta.url));
-  cpSync(join(here, "..", "..", "..", "examples", "extensions", "session-notes"), join(daemon.project, "oxplow", "extensions", "session-notes"), {
-    recursive: true,
-  });
-  await until("session-notes to load", 60_000, async () => {
-    const ext = await ipc<Array<{ name: string }>>(daemon, "list_extensions");
-    return ext.some((e) => e.name === "session-notes");
-  });
+  await installExample(daemon, "session-notes");
 
   await page.goto("/");
   const doc = page.getByTestId("page-new-session");

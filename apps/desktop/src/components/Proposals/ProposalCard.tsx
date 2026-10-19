@@ -54,6 +54,13 @@ export function ProposalCard({
           <span style={{ color: "var(--text-primary)" }}>{s.change.after}</span>
         </div>
       ) : null}
+      {s.details.length > 0 ? (
+        <ul data-testid={`proposal-details-${id}`} style={{ margin: "2px 0 0 18px", padding: 0 }}>
+          {s.details.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      ) : null}
       {!compact && s.children.length > 0 ? (
         <ol data-testid={`proposal-children-${id}`} style={{ margin: "2px 0 0 18px", padding: 0 }}>
           {s.children.map((c, i) => (

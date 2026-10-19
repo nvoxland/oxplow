@@ -54,7 +54,7 @@ May not:
 
 ## Try it
 
-1. Copy this folder to `oxplow/extensions/task-views/`.
+1. Copy this folder to `.oxplow/extensions/task-views/`.
 2. Settings → Integrations: choose **task-views** for the board, list and
    editor (it's the only candidate, so it is the default).
 3. Settings → Data → Programs: approve the **swimlanes** component to let

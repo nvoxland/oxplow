@@ -1,102 +1,48 @@
-/// "Extensions" section body for SettingsPage: every project extension
-/// (`oxplow/extensions/`) with its origin, lens count and load errors,
-/// its sources' credentials (set here, kept in the keychain); an Update
-/// action for git-installed ones; and an install strip for a git URL.
-/// Install and Update first show what the extension would bring in (its
-/// programs, hosts, credentials, advisories) and install only the commit
-/// the person confirmed (tsk378).
-/// Each provider instance's and collector's health shows on its
-/// extension's row: a disabled one with its reason, **Enable Again**
-/// (`oxplow.contribution.enable` as the person) and **Repair with the Agent** (fills
-/// the agent's input with a mention of the repair item; never sends).
+/// "Health and credentials" section body for SettingsPage: what has no lens
+/// equivalent. The extension list itself (deployment, permissions, Deploy,
+/// Roll Back, Enable, Disable, Share, Remove) is the foundation extension's
+/// Extensions lens, mounted above this section.
+/// Per extension that has any: its disabled contributions with the reason,
+/// **Enable Again** (`oxplow.contribution.enable` as the person) and
+/// **Repair with the Agent** (fills the agent's input with a mention of the
+/// repair item; never sends), the collectors' credentials and the
+/// providers' secrets (set here, kept in the keychain).
 /// Running sources is under Data (DataSection.tsx). See
-/// `.context/extensions.md` → "Health, disable and repair".
+/// `.context/extensions.md` -> "Health, disable and repair".
 ///
-/// Usability contract (.context/usability.md): no modals; Enter submits
-/// the install strip; failures land in opErrorsStore, not alerts.
+/// Usability contract (.context/usability.md): no modals; failures land in
+/// opErrorsStore, not alerts.
 
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useState } from "react";
 
 import {
-  installExtension,
   listExtensions,
-  listServices,
   listCollectors,
-  reviewExtension,
-  setExtensionEnabled,
   setCredential,
   saveExtensionSecret,
   extensionSecretIsSet,
   revokeExtensionSecret,
   subscribeOxplowEvents,
-  updateExtension,
-  validateExtension,
   type Extension,
-  type ExtensionReview,
-  type ScriptServices,
-  type ServiceListing,
   type CollectorListing,
-  querySql,
 } from "../api.js";
-import { NEW_LENS_COMMAND } from "../lens/lensModel.js";
-import { useCommandDraft } from "../commandDraft.js";
 import { disabledCount, enableAgain, enableAllAgain, healthLine, healthOf, repairWithAgent, useContributionHealth, type ContributionHealth } from "../contributionHealth.js";
-import { COLLECTOR_RUNS, extensionCredentials, extensionRowModel, LATEST_RUNS_SQL, lastRuns, type LastRun, type RunRow, reviewModel, secretCredentials, secretRowModel, serviceLines, type SecretCredential } from "./extensionRowModel.js";
-import { extensionsChanged } from "../lens/lensRerun.js";
-import { ImpactReportView } from "./ImpactReportView.js";
-import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
-import type { Reads } from "../tauri-bridge/generated/bindings.js";
+import { COLLECTOR_RUNS, extensionCredentials, secretCredentials, secretRowModel, type SecretCredential } from "./extensionRowModel.js";
+import { extensionsChanged, useRerunOnChange } from "../lens/lensRerun.js";
 import { InlineConfirm } from "./InlineConfirm.js";
 import { InlineEdit } from "./InlineEdit.js";
 import { recordOpError } from "./opErrorsStore.js";
 import { showToast } from "./toastStore.js";
-import { EmptyState } from "./Prompts/EmptyState.js";
 
 export function ExtensionsSection() {
-  const newLensPrompt = useCommandDraft(NEW_LENS_COMMAND);
   const [exts, setExts] = useState<Extension[] | null>(null);
-  /** What each project extension's check found (bundled ones are checked
-   *  where they're built). */
-  const [checked, setChecked] = useState<Record<string, string[]>>({});
-  /** The services each project extension's scripts are given (its check
-   *  reports them), and the titles that name them. */
-  const [services, setServices] = useState<Record<string, ScriptServices[]>>({});
-  const [serviceListing, setServiceListing] = useState<ServiceListing[]>([]);
-  const [collectors, setCollectors] = useState<CollectorListing[]>([]);
-  /** Each extension's last run (`v_extension_run`, latest per contribution). */
-  const [runs, setRuns] = useState<Record<string, LastRun>>({});
-  const [runReads, setRunReads] = useState<Reads>(NO_READS);
+  const [collectors, setCollectors] = useState<CollectorListing[] | null>(null);
   const health = useContributionHealth();
-  const [url, setUrl] = useState("");
-  const [busy, setBusy] = useState<string | null>(null);
-  /** An install or update waiting on the person's go-ahead. */
-  const [pending, setPending] = useState<
-    { kind: "install"; url: string; review: ExtensionReview } | { kind: "update"; name: string; review: ExtensionReview } | null
-  >(null);
 
-  // Each part re-reads on the change that touches it, not on any event
-  // (tsk1403): the extensions and their checks when the catalog or config
-  // changes, the collectors when a run commits (`v_collector_run`), the
-  // last runs when a run row does (`v_extension_run`).
   const loadExtensions = useCallback(async () => {
     try {
-      const listed = await listExtensions();
-      setExts(listed);
-      const reports = await Promise.all(
-        listed
-          .filter((e) => e.origin !== "bundled" && e.enabled)
-          .map(async (e) => {
-            try {
-              const report = await validateExtension(e.name, null);
-              return [e.name, report.errors, report.services] as [string, string[], ScriptServices[]];
-            } catch (err) {
-              return [e.name, [`couldn't check it: ${String(err)}`], []] as [string, string[], ScriptServices[]];
-            }
-          }),
-      );
-      setChecked(Object.fromEntries(reports.map(([name, errors]) => [name, errors])));
-      setServices(Object.fromEntries(reports.map(([name, , scripts]) => [name, scripts])));
+      setExts(await listExtensions());
     } catch (e) {
       recordOpError({ label: "List extensions", message: String(e) });
       setExts([]);
@@ -107,241 +53,81 @@ export function ExtensionsSection() {
       setCollectors(await listCollectors());
     } catch (e) {
       recordOpError({ label: "List collectors", message: String(e) });
+      setCollectors([]);
     }
   }, []);
-  const loadRuns = useCallback(async () => {
-    // A read that fails costs the line, not the list.
-    try {
-      const r = await querySql(LATEST_RUNS_SQL, [], null);
-      setRunReads(r.reads);
-      setRuns(
-        lastRuns(
-          r.rows.map(
-            ([extension, contribution, outcome, error, finished_at, decisions]) =>
-              ({ extension, contribution, outcome, error, finished_at, decisions }) as RunRow,
-          ),
-        ),
-      );
-    } catch {
-      setRuns({});
-    }
-  }, []);
-  /** Everything again: what an install, an update or an enable leaves
-   *  different. */
   const refresh = useCallback(async () => {
-    await Promise.all([loadExtensions(), loadCollectors(), loadRuns()]);
-  }, [loadExtensions, loadCollectors, loadRuns]);
+    await Promise.all([loadExtensions(), loadCollectors()]);
+  }, [loadExtensions, loadCollectors]);
 
-  useRerunOnChange(runReads, () => void loadRuns());
+  // Each part re-reads on the change that touches it: the extensions when
+  // the catalog or config changes, the collectors when a run commits.
   useRerunOnChange(COLLECTOR_RUNS, () => void loadCollectors());
-  useEffect(() => {
-    // A read that fails costs the lines' wording, not the list.
-    void listServices().then(setServiceListing).catch(() => setServiceListing([]));
-  }, []);
   useEffect(() => {
     void refresh();
     return subscribeOxplowEvents((event) => {
-      if (extensionsChanged(event as Record<string, unknown>)) {
-        void loadExtensions();
-        void loadCollectors();
-      }
+      if (extensionsChanged(event as Record<string, unknown>)) void refresh();
     });
-  }, [refresh, loadExtensions, loadCollectors]);
+  }, [refresh]);
 
-  async function review() {
-    const gitUrl = url.trim();
-    if (!gitUrl || busy) return;
-    setBusy("install");
-    try {
-      setPending({ kind: "install", url: gitUrl, review: await reviewExtension({ gitUrl }, null) });
-    } catch (e) {
-      recordOpError({ label: `Review extension ${gitUrl}`, message: String(e) });
-    } finally {
-      setBusy(null);
-    }
+  if (exts === null || collectors === null) {
+    return (
+      <div data-testid="extensions-section" style={mutedStyle}>
+        Loading…
+      </div>
+    );
   }
 
-  async function confirm() {
-    if (!pending || busy) return;
-    const { review } = pending;
-    setBusy(pending.kind === "install" ? "install" : pending.name);
-    try {
-      if (pending.kind === "install") {
-        const ext = await installExtension(pending.url, null, review.sha, null);
-        setUrl("");
-        showToast({ message: `Installed ${ext.name}. Commit oxplow/extensions/${ext.name} to share it with your team.` });
-      } else {
-        await updateExtension(pending.name, review.sha, null);
-        showToast({ message: `Updated ${pending.name}.` });
-      }
-      setPending(null);
-      await refresh();
-    } catch (e) {
-      recordOpError({ label: `${pending.kind === "install" ? "Install" : "Update"} extension ${review.extension.name}`, message: String(e) });
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function toggle(name: string, enabled: boolean) {
-    setBusy(name);
-    try {
-      setExts(await setExtensionEnabled(name, enabled));
-      setCollectors(await listCollectors());
-      showToast({ message: enabled ? `Enabled ${name}.` : `Disabled ${name} for this project.` });
-    } catch (e) {
-      recordOpError({ label: `${enabled ? "Enable" : "Disable"} extension ${name}`, message: String(e) });
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function update(name: string) {
-    setBusy(name);
-    try {
-      setPending({ kind: "update", name, review: await reviewExtension({ name }, null) });
-    } catch (e) {
-      recordOpError({ label: `Review update of ${name}`, message: String(e) });
-    } finally {
-      setBusy(null);
-    }
-  }
+  const rows = exts
+    .map((ext) => ({
+      name: ext.name,
+      health: healthOf(health, ext.name),
+      secrets: secretCredentials(ext),
+      credentials: extensionCredentials(collectors, ext.name),
+    }))
+    .filter((r) => r.health.length > 0 || r.secrets.length > 0 || r.credentials.length > 0);
 
   return (
     <div data-testid="extensions-section">
-      {exts === null ? (
-        <div style={mutedStyle}>Loading…</div>
-      ) : exts.length === 0 ? (
-        <EmptyState
-          testId="extensions-empty"
-          title="No extensions yet"
-          text="An extension adds lenses, data and checks. Have the agent build one, or install one below."
-          prompts={newLensPrompt ? [newLensPrompt] : []}
-        />
+      {rows.length === 0 ? (
+        <div data-testid="extensions-health-empty" style={mutedStyle}>
+          Nothing to repair and no credentials to set.
+        </div>
       ) : (
         <>
-        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
-          <EnableAllButton count={disabledCount(health)} />
-        </div>
-        <ul style={{ listStyle: "none", margin: "0 0 12px", padding: 0 }}>
-          {exts.map((ext) => {
-            const m = extensionRowModel(ext, checked[ext.name]);
-            return (
-              <li key={m.name} data-testid={`extension-row-${m.name}`} style={rowStyle}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <strong>{m.name}</strong>
-                  <span style={mutedStyle}>
-                    {m.lensCount} {m.lensCount === 1 ? "lens" : "lenses"} · {m.origin}
-                  </span>
-                  <span style={{ flex: 1 }} />
-                  <button
-                    type="button"
-                    data-testid={`extension-toggle-${m.name}`}
-                    disabled={busy !== null}
-                    onClick={() => void toggle(m.name, !m.enabled)}
-                  >
-                    {m.toggleLabel}
-                  </button>
-                  {m.canUpdate ? (
-                    <button
-                      type="button"
-                      data-testid={`extension-update-${m.name}`}
-                      disabled={busy !== null}
-                      onClick={() => void update(m.name)}
-                    >
-                      {busy === m.name ? "Checking…" : "Update…"}
-                    </button>
-                  ) : null}
-                </div>
-                {m.description ? <div style={mutedStyle}>{m.description}</div> : null}
-                {m.disabledNote ? <div style={mutedStyle}>{m.disabledNote}</div> : null}
-                {runs[m.name] ? (
-                  <div
-                    data-testid={`extension-last-run-${m.name}`}
-                    data-warn={runs[m.name]!.warn ? "true" : "false"}
-                    style={runs[m.name]!.warn ? { ...mutedStyle, color: "var(--severity-medium)" } : mutedStyle}
-                  >
-                    {runs[m.name]!.text}
-                    {runs[m.name]!.reason ? ` — ${runs[m.name]!.reason}` : ""}
-                  </div>
-                ) : null}
-                {serviceLines(services[m.name] ?? [], serviceListing).map((line) => (
-                  <div
-                    key={line.script}
-                    data-testid={`extension-services-${m.name}`}
-                    title="The services this script is given: what it can reach beyond its own input"
-                    style={mutedStyle}
-                  >
-                    {line.script} — {line.text}
-                  </div>
-                ))}
-                {m.errors.map((err, i) => (
-                  <div key={i} style={errorStyle}>
-                    {err}
-                  </div>
-                ))}
-                {disabledCount(health, m.name) > 1 ? (
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+            <EnableAllButton count={disabledCount(health)} />
+          </div>
+          <ul style={{ listStyle: "none", margin: "0 0 12px", padding: 0 }}>
+            {rows.map((r) => (
+              <li key={r.name} data-testid={`extension-row-${r.name}`} style={rowStyle}>
+                <strong>{r.name}</strong>
+                {disabledCount(health, r.name) > 1 ? (
                   <div style={{ marginTop: 4 }}>
-                    <EnableAllButton extension={m.name} count={disabledCount(health, m.name)} />
+                    <EnableAllButton extension={r.name} count={disabledCount(health, r.name)} />
                   </div>
                 ) : null}
-                {healthOf(health, m.name).map((h) => (
+                {r.health.map((h) => (
                   <HealthRow key={`${h.kind}:${h.contribution}`} health={h} />
                 ))}
-                {secretCredentials(ext).map((c) => (
-                  <SecretRow
-                    key={`${c.provider}/${c.name}`}
-                    extension={m.name}
-                    credential={c}
-                  />
+                {r.secrets.map((c) => (
+                  <SecretRow key={`${c.provider}/${c.name}`} extension={r.name} credential={c} />
                 ))}
-                {extensionCredentials(collectors, m.name).map((c) => (
+                {r.credentials.map((c) => (
                   <CredentialRow
                     key={c.name}
-                    owner={m.name}
+                    owner={r.name}
                     name={c.name}
                     set={c.set}
-                    store={(v) => setCredential(m.name, c.name, v)}
+                    store={(v) => setCredential(r.name, c.name, v)}
                     onChanged={() => void refresh()}
                   />
                 ))}
               </li>
-            );
-          })}
-        </ul>
+            ))}
+          </ul>
         </>
       )}
-      <div style={{ display: "flex", gap: 8 }}>
-        <input
-          data-testid="extension-install-url"
-          value={url}
-          placeholder="Git URL of an extension, e.g. https://github.com/acme/oxplow-lenses"
-          onChange={(e) => setUrl(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void review();
-            if (e.key === "Escape") setUrl("");
-          }}
-          style={{ flex: 1 }}
-        />
-        <button
-          type="button"
-          data-testid="extension-install"
-          disabled={!url.trim() || busy !== null || pending !== null}
-          onClick={() => void review()}
-        >
-          {busy === "install" && !pending ? "Checking…" : "Install…"}
-        </button>
-      </div>
-      {pending ? (
-        <ReviewPanel
-          review={pending.review}
-          serviceListing={serviceListing}
-          action={pending.kind === "install" ? "Install" : "Update"}
-          busy={busy !== null}
-          onConfirm={() => void confirm()}
-          onCancel={() => setPending(null)}
-        />
-      ) : null}
     </div>
   );
 }
@@ -406,83 +192,6 @@ export function HealthRow({ health }: { health: ContributionHealth }) {
           {enabling ? "Enabling…" : "Enable Again"}
         </button>
       ) : null}
-    </div>
-  );
-}
-
-/// What an install or update would bring in, with the go-ahead. Inline,
-/// not a modal: the confirm button takes focus, Escape cancels.
-export function ReviewPanel({
-  review,
-  serviceListing = [],
-  action,
-  busy,
-  onConfirm,
-  onCancel,
-}: {
-  review: ExtensionReview;
-  /** The titles that name services (`list_services`). */
-  serviceListing?: ServiceListing[];
-  action: "Install" | "Update";
-  busy: boolean;
-  onConfirm(): void;
-  onCancel(): void;
-}) {
-  const m = reviewModel(review, serviceListing);
-  return (
-    <div
-      data-testid="extension-review"
-      style={{ ...rowStyle, marginTop: 8 }}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onCancel();
-      }}
-    >
-      <div>
-        <strong>{m.name}</strong> <span style={mutedStyle}>from {m.from}</span>
-      </div>
-      {m.description ? <div style={mutedStyle}>{m.description}</div> : null}
-      <ul data-testid="extension-review-declares" style={{ margin: "6px 0", paddingLeft: 18 }}>
-        {m.declares.length === 0 ? <li style={mutedStyle}>Nothing but its manifest.</li> : null}
-        {m.declares.map((line, i) => (
-          <li key={i}>{line}</li>
-        ))}
-      </ul>
-      {m.services.length > 0 ? (
-        <ul data-testid="extension-review-services" style={{ margin: "6px 0", paddingLeft: 18 }}>
-          {m.services.map((line) => (
-            <li key={line.script}>
-              {line.script} — {line.text}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {/* No report when the candidate doesn't load; its errors say why. */}
-      {review.impact ? <ImpactReportView report={review.impact} testId="extension-review-impact" /> : null}
-      {m.errors.map((err, i) => (
-        <div key={`e${i}`} style={errorStyle}>
-          {err}
-        </div>
-      ))}
-      {m.problems.map((p, i) => (
-        <div key={`p${i}`} style={mutedStyle}>
-          {p}
-        </div>
-      ))}
-      <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-        <button
-          type="button"
-          data-testid="extension-review-confirm"
-          autoFocus
-          disabled={!m.canInstall || busy}
-          onClick={onConfirm}
-        >
-          {busy ? `${action === "Install" ? "Installing" : "Updating"}…` : action}
-        </button>
-        <button type="button" data-testid="extension-review-cancel" onClick={onCancel}>
-          Cancel
-        </button>
-        {!m.canInstall ? <span style={errorStyle}>Fix its errors before installing.</span> : null}
-      </div>
     </div>
   );
 }
@@ -648,6 +357,5 @@ export function SecretRow({
 
 const mutedStyle: CSSProperties = { fontSize: "var(--text-xs)", color: "var(--text-secondary)" };
 const rowStyle: CSSProperties = { padding: "8px 0", borderBottom: "1px solid var(--border-subtle)", fontSize: "var(--text-sm)" };
-const errorStyle: CSSProperties = { fontSize: "var(--text-xs)", color: "var(--severity-critical)", marginTop: 4 };
 const errorInlineStyle: CSSProperties = { fontSize: "var(--text-xs)", color: "var(--severity-critical)" };
 const warnStyle: CSSProperties = { fontSize: "var(--text-xs)", color: "var(--severity-medium)" };

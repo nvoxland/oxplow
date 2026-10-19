@@ -1118,7 +1118,7 @@ mod tests {
     #[test]
     fn jaq_type_coverage_script_tolerates_a_missing_report() {
         let program =
-            include_str!("../../../oxplow/extensions/project/collectors/type_coverage.jq");
+            include_str!("../../../.oxplow/extensions/project/collectors/type_coverage.jq");
         for input in [
             json!({}),
             json!({ "report": null }),

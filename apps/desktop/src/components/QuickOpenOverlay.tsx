@@ -31,9 +31,8 @@ import { kindForTabId, PageKindIcon, pageKindLabel } from "../pageKinds.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./RailHud/history.js";
 import type { PageCategory, PageDirectoryEntry } from "./RailHud/sections.js";
-import { mergeDirectory } from "../lens/lensModel.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
-import { launcherPages, useLauncherCounts } from "./extensionLauncher.js";
+import { launcherDirectory, useLauncherCounts } from "./extensionLauncher.js";
 
 interface Props {
   open: boolean;
@@ -287,8 +286,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
   // command or prompt as an action (P6.D1).
   const exts = useExtensions();
   const counts = useLauncherCounts(exts, stream?.id ?? null, open);
-  const lensPages = useMemo(() => launcherPages(exts ?? [], counts), [exts, counts]);
-  const pages = useMemo(() => mergeDirectory(lensPages, staticPages), [staticPages, lensPages]);
+  const pages = useMemo(() => launcherDirectory(exts, counts, staticPages), [exts, counts, staticPages]);
 
   // Recent pages for the "Recent" start-menu section: the 10 most recent
   // visits (deduped by ref), reusing the rail History source + exclude set.

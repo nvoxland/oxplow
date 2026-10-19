@@ -16,7 +16,7 @@ Which tests you run, and when, is up to you and the project — oxplow
 doesn't ask for any. What it needs is to **see the runs you do make**,
 so their results and coverage attach to the effort. The project's
 commands are in the `testing:` block of `.oxplow/project.yaml`, and its report
-collectors in the project's own extension, `oxplow/extensions/project/extension.yaml`.
+collectors in the project's own extension, `.oxplow/extensions/project/extension.yaml`.
 
 - **Run tests through a report-emitting command.** A bare
   `bun test <file>` / `cargo test <name>` writes no report, so the run

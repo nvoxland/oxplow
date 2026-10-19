@@ -32,6 +32,7 @@ pub mod event_log_store;
 pub mod event_retention;
 pub mod event_type_store;
 pub mod extension_config_store;
+pub mod extension_deployment_store;
 pub mod extension_job_store;
 pub mod extension_run_store;
 pub mod extension_state_store;

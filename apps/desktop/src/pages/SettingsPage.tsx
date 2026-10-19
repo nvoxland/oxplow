@@ -1,6 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  effectiveConfig,
   getConfig,
   setAgentSetting,
   setAgents,
@@ -8,7 +7,8 @@ import {
   subscribeOxplowEvents,
 } from "../api.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
-import type { EffectiveSetting, HarnessListing } from "../tauri-bridge/generated/bindings.js";
+import type { HarnessListing } from "../tauri-bridge/generated/bindings.js";
+import { readSettings, type EffectiveSetting } from "../configValues.js";
 import { askToChange, groupSettings, matchesSearch, valueText } from "./settingsModel.js";
 import { DocumentLayout, type DocSection } from "../kit/DocumentLayout.js";
 import { Toolbar } from "../kit/Toolbar.js";
@@ -150,14 +150,22 @@ function useAreaContent(area: SettingsArea, open: (id: SettingsAreaId, anchor?: 
         ],
       };
     case "extensions":
-      return { sections: [section("installed", <ExtensionsSection />, "Installing and updating apply at once.")] };
+      return {
+        sections: [
+          section(
+            "health",
+            <ExtensionsSection />,
+            "Contributions turned off after failures, and the credentials extensions declare.",
+          ),
+        ],
+      };
     case "data":
       return {
         sections: [
           section(
             "data",
             <DataSection />,
-            "What oxplow can query: its own data and what extension sources bring in. Sources run here, and programs the project's config would run are approved here; set credentials under Extensions.",
+            "What oxplow can query: its own data and what extension sources bring in. Sources run here; set credentials under Extensions.",
           ),
         ],
       };
@@ -202,8 +210,8 @@ function EverySetting({ onOpenControl }: { onOpenControl(area: SettingsAreaId): 
   // The view re-reads when the config changes, whoever changed it.
   useEffect(() => {
     const load = () =>
-      void effectiveConfig()
-        .then(setSettings)
+      void readSettings()
+        .then((r) => setSettings(r.settings))
         .catch((e) => setError(String(e)));
     load();
     return subscribeOxplowEvents((event) => {

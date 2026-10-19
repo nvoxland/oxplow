@@ -11,7 +11,7 @@
 //!    step outside the transaction: recorded `failed` ([`cut_off`]) and,
 //!    when its claim kept what it composed, sent again by itself like a
 //!    failure that may pass (tsk954); otherwise a person's.
-//! 2. Not approved as it is now, or the event is from before its approval
+//! 2. Not started yet, or the event is from before it started
 //!    (`effects::gate`): nothing — it never reacts to the past.
 //! 3. The loop guard: an event its own run caused is never its trigger,
 //!    and a chain of more than [`MAX_CHAIN`] effect runs stops (`skipped`).
@@ -72,53 +72,11 @@ pub use crate::event_lineage::MAX_CHAIN;
 
 pub struct EffectTriggers {
     services: Weak<Services>,
-    hashes: std::sync::Mutex<FolderHashes>,
-}
-
-/// The effects' approval hashes for one catalog load: each extension's
-/// folder hashed the first time one of its effects is gated, again only
-/// when the catalog reloads (a file under it changed).
-#[derive(Default)]
-struct FolderHashes {
-    load: Option<Arc<Vec<Extension>>>,
-    /// By program key; `None` when its folder couldn't be read.
-    by_program: std::collections::BTreeMap<String, Option<String>>,
-    /// How many it has computed (tests).
-    computed: usize,
 }
 
 impl EffectTriggers {
     pub fn new(services: Weak<Services>) -> Self {
-        Self {
-            services,
-            hashes: std::sync::Mutex::default(),
-        }
-    }
-
-    /// `program`'s approval hash as of catalog load `load`.
-    fn folder_hash(
-        &self,
-        load: &Arc<Vec<Extension>>,
-        project_dir: &std::path::Path,
-        program: &crate::exec_consent::ProjectProgram,
-    ) -> Option<String> {
-        let mut hashes = self.hashes.lock().unwrap_or_else(|e| e.into_inner());
-        if !hashes.load.as_ref().is_some_and(|l| Arc::ptr_eq(l, load)) {
-            hashes.load = Some(load.clone());
-            hashes.by_program.clear();
-        }
-        if let Some(hash) = hashes.by_program.get(&program.key()) {
-            return hash.clone();
-        }
-        let hash = program.hash(project_dir).ok();
-        hashes.computed += 1;
-        hashes.by_program.insert(program.key(), hash.clone());
-        hash
-    }
-
-    #[cfg(test)]
-    fn folder_hashes(&self) -> usize {
-        self.hashes.lock().unwrap().computed
+        Self { services }
     }
 }
 
@@ -244,19 +202,7 @@ impl EffectTriggers {
                 continue;
             }
             let started = std::time::Instant::now();
-            let program = effects::effect_program(&ext, &decl);
-            let hash = self.folder_hash(&load, &svc.layout.project_dir, &program);
-            let approved = effects::is_approved(&svc.approvals, &program, hash.as_deref());
-            let reacted = run_reaction(
-                svc,
-                &ext,
-                &decl,
-                approved,
-                event,
-                ReactionOrigin::Live,
-                None,
-            )
-            .await;
+            let reacted = run_reaction(svc, &ext, &decl, event, ReactionOrigin::Live, None).await;
             match reacted {
                 Ok(reacted) => count(&health, &decl, &reacted, started.elapsed()).await,
                 Err(error) if matches!(error, DomainError::Busy(_)) => return Err(error),
@@ -298,8 +244,8 @@ pub(crate) enum Reacted {
     /// A scheduled automatic retry that wasn't sent (tsk887): the failed
     /// attempt's failure stands, a person's to retry, and counts now.
     NotResent(String),
-    /// Nothing was attempted: not its to run (unapproved, before its
-    /// approval, its own event) or already recorded by another delivery.
+    /// Nothing was attempted: not its to run (not started, from before it
+    /// started, its own event) or already recorded by another delivery.
     Nothing,
 }
 
@@ -491,7 +437,7 @@ pub(crate) const NOT_REACTED: &str = "hasn't reacted";
 /// - `Live` (the pump): the first attempt, made only if there was none —
 ///   a redelivery finds the reaction and runs nothing (an attempt left
 ///   `started` is recorded `failed`: interrupted) — and only for an event
-///   logged after the effect's approval;
+///   logged after the effect started;
 /// - `Retry` (a person's `oxplow.effect.retry`): the next attempt at a reaction
 ///   whose latest **failed**; `Invalid` otherwise. The person named the
 ///   event, so when it was logged doesn't matter;
@@ -501,13 +447,12 @@ pub(crate) const NOT_REACTED: &str = "hasn't reacted";
 ///   sending exactly what that one composed (tsk887) — a person's retry
 ///   composes afresh, from what the effect reads now.
 ///
-/// Every origin needs the effect `approved` as it is now, and passes the
-/// loop guard.
+/// Every origin passes the loop guard, and runs within its extension's
+/// permissions.
 pub(crate) async fn run_reaction(
     svc: &Arc<Services>,
     ext: &Extension,
     decl: &EffectDecl,
-    approved: bool,
     event: &StoredEvent,
     origin: ReactionOrigin,
     under: Option<&RunContext>,
@@ -570,20 +515,12 @@ pub(crate) async fn run_reaction(
         Some(parent) => run.under(parent),
         None => run,
     };
-    // What it may do: the scopes it declares, on the person's approval.
-    let run = run
-        .authorized(crate::grants::authority(
-            &svc.approvals,
-            &oxplow_domain::refs::build::effect_source(&decl.name()),
-            approved,
-            crate::grants::script_request(&decl.needs),
-        ))
-        .guarded(crate::exec_consent::loaded_script_gate(
-            svc.approvals.clone(),
-            svc.layout.project_dir.clone(),
-            crate::effects::effect_program(ext, decl),
-            decl.script.clone(),
-        ));
+    // What it may do: the scopes it declares, within its extension's
+    // permissions.
+    let run = run.authorized(crate::grants::authority(
+        ext,
+        crate::grants::script_request(&decl.needs),
+    ));
     let key = EffectRunKey {
         effect,
         event_id,
@@ -593,13 +530,13 @@ pub(crate) async fn run_reaction(
         run_id: Some(run.run().to_string()),
     };
     // The live consumer never reacts to the past; a person's retry or
-    // backfill names what to react to, and needs only the approval.
+    // backfill names what to react to.
     let runs = match origin {
         ReactionOrigin::Live => {
             let start = effects::start_after(&svc.db, &key.effect).await?;
-            effects::gate(approved, start, event.seq) == Gate::Runs
+            effects::gate(start, event.seq) == Gate::Runs
         }
-        ReactionOrigin::Retry | ReactionOrigin::Backfill | ReactionOrigin::Auto => approved,
+        ReactionOrigin::Retry | ReactionOrigin::Backfill | ReactionOrigin::Auto => true,
     };
     if !runs {
         return Ok(Reacted::Nothing);
@@ -807,8 +744,8 @@ fn schedule_retry_tx(
 pub(crate) const MAX_RETRY_LATENESS: Duration = Duration::from_secs(60 * 60);
 
 /// Send again every failed attempt whose automatic retry is due by `now`
-/// (P10): the next attempt, `auto`, made when the effect is still there,
-/// enabled and approved as it is now, and the retry not more than
+/// (P10): the next attempt, `auto`, made when the effect is still there
+/// and enabled, and the retry not more than
 /// [`MAX_RETRY_LATENESS`] overdue — otherwise the retry is dropped and the
 /// failure counted, a person's to retry. Its health is counted as a live
 /// attempt's. How many were sent.
@@ -871,13 +808,10 @@ async fn retry_one(
     let runnable = match (&effect, &event) {
         // Dropped only when it is disabled; one whose health can't be
         // read is tried again next time.
-        (Some((ext, decl)), Some(_)) => {
-            health
-                .disabled_reason(&contribution_key(decl))
-                .await?
-                .is_none()
-                && approved_now(svc, &effects::effect_program(ext, decl))
-        }
+        (Some((_, decl)), Some(_)) => health
+            .disabled_reason(&contribution_key(decl))
+            .await?
+            .is_none(),
         _ => false,
     };
     let (Some((ext, decl)), Some(event), true, false) = (effect.clone(), event, runnable, late)
@@ -907,7 +841,6 @@ async fn retry_one(
         svc,
         &ext,
         &decl,
-        true,
         &event,
         ReactionOrigin::Auto,
         None,
@@ -917,8 +850,8 @@ async fn retry_one(
     Ok(!matches!(reacted, Reacted::Nothing | Reacted::NotResent(_)))
 }
 
-/// A scheduled retry that can't run (the effect gone, disabled or no
-/// longer approved as it is): dropped, so the failure is a person's.
+/// A scheduled retry that can't run (the effect gone or disabled):
+/// dropped, so the failure is a person's.
 async fn drop_retry(svc: &Services, key: &EffectRunKey) -> Result<(), DomainError> {
     let key = key.clone();
     svc.db
@@ -941,12 +874,6 @@ pub fn spawn_auto_retry(state: &Arc<Services>) {
             }
         },
     );
-}
-
-/// The approval hash of `program`'s folder as it is now.
-pub(crate) fn approved_now(svc: &Services, program: &crate::exec_consent::ProjectProgram) -> bool {
-    let hash = program.hash(&svc.layout.project_dir).ok();
-    effects::is_approved(&svc.approvals, program, hash.as_deref())
 }
 
 /// The enabled effect `<extension>/<id>` in the primary worktree, with
@@ -1049,7 +976,6 @@ pub(crate) async fn run_script(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::exec_consent::ProgramKind;
     use oxplow_domain::events::schema::EventType as _;
     use oxplow_domain::events::schema::{
         ActorKind, CommandExecuted, CommandExecutedV3, CommandOutcome, WorkItemEdited,
@@ -1060,7 +986,7 @@ mod tests {
     use serde_json::Value;
     use std::path::Path;
 
-    const HEAD: &str = "manifest: 2\nname: acme\nsharing: private\nintent: { purpose: Effects., origin: null, examples: [] }\neffects:\n";
+    const HEAD: &str = "manifest: 2\nname: acme\nintent: { purpose: Effects., origin: null, examples: [] }\npermissions: { sql: read, commands: [oxplow.work_item.*, oxplow.probe.*] }\neffects:\n";
 
     /// Marks a finished item's title.
     const MARK_DONE: &str = "  - id: mark-done\n    summary: Mark a finished item.\n    on: [work_item.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: mark.star\n";
@@ -1069,7 +995,7 @@ mod tests {
     /// Write extension `acme` into the project and publish the generation
     /// that carries it.
     async fn extension(svc: &std::sync::Arc<Services>, effects: &str, files: &[(&str, &str)]) {
-        let dir = svc.layout.project_dir.join("oxplow/extensions/acme");
+        let dir = svc.layout.project_dir.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("extension.yaml"), format!("{HEAD}{effects}")).unwrap();
         for (name, body) in files {
@@ -1078,22 +1004,11 @@ mod tests {
         crate::test_fixtures::activate(svc).await;
     }
 
-    /// A person approves every effect of `acme` as it is now.
-    async fn approve(svc: &Services) {
-        let root = &svc.layout.project_dir;
+    /// Starts every effect of `acme` at the log's head.
+    async fn start(svc: &Services) {
         let ext = effects(svc).into_iter().next().unwrap().0;
         for decl in &ext.effects {
-            let program = effects::effect_program(&ext, decl);
-            crate::exec_consent::approve_program(
-                &svc.approvals,
-                root,
-                std::slice::from_ref(&ext),
-                ProgramKind::Effect,
-                &program.name,
-                &program.hash(root).unwrap(),
-            )
-            .unwrap();
-            effects::approved(&svc.db, &decl.name()).await.unwrap();
+            effects::start_at_head(&svc.db, &decl.name()).await.unwrap();
         }
     }
 
@@ -1149,7 +1064,7 @@ mod tests {
             &[("skip.star", skip)],
         )
         .await;
-        approve(svc).await;
+        start(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
         consumer.handle(&ev).await.unwrap();
@@ -1191,7 +1106,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
-        approve(svc).await;
+        start(svc).await;
         let before = title(&fx).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
@@ -1230,7 +1145,7 @@ mod tests {
         let stamp = "  - id: stamp\n    summary: Stamp the event's seq.\n    on: [work_item.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: stamp.star\n";
         let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT seq, type FROM v_event WHERE id = :event_id AND seq = :event_seq\", \"params\": {\"event_id\": x[\"event\"][\"id\"], \"event_seq\": x[\"event\"][\"seq\"]}})\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": ref, \"title\": rows[0][\"type\"] + \" #\" + str(rows[0][\"seq\"])}}]}\n";
         extension(svc, stamp, &[("stamp.star", script)]).await;
-        approve(svc).await;
+        start(svc).await;
         let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
         EffectTriggers::new(Arc::downgrade(svc))
             .handle(&ev)
@@ -1265,39 +1180,6 @@ mod tests {
         );
     }
 
-    /// tsk798: the extension's folder is hashed once per catalog load, not
-    /// per event — and an edit (a new load) is hashed again, so the edited
-    /// effect stops until a person approves it again.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn the_folder_is_hashed_once_per_catalog_load() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
-        let svc = &fx.svc;
-        extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
-        approve(svc).await;
-        let consumer = EffectTriggers::new(Arc::downgrade(svc));
-        for _ in 0..2 {
-            let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
-            consumer.handle(&ev).await.unwrap();
-        }
-        assert_eq!(consumer.folder_hashes(), 1);
-        std::fs::write(
-            svc.layout
-                .project_dir
-                .join("oxplow/extensions/acme/mark.star"),
-            format!("{MARK}# edited\n"),
-        )
-        .unwrap();
-        crate::test_fixtures::activate(svc).await;
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
-        consumer.handle(&ev).await.unwrap();
-        assert_eq!(consumer.folder_hashes(), 2);
-        assert_eq!(
-            rows(svc, "SELECT count(*) FROM v_effect_run").await,
-            json!([[2]]),
-            "the edited effect didn't run"
-        );
-    }
-
     /// tsk798: a reaction's command shares `oxplow.command.sequence`'s compiled
     /// input schema rather than compiling its own.
     #[tokio::test(flavor = "multi_thread")]
@@ -1311,16 +1193,14 @@ mod tests {
         assert!(a.shares_validator(&b));
     }
 
-    /// Nothing before approval, and a `where` that doesn't match skips.
+    /// Nothing before it started, and a `where` that doesn't match skips.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_effect_never_reacts_to_the_past_or_to_what_where_excludes() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
+        let early = log(svc, state_changed(&fx, CanonicalState::Done)).await;
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
-        let early = log(svc, state_changed(&fx, CanonicalState::Done)).await;
-        consumer.handle(&early).await.unwrap();
-        approve(svc).await;
         consumer.handle(&early).await.unwrap();
         let blocked = log(svc, state_changed(&fx, CanonicalState::Blocked)).await;
         consumer.handle(&blocked).await.unwrap();
@@ -1337,7 +1217,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
-        approve(svc).await;
+        start(svc).await;
         let before = title(&fx).await;
         let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
         interrupt(svc, &ev).await;
@@ -1357,7 +1237,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
-        approve(svc).await;
+        start(svc).await;
         register(svc);
         let claim = |ev: &StoredEvent, origin| {
             let key =
@@ -1478,7 +1358,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         extension(svc, MARK_DONE, &[("mark.star", PROBE)]).await;
-        approve(svc).await;
+        start(svc).await;
         register(svc);
         let keys: Arc<parking_lot::Mutex<Vec<Option<String>>>> = Arc::default();
         let fail = Arc::new(std::sync::atomic::AtomicBool::new(true));
@@ -1523,7 +1403,7 @@ mod tests {
         let svc = &fx.svc;
         const TWO_STEPS: &str = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.probe.note\", \"input\": {\"n\": 1}}, {\"name\": \"oxplow.probe.write\", \"input\": {\"n\": 2}}]}\n";
         extension(svc, MARK_DONE, &[("mark.star", TWO_STEPS)]).await;
-        approve(svc).await;
+        start(svc).await;
         register(svc);
         let keys: Arc<parking_lot::Mutex<Vec<Option<String>>>> = Arc::default();
         let fail = Arc::new(std::sync::atomic::AtomicBool::new(true));
@@ -1611,7 +1491,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
-        approve(svc).await;
+        start(svc).await;
         register(svc);
         let before = title(&fx).await;
         let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
@@ -1683,13 +1563,13 @@ mod tests {
     }
 
     /// P9.D4: a retry runs the effect as it is now, so it needs what a
-    /// live reaction needs — the effect enabled, and approved as it is.
+    /// live reaction needs — the effect enabled.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_retry_needs_a_current_approval_and_an_enabled_effect() {
+    async fn a_retry_needs_an_enabled_effect() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
-        approve(svc).await;
+        start(svc).await;
         register(svc);
         let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
         interrupt(svc, &ev).await;
@@ -1712,20 +1592,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Edited since it was approved: a person approves it first.
-        extension(
-            svc,
-            MARK_DONE,
-            &[("mark.star", &format!("{MARK}# edited\n"))],
-        )
-        .await;
-        let refused = retry(svc, &human, &ev, true).await.unwrap_err();
-        assert!(refused.to_string().contains("approv"), "{refused}");
-        assert_eq!(
-            rows(svc, "SELECT count(*) FROM v_effect_run").await,
-            json!([[1]]),
-            "no attempt was made"
-        );
         // No such effect, no such event.
         let unknown = svc
             .commands
@@ -1752,7 +1618,7 @@ mod tests {
         let bang = "  - id: bang\n    summary: Add a bang.\n    on: [work_item.edited]\n    needs: [sql.read]\n    entry: bang.star\n";
         let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE ref = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
         extension(svc, bang, &[("bang.star", script)]).await;
-        approve(svc).await;
+        start(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         let r = oxplow_tasks::work_item_ref(fx.task);
         svc.commands
@@ -1833,7 +1699,7 @@ mod tests {
             &[("drop.star", script)],
         )
         .await;
-        approve(svc).await;
+        start(svc).await;
         let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
         EffectTriggers::new(Arc::downgrade(svc))
             .handle(&ev)
@@ -1865,7 +1731,7 @@ mod tests {
             &[("mark.star", "def transform(x):\n    return 1 // 0\n")],
         )
         .await;
-        approve(svc).await;
+        start(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         for _ in 0..3 {
             let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
@@ -1903,55 +1769,18 @@ mod tests {
         );
     }
 
-    /// An effect's file changes on disk after the catalog loaded it and the
-    /// new bytes are approved: the reaction still runs the loaded script, so
-    /// it is refused until the catalog republishes.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn an_effect_whose_file_changed_since_it_loaded_is_refused() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
-        let svc = &fx.svc;
-        extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
-        let before = title(&fx).await;
-        std::fs::write(
-            svc.layout
-                .project_dir
-                .join("oxplow/extensions/acme/mark.star"),
-            format!("{MARK}# edited on disk\n"),
-        )
-        .unwrap();
-        // A person approves what is on disk now; the catalog still holds the old text.
-        approve(svc).await;
-        let consumer = EffectTriggers::new(Arc::downgrade(svc));
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
-        consumer.handle(&ev).await.unwrap();
-        assert_eq!(title(&fx).await, before, "nothing ran");
-        let rows = rows(svc, "SELECT state, reason FROM v_effect_run").await;
-        assert_eq!(rows[0][0], json!("failed"), "{rows}");
-        assert!(
-            rows[0][1]
-                .as_str()
-                .is_some_and(|e| e.contains("loaded script differs")),
-            "{rows}"
-        );
-        // Republished, the approved text is the loaded one.
-        crate::test_fixtures::activate(svc).await;
-        let again = log(svc, state_changed(&fx, CanonicalState::Done)).await;
-        consumer.handle(&again).await.unwrap();
-        assert_eq!(title(&fx).await, format!("{before} (done)"));
-    }
-
     /// A script that computes for a while, with no host call to notice a
     /// revocation by.
     const SPIN: &str = "def transform(x):\n    n = 0\n    for i in range(700):\n        for j in range(700):\n            n += 1\n    return {\"skip\": \"spun \" + str(n)}\n";
 
-    /// An approval revoked while the effect's script runs ends the run
+    /// An extension turned off while the effect's script runs ends the run
     /// `cancelled`, not `failed`, and it doesn't count toward disabling.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_revoked_effect_run_is_cancelled_not_failed() {
+    async fn a_disabled_extensions_effect_run_is_cancelled_not_failed() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         extension(svc, MARK_DONE, &[("mark.star", SPIN)]).await;
-        approve(svc).await;
+        start(svc).await;
         let consumer = Arc::new(EffectTriggers::new(Arc::downgrade(svc)));
         let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
         let running = {
@@ -1959,9 +1788,9 @@ mod tests {
             tokio::spawn(async move { consumer.handle(&ev).await })
         };
         tokio::time::sleep(Duration::from_millis(300)).await;
-        let (ext, decl) = effects(svc).into_iter().next().unwrap();
-        let key = effects::effect_program(&ext, &decl).key();
-        assert!(svc.approvals.revoke(&key).unwrap());
+        crate::extension_deploy::set_enabled(svc, "acme", false, true)
+            .await
+            .unwrap();
         running.await.unwrap().unwrap();
         assert_eq!(
             rows(
@@ -1987,15 +1816,15 @@ mod tests {
         );
     }
 
-    /// A revocation reaches a script that is computing, with no host call to
+    /// Turning an extension off reaches a script that is computing, with no host call to
     /// notice it by: the run ends at once, not when the script's timeout does.
     #[tokio::test(flavor = "multi_thread")]
-    async fn revoking_an_effect_stops_a_script_that_is_computing() {
+    async fn turning_off_an_extension_stops_a_script_that_is_computing() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let forever = SPIN.replace("range(700)", "range(100000)");
         extension(svc, MARK_DONE, &[("mark.star", &forever)]).await;
-        approve(svc).await;
+        start(svc).await;
         let consumer = Arc::new(EffectTriggers::new(Arc::downgrade(svc)));
         let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
         let running = {
@@ -2003,11 +1832,9 @@ mod tests {
             tokio::spawn(async move { consumer.handle(&ev).await })
         };
         tokio::time::sleep(Duration::from_millis(300)).await;
-        let (ext, decl) = effects(svc).into_iter().next().unwrap();
-        assert!(svc
-            .approvals
-            .revoke(&effects::effect_program(&ext, &decl).key())
-            .unwrap());
+        crate::extension_deploy::set_enabled(svc, "acme", false, true)
+            .await
+            .unwrap();
         let revoked = std::time::Instant::now();
         running.await.unwrap().unwrap();
         assert!(
@@ -2046,7 +1873,7 @@ mod tests {
                 ),
             ],
         ).await;
-        approve(svc).await;
+        start(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         for _ in 0..3 {
             let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
@@ -2086,61 +1913,51 @@ mod tests {
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         let owner = |types: &str| {
-            format!("manifest: 2\nname: acme-pr\nsharing: private\nintent: {{ purpose: PRs., origin: null, examples: [] }}\nevent_types:\n  types:\n{types}")
+            format!("manifest: 2\nname: acme-pr\nintent: {{ purpose: PRs., origin: null, examples: [] }}\nevent_types:\n  types:\n{types}")
         };
         let v1 = "    - { type: acme_pr.merged, v: 1, schema: merged.v1.json, summary: A pull request merged. }\n";
         let v2 = "    - { type: acme_pr.merged, v: 2, schema: merged.v2.json, summary: A pull request merged by someone., upcast: merged.star }\n";
         write(
             &root,
-            "oxplow/extensions/acme-pr/extension.yaml",
+            ".oxplow/extensions/acme-pr/extension.yaml",
             &owner(v1),
         );
         write(
             &root,
-            "oxplow/extensions/acme-pr/merged.v1.json",
+            ".oxplow/extensions/acme-pr/merged.v1.json",
             r#"{"type": "object", "required": ["number"], "properties": {"number": {"type": "integer"}}}"#,
         );
         write(
             &root,
-            "oxplow/extensions/acme-pr/merged.v2.json",
+            ".oxplow/extensions/acme-pr/merged.v2.json",
             r#"{"type": "object", "required": ["number", "by"], "properties": {"number": {"type": "integer"}, "by": {"type": "string"}}}"#,
         );
         write(
             &root,
-            "oxplow/extensions/acme-pr/merged.star",
+            ".oxplow/extensions/acme-pr/merged.star",
             "def transform(x):\n    p = dict(x[\"payload\"])\n    p[\"by\"] = \"unknown\"\n    return p\n",
         );
         // The subscriber: retitles the fixture's task with what it saw.
         let task = oxplow_tasks::work_item_ref(fx.task);
         write(
             &root,
-            "oxplow/extensions/acme/extension.yaml",
+            ".oxplow/extensions/acme/extension.yaml",
             &format!("{HEAD}  - id: note\n    summary: Note a merge.\n    on: [acme_pr.merged]\n    entry: note.star\n"),
         );
         write(
             &root,
-            "oxplow/extensions/acme/note.star",
+            ".oxplow/extensions/acme/note.star",
             &format!(
                 "def transform(x):\n    e = x[\"event\"]\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.update\", \"input\": {{\"ref\": \"{task}\", \"title\": \"#%d v%d by %s\" % (e[\"payload\"][\"number\"], e[\"v\"], e[\"payload\"][\"by\"])}}}}]}}\n"
             ),
         );
         crate::test_fixtures::activate_with_problems(svc).await;
         // The subscriber is `acme`; `effects()` lists the owner first.
-        let (ext, decl) = effects(svc)
+        let (_, decl) = effects(svc)
             .into_iter()
             .find(|(e, _)| e.name == "acme")
             .unwrap();
-        let program = effects::effect_program(&ext, &decl);
-        crate::exec_consent::approve_program(
-            &svc.approvals,
-            &root,
-            std::slice::from_ref(&ext),
-            ProgramKind::Effect,
-            &program.name,
-            &program.hash(&root).unwrap(),
-        )
-        .unwrap();
-        effects::approved(&svc.db, &decl.name()).await.unwrap();
+        effects::start_at_head(&svc.db, &decl.name()).await.unwrap();
 
         // Logged at v1, while v1 was the newest.
         let mut merged =
@@ -2150,7 +1967,7 @@ mod tests {
         // The owner publishes v2; the pump delivers the old row at it.
         write(
             &root,
-            "oxplow/extensions/acme-pr/extension.yaml",
+            ".oxplow/extensions/acme-pr/extension.yaml",
             &owner(&format!("{v1}{v2}")),
         );
         crate::test_fixtures::activate_with_problems(svc).await;
@@ -2230,7 +2047,7 @@ mod tests {
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         register(svc);
         let past = log(svc, state_changed(&fx, CanonicalState::Done)).await;
-        approve(svc).await;
+        start(svc).await;
         // The live consumer hasn't reached this one yet.
         let after = log(svc, state_changed(&fx, CanonicalState::Done)).await;
         let plan = run_as_person(svc, BACKFILL_PLAN, json!({ "effect": "acme/mark-done" }))
@@ -2296,7 +2113,7 @@ mod tests {
         }
         let first = log(svc, state_changed(&fx, CanonicalState::Done)).await;
         let last = log(svc, state_changed(&fx, CanonicalState::Done)).await;
-        approve(svc).await;
+        start(svc).await;
         let (_, decl) = find_effect(svc, "acme/mark-done").unwrap();
         let vocabulary = svc.vocabulary.current();
         let planned = svc
@@ -2348,7 +2165,7 @@ mod tests {
         // A person's edit, and one the effect's own run made (its source).
         let theirs = log(svc, edited("human")).await;
         log(svc, edited("effect:acme/bang")).await;
-        approve(svc).await;
+        start(svc).await;
         let plan = run_as_person(svc, BACKFILL_PLAN, json!({ "effect": "acme/bang" }))
             .await
             .unwrap();
@@ -2375,7 +2192,7 @@ mod tests {
             past.push(log(svc, state_changed(&fx, CanonicalState::Done)).await);
         }
         log(svc, state_changed(&fx, CanonicalState::Blocked)).await;
-        approve(svc).await;
+        start(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         for ev in &past {
             consumer.handle(ev).await.unwrap();
@@ -2472,7 +2289,7 @@ mod tests {
         for _ in 0..3 {
             past.push(log(svc, state_changed(&fx, CanonicalState::Done)).await);
         }
-        approve(svc).await;
+        start(svc).await;
         let planned = |input: Value| async move {
             run_as_person(svc, BACKFILL_PLAN, input).await.unwrap()["planned"].clone()
         };
@@ -2510,53 +2327,11 @@ mod tests {
         assert_eq!((second.planned, second.ran, second.remaining), (1, 1, 0));
     }
 
-    /// A backfill reacts only while the effect is approved as it is: one
-    /// whose approval stops holding during the run — its script changed —
-    /// stops before its next reaction, rather than running it unapproved.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_backfill_stops_when_the_effect_is_no_longer_approved() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
-        let svc = &fx.svc;
-        let quiet = "def transform(x):\n    return {\"skip\": \"nothing to do\"}\n";
-        extension(svc, MARK_DONE, &[("mark.star", quiet)]).await;
-        register(svc);
-        for _ in 0..3 {
-            log(svc, state_changed(&fx, CanonicalState::Done)).await;
-        }
-        approve(svc).await;
-        let (ext, decl) = find_effect(svc, "acme/mark-done").unwrap();
-        // The script changes under the run: the approval was of another.
-        extension(
-            svc,
-            MARK_DONE,
-            &[(
-                "mark.star",
-                "def transform(x):\n    return {\"skip\": \"changed\"}\n",
-            )],
-        )
-        .await;
-        let out = crate::commands::effect::backfill(
-            svc,
-            &ext,
-            &decl,
-            &crate::commands::effect::Range::default(),
-            50,
-            None,
-        )
-        .await
-        .unwrap();
-        assert_eq!((out.ran, out.skipped, out.remaining), (0, 0, 3), "{out:?}");
-        assert!(
-            out.stopped.as_deref().unwrap_or("").contains("approved"),
-            "{out:?}"
-        );
-    }
-
     /// P9.D5: a backfill runs the effect as it is now, under the same
-    /// health: it needs the effect enabled and approved, and three
+    /// health: it needs the effect enabled, and three
     /// failures in a row stop it — and disable the effect, as live.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_backfill_needs_approval_and_stops_when_the_effect_is_disabled() {
+    async fn a_backfill_stops_when_the_effect_is_disabled() {
         use crate::commands::effect::BACKFILL;
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
@@ -2567,11 +2342,7 @@ mod tests {
             log(svc, state_changed(&fx, CanonicalState::Done)).await;
         }
         let input = json!({ "effect": "acme/mark-done" });
-        let unapproved = run_as_person(svc, BACKFILL, input.clone())
-            .await
-            .unwrap_err();
-        assert!(unapproved.to_string().contains("approv"), "{unapproved}");
-        approve(svc).await;
+        start(svc).await;
         let out = run_as_person(svc, BACKFILL, input.clone()).await.unwrap();
         assert_eq!(
             (

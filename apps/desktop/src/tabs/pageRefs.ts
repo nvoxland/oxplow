@@ -171,7 +171,7 @@ export function metricRef(metricKey: string): TabRef {
 }
 
 /** A lens page (`lens:<extension>/<slug>`): a user/agent-built query
- *  over the semantic layer from `oxplow/extensions/`. `params` (e.g. a
+ *  over the semantic layer from `.oxplow/extensions/`. `params` (e.g. a
  *  slot's `{ effort_id }`) ride in the id as a sorted query string, so
  *  the tab, its history and bookmarks reopen the lens with the same
  *  values. */

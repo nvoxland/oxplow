@@ -21,7 +21,11 @@ mock.module("../api.js", () => ({
     confirmed: boolean,
   ) => {
     calls.push(confirmed);
-    if (!confirmed) throw new IpcCallError("Finish needs confirmation", "NEEDS_CONFIRMATION");
+    if (!confirmed) {
+      throw new IpcCallError("Finish needs confirmation", "NEEDS_CONFIRMATION", null, [
+        "process — runs programs with your authority; oxplow does not confine them",
+      ]);
+    }
     return { result: null, auditId: 1, eventId: null, inverse: null };
   },
   getCommand: async () => Promise.reject(new Error("no bridge in tests")),
@@ -99,6 +103,9 @@ test("a row action's confirmation shows when the toolbar is hidden", async () =>
   fireEvent.click(getByTestId("menu-item-lens-action-finish"));
   await waitFor(() => expect(calls).toEqual([false]));
   await waitFor(() => expect(queryByTestId("lens-action-confirm")).not.toBeNull());
+  // What the command asks about beyond itself (a deploy's added
+  // permissions) is in the confirmation.
+  expect(getByTestId("lens-action-confirm-details").textContent).toContain("process — runs programs with your authority");
   fireEvent.click(getByTestId("lens-action-confirm-run"));
   await waitFor(() => expect(calls).toEqual([false, true]));
   await waitFor(() => expect(queryByTestId("lens-action-confirm") === null).toBe(true));

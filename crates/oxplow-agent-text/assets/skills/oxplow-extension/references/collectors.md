@@ -39,7 +39,7 @@ Rules:
   `v_collector_state` whether this machine approved it (`approved`; 0 means
   `oxplow.collector.sync` is refused until a person approves it) and why it is
   disabled, if it is.
-- **Check a collector before it's merged** with
+- **Check a collector before you deploy it** with
   `oxplow_preview_collector(owner, id, stream_id)`: it runs your worktree's
   version and returns the rows it would store, storing nothing. For a
   fact collector (`facts:`) it returns the facts it would record

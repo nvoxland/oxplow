@@ -21,7 +21,7 @@ core's events and answers with the commands to run.
 
 ## Use it
 
-1. Copy this folder to `oxplow/extensions/prompt-efforts/` in your repo.
+1. Copy this folder to `.oxplow/extensions/prompt-efforts/` in your repo.
 2. Settings → Data → Programs: approve **Effort policy
    prompt-efforts/prompt_efforts** (it reads your efforts and turns
    through `sql.read`; any change to its files asks again).

@@ -660,6 +660,13 @@ impl WorkspaceFilter {
                         // differ, so the one distinction gitignore can't carry
                         // lives here.
                         Some("wiki") if watching => false,
+                        // Extension sources are watched for the same reason:
+                        // an agent's edits to one are its work (snapshotted,
+                        // given to its effort), committed or not. Watching
+                        // never runs them; only a deploy does. In git's view
+                        // too: a shared one is committed code (git decides
+                        // which are there).
+                        Some("extensions") => false,
                         // Every other SUBDIRECTORY is pruned wholesale, so a
                         // walk never descends into `snapshots/` (thousands of
                         // blobs), `runtime/`, or the LSP caches. Negations
@@ -1518,6 +1525,13 @@ mod tests {
             !f.ignore(Path::new(".oxplow/wiki"), true),
             "and into the wiki"
         );
+        // Extension sources are watched; their deployments are not.
+        assert!(!f.ignore(Path::new(".oxplow/extensions"), true));
+        assert!(!f.ignore(Path::new(".oxplow/extensions/mine/lenses/a.yaml"), false));
+        assert!(f.ignore(
+            Path::new(".oxplow/runtime/extensions/mine/0123/a.yaml"),
+            false
+        ));
 
         // The wiki stays watched. This one CANNOT come from .gitignore:
         // it is deliberately not committed, but it IS snapshotted (Local

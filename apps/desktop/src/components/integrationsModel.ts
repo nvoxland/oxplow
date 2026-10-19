@@ -12,8 +12,6 @@ export interface IntegrationRowModel {
   status: string;
   /** The toggle's label: Enable, Disable, or Enable again after an automatic disable. */
   enableLabel: "Enable" | "Disable" | "Enable again";
-  /** Not approved on this machine: point at Data → Programs. */
-  needsApproval: boolean;
   /** A state worth the error colour. */
   problem: boolean;
 }
@@ -30,14 +28,6 @@ export function integrationRow(v: ProviderInstanceView, now: Date = new Date()):
       break;
     case "refused":
       status = `Not started: ${s.reason}`;
-      break;
-    case "unapproved":
-      // A global instance runs in every project, but consent is about the
-      // code in this one.
-      status =
-        v.scope === "global"
-          ? "Not approved in this project: its program is approved per project, under Data → Programs"
-          : "Not approved on this machine: approve it under Data → Programs";
       break;
     case "unconfigured":
       status = `Config problems: ${s.problems.map((p) => `${p.path || "/"} ${p.message}`).join("; ")}`;
@@ -71,8 +61,7 @@ export function integrationRow(v: ProviderInstanceView, now: Date = new Date()):
     }`,
     status,
     enableLabel,
-    needsApproval: !v.approved,
-    problem: ["missing", "refused", "unapproved", "unconfigured", "failing", "disabled"].includes(s.state),
+    problem: ["missing", "refused", "unconfigured", "failing", "disabled"].includes(s.state),
   };
 }
 

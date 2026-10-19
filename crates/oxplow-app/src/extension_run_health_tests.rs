@@ -9,12 +9,12 @@ use oxplow_domain::run::{Mode, RunContext};
 use oxplow_domain::Actor;
 use serde_json::{json, Value};
 
-use crate::collector_runner::{approval_hash, approve, run_collector, Collectors, RunTrigger};
+use crate::collector_runner::{run_collector, Collectors, RunTrigger};
 use crate::test_fixtures::{services_with_task_effort, TaskEffortFixture};
 
 const SECRET: &str = "s3cr3t-token-value";
 
-const MANIFEST: &str = "manifest: 2\nname: acme\nversion: 2.1.0\nintent:\n  purpose: p\ncollectors:
+const MANIFEST: &str = "manifest: 2\nname: acme\nversion: 2.1.0\nintent:\n  purpose: p\npermissions: { process: true, secrets: [GH_TOKEN] }\ncollectors:
   - id: sync
     runtime: exec
     entry: sync.sh
@@ -30,7 +30,7 @@ commands:
 ";
 
 fn write(root: &std::path::Path, rel: &str, body: &str) {
-    let path = root.join("oxplow/extensions/acme").join(rel);
+    let path = root.join(".oxplow/extensions/acme").join(rel);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, body).unwrap();
     if rel.ends_with(".sh") {
@@ -38,7 +38,7 @@ fn write(root: &std::path::Path, rel: &str, body: &str) {
     }
 }
 
-/// Install `acme` with the program `body`, approve it and set its credential.
+/// Install `acme` with the program `body` and set its credential.
 async fn install(fx: &TaskEffortFixture, body: &str) {
     let root = fx.svc.layout.project_dir.clone();
     write(&root, "extension.yaml", MANIFEST);
@@ -51,17 +51,6 @@ async fn install(fx: &TaskEffortFixture, body: &str) {
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
     let collectors = Collectors::of(&fx.svc, &root);
     crate::collector_runner::set_credential(&collectors, "acme", "GH_TOKEN", Some(SECRET)).unwrap();
-    let ext = fx
-        .svc
-        .extension_catalog
-        .snapshot(&root)
-        .extensions()
-        .iter()
-        .find(|e| e.name == "acme")
-        .cloned()
-        .unwrap();
-    let hash = approval_hash(&root.join(&ext.path), &ext.collectors[0]).unwrap();
-    approve(&fx.svc.approvals, "acme", "sync", &hash).unwrap();
 }
 
 async fn run(fx: &TaskEffortFixture, parent: &RunContext) -> Result<(), String> {
@@ -126,18 +115,6 @@ async fn a_failed_run_and_its_retry_are_two_rows_and_neither_leaks_a_credential(
         "#!/bin/sh\necho '{\"entities\":{\"seen\":[{\"k\":\"a\"}]}}'\n",
     );
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    let root = fx.svc.layout.project_dir.clone();
-    let ext = fx
-        .svc
-        .extension_catalog
-        .snapshot(&root)
-        .extensions()
-        .iter()
-        .find(|e| e.name == "acme")
-        .cloned()
-        .unwrap();
-    let hash = approval_hash(&root.join(&ext.path), &ext.collectors[0]).unwrap();
-    approve(&fx.svc.approvals, "acme", "sync", &hash).unwrap();
     run(&fx, &person()).await.expect("the retry succeeds");
     assert_eq!(fresh(&fx).await, vec![vec![json!(1), json!("ok")]]);
 
@@ -307,8 +284,8 @@ async fn disabling_an_extension_stops_a_collector_script_that_is_computing() {
     };
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     std::fs::write(
-        root.join(".oxplow/project.yaml"),
-        "extensions:\n  disabled: [acme]\n",
+        root.join(".oxplow/personal.yaml"),
+        "disableExtensions: [acme]\n",
     )
     .unwrap();
     fx.svc.reload_config_from_disk().unwrap();

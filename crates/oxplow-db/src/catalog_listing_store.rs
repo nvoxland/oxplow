@@ -36,12 +36,18 @@ pub struct ExtensionRow {
     pub origin: String,
     pub version: Option<String>,
     pub enabled: bool,
-    pub sharing: String,
     pub purpose: Option<String>,
-    pub source_git: Option<String>,
-    pub source_sha: Option<String>,
+    /// `deployed`, `shipped`, `source`, `undeployed` or `not_here`.
+    pub deployment: String,
+    pub hash: Option<String>,
     pub errors_json: String,
     pub warnings_json: String,
+    /// What it declares it may reach beyond the baseline, as JSON.
+    pub permissions_json: String,
+    /// What an undeployed extension waits on a person for, as a JSON array.
+    pub pending_json: String,
+    /// It is the team's.
+    pub shared: bool,
 }
 
 /// One question a person can ask, as `v_prompt` lists it.
@@ -106,9 +112,10 @@ pub fn reset_tx(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result
     let mut ext = conn
         .prepare(
             "INSERT OR REPLACE INTO extension_listing
-               (name, namespace, description, path, origin, version, enabled, sharing,
-                purpose, source_git, source_sha, errors_json, warnings_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+               (name, namespace, description, path, origin, version, enabled,
+                purpose, deployment, hash, errors_json, warnings_json, permissions_json,
+                pending_json, shared)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         )
         .map_err(map_sql_err)?;
     for e in extensions {
@@ -120,12 +127,14 @@ pub fn reset_tx(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result
             e.origin,
             e.version,
             e.enabled,
-            e.sharing,
             e.purpose,
-            e.source_git,
-            e.source_sha,
+            e.deployment,
+            e.hash,
             e.errors_json,
             e.warnings_json,
+            e.permissions_json,
+            e.pending_json,
+            e.shared,
         ])
         .map_err(map_sql_err)?;
     }

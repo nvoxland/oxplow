@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import type { CommandSpec, Lens, LensRun } from "../tauri-bridge/generated/bindings.js";
+import type { ActionThen, CommandSpec, Lens, LensRun } from "../tauri-bridge/generated/bindings.js";
 import { IpcCallError } from "../ipc-error.js";
+import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
 
 // A lens action with `form: true` opens its command's form in a slideover,
 // its fields starting from the action's bound input and its fixed fields
 // shown but not editable; submitting runs it with what the person filled
 // in, an invalid field's message lands under that field, and success
-// closes it. A form lens shows the same per-field errors.
+// closes it. A form lens shows the same per-field errors, and after a
+// submit goes where its command says, as its `then` says.
 
 const realApi = await import("../api.js");
 const runs: Array<{ action: string; row: unknown; input: unknown; confirmed: boolean }> = [];
@@ -16,6 +18,8 @@ const submits: unknown[] = [];
 // What the item's title is in the models: a form lens starts from it.
 let storedTitle = "Old";
 let formStarts = 0;
+// The page the command names after a run (`ui.open_after`), if any.
+let openAfterPage: string | null = null;
 
 const UPDATE: CommandSpec = {
   id: "oxplow.work_item.update",
@@ -62,6 +66,7 @@ mock.module("../api.js", () => ({
     if (invalidField) throw new IpcCallError("a title can't be empty", "INVALID", invalidField);
     return { result: null, auditId: 1, eventId: null, inverse: null };
   },
+  commandOpenAfter: async () => openAfterPage,
 }));
 
 const { LensResultView } = await import("./LensResultView.js");
@@ -72,6 +77,7 @@ beforeEach(() => {
   invalidField = null;
   storedTitle = "Old";
   formStarts = 0;
+  openAfterPage = null;
 });
 afterEach(cleanup);
 
@@ -182,4 +188,42 @@ test("a form lens starts again from the current values after it saves", async ()
   await waitFor(() => expect(submits).toEqual([{ ref: "work_item:oxplow:tsk1", title: "New" }]));
   await waitFor(() => expect(formStarts).toBe(2));
   await waitFor(() => expect((view.getByTestId("lens-form-fields-title") as HTMLInputElement).value).toBe("New"));
+});
+
+function formLens(then: ActionThen): LensRun {
+  return {
+    lens: { ...lens, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["ref"], fields: ["title"], then }, actions: [] },
+    params: {},
+    result: { columns: [], rows: [], truncated: false },
+  } as unknown as LensRun;
+}
+
+/** Submit a form lens on a page; what it asked the page to open. */
+async function submitOnPage(then: ActionThen): Promise<Array<[string, unknown]>> {
+  openAfterPage = "work_item:oxplow:tsk1";
+  const opened: Array<[string, unknown]> = [];
+  const nav = { openRef: (ref: string, how: unknown) => opened.push([ref, how]) } as unknown as PageNavigation;
+  const view = render(
+    <PageNavigationContext.Provider value={nav}>
+      <LensResultView run={formLens(then)} onOpenPage={() => {}} />
+    </PageNavigationContext.Provider>,
+  );
+  const title = await waitFor(() => view.getByTestId("lens-form-fields-title") as HTMLInputElement);
+  fireEvent.change(title, { target: { value: "New" } });
+  fireEvent.submit(view.getByTestId("lens-form-fields"));
+  await waitFor(() => expect(submits).toHaveLength(1));
+  await waitFor(() => expect(formStarts).toBe(2));
+  return opened;
+}
+
+test("a form lens goes where its command says after a submit", async () => {
+  expect(await submitOnPage("open")).toEqual([["work_item:oxplow:tsk1", { replace: false }]]);
+});
+
+test("`then: replace` sends the form's page out of history", async () => {
+  expect(await submitOnPage("replace")).toEqual([["work_item:oxplow:tsk1", { replace: true }]]);
+});
+
+test("`then: stay` keeps the form for the next entry", async () => {
+  expect(await submitOnPage("stay")).toEqual([]);
 });

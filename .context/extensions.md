@@ -61,9 +61,9 @@ enabled extension's descriptors to a `Registry` in catalog order: a global
 name a kind doesn't share that another already holds is refused — a load
 error of the later extension naming both — and the contribution is taken
 out of that extension, so nothing downstream sees two (this is what keeps
-the first extension's metric when two declare one key). `version:` is
-required for `sharing: shared` (`manifest_v2::valid_version`); a bundled
-extension's version is oxplow's own. Every kind is described: collectors
+the first extension's metric when two declare one key). `version:`, when
+given, is checked by `manifest_v2::valid_version`; a bundled extension's
+version is oxplow's own. Every kind is described: collectors
 (global: a fact collector's id), effects, commands (global: the bus id),
 advisories, skills (global: the name), implementations (global:
 `<capability>/<id>`), providers (global: the id, which is also the default
@@ -205,11 +205,8 @@ to it. Model compilation also reports errors from declared transitive consumers.
 Disabled packages can be inspected without changing enablement or authority.
 
 Both impact sides resolve against current project dependencies, rather than a
-complete historical dependency catalog. The installed side reads its own raw
-source even if its active contributions were cleared. Review and installation
-reject contract regressions before replacing files; source lookup allows a
-contract-blocked package to review a repairing update. Explicit configuration
-disabling still applies to update operations. Rejected project folders using
+complete historical dependency catalog. The `before` side reads its own raw
+source even if its active contributions were cleared. Rejected project folders using
 reserved bundled names remain diagnostics only and cannot block the bundled
 package's public identity. Runtime generation activation is integrated; import
 withdrawal and activation behavior are covered end to end by
@@ -447,12 +444,13 @@ over a database file); adversarial and concurrency coverage is still to do.
 > **Status: built (epic tsk275; host finished in tsk278).**
 > - **Current:**
 >   - loading project extensions and their lenses from
->     `oxplow/extensions/` (see "What works today" below);
+>     `.oxplow/extensions/` (see "What works today" below);
 >   - running and validating lenses over IPC and MCP;
 >   - the `oxplow-extension` agent skill;
 >   - the lens page and the launcher's "Lenses" section;
->   - sharing: team via the repo, world via the `oxplow.extension.install` /
->     `oxplow.extension.update` commands and Settings → Extensions;
+>   - sharing: `oxplow.extension.share` / `unshare` move a source in or out
+>     of git, and a teammate's checkout deploys it at startup ("Sources and
+>     deployments");
 >   - the core explorer: the Explore Data page (with Save as Lens) and
 >     lens tiles on dashboards;
 >   - **bundled extensions** (compiled in, read-only, reserved names) and
@@ -475,10 +473,10 @@ over a database file); adversarial and concurrency coverage is still to do.
 > - **Current:** extension-declared dimensions (tsk328).
 > - **Current:** lens action buttons (tsk329) and the `settings.section` slot (then `settings`)
 >   (tsk330).
-> - **Current (P1, 2026-09-28/29):** manifest v2 with `intent`,
->   `sharing` and the stable/experimental split (tsk413), the textual
+> - **Current (P1, 2026-09-28/29):** manifest v2 with `intent`
+>   and the stable/experimental split (tsk413), the textual
 >   v1→v2 migrator (tsk414, removed with the v1 reader in tsk865), the
->   per-root catalog cache (tsk415, tsk390) and the SDK: `oxplow extension
+>   catalog cache (tsk415, tsk390) and the SDK: `oxplow extension
 >   new|check|test` (tsk416; "The SDK").
 >
 > When a piece ships, move it from "target" to "current" here, in the
@@ -491,8 +489,8 @@ validation), `crates/oxplow-rpc/src/commands/extensions.rs` (IPC), and the
 lens tools in `crates/oxplow-mcp/src/lib.rs`.
 
 - **Files.**
-  - `oxplow/extensions/<name>/extension.yaml` is a **manifest v2**
-    (`manifest: 2`, `name` = the folder, `sharing`, `intent`, the
+  - `.oxplow/extensions/<name>/extension.yaml` is a **manifest v2**
+    (`manifest: 2`, `name` = the folder, `intent`, the
     contribution kinds; see "`extension.yaml`" below).
   - `lenses/<slug>.yaml` contains `title`, `description`, `query`, `viz`
     (`table` | `list` | `number` | `markdown`), `params` (`name`, `label`,
@@ -501,30 +499,21 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     ref) and `empty`.
   - Unknown keys are errors, so typos surface instead of being ignored.
 - **Ids.** A lens id is `<extension>/<slug>`.
-- **Reading.** What the app shows is read from the **main worktree**
-  (the daemon's project dir), whichever stream is open: listings, lens
-  pages, slots and panels, custom components, prompts, advisories,
-  `oxplow.lens.show` / thread answers and `oxplow_get_open_page`. A stream's `stream_id`
-  only scopes the data a lens reads (`:stream_id` / `:thread_id`). See
-  "Per stream" below. Reads go through
-  `Services.extension_catalog` (`crates/oxplow-app/src/extension_catalog.rs`):
-  a per-root cache behind a stat-only fingerprint of `oxplow/extensions/**`
-  (every file in the folder — a custom component's bundle too, so its
-  file cap keeps that walk small) and `.oxplow/project.yaml`, so a hit costs ~60 µs instead of the ~3 ms
-  parse and an edit still shows up on the very next call (see
-  [performance.md](./performance.md)). `find_lens`, `oxplow_run_lens`,
-  `oxplow_validate_extension`, `list_data_entities` and the advisory/metric/source
-  readers all take the catalog; `load_extensions` itself is the cache's
-  loader and the write paths' direct read. Hidden folders directly under
-  `oxplow/extensions/` are excluded from both loading and fingerprinting, so
-  installation staging does not identify a new catalog. Hidden files within
-  a declared extension remain fingerprinted. `ExtensionCatalog::snapshot`
-  returns immutable declarations with their load fingerprint identity. Retaining
-  it preserves that identity across cache reloads; `generation(root)` still
-  observes current files for candidate staleness checks. The raw `snapshot`
-  remains an authoring/candidate view; runtime readers use `runtime_snapshot`
-  for the last committed catalog plus immediate disable/removal revocation.
-  Neither API pins the filesystem itself.
+- **Reading.** What the app shows is the **live set**: each extension's
+  active deployment ("Sources and deployments"), whichever stream is open:
+  listings, lens pages, slots and panels, custom components, prompts,
+  advisories, `oxplow.lens.show` / thread answers and
+  `oxplow_get_open_page`. A stream's `stream_id` only scopes the data a lens
+  reads (`:stream_id` / `:thread_id`). Reads go
+  through `Services.extension_catalog`
+  (`crates/oxplow-app/src/extension_catalog.rs`). `find_lens`,
+  `oxplow_run_lens`, `list_data_entities` and the advisory/metric/source
+  readers take the catalog; the authoring checks
+  (`oxplow_validate_extension`, preview) load the source instead.
+  `ExtensionCatalog::snapshot` returns immutable declarations with their
+  generation identity; `runtime_snapshot` is the last committed catalog plus
+  immediate disable/removal revocation. The raw `snapshot` is the
+  authoring/candidate view, with a staged change in it.
 - **Params.** Values are bound as `:name` (`SemanticLayer::query_sql_named`).
   Supplied values override defaults. An unknown param name is an `Invalid`
   error, so a typo can't silently fall back to a default. A param with no
@@ -542,24 +531,26 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - An agent lists lenses, extensions and what each contributes with
     models, not tools: `v_lens`, `v_extension` and `v_contribution`
     (restated with each extension generation from the active catalog, the
-    main worktree's; an extension that fails to load holds its generation
+    live set; an extension that fails to load holds its generation
     back, so it is not a row — `oxplow_validate_extension` says why). The UI's
     `list_extensions` stays IPC.
   - **Over MCP these are the authoring tools** and read the caller's
-    **working copy**: an omitted `stream_id` is the caller's own stream
+    **source**: an omitted `stream_id` is the caller's own stream
     (its header, else its thread's; the primary only for an anonymous
     caller), so an agent in a worktree can check the extension it just
-    wrote before it's merged — the same for `oxplow_preview_collector`, `oxplow_review_extension`, `oxplow.extension.install`,
-    `oxplow.extension.update`, `oxplow_run_lens_action` and `oxplow_ensure_change`.
+    wrote before it deploys it — the same for `oxplow_preview_collector`,
+    `oxplow_preview_extension`, `oxplow_run_lens_action` and
+    `oxplow_ensure_change`. `oxplow.extension.deploy` takes the same
+    `stream` (default: the caller's).
     `site_search` is the exception by design: omitted, it searches every
     stream.
-  - **Over IPC (the UI)** they show the main worktree's extensions:
+  - **Over IPC (the UI)** they show the live set:
     `list_extensions`, `get_lens`, `load_component`,
     and `invoke_component_command` take no stream;
     `run_lens`, `lens_text`, `lens_form`, `submit_lens_form`,
     `run_component_query` and `run_lens_action` take one only for the
-    lens's data context. `validate_extension` and `review_extension` are
-    authoring calls and check the named stream's working copy.
+    lens's data context. `validate_extension` is an
+    authoring call and checks the named stream's source.
   - `oxplow_get_open_page` (an agent's) plus `report_open_page` (UI) are
     current; see "Agents: the MCP surface".
     Agents write lens files with their normal Edit tool, under the filing
@@ -575,14 +566,14 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     with Agent".
   - The page re-runs when a model it read changed (`modelsChanged`), when
     facts landed for a measure its `metric_grid()` read
-    (`metricSamplesChanged`), on edits under `oxplow/extensions/` —
+    (`metricSamplesChanged`), when the live set changes —
     the run's `result.reads` is what it subscribes to (P4.6) — and after a
     reconnect (`onRemoteReconnect`): events sent while the daemon was
     unreachable never arrive, so anything may have changed (tsk1050). Every
     lens host uses `useRerunOnChange` in `src/lens/lensRerun.ts`.
   - "Improve with Agent" inserts `[oxplow lens <id> k=v…]`, with only the
     changed params, through the standard add-to-context path.
-  - The Cmd+P launcher re-reads lenses (the main worktree's) every
+  - The Cmd+P launcher re-reads lenses (the live set's) every
     time it opens and lists them under their `launcher.category`
     (default **Lenses**; `hidden` ones not at all), merged into the
     static directory by category order (`mergeDirectory`).
@@ -660,6 +651,11 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       needs `row: true`; `oxplow_validate_extension` checks `{{row.x}}` against
       the result's columns; the command name must be well-formed. Any
       other shape is a field error.
+    - **`when: <column>`** (row actions only): the action is offered only on
+      rows where that column is truthy (not null, 0, `""` or false) — the
+      row menu leaves it out elsewhere (`actionOffered`), and a run on such
+      a row is refused. `oxplow_validate_extension` checks the column is in
+      the result. The query computes the condition (`can_enable`).
     - **A lens grants no power.** `lens_actions::run_lens_action` runs the
       command through the bus as `Actor::Lens { lens_id, on_behalf_of }`
       — `Human` from the UI (`run_lens_action` RPC), the calling agent from
@@ -714,62 +710,21 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     (`barRows`, `lineSeries`, `treemapItems`, `treeNodes`,
     `timelineEntries`, `stepItems`, `hunkRows`, `childParams`).
 - **Sharing.** There are three levels:
-  - **Yourself.** An extension works in your worktree as soon as it's
-    written.
-  - **Your team.** Extensions are committed files under
-    `oxplow/extensions/`.
-  - **The world.** Publish an extension as a git repo with
-    `extension.yaml` at its root. Others run `oxplow_review_extension(git_url,
-    git_ref?)` then the `oxplow.extension.install { git_url, git_ref?,
-    reviewed_sha, stream? }` command (`commands/extension_install.rs`,
-    P8.A9: `External`, `Confirm::Always` — an agent's run becomes a
-    proposal a person approves; Settings → Extensions' install box runs it
-    confirmed, the review being the confirmation).
-    - **Review first (tsk378).** `oxplow_review_extension` (or `(name)` for an
-      update) clones into `.oxplow/tmp/` and returns `ExtensionReview`:
-      the extension as it would load (`errors` = load errors), its commit
-      `sha`, and `problems` from a dry run of its lenses/advisories
-      (reported, not blocking: a lens over an unsynced source can't run
-      yet). Settings shows it as an inline panel spelling out each exec
-      source's program, hosts and credentials, derived sources,
-      advisories, fact collectors and slots (`reviewModel`); Install/Update
-      confirms. `oxplow.extension.install` / `oxplow.extension.update` take the
-      `reviewed_sha` and refuse a clone at any other commit, or one with
-      load errors.
-    - The repo is cloned inside `.oxplow/tmp/`, because workspace
-      isolation forbids writing outside the project.
-    - It's validated, then copied without `.git` into a hidden staging
-      directory under `oxplow/extensions/`, on the destination filesystem.
-      `source.yaml` is written there and the copied candidate is revalidated
-      against the project catalog before replacing anything. Symlinks are
-      skipped, since they could point outside the extension.
-    - The origin is recorded in `source.yaml` (`git`, `gitRef`, `sha`).
-      The loader surfaces it as `Extension.source`.
-    - Installing never overwrites an existing folder, and a name must be
-      lowercase letters, digits and single dashes.
-    - `oxplow.extension.update { name, reviewed_sha }` re-clones from the recorded source. The old
-      folder is replaced only after the staged copy validates, and only for
-      git-installed extensions. Candidate check and publication (and startup
-      install recovery) are serialized by an exclusive lock on
-      `.oxplow/install.lock`, so two installs of one name wait for each other
-      across threads and across processes on the project; the clone is
-      fetched before the lock, in a temp dir unique to the attempt. Publication renames the installed folder into the
-      staging directory, then renames the complete candidate into place. A
-      failed second rename restores the old folder; if restoration also fails,
-      retain the backup and report its path rather than deleting it. Cleanup
-      failure after successful publication is a warning, not a failed update.
-      The two renames still have a visibility gap and no startup crash recovery;
-      they do not coordinate DB models or runtime registry activation.
-    - Installing is a write tool on MCP. The skill says to do it only when
-      the user asks, and to offer to commit the result.
-    - Installing runs nothing. An exec source, a Starlark one that calls
-      a model (`ai_*`) and a shared extension's
-      advisories run only after a person approves them in Settings →
-      Data. Approvals are stored per machine outside the repo, MACed under
-      a keychain key, and bound to a hash of that version of the program,
-      so a changed script needs approving again (`exec_consent.rs`,
-      `collector_runner.rs`; see [architecture.md](./architecture.md) → "A
-      repo's config never runs a program without consent").
+  - **Yourself.** A source is personal (`.oxplow/.gitignore` ignores it). It
+    runs after `oxplow.extension.deploy`.
+  - **Your team.** `oxplow.extension.share { name }` un-ignores the source;
+    the person commits it. A teammate's checkout deploys it at startup.
+  - **Someone else's.** The interim way: clone it into
+    `.oxplow/extensions/<name>/` (or point `extensionSources` at it), list
+    it, deploy it.
+  - Deploying runs nothing by itself. An exec source, a Starlark one that
+    calls a model (`ai_*`) and a non-bundled extension's
+    advisories run only after a person approves them in Settings →
+    Data. Approvals are stored per machine outside the repo, MACed under
+    a keychain key, and bound to a hash of that version of the program,
+    so a changed script needs approving again (`exec_consent.rs`,
+    `collector_runner.rs`; see [architecture.md](./architecture.md) → "A
+    repo's config never runs a program without consent").
 - **Core explorer (stays in core, deliberately simple).**
   - **Explore Data** (`explore-data` page, `ExploreDataPage.tsx`):
     - Lists every model from `v_model`, with its columns from
@@ -805,14 +760,12 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       tsk943 — on the bus like Keep This, in the stream's worktree; its
       shape checked as `oxplow.lens.show` checks one, its query through the SQL
       gateway as the explorer runs it, so a `metric_grid()` chart is kept,
-      tsk987), then opens the new lens — or, kept in a non-main stream's
-      worktree (`live: false`), toasts that it shows once the stream is
-      merged (`KEPT_IN_STREAM`; Keep This does the same).
-      It creates the extension if missing
+      tsk987), deploys the extension, then opens the new lens (it is live when
+      the command returns). It creates the extension if missing
       (with the same v2 manifest `oxplow extension new` writes —
       `extensions::scaffold_manifest`, so a saved lens starts as a
       checkable extension with an `intent` to fill in), refuses to
-      overwrite a lens, and refuses git-installed extensions.
+      overwrite a lens.
   - **Thread answers** (P6.C1, `commands/lens.rs`,
     `oxplow-db/src/thread_answer_store.rs`). An agent answers with a lens
     rather than pasting rows: MCP **`oxplow_show_lens { lens | spec, params? }`**
@@ -832,17 +785,15 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     - An answer's query is agent SQL: `oxplow.lens.show` checks it with the same
       read-only authorizer as `query_sql` before storing anything.
       `run_answer` (RPC and MCP) re-runs it.
-    - **Keep This** is `oxplow.lens.keep`: the answer becomes a private lens in
-      `my-lenses` (params → defaults, `intent.origin` the thread).
-      **`oxplow.lens.share`** (a person's only) moves a lens into a shared
-      extension, created with `sharing: shared` and `engine`
-      (`ManifestScaffold.shared`), and refuses one that doesn't load or
-      reads beyond models. The target goes through
+    - **Keep This** is `oxplow.lens.keep`: the answer becomes a lens in
+      `my-lenses` (params → defaults, `intent.origin` the thread), written
+      into that extension's source and deployed. The lens is live when the
+      command returns. The target goes through
       `extensions::writable_extension_dir` first — the one check every
-      writer of an extension's files runs (a valid name, not bundled, not
-      installed), so a path or reserved name never reaches the
-      filesystem — and a refused share removes only the files it wrote
-      (never a directory that was there before).
+      writer of an extension's files runs (a valid name, not bundled), so a
+      path or reserved name never reaches the filesystem — and a failed
+      deploy removes only the files it wrote (never a directory that was
+      there before).
     - **UI** (P6.C2, `components/Answers/`): a terminal thread's
       `AgentPage` shows the **Answers strip** above the terminal — the
       thread's answers from `v_thread_answer` (`threadAnswers.ts`,
@@ -902,7 +853,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - Their names are reserved:
     - a project folder with that name is listed with an error and never
       shadows the bundled one;
-    - `oxplow.extension.install` refuses the name;
+    - `oxplow.extension.deploy` of the name resolves to the shipped deployment;
     - `extensions::save_lens` (the writer behind `oxplow.lens.keep`) refuses to
       write into a bundled extension.
 - **Slots (current: see "Slots" below).**
@@ -942,13 +893,12 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   `duplicate-block` page, which is now the general core compare page.
   Both refs carry their whole spec, so App's `handleOpenPage` and
   in-tab navigation register them directly.
-- **Disabling.** `extensions: { disabled: [name] }` in
-  `.oxplow/project.yaml` (bundled extensions included). `load_extensions`
-  reads the list with `oxplow_config::disabled_extensions` (just that key,
-  from the worktree being read) and returns a disabled extension with
+- **Disabling.** An extension that is off contributes nothing: it has
   `enabled: false` and no lenses, slots or sources, so every consumer
-  ignores it; `find_lens` and `oxplow_run_lens` say it's disabled. Settings →
-  Extensions toggles it through the UI-only `set_extension_enabled`.
+  ignores it; `find_lens` and `oxplow_run_lens` say it's disabled. Which are
+  on is the team's `extensions:` plus the person's `enableExtensions` /
+  `disableExtensions` ("Sources and deployments"). Settings → Extensions
+  toggles it through `oxplow.extension.enable` / `disable`.
 - **A page of sections leads with what matters** (tsk1036). Slot sections
   (`LensSlots`) and a `document`'s sections with no rows (no error, not a composite)
   fold into one closing line, "Nothing found: Duplication, Co-change
@@ -1063,8 +1013,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   reactions — at any revision, on the CLI (`extension check --impact`)
   and in an effort's review ("Reviewing by impact"). Models declare keys and may materialize on a
   clock or incrementally ([semantic-layer.md](./semantic-layer.md)).
-  Installs and updates are the `oxplow.extension.install` / `oxplow.extension.update`
-  commands.
+  Changes go live with `oxplow.extension.deploy` ("Sources and deployments").
 
 ## The rules
 
@@ -1095,60 +1044,206 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   domain-specific dashboards are equally valid extension presentations;
   the semantic data and metrics are reusable independently of a view.
 
-## Where extensions live
+## Sources and deployments
 
-- `extensions/<name>/`: bundled with the app, read-only.
-- `oxplow/extensions/<name>/`: project extensions, authored by the user or
-  their agent and **committed with the repo**. This is how a team shares
-  them.
-- **The project's own.** An extension in `oxplow/extensions/` with no
-  `source.yaml` (not installed from elsewhere) is the project's own
-  (`Extension::is_own()`; collectors parse with
-  `oxplow_config::collectors::Declarer { extension, namespace, own }`). The
-  project's own collectors, measures, dimensions and metrics live there, never
-  in `.oxplow/project.yaml` (which refuses `collectors:`, `measures:`,
-  `dimensions:` and `key:` metrics with an error naming
-  `oxplow/extensions/project/extension.yaml`). By convention that extension is
-  `oxplow/extensions/project/` (`oxplow_config::collectors::PROJECT_EXTENSION`),
-  where the tools write new ones; `project` is an ordinary extension name.
-  Collector script `entry` paths are relative to the extension folder. Only an
-  own extension may declare an `exec` fact collector, declare report collectors
-  (`records:`), and `promote` a dimension (bundled extensions may promote too).
+An extension has a **source**, the files a person or their agent edits,
+and **deployments**, the immutable copies oxplow runs. Nothing runs a
+source directly: an edit changes nothing until it is deployed.
 
-**Why `oxplow/` and not `.oxplow/`:** `.oxplow/` is oxplow's *local
-state*. Its `.gitignore` ignores everything except `project.yaml`, and the
-fs watcher prunes its subdirectories wholesale, so files there are neither
-committed nor snapshotted nor attributed to efforts. Project-authored
-oxplow content already lives in `oxplow/` at the repo root (for example
-`oxplow/extensions/project/collectors/*.star`). Extensions follow that convention, so they are
-ordinary project files: visible in the file tree, diffed, reviewed and
-merged like code.
+- **Source:** `.oxplow/extensions/<name>/` in a checkout, unless
+  `extensionSources: { <name>: <folder> }` points the name elsewhere. The
+  folder is relative to the checkout or absolute (`~/` is the home folder).
+  The team's `extensionSources` is in `.oxplow/project.yaml`; a person's own,
+  which wins, is in `.oxplow/personal.yaml`. This repo points
+  `oxplow-foundation` and `oxplow-bundled` at `extensions/…`, so their
+  sources are ordinary repo files. A personal source outside every checkout
+  (`~/oxplow-extensions/x`) is how an agent in any stream edits it: the write
+  guard only blocks paths inside another stream's checkout.
+- **Deployment:** `.oxplow/runtime/extensions/<name>/<hash>/`, where
+  `<hash>` is the hash of the source (`extension_store::source_hash`: sha256
+  over each file's relative path and bytes, dot entries skipped, cut to 16
+  hex characters). The hash is the extension's identity; a deployment
+  folder is written whole (copied beside, then renamed) and never changed.
+  Everything oxplow reads for a deployed extension — manifest, lenses,
+  Starlark, models, component bundles, provider entries, skills — comes
+  from that folder. Its `Extension.path` is the folder's absolute path, so
+  every `root.join(ext.path)` reader finds it. The file watcher never looks
+  under `.oxplow/runtime/`; it does watch `.oxplow/extensions/` (an agent's
+  edits to a source are its work, snapshotted and given to its effort), and
+  watching never activates anything.
+- **Shipped deployments:** `oxplow-foundation` and `oxplow-bundled` are
+  compiled into the binary (`bundled_extensions::BUNDLED`) and written to the
+  store once per hash as their shipped deployment
+  (`extension_store::extract_shipped`); they run from disk like any other.
+  The shipped hash uses the source rule, so deploying an unchanged
+  `extensions/oxplow-foundation` resolves to the shipped deployment. A
+  bundled extension with no active deployment of its own runs the shipped
+  one (`Deployment::Shipped`).
+- **The live set:** each extension's active deployment, in the
+  `extension_deployment` table (`v_extension_deployment`: name, hash,
+  deployed_at, stream, source, active). The publish transaction of every
+  activation marks the active rows from what it published, so the table
+  and what runs never disagree. The store keeps the active deployment and
+  the five newest (`extension_store::KEEP`); deploy prunes the rest.
 
-**The main worktree is the project** (decided 2026-10-07). What the app
-shows — and the `extensions.disabled` list in `.oxplow/project.yaml` —
-comes from the main worktree, the same in every stream. Extensions are
-mostly cross-stream concerns, so branching them per stream was the wrong
-separation. Writes still go where code goes: an agent in a worktree stream
-edits its own worktree's `oxplow/extensions/` (the write guard keeps it
-out of the main checkout), and `oxplow.lens.keep` / `oxplow.lens.share` /
-`oxplow.extension.install` / `oxplow.extension.update` write to the named stream's
-worktree. The app shows that work once it's merged into the main
-worktree, like any other code change. Until then the MCP authoring tools
-(`oxplow_validate_extension`, `oxplow_run_lens`, `oxplow_read` of a lens, …) read the agent's own
-working copy so it can check what it wrote — its files, under the main
-worktree's config: the daemon's catalog is
-`ExtensionCatalog::for_project(main)`, so every load (`load_extensions_in`,
-the write paths' `load_fresh`, the SDK check's workspace filter) takes
-`extensions.disabled` from the main worktree whatever root it reads.
-Standalone (`ExtensionCatalog::new()`, the CLI) a root is its own
-project. If per-stream config is ever
-needed, it goes in a separate file, not a per-worktree read of
-`project.yaml`.
+**Which extensions are on** is two lists: the team's `extensions: [..]` in
+`.oxplow/project.yaml` (absent: `[oxplow-bundled]`; `[]` turns it off) and
+the person's `enableExtensions` / `disableExtensions` in
+`.oxplow/personal.yaml`. On = (team ∪ enable) − disable
+(`oxplow_config::ExtensionSettings::enabled`). `oxplow-foundation` is always
+on and never listed. A listed name with neither a source nor a deployment
+on this machine is listed as `not_here` (`v_extension.deployment`), not an
+error, so a teammate's personal extension in the team list breaks nothing.
 
-Each extension is enabled or disabled per project in the main worktree's
-`.oxplow/project.yaml`. Loading respects the workspace isolation rule
-([architecture.md](./architecture.md)). A malformed extension shows an
-error for that extension only; it never breaks the others or core.
+**Two ways to load** (`extension_catalog.rs`):
+
+- **Deployed** (the daemon's catalog, `ExtensionCatalog::for_project`): the
+  live set, the same whatever root a caller names. An extension that is on
+  but has no deployment is listed `undeployed`, not run.
+  `extensions::load_deployed`.
+- **Source** (standalone `ExtensionCatalog::new()`, the CLI, the SDK, the
+  authoring checks `oxplow_validate_extension` / preview): each source
+  folder in a checkout, every one present on unless `disableExtensions`
+  lists it (`extensions::sources_on`) — what the author's sources would do.
+  `extensions::load_extensions`.
+
+**Deploy** (`oxplow.extension.deploy { name, stream? }`, the agent's
+`run_command`; the CLI has no way to reach the running daemon yet, so it
+has no deploy; `extension_deploy::deploy`): source in the stream's checkout (the
+caller's when not named) → hash → already active is `already: true` →
+source load, whose errors refuse it → copy into the store and record the
+row → turn it on in the person's layer when nothing turns it on → stage the
+live set with it in (`ExtensionCatalog::stage_changes`, which every staging
+check's `snapshot()` then reads) and publish. An extension the staging holds
+back (it doesn't prepare) keeps its previous deployment and the deploy
+fails with its problems; a candidate overtaken by another change is staged
+again. The command returns once the deployment runs. Any stream may
+deploy; restart starts from the recorded live set. Nothing caps an
+extension's size: a deployment over 25 MiB goes live with a warning in the
+result's `warnings` (every deployment copies the whole folder).
+`oxplow.extension.rollback { name, to? }` makes an earlier deployment
+active (`to` a hash or its start; a bundled one with nothing older returns
+to the shipped deployment). `oxplow.extension.enable` / `disable` write the
+person's lists (enable deploys one with no deployment here).
+`oxplow.extension.remove` takes it out of both lists, stops it, forgets its
+deployments, private state and settings, and never deletes its source.
+
+**Startup** (`extension_deploy::start`, before the first activation): the
+live set starts from the active rows whose folder is still in the store;
+each extension that is on with no deployment here (a fresh clone, a
+just-pulled teammate's) is staged from the main checkout's source and
+activates with the rest — one that doesn't prepare is held, as any is. One
+whose source declares permissions (beyond what ships, for a bundled one)
+isn't: it stays `undeployed` and `v_extension.pending` says what it asks
+for, until a person deploys it ("Permissions").
+Foundation can't be held: a deployment of it that doesn't load or whose
+core baseline doesn't activate gives way to the shipped one
+(`ExtensionActivation::initialize`), which the next publication records
+as the live set, and its problems say "the shipped version runs until it
+is deployed again". Boot never runs without foundation.
+
+**Sharing is one explicit act.** `.oxplow/.gitignore` ignores everything
+but `project.yaml`, so a new extension's source is personal.
+`oxplow.extension.share { name }` appends `!extensions/`, `extensions/*`,
+`!extensions/<name>/` and `!extensions/<name>/**` (git can't re-include a
+file under an excluded folder, and `*` matches files at every depth) and
+moves the name from the person's `enableExtensions` to the team's
+`extensions`; the person commits. `oxplow.extension.unshare` reverses it.
+Only a source in `.oxplow/extensions/` is shared this way.
+
+**Keep This** (`oxplow.lens.keep`) writes the lens into the extension's
+source (`my-lenses` unless named; created when missing) in the stream's
+checkout and deploys it; it returns once the lens is live. A failed deploy
+takes the lens file back out.
+
+A malformed extension shows an error for that extension only; it never
+breaks the others or core.
+
+## Permissions
+
+An extension declares what it may reach beyond the **baseline** in its
+manifest's `permissions:` (`oxplow_domain::permissions::Permissions`); a
+person approves it when the extension is deployed. The baseline needs no
+declaration: lenses, pages, panels, slots, decorators, replacements; its
+own models; a collector's `input:` query (declared and reviewable); its
+own commands and the effects, jobs and commands whose scripts compose them;
+components that query their own lenses; Starlark and jaq collectors that
+don't ask a model; `state.read`, `extension_config.read`, `jobs.read`.
+
+```yaml
+permissions:                    # every key optional; absent = baseline only
+  sql: read                     # ad-hoc read-only SQL (a script's `needs: [sql.read]`)
+  commands: [oxplow.work_item.*] # commands outside its own namespace (`*` one segment, `**` the rest)
+  files: read                   # or `write` (includes read): `needs: [tree.read]`
+  ai: true                      # models, with the person's key
+  network: [api.github.com]     # hosts its programs reach (`*.example.com` covers the names under it)
+  process: true                 # runs programs: providers, `runtime: exec` collectors
+  secrets: [GITHUB_TOKEN]       # secrets it reads, by name
+  agent: true                   # advisories and skills: text that reaches the agent
+```
+
+`process` is declared, **not confined**: a program runs with the person's
+file, network and process authority (`.context/providers.md` "External
+execution authority"), and what a deploy asks says so plainly.
+
+**The loader checks the declaration against the contents**
+(`extensions::check_permissions`, at the end of `load_one`): each
+contribution that needs something the manifest doesn't declare is an error
+at the contribution's line, naming what to add —
+``provider `github` needs `permissions.process`, `permissions.network: [api.github.com]` ``.
+What needs what (`needed_permissions`): a provider with an `entry` or an
+MCP `command` → `process`, its `network` and its credentials' names →
+`network`, `secrets` (a URL adapter runs oxplow's own adapter: only its
+hosts and credentials); an `exec` collector that isn't a bundled parser →
+`process`, `network`, `secrets`; any declared `needs` of `ai.compute` /
+`ai.discover` → `ai`, `sql.read` → `sql: read`, `tree.read` → `files:
+read` (the *declared* needs: a collector's `input:` is baseline); a
+Starlark collector whose script calls an `ai_*` builtin → `ai`; an
+`ai_provider` implementation → `ai`; advisories, skills and
+implementations with skills → `agent`; a custom component's `commands`
+outside its namespace → `commands`. A script's composed commands can't be
+known before it runs, so they are checked when it runs. `intent.prompts`
+are suggestions a person picks, not agent text, and need nothing.
+
+**Approval is the deploy** (`extension_deploy::approved`). The approved
+set is what runs: the active deployment's permissions (the running catalog
+entry's; a bundled extension with no deployment of its own runs what ships,
+`shipped_permissions`). A deploy, rollback or enable whose permissions add
+nothing to that goes live at once — a narrower one too. One that adds a
+permission changes nothing (no copy, no row, not turned on) and returns
+`DeployError::NeedsApproval { adds }`, one line per added permission
+(`Permissions::added_over`: "process — runs programs with your authority;
+oxplow does not confine them", "network — may reach api.github.com", …).
+The command (`oxplow.extension.deploy`, `rollback`, `enable`) raises that
+as `NeedsConfirmation` with the lines in `Preview::details`: a person
+confirms inline (`CommandConfirm` lists them), an agent's call becomes a
+proposal naming them (an agent can't confirm), and the approval deploys it.
+There is no separate approval store: each deployment row records the
+permissions it was approved with (`v_extension_deployment.permissions`).
+Keep This (`oxplow.lens.keep`) never asks: it fails, saying why, when the
+extension's source gained a permission since it was last deployed. A
+fresh machine has nothing running, so a teammate's extension that
+declares permissions waits for its first deploy here (Startup).
+
+**The Extensions page** (foundation's `extensions` page, also mounted in
+Settings → Extensions through `settings.extensions.sections`, ahead of
+core's health-and-credentials section): `extensions-list` is every
+extension from `v_extension` joined to `v_extension_source` — the live
+model of each source as it is now, so an edit shows at once ("out of date"
+when its hash isn't the running deployment's) — with its permissions and
+what it waits on, and the row actions Deploy (offered only when undeployed
+or out of date), Roll Back, Enable, Disable, Share with the Team, Stop
+Sharing and Remove, each offered by a `when:` column the query computes;
+`extensions-deployments` is `v_extension_deployment`, newest first, with
+Roll Back to This. A row action that adds permissions asks inline like any
+deploy.
+
+`v_extension.permissions` is the declaration as JSON (`{}`: baseline);
+`v_extension.pending` is what an undeployed extension waits on a person
+for (the same lines; `[]` when nothing).
+The shipped extensions declare theirs like any other: `oxplow-foundation`
+`{ ai: true }` (its AI providers), `oxplow-bundled` `{ sql: read, ai: true,
+agent: true }`.
 
 ## `extension.yaml`
 
@@ -1161,8 +1256,8 @@ manifest: 2
 name: oxplow-bundled   # must equal the folder name
 namespace: oxplow      # its command ids' namespace (default: the name, `-` → `_`); `oxplow` only for oxplow's own
 description: …
-sharing: shared          # private (default) | shared — see below
-engine: ">=0.7"          # the oxplow it targets; required when shared
+engine: ">=0.7"          # optional: the oxplow it targets
+permissions: { ai: true } # optional: what it reaches beyond the baseline ("Permissions")
 intent:                  # required
   purpose: What question it answers, or what job it does
   origin: effort:eff42   # the thread/effort ref that created it, or null
@@ -1197,16 +1292,11 @@ Lenses aren't listed here: every `lenses/*.yaml` file in the folder is
 loaded. A lens gets into the launcher through its own `launcher.category`
 (or stays out with `hidden: true`).
 
-**Private vs shared.** `sharing: private` is the usual case (this
-project, this person, agent-built). `sharing: shared` (committed for a
-team, installed from git, bundled — bundled *must* be shared) must
-declare `engine` (satisfied by this oxplow) and its own `version`.
-
 **What the loader checks** (`Extension.errors` / `Extension.warnings`):
 - shape: unknown keys, `manifest` version, `intent` present and
   `intent.origin` a canonical ref; an empty `intent.examples` is a
   warning;
-- lifecycle: sharing rules above; `engine` is `>=MAJOR.MINOR[.PATCH]`;
+- lifecycle: `engine`, when given, is `>=MAJOR.MINOR[.PATCH]`;
 - cross-references: a `ui.slots` lens exists (and declares a param
   the slot binds); a composite's part lenses exist — in this extension or,
   once everything is loaded, in another; a `launcher` target is a
@@ -1263,8 +1353,7 @@ door gives an author the same report, so an agent editing from a terminal
 and one calling MCP read identical `file:line: what — fix` lines.
 
 - **`scaffold(root, kind, name, origin)`** (`extension new <kind> <name>`)
-  writes `oxplow/extensions/<name>/extension.yaml` (v2, `sharing:
-  private`, an `intent` whose `origin` is the ref passed with `--origin`,
+  writes `.oxplow/extensions/<name>/extension.yaml` (v2, an `intent` whose `origin` is the ref passed with `--origin`,
   one example) and, but for a bare extension, that example's fixture
   `fixtures/basic.yaml` — then the kind's starter (P7.C6):
   - `lens` — `lenses/<name>.yaml`, open tasks in the viewer's stream, with
@@ -1350,11 +1439,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
   example names (`check_fixture_pairing`; `model-*` / `provider-*` belong
   to a model or a provider); `extension test` warns about the reverse, an
   example with no fixture (a fresh scaffold has some). Each names the file
-  and the fix. For `sharing: shared`, `check_credentials`
-  (`credential_lint`) scans `extension.yaml`, `*.star` and `fixtures/**`
-  for known token prefixes, private-key headers and long high-entropy
-  literals (hex digests of 32/40/64 characters and uuids pass): warnings
-  `file:line` with the issuer prefix and length, never the value.
+  and the fix.
 - **`scaffold(…, Kind::Provider { capability }, …)`** (`extension new
   provider <name> [--capability <cap>]`, P5.D5) adds a `providers:` entry
   (id = the name with `_` for `-`, the capability). `Kind::parse("provider")`
@@ -1382,7 +1467,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
   test <name> [--bless] [--json]`, P5.D5; MCP `oxplow_preview_extension`, which
   runs it for an agent with an empty environment) runs on **a throwaway
   oxplow** (`throwaway::Host`) that is a real one: a temp project with a
-  copy of the project's `oxplow/extensions/` and of which it turned off
+  copy of the project's `.oxplow/extensions/` and of which it turned off
   (nothing else of its config — its provider instances would start its
   programs), `Services::in_memory_on_machine` with an in-memory keychain,
   its own global config and the environment it is given, activated by
@@ -1440,7 +1525,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
 - **The CLI** is `apps/desktop/src-tauri/src/extension_cli.rs`, dispatched
   by `main.rs` before Tauri boots exactly like `oxplow hook`. It takes a
   bare name (under `--root` or the cwd) or the extension folder's path
-  (the project is read off `…/oxplow/extensions/<name>`). `check` opens
+  (the project is read off `…/.oxplow/extensions/<name>`). `check` opens
   `<root>/.oxplow/local.sqlite` **read-only** (`Database::open_read_only`:
   no migrations, no writes, refused unless its schema version matches
   this build — the CLI may not be the app's version) so lens SQL is
@@ -1683,7 +1768,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   (`columns` entry for `tree.label`), so its `link`, `icon` and `tone`
   apply.
 - `actions`: commands the lens offers, `{ id, label, command, input?,
-  row?, group?, form?, fixed?, choices? }`, with `{{param.x}}` / `{{row.x}}` placeholders; run as the lens
+  row?, group?, form?, fixed?, choices?, then? }`, with `{{param.x}}` / `{{row.x}}` placeholders; run as the lens
   for whoever pressed, so they grant no power. `form: true` opens the
   command's form instead of running (a slideover: `lens_action_form`
   gives the command and the bound `input` as starting values); what the
@@ -1705,7 +1790,15 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   a command offer does (`lensActions.openAfterAction`). A result that
   can't name the page is the action's recorded failure.
   `oxplow.knowledge.write_page` declares one (the page it wrote), so the
-  Wiki page's "+ New" opens the new page.
+  Wiki page's "+ New" opens the new page. A form lens's submit follows
+  `open_after` the same way. What becomes of the lens's page is the
+  action's `then` (a form lens's `form.then`): `open` (default) — the
+  page opens in this tab and Back returns; `replace` — it takes this tab
+  and the lens's page leaves history (`NavigateOptions.replace`, so Back
+  never returns to a submitted form; a page that can't live in a tab,
+  an agent session, closes this one and is focused); `stay` — nothing
+  opens (a form for the next entry). Outside a page (a panel) a page
+  opens in a new tab whatever `then` says.
 - `alert`: a row-count or threshold condition that shows a panel badge
   (nudging the agent is what advisories are for).
 
@@ -1938,7 +2031,7 @@ dashboard's recent commits with their stats) is a plain list.
 — lanes, merge lanes, child-before-parent order, filters, reveal, Cmd-click.
 
 **The example that proves views and forms: `examples/extensions/task-views`.**
-A private extension, no provider of its own, replacing `work_item.board`
+An extension with no provider of its own, replacing `work_item.board`
 (the `swimlanes` component: a column per canonical state, drag a card to
 another column to `oxplow.work_item.transition` it, drag within a column to
 `reorder` it only when the active provider's `features` (a second hidden
@@ -1964,8 +2057,8 @@ is its regression test).
 
 ## Reviewing by impact
 
-An extension is reviewed by its **impact** — what installing or updating
-it would change — not only by what it declares (`extension_impact.rs`).
+An extension is reviewed by its **impact** — what changing it
+would change — not only by what it declares (`extension_impact.rs`).
 `ImpactReport` holds, each with a `Change` (`added`, `removed`,
 `changed`, `unchanged`):
 
@@ -2013,13 +2106,8 @@ that fails the same way on both sides is `unchanged`. Each
 model's `downstream` is its direct readers from `v_model_lineage`
 (`downstream_of`) other than this extension's own views, by exact name;
 a provider's declarations are read from each version's files.
-`oxplow_review_extension` fills `ExtensionReview.impact`, with the installed
-version as `before` when it replaces one (`review_update`), else none
-(everything is `added`); a candidate that doesn't load gets **no**
-report (`impact: None` — its errors say why, and it can't be
-installed). Settings → Extensions shows `ImpactReport.lines` —
-`extension_impact::summary`, the one wording the install
-review, `extension check --impact` and an effort's review share:
+`extension_impact::summary` is the one wording
+`extension check --impact` and an effort's review share:
 collectors' and providers' grants first — "now reaches x (was y)", a
 provider command added (destructive) — then models with their readers,
 lenses) and each changed lens's text before and after,
@@ -2042,7 +2130,7 @@ need be on disk.
 `Prepared { lenses, overlay }`: the extension's models (with the other
 enabled extensions') compile to temp views, published nowhere, and its
 lenses, advisories and commands read through that overlay. A review
-prepares **both** sides — the candidate and the installed version — so a
+prepares **both** sides — the candidate and the version before it — so a
 lens over a model whose SQL changed renders against each version's own
 SQL, whatever the database has published (a disabled extension, a model
 that failed, another worktree's copy).
@@ -2105,7 +2193,7 @@ The same review on the CLI: `oxplow_sdk::check(…, against)` — the check
 and its impact with one throwaway oxplow's command registry — loads the
 extension at git `HEAD` (or `--against`) — `extension_tree_at` through a
 `Trees` over the VCS alone — as `before` and the working tree as `after`,
-and runs `extensions::impact_between` (the install review's path too):
+and runs `extensions::impact_between`:
 each side on its own overlay over the project's database read
 read-only (else an empty one), so it **writes nothing** — the database
 file is byte-identical after. Text output adds `impact against <rev>:`
@@ -2113,7 +2201,7 @@ and the report's lines; `--json` adds `impact` (the `ImpactReport`) and
 `against` to the check's JSON.
 
 **On an effort's review.** DiffViewPage shows an "Extension
-Changes" section when the change's files include `oxplow/extensions/**`
+Changes" section when the change's files include `.oxplow/extensions/**`
 (`changedExtensions`): RPC `extension_impact_between { streamId, start,
 end }` → `extensions::extension_changes_between` names each extension
 whose files differ between the two revisions (`Trees::diff`), loads both
@@ -2121,8 +2209,8 @@ versions as those revisions hold them (`extension_tree_at`) and reviews
 them with `impact_between` — an `ExtensionChange { name, change,
 impact?, errors }` each (a removed one has no report). The section
 renders each with `ImpactReportView` (the server's lines, then each
-changed lens before and after), the component the install review uses
-too. While the RPC runs it says "Reviewing acme…"; when it fails, "Could
+changed lens before and after), the component `check --impact`
+shows too. While the RPC runs it says "Reviewing acme…"; when it fails, "Could
 not review acme: <why>" — never a spinner that doesn't end.
 
 ## Commands in core menus (a command's `ui.about`)
@@ -2146,13 +2234,13 @@ block is gone.
 
 **The desktop reads the extensions from one store**
 (`extensionsStore.ts`, `useExtensions()`): one `listExtensions` (the
-main worktree's, the same in every stream) and one event subscription
+live set, the same in every stream) and one event subscription
 however many readers are mounted
 (slots, `useSlotMounted`,
 decorators, rail panels, extension pages, the launcher), reloaded on
 `extensionsChanged`; the listing lives while something reads it, so a
 later mount loads afresh. Only Settings → Extensions lists them itself — it
-reloads after its own installs and updates.
+reloads after its own deploys and toggles.
 
 ## Custom components
 
@@ -2188,23 +2276,23 @@ under the frame (`custom-component-refused`, `componentRefusal`) — the
 component's own code may not. A component that declares no commands
 only shows and reads, and isn't a program.
 
-**What runs is what was approved** (tsk984). Before it shows a frame the
-host loads the component's bundle (`load_component`, from the main
-worktree, as the lens itself is: the RPCs read the project's extensions
-whatever the stream) into `Services::component_bundles`
-(`component_bundles.rs`): every file of the folder, read once, keyed by
-its **version** — the component's approval hash over exactly those files
-and its commands (`ProjectProgram::component_hash`, the same function
-Programs lists the version with). The daemon serves the frame from that
-snapshot alone (`/components/v/<version>/…`), and the frame's `invoke`
-names the version it loaded: it runs only when that version is
-approved and declares the command. So a bundle edited on disk after the
-frame loaded changes nothing that runs, and one loaded while edited
-can't act on the approval of what the disk says later. The folder is
-read as served — the extension's path joined with the manifest's
-`bundle` — so a spelling that differs from the disk's only in case still
-covers every file. The snapshots kept are the 16 newest; an older
-frame's invoke is refused with "reload its lens".
+**What runs is what was approved.** Before it shows a frame the host
+loads the component's bundle (`load_component`, from the deployed
+catalog, the same whatever the stream) into `Services::component_bundles`
+(`component_bundles.rs`): the bundle's folder in its deployment and its
+file names, keyed by its **version** — the component's approval hash over
+those files and its commands (`ProjectProgram::component_hash`, the same
+function Programs lists the version with). No bytes are held: the daemon
+serves the frame (`/components/v/<version>/…`) by reading the named file
+from that folder, which never changes, and the frame's `invoke` names the
+version it loaded: it runs only when that version is approved and
+declares the command. So an edit to the source changes nothing that runs
+until it is deployed. The folder is read as served — the extension's path
+joined with the manifest's `bundle` — so a spelling that differs from the
+disk's only in case still covers every file. Every version loaded in the
+process stays servable while its deployment is in the store (a folder
+and a list of names each, so nothing is dropped); once the deployment is
+pruned its files 404 and the frame reloads.
 
 **A hot update reaches a mounted frame.** Activation stages every
 enabled extension's bundles into the generation it publishes
@@ -2218,12 +2306,10 @@ person approves its code; the old approval doesn't carry over
 (`an_activated_edit_needs_a_reload_and_its_own_approval`).
 
 **Bundled and project components share one runtime.** A bundled
-extension's files are embedded as bytes (`bundled_extensions.rs`,
-`include_bytes!`), so its component's assets ship as they are; its
-bundle is found from the embedded paths (`Embedded::bundle_stat`),
-staged, hashed (the same `component_hash` over `bundled:<name>/…`),
-served at `/components/v/<version>/` under the same CSP, and — when it
-declares `commands` — listed on Programs and approved like a project's.
+extension runs from its shipped deployment on disk (`Sources and
+deployments`), so its component's bundle is staged, hashed, served at
+`/components/v/<version>/` under the same CSP and — when it declares
+`commands` — listed on Programs and approved exactly like a project's.
 What still differs by origin, none of it about components: a bundled
 advisory needs no approval, the `oxplow` command namespace is reserved
 for bundled extensions, and a bundled extension's name wins a clash with
@@ -2250,8 +2336,8 @@ custom: { component: burndown, props: { color: accent } }
 accepting SQL from the frame; a component that needs a model writes a
 `hidden: true` lens over it. Load checks, each at its line: the id, a
 duplicate, `bundle` a relative folder without `..` that holds
-`index.html`, no symlink anywhere in it, at most 256 files and 5 MiB
-(`stat_bundle`; a bundled extension has none), each asset a lens id
+`index.html`, no symlink anywhere in it (`stat_bundle`; a bundle has no
+size limit, see Deploy), each asset a lens id
 alone (no `?params`, `@rev` or `#fragment` — `query(asset)` names the
 lens) — this extension's must be among its lenses — and each command a
 command name. A `custom` lens needs `custom.component` naming one of the
@@ -2338,7 +2424,7 @@ in the library — one number, bumped when a message's shape changes), and
 version. `componentClient.test.ts` drives the served file against the
 real `createBridgeHost` and the real `init` (`initMessage`, which
 `CustomComponentViz` posts), so the two can't drift (tsk856). `oxplow extension new
-component <name>` scaffolds a private extension — the component, its
+component <name>` scaffolds an extension — the component, its
 `viz: custom` lens and a bundle using the library — that checks and
 tests clean (`just_works.rs`). The reference is in
 `docs/guide/lenses.md`.
@@ -2354,8 +2440,7 @@ Programs. The host's own re-run (`onUpdate`, at the lens's params) is
 asked again with a selected filter rather than drawn over it; a pull
 request whose dates can't be read is left out and counted in a note,
 never blanking the rest; a rejected `connect()` is said in the status
-(tsk1008) — a component author's model for each. The loader no longer limits components to private extensions,
-nor to project ones. The
+(tsk1008) — a component author's model for each. The loader limits components to no kind of extension. The
 browser suite's `specs/components/pr-lifetimes.spec.ts` runs it in
 Chromium **and WebKit** (the engines of browser mode and the macOS
 window; the suite's one WebKit project): the frame loads, the filters
@@ -2616,11 +2701,8 @@ uses):
   titles (`list_services`, one rpc over `SERVICES`; the surface-parity
   manifest has it as a UI read, with `v_scope` for the agent), a service its script uses without naming it
   in `needs` flagged "(not in its needs)". The row's lines come from the
-  extension's check (`oxplow_validate_extension` → `CheckReport.services`); the
-  install and update review (`ExtensionReview.services`, listed under what
-  it declares and before the impact report) computes them from the
-  candidate's own files (`of_extension` reads through the review's
-  reader, never the installed copy of the same name). Bundled extensions show no
+  extension's check (`oxplow_validate_extension` → `CheckReport.services`).
+  Bundled extensions show no
   line (they are not checked in the section). Row model:
   `serviceLines` in `extensionRowModel.ts`. `oxplow extension new
   collector` scaffolds `needs: []` under a comment naming the three
@@ -2658,62 +2740,52 @@ uses):
 
 ## Grants
 
-A **need** is what a contribution declares; a **grant** is what a person
-approved; a **decision** is what a run was allowed (`oxplow_domain::grant`,
-`grants.rs`).
+A **need** is what a contribution declares; a **grant** is what its
+extension may reach (its `permissions:`, approved when it was deployed —
+"Permissions"); a **decision** is what a run was allowed
+(`oxplow_domain::grant`, `grants.rs`).
 
 - **The request.** `GrantRequest { scopes, program, hosts, credentials,
   env, commands }`, derived from the declaration: an exec collector's
   entry, `network`, `credentials` and `env`; a collector's services
   (`services::collector_needs`: declared ∪ implied, `ai.compute` among
-  them for a model-calling script — a model is a scope, not a flag); a
-  script's (effect, command, effort policy) scopes from its `needs`; a
-  project program's from its listing (`program_request`).
-  `widening(granted)` names what a new request asks beyond a grant; a
-  narrower one asks nothing new.
-- **The grant.** `Grant { request, granted_at, granted_by, revoked_at }`.
-  What a run decides against is always the request derived from the
-  declaration *now* — the approval's hash proves that declaration is the
-  approved one — never a request stored in the approvals file, which a
-  process writing that file could widen.
+  them for a model-calling script); a script's (effect, command, effort
+  policy, job, provider `host/call`) scopes from its `needs`.
+- **The grant.** `Grant { namespace, permissions }` (`grants::grant_of`):
+  the extension's command namespace and its declared permissions. There is
+  no approvals store and nothing hashed per program: the deployment is
+  immutable, so what runs is what was deployed, and the deployment's
+  permissions are what a person approved.
 - **The authority** a run carries (`RunContext::authorized`,
-  `run::Authority { declared, grant, enforcement }`): the grant when a
-  person's approval is what lets it run (a program, a model-calling
-  script, an effect), else its declaration alone (a script command, a
-  policy's script, a provider's `host/call`s — decided against the
-  provider's own `needs`). Core's own work has none and is allowed what
-  it does.
-- **The loaded-vs-disk gate.** Every script kind a person approves — an
-  effect, an effort policy, a model-calling collector or provider script —
-  runs under `exec_consent::loaded_script_gate`: besides the approval hash of
-  the folder as it is on disk, it refuses (at each host call and at
-  publication) when the script *as the catalog loaded it* differs from the
-  file now ("the loaded script differs from the approved version; reload
-  it"). Approving an edited file therefore never lets the older cached text
-  run; the next catalog publication loads the new one. Pinned for effects by
-  `an_effect_whose_file_changed_since_it_loaded_is_refused`.
-- **Revocation stops every kind of run, which records `cancelled`.** A
-  program's whole process group is killed (`external_process::RevocationWatch`),
-  a job's supervisor cancels its attempt, and an in-process script — a
-  Starlark or jaq collector, a fact collector, an effect, an effort-policy
-  script — runs under `run_context::watch_authority(run)`: a task checking the
-  run's guards every 100 ms until it is dropped, which sets the run's cancel
-  flag when one fails; the script worker polls that flag. Without it a script
-  computing with no host call would run on to its timeout (120 s by default)
-  and only be discarded at publication. Pinned by
-  `disabling_an_extension_stops_a_collector_script_that_is_computing` and
-  `revoking_an_effect_stops_a_script_that_is_computing`.
+  `run::Authority { declared, grant, enforcement }`,
+  `grants::authority(ext, declared)`). Every extension run has one: a
+  collector, an effect, a job, a script command, a scripted effort policy,
+  a provider's `host/call`s. Core's own work has none and is allowed what
+  it does (core's built-in effort policy, core commands).
 - **Decisions.** `run.decide(Need)` → `Allowed`, `Denied(why)` or
-  `Unenforced(why)`, recorded on the run (`v_extension_run.decisions`):
-  each scope call (`Calls::serve`); a program collector's `program`,
-  `files`, each `env` name, each `host` and each `credential` — a
-  credential its grant doesn't name is never read from the keychain; a
-  script's services (`scope` `tree.read` / `ai.compute`, by the router).
-  A denied need stops what asked for it.
-  `Enforcement { hosts }` is the one table of what this machine holds.
-  A program's file and network decisions remain `unenforced`: macOS's
-  proxy and direct-network sandbox do not prevent local brokers or file
-  access. `grants::gaps` reports this in Programs and review grant lines.
+  `Unenforced(why)`, recorded on the run (`v_extension_run.decisions`).
+  `grant::decide` refuses what the contribution didn't declare ("not
+  declared"), then what its extension's permissions don't allow — the
+  refusal names the permission: ``needs `permissions.ai` in the
+  extension's manifest`` (`Grant::permits`: `sql.read` → `sql`;
+  `tree.read` and paths → `files`; `ai.compute`/`ai.discover` → `ai`; a
+  program, its files and env → `process`; a host → `network`; a
+  credential → `secrets`; a command outside the extension's namespace →
+  `commands`). Then `Enforcement { hosts }` says what this machine can't
+  hold it to: a program's files always, its hosts wherever the network
+  isn't confined — `Unenforced`, said rather than passed off as held.
+  Decided: each scope call (`Calls::serve`); a program collector's
+  `program`, `files`, each `env` name, each `host` and each `credential` —
+  one not permitted is never read from the keychain; a script's services
+  (`scope` `tree.read` / `ai.compute`, by the router). A denied need stops
+  what asked for it. A model-calling Starlark collector or fact collector
+  is refused at its `ai.compute` decision when its extension lacks `ai`
+  (`RunCollectorError::Denied`, recorded as the run's `error`).
+- **What the loader already refused.** Most of this is decided before
+  anything runs: an extension whose contents need a permission it doesn't
+  declare doesn't load ("Permissions"). The runtime decisions are for what
+  only a run reveals — a script's composed commands, a path or model it
+  reads.
 - **Bounded reads.** `sql.read:v_work_item` names an exact published
   model; use multiple needs for multiple models. SQLite preparation checks
   the query's models and transitive registered `ref` inputs, including
@@ -2725,75 +2797,46 @@ approved; a **decision** is what a run was allowed (`oxplow_domain::grant`,
   directory. Absolute paths, traversal, backslashes and globs are refused.
   The host filters its captured tree before giving it to a script; these
   needs do not grant raw filesystem access. Bare `tree.read` grants the
-  whole captured tree.
-  Manifest validation, capability availability, command script checks and grant
-  request construction recognize the validated service prefix while preserving
-  the original qualifier. Transactional command composers still refuse bounded
-  tree reads because their tree service is unavailable inside the transaction.
+  whole captured tree. A collector's `input:` query is the host's, under
+  its declared model bounds, and needs no `sql` permission.
 - **External execution.** Every external program (an exec collector, a
-  project fact program, a report parser, an external provider, a harness
-  or MCP stdio server) runs with the person's file, network and process
-  authority. Nothing declares that, and the approval says so plainly: a
-  program "runs with your file, network and process authority; oxplow
-  cleans up its processes but doesn't confine it". Confining external
-  processes is shelved (the owner's decision); a confinement tier is
-  deferred until real OS confinement exists, and there is no `execution:`
-  key (a manifest still declaring it is a load error). A program's file and
-  network decisions stay `unenforced`. What oxplow does do is cleanup, not
-  confinement: on Unix each program runs in an owned process group, killed
-  on completion, timeout, cancellation or revocation. A process can escape
-  its group. Platforms without owned-group cleanup just run the program.
-  Pipe I/O also has a deadline, so escaped children cannot leave host
-  drain/writer threads blocked indefinitely.
-  Environment/credential delivery is deliberately process-readable;
-  contained script services never receive keychain values.
-  Entity collector programs run from a private per-run copy, verified against
-  the approved declaration and code hash before launch and during execution.
-  Their working directory and `OXPLOW_EXTENSION_DIR` name that copy, so helpers
-  load the approved code. The complete copied folder is limited to 500 files
-  and 16 MiB, including its manifest and lenses; oversized folders fail before
-  launch. Entries under normally excluded metadata paths are hashed explicitly
-  and need renewed approval. Copy preparation rejects symlinks and special
-  files; the copy is removed when the run releases it. Original-tree edits or
-  copy changes stop the run under the live authority policy.
-  Disk extension reads also refuse special files and files larger than 16 MiB;
-  Unix opens refuse a final symlink and avoid blocking on replacement FIFOs.
-  Project fact programs and report parsers use the same bounded copy helper,
-  with their project-relative code layout preserved. Their guard owns the copy;
-  `OXPLOW_CODE_DIR` names its root and `OXPLOW_PROJECT_DIR` names the original
-  checkout for their approved data access.
+  fact program, a report parser, an external provider, a harness or MCP
+  stdio server) runs from its extension's deployment — working directory
+  and `OXPLOW_EXTENSION_DIR` both — under the `process` permission, with
+  the person's file, network and process authority, and a deploy that adds
+  `process` says so plainly. Confining external processes is shelved (the
+  owner's decision); there is no `execution:` key. What oxplow does do is
+  cleanup, not confinement: on Unix each program runs in an owned process
+  group, killed on completion, timeout, cancellation or when its extension
+  stops being live; a process can escape its group. Pipe I/O has a
+  deadline, so escaped children cannot leave host threads blocked.
+  Credentials are handed to a process at spawn and are process-readable;
+  contained script services never receive keychain values. Disk extension
+  reads refuse special files and files larger than 16 MiB; Unix opens
+  refuse a final symlink and avoid blocking on replacement FIFOs.
+- **Live checks.** A run that outlives a generation holds a
+  `run_context::LiveCheck` (`live_owner`: its extension still enabled, at
+  its version, still declaring it), composed through nested runs and
+  rechecked before sensitive calls and publication. A program's process
+  group is killed when it fails (`external_process`); an in-process script
+  runs under `run_context::watch_authority(run)`, which sets the run's
+  cancel flag (the script worker polls it). Disabling or redeploying an
+  extension therefore stops its running work. This cannot undo an external
+  side effect already performed.
 - **Collector previews.** A preview stores no rows, but receives the same
-  contribution authority and pinned live consent as an ordinary entity
-  collector run. Previewing cannot bypass declared model/path access or
-  continue an AI/program call after its approval changes.
-- **Revoking** removes the approval ([architecture.md](./architecture.md)
-  "A repo's config never runs a program without consent"). Host-owned
-  `RunContext::guarded` checks pin the approved version, compose through
-  nested runs and recheck before sensitive calls/publication. Replacement
-  approval cannot authorize an already loaded old script. External hosts
-  poll live consent with 100 ms between checks; entity collector processes
-  use 25 ms and report/fact programs 10 ms between checks. In-flight AI futures are dropped and their results discarded.
-  This cannot undo an external side effect already performed.
+  authority as an ordinary run; it never runs a program.
 - **Component authority.** Query messages carry the loaded bundle version.
-  Asset and command allowlists come from that immutable bundle; adding
-  manifest permissions cannot widen a running frame. Asset declarations
-  are included in component approval hashes.
+  Asset and command allowlists come from that bundle; a component's
+  commands outside its namespace need `permissions.commands` (the loader
+  checks them).
 - **Not yet:** OS confinement and model call-count/monetary budgets.
-- **Deliberately still open** (audited sound by design; the hardening is
-  deferred until the extension API settles):
+- **Deliberately still open:**
   - adversarial tests for bounded `sql.read` (CTEs, UNIONs, table-valued
     and pragma functions, the `metric_grid()` refusal) and bounded
-    `tree.read:` (sibling prefixes, `..`), and for `copy_directory`'s
-    refusals and a file changed mid-copy;
-  - the approved copy is writable, so a same-user process could rewrite
-    it between the last re-hash and `execve` (the poll then kills it);
-  - a shebang's interpreter resolves from `PATH` and isn't part of the
-    approval;
-  - `extension.yaml` and `lenses/` are copied into a program's copy but
-    not hashed;
-  - credentials are handed to a process at spawn: revocation kills it
-    but can't take a credential back, and a keychain deletion mid-run
-    isn't watched;
+    `tree.read:` (sibling prefixes, `..`);
+  - a shebang's interpreter resolves from `PATH`;
+  - credentials are handed to a process at spawn: stopping it can't take
+    a credential back, and a keychain deletion mid-run isn't watched;
   - a run built without authority is unbounded (core's own runs, by
     design; not yet a tested invariant);
   - network confinement is `sandbox-exec` on macOS only.
@@ -2925,7 +2968,7 @@ is approved like any (K1, tsk953: its embedded files are hashed alike),
 so it runs only once a person approves it. A task an effect (or oxplow
 itself) files has no `author` — it isn't the person's; its
 `work_item.created` and the run's audit name the effect (its `native`
-`author` is null). The loader no longer limits effects to private extensions.
+`author` is null). The loader limits effects to no kind of extension.
 
 **Retention** (P8.D5) is the namespace's window for payloads and large
 content (data-model.md "event_log" retention): either omitted part is the
@@ -3542,7 +3585,7 @@ scope's access), the scope implied in `needs`; the bus refuses
 to register one naming an operation that isn't there. oxplow's own
 commands are declared this way in the required `oxplow-foundation`.
 
-A shared extension's commands are `Stable`, a private one's
+A bundled extension's commands are `Stable`, any other's
 `Experimental`. `transform` returns `{ commands: [{ name, input }], result?, events? }`, or
 `{ refuse: "<why>" }` to decline — the run is `Invalid` with that reason
 and writes nothing (`composed` → `Composed::{Run, Refused}`). An `access:
@@ -3619,14 +3662,13 @@ row, no undo. A script can't do I/O of its own: `files()` sees
 nothing, `ai_*` is refused without a host, and `scope` reaches only
 what it `needs`. **Registration**
 (`ExtensionCommands`, `Services.extension_commands`): the enabled
-extensions of the **primary worktree** (one bus, like providers — a
-command authored in another stream registers once merged), one
+live extensions (one bus, like providers — a
+command registers when its extension is deployed), one
 namespace at a time, all-or-nothing; registered by the generation at boot and on the
 extension catalog's change signal (`ExtensionCatalog::changes`, P7.B6):
-the workspace watcher fires it for a file under `oxplow/extensions/`
-**in the primary worktree** only (another stream's edits wait for the
-merge), the `config.extensions` reactor for the `extensions` key
-(enabling or disabling). The extension models, the provider registry and
+a deploy, rollback, enable or disable publishes it, and the
+`config.extensions` reactor fires it for the `extensions` key.
+Editing a source fires nothing. The extension models, the provider registry and
 the metric catalog follow the same signal; a namespace something else
 already holds (a provider) is refused and kept as the extension's
 `problem`. Replacement is prepared against a cloned command registry and
@@ -3683,8 +3725,8 @@ is written elsewhere), and fact collectors (a `collectors:` entry with
   `whole_tree: true` reads the whole tree as of the snapshot on every run.
   `oxplow.*` measure, dimension, metric and collector keys are the
   `oxplow` namespace's (`oxplow_config::reserved_key`).
-- `MetricsService::extension_catalog` loads enabled extensions from the
-  primary worktree on each resolve; fact-collector scripts are read through
+- `MetricsService::extension_catalog` loads the live extensions
+  on each resolve; fact-collector scripts are read through
   `extensions::read_extension_file` (bundled or disk), and a collector's
   `report` path resolves against the project root (the checkout).
 - Storage: the scope CHECK allows only a fixed set, and
@@ -3694,8 +3736,7 @@ is written elsewhere), and fact collectors (a `collectors:` entry with
   `scope = 'extension'` and the `extension` name.
 - A generation prunes extension specs no longer declared (a disabled or
   removed extension) with `delete_extension_specs_not_in`; its measures
-  stay, since deleting one would take its facts. A new generation follows when an
-  `oxplow/extensions/*/extension.yaml` changes (`WorkspaceChanged`).
+  stay, since deleting one would take its facts. A new generation follows when the live set changes (a deploy).
 
 ## Health, disable and repair (P7.C1–C3)
 
@@ -3963,8 +4004,8 @@ advisories:
   extensions' advisories for one trigger and scope and applies
   `once_per`. Marks are recorded only after every query ran. A failing
   query is logged and skipped.
-- **Consent.** A shared extension's advisories (committed by a
-  teammate, or installed from git) speak into the agent's context, so they
+- **Consent.** A non-bundled extension's advisories (the project's,
+  possibly from a teammate) speak into the agent's context, so they
   run only once a person approved them. `exec_consent::advisory_program`
   turns an extension's advisories into a program (kind `advisories`), with
   one arg per advisory: its id, trigger, repeat rule, heading and query.
@@ -3972,7 +4013,7 @@ advisories:
   again. `advisories::consented` filters before running; bundled
   extensions aren't gated.
 - `for_thread(svc, thread, on, cause)` runs them for a thread, reading
-  the main worktree's extensions (whatever the thread's stream) and
+  the live extensions (whatever the thread's stream) and
   binding the thread's stream into the scope.
 - `oxplow_validate_extension` dry-runs each advisory with every param NULL and
   checks it returns `message` (and `key` for `once_per: row`).
@@ -4171,8 +4212,10 @@ tool: open_work              # offered as <namespace>_open_work
 **Building**
 
 - Agents author extensions and lenses **by editing files** under
-  `oxplow/extensions/<name>/` with their normal Edit tool, under the usual
-  write guard. The loader hot-reloads.
+  `.oxplow/extensions/<name>/` with their normal Edit tool, under the usual
+  write guard. Editing a source changes nothing until
+  `oxplow.extension.deploy { name }` ("Sources and deployments"); the
+  authoring tools read the source, so the agent checks its work first.
 - **No scaffold tools (decided).** A scaffold tool would write project
   files outside the write guard and the caller's worktree. The skill carries the templates instead, and humans have
   Save as Lens in Explore Data. The same rule holds for metrics:
@@ -4185,8 +4228,8 @@ tool: open_work              # offered as <namespace>_open_work
 - **Worktree streams: preview, don't run (tsk377).** Collected data is
   project-wide (one `ext__<ext>__<entity>` table), so a run (the
   `oxplow.collector.sync` command over `CollectorRunner::sync`, from any caller)
-  always runs the **primary** worktree's copy. An agent
-  writing a collector in a worktree stream checks it with MCP
+  always runs the **live** copy. An agent
+  writing a collector checks it with MCP
   `oxplow_preview_collector(owner, id, stream_id)`: `collector_runner::
   preview_collector` runs that worktree's version through the same
   `produce` step (same consent: an exec collector needs a person's
@@ -4248,7 +4291,7 @@ What moves out of core, and what it becomes:
 | Planning / Review / Quality dashboards | `document` lenses (**done**: `planning`, `review`, `quality`) |
 | Code-quality runner, dup scan, FindingPage, DuplicateBlockPage | **done:** the `findings` / `duplicate-blocks` lenses; the dup scan runs in core's change analysis; `DuplicateBlockPage` stays core as the compare page |
 | Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | **done:** the `change-review` document in the `effort.review.details` / `vcs.commit.details` / `vcs.status.details` slots; core keeps a changed-files tree (`ChangedFilesTree`, `useChangedFiles`) |
-| Fact collectors (`oxplow/extensions/project/collectors/*.star`, idiom `.star`; gauges until P7.B3) | extensions can declare fact collectors (tsk311); done: the code metrics are oxplow-foundation's (the opt-in ones say `default: off`) |
+| Fact collectors (`.oxplow/extensions/project/collectors/*.star`, idiom `.star`; gauges until P7.B3) | extensions can declare fact collectors (tsk311); done: the code metrics are oxplow-foundation's (the opt-in ones say `default: off`) |
 | Metric-threshold nudges | **done:** the `threshold-crossed` advisory (with `metric-deltas`) |
 | Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | **done:** the `usage` dashboard; `task-tokens` (`work_item.detail.body` slot) and `thread-tokens` (`thread.plan.header` slot) |
 | Git History's commit graph | **done:** the `history-graph` component, replacing core's plain `CommitList` (`vcs.history.graph`) |
@@ -4527,18 +4570,19 @@ propagate into spawned tasks. Provider host-call registration is cancellation-sa
 across candidate publication. Native/background and synchronous metadata
 entrypoints still need a complete audit. Metric declaration rows now join the
 publication transaction; state-value recapture remains a post-publication reader. The renderer receives the published metadata change signal;
-raw filesystem changes continue to trigger candidate preparation. Until the first
+a deploy, a rollback or a config change triggers candidate preparation (file changes never do). Until the first
 generation is activated (boot's `initialize`, before ingress opens), no reader is
 served: the generation is the only publisher of commands, models, vocabulary,
 providers and capabilities.
 
-Custom component preparation reads immutable bundle bytes on a blocking worker,
-with at most 64 bundles and 128 MiB in a candidate. Publication swaps the whole
-active bundle map without rereading files. Active bytes remain available independently
-of the sixteen-entry history used by previous frames. A retained frame from a
-different activated generation must reload before invoking a query or command;
-a bundle of another root (a stream's lens) is built from that root's files. This check requires the owning
-runtime reader scope for atomicity with command or query execution.
+Custom component preparation hashes each bundle's files in its deployment and
+keeps their names, never their bytes. Publication swaps the whole active bundle
+map and adds its bundles to the process's loaded versions, which a previous
+frame is still served from while its deployment is on disk. A retained frame
+from a different activated generation must reload before invoking a query or
+command; a bundle of another root is built from that root's files. This check
+requires the owning runtime reader scope for atomicity with command or query
+execution.
 
 ## Runtime ingress and entity refresh
 
@@ -4844,22 +4888,3 @@ is detached from the settings RPC's lifetime, then requests coordinated
 reconciliation. Keychain mutation failure also invalidates old consumers; it
 does not claim deletion succeeded. Runtime isolation/revocation checks remain
 pending.
-
-## Interrupted installation recovery
-
-`extensions/candidates.rs` owns a shared in-process install/recovery lock and a
-bounded, versioned marker inside hidden `.ext-publish-*` staging. Publication
-syncs copied regular files and directory entries before moving the old target.
-It restores or retains the prior copy on failure. The two directory renames
-are filesystem staging; they do not themselves publish runtime authority.
-
-`Services::boot` recovers before loading configuration or constructing the
-catalog. Recovery scans at most 4096 parent entries and 128 staging folders,
-reads markers up to 256 bytes, checks names and plain directory/file shapes and
-refuses repo-controlled symlink parents. A missing target with a known prior
-copy is restored and synced. An unpublished first-install candidate is discarded,
-never activated automatically. Unknown entries, malformed markers and ambiguous
-target-plus-backup states are retained with a fixed warning, so recovery cannot
-delete the only identified prior copy. Unix uses directory sync; other platforms
-retain ordinary filesystem semantics. The lock is process-local; adversarial
-cross-process filesystem races and crash injection remain validation gaps.

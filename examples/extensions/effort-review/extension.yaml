@@ -1,7 +1,6 @@
 manifest: 2
 name: effort-review
 description: A model reviews each finished effort from its evidence — tests, coverage, what changed, findings — and comments the review on its work item.
-sharing: shared
 engine: ">=0.7"
 version: 0.1.0
 intent:
@@ -42,6 +41,10 @@ intent:
 # The model the review asks for: a person binds `effort-review/review` in
 # Settings → AI; until then it uses their Summarize model. The review calls
 # a tool, so the bound model must support tool calling.
+permissions:
+  sql: read
+  ai: true
+  commands: [oxplow.effort.*, oxplow.work_item.comment, oxplow.work_item.create, oxplow.test.record_run]
 ai_profiles:
   - id: review
     description: Reviews one finished effort from the evidence oxplow collected about it.

@@ -187,11 +187,11 @@ test("a component navigates to app pages only", async () => {
   h.channel.port1.close();
 });
 
-// tsk960: a refused invoke — an unapproved component, or a policy saying
+// tsk960: a refused invoke — a component that is not allowed, or a policy saying
 // no — is shown by the host, beside the frame, whatever the component's
 // own code does with the reply; any other failure is the frame's to show.
 test("componentRefusal is a refused invoke's reason, and nothing else's", () => {
-  const reason = "component `x/burn` runs `…` and needs a person's approval first (Settings → Data → Programs).";
+  const reason = "component `x/burn` runs `…` and is not allowed to call this command.";
   expect(componentRefusal(new IpcCallError(reason, "DENIED"))).toBe(reason);
   expect(componentRefusal(new IpcCallError("bad input", "INVALID"))).toBeNull();
   expect(componentRefusal(new Error("boom"))).toBeNull();

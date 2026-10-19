@@ -15,7 +15,7 @@ use oxplow_sdk::{Format, Kind};
 const USAGE: &str = "\
 usage:
   oxplow extension new <lens|extension|provider|collector|metric|command|effect|component|policy|advisory|skill|page|panel> <name> [--origin <ref>] [--capability <cap>] [--language <lang>] [--glob <glob>] [--root <dir>]
-      scaffold oxplow/extensions/<name>/ with a v2 manifest, an intent
+      scaffold .oxplow/extensions/<name>/ with a v2 manifest, an intent
       (--origin = the effort/thread ref that asked for it), one example
       and its fixture, and the kind's starter: a lens with a row action; a
       provider of --capability (work_items, the default, effort_policy,
@@ -50,8 +50,10 @@ usage:
       golden transcript (--bless writes it) and its capability's
       conformance suite
 
-<name|path> is an extension name under the project's oxplow/extensions/,
-or the path to that folder. --root names the project (default: the
+<name|path> is an extension name (its source in the project's
+.oxplow/extensions/, or where extensionSources points), or the path to that
+folder. check and test read the source; to run it in oxplow, deploy it
+(`oxplow.extension.deploy`). --root names the project (default: the
 current directory, or the project the path sits in).
 ";
 
@@ -298,7 +300,7 @@ fn cwd() -> PathBuf {
 }
 
 /// `(project root, extension name)` for a bare name or a folder path. A
-/// path `…/oxplow/extensions/<name>` names its own project; anything
+/// path `…/.oxplow/extensions/<name>` names its own project; anything
 /// else is a name under `--root` (or the current directory).
 fn locate(root: Option<&Path>, target: &str) -> (PathBuf, String) {
     let name = oxplow_sdk::name_of(target).to_string();
@@ -369,9 +371,9 @@ mod tests {
             root,
         ]);
         assert_eq!(code, 0, "{err}");
-        assert!(out.contains("created oxplow/extensions/demo\n"), "{out}");
+        assert!(out.contains("created .oxplow/extensions/demo\n"), "{out}");
         assert!(out.contains("lenses/demo.yaml"), "{out}");
-        let folder = dir.path().join("oxplow/extensions/demo");
+        let folder = dir.path().join(".oxplow/extensions/demo");
         let (code, out, err) = cli(&["check", folder.to_str().unwrap()]);
         assert_eq!(code, 0, "{out}{err}");
         assert!(out.contains("demo: 0 errors, 0 warnings"), "{out}");
@@ -387,17 +389,17 @@ mod tests {
     #[test]
     fn a_lifecycle_error_exits_one_with_file_and_line() {
         let dir = tempfile::tempdir().unwrap();
-        let folder = dir.path().join("oxplow/extensions/team");
+        let folder = dir.path().join(".oxplow/extensions/team");
         std::fs::create_dir_all(&folder).unwrap();
         std::fs::write(
             folder.join("extension.yaml"),
-            "manifest: 2\nname: team\nsharing: shared\nengine: \">=99.0\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\n",
+            "manifest: 2\nname: team\nengine: \">=99.0\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\n",
         )
         .unwrap();
         let (code, out, _) = cli(&["check", folder.to_str().unwrap()]);
         assert_eq!(code, 1);
         assert!(
-            out.contains("error: oxplow/extensions/team/extension.yaml:4: needs oxplow >=99.0"),
+            out.contains("error: .oxplow/extensions/team/extension.yaml:3: needs oxplow >=99.0"),
             "{out}"
         );
         assert!(out.contains("team: 1 error, 0 warnings"), "{out}");
@@ -409,11 +411,12 @@ mod tests {
     fn check_services_lists_what_each_script_uses() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_str().unwrap();
-        let folder = dir.path().join("oxplow/extensions/svc");
+        let folder = dir.path().join(".oxplow/extensions/svc");
         std::fs::create_dir_all(&folder).unwrap();
         std::fs::write(
             folder.join("extension.yaml"),
-            "manifest: 2\nname: svc\nsharing: private\nintent:\n  purpose: Reads.\n  examples: [{ name: a }]\n\
+            "manifest: 2\nname: svc\nintent:\n  purpose: Reads.\n  examples: [{ name: a }]\n\
+             permissions: { sql: read, files: read, ai: true }\n\
              collectors:\n\
              \x20 - id: paths\n    runtime: starlark\n    entry: paths.star\n    needs: [tree.read, sql.read]\n    entities:\n      - { name: seen, key: k, columns: { k: text } }\n\
              \x20 - id: kinds\n    runtime: starlark\n    entry: kinds.star\n    entities:\n      - { name: kind, key: k, columns: { k: text } }\n",
@@ -486,7 +489,7 @@ mod tests {
         ]);
         assert_eq!(code, 0, "{err}");
         let manifest =
-            std::fs::read_to_string(dir.path().join("oxplow/extensions/steward/extension.yaml"))
+            std::fs::read_to_string(dir.path().join(".oxplow/extensions/steward/extension.yaml"))
                 .unwrap();
         assert!(
             manifest.contains("capability: effort_policy\n"),
@@ -536,7 +539,7 @@ mod tests {
         assert_eq!(code, 0, "{err}");
         let script = std::fs::read_to_string(
             dir.path()
-                .join("oxplow/extensions/busy-ts/collectors/complex_functions.star"),
+                .join(".oxplow/extensions/busy-ts/collectors/complex_functions.star"),
         )
         .unwrap();
         assert!(script.contains("LANGUAGE = \"typescript\""), "{script}");
@@ -622,15 +625,16 @@ mod tests {
     fn extension_test_runs_the_effort_policy_suite_against_a_policy_provider() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_str().unwrap();
-        let ext = dir.path().join("oxplow/extensions/steward");
+        let ext = dir.path().join(".oxplow/extensions/steward");
         std::fs::create_dir_all(ext.join("bin")).unwrap();
         std::fs::create_dir_all(ext.join("fixtures")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: steward\ndescription: An effort policy.\nsharing: private\n\
+            "manifest: 2\nname: steward\ndescription: An effort policy.\n\
              intent:\n  purpose: Open and close efforts as items start and finish.\n  examples:\n\
              \x20   - name: basic\n      input: { command: react, input: { event: { id: e1, type: thread.checkpoint, v: 1, seq: 1, source: system, subject: [], payload: {}, anchors: {} } } }\n\
              \x20     expect: nothing to do\n\
+             permissions: { process: true, sql: read, commands: [oxplow.effort.*] }\n\
              providers:\n  - id: steward\n    capability: effort_policy\n    entry: bin/provider\n    declarations: provider.json\n    needs: [sql.read]\n",
         )
         .unwrap();
@@ -697,13 +701,13 @@ mod tests {
             assert!(out.contains(f), "{out}");
         }
         assert_eq!(cli(&["check", "fake", "--root", root]).0, 0);
-        let ext = dir.path().join("oxplow/extensions/fake");
+        let ext = dir.path().join(".oxplow/extensions/fake");
 
         // The stub doesn't speak the protocol.
         let (code, out, _) = test_on_a_fresh_service(dir.path(), &["test", "fake", "--root", root]);
         assert_eq!(code, 1, "{out}");
         assert!(
-            out.contains("error: oxplow/extensions/fake/provider.json:1: initialize failed"),
+            out.contains("error: .oxplow/extensions/fake/provider.json:1: initialize failed"),
             "{out}"
         );
 
@@ -726,7 +730,7 @@ mod tests {
         assert_eq!(code, 1, "{out}");
         assert!(
             out.contains(
-                "oxplow/extensions/fake/fixtures/provider-fake.yaml:1: check reports `/team`"
+                ".oxplow/extensions/fake/fixtures/provider-fake.yaml:1: check reports `/team`"
             ),
             "{out}"
         );
@@ -746,7 +750,7 @@ mod tests {
             test_on_a_fresh_service(dir.path(), &["test", "fake", "--bless", "--root", root]);
         assert_eq!(code, 0, "{out}{err}");
         assert!(
-            out.contains("blessed: oxplow/extensions/fake/fixtures/transcripts/fake.jsonl"),
+            out.contains("blessed: .oxplow/extensions/fake/fixtures/transcripts/fake.jsonl"),
             "{out}"
         );
         assert!(
@@ -765,7 +769,7 @@ mod tests {
         std::fs::write(ext.join("README.md"), "# Fake tracker\n").unwrap();
         let (code, out, _) = test_on_a_fresh_service(dir.path(), &["test", "fake", "--root", root]);
         assert_eq!(code, 1, "{out}");
-        assert!(out.contains("oxplow/extensions/fake/questions.yaml: question 1 (\"File a ticket.\"): skill `README.md` never names `fake.create`"), "{out}");
+        assert!(out.contains(".oxplow/extensions/fake/questions.yaml: question 1 (\"File a ticket.\"): skill `README.md` never names `fake.create`"), "{out}");
         std::fs::write(
             ext.join("README.md"),
             "# Fake tracker\n\nFile one with `fake.create`.\n",
@@ -793,7 +797,7 @@ mod tests {
         assert_eq!(errors.len(), 1, "{errors:?}");
         let e = errors[0].as_str().unwrap();
         assert!(
-            e.starts_with(&format!("oxplow/extensions/fake/fixtures/transcripts/fake.jsonl:{line}: the transcript differs at `/message/params/input/title`")),
+            e.starts_with(&format!(".oxplow/extensions/fake/fixtures/transcripts/fake.jsonl:{line}: the transcript differs at `/message/params/input/title`")),
             "{e}"
         );
         assert!(e.contains("--bless"), "{e}");
@@ -801,7 +805,7 @@ mod tests {
 
     #[test]
     fn locate_reads_the_project_off_an_extension_path() {
-        let (root, name) = locate(None, "/proj/oxplow/extensions/demo/");
+        let (root, name) = locate(None, "/proj/.oxplow/extensions/demo/");
         assert_eq!(root, PathBuf::from("/proj"));
         assert_eq!(name, "demo");
         let (root, name) = locate(Some(Path::new("/r")), "demo");
@@ -829,7 +833,7 @@ mod tests {
     fn check_impact_compares_the_worktree_with_head_and_writes_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let ext = root.join("oxplow/extensions/acme");
+        let ext = root.join(".oxplow/extensions/acme");
         let w = |rel: &str, body: &str| {
             let p = ext.join(rel);
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();

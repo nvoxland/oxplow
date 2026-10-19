@@ -26,17 +26,8 @@
       "type": "string",
       "default": ""
     },
-    "sharing": {
-      "description": "`private` (the default: this project) or `shared` (`engine`\nrequired).",
-      "default": "private",
-      "allOf": [
-        {
-          "$ref": "#/definitions/Sharing"
-        }
-      ]
-    },
     "engine": {
-      "description": "The oxplow version range it targets, `>=MAJOR.MINOR[.PATCH]`.\nRequired when shared.",
+      "description": "The oxplow version range it targets, `>=MAJOR.MINOR[.PATCH]`.",
       "type": [
         "string",
         "null"
@@ -44,7 +35,7 @@
       "default": null
     },
     "version": {
-      "description": "Its own version, `MAJOR.MINOR.PATCH` (semver; a `-pre` suffix is\nfine). Recorded on every contribution it makes. Required when\nshared.",
+      "description": "Its own version, `MAJOR.MINOR.PATCH` (semver; a `-pre` suffix is\nfine). Recorded on every contribution it makes.",
       "type": [
         "string",
         "null"
@@ -117,6 +108,14 @@
       "allOf": [
         {
           "$ref": "#/definitions/ConfigurationFile"
+        }
+      ]
+    },
+    "permissions": {
+      "description": "What it may reach beyond the baseline (`.context/extensions.md`\n\"Permissions\"): checked against what it contains when it loads,\napproved when it is deployed.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Permissions"
         }
       ]
     },
@@ -332,14 +331,6 @@
     "intent"
   ],
   "definitions": {
-    "Sharing": {
-      "description": "Who the extension is for. Explicit and checked: a shared extension\n(committed for a team, installed from git, bundled) must name the\nengine it targets and its own version.",
-      "type": "string",
-      "enum": [
-        "private",
-        "shared"
-      ]
-    },
     "IntentExample": {
       "description": "One acceptance example: an input and what the extension should make\nof it. Fixtures for `oxplow extension test`; data here.",
       "type": "object",
@@ -509,6 +500,83 @@
         "from",
         "to",
         "entry"
+      ]
+    },
+    "Permissions": {
+      "description": "What an extension may do beyond the baseline. Absent fields grant\nnothing.",
+      "type": "object",
+      "properties": {
+        "sql": {
+          "description": "Ad-hoc SQL: a script's `scope(\"sql.read\")`, a component's own query.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SqlAccess"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "commands": {
+          "description": "Commands outside its own namespace it may run, as patterns:\n`oxplow.work_item.*` (`*` is one segment, `**` the rest).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "files": {
+          "description": "The project's files outside the bus.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FilesAccess"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ai": {
+          "description": "Calling AI models, with the person's key.",
+          "type": "boolean"
+        },
+        "network": {
+          "description": "The hosts its programs may reach (`api.github.com`, `*.example.com`).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "process": {
+          "description": "Running programs (providers, `exec` collectors). They run with the\nperson's authority; oxplow doesn't confine them.",
+          "type": "boolean"
+        },
+        "secrets": {
+          "description": "The secrets it may read, by name.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "agent": {
+          "description": "Contributing to the agent's context: skills, advisories, prompts.",
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SqlAccess": {
+      "description": "`sql: read`: ad-hoc read-only SQL over the `v_*` models.",
+      "type": "string",
+      "enum": [
+        "read"
+      ]
+    },
+    "FilesAccess": {
+      "description": "`files: read | write`: the project's files outside the bus. `write`\nincludes `read`.",
+      "type": "string",
+      "enum": [
+        "read",
+        "write"
       ]
     },
     "ModelDecl": {
@@ -1776,7 +1844,7 @@
           "default": null
         },
         "lifecycle": {
-          "description": "`experimental` keeps a shared extension's command experimental.",
+          "description": "`experimental` keeps a bundled extension's command experimental.",
           "type": [
             "string",
             "null"

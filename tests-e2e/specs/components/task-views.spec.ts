@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import type { Page } from "@playwright/test";
 
-import { approveProgram, ipc, run, searchable, until, type Daemon } from "../../support/daemon.js";
+import { installExample, ipc, run, searchable, until, type Daemon } from "../../support/daemon.js";
 import { expect, test, type Workspace } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
@@ -17,19 +17,7 @@ import { openFromLauncher } from "../../support/ui.js";
  *  isn't in every suite daemon: replacing the Board would change every
  *  other spec's. */
 async function install(daemon: Daemon) {
-  const here = dirname(fileURLToPath(import.meta.url));
-  cpSync(
-    join(here, "..", "..", "..", "examples", "extensions", "task-views"),
-    join(daemon.project, "oxplow", "extensions", "task-views"),
-    { recursive: true },
-  );
-  await until("task-views to load", 60_000, async () => {
-    const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
-      sql: "SELECT 1 FROM v_replaceable WHERE target = 'work_item.board'",
-    });
-    const ext = await ipc<Array<{ name: string }>>(daemon, "list_extensions");
-    return out.rows.length > 0 && ext.some((e) => e.name === "task-views");
-  });
+  await installExample(daemon, "task-views");
 }
 
 /** Choose whose view shows for `target` on Settings → Integrations. */
@@ -60,8 +48,8 @@ async function titled(daemon: Daemon, title: string): Promise<boolean> {
   return out.rows.length > 0;
 }
 
-/** The Board, replaced: drag a card (refused until the board is approved),
- *  rename it, and the empty title's refusal under its input. `scope` is
+/** The Board, replaced: drag a card, rename it, and the empty title's
+ *  refusal under its input. `scope` is
  *  the Board's scope that shows the items. */
 async function swimlanes(page: Page, daemon: Workspace, scope: string) {
   await run(daemon, "oxplow.work_item.create", { title: "Card one", thread: daemon.thread });
@@ -79,12 +67,6 @@ async function swimlanes(page: Page, daemon: Workspace, scope: string) {
   await expect(card).toBeVisible();
   await expect(frame.locator(".lane")).toHaveCount(5);
 
-  // Refused until a person approves the board, said in one line above it.
-  await card.dragTo(frame.locator('.lane[data-state="done"]'));
-  await expect(frame.locator("#note")).toContainText("Approve");
-  expect(await stateOf(daemon, "Card one")).not.toBe("done");
-
-  await approveProgram(daemon, "component", "task-views/swimlanes");
   await card.dragTo(frame.locator('.lane[data-state="done"]'));
   await expect(frame.locator('.lane[data-state="done"] .card', { hasText: "Card one" })).toBeVisible();
   expect(await stateOf(daemon, "Card one")).toBe("done");
@@ -106,7 +88,7 @@ async function swimlanes(page: Page, daemon: Workspace, scope: string) {
   await until("the rename to be stored", 15_000, () => titled(daemon, "Card renamed"));
 }
 
-test("the swimlanes replace the Board: drag, rename, and the refusal until approved", async ({ fresh }) => {
+test("the swimlanes replace the Board: drag and rename", async ({ fresh }) => {
   const { page, daemon } = fresh;
   await install(daemon);
   await swimlanes(page, daemon, "thread");
@@ -117,7 +99,6 @@ test("the swimlanes work over another work list too (e2e/fake active)", async ({
   await install(daemon);
   // The fake tracker as the active work list, set up before any page is
   // open: Settings → Integrations does the same (see fake-provider.spec).
-  await approveProgram(daemon, "provider", "e2e/fake");
   await ipc(daemon, "set_provider_instance", { instance: "e2e/fake", enabled: true, config: { team: "core" } });
   await until("the fake to be ready", 30_000, async () => {
     const all = await ipc<Array<{ instance: string; enabled: boolean; health: { state: { state: string } } }>>(

@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import type { Page } from "@playwright/test";
 
-import { approveCollector, approveProgram, ipc, run, until, type Daemon } from "../../support/daemon.js";
+import { deploy, extensionSource, ipc, run, until, type Daemon } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
@@ -13,11 +13,9 @@ import { openFromLauncher } from "../../support/ui.js";
 // window run. Every suite daemon has the example, its sync printing the
 // suite's two pull requests (#12 merged, #13 open).
 
-/** Approve the example's sync as it is now and run it as a person, until
- *  `count` pull requests are collected. Its approval covers its
- *  extension's files, so a changed `prs.json` is approved again. */
+/** Run the example's sync as a person, until `count` pull requests are
+ *  collected. */
 async function collect(daemon: Daemon, count: number) {
-  await approveCollector(daemon, "github", "prs");
   await run(daemon, "oxplow.collector.sync", { collector: "collector:github/prs" });
   await until(`${count} pull requests to be collected`, 30_000, async () => {
     const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT count(*) FROM v_github_pr" });
@@ -36,12 +34,13 @@ async function openLifetimes(page: Page, daemon: Daemon, count = 2, bars = 2) {
   return frame;
 }
 
-/** Add `prs` to what the example's sync prints. */
-function addPrs(daemon: Daemon, prs: Array<Record<string, unknown>>) {
-  const path = join(daemon.project, "oxplow", "extensions", "github", "prs.json");
+/** Add `prs` to what the example's sync prints, and deploy that. */
+async function addPrs(daemon: Daemon, prs: Array<Record<string, unknown>>) {
+  const path = join(extensionSource(daemon, "github"), "prs.json");
   const printed = JSON.parse(readFileSync(path, "utf8")) as { entities: { pr: unknown[] } };
   printed.entities.pr.push(...prs);
   writeFileSync(path, JSON.stringify(printed));
+  await deploy(daemon, "github");
 }
 
 const pr = (number: number, opened_at: string) => ({
@@ -62,7 +61,7 @@ const pr = (number: number, opened_at: string) => ({
 // the lens again (its models changed), rather than redrawing everything.
 test("a bad date is left out, and a filter holds across the host's re-run", async ({ fresh }) => {
   const { page, daemon } = fresh;
-  addPrs(daemon, [pr(11, "not a date")]);
+  await addPrs(daemon, [pr(11, "not a date")]);
   const frame = await openLifetimes(page, daemon, 3, 2);
   await expect(frame.locator("#note")).toContainText("1 pull request has a date that can't be read");
   for (const rect of await frame.locator(".bar rect").all()) {
@@ -70,7 +69,7 @@ test("a bad date is left out, and a filter holds across the host's re-run", asyn
   }
   await frame.locator('[data-state="open"]').click();
   await expect(frame.locator(".bar")).toHaveCount(1);
-  addPrs(daemon, [pr(14, "2026-09-30T00:00:00Z")]);
+  await addPrs(daemon, [pr(14, "2026-09-30T00:00:00Z")]);
   await collect(daemon, 4);
   // The host's re-run, with the filter kept: the open ones, #13 and #14.
   await expect(frame.locator(".bar")).toHaveCount(2);
@@ -78,7 +77,7 @@ test("a bad date is left out, and a filter holds across the host's re-run", asyn
   await expect(frame.locator('.bar[data-ref="github_pr:12"]')).toHaveCount(0);
 });
 
-test("PR lifetimes draws, filters and opens; it acts only once a person approves it", async ({ fresh }) => {
+test("PR lifetimes draws, filters, syncs and opens", async ({ fresh }) => {
   const { page, daemon } = fresh;
   const frame = await openLifetimes(page, daemon);
   await expect(page.getByTestId("custom-component-badge")).toHaveText("custom");
@@ -90,12 +89,8 @@ test("PR lifetimes draws, filters and opens; it acts only once a person approves
   await frame.locator('[data-state="all"]').click();
   await expect(frame.locator(".bar")).toHaveCount(2);
 
-  // It runs the sync with the person's rights: refused until it's approved,
-  // and oxplow says why beside the frame, whatever the frame shows.
-  await frame.locator("#sync").click();
-  await expect(page.getByTestId("custom-component-refused")).toContainText("component `github/pr-lifetimes`");
-  await expect(frame.locator("#status")).toContainText("approval");
-  await approveProgram(daemon, "component", "github/pr-lifetimes");
+  // It runs the sync with the person's rights, under the permissions its
+  // extension was deployed with.
   await frame.locator("#sync").click();
   await expect(frame.locator("#status")).toHaveText("Synced.");
   await expect(page.getByTestId("custom-component-refused")).toHaveCount(0);

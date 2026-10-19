@@ -1,9 +1,8 @@
 //! Answers in a thread (P6.C1, target §11.4's lens lifecycle): an agent
 //! shows the person something — an existing lens or its own lens spec —
 //! with `oxplow.lens.show`; `oxplow.lens.keep` writes an answer — or a spec, as Explore
-//! Data's Save as Lens does — as a private lens;
-//! `oxplow.lens.share` moves a private lens into a shared extension once it
-//! passes the shared checks (committing it is the person's git commit).
+//! Data's Save as Lens does — as a lens in an extension's source and deploys
+//! it.
 //! The rows live in `thread_answer` (`v_thread_answer`); `run_answer`
 //! runs one for the Answers strip and for `oxplow_show_lens`'s text.
 
@@ -17,7 +16,7 @@ use oxplow_db::SqlCell;
 use oxplow_domain::events::schema::{LensKept, LensKeptV2, LensShown, LensShownV1};
 use oxplow_domain::events::Envelope;
 use oxplow_domain::refs::build::{answer_ref, lens_ref, thread_ref};
-use oxplow_domain::{CommandError, DomainError, Invokers, ThreadId};
+use oxplow_domain::{CommandError, DomainError, ThreadId};
 use rusqlite::OptionalExtension;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -30,11 +29,9 @@ use crate::extensions::{self, LensContext, LensOrigin, LensSpec};
 
 pub const SHOW: &str = "oxplow.lens.show";
 pub const KEEP: &str = "oxplow.lens.keep";
-pub const SHARE: &str = "oxplow.lens.share";
 
 /// Where the lens commands find lenses and write them, and the database
-/// the `External` ones (`keep`, `share`) read and write in transactions
-/// of their own.
+/// the `External` one (`keep`) reads and writes in transactions of its own.
 #[derive(Clone)]
 pub struct LensTarget {
     pub project_dir: PathBuf,
@@ -78,19 +75,6 @@ pub struct KeepInput {
     pub extension: Option<String>,
     /// Its slug; from its title when omitted.
     pub slug: Option<String>,
-}
-
-/// `oxplow.lens.share`: move a private lens into a shared extension.
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ShareInput {
-    /// The lens (`<extension>/<slug>`), in a private extension.
-    pub lens: String,
-    /// The shared extension it moves to (created, shared, when missing).
-    pub extension: String,
-    /// The stream whose worktree it's in (`stream:str2`); the primary's when
-    /// omitted.
-    pub stream: Option<String>,
 }
 
 fn domain(e: DomainError) -> CommandError {
@@ -548,6 +532,27 @@ fn keep(target: LensTarget) -> Op {
                     return Err(domain(e));
                 }
             };
+            // Kept is live: the extension is deployed with the lens in it.
+            // A deploy that fails takes the lens back out.
+            let svc = target.services.get()?;
+            // Keeping a lens adds no permission; one the extension's source
+            // gained since its last deploy waits for a person to deploy it.
+            if let Err(e) =
+                crate::extension_deploy::deploy(&svc, &extension, &root, None, false).await
+            {
+                let _ = std::fs::remove_file(root.join(&lens.path));
+                if let Some(id) = answer {
+                    let lens_id = claim.clone();
+                    let _ = target
+                        .db
+                        .transaction(move |tx| answers::release_kept_tx(tx, id, &lens_id))
+                        .await;
+                }
+                return Err(match e {
+                    crate::extension_deploy::DeployError::Failed(e) => domain(e),
+                    asks => domain(oxplow_domain::DomainError::Invalid(asks.to_string())),
+                });
+            }
             let subject: Vec<String> = answer
                 .map(answer_ref)
                 .into_iter()
@@ -562,12 +567,9 @@ fn keep(target: LensTarget) -> Op {
             )
             .with_subject(subject);
             Ok(HandlerOutput {
-                // `live`: written to the main worktree, so the app shows it
-                // now; in another stream's, it shows once that's merged.
                 result: json!({
                     "lens": lens.id,
                     "path": lens.path,
-                    "live": root == target.project_dir,
                 }),
                 inverse: None,
                 events: vec![event],
@@ -585,161 +587,8 @@ fn keep(target: LensTarget) -> Op {
     )
 }
 
-/// `oxplow.lens.share` writes, load-checks, then removes the private copy —
-/// filesystem work that must happen before the check can run, so it's an
-/// `External` command (see `keep`).
-fn share(target: LensTarget) -> Op {
-    let handler = Handler::External(Arc::new(move |_: Invocation, input| {
-        let target = target.clone();
-        Box::pin(async move {
-            let input: ShareInput = parse(input)?;
-            let root = match input.stream {
-                Some(raw) => {
-                    let project_dir = target.project_dir.clone();
-                    target
-                        .db
-                        .read(move |tx| stream_root_tx(tx, &project_dir, &raw))
-                        .await
-                        .map_err(|e| match e {
-                            DomainError::Invalid(m) => invalid("/stream", m),
-                            other => CommandError::from(other),
-                        })?
-                        .1
-                }
-                None => target.project_dir.clone(),
-            };
-            let id = share_lens(&target, &root, &input.lens, &input.extension).await?;
-            Ok(HandlerOutput {
-                result: json!({ "lens": id }),
-                ..HandlerOutput::default()
-            })
-        })
-    }));
-    Op::new(
-        "lenses.write",
-        "share",
-        schema::<ShareInput>(),
-        false,
-        handler,
-    )
-    .open_to(Invokers::HUMAN_ONLY)
-}
-
-/// Move lens `id` into shared extension `to` under `root`; its new id.
-/// Written, then checked — the extension must load clean with the lens
-/// in it and the lens's query must pass the `oxplow_query_sql` authorizer — and
-/// only then is the private copy removed; a failed check leaves nothing
-/// behind.
-async fn share_lens(
-    target: &LensTarget,
-    root: &Path,
-    id: &str,
-    to: &str,
-) -> Result<String, CommandError> {
-    let lens = target.catalog.find_lens(root, id).map_err(domain)?;
-    let source = extensions::load_extensions_in(root, &target.project_dir)
-        .into_iter()
-        .find(|e| e.name == lens.extension)
-        .ok_or_else(|| invalid("/lens", format!("no extension `{}`", lens.extension)))?;
-    if source.sharing == extensions::Sharing::Shared {
-        return Err(invalid("/lens", format!("`{id}` is shared already")));
-    }
-    let dir = extensions::writable_extension_dir(root, to).map_err(domain)?;
-    let manifest = dir.join("extension.yaml");
-    let created = !manifest.exists();
-    if !created {
-        let existing = extensions::load_extensions_in(root, &target.project_dir)
-            .into_iter()
-            .find(|e| e.name == to)
-            .ok_or_else(|| invalid("/extension", format!("`{to}` doesn't load")))?;
-        if existing.sharing != extensions::Sharing::Shared {
-            return Err(invalid(
-                "/extension",
-                format!("`{to}` is private; share into a shared extension, or a new one"),
-            ));
-        }
-    }
-    let file = dir.join("lenses").join(format!("{}.yaml", lens.slug));
-    if file.exists() {
-        return Err(invalid(
-            "/extension",
-            format!("`{to}` has a `{}` lens already", lens.slug),
-        ));
-    }
-    let text = std::fs::read_to_string(root.join(&lens.path)).map_err(|e| {
-        CommandError::from(DomainError::Storage(format!("read {}: {e}", lens.path)))
-    })?;
-    let write = || -> std::io::Result<()> {
-        std::fs::create_dir_all(file.parent().unwrap_or(&dir))?;
-        if created {
-            std::fs::write(
-                &manifest,
-                extensions::scaffold_manifest(&extensions::ManifestScaffold {
-                    name: to,
-                    description: &lens.title,
-                    purpose: &lens.title,
-                    origin: None,
-                    example_name: &lens.slug,
-                    example_input: &format!("{{ lens: {} }}", lens.slug),
-                    example_expect: "the lens renders",
-                    shared: true,
-                }),
-            )?;
-        }
-        std::fs::write(&file, &text)
-    };
-    // Only what this call wrote: the lens file, the manifest it scaffolded,
-    // and the directories left empty by removing them (`remove_dir` is not
-    // recursive, so anything that was there before stays).
-    let undo = || {
-        let _ = std::fs::remove_file(&file);
-        let _ = std::fs::remove_dir(dir.join("lenses"));
-        if created {
-            let _ = std::fs::remove_file(&manifest);
-            let _ = std::fs::remove_dir(&dir);
-        }
-    };
-    write().map_err(|e| CommandError::from(DomainError::Storage(format!("write {to}: {e}"))))?;
-    let loaded = extensions::load_extensions_in(root, &target.project_dir)
-        .into_iter()
-        .find(|e| e.name == to);
-    let problems: Vec<String> = match &loaded {
-        None => vec![format!("`{to}` doesn't load")],
-        Some(ext) => {
-            let mut p = ext.errors.clone();
-            if !ext.lenses.iter().any(|l| l.slug == lens.slug) {
-                p.push(format!("the lens `{}` doesn't load in `{to}`", lens.slug));
-            }
-            p
-        }
-    };
-    let query_problem = if lens.query.trim().is_empty() {
-        None
-    } else {
-        target
-            .sql
-            .check(&lens.query)
-            .await
-            .err()
-            .map(|e| e.to_string())
-    };
-    if !problems.is_empty() || query_problem.is_some() {
-        undo();
-        let mut all = problems;
-        all.extend(query_problem);
-        return Err(invalid(
-            "/lens",
-            format!("it doesn't pass the shared checks: {}", all.join("; ")),
-        ));
-    }
-    std::fs::remove_file(root.join(&lens.path)).map_err(|e| {
-        CommandError::from(DomainError::Storage(format!("remove {}: {e}", lens.path)))
-    })?;
-    Ok(format!("{to}/{}", lens.slug))
-}
-
 pub fn ops(target: LensTarget) -> Vec<Op> {
-    vec![show(target.clone()), keep(target.clone()), share(target)]
+    vec![show(target.clone()), keep(target)]
 }
 
 /// Run answer `id` as the person sees it: its lens, or its own spec (as
@@ -877,7 +726,7 @@ mod tests {
     #[tokio::test]
     async fn a_worktree_thread_shows_the_main_worktrees_lens() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
-        let ext = fx.svc.layout.project_dir.join("oxplow/extensions/demo");
+        let ext = fx.svc.layout.project_dir.join(".oxplow/extensions/demo");
         std::fs::create_dir_all(ext.join("lenses")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
@@ -1042,7 +891,7 @@ mod tests {
         assert_eq!(kept.result["lens"], "my-lenses/busy-tasks");
         let root = fx.svc.layout.project_dir.clone();
         let manifest =
-            std::fs::read_to_string(root.join("oxplow/extensions/my-lenses/extension.yaml"))
+            std::fs::read_to_string(root.join(".oxplow/extensions/my-lenses/extension.yaml"))
                 .unwrap();
         assert!(
             manifest.contains(&format!("origin: {}", thread_ref(fx.thread))),
@@ -1110,7 +959,7 @@ mod tests {
         assert_eq!(saved.result["lens"], "saved/busy-tasks");
         let file = |ext: &str| {
             std::fs::read_to_string(
-                root.join(format!("oxplow/extensions/{ext}/lenses/busy-tasks.yaml")),
+                root.join(format!(".oxplow/extensions/{ext}/lenses/busy-tasks.yaml")),
             )
             .unwrap()
         };
@@ -1148,7 +997,7 @@ mod tests {
             .svc
             .layout
             .project_dir
-            .join("oxplow/extensions/saved")
+            .join(".oxplow/extensions/saved")
             .exists());
         assert!(events_of(&fx, "lens.kept").await.is_empty());
     }
@@ -1312,51 +1161,23 @@ mod tests {
                 if f == "/stream" && message.contains("its own thread's stream")),
             "{err:?}"
         );
-        assert!(!wt.path().join("oxplow/extensions/kept").exists());
+        assert!(!wt.path().join(".oxplow/extensions/kept").exists());
         let own = oxplow_domain::refs::build::stream_ref(
             fx.svc.streams.list_streams().await.unwrap()[0].id,
         );
-        // Kept in the main worktree, it shows now; in another stream's,
-        // once that stream is merged.
-        let mine = keep(agent(&fx), &own, "mine").await.unwrap();
-        assert_eq!(mine.result["live"], json!(true));
-        let theirs = keep(Actor::Human, "stream:str2", "theirs").await.unwrap();
-        assert_eq!(theirs.result["live"], json!(false));
+        // Kept, it is deployed: it shows now.
+        keep(agent(&fx), &own, "mine").await.unwrap();
+        let project = fx.svc.layout.project_dir.clone();
+        assert!(fx
+            .svc
+            .extension_catalog
+            .find_lens(&project, "kept/mine")
+            .is_ok());
+        keep(Actor::Human, "stream:str2", "theirs").await.unwrap();
         assert!(wt
             .path()
-            .join("oxplow/extensions/kept/lenses/theirs.yaml")
+            .join(".oxplow/extensions/kept/lenses/theirs.yaml")
             .exists());
-    }
-
-    /// tsk988: a kept lens goes to a private extension — moving one into a
-    /// shared extension is `oxplow.lens.share`, a person's.
-    #[tokio::test]
-    async fn a_lens_isnt_kept_into_a_shared_extension() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        let team = fx.svc.layout.project_dir.join("oxplow/extensions/team");
-        std::fs::create_dir_all(&team).unwrap();
-        std::fs::write(
-            team.join("extension.yaml"),
-            "manifest: 2\nname: team\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: p\n  examples: [{ name: a }]\n",
-        )
-        .unwrap();
-        let err = fx
-            .svc
-            .commands
-            .run(
-                &agent(&fx),
-                KEEP,
-                json!({ "spec": spec(), "extension": "team" }),
-                false,
-            )
-            .await
-            .unwrap_err();
-        assert!(
-            err.to_string().contains("`team` is shared")
-                && err.to_string().contains("oxplow.lens.share"),
-            "{err}"
-        );
-        assert!(!team.join("lenses").exists());
     }
 
     /// `oxplow.lens.keep` keeps an answer or a spec: neither, or both, is refused;
@@ -1386,140 +1207,5 @@ mod tests {
                 "{input}: {err}"
             );
         }
-    }
-
-    /// Sharing moves a private lens into a shared extension — only when it
-    /// passes the shared checks; a failure leaves nothing behind.
-    #[tokio::test]
-    async fn share_moves_a_passing_lens_and_refuses_a_failing_one() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        let root = fx.svc.layout.project_dir.clone();
-        let mine = root.join("oxplow/extensions/mine");
-        std::fs::create_dir_all(mine.join("lenses")).unwrap();
-        std::fs::write(
-            mine.join("extension.yaml"),
-            "manifest: 2\nname: mine\nintent:\n  purpose: mine\n",
-        )
-        .unwrap();
-        std::fs::write(
-            mine.join("lenses/good.yaml"),
-            "title: Good\nquery: SELECT ref FROM v_work_item\n",
-        )
-        .unwrap();
-        std::fs::write(
-            mine.join("lenses/raw.yaml"),
-            "title: Raw\nquery: SELECT id FROM task\n",
-        )
-        .unwrap();
-        crate::test_fixtures::activate(&fx.svc).await;
-        let share = |lens: &str| {
-            let svc = fx.svc.clone();
-            let lens = lens.to_string();
-            async move {
-                svc.commands
-                    .run(
-                        &Actor::Human,
-                        SHARE,
-                        json!({ "lens": lens, "extension": "team" }),
-                        false,
-                    )
-                    .await
-            }
-        };
-        let err = share("mine/raw").await.unwrap_err();
-        assert!(err.to_string().contains("shared checks"), "{err}");
-        assert!(!root.join("oxplow/extensions/team").exists());
-        assert!(mine.join("lenses/raw.yaml").exists());
-
-        let out = share("mine/good").await.unwrap();
-        assert_eq!(out.result["lens"], "team/good");
-        assert!(!mine.join("lenses/good.yaml").exists());
-        let team = extensions::load_extensions(&root)
-            .into_iter()
-            .find(|e| e.name == "team")
-            .unwrap();
-        assert_eq!(team.sharing, extensions::Sharing::Shared);
-        assert!(team.errors.is_empty(), "{:?}", team.errors);
-        // An agent can't share.
-        let err = fx
-            .svc
-            .commands
-            .run(
-                &agent(&fx),
-                SHARE,
-                json!({ "lens": "mine/raw", "extension": "team" }),
-                false,
-            )
-            .await
-            .unwrap_err();
-        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
-    }
-
-    /// Both write lens files, which a `Tx` handler may not do: the bus
-    /// retries a `Tx` handler on a busy database, and a retried file write
-    /// strands the first one. They run as `External` commands, recorded
-    /// after they return.
-    #[tokio::test]
-    async fn keep_and_share_are_external_commands() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        for name in [KEEP, SHARE] {
-            let spec = fx.svc.commands.spec(name).unwrap();
-            assert_eq!(spec.atomicity, oxplow_domain::Atomicity::External, "{name}");
-        }
-    }
-
-    /// The target is an extension name, checked the way `save_lens` checks
-    /// one; and a failed share removes only what it wrote — never a
-    /// directory that was there before.
-    #[tokio::test]
-    async fn share_checks_the_target_name_and_removes_only_what_it_wrote() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        let root = fx.svc.layout.project_dir.clone();
-        let mine = root.join("oxplow/extensions/mine");
-        std::fs::create_dir_all(mine.join("lenses")).unwrap();
-        std::fs::write(
-            mine.join("extension.yaml"),
-            "manifest: 2\nname: mine\nintent:\n  purpose: mine\n",
-        )
-        .unwrap();
-        std::fs::write(
-            mine.join("lenses/raw.yaml"),
-            "title: Raw\nquery: SELECT id FROM task\n",
-        )
-        .unwrap();
-        crate::test_fixtures::activate(&fx.svc).await;
-        let share = |to: &str| {
-            let svc = fx.svc.clone();
-            let to = to.to_string();
-            async move {
-                svc.commands
-                    .run(
-                        &Actor::Human,
-                        SHARE,
-                        json!({ "lens": "mine/raw", "extension": to }),
-                        false,
-                    )
-                    .await
-            }
-        };
-        let err = share("../../src").await.unwrap_err();
-        assert!(err.to_string().contains("extension name"), "{err}");
-        assert!(!root.join("oxplow/src").exists());
-        let err = share("oxplow-bundled").await.unwrap_err();
-        assert!(err.to_string().contains("bundled"), "{err}");
-
-        // A directory that isn't an extension yet, holding someone's files.
-        let scratch = root.join("oxplow/extensions/scratch");
-        std::fs::create_dir_all(&scratch).unwrap();
-        std::fs::write(scratch.join("notes.txt"), "keep me").unwrap();
-        let err = share("scratch").await.unwrap_err();
-        assert!(err.to_string().contains("shared checks"), "{err}");
-        assert!(
-            scratch.join("notes.txt").exists(),
-            "a failed share deleted a pre-existing file"
-        );
-        assert!(!scratch.join("extension.yaml").exists());
-        assert!(!scratch.join("lenses").exists());
-        assert!(mine.join("lenses/raw.yaml").exists());
     }
 }

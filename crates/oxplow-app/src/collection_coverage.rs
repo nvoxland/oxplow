@@ -123,9 +123,6 @@ fn status_of(
         (Some((status, at, error)), _) if status == "error" => {
             ("failed", Some(at.clone()), error.clone())
         }
-        (Some((status, at, _)), _) if status == "needs_approval" => {
-            ("needs_approval", Some(at.clone()), None)
-        }
         (Some((_, at, _)), Some((_, _, Some(due)))) if due.as_str() < now => {
             ("stale", Some(at.clone()), None)
         }
@@ -146,11 +143,11 @@ mod tests {
 
     async fn fixture() -> crate::test_fixtures::EffortFixture {
         let fx = crate::test_fixtures::services_with_effort().await;
-        let dir = fx.svc.layout.project_dir.join("oxplow/extensions/my-gh");
+        let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/my-gh");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),
-            "manifest: 2\nname: my-gh\nintent:\n  purpose: test\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n",
+            "manifest: 2\nname: my-gh\nintent:\n  purpose: test\npermissions: { process: true }\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n",
         )
         .unwrap();
         std::fs::write(dir.join("sync.sh"), "#!/bin/sh\necho '{}'\n").unwrap();
@@ -216,7 +213,7 @@ mod tests {
             fx.svc
                 .layout
                 .project_dir
-                .join("oxplow/extensions/my-gh/extra.txt"),
+                .join(".oxplow/extensions/my-gh/extra.txt"),
             "x",
         )
         .unwrap();

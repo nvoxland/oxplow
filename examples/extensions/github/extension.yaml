@@ -1,7 +1,6 @@
 manifest: 2
 name: github
 description: Pull requests from this repo's GitHub, joined to work items and streams.
-sharing: shared
 engine: ">=0.7"
 version: 0.1.0
 intent:
@@ -17,6 +16,11 @@ intent:
     - name: pr-link
       input: { wikilink: "pr:12" }
       expect: the pull request's ref, `github_pr:12`
+permissions:
+  commands: [oxplow.collector.sync]
+  network: [api.github.com]
+  process: true
+  secrets: [GITHUB_TOKEN]
 collectors:
   - id: prs
     doc: The repo's 100 most recent pull requests (open and closed).

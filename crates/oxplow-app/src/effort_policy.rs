@@ -375,8 +375,6 @@ pub fn prepare_built_ins(
     declared: &[crate::capabilities::Implementation],
     sql: &SqlGateway,
     trees: &Arc<dyn crate::services::TreeSource>,
-    approvals: &Arc<crate::exec_consent::ApprovalStore>,
-    project_dir: &std::path::Path,
 ) -> PreparedEffortPolicies {
     use crate::capabilities::Source;
     let built: Vec<Arc<dyn EffortPolicy>> = declared
@@ -388,31 +386,13 @@ pub fn prepare_built_ins(
                     id: i.id.clone(),
                     sql: sql.clone(),
                 })),
-                Source::Script {
-                    entry,
-                    tree,
-                    script,
-                    needs,
-                } => {
-                    let program = crate::exec_consent::effort_policy_program(
-                        tree,
-                        i.extension.as_deref().unwrap_or_default(),
-                        &i.id,
-                        entry,
-                        needs,
-                    );
+                Source::Script { script, needs, .. } => {
                     Some(Arc::new(crate::effort_policy_script::ScriptedPolicy {
                         id: i.id.clone(),
                         script: script.as_str().into(),
                         needs: needs.clone(),
                         sql: sql.clone(),
                         trees: trees.clone(),
-                        gate: crate::exec_consent::loaded_script_gate(
-                            approvals.clone(),
-                            project_dir.to_path_buf(),
-                            program,
-                            script.clone(),
-                        ),
                     }))
                 }
                 _ => None,
@@ -546,13 +526,13 @@ impl AsyncEventConsumer for EffortPolicyConsumer {
                     &id,
                     owner.as_ref(),
                     event,
-                )
-                .authorized(oxplow_domain::run::Authority {
-                    declared,
-                    grant: None,
-                    enforcement: crate::grants::enforcement(),
-                });
-                run
+                );
+                // Within its extension's permissions; core's own policy is
+                // core's run.
+                match &owner {
+                    Some(owner) => run.authorized(crate::grants::authority(owner, declared)),
+                    None => run,
+                }
             })
             .await?;
         let lineage = crate::event_lineage::lineage(

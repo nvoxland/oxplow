@@ -33,7 +33,9 @@ use oxplow_domain::vcs::{CommitRequest, FileStatus, LogQuery, Vcs};
 use oxplow_domain::ChangeStatus;
 
 fn write(ws: &Path, path: &str, body: &str) {
-    std::fs::write(ws.join(path), body).unwrap();
+    let file = ws.join(path);
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(file, body).unwrap();
 }
 
 async fn commit(p: &dyn Vcs, ws: &Path, message: &str) -> String {
@@ -145,7 +147,8 @@ pub async fn the_clean_baseline_vouches_only_for_untouched_files(p: &dyn Vcs, ws
     assert_eq!(baseline.clean_object("nope.txt", 1, (0, 0)), None);
 }
 
-/// 3. Status shows each kind of change, and a commit clears it.
+/// 3. Status shows each kind of change — a file in a new folder by its own
+///    path — and a commit clears it.
 pub async fn status_reports_edits_and_is_clean_after_commit(p: &dyn Vcs, ws: &Path) {
     write(ws, "kept.txt", "kept\n");
     write(ws, "gone.txt", "gone\n");
@@ -153,6 +156,7 @@ pub async fn status_reports_edits_and_is_clean_after_commit(p: &dyn Vcs, ws: &Pa
     write(ws, "kept.txt", "changed\n");
     std::fs::remove_file(ws.join("gone.txt")).unwrap();
     write(ws, "new.txt", "new\n");
+    write(ws, "fresh/deep/b.txt", "b\n");
     let status = p.status(ws).await.unwrap();
     let entries: Vec<(&str, FileStatus)> = status
         .entries
@@ -162,6 +166,7 @@ pub async fn status_reports_edits_and_is_clean_after_commit(p: &dyn Vcs, ws: &Pa
     assert_eq!(
         entries,
         vec![
+            ("fresh/deep/b.txt", FileStatus::Untracked),
             ("gone.txt", FileStatus::Deleted),
             ("kept.txt", FileStatus::Modified),
             ("new.txt", FileStatus::Untracked),

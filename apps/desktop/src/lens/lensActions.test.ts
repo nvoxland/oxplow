@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { IpcCallError } from "../ipc-error.js";
 import type { LensAction, LensRun } from "../tauri-bridge/generated/bindings.js";
-import { addLensToContext, copyLens, openAfterAction, performLensAction, rowRecord, type LensActionDeps } from "./lensActions.js";
+import { actionOffered, addLensToContext, copyLens, openAfterAction, performLensAction, rowRecord, type LensActionDeps } from "./lensActions.js";
 
 const run = { lens: { id: "acme/prs" }, params: { repo: "x" } } as unknown as LensRun;
 const action: LensAction = { id: "finish", label: "Finish", command: "oxplow.work_item.transition", input: {}, row: false };
@@ -21,7 +21,7 @@ function deps(fail?: Error, openPage: string | null = null) {
       log.push(`open_after ${command} ${JSON.stringify(result)}`);
       return openPage;
     },
-    openPage: (page) => log.push(`open ${page}`),
+    openPage: (page, replace) => log.push(`${replace ? "replace with" : "open"} ${page}`),
   };
   return { d, log };
 }
@@ -42,6 +42,20 @@ test("an action whose command names a page to open opens it once it ran", async 
   expect(log.slice(-2)).toEqual([`open_after oxplow.work_item.transition {}`, "open wiki:lib"]);
 });
 
+const done = { result: {}, audit_id: 1, event_id: null, inverse: null };
+
+test("`then: replace` opens the page in place of the lens's page", async () => {
+  const { d, log } = deps(undefined, "work_item:oxplow:tsk9");
+  await openAfterAction({ ...action, then: "replace" }, done, d);
+  expect(log.at(-1)).toBe("replace with work_item:oxplow:tsk9");
+});
+
+test("`then: stay` opens nothing, without asking where", async () => {
+  const { d, log } = deps(undefined, "work_item:oxplow:tsk9");
+  await openAfterAction({ ...action, then: "stay" }, done, d);
+  expect(log).toEqual([]);
+});
+
 test("a command that names no page opens nothing, and a refusal to bind is recorded", async () => {
   const quiet = deps();
   await openAfterAction(action, { result: {}, audit_id: 1, event_id: null, inverse: null }, quiet.d);
@@ -54,9 +68,11 @@ test("a command that names no page opens nothing, and a refusal to bind is recor
   expect(log).toEqual([`error Finish: its result has no \`page\` to open`]);
 });
 
-test("a command that asks returns needs-confirmation, then runs confirmed", async () => {
-  const { d, log } = deps(new IpcCallError("`x` needs confirmation", "NEEDS_CONFIRMATION"));
-  expect(await performLensAction(action, run, null, null, false, d)).toBe("needs-confirmation");
+test("a command that asks returns what it asks about, then runs confirmed", async () => {
+  const { d, log } = deps(
+    new IpcCallError("`x` needs confirmation", "NEEDS_CONFIRMATION", null, ["process — runs programs"]),
+  );
+  expect(await performLensAction(action, run, null, null, false, d)).toEqual({ confirm: ["process — runs programs"] });
   expect(await performLensAction(action, run, null, null, true, d)).toBe("done");
   expect(log.filter((l) => l.startsWith("error"))).toEqual([]);
 });
@@ -86,4 +102,14 @@ test("add to context hands the lens and its params to the agent", () => {
 
 test("rowRecord maps columns to the row's values", () => {
   expect(rowRecord(["id", "title"], [7, "x"])).toEqual({ id: 7, title: "x" });
+});
+
+test("a row action with `when` is offered only on rows where that column is truthy", () => {
+  const enable = { ...action, row: true, when: "can_enable" } as LensAction;
+  expect(actionOffered(enable, { can_enable: 1 })).toBe(true);
+  expect(actionOffered(enable, { can_enable: 0 })).toBe(false);
+  expect(actionOffered(enable, { can_enable: null })).toBe(false);
+  expect(actionOffered(enable, { can_enable: "" })).toBe(false);
+  expect(actionOffered(enable, {})).toBe(false);
+  expect(actionOffered({ ...action, row: true } as LensAction, {})).toBe(true);
 });

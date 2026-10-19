@@ -251,7 +251,7 @@ mod tests {
     /// A task, and a lens over it with an action that finishes it.
     async fn fixture() -> (crate::test_fixtures::TaskEffortFixture, Actor) {
         let fx = services_with_task_effort().await;
-        let ext = fx.svc.layout.project_dir.join("oxplow/extensions/acme");
+        let ext = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(ext.join("lenses")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),

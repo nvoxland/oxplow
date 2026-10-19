@@ -69,6 +69,7 @@ fn not_stopped(session: &AgentSession) -> Result<(), IpcError> {
             message: format!("agent session {} was stopped", session.id),
             cause: None,
             field: None,
+            details: Vec::new(),
         });
     }
     Ok(())

@@ -57,7 +57,7 @@ pub struct SourceCoverage {
     /// `collector:<owner>/<id>`.
     pub source: String,
     /// `current`, `stale` (past its next due run), `failed` (its last run
-    /// errored), `disabled`, `needs_approval` or `never` (it hasn't run).
+    /// errored), `disabled` or `never` (it hasn't run).
     pub status: String,
     /// Its last run (RFC 3339), when it has one.
     pub at: Option<String>,

@@ -4,14 +4,15 @@
  * `none`, or an agent (a harness's key). Settings →
  * Agents and the picker's Remember This set it.
  */
-import { effectiveConfig, listAgentHarnesses, runCommand } from "./api.js";
+import { listAgentHarnesses, runCommand } from "./api.js";
+import { settingValue } from "./configValues.js";
 import { newThreadTabs } from "./tabs/sessionTabs.js";
 
 const KEY = "newThreadSession";
 
 /** The person's choice; `ask` when they haven't made one. */
 export async function readNewThreadSession(): Promise<string> {
-  const value = (await effectiveConfig()).find((s) => s.key === `personal.${KEY}`)?.value;
+  const value = await settingValue(`personal.${KEY}`);
   return typeof value === "string" && value !== "" ? value : "ask";
 }
 

@@ -183,13 +183,13 @@ export function snapshotRange(
   return { rangeStart: startId ?? 0, rangeEnd: endId };
 }
 
-/** The extensions under `oxplow/extensions/` that `paths` touch, sorted —
+/** The extensions under `.oxplow/extensions/` that `paths` touch, sorted —
  *  an effort's review shows an "Extension Changes" section for them
  *  (P8.C7). */
 export function changedExtensions(paths: readonly string[]): string[] {
   const names = new Set<string>();
   for (const p of paths) {
-    const m = /^oxplow\/extensions\/([^/]+)\//.exec(p);
+    const m = /^\.oxplow\/extensions\/([^/]+)\//.exec(p);
     if (m) names.add(m[1]!);
   }
   return [...names].sort();

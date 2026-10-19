@@ -1,7 +1,6 @@
 manifest: 2
 name: stale-work
 description: Open tasks nobody has touched for a week
-sharing: private
 intent:
   purpose: "Answer: which open tasks has nobody touched for a week? A task counts as touched when it is edited, commented on, or worked on in an effort."
   origin: null

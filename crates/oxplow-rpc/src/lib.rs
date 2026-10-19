@@ -246,7 +246,6 @@ macro_rules! oxplow_command_table {
                 search => $crate::commands::search::search { query: String, stream_id: Option<String>, kinds: Option<Vec<String>>, limit: Option<u32> } -> Vec<::oxplow_db::SearchHit>,
                 query_sql => $crate::commands::semantic::query_sql { sql: String, params: Option<Vec<::oxplow_db::SqlCell>>, limit: Option<u32>, raw: Option<bool> } -> ::oxplow_db::SqlQueryResult,
                 list_data_entities => $crate::commands::semantic::list_data_entities {} -> Vec<::oxplow_app::semantic_catalog::DataEntity>,
-                effective_config => $crate::commands::semantic::effective_config {} -> Vec<::oxplow_app::effective_config::EffectiveSetting>,
                 get_panel_layout => $crate::commands::semantic::get_panel_layout {} -> Vec<::oxplow_db::PanelPlacement>,
                 set_panel_layout => $crate::commands::semantic::set_panel_layout { layout: Vec<::oxplow_db::PanelPlacement> } -> (),
                 list_extensions => $crate::commands::extensions::list_extensions {} -> Vec<::oxplow_app::extensions::Extension>,
@@ -266,8 +265,6 @@ macro_rules! oxplow_command_table {
                 lens_text => $crate::commands::extensions::lens_text { id: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> String,
                 list_services => $crate::commands::extensions::list_services {} -> Vec<$crate::commands::extensions::ServiceListing>,
                 validate_extension => $crate::commands::extensions::validate_extension { name: String, stream_id: Option<String> } -> ::oxplow_sdk::CheckReport,
-                review_extension => $crate::commands::extensions::review_extension { git_url: Option<String>, git_ref: Option<String>, name: Option<String>, stream_id: Option<String> } -> ::oxplow_app::extensions::ExtensionReview,
-                set_extension_enabled => $crate::commands::extensions::set_extension_enabled { name: String, enabled: bool } -> Vec<::oxplow_app::extensions::Extension>,
                 list_collectors => $crate::commands::collectors::list_collectors {} -> Vec<::oxplow_app::collector_runner::CollectorListing>,
                 ensure_change => $crate::commands::changes::ensure_change { target: ::oxplow_app::change_analysis::ChangeTarget } -> ::oxplow_db::ChangeRow,
                 // ai (Settings → AI)
@@ -277,14 +274,7 @@ macro_rules! oxplow_command_table {
                 set_ai_role => $crate::commands::ai::set_ai_role { role: ::oxplow_app::ai_service::Role, binding: Option<::oxplow_app::ai_service::RoleBinding> } -> ::oxplow_app::ai_service::AiSettings,
                 test_ai_provider => $crate::commands::ai::test_ai_provider { id: String, model: String } -> String,
                 read_ai_call => $crate::commands::ai::read_ai_call { id: ::oxplow_domain::AiCallId, body: ::oxplow_app::ai_calls::AiCallBody } -> Option<::oxplow_app::event_bodies::EventBody>,
-                approve_collector => $crate::commands::collectors::approve_collector { owner: String, id: String, version: String } -> (),
-                revoke_collector => $crate::commands::collectors::revoke_collector { owner: String, id: String } -> (),
                 set_credential => $crate::commands::collectors::set_credential { extension: String, name: String, value: Option<String> } -> (),
-                list_project_programs => $crate::commands::collectors::list_project_programs {} -> Vec<::oxplow_app::exec_consent::ProjectProgram>,
-                provider_declaration_impact => $crate::commands::collectors::provider_declaration_impact { instance: String } -> ::oxplow_app::extension_impact::ProviderImpact,
-                approve_project_program => $crate::commands::collectors::approve_project_program { kind: ::oxplow_app::exec_consent::ProgramKind, name: String, version: String } -> Vec<::oxplow_app::exec_consent::ProjectProgram>,
-                revoke_project_program => $crate::commands::collectors::revoke_project_program { kind: ::oxplow_app::exec_consent::ProgramKind, name: String } -> Vec<::oxplow_app::exec_consent::ProjectProgram>,
-                program_source => $crate::commands::collectors::program_source { kind: ::oxplow_app::exec_consent::ProgramKind, name: String } -> String,
                 // providers (Settings → Integrations)
                 list_provider_instances => $crate::commands::providers::list_provider_instances {} -> Vec<::oxplow_app::providers::ProviderInstanceView>,
                 check_provider_instance => $crate::commands::providers::check_provider_instance { instance: String, config: ::oxplow_domain::Json } -> ::oxplow_app::providers::ProviderInstanceView,
@@ -426,6 +416,24 @@ pub(crate) mod test_support {
     /// Publish the generation the files written and the config changed since
     /// ask for, as the owner of generations does on the change.
     pub async fn publish(ctx: &crate::RpcContext) {
+        // Only deployed extensions run: deploy the sources the test wrote
+        // (but not ones the person turned off; one that doesn't load is
+        // left out, as an activation holds it back).
+        let root = ctx.services.layout.project_dir.clone();
+        let off = oxplow_config::extension_settings(&root).personal.disable;
+        let mut names: Vec<String> = std::fs::read_dir(root.join(".oxplow/extensions"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|n| !off.contains(n))
+            .collect();
+        names.sort();
+        for name in names {
+            let _ =
+                oxplow_app::extension_deploy::deploy(&ctx.services, &name, &root, None, true).await;
+        }
         ctx.services
             .extension_activation
             .activate(ctx.services.clone())

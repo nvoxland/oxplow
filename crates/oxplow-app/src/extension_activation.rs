@@ -12,7 +12,7 @@ use oxplow_db::TxError;
 use oxplow_domain::{run::RunContext, DomainError, Timestamp};
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
-use crate::extension_catalog::CatalogSnapshot;
+use crate::extension_catalog::{CatalogSnapshot, LiveChanges};
 use crate::vocabulary_reactor::VocabularyErrors;
 use crate::Services;
 
@@ -229,17 +229,108 @@ impl ExtensionActivation {
     /// Initialize before ingress/background extension consumers are exposed.
     /// The baseline is required bundled code only, with no external instances.
     /// A rejected full candidate keeps this baseline available for repair.
+    /// First the live set starts (`extension_deploy::start`): an enabled
+    /// extension with no deployment here deploys from its source.
     pub async fn initialize(&self, svc: Arc<Services>) -> Result<(), DomainError> {
-        if let Err(error) = self.activate_core(svc.clone()).await {
-            self.record_failure(&svc, error);
-            return Err(DomainError::Invalid(
-                "required extension baseline could not activate".into(),
-            ));
+        let changes = match crate::extension_deploy::start(&svc).await {
+            Ok(changes) => changes,
+            Err(error) => {
+                tracing::warn!(%error, "startup deploys failed");
+                LiveChanges::new()
+            }
+        };
+        // A required extension (foundation) is always on: a deployment of
+        // it that doesn't load or activate gives way to the shipped one.
+        let project = svc.layout.project_dir.clone();
+        let mut fell_back = VocabularyErrors::new();
+        for ext in svc.extension_catalog.snapshot(&project).extensions().iter() {
+            if crate::bundled_extensions::is_required(&ext.name)
+                && matches!(
+                    ext.deployment,
+                    crate::extensions::Deployment::Deployed { .. }
+                )
+                && !ext.errors.is_empty()
+            {
+                fell_back.insert(ext.name.clone(), ext.errors.clone());
+            }
         }
-        if let Err(error) = self.activate(svc.clone()).await {
-            self.record_failure(&svc, error);
+        self.give_way(&svc, &fell_back);
+        if let Err(error) = self.activate_core(svc.clone()).await {
+            let deployed: Vec<String> = svc
+                .extension_catalog
+                .live()
+                .into_keys()
+                .filter(|name| crate::bundled_extensions::is_required(name))
+                .collect();
+            let retried = if deployed.is_empty() {
+                Err(error)
+            } else {
+                let why = match &error {
+                    TxError::Aborted(problems) => problems.values().flatten().cloned().collect(),
+                    TxError::Storage(_) => Vec::new(),
+                };
+                let now: VocabularyErrors = deployed
+                    .into_iter()
+                    .map(|name| (name, why.clone()))
+                    .collect();
+                self.give_way(&svc, &now);
+                fell_back.extend(now);
+                self.activate_core(svc.clone()).await
+            };
+            if let Err(error) = retried {
+                self.record_failure(&svc, error);
+                let why: Vec<String> = self
+                    .problems()
+                    .into_iter()
+                    .flat_map(|(owner, why)| why.into_iter().map(move |w| format!("{owner}: {w}")))
+                    .collect();
+                return Err(DomainError::Invalid(format!(
+                    "required extension baseline could not activate: {}",
+                    why.join("; ")
+                )));
+            }
+        }
+        // A candidate overtaken by a change made while it was staged is
+        // staged again: the startup deploys must not be lost with it.
+        let mut attempts = 0;
+        loop {
+            attempts += 1;
+            match self.activate_kind(svc.clone(), false, &changes).await {
+                Ok(_) => break,
+                Err(TxError::Aborted(problems))
+                    if problems.contains_key("<host>") && attempts < 3 => {}
+                Err(error) => {
+                    tracing::warn!(?error, "the first extension generation was rejected");
+                    self.record_failure(&svc, error);
+                    break;
+                }
+            }
+        }
+        if !fell_back.is_empty() {
+            let mut problems = self.problems.lock();
+            for (name, mut why) in fell_back {
+                why.push(
+                    "its deployment doesn't activate; the shipped version runs until it is deployed again"
+                        .into(),
+                );
+                problems.entry(name).or_default().extend(why);
+            }
+            drop(problems);
+            svc.extension_catalog.runtime_changed();
         }
         Ok(())
+    }
+
+    /// Run the shipped version of each of `names` instead of its
+    /// deployment.
+    fn give_way(&self, svc: &Services, names: &VocabularyErrors) {
+        if names.is_empty() {
+            return;
+        }
+        tracing::warn!(names = ?names.keys().collect::<Vec<_>>(), "a required extension's deployment doesn't activate; running the shipped one");
+        let mut live = svc.extension_catalog.live();
+        live.retain(|name, _| !names.contains_key(name));
+        svc.extension_catalog.set_live(live);
     }
 
     fn record_failure(&self, svc: &Services, error: TxError<VocabularyErrors>) {
@@ -449,7 +540,41 @@ impl ExtensionActivation {
         &self,
         svc: Arc<Services>,
     ) -> Result<Arc<CatalogSnapshot>, TxError<VocabularyErrors>> {
-        self.activate_kind(svc, false).await
+        self.activate_kind(svc, false, &LiveChanges::new()).await
+    }
+
+    /// Activate with `changes` to the live set, holding what doesn't
+    /// prepare as any activation does (startup, and tests that stage
+    /// sources).
+    pub async fn activate_live(
+        &self,
+        svc: Arc<Services>,
+        changes: &LiveChanges,
+    ) -> Result<Arc<CatalogSnapshot>, TxError<VocabularyErrors>> {
+        self.activate_kind(svc, false, changes).await
+    }
+
+    /// Activate with `changes` to the live set (a deploy, a rollback, a
+    /// removal). The publication records which deployments are active. An
+    /// extension `changes` names that doesn't go live is held as any broken
+    /// one is (its last working version stays) and its problems are the
+    /// error.
+    pub async fn activate_changes(
+        &self,
+        svc: Arc<Services>,
+        changes: &LiveChanges,
+    ) -> Result<Arc<CatalogSnapshot>, TxError<VocabularyErrors>> {
+        let published = self.activate_kind(svc, false, changes).await?;
+        let held = self.problems.lock().clone();
+        let failed: VocabularyErrors = changes
+            .keys()
+            .filter_map(|name| held.get(name).map(|why| (name.clone(), why.clone())))
+            .collect();
+        if failed.is_empty() {
+            Ok(published)
+        } else {
+            Err(TxError::Aborted(failed))
+        }
     }
 
     /// Publish only required bundled declarations so the host can repair a
@@ -458,13 +583,14 @@ impl ExtensionActivation {
         &self,
         svc: Arc<Services>,
     ) -> Result<Arc<CatalogSnapshot>, TxError<VocabularyErrors>> {
-        self.activate_kind(svc, true).await
+        self.activate_kind(svc, true, &LiveChanges::new()).await
     }
 
     async fn activate_kind(
         &self,
         svc: Arc<Services>,
         core_only: bool,
+        changes: &LiveChanges,
     ) -> Result<Arc<CatalogSnapshot>, TxError<VocabularyErrors>> {
         if !std::ptr::eq(self, svc.extension_activation.as_ref()) {
             return Err(rejected(
@@ -475,6 +601,7 @@ impl ExtensionActivation {
             return Err(rejected("activation cannot wait on its own reader"));
         }
         let _one = self.activating.lock().await;
+        let _staged = svc.extension_catalog.stage_changes(changes);
         let raw = svc.extension_catalog.snapshot(&svc.layout.project_dir);
         // An extension that can't load keeps its last working version (or
         // stays out); the rest activate without it. One whose preparation
@@ -559,6 +686,32 @@ impl ExtensionActivation {
                     {
                         return Err(rejected("catalog changed while activation was staged"));
                     }
+                    // The core baseline is not what the project runs: the
+                    // deployments it leaves out stay recorded as active.
+                    if !core_only {
+                        let live: Vec<(String, String)> =
+                            crate::extension_catalog::live_of(published.extensions())
+                                .into_iter()
+                                .collect();
+                        oxplow_db::extension_deployment_store::set_active_tx(
+                            publication.transaction()?,
+                            &live,
+                        )
+                        .map_err(TxError::Storage)?;
+                        // An effect starts when a generation that runs it
+                        // first publishes: it never reacts to the past.
+                        let now = Timestamp::now().to_string();
+                        for ext in published.extensions().iter().filter(|e| e.enabled) {
+                            for effect in &ext.effects {
+                                oxplow_db::effect_state_store::start_if_new_tx(
+                                    publication.transaction()?,
+                                    &effect.name(),
+                                    &now,
+                                )
+                                .map_err(TxError::Storage)?;
+                            }
+                        }
+                    }
                     // Stored settings behind an extension's declared schema
                     // are carried forward in this transaction: a step that
                     // fails rolls everything back and holds that extension.
@@ -609,6 +762,10 @@ impl ExtensionActivation {
                         .expect("bundle candidate consumed only after successful commit")
                         .publish(&svc.component_bundles);
                     svc.extension_catalog.publish_active(published.clone());
+                    if !core_only {
+                        svc.extension_catalog
+                            .set_live(crate::extension_catalog::live_of(published.extensions()));
+                    }
                     // Admission enables callbacks and their live-owner checks.
                     // Publish the matching owner catalog before starting them;
                     // readers remain excluded by the owned generation writer.
@@ -700,14 +857,13 @@ impl ExtensionActivation {
         snapshot: &Arc<CatalogSnapshot>,
         core_only: bool,
     ) -> Result<Prepared, TxError<VocabularyErrors>> {
-        let disabled = oxplow_config::disabled_extensions(&svc.layout.project_dir);
+        let settings = oxplow_config::extension_settings(&svc.layout.project_dir);
         let blocked: VocabularyErrors = snapshot
             .extensions()
             .iter()
             .filter(|extension| {
                 extension.public_contracts.blocked
-                    && (crate::bundled_extensions::is_required(&extension.name)
-                        || !disabled.contains(&extension.name))
+                    && !crate::extensions::is_off(&settings, &extension.name)
             })
             .map(|extension| (extension.name.clone(), extension.errors.clone()))
             .collect();

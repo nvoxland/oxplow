@@ -69,7 +69,7 @@ metric (`metric_findings('triage.todos')`).
 
 ## Use it
 
-1. Copy this folder to `oxplow/extensions/triage/` in your repo.
+1. Copy this folder to `.oxplow/extensions/triage/` in your repo.
 2. Settings → AI: bind **triage/sort** to a model, or give the **Decide**
    role one and it is used instead.
 3. Settings → Data: approve **triage/todos**. Any change to its files

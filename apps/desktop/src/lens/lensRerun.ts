@@ -19,8 +19,8 @@ export function readsOf(...models: string[]): Reads {
 }
 
 /** The extension catalog changed — the daemon's own signal (tsk1030),
- *  sent when a file under `oxplow/extensions/` or the `extensions` config
- *  changed: a lens's definition may have. */
+ *  sent when an extension was deployed, rolled back, turned on or off, or
+ *  removed: a lens's definition may have. */
 export function lensDefinitionChanged(event: Readonly<Record<string, unknown>>): boolean {
   return event.kind === "extensionsChanged";
 }

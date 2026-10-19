@@ -5,8 +5,8 @@
 In the worktree of the stream you're working in:
 
 ```
-oxplow/extensions/<name>/extension.yaml
-oxplow/extensions/<name>/lenses/<slug>.yaml
+.oxplow/extensions/<name>/extension.yaml
+.oxplow/extensions/<name>/lenses/<slug>.yaml
 ```
 
 `<name>` and `<slug>` are lowercase-with-dashes. The lens id is
@@ -19,7 +19,6 @@ new one for a new area.
 manifest: 2
 name: review            # must equal the folder name
 description: Lenses for reviewing agent work
-sharing: private        # private is the default; `shared` = for the team, `engine` + `version` required
 intent:                 # required: what it is for, and how to know it works
   purpose: Show what is waiting on the reviewer in this stream
   origin: effort:eff42  # the effort you are working under, or null

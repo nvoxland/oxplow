@@ -44,6 +44,10 @@ pub fn unpinned_contribution(
     }
 }
 
+/// A check a running contribution must keep passing (its extension still
+/// live at its version): `Err` says why it must stop.
+pub type LiveCheck = std::sync::Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
+
 /// The live check of a run that holds no generation: its own extension is
 /// still enabled, still at the version the run started with, and still
 /// declares the contribution. Run at each host call and at publication.

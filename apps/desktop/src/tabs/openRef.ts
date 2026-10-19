@@ -16,6 +16,9 @@ export interface OpenHow {
   newTab?: boolean;
   /** The list the link sits in, for prev/next on the page it opens. */
   siblings?: NavSiblings;
+  /** In place of the current page, which leaves history: Back won't
+   *  return to it (a submitted form gives way to what it made). */
+  replace?: boolean;
 }
 
 /** What the window does with where a ref opens. */

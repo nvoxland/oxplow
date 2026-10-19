@@ -62,6 +62,10 @@
   `{{param.x}}`; a `query` prefills from its first row; `fixed` fields
   show their default and can't be changed (an item's `ref`); `fields`
   says which to show.
+- **After a submit**, a command with `ui.open_after` opens that page;
+  `then:` on the action (or `form.then`) says what becomes of the lens's
+  page: `open` (default; Back returns), `replace` (it leaves history —
+  a create form giving way to what it made) or `stay` (nothing opens).
 - **A form action** on any lens: `form: true` on an action opens the
   command's form (a side panel) starting from its `input`, instead of
   running at once; `fixed` keeps fields to the bound values:

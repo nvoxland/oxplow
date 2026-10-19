@@ -1,7 +1,7 @@
 //! `collectors:` (P7.B3, `.context/semantic-layer.md` "Collectors"): the
 //! one declaration for bringing data in, in an extension's
 //! `extension.yaml` (the project's own collectors are its own extension's,
-//! `oxplow/extensions/project/` by convention).
+//! `.oxplow/extensions/project/` by convention).
 //!
 //! A collector is a program (`exec`, approved by a person), a sandboxed
 //! script (`starlark` / `jaq`, no I/O, no approval) or a provider's read
@@ -438,7 +438,7 @@ pub fn entity_view_name(owner: &str, entity: &str) -> String {
 
 /// The extension the project's own collectors, measures and metrics go in
 /// when a tool writes one (`/oxplow:configure`, `oxplow.metric.scaffold`):
-/// `oxplow/extensions/project/`. Any of the project's own extensions may
+/// `.oxplow/extensions/project/`. Any of the project's own extensions may
 /// hold them; this is only where tools put new ones.
 pub const PROJECT_EXTENSION: &str = "project";
 
@@ -450,7 +450,7 @@ pub struct Declarer {
     /// Its extension's namespace: an `oxplow.*` id is the `oxplow`
     /// namespace's.
     pub namespace: String,
-    /// The project's own (in `oxplow/extensions/`, not installed from
+    /// The project's own (in `.oxplow/extensions/`, not installed from
     /// elsewhere): only it may run its own programs to record facts and
     /// parse reports (`records:`), each once a person approved it.
     pub own: bool,
@@ -1277,7 +1277,7 @@ fn validate_report_collector(
     if !declarer.own {
         return Err(ctx(
             "a report collector (`records:`) is the project's own: declare it in an extension \
-             of the project's (`oxplow/extensions/project/`)"
+             of the project's (`.oxplow/extensions/project/`)"
                 .into(),
         ));
     }

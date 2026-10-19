@@ -28,6 +28,25 @@ pub fn start_at_head_tx(conn: &Connection, effect: &str, now: &str) -> Result<i6
 
 /// Where `effect` starts: the seq after which it reads; `None` before it
 /// was ever approved.
+/// Start `effect` after the log's head unless it has started already: a
+/// generation that runs it publishes, the first does. Whether it started
+/// now.
+pub fn start_if_new_tx(conn: &Connection, effect: &str, now: &str) -> Result<bool, DomainError> {
+    let head: i64 = conn
+        .query_row("SELECT coalesce(max(seq), 0) FROM event_log", [], |r| {
+            r.get(0)
+        })
+        .map_err(map_sql_err)?;
+    let inserted = conn
+        .execute(
+            "INSERT INTO effect_state (effect, start_after_seq, approved_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT (effect) DO NOTHING",
+            params![effect, head, now],
+        )
+        .map_err(map_sql_err)?;
+    Ok(inserted > 0)
+}
+
 pub fn start_after_tx(conn: &Connection, effect: &str) -> Result<Option<i64>, DomainError> {
     conn.query_row(
         "SELECT start_after_seq FROM effect_state WHERE effect = ?1",

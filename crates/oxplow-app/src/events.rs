@@ -122,7 +122,7 @@ pub enum OxplowEvent {
     /// the renderer refetches `get_config`.
     ConfigChanged,
     /// The extension catalog may have changed: a file under the primary
-    /// worktree's `oxplow/extensions/` did, or the `extensions` config key
+    /// worktree's `.oxplow/extensions/` did, or the `extensions` config key
     /// (the catalog's own signal, tsk1030). Every host listing what
     /// extensions contribute — the launcher, pages, panels, slots —
     /// reloads, and a lens re-runs its definition.
@@ -143,11 +143,6 @@ pub enum OxplowEvent {
         op: String,
         input: oxplow_domain::Json,
     },
-    /// A person approved a program on this machine (a provider, collector,
-    /// effect, component, ACP agent): what shows approval state —
-    /// Settings → Integrations and Data — refreshes (tsk1040). Approvals
-    /// are per machine, not config, so `ConfigChanged` never said so.
-    ApprovalsChanged,
     /// `.git` directory appeared/disappeared at the project root —
     /// "is this a git workspace" flipped. Renderer hides/restores the
     /// git-aware UI on receipt.
@@ -214,16 +209,47 @@ impl EventBus {
         self.sender.subscribe()
     }
 
-    /// Post an event. Returns the number of active receivers (which
-    /// may be 0 — that's not an error, the bus is fire-and-forget).
+    /// Post an event — and, when it changed what a live model reads, the
+    /// `ModelsChanged` naming that model (`models_changed::announced_after`),
+    /// so a lens over it re-runs. Fire-and-forget: no receiver is fine.
     pub fn emit(&self, event: OxplowEvent) {
+        let then = crate::models_changed::announced_after(&event);
         let _ = self.sender.send(event);
+        if let Some(then) = then {
+            let _ = self.sender.send(then);
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An event about what a live model reads is followed on the bus by
+    /// the `ModelsChanged` naming it; one about nothing a live model reads
+    /// is alone.
+    #[tokio::test]
+    async fn a_change_a_live_model_reads_announces_the_model() {
+        let bus = EventBus::new();
+        let mut rx = bus.subscribe_ui();
+        bus.emit(OxplowEvent::ConfigChanged);
+        assert!(matches!(
+            rx.recv().await.unwrap(),
+            OxplowEvent::ConfigChanged
+        ));
+        match rx.recv().await.unwrap() {
+            OxplowEvent::ModelsChanged { models } => {
+                assert!(models.contains(&"v_config_value".to_string()), "{models:?}")
+            }
+            other => panic!("expected ModelsChanged, got {other:?}"),
+        }
+        bus.emit(OxplowEvent::BackgroundTasksChanged);
+        assert!(matches!(
+            rx.recv().await.unwrap(),
+            OxplowEvent::BackgroundTasksChanged
+        ));
+        assert!(rx.try_recv().is_err());
+    }
 
     #[tokio::test]
     async fn subscribers_receive_events() {

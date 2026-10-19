@@ -224,7 +224,6 @@ mod tests {
                 "oxplow_query_sql",
                 "oxplow_read",
                 "oxplow_recent_commits",
-                "oxplow_review_extension",
                 "oxplow_run_lens",
                 "oxplow_run_lens_action",
                 "oxplow_search",
@@ -279,7 +278,6 @@ mod tests {
             "oxplow_query_sql",
             "oxplow_ensure_change",
             "oxplow_preview_collector",
-            "oxplow_review_extension",
         ] {
             assert!(hinted(free), "{free} costs nothing");
         }
@@ -290,7 +288,7 @@ mod tests {
     #[tokio::test]
     async fn an_extension_command_over_ai_compute_is_not_hinted_read_only() {
         let fx = services_with_task_effort().await;
-        let root = fx._dir.path().join("oxplow/extensions/acme");
+        let root = fx._dir.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(
             root.join("extension.yaml"),
@@ -315,7 +313,7 @@ mod tests {
     #[tokio::test]
     async fn an_extensions_command_and_lens_are_tools() {
         let fx = services_with_task_effort().await;
-        let root = fx._dir.path().join("oxplow/extensions/acme");
+        let root = fx._dir.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(root.join("lenses")).unwrap();
         std::fs::write(
             root.join("extension.yaml"),

@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react";
 import { runLens } from "../api.js";
 import type { Extension } from "../tauri-bridge/generated/bindings.js";
-import { lensDirectoryEntries } from "../lens/lensModel.js";
+import { lensDirectoryEntries, mergeDirectory } from "../lens/lensModel.js";
 import { refFromTabId } from "../tabs/pageRefs.js";
 import type { PageDirectoryEntry } from "./RailHud/sections.js";
 
@@ -29,6 +29,18 @@ export function launcherPages(extensions: Extension[], counts: Record<string, nu
     }
   }
   return [...pages, ...lensDirectoryEntries(extensions)];
+}
+
+/** The launcher's whole page list: the declared pages and lenses, then
+ *  `more` (the Settings areas) placed by category. Empty until the
+ *  extensions load — a partial list would let a quick query pick the wrong
+ *  page ("Settings" finding an area before the Settings page). */
+export function launcherDirectory(
+  extensions: Extension[] | null,
+  counts: Record<string, number>,
+  more: PageDirectoryEntry[],
+): PageDirectoryEntry[] {
+  return extensions === null ? [] : mergeDirectory(launcherPages(extensions, counts), more);
 }
 
 /** The declared pages' badges, by count lens: each `count:` lens run

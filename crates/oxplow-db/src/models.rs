@@ -2698,7 +2698,7 @@ mod tests {
             sources: models
                 .into_iter()
                 .map(|mut m| {
-                    m.file = format!("oxplow/extensions/{extension}/{}", m.file);
+                    m.file = format!(".oxplow/extensions/{extension}/{}", m.file);
                     m
                 })
                 .collect(),
@@ -3032,7 +3032,7 @@ mod tests {
         .unwrap();
         let raw = errors["raw"].join("\n");
         assert!(
-            raw.contains("oxplow/extensions/raw/models/items.sql:2:3"),
+            raw.contains(".oxplow/extensions/raw/models/items.sql:2:3"),
             "{raw}"
         );
         assert!(raw.contains("only its own extension's tables"), "{raw}");

@@ -233,7 +233,14 @@ pub const SCOPES: &[Scope] = &[
         access: Access::Read,
         host: Host::Daemon,
         spends: false,
-        summary: "Check an extension before it ships: validate a directory, preview what it contributes, or review a candidate (a review clones it into .oxplow/tmp; it changes no record).",
+        summary: "Check an extension before it is deployed: validate its source, or preview what it contributes in a throwaway oxplow (it changes no record).",
+    },
+    Scope {
+        id: "extensions.deploy",
+        access: Access::Write,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Deploy an extension from its source, roll back to an earlier deployment, turn one on or off, remove it, or share it with the team.",
     },
     Scope {
         id: "extensions.enable",
@@ -241,13 +248,6 @@ pub const SCOPES: &[Scope] = &[
         host: Host::Daemon,
         spends: false,
         summary: "Turn a disabled extension contribution back on.",
-    },
-    Scope {
-        id: "extensions.install",
-        access: Access::Write,
-        host: Host::Daemon,
-        spends: false,
-        summary: "Install or update an extension in the project's `oxplow/extensions/`.",
     },
     Scope {
         id: "files.write",

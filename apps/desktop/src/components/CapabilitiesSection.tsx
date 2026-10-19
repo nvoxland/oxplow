@@ -12,7 +12,8 @@
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useState } from "react";
 
-import { effectiveConfig, listExtensions, querySql, runCommand, subscribeOxplowEvents } from "../api.js";
+import { listExtensions, querySql, runCommand, subscribeOxplowEvents } from "../api.js";
+import { readSettings } from "../configValues.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import type { Extension, Reads } from "../tauri-bridge/generated/bindings.js";
 import { capabilitiesFromResult, choiceHint, chosenNote, nextChoices, offWithout, type ChoosableCapability } from "./capabilitiesModel.js";
@@ -37,7 +38,7 @@ export function CapabilitiesSection() {
 
   const load = useCallback(async () => {
     try {
-      const [res, settings, exts] = await Promise.all([querySql(QUERY, [], 500), effectiveConfig(), listExtensions()]);
+      const [res, { settings }, exts] = await Promise.all([querySql(QUERY, [], 500), readSettings(), listExtensions()]);
       setCapabilities(capabilitiesFromResult(res));
       setReads(res.reads);
       setExtensions(exts);

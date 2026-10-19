@@ -1,6 +1,5 @@
 manifest: 2
 name: e2e
-sharing: private
 intent:
   purpose: >-
     The browser suite's extension: a fake work-item tracker, an effect, a
@@ -8,6 +7,13 @@ intent:
     provider that sorts text by its words.
   origin: null
   examples: []
+# Its providers run programs, its model provider asks models, its effect
+# reads with its own SQL and comments on (or deletes) work items.
+permissions:
+  process: true
+  ai: true
+  sql: read
+  commands: [oxplow.work_item.comment, oxplow.work_item.delete]
 # `bin/provider` and `bin/terminal` are written when a suite daemon starts:
 # they run the oxplow-provider-fake binary this checkout built, the second in
 # harness mode.

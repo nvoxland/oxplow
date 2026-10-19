@@ -47,8 +47,8 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   opens `/events` first (the daemon subscribes before answering the
   upgrade), does a write, and resolves once the daemon says each named
   model changed — so a seeding write is never raced;
-  `approveProgram()` / `approveCollector()` approve a program or an
-  extension's collector as a person does; `searchable()` waits until site
+  `deploy()` deploys an extension from its source as the person,
+  confirmed; `searchable()` waits until site
   search has indexed a write;
   `until()` polls any such background state, trying a check that throws
   again and naming its last error on timeout. `ipc()` on a reply that

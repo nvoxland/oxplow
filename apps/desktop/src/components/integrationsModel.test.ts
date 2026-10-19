@@ -14,7 +14,6 @@ const view = (over: Partial<ProviderInstanceView>): ProviderInstanceView => ({
   enabled: false,
   config: {},
   configSchema: null,
-  approved: true,
   credentials: [],
   health: { state: { state: "off" }, consecutiveFailures: 0, lastOkAt: null, meanInvokeMs: null, rateLimitedUntil: null, activity: null },
   collectors: [],
@@ -24,11 +23,6 @@ const view = (over: Partial<ProviderInstanceView>): ProviderInstanceView => ({
 test("integrationRow says where an instance stands and what the person can do", () => {
   const off = integrationRow(view({}));
   expect([off.label, off.status, off.enableLabel]).toEqual(["tracker/issues · work items", "Off", "Enable"]);
-  expect(off.needsApproval).toBe(false);
-
-  const unapproved = integrationRow(view({ approved: false, enabled: true, health: { ...view({}).health, state: { state: "unapproved" } } }));
-  expect(unapproved.status).toBe("Not approved on this machine: approve it under Data → Programs");
-  expect(unapproved.needsApproval).toBe(true);
 
   const unconfigured = integrationRow(
     view({ enabled: true, health: { ...view({}).health, state: { state: "unconfigured", problems: [{ path: "/team", message: "required" }] } } }),
@@ -55,7 +49,7 @@ test("integrationRow says where an instance stands and what the person can do", 
 });
 
 // P9.B2: a global instance is the person's on this machine — the row says
-// so, and that its program is approved per project.
+// so.
 test("a global instance's row says whose it is", () => {
   const ready = { ...view({}).health, state: { state: "ready" as const } };
   expect(integrationRow(view({ scope: "global", enabled: true, health: ready })).label).toBe(
@@ -65,12 +59,6 @@ test("a global instance's row says whose it is", () => {
   // (its credentials too, tsk838).
   expect(integrationRow(view({ scope: "project", overridden: true })).label).toBe(
     "tracker/issues · work items · this project's, replacing yours",
-  );
-  const unapproved = integrationRow(
-    view({ scope: "global", approved: false, enabled: true, health: { ...view({}).health, state: { state: "unapproved" } } }),
-  );
-  expect(unapproved.status).toBe(
-    "Not approved in this project: its program is approved per project, under Data → Programs",
   );
   expect(integrationRow(view({})).label).toBe("tracker/issues · work items");
 });

@@ -1,7 +1,7 @@
 //! `oxplow extension test` (P5.D5, P7.C6; `.context/extensions.md` "The
 //! SDK"; `.context/providers.md` "The conformance kit"). Everything runs
 //! on a throwaway oxplow — an in-memory one over a copy of the project's
-//! `oxplow/extensions/` ([`Host`]) — so it never touches the project's
+//! `.oxplow/extensions/` ([`Host`]) — so it never touches the project's
 //! data: `check` (against its real command registry, so `commands:`
 //! examples dry-run), then each intent example whose fixture names a lens
 //! (`input: { lens, params? }`, `expect: { columns?, rows }`), a derived
@@ -100,7 +100,7 @@ pub async fn test_extension_in(
     bless: bool,
     env: host::HostEnv,
 ) -> Result<TestReport, SdkError> {
-    let host = Host::start(root, env.clone())
+    let host = Host::start(root, name, env.clone())
         .await
         .map_err(SdkError::Invalid)?;
     host.start_runtime().map_err(SdkError::Invalid)?;
@@ -193,7 +193,7 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
     // Read as the extension's files are everywhere: a bundled extension's
     // fixtures are embedded with it, not on disk.
     let read =
-        |file: &str| oxplow_app::extensions::read_extension_file(&host.root, &ext.name, file);
+        |file: &str| oxplow_app::extensions::read_extension_file(&host.root, &ext.path, file);
     let examples = ext
         .intent
         .as_ref()
@@ -424,10 +424,10 @@ fn unsupported(ext: &Extension) -> Vec<String> {
 /// `{ effects: [{ id, state? }], commands: [names] }` (`$any` matches).
 async fn event_example(host: &Host, ext: &Extension, ex: &Example<'_>, report: &mut TestReport) {
     let shown = ex.shown;
-    if let Err(e) = approve_effects(host, ext).await {
+    if let Err(e) = start_effects(host, ext).await {
         report
             .errors
-            .push(format!("{shown}:1: approving its effects: {e}"));
+            .push(format!("{shown}:1: starting its effects: {e}"));
         return;
     }
     let Some(view) = example_event(host, ex, report) else {
@@ -516,15 +516,11 @@ async fn effect_outcome(host: &Host, seq: i64, at: &str) -> (Vec<Value>, Vec<Str
     (effects, commands)
 }
 
-/// Approve `ext`'s effects in the throwaway as a person does, each
-/// starting at the log's head.
-async fn approve_effects(host: &Host, ext: &Extension) -> Result<(), String> {
-    oxplow_app::exec_consent::approve_every(
-        &host.svc,
-        oxplow_app::exec_consent::ProgramKind::Effect,
-    )?;
+/// Start `ext`'s effects at the log's head, so they react to what the
+/// example logs next.
+async fn start_effects(host: &Host, ext: &Extension) -> Result<(), String> {
     for decl in &ext.effects {
-        oxplow_app::effects::approved(&host.svc.db, &decl.name())
+        oxplow_app::effects::start_at_head(&host.svc.db, &decl.name())
             .await
             .map_err(|e| e.to_string())?;
     }
@@ -572,23 +568,14 @@ async fn job_example(
         ));
         return;
     };
-    if let Err(e) = oxplow_app::exec_consent::approve_every(
-        &host.svc,
-        oxplow_app::exec_consent::ProgramKind::Job,
-    ) {
-        report
-            .errors
-            .push(format!("{shown}:1: approving its jobs: {e}"));
-        return;
-    }
     let delivers = ["effects", "commands", "pages"]
         .iter()
         .any(|k| ex.expect.get(k).is_some());
     if delivers {
-        if let Err(e) = approve_effects(host, ext).await {
+        if let Err(e) = start_effects(host, ext).await {
             report
                 .errors
-                .push(format!("{shown}:1: approving its effects: {e}"));
+                .push(format!("{shown}:1: starting its effects: {e}"));
             return;
         }
     }
@@ -997,17 +984,6 @@ async fn component_example(
         .cloned()
         .unwrap_or_default()
     {
-        if i.get("approved").and_then(Value::as_bool).unwrap_or(false) {
-            if let Err(e) = oxplow_app::exec_consent::approve_every(
-                &host.svc,
-                oxplow_app::exec_consent::ProgramKind::Component,
-            ) {
-                report
-                    .errors
-                    .push(format!("{shown}:1: approving its component: {e}"));
-                return;
-            }
-        }
         let out = invoke_component_command(
             &host.svc,
             &host.root,
@@ -1610,33 +1586,19 @@ async fn collector_example(
         ));
         return;
     };
-    if oxplow_app::collector_runner::needs_approval(&host.root, &ext.name, spec) {
+    {
         use oxplow_config::collectors::CollectorRuntime as R;
         let does = match spec.runtime {
-            // Calls a model: approved here as a person would, then run
-            // against the fixture model.
-            R::Starlark | R::Jaq => None,
             R::Read => Some("reads a provider"),
-            R::Exec => Some("runs a program"),
+            R::Exec if spec.bundled_parser().is_none() => Some("runs a program"),
+            _ => None,
         };
         if let Some(does) = does {
             report.warnings.push(format!(
                 "{shown}:1: example `{example}` runs collector `{id}`, which {does}: `extension \
-                 test` doesn't run it (it needs a person's approval) — fix: none; run it from \
-                 Settings → Data"
+                 test` doesn't run programs or providers — fix: none; run it with \
+                 `oxplow.collector.sync` once it's deployed"
             ));
-            return;
-        }
-        let approved =
-            oxplow_app::collector_runner::approval_hash(&host.root.join(&ext.path), spec).and_then(
-                |hash| {
-                    oxplow_app::collector_runner::approve(&host.svc.approvals, &ext.name, id, &hash)
-                },
-            );
-        if let Err(e) = approved {
-            report
-                .errors
-                .push(format!("{shown}:1: approving collector `{id}`: {e}"));
             return;
         }
     }
@@ -1663,7 +1625,7 @@ async fn collector_example(
             use oxplow_app::collector_runner::RunCollectorError as E;
             let why = match e {
                 E::NotFound => "it isn't loaded".to_string(),
-                E::NeedsApproval(m) | E::Failed(m) | E::Disabled(m) => m,
+                E::Denied(m) | E::Failed(m) | E::Disabled(m) => m,
                 E::Storage(e) => e.to_string(),
             };
             report.errors.push(format!(
@@ -2366,6 +2328,21 @@ async fn suite_host(
     let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
     let target = tmp.path().join(EXTENSIONS_DIR).join(&ext.name);
     crate::throwaway::copy_dir(&root.join(&ext.path), &target).map_err(|e| e.to_string())?;
+    // It, and what ships with oxplow, are on; boot deploys what is listed,
+    // and the author's own run of its tests deploys it as they would:
+    // confirmed, whatever it declares.
+    std::fs::create_dir_all(tmp.path().join(".oxplow")).map_err(|e| e.to_string())?;
+    let on: Vec<&str> = oxplow_config::DEFAULT_EXTENSIONS
+        .iter()
+        .copied()
+        .chain([ext.name.as_str()])
+        .collect();
+    std::fs::write(
+        tmp.path().join(".oxplow/project.yaml"),
+        serde_yaml::to_string(&serde_json::json!({ "extensions": on }))
+            .map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
     oxplow_app::vcs::GitProvider
         .init_repository(tmp.path())
         .await
@@ -2378,6 +2355,9 @@ async fn suite_host(
     )
     .await
     .map_err(|e| e.to_string())?;
+    oxplow_app::extension_deploy::deploy(&svc, &ext.name, tmp.path(), None, true)
+        .await
+        .map_err(|e| e.to_string())?;
     let hosted = svc
         .extension_catalog
         .get(tmp.path())
@@ -2411,25 +2391,7 @@ async fn policy_suite(
     let manifest = format!("{}/extension.yaml", ext.path.trim_end_matches('/'));
     report.ran.push(format!("{EFFORT_POLICY} suite"));
     let run = async {
-        let (tmp, svc, hosted) = suite_host(root, ext, env).await?;
-        let program = oxplow_app::exec_consent::effort_policy_program(
-            &hosted.path,
-            &hosted.name,
-            &decl.id,
-            &decl.entry,
-            &decl.needs,
-        );
-        let version = program
-            .hash(tmp.path())
-            .map_err(|e| format!("hashing it: {e}"))?;
-        oxplow_app::exec_consent::approve_program(
-            &svc.approvals,
-            tmp.path(),
-            std::slice::from_ref(&hosted),
-            oxplow_app::exec_consent::ProgramKind::EffortPolicy,
-            &program.name,
-            &version,
-        )?;
+        let (_tmp, svc, _) = suite_host(root, ext, env).await?;
         svc.config
             .write()
             .map_err(|e| e.to_string())?
@@ -2467,19 +2429,7 @@ async fn suite(
     let manifest = format!("{}/extension.yaml", ext.path.trim_end_matches('/'));
     report.ran.push(format!("{} suite", spec.capability));
     let run = async {
-        let (tmp, svc, hosted) = suite_host(root, ext, env).await?;
-        let program = oxplow_app::exec_consent::provider_program(&hosted, spec);
-        let version = program
-            .hash(tmp.path())
-            .map_err(|e| format!("hashing it: {e}"))?;
-        oxplow_app::exec_consent::approve_program(
-            &svc.approvals,
-            tmp.path(),
-            std::slice::from_ref(&hosted),
-            oxplow_app::exec_consent::ProgramKind::Provider,
-            &program.name,
-            &version,
-        )?;
+        let (tmp, svc, _) = suite_host(root, ext, env).await?;
         let project = oxplow_app::collector_runner::project_key(tmp.path());
         for (name, value) in env_credentials(spec, env) {
             svc.secrets
@@ -2685,7 +2635,7 @@ mod tests {
     fn tally(root: &Path, collector_expect: &str, command_expect: &str) {
         write(
             root,
-            "oxplow/extensions/tally/extension.yaml",
+            ".oxplow/extensions/tally/extension.yaml",
             &format!(
                 "manifest: 2
 name: tally
@@ -2695,6 +2645,7 @@ intent:
     - {{ name: labelled, input: {{ lens: labelled }}, expect: no labelled things yet }}
     - {{ name: things, input: {{ collector: things }}, expect: one thing per input row }}
     - {{ name: shell, input: {{ collector: shell }}, expect: whatever the shell says }}
+permissions: {{ sql: read, ai: true, process: true }}
 collectors:
   - id: things
     runtime: starlark
@@ -2727,54 +2678,54 @@ commands:
         );
         write(
             root,
-            "oxplow/extensions/tally/collectors/things.star",
+            ".oxplow/extensions/tally/collectors/things.star",
             "def transform(x):\n    return {\"entities\": {\"thing\": [{\"id\": r[\"id\"], \"label\": \"t\"} for r in x[\"rows\"]]}}\n",
         );
         write(
             root,
-            "oxplow/extensions/tally/collectors/shell.sh",
+            ".oxplow/extensions/tally/collectors/shell.sh",
             "#!/bin/sh\necho '{}'\n",
         );
         write(
             root,
-            "oxplow/extensions/tally/models/labelled.sql",
+            ".oxplow/extensions/tally/models/labelled.sql",
             "SELECT id, label FROM ref('thing') WHERE label IS NOT NULL\n",
         );
         write(
             root,
-            "oxplow/extensions/tally/handlers/note.star",
+            ".oxplow/extensions/tally/handlers/note.star",
             "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.comment\", \"input\": {\"ref\": x[\"input\"][\"ref\"], \"body\": \"noted\"}}]}\n",
         );
         write(
             root,
-            "oxplow/extensions/tally/lenses/labelled.yaml",
+            ".oxplow/extensions/tally/lenses/labelled.yaml",
             "title: Labelled\nquery: SELECT id, label FROM v_tally_labelled\n",
         );
         write(
             root,
-            "oxplow/extensions/tally/fixtures/labelled.yaml",
+            ".oxplow/extensions/tally/fixtures/labelled.yaml",
             "input: { lens: labelled }\nexpect: { columns: [id, label], rows: 0 }\n",
         );
         write(
             root,
-            "oxplow/extensions/tally/fixtures/things.yaml",
+            ".oxplow/extensions/tally/fixtures/things.yaml",
             &format!(
                 "input: {{ collector: things, rows: [{{ id: 1 }}, {{ id: 2 }}] }}\nexpect: {collector_expect}\n"
             ),
         );
         write(
             root,
-            "oxplow/extensions/tally/fixtures/shell.yaml",
+            ".oxplow/extensions/tally/fixtures/shell.yaml",
             "input: { collector: shell }\nexpect: { entities: { line: $any } }\n",
         );
         write(
             root,
-            "oxplow/extensions/tally/README.md",
+            ".oxplow/extensions/tally/README.md",
             "Read `v_tally_labelled`; note a work item with `tally.work.note`.\n",
         );
         write(
             root,
-            "oxplow/extensions/tally/questions.yaml",
+            ".oxplow/extensions/tally/questions.yaml",
             "- question: Which things are labelled?\n  skill: README.md\n  reaches:\n    sql: SELECT id, label FROM v_tally_labelled\n  shape: { columns: [id, label] }\n- question: Note a work item.\n  skill: README.md\n  reaches:\n    command: tally.work.note\n    input: { ref: \"work_item:oxplow:tsk1\" }\n",
         );
     }
@@ -2792,7 +2743,7 @@ commands:
         );
         write(
             dir.path(),
-            "oxplow/extensions/tally/collectors/things.star",
+            ".oxplow/extensions/tally/collectors/things.star",
             "def transform(x):\n    return {\"entities\": {\"thing\": [{\"id\": r[\"id\"], \"label\": ai_summarize(\"t\")} for r in x[\"rows\"]]}}\n",
         );
         let report = test_extension(dir.path(), "tally", false).await.unwrap();
@@ -2871,24 +2822,24 @@ commands:
     fn producer_and_consumer(root: &Path, version: u32) {
         write(
             root,
-            "oxplow/extensions/maker/extension.yaml",
+            ".oxplow/extensions/maker/extension.yaml",
             &format!(
                 "manifest: 2\nname: maker\nintent:\n  purpose: Make items.\nmodels:\n  - name: items\n    version: {version}\n    description: Items.\n    columns:\n      - {{ name: ref, type: TEXT, doc: A work item. }}\nexports:\n  - {{ contribution: model:maker/items, version: {version}, visibility: stable }}\n"
             ),
         );
         write(
             root,
-            "oxplow/extensions/maker/models/items.sql",
+            ".oxplow/extensions/maker/models/items.sql",
             "SELECT ref FROM ref('work_item')\n",
         );
         write(
             root,
-            "oxplow/extensions/reader/extension.yaml",
+            ".oxplow/extensions/reader/extension.yaml",
             "manifest: 2\nname: reader\nintent:\n  purpose: Read the maker's items.\nimports:\n  - { id: items, contribution: model:maker/items, version: 1, optional: true }\n",
         );
         write(
             root,
-            "oxplow/extensions/reader/lenses/seen.yaml",
+            ".oxplow/extensions/reader/lenses/seen.yaml",
             "title: Seen\nquery: SELECT ref FROM import_ref('items')\n",
         );
     }
@@ -2932,8 +2883,8 @@ commands:
         producer_and_consumer(dir.path(), 1);
         write(
             dir.path(),
-            ".oxplow/project.yaml",
-            "extensions:\n  disabled: [maker]\n",
+            ".oxplow/personal.yaml",
+            "disableExtensions: [maker]\n",
         );
         let report = test_extension(dir.path(), "reader", false).await.unwrap();
         assert_eq!(
@@ -2954,7 +2905,7 @@ commands:
                 "{ entities: { thing: 2 } }",
                 "[oxplow.work_item.comment]",
             );
-            let manifest = dir.path().join("oxplow/extensions/tally/extension.yaml");
+            let manifest = dir.path().join(".oxplow/extensions/tally/extension.yaml");
             let yaml = std::fs::read_to_string(&manifest).unwrap().replace(
                 "    - {{ name: shell,".replace("{{", "{").as_str(),
                 "    - { name: counted, input: { command: tally.things.count }, expect: the things counted }\n    - { name: shell,",
@@ -2962,12 +2913,12 @@ commands:
             std::fs::write(&manifest, yaml).unwrap();
             write(
                 dir.path(),
-                "oxplow/extensions/tally/handlers/count.star",
+                ".oxplow/extensions/tally/handlers/count.star",
                 "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT id FROM v_tally_labelled\"})\n    return {\"commands\": [], \"result\": {\"count\": len(rows), \"of\": \"things\"}}\n",
             );
             write(
                 dir.path(),
-                "oxplow/extensions/tally/fixtures/counted.yaml",
+                ".oxplow/extensions/tally/fixtures/counted.yaml",
                 &format!(
                     "input: {{ command: tally.things.count, input: {{}}, answers: {{ sql.read: [[{{ id: 1 }}, {{ id: 2 }}]] }} }}\nexpect: {{ result: {want} }}\n"
                 ),
@@ -2998,7 +2949,7 @@ commands:
     fn visits(root: &Path, before: i64, after: i64) {
         write(
             root,
-            "oxplow/extensions/visits/extension.yaml",
+            ".oxplow/extensions/visits/extension.yaml",
             "manifest: 2
 name: visits
 intent:
@@ -3018,12 +2969,12 @@ models:
         );
         write(
             root,
-            "oxplow/extensions/visits/models/long_visits.sql",
+            ".oxplow/extensions/visits/models/long_visits.sql",
             "SELECT id, duration_ms FROM ref('page_visit') WHERE duration_ms IS NOT NULL\n",
         );
         write(
             root,
-            "oxplow/extensions/visits/fixtures/model-long_visits.yaml",
+            ".oxplow/extensions/visits/fixtures/model-long_visits.yaml",
             &format!(
                 "before:
   page_visit:
@@ -3059,7 +3010,7 @@ after:
         let errors = report.errors.join("\n");
         assert!(
             errors.contains(
-                "oxplow/extensions/visits/extension.yaml:8: incremental model `long_visits`"
+                ".oxplow/extensions/visits/extension.yaml:8: incremental model `long_visits`"
             ) && errors.contains("1 row(s) a full refill holds"),
             "{errors}"
         );
@@ -3081,7 +3032,7 @@ after:
 
         let fixture = dir
             .path()
-            .join("oxplow/extensions/notes/fixtures/basic.yaml");
+            .join(".oxplow/extensions/notes/fixtures/basic.yaml");
         let text = std::fs::read_to_string(&fixture).unwrap();
         std::fs::write(
             &fixture,
@@ -3095,7 +3046,7 @@ after:
         let errors = report.errors.join("\n");
         assert!(
             errors.contains(
-                "oxplow/extensions/notes/fixtures/basic.yaml:1: effect `on-done` composed"
+                ".oxplow/extensions/notes/fixtures/basic.yaml:1: effect `on-done` composed"
             ),
             "{errors}"
         );
@@ -3130,36 +3081,36 @@ def transform(x):
     fn policy(root: &Path, script: &str, basic_expect: &str) {
         write(
             root,
-            "oxplow/extensions/acme/extension.yaml",
+            ".oxplow/extensions/acme/extension.yaml",
             "manifest: 2
 name: acme
-sharing: private
 intent:
   purpose: Open and close efforts as items start and finish.
   examples:
     - { name: basic, expect: nothing to do }
     - { name: start, expect: its effort opens }
     - { name: finish, expect: its effort closes }
+permissions: { sql: read, commands: [oxplow.effort.*] }
 implementations:
   - { capability: effort_policy, id: tidy, title: Tidy, entry: policies/tidy.star, needs: [sql.read] }
 ",
         );
-        write(root, "oxplow/extensions/acme/policies/tidy.star", script);
+        write(root, ".oxplow/extensions/acme/policies/tidy.star", script);
         write(
             root,
-            "oxplow/extensions/acme/fixtures/basic.yaml",
+            ".oxplow/extensions/acme/fixtures/basic.yaml",
             &format!(
                 "input: {{ implementation: tidy, event: {{ type: thread.checkpoint, payload: {{ thread: \"thread:thr1\", turn: \"turn:trn1\", reason: turn_end, snapshot: \"snapshot:1\", changed: false, writing_tools: 0 }} }} }}\nexpect: {basic_expect}\n"
             ),
         );
         write(
             root,
-            "oxplow/extensions/acme/fixtures/start.yaml",
+            ".oxplow/extensions/acme/fixtures/start.yaml",
             "input: { implementation: tidy, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: in_progress }, anchors: { thread_id: thr1 } } }\nexpect: { commands: [oxplow.effort.open] }\n",
         );
         write(
             root,
-            "oxplow/extensions/acme/fixtures/finish.yaml",
+            ".oxplow/extensions/acme/fixtures/finish.yaml",
             "input: { implementation: tidy, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: done } }, answers: { sql.read: [[{ ref: \"effort:eff3\" }]] } }\nexpect: { commands: [oxplow.effort.close] }\n",
         );
     }
@@ -3196,7 +3147,7 @@ implementations:
         policy(dir.path(), TIDY, "{ commands: [oxplow.effort.open] }");
         let finish = dir
             .path()
-            .join("oxplow/extensions/acme/fixtures/finish.yaml");
+            .join(".oxplow/extensions/acme/fixtures/finish.yaml");
         let text = std::fs::read_to_string(&finish).unwrap();
         std::fs::write(
             &finish,
@@ -3230,10 +3181,12 @@ implementations:
         policy(root, shape, "{ skip: \"1 fixture None None None\" }");
         // `start` and `finish` aren't this script's; only `basic` stays.
         for gone in ["start", "finish"] {
-            std::fs::remove_file(root.join(format!("oxplow/extensions/acme/fixtures/{gone}.yaml")))
-                .unwrap();
+            std::fs::remove_file(
+                root.join(format!(".oxplow/extensions/acme/fixtures/{gone}.yaml")),
+            )
+            .unwrap();
         }
-        let manifest = root.join("oxplow/extensions/acme/extension.yaml");
+        let manifest = root.join(".oxplow/extensions/acme/extension.yaml");
         let text = std::fs::read_to_string(&manifest).unwrap();
         std::fs::write(
             &manifest,
@@ -3267,7 +3220,7 @@ implementations:
         ] {
             write(
                 root,
-                "oxplow/extensions/acme/fixtures/basic.yaml",
+                ".oxplow/extensions/acme/fixtures/basic.yaml",
                 &format!(
                     "input: {{ implementation: tidy, event: {event} }}\nexpect: {{ skip: $any }}\n"
                 ),
@@ -3291,10 +3244,9 @@ implementations:
         let root = dir.path();
         write(
             root,
-            "oxplow/extensions/acme/extension.yaml",
+            ".oxplow/extensions/acme/extension.yaml",
             "manifest: 2
 name: acme
-sharing: private
 intent:
   purpose: Note merges.
   examples:
@@ -3309,27 +3261,27 @@ effects:
         );
         write(
             root,
-            "oxplow/extensions/acme/merged.v1.json",
+            ".oxplow/extensions/acme/merged.v1.json",
             r#"{"type": "object", "required": ["number"], "properties": {"number": {"type": "integer"}}}"#,
         );
         write(
             root,
-            "oxplow/extensions/acme/merged.v2.json",
+            ".oxplow/extensions/acme/merged.v2.json",
             r#"{"type": "object", "required": ["number", "by"], "properties": {"number": {"type": "integer"}, "by": {"type": "string"}}}"#,
         );
         write(
             root,
-            "oxplow/extensions/acme/merged.star",
+            ".oxplow/extensions/acme/merged.star",
             "def transform(x):\n    p = dict(x[\"payload\"])\n    p[\"by\"] = \"unknown\"\n    return p\n",
         );
         write(
             root,
-            "oxplow/extensions/acme/note.star",
+            ".oxplow/extensions/acme/note.star",
             "def transform(x):\n    e = x[\"event\"]\n    return {\"skip\": \"v%d by %s\" % (e[\"v\"], e[\"payload\"][\"by\"])}\n",
         );
         write(
             root,
-            "oxplow/extensions/acme/fixtures/old.yaml",
+            ".oxplow/extensions/acme/fixtures/old.yaml",
             "input: { effect: note, event: { type: acme.merged, v: 1, payload: { number: 3 } } }\nexpect: { skip: v2 by unknown }\n",
         );
         let report = test_extension(root, "acme", false).await.unwrap();
@@ -3365,10 +3317,9 @@ effects:
         let root = dir.path();
         write(
             root,
-            "oxplow/extensions/acme/extension.yaml",
+            ".oxplow/extensions/acme/extension.yaml",
             "manifest: 2
 name: acme
-sharing: private
 intent:
   purpose: PRs.
   examples:
@@ -3394,38 +3345,38 @@ ref_kinds:
         );
         write(
             root,
-            "oxplow/extensions/acme/merged.v1.json",
+            ".oxplow/extensions/acme/merged.v1.json",
             r#"{"type": "object", "required": ["number"]}"#,
         );
         write(
             root,
-            "oxplow/extensions/acme/merged.v2.json",
+            ".oxplow/extensions/acme/merged.v2.json",
             r#"{"type": "object", "required": ["pr"]}"#,
         );
         write(
             root,
-            "oxplow/extensions/acme/merged.star",
+            ".oxplow/extensions/acme/merged.star",
             "def transform(x):\n    return {\"pr\": x[\"payload\"][\"number\"]}\n",
         );
         write(
             root,
-            "oxplow/extensions/acme/models/prs.sql",
+            ".oxplow/extensions/acme/models/prs.sql",
             "SELECT 'acme_pr:1' AS ref, 'One' AS title",
         );
         write(
             root,
-            "oxplow/extensions/acme/lenses/open.yaml",
+            ".oxplow/extensions/acme/lenses/open.yaml",
             "title: Open\nquery: \"SELECT 1 AS n\"\n",
         );
         write(
             root,
-            "oxplow/extensions/acme/fixtures/merged.yaml",
+            ".oxplow/extensions/acme/fixtures/merged.yaml",
             "input: { event_type: acme.merged, payload: { pr: 12 } }\nexpect: { valid: true }\n",
         );
-        write(root, "oxplow/extensions/acme/fixtures/old.yaml", "input: { event_type: acme.merged, v: 1, payload: { number: 12 } }\nexpect: { valid: true, upcast: { pr: 12 } }\n");
+        write(root, ".oxplow/extensions/acme/fixtures/old.yaml", "input: { event_type: acme.merged, v: 1, payload: { number: 12 } }\nexpect: { valid: true, upcast: { pr: 12 } }\n");
         write(
             root,
-            "oxplow/extensions/acme/fixtures/link.yaml",
+            ".oxplow/extensions/acme/fixtures/link.yaml",
             "input: { wikilink: \"pr:12\" }\nexpect: { ref: \"acme_pr:12\" }\n",
         );
         let report = test_extension(root, "acme", false).await.unwrap();
@@ -3438,10 +3389,10 @@ ref_kinds:
             );
         }
 
-        write(root, "oxplow/extensions/acme/fixtures/merged.yaml", "input: { event_type: acme.merged, payload: { number: 12 } }\nexpect: { valid: true }\n");
+        write(root, ".oxplow/extensions/acme/fixtures/merged.yaml", "input: { event_type: acme.merged, payload: { number: 12 } }\nexpect: { valid: true }\n");
         write(
             root,
-            "oxplow/extensions/acme/fixtures/link.yaml",
+            ".oxplow/extensions/acme/fixtures/link.yaml",
             "input: { wikilink: \"pr:12\" }\nexpect: { ref: \"acme_pr:13\" }\n",
         );
         let errors = test_extension(root, "acme", false)
@@ -3450,12 +3401,13 @@ ref_kinds:
             .errors
             .join("\n");
         assert!(
-            errors
-                .contains("oxplow/extensions/acme/fixtures/merged.yaml:1: `acme.merged@2` refuses"),
+            errors.contains(
+                ".oxplow/extensions/acme/fixtures/merged.yaml:1: `acme.merged@2` refuses"
+            ),
             "{errors}"
         );
         assert!(
-            errors.contains("oxplow/extensions/acme/fixtures/link.yaml:1: `[[pr:12]]` names"),
+            errors.contains(".oxplow/extensions/acme/fixtures/link.yaml:1: `[[pr:12]]` names"),
             "{errors}"
         );
     }
@@ -3469,10 +3421,9 @@ ref_kinds:
         let root = dir.path();
         write(
             root,
-            "oxplow/extensions/editor/extension.yaml",
+            ".oxplow/extensions/editor/extension.yaml",
             "manifest: 2
 name: editor
-sharing: private
 intent:
   purpose: Edit work items.
   examples:
@@ -3481,12 +3432,12 @@ intent:
         );
         write(
             root,
-            "oxplow/extensions/editor/lenses/edit-item.yaml",
+            ".oxplow/extensions/editor/lenses/edit-item.yaml",
             "title: Edit\nviz: form\nparams: [{ name: ref }]\nquery: SELECT title, body FROM v_work_item WHERE ref = :ref\nform: { command: oxplow.work_item.update, defaults: { ref: '{{param.ref}}' }, fixed: [ref], fields: [title, body] }\n",
         );
         write(
             root,
-            "oxplow/extensions/editor/fixtures/edit.yaml",
+            ".oxplow/extensions/editor/fixtures/edit.yaml",
             "input: { form: edit-item, params: { ref: 'work_item:oxplow:tsk1' } }\nexpect: { values: { ref: 'work_item:oxplow:tsk1' }, fixed: [ref], fields: [title, body] }\n",
         );
         let report = test_extension(root, "editor", false).await.unwrap();
@@ -3499,7 +3450,7 @@ intent:
 
         write(
             root,
-            "oxplow/extensions/editor/fixtures/edit.yaml",
+            ".oxplow/extensions/editor/fixtures/edit.yaml",
             "input: { form: edit-item, params: { ref: 'work_item:oxplow:tsk1' } }\nexpect: { fixed: [ref, title] }\n",
         );
         let errors = test_extension(root, "editor", false)
@@ -3509,7 +3460,7 @@ intent:
             .join("\n");
         assert!(
             errors.contains(
-                "oxplow/extensions/editor/fixtures/edit.yaml:1: form `edit-item` opened with"
+                ".oxplow/extensions/editor/fixtures/edit.yaml:1: form `edit-item` opened with"
             ),
             "{errors}"
         );

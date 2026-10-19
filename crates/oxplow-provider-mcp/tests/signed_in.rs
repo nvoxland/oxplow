@@ -35,17 +35,29 @@ fn copy_dir(from: &Path, to: &Path) {
 /// bearer `NOTES_TOKEN` a credential the person signs in for there.
 fn write_extension(project: &Path, sim: &OAuthSim) {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/notes");
-    let ext = project.join("oxplow/extensions/notes");
+    let ext = project.join(".oxplow/extensions/notes");
     copy_dir(&fixture, &ext);
+    // On for the project, so boot deploys it.
+    std::fs::write(
+        project.join(".oxplow/project.yaml"),
+        "extensions: [oxplow-bundled, notes]\n",
+    )
+    .unwrap();
     let manifest = std::fs::read_to_string(ext.join("extension.yaml")).unwrap();
     let by_command = "      mcp: { command: [bin/notes-server] }\n";
     assert!(manifest.contains(by_command));
     std::fs::write(
         ext.join("extension.yaml"),
-        manifest.replace(
-            by_command,
-            &format!("      mcp: {{ url: \"{}\", auth: NOTES_TOKEN }}\n", sim.mcp_url),
-        ) + &format!(
+        manifest
+            .replace(
+                "  process: true\n",
+                "  network: [127.0.0.1]\n  secrets: [NOTES_TOKEN]\n",
+            )
+            .replace(
+                by_command,
+                &format!("      mcp: {{ url: \"{}\", auth: NOTES_TOKEN }}\n", sim.mcp_url),
+            )
+            + &format!(
             "    credentials:\n      - name: NOTES_TOKEN\n        oauth:\n          authorize_url: {}\n          token_url: {}\n          client_id: oxplow-test\n    network: [127.0.0.1]\n",
             sim.authorize_url, sim.token_url
         ),
@@ -87,8 +99,11 @@ async fn a_signed_in_bearer_renews_once_when_its_server_stops_taking_it() {
     .await
     .unwrap();
 
-    // The person approves the provider (where it signs in is part of it)
-    // and enables the instance.
+    // The person deploys it (it runs a program: boot waits for them) and
+    // enables the instance.
+    oxplow_app::extension_deploy::deploy(&svc, "notes", project, None, true)
+        .await
+        .unwrap();
     let hosted = svc
         .extension_catalog
         .get(project)
@@ -97,18 +112,6 @@ async fn a_signed_in_bearer_renews_once_when_its_server_stops_taking_it() {
         .cloned()
         .unwrap();
     assert_eq!(hosted.errors, Vec::<String>::new());
-    let spec = hosted.providers[0].clone();
-    let program = oxplow_app::exec_consent::provider_program(&hosted, &spec);
-    let version = program.hash(project).unwrap();
-    oxplow_app::exec_consent::approve_program(
-        &svc.approvals,
-        project,
-        std::slice::from_ref(&hosted),
-        oxplow_app::exec_consent::ProgramKind::Provider,
-        &program.name,
-        &version,
-    )
-    .unwrap();
     // Every create files on the notes tracker.
     svc.config
         .write()

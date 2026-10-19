@@ -25,7 +25,7 @@ const lens = (over: Partial<Lens> = {}): Lens => ({
   parts: [],
   launcherCategory: null,
   hidden: false,
-  path: "oxplow/extensions/review/lenses/waiting.yaml",
+  path: ".oxplow/extensions/review/lenses/waiting.yaml",
   ...over,
 });
 
@@ -159,8 +159,8 @@ describe("formatCell", () => {
 describe("lensDirectoryEntries", () => {
   test("one launcher entry per loaded lens, under Lenses", () => {
     const exts: Extension[] = [
-      { name: "review", description: "Review helpers", path: "oxplow/extensions/review", errors: [], lenses: [lens()], source: null, collectors: [], origin: "project", ui: { slots: [], commands: [], decorators: [] }, enabled: true },
-      { name: "broken", description: "", path: "oxplow/extensions/broken", errors: ["bad"], lenses: [], source: null, collectors: [], origin: "project", ui: { slots: [], commands: [], decorators: [] }, enabled: true },
+      { name: "review", description: "Review helpers", path: ".oxplow/extensions/review", errors: [], lenses: [lens()], deployment: { kind: "deployed", hash: "0123456789abcdef" }, collectors: [], origin: "project", ui: { slots: [], commands: [], decorators: [] }, enabled: true },
+      { name: "broken", description: "", path: ".oxplow/extensions/broken", errors: ["bad"], lenses: [], deployment: { kind: "deployed", hash: "0123456789abcdef" }, collectors: [], origin: "project", ui: { slots: [], commands: [], decorators: [] }, enabled: true },
     ];
     const entries = lensDirectoryEntries(exts);
     expect(entries).toHaveLength(1);
@@ -267,7 +267,7 @@ describe("launcher entries", () => {
       path: "",
       errors: [],
       lenses: [],
-      source: null,
+      deployment: { kind: "deployed", hash: "0123456789abcdef" },
       collectors: [],
       origin: "project",
       ui: { slots: [], commands: [], decorators: [] },

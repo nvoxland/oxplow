@@ -4,7 +4,7 @@
 /// provider (`transitionWorkItem`). Every card opens its item's page.
 /// Drop targets highlight while a card is over them.
 import type { CSSProperties } from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { decodeWorkItemDrag, dragHasWorkItems, setWorkItemDrag } from "../../agent-context-dnd.js";
 import { WORK_ITEM_DRAG_MIME } from "../../dragMimes.js";
@@ -40,12 +40,17 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
   const refOffersFor = useRefOffers();
   const { fields } = useWorkListProfile();
   const scopeKey = JSON.stringify(scope);
+  // Only the latest read lands: one for a scope left behind may answer last.
+  const latest = useRef(0);
   const refresh = useCallback(async () => {
+    const mine = ++latest.current;
     try {
       const out = await readWorkItems({ scope: JSON.parse(scopeKey) as WorkItemScope });
+      if (mine !== latest.current) return;
       setItems(out.items);
       setReads(out.reads);
     } catch (e) {
+      if (mine !== latest.current) return;
       recordOpError({ label: "Load the board", message: e instanceof Error ? e.message : String(e) });
     }
   }, [scopeKey]);

@@ -12,6 +12,8 @@ const COLUMNS = [
 const ran: [string, unknown][] = [];
 // `api.js` is mocked with the reals spread, and put back as it was
 // afterwards so later files see their own mocks.
+import { configValueResult, readsSettings } from "../configValuesTestSupport.js";
+
 const realApi = { ...(await import("../api.js")) };
 afterAll(() => {
   mock.module("../api.js", () => realApi);
@@ -22,11 +24,13 @@ mock.module("../api.js", () => ({
   listExtensions: async () => [
     { enabled: true, pages: [], lenses: [{ title: "Ready Tasks", needs: ["work_items"] }], advisories: [] },
   ],
-  effectiveConfig: async () => [
-    { key: "activeProviders", origin: "default", value: {} },
-    { key: "personal.activeProviders", origin: "personal", value: { work_items: "none" } },
-  ],
-  querySql: async () => ({
+  querySql: async (sql: string) =>
+    readsSettings(sql)
+      ? configValueResult([
+          { key: "activeProviders", origin: "default", value: {} },
+          { key: "personal.activeProviders", origin: "personal", value: { work_items: "none" } },
+        ])
+      : {
     columns: COLUMNS,
     rows: [
       ["work_items", "none", null, "{}", 1, "None", "none", 1, "personal", "Work list", 1, 1],
@@ -36,7 +40,7 @@ mock.module("../api.js", () => ({
     truncated: false,
     reads: { models: ["v_capability_provider"], tables: [], measures: [] },
     freshness: [],
-  }),
+  },
   runCommand: async (name: string, input: unknown) => {
     ran.push([name, input]);
     return { result: null, audit_id: 1, event_id: "e", inverse: null };

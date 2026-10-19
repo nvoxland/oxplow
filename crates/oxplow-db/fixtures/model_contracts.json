@@ -7884,6 +7884,61 @@
         }
       ],
       "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "owner",
+          "type": "TEXT",
+          "doc": "The extension that declares it, `project` for `.oxplow/project.yaml`, or `built-in`."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "The collector's id within its owner (may be dotted: `repo.scan_clone`)."
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "doc": "`ok`, `error` (what failed, or a permission its extension lacks; v4), or `skipped` (the loop guard refused its run for an event; `error` says why)."
+        },
+        {
+          "name": "last_run_at",
+          "type": "TEXT",
+          "doc": "When it last ran (RFC 3339)."
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "The last run's error, when it failed."
+        },
+        {
+          "name": "row_counts_json",
+          "type": "TEXT",
+          "doc": "Rows per entity after the last successful run, as JSON."
+        },
+        {
+          "name": "cursor_json",
+          "type": "TEXT",
+          "doc": "Its checkpoint: the opaque state its script or provider read returned last."
+        },
+        {
+          "name": "last_event_id",
+          "type": "INTEGER",
+          "doc": "The seq of the last trigger event it ran for."
+        },
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "doc": "Its last run (`v_extension_run.run_id`); NULL for a run before runs were recorded. (v2)"
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`collector:<owner>/<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
+        }
+      ],
+      "key": []
     }
   },
   "capability_provider": {
@@ -12762,7 +12817,7 @@
         {
           "name": "name",
           "type": "TEXT",
-          "doc": "Its name: the folder under `oxplow/extensions/`."
+          "doc": "Its name: the folder under `.oxplow/extensions/`."
         },
         {
           "name": "namespace",
@@ -12823,6 +12878,247 @@
           "name": "warnings",
           "type": "TEXT",
           "doc": "Things worth fixing that don't stop it loading, as a JSON array of strings."
+        }
+      ],
+      "key": [
+        "ref"
+      ]
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`extension:<name>`."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "Its name."
+        },
+        {
+          "name": "namespace",
+          "type": "TEXT",
+          "doc": "The namespace its commands' ids are under."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "What it is, in a line."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "The folder its files are read from: its deployment in the store, or its source relative to the checkout."
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "doc": "`project` or `bundled` (ships with oxplow, read-only)."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "Its `version:`; NULL when it declares none."
+        },
+        {
+          "name": "enabled",
+          "type": "INTEGER",
+          "doc": "0 when configuration disables it or a public contract blocks it: it contributes nothing."
+        },
+        {
+          "name": "purpose",
+          "type": "TEXT",
+          "doc": "Why it exists (its intent); NULL when the manifest didn't load."
+        },
+        {
+          "name": "deployment",
+          "type": "TEXT",
+          "doc": "Where its files come from: `deployed` (a deployment in the store, `v_extension_deployment`), `shipped` (the deployment that ships with oxplow), `source` (read from its source folder), `undeployed` (its source is here but it was never deployed; it runs nothing) or `not_here` (listed as on, but neither its source nor a deployment is on this machine). (v2)"
+        },
+        {
+          "name": "hash",
+          "type": "TEXT",
+          "doc": "The hash of the deployment it runs; NULL when it runs none. (v2)"
+        },
+        {
+          "name": "errors",
+          "type": "TEXT",
+          "doc": "Problems reported while loading it that did not hold it back, as a JSON array of strings; `[]` when healthy."
+        },
+        {
+          "name": "warnings",
+          "type": "TEXT",
+          "doc": "Things worth fixing that don't stop it loading, as a JSON array of strings."
+        }
+      ],
+      "key": [
+        "ref"
+      ]
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`extension:<name>`."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "Its name."
+        },
+        {
+          "name": "namespace",
+          "type": "TEXT",
+          "doc": "The namespace its commands' ids are under."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "What it is, in a line."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "The folder its files are read from: its deployment in the store, or its source relative to the checkout."
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "doc": "`project` or `bundled` (ships with oxplow, read-only)."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "Its `version:`; NULL when it declares none."
+        },
+        {
+          "name": "enabled",
+          "type": "INTEGER",
+          "doc": "0 when configuration disables it or a public contract blocks it: it contributes nothing."
+        },
+        {
+          "name": "purpose",
+          "type": "TEXT",
+          "doc": "Why it exists (its intent); NULL when the manifest didn't load."
+        },
+        {
+          "name": "deployment",
+          "type": "TEXT",
+          "doc": "Where its files come from: `deployed` (a deployment in the store, `v_extension_deployment`), `shipped` (the deployment that ships with oxplow), `source` (read from its source folder), `undeployed` (its source is here but it was never deployed; it runs nothing) or `not_here` (listed as on, but neither its source nor a deployment is on this machine). (v2)"
+        },
+        {
+          "name": "hash",
+          "type": "TEXT",
+          "doc": "The hash of the deployment it runs; NULL when it runs none. (v2)"
+        },
+        {
+          "name": "errors",
+          "type": "TEXT",
+          "doc": "Problems reported while loading it that did not hold it back, as a JSON array of strings; `[]` when healthy."
+        },
+        {
+          "name": "warnings",
+          "type": "TEXT",
+          "doc": "Things worth fixing that don't stop it loading, as a JSON array of strings."
+        },
+        {
+          "name": "permissions",
+          "type": "TEXT",
+          "doc": "What its manifest declares it may reach beyond the baseline (`permissions:`: `sql`, `commands`, `files`, `ai`, `network`, `process`, `secrets`, `agent`), as a JSON object; `{}` is the baseline. Approved when it is deployed. (v3)"
+        },
+        {
+          "name": "pending",
+          "type": "TEXT",
+          "doc": "What an extension that is on but undeployed waits on a person for: the permissions its source would add, one line each, as a JSON array; `[]` when nothing waits. Startup deploys an undeployed extension only when it asks for nothing. (v3)"
+        }
+      ],
+      "key": [
+        "ref"
+      ]
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`extension:<name>`."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "Its name."
+        },
+        {
+          "name": "namespace",
+          "type": "TEXT",
+          "doc": "The namespace its commands' ids are under."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "What it is, in a line."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "The folder its files are read from: its deployment in the store, or its source relative to the checkout."
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "doc": "`project` or `bundled` (ships with oxplow, read-only)."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "Its `version:`; NULL when it declares none."
+        },
+        {
+          "name": "enabled",
+          "type": "INTEGER",
+          "doc": "0 when configuration disables it or a public contract blocks it: it contributes nothing."
+        },
+        {
+          "name": "purpose",
+          "type": "TEXT",
+          "doc": "Why it exists (its intent); NULL when the manifest didn't load."
+        },
+        {
+          "name": "deployment",
+          "type": "TEXT",
+          "doc": "Where its files come from: `deployed` (a deployment in the store, `v_extension_deployment`), `shipped` (the deployment that ships with oxplow), `source` (read from its source folder), `undeployed` (its source is here but it was never deployed; it runs nothing) or `not_here` (listed as on, but neither its source nor a deployment is on this machine). (v2)"
+        },
+        {
+          "name": "hash",
+          "type": "TEXT",
+          "doc": "The hash of the deployment it runs; NULL when it runs none. (v2)"
+        },
+        {
+          "name": "errors",
+          "type": "TEXT",
+          "doc": "Problems reported while loading it that did not hold it back, as a JSON array of strings; `[]` when healthy."
+        },
+        {
+          "name": "warnings",
+          "type": "TEXT",
+          "doc": "Things worth fixing that don't stop it loading, as a JSON array of strings."
+        },
+        {
+          "name": "permissions",
+          "type": "TEXT",
+          "doc": "What its manifest declares it may reach beyond the baseline (`permissions:`: `sql`, `commands`, `files`, `ai`, `network`, `process`, `secrets`, `agent`), as a JSON object; `{}` is the baseline. Approved when it is deployed. (v3)"
+        },
+        {
+          "name": "pending",
+          "type": "TEXT",
+          "doc": "What an extension that is on but undeployed waits on a person for: the permissions its source would add, one line each, as a JSON array; `[]` when nothing waits. Startup deploys an undeployed extension only when it asks for nothing. (v3)"
+        },
+        {
+          "name": "shared",
+          "type": "INTEGER",
+          "doc": "1 when it is the team's: the project's `extensions:` list names it (`oxplow.extension.share`). (v4)"
         }
       ],
       "key": [
@@ -13076,6 +13372,38 @@
           "name": "version",
           "type": "TEXT",
           "doc": "Its approval hash as it is now — what a person's approval names; NULL for a collector needing none."
+        },
+        {
+          "name": "disabled",
+          "type": "TEXT",
+          "doc": "Why failures disabled it on this machine; NULL when it isn't."
+        }
+      ],
+      "key": [
+        "ref"
+      ]
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`collector:<owner>/<id>`."
+        },
+        {
+          "name": "owner",
+          "type": "TEXT",
+          "doc": "The extension that declares it."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "Its id within the extension."
+        },
+        {
+          "name": "network_enforced",
+          "type": "INT",
+          "doc": "1 when this OS enforces the collector's `network` list."
         },
         {
           "name": "disabled",
@@ -13872,6 +14200,303 @@
       ],
       "key": [
         "key"
+      ]
+    }
+  },
+  "config_value": {
+    "1": {
+      "columns": [
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "A project key (`snapshotRetentionDays`), or a scoped name (`ai.roles.main`, `personal.activeProviders`, `metrics.<key>`, `dimensions.<key>`)."
+        },
+        {
+          "name": "value",
+          "type": "TEXT",
+          "doc": "Its value now, as JSON."
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "doc": "Where the value comes from: `default`, `global`, `project`, `personal` or `extension`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension it comes from, when `origin` is `extension`."
+        },
+        {
+          "name": "human_only",
+          "type": "INT",
+          "doc": "1 when only a person may set it; an agent's change waits for their approval."
+        },
+        {
+          "name": "doc",
+          "type": "TEXT",
+          "doc": "What it is for."
+        },
+        {
+          "name": "schema",
+          "type": "TEXT",
+          "doc": "A project key's value schema, as JSON; NULL for the rest."
+        }
+      ],
+      "key": [
+        "key"
+      ]
+    }
+  },
+  "agent_conversation": {
+    "1": {
+      "columns": [
+        {
+          "name": "stream_id",
+          "type": "INT",
+          "doc": "The stream whose worktree it was begun in (v_stream.id)."
+        },
+        {
+          "name": "harness",
+          "type": "TEXT",
+          "doc": "The harness that keeps it (`claude`, `codex`, `opencode`)."
+        },
+        {
+          "name": "native_id",
+          "type": "TEXT",
+          "doc": "The harness's own id for it: what a resume names. NULL on a `problem` row."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Its title, if the harness keeps one."
+        },
+        {
+          "name": "first_prompt",
+          "type": "TEXT",
+          "doc": "The first thing the person asked, if the harness keeps it."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "When it began."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "When it was last active."
+        },
+        {
+          "name": "size_bytes",
+          "type": "INT",
+          "doc": "How large its saved transcript is."
+        },
+        {
+          "name": "parent",
+          "type": "TEXT",
+          "doc": "The conversation it was forked from, if any."
+        },
+        {
+          "name": "problem",
+          "type": "TEXT",
+          "doc": "Why the harness couldn't list its conversations now; NULL on a conversation."
+        }
+      ],
+      "key": []
+    }
+  },
+  "vcs_workspace": {
+    "1": {
+      "columns": [
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "Where it is on disk."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "The branch it has checked out; NULL on a detached HEAD."
+        },
+        {
+          "name": "head",
+          "type": "TEXT",
+          "doc": "The commit it is at."
+        },
+        {
+          "name": "is_main",
+          "type": "INT",
+          "doc": "1 for the repository's primary working copy."
+        },
+        {
+          "name": "stream_id",
+          "type": "INT",
+          "doc": "The stream working in it (v_stream.id); NULL when none does."
+        }
+      ],
+      "key": [
+        "path"
+      ]
+    }
+  },
+  "workspace_file": {
+    "1": {
+      "columns": [
+        {
+          "name": "stream_id",
+          "type": "INT",
+          "doc": "The stream whose worktree it lists (v_stream.id)."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "Its path in the worktree, `/`-separated."
+        },
+        {
+          "name": "parent",
+          "type": "TEXT",
+          "doc": "The folder it is in; `''` at the top level."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "Its last path segment."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`file` or `dir`."
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "doc": "A file's change against HEAD (`added`, `modified`, `deleted`, `renamed`, `untracked`, `conflicted`); NULL when unchanged, and on a folder."
+        }
+      ],
+      "key": []
+    }
+  },
+  "extension_deployment": {
+    "1": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`extension_deployment:<name>@<hash>`."
+        },
+        {
+          "name": "extension_ref",
+          "type": "TEXT",
+          "doc": "`extension:<name>`: the extension it is a deployment of; NULL when the catalog no longer lists it."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The extension's name."
+        },
+        {
+          "name": "hash",
+          "type": "TEXT",
+          "doc": "The hash of the source it was copied from: its identity."
+        },
+        {
+          "name": "deployed_at",
+          "type": "TEXT",
+          "doc": "When it was first deployed."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream whose checkout it was deployed from; NULL when oxplow deployed it at startup."
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "The source folder it was copied from."
+        },
+        {
+          "name": "active",
+          "type": "INTEGER",
+          "doc": "1 for the deployment the extension runs now."
+        }
+      ],
+      "key": [
+        "ref"
+      ]
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`extension_deployment:<name>@<hash>`."
+        },
+        {
+          "name": "extension_ref",
+          "type": "TEXT",
+          "doc": "`extension:<name>`: the extension it is a deployment of; NULL when the catalog no longer lists it."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The extension's name."
+        },
+        {
+          "name": "hash",
+          "type": "TEXT",
+          "doc": "The hash of the source it was copied from: its identity."
+        },
+        {
+          "name": "deployed_at",
+          "type": "TEXT",
+          "doc": "When it was first deployed."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream whose checkout it was deployed from; NULL when oxplow deployed it at startup."
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "The source folder it was copied from."
+        },
+        {
+          "name": "active",
+          "type": "INTEGER",
+          "doc": "1 for the deployment the extension runs now."
+        },
+        {
+          "name": "permissions",
+          "type": "TEXT",
+          "doc": "What it declares it may reach beyond the baseline, as a JSON object (`v_extension.permissions`'s shape): what a person approved when it was deployed. (v2)"
+        }
+      ],
+      "key": [
+        "ref"
+      ]
+    }
+  },
+  "extension_source": {
+    "1": {
+      "columns": [
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The extension's name."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "Its source folder, relative to the project when inside it."
+        },
+        {
+          "name": "hash",
+          "type": "TEXT",
+          "doc": "The hash of the source as it is now (`v_extension_deployment.hash` of a deploy of it)."
+        }
+      ],
+      "key": [
+        "name"
       ]
     }
   }

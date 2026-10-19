@@ -1,4 +1,7 @@
-import { approveProgram, ipc, run, type Daemon } from "../../support/daemon.js";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+import { deploy, extensionSource, ipc, run, type Daemon } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
@@ -29,7 +32,6 @@ async function notesOn(daemon: Daemon, title: string): Promise<number> {
 
 test("a failed reaction is in Delivery, and a person's Retry composes it afresh", async ({ fresh }) => {
   const { page, daemon } = fresh;
-  await approveProgram(daemon, "effect", "e2e/note-created");
   await page.goto("/");
   await openFromLauncher(page, "Settings: Data");
   await run(daemon, "oxplow.work_item.create", { title: "Plum [fail]", thread: daemon.thread });
@@ -46,14 +48,38 @@ test("a failed reaction is in Delivery, and a person's Retry composes it afresh"
   await expect.poll(() => notesOn(daemon, "Plum")).toBe(1);
 });
 
-test("a person's Backfill reaches what was logged before the effect was approved", async ({ fresh }) => {
+test("a person's Backfill reaches what was logged before the effect was deployed", async ({ fresh }) => {
   const { page, daemon } = fresh;
+  // Logged first; then an extension whose effect comments on created
+  // tasks is deployed: it starts after what was already logged.
   await run(daemon, "oxplow.work_item.create", { title: "Fig", thread: daemon.thread });
-  await approveProgram(daemon, "effect", "e2e/note-created");
+  const dir = extensionSource(daemon, "late");
+  mkdirSync(join(dir, "effects"), { recursive: true });
+  writeFileSync(
+    join(dir, "extension.yaml"),
+    "manifest: 2\nname: late\nintent:\n  purpose: An effect deployed after the event it backfills.\n" +
+      "permissions: { commands: [oxplow.work_item.comment] }\n" +
+      "effects:\n  - { id: note, summary: Notes a created task., on: [work_item.created], entry: effects/note.star }\n",
+  );
+  writeFileSync(
+    join(dir, "effects", "note.star"),
+    'def transform(x):\n    return {"commands": [{"name": "oxplow.work_item.comment", "input": {"ref": x["event"]["payload"]["work_item"], "body": "Noted late."}}]}\n',
+  );
+  await deploy(daemon, "late");
+  const late = async () =>
+    Number(
+      (
+        await sql(
+          daemon,
+          "SELECT count(*) FROM v_work_item_comment c JOIN v_work_item w ON w.ref = c.ref WHERE w.title = 'Fig' AND c.body = 'Noted late.'",
+        )
+      )[0]?.[0],
+    );
+  expect(await late()).toBe(0);
   await page.goto("/");
   await openFromLauncher(page, "Settings: Data");
-  await page.getByTestId(`effect-backfill-${EFFECT}`).click();
-  await expect(page.getByTestId(`effect-backfill-ask-${EFFECT}`)).toBeVisible();
-  await page.getByTestId(`effect-backfill-run-${EFFECT}`).click();
-  await expect.poll(() => notesOn(daemon, "Fig")).toBe(1);
+  await page.getByTestId("effect-backfill-late/note").click();
+  await expect(page.getByTestId("effect-backfill-ask-late/note")).toBeVisible();
+  await page.getByTestId("effect-backfill-run-late/note").click();
+  await expect.poll(late).toBe(1);
 });

@@ -110,7 +110,7 @@ extension host lands.
   `terminal`
 - **Knowledge:** `wiki`
 - **Lenses:** `lens` (`lens:<extension>/<slug>`, user/agent-built from
-  `oxplow/extensions/`; see [extensions.md](./extensions.md))
+  `.oxplow/extensions/`; see [extensions.md](./extensions.md))
 - **System:** `settings`, `external-url`
 - **Data (the core explorer; stays core):** `explore-data`, `metrics`,
   `metrics-recorded`, `metric`,
@@ -201,8 +201,12 @@ and a test checks they match.
 The desktop draws a `page` tab in one renderer (`App.tsx`,
 `pageRenderers.page`): it finds the declaration (`declaredPage`, by tab
 id among the enabled extensions), draws a built-in from the
-`builtInPages` table by name, and a lens page through
-`DeclaredPageView` (`LensPage` with the id's params). While the
+`builtInPages` table (`pages/builtInPages.tsx`) by name, and a lens page through
+`DeclaredPageView` (`LensPage` with the id's params). Each built-in body is a
+`(ctx) => CenterTab | null` over `{ ref, params, state, nav, scope }`;
+`scope` is the `AppScope` (`pages/appScope.ts`), the explicit list of
+what core offers them (selection, work state, handlers) that `App.tsx`
+builds per render, so a body never reaches into App's locals. While the
 extensions load, an oxplow page whose id is a built-in's name draws the
 built-in straight away. Icons and labels come from the declaration too:
 `kindForTabId` gives a page's id (`tasks`, `gh/open-prs`) as its kind,
@@ -269,8 +273,8 @@ proposals, failed operations, undelivered events, firing badges — isn't
 a rail panel: it's the status bar's bell and the Alerts page (see usability.md). A
 layout stored before a core panel existed gets it appended at the bottom.
 The set of extension panels (like extension pages and slot mounts)
-reloads on `lensRerun.extensionsChanged`: a file under
-`oxplow/extensions/` changed, or the config did — enabling or disabling
+reloads on `lensRerun.extensionsChanged`: a deployment changed (`oxplow.extension.deploy`, `rollback`, `enable`,
+`disable`), or the config did — enabling or disabling
 an extension is a `configChanged`, so its panel appears or leaves at once.
 
 The person's layout — order (drag the ⠿ handle), collapsed (the chevron),
@@ -643,7 +647,8 @@ Mechanics:
   on in-tab navigation only (new-tab escape paths drop it — sibling
   context is in-tab only).
 - Per-tab history entries (`threadPageHistory`) gained a `siblings`
-  field. `handleNavigateInTab` calls `resolveSiblings` to snap the
+  field. `handleNavigateInTab` builds the entry with `navigatedHistory`
+  (`tabs/tabHistory.ts`), whose `resolveSiblings` snaps the
   destination's index against `ref.id`, so a stale list still lands on
   the right row.
 - `handleStepSibling` swaps the active tab to a sibling at the target
@@ -904,7 +909,10 @@ kinds slot in without re-discovering the layout.
 ### Per-tab navigation history
 - **`threadPageHistory: Record<string, Record<string, { back: TabRef[], forward: TabRef[], siblings: NavSiblings | null }>>`**
   — keyed by `threadId` then by the tab's current id. `back` is
-  pushed when `handleNavigateInTab` swaps the tab's ref; `forward`
+  pushed when `handleNavigateInTab` swaps the tab's ref — unless the
+  navigation is a **replace** (`NavigateOptions.replace`, a lens
+  action's `then: replace`), when the page it left goes out of history
+  and Back skips it; `forward`
   is populated by `handleGoBack`. `siblings` carries the list-
   originated prev/next list (cleared on back/forward; preserved on
   sibling-step). New tab kinds participate automatically — the
@@ -969,12 +977,14 @@ caller
 **Navigate in-tab (browser-tab semantic):**
 ```
 in-page row click
-  └→ useRouteDispatch / ctxNav.navigate(ref, { newTab: false, siblings? })
-       └→ handleNavigateInTab(currentTabId, ref, siblings?)
+  └→ useRouteDispatch / ctxNav.navigate(ref, { newTab: false, siblings?, replace? })
+       └→ handleNavigateInTab(currentTabId, ref, siblings?, replace?)
+            ├→ a ref that can't live in a tab (agent session, symbol):
+            │   close this tab first when replacing, then open it
             ├→ register payload if needed (file: handleOpenFile;
             │   diff: handleOpenDiffInTab — both register before
             │   calling handleNavigateInTab)
-            ├→ push prior ref onto back stack
+            ├→ push prior ref onto back stack (not when replacing)
             ├→ replace tab's current ref
             └→ setCenterActive(ref.id)
 ```

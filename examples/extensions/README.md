@@ -1,21 +1,21 @@
 # Example extensions
 
 Each folder is a working extension built only on oxplow's public
-extension services. Copy one to your project's `oxplow/extensions/` to
-use it, and run `oxplow extension test oxplow/extensions/<name>` to run
+extension services. Copy one to your project's `.oxplow/extensions/`,
+deploy it (`oxplow.extension.deploy { name }`) to use it, and run `oxplow extension test .oxplow/extensions/<name>` to run
 its examples on a throwaway oxplow. `crates/oxplow-sdk/tests/examples.rs`
 runs them all, some against a real in-memory oxplow too.
 
-| Example | Sharing | What it shows |
-|---|---|---|
-| [github](github/) | shared | An outside data source: an exec collector syncing pull requests with a credential kept in the keychain, a ref kind (`[[pr:12]]`), a page and a custom component. |
-| [prompt-efforts](prompt-efforts/) | shared | Replacing a core policy: an effort policy script that opens one effort per prompt. |
-| [task-views](task-views/) | private | Replacing core views: the Board, the Tasks list and the work-item editor, for any work-items provider. |
-| [triage](triage/) | shared | Data, AI and workflow state together: a collector that classifies TODO comments with a model, a durable per-TODO decision in private state, a custom board with forms, and a summary job. |
-| [effort-review](effort-review/) | shared | A cancellable AI job over collected evidence: on each finished effort, a model reads its tests, diff coverage, changed functions and findings through a tool, the review streams and can be cancelled, and it is commented on the work item and exported as a model. |
-| [schema-review](schema-review/) | shared | A review policy of its own: a collector's facts about migrations, joined with oxplow's test, coverage and code-analysis evidence into the effort's verdict, in place of oxplow-bundled's. |
-| [session-notes](session-notes/) | private | Adding to a core page: a section on the New Session page, placed after its "Start a new session" section by that section's stable id. |
-| [review-badges](review-badges/) | private | Building on another extension: an optional import of effort-review's exported model, shown as a list and on the task page, withheld with a warning when effort-review isn't there. |
+| Example | What it shows |
+|---|---|
+| [github](github/) | An outside data source: an exec collector syncing pull requests with a credential kept in the keychain, a ref kind (`[[pr:12]]`), a page and a custom component. |
+| [prompt-efforts](prompt-efforts/) | Replacing a core policy: an effort policy script that opens one effort per prompt. |
+| [task-views](task-views/) | Replacing core views: the Board, the Tasks list and the work-item editor, for any work-items provider. |
+| [triage](triage/) | Data, AI and workflow state together: a collector that classifies TODO comments with a model, a durable per-TODO decision in private state, a custom board with forms, and a summary job. |
+| [effort-review](effort-review/) | A cancellable AI job over collected evidence: on each finished effort, a model reads its tests, diff coverage, changed functions and findings through a tool, the review streams and can be cancelled, and it is commented on the work item and exported as a model. |
+| [schema-review](schema-review/) | A review policy of its own: a collector's facts about migrations, joined with oxplow's test, coverage and code-analysis evidence into the effort's verdict, in place of oxplow-bundled's. |
+| [session-notes](session-notes/) | Adding to a core page: a section on the New Session page, placed after its "Start a new session" section by that section's stable id. |
+| [review-badges](review-badges/) | Building on another extension: an optional import of effort-review's exported model, shown as a list and on the task page, withheld with a warning when effort-review isn't there. |
 
 ## What the trials prove
 
@@ -91,10 +91,6 @@ Fixed while building them:
   so triage rebuilt the latest TODOs from `v_fact`; a command's script
   now reads through the SQL gateway, as an effect's does, and triage
   reads `metric_findings('triage.todos')`.
-- A shared extension could carry a token in its files unnoticed;
-  `extension check` now warns about known token prefixes, private-key
-  headers and long high-entropy literals, showing the file and line but
-  never the value.
 
 Still open:
 
@@ -109,7 +105,7 @@ Still open:
 - **Not all evidence can be made in a fixture**: `setup` reaches what
   oxplow's commands make (work items, efforts, test runs), not collected
   reports like diff coverage, so that still needs a Rust test.
-- **`extension test` needs the folder under `oxplow/extensions/`.**
+- **`extension test` needs the folder under `.oxplow/extensions/`.**
 - **Names:** an extension's command namespace is its name with `-` as `_`
   (`effort_review.review.ask`), while its contribution ids and model
   views keep or translate the dash differently
@@ -117,5 +113,5 @@ Still open:
 - **The compare-exchange stamp isn't readable** through a public read, so
   a stale write can only be tested as `expected: null` against existing
   state.
-- **No reload or uninstall command**, and uninstall keeps an extension's
-  private state with nothing reading it.
+- **Removing an extension** (`oxplow.extension.remove`) forgets its
+  deployments, private state and settings, and never deletes its source.

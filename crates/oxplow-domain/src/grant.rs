@@ -1,20 +1,18 @@
-//! What a contribution asks to do, what a person granted, and what each
-//! call was decided (`.context/extensions.md` "Grants").
+//! What a contribution asks to do, what its extension may do, and what
+//! each call was decided (`.context/extensions.md` "Grants").
 //!
 //! A [`GrantRequest`] is derived from what a contribution declares — the
 //! scopes it calls (a model among them, `ai.compute`), the program it
 //! runs, the hosts it reaches, the credentials and environment it reads. A
-//! declaration is never a grant: a [`Grant`] is a person's approval of
-//! exactly a request, on this machine, until they revoke it or the request
-//! changes. A run decides each thing it does against its grant (or, for a
-//! contribution that needs no approval, its declaration) and records the
-//! [`Decision`] — including where oxplow can't enforce what was granted.
+//! [`Grant`] is what its extension may reach: the `permissions:` a person
+//! approved when it was deployed, and its own command namespace. A run
+//! decides each thing it does against both — declared, and permitted — and
+//! records the [`Decision`], including where oxplow can't hold it to what
+//! was permitted.
 
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
-
-use crate::time::Timestamp;
 
 /// What a contribution asks to do.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,72 +41,70 @@ impl GrantRequest {
     pub fn canonical_json(&self) -> String {
         serde_json::to_string(self).expect("a grant request serializes")
     }
-
-    /// What `self` asks beyond `granted`, named — empty when it asks for no
-    /// more (a narrower request needs no approval again).
-    pub fn widening(&self, granted: &GrantRequest) -> Vec<String> {
-        let mut out = Vec::new();
-        let more = |label: &str, want: &BTreeSet<String>, have: &BTreeSet<String>| {
-            want.difference(have)
-                .map(|w| format!("{label} {w}"))
-                .collect::<Vec<_>>()
-        };
-        out.extend(
-            self.scopes
-                .iter()
-                .filter(|need| {
-                    !granted.scopes.iter().any(|have| {
-                        have == *need
-                            || (crate::service::need_scope(need) != need.as_str()
-                                && have == crate::service::need_scope(need))
-                            || (need
-                                .strip_prefix("tree.read:")
-                                .zip(have.strip_prefix("tree.read:"))
-                                .is_some_and(|(want, prefix)| {
-                                    prefix.ends_with('/') && want.starts_with(prefix)
-                                }))
-                    })
-                })
-                .map(|need| format!("calls {need}")),
-        );
-        out.extend(more("reaches", &self.hosts, &granted.hosts));
-        out.extend(more(
-            "reads credential",
-            &self.credentials,
-            &granted.credentials,
-        ));
-        out.extend(more("reads env", &self.env, &granted.env));
-        out.extend(more("runs command", &self.commands, &granted.commands));
-        if self.program != granted.program {
-            if let Some(p) = &self.program {
-                out.push(format!("runs {p}"));
-            }
-        }
-        out
-    }
 }
 
-/// Who granted it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum GrantedBy {
-    /// A person, in Settings → Data → Programs.
-    Human,
-}
-
-/// A person's approval of exactly `request`, on this machine.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// What a contribution's extension may reach: the permissions approved
+/// when it was deployed, and its own commands.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Grant {
-    pub request: GrantRequest,
-    pub granted_at: Timestamp,
-    pub granted_by: GrantedBy,
-    /// When a person revoked it: from then, nothing it granted is allowed.
-    pub revoked_at: Option<Timestamp>,
+    /// Its command namespace: its own commands need no permission.
+    pub namespace: String,
+    pub permissions: crate::permissions::Permissions,
 }
 
 impl Grant {
-    pub fn is_revoked(&self) -> bool {
-        self.revoked_at.is_some()
+    pub fn from_permissions(
+        namespace: &str,
+        permissions: &crate::permissions::Permissions,
+    ) -> Self {
+        Self {
+            namespace: namespace.to_string(),
+            permissions: permissions.clone(),
+        }
+    }
+
+    /// The baseline and nothing else, with no commands of its own: a run
+    /// that isn't any extension's.
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// Whether its permissions allow `need`; else the permission that
+    /// would (`ai`, `process`, …).
+    pub fn permits(&self, need: &Need) -> Result<(), &'static str> {
+        let p = &self.permissions;
+        let ok = match need {
+            Need::Scope(s) => match crate::service::need_scope(s) {
+                "sql.read" => p.sql.is_some(),
+                "tree.read" => p.files.is_some(),
+                "ai.compute" | "ai.discover" => p.ai,
+                _ => true,
+            },
+            // A model's bounds are its declaration's; reading a model at all
+            // is decided where SQL is asked for (`Scope("sql.read")`).
+            Need::Model(_) => true,
+            Need::Path(_) => p.files.is_some(),
+            Need::Program(_) | Need::Files | Need::Env(_) => p.process,
+            Need::Host(h) => p.host_allowed(h),
+            Need::Credential(c) => p.secrets.contains(c),
+            Need::Command(c) => p.command_allowed(&self.namespace, c),
+        };
+        if ok {
+            return Ok(());
+        }
+        Err(match need {
+            Need::Scope(s) => match crate::service::need_scope(s) {
+                "sql.read" => "sql",
+                "tree.read" => "files",
+                _ => "ai",
+            },
+            Need::Model(_) => "sql",
+            Need::Path(_) => "files",
+            Need::Program(_) | Need::Files | Need::Env(_) => "process",
+            Need::Host(_) => "network",
+            Need::Credential(_) => "secrets",
+            Need::Command(_) => "commands",
+        })
     }
 }
 
@@ -174,21 +170,17 @@ impl Enforcement {
     }
 }
 
-/// Decide `need` against what a contribution may do: its `grant` when it
-/// runs on a person's approval, else its `declared` request (a contribution
-/// that needs no approval may do what it declares, no more).
+/// Decide `need`: within what the contribution `declared` (a command is
+/// its extension's to allow, not the declaration's: a script's calls
+/// aren't known before it runs), then within what its extension's `grant`
+/// permits, then whether this machine holds it to that.
 pub fn decide(
     need: &Need,
-    grant: Option<&Grant>,
     declared: &GrantRequest,
+    grant: &Grant,
     enforcement: Enforcement,
 ) -> Decision {
-    if let Some(g) = grant {
-        if g.is_revoked() {
-            return Decision::Denied("its approval was revoked".into());
-        }
-    }
-    let allowed = grant.map_or(declared, |g| &g.request);
+    let allowed = declared;
     let within = match need {
         Need::Scope(s) => allowed
             .scopes
@@ -212,14 +204,16 @@ pub fn decide(
         Need::Host(h) => allowed.hosts.iter().any(|pattern| host_matches(pattern, h)),
         Need::Credential(c) => allowed.credentials.contains(c),
         Need::Env(e) => allowed.env.contains(e),
-        Need::Command(c) => allowed.commands.contains(c),
+        Need::Command(_) => true,
         Need::Files => allowed.program.is_some(),
     };
     if !within {
-        return Decision::Denied(match grant {
-            Some(_) => "not in what was approved".into(),
-            None => "not declared".into(),
-        });
+        return Decision::Denied("not declared".into());
+    }
+    if let Err(permission) = grant.permits(need) {
+        return Decision::Denied(format!(
+            "needs `permissions.{permission}` in the extension's manifest"
+        ));
     }
     match enforcement.gap(need) {
         Some(why) => Decision::Unenforced(why.into()),
@@ -253,58 +247,87 @@ mod tests {
         }
     }
 
-    fn granted(request: GrantRequest) -> Grant {
-        Grant {
-            request,
-            granted_at: Timestamp::now(),
-            granted_by: GrantedBy::Human,
-            revoked_at: None,
-        }
+    fn granted(permissions: &str) -> Grant {
+        Grant::from_permissions("acme", &serde_yaml::from_str(permissions).unwrap())
     }
 
     const MAC: Enforcement = Enforcement { hosts: true };
     const ELSEWHERE: Enforcement = Enforcement { hosts: false };
 
-    /// A need inside the grant is allowed; outside it, denied.
+    /// A need inside the declaration is decided by what the extension's
+    /// permissions allow, and a refusal names the permission.
     #[test]
-    fn a_need_is_decided_against_the_grant() {
-        let g = granted(request());
-        let d = |need: Need| decide(&need, Some(&g), &GrantRequest::default(), MAC);
-        assert_eq!(d(Need::Scope("sql.read".into())), Decision::Allowed);
+    fn a_need_is_decided_against_the_extensions_permissions() {
+        let g = granted(
+            "process: true\nnetwork: [\"*.githubusercontent.com\", api.github.com]\nsecrets: [GH_TOKEN]\ncommands: [oxplow.work_item.*]",
+        );
+        let declared = GrantRequest {
+            scopes: ["ai.compute".to_string(), "sql.read".to_string()].into(),
+            ..request()
+        };
+        let d = |need: Need| decide(&need, &declared, &g, MAC);
         assert_eq!(d(Need::Credential("GH_TOKEN".into())), Decision::Allowed);
         assert_eq!(
             d(Need::Host("raw.githubusercontent.com".into())),
             Decision::Allowed
         );
-        assert!(matches!(
-            d(Need::Host("evil.com".into())),
-            Decision::Denied(_)
-        ));
-        assert!(matches!(
-            d(Need::Credential("AWS_KEY".into())),
-            Decision::Denied(_)
-        ));
-        assert!(matches!(
+        assert_eq!(d(Need::Program("bin/sync.sh".into())), Decision::Allowed);
+        assert_eq!(
             d(Need::Scope("ai.compute".into())),
+            Decision::Denied("needs `permissions.ai` in the extension's manifest".into())
+        );
+        assert_eq!(
+            d(Need::Scope("sql.read".into())),
+            Decision::Denied("needs `permissions.sql` in the extension's manifest".into())
+        );
+        // Undeclared stays refused whatever is permitted.
+        assert_eq!(
+            d(Need::Credential("AWS_KEY".into())),
+            Decision::Denied("not declared".into())
+        );
+        assert_eq!(
+            d(Need::Command("oxplow.work_item.transition".into())),
+            Decision::Allowed
+        );
+        assert_eq!(
+            d(Need::Command("oxplow.thread.close".into())),
+            Decision::Denied("needs `permissions.commands` in the extension's manifest".into())
+        );
+    }
+
+    /// Its own commands need no permission.
+    #[test]
+    fn a_command_in_the_own_namespace_needs_no_pattern() {
+        let g = granted("{}");
+        let d = |c: &str| decide(&Need::Command(c.into()), &GrantRequest::default(), &g, MAC);
+        assert_eq!(d("acme.notes.add"), Decision::Allowed);
+        assert!(matches!(d("acmex.notes.add"), Decision::Denied(_)));
+        assert!(matches!(
+            decide(
+                &Need::Command("acme.notes.add".into()),
+                &GrantRequest::default(),
+                &Grant::none(),
+                MAC
+            ),
             Decision::Denied(_)
         ));
     }
 
-    /// What oxplow can't hold to the grant is said, not passed off as
-    /// enforced.
+    /// What oxplow can't hold to what was permitted is said, not passed off
+    /// as enforced.
     #[test]
     fn what_isnt_enforced_here_says_so() {
-        let g = granted(request());
+        let g = granted("process: true\nnetwork: [api.github.com]");
         assert!(matches!(
             decide(
                 &Need::Host("api.github.com".into()),
-                Some(&g),
-                &GrantRequest::default(),
+                &request(),
+                &g,
                 ELSEWHERE
             ),
             Decision::Unenforced(_)
         ));
-        match decide(&Need::Files, Some(&g), &GrantRequest::default(), MAC) {
+        match decide(&Need::Files, &request(), &g, MAC) {
             Decision::Unenforced(why) => {
                 assert!(why.contains("file, network and process authority"), "{why}");
                 assert!(why.contains("doesn't confine"), "{why}");
@@ -317,63 +340,9 @@ mod tests {
             ..request()
         };
         assert!(matches!(
-            decide(
-                &Need::Files,
-                Some(&granted(none)),
-                &GrantRequest::default(),
-                MAC
-            ),
+            decide(&Need::Files, &none, &g, MAC),
             Decision::Denied(_)
         ));
-    }
-
-    /// A revoked grant allows nothing.
-    #[test]
-    fn a_revoked_grant_allows_nothing() {
-        let mut g = granted(request());
-        g.revoked_at = Some(Timestamp::now());
-        assert_eq!(
-            decide(
-                &Need::Scope("sql.read".into()),
-                Some(&g),
-                &GrantRequest::default(),
-                MAC
-            ),
-            Decision::Denied("its approval was revoked".into())
-        );
-    }
-
-    /// Without an approval, what it declares is what it may do.
-    #[test]
-    fn without_a_grant_the_declaration_decides() {
-        let declared = GrantRequest {
-            scopes: ["sql.read".to_string()].into(),
-            ..GrantRequest::default()
-        };
-        assert_eq!(
-            decide(&Need::Scope("sql.read".into()), None, &declared, MAC),
-            Decision::Allowed
-        );
-        assert_eq!(
-            decide(&Need::Scope("ai.compute".into()), None, &declared, MAC),
-            Decision::Denied("not declared".into())
-        );
-    }
-
-    /// Narrowing asks nothing new; widening names what's new.
-    #[test]
-    fn a_narrower_request_needs_no_new_approval() {
-        let granted = request();
-        let mut narrower = request();
-        narrower.hosts.remove("*.githubusercontent.com");
-        assert!(narrower.widening(&granted).is_empty());
-        let mut wider = request();
-        wider.hosts.insert("evil.com".into());
-        wider.scopes.insert("ai.compute".into());
-        assert_eq!(
-            wider.widening(&granted),
-            vec!["calls ai.compute", "reaches evil.com"]
-        );
     }
 
     /// The same request is the same text, whatever order it was built in.

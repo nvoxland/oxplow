@@ -18,7 +18,6 @@ use std::sync::Arc;
 
 use common::boot;
 
-use oxplow_app::exec_consent;
 use oxplow_app::observe_conformance::{suite, Expect};
 use oxplow_domain::agent::harness::{Endpoints, LaunchInput, LaunchSpec, SessionIds};
 use oxplow_domain::agent::text::AgentText;
@@ -194,18 +193,18 @@ async fn the_fake_harness_session_is_recorded_canonically() {
 }
 
 /// The same session, its harness a provider's process: the fake provider
-/// in harness mode, approved and enabled in the project as a person would,
+/// in harness mode, deployed and enabled in the project as a person would,
 /// registered under its instance id. Its launch, every tool hook's mapping
 /// and every answer's rendering go through that process — and core records
 /// it canonically.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_provider_launched_session_is_recorded_canonically() {
     let (cp, svc, root, _dir) = boot().await;
-    let ext_dir = root.join("oxplow/extensions/relay");
+    let ext_dir = root.join(".oxplow/extensions/relay");
     std::fs::create_dir_all(ext_dir.join("bin")).unwrap();
     std::fs::write(
         ext_dir.join("extension.yaml"),
-        "manifest: 2\nname: relay\nsharing: private\nintent:\n  purpose: a harness over the protocol\n  examples: [{ name: a }]\nproviders:\n  - id: relay\n    capability: agent_harness\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: relay\nintent:\n  purpose: a harness over the protocol\n  examples: [{ name: a }]\npermissions: { process: true }\nproviders:\n  - id: relay\n    capability: agent_harness\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = ext_dir.join("bin/provider");
@@ -234,19 +233,11 @@ async fn a_provider_launched_session_is_recorded_canonically() {
         .cloned()
         .expect("the harness extension loads");
     assert_eq!(ext.errors, Vec::<String>::new());
-    let program = exec_consent::list(&svc.approvals, &root, &extensions)
-        .into_iter()
-        .find(|p| p.kind == exec_consent::ProgramKind::Provider)
-        .expect("the provider is a program");
-    exec_consent::approve_program(
-        &svc.approvals,
-        &root,
-        &extensions,
-        program.kind,
-        &program.name,
-        program.version.as_deref().unwrap(),
-    )
-    .unwrap();
+    // Deployed (which turns it on, reloading the config), then its
+    // instance enabled as a person would, then activated.
+    oxplow_app::extension_deploy::deploy(&svc, "relay", &root, None, true)
+        .await
+        .expect("the extension deploys");
     svc.config.write().unwrap().extension_instances.insert(
         "relay/relay".into(),
         oxplow_config::ExtensionInstanceConfig {
@@ -259,7 +250,7 @@ async fn a_provider_launched_session_is_recorded_canonically() {
     svc.extension_activation
         .activate(svc.clone())
         .await
-        .expect("the extension and its provider activate");
+        .expect("its provider activates");
     assert!(
         svc.harnesses.get(oxplow_harness_fake::ID).is_err(),
         "only the provider's instance stands for the fake"

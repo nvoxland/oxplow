@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { approveProgram, ipc, run, until } from "../../support/daemon.js";
+import { ipc, run, until } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher, openNewTask } from "../../support/ui.js";
 
@@ -16,7 +16,6 @@ function fakeState(project: string): string {
 
 test("a person configures, checks and enables the fake tracker, and an item reaches it", async ({ fresh }) => {
   const { page, daemon } = fresh;
-  await approveProgram(daemon, "provider", "e2e/fake");
   await page.goto("/");
   await openFromLauncher(page, "Settings: Integrations");
   await page.getByTestId("integration-config-e2e/fake-team").fill("core");

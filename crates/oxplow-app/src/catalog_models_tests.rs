@@ -23,7 +23,7 @@ async fn rows(fx: &EffortFixture, sql: &str) -> Vec<Vec<Value>> {
 }
 
 fn write(root: &std::path::Path, rel: &str, body: &str) {
-    let path = root.join("oxplow/extensions/acme").join(rel);
+    let path = root.join(".oxplow/extensions/acme").join(rel);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, body).unwrap();
 }
@@ -97,8 +97,10 @@ async fn lenses_and_extensions_are_models_that_follow_the_catalog() {
         vec![vec![json!("bundled")]]
     );
 
-    std::fs::remove_dir_all(root.join("oxplow/extensions/acme")).unwrap();
-    crate::test_fixtures::activate(&fx.svc).await;
+    std::fs::remove_dir_all(root.join(".oxplow/extensions/acme")).unwrap();
+    crate::extension_deploy::remove(&fx.svc, "acme")
+        .await
+        .unwrap();
     assert!(rows(&fx, "SELECT 1 FROM v_lens WHERE extension = 'acme'")
         .await
         .is_empty());
@@ -229,8 +231,10 @@ async fn prompts_and_config_keys_are_models() {
             .collect::<Vec<_>>()
     );
 
-    std::fs::remove_dir_all(root.join("oxplow/extensions/acme")).unwrap();
-    crate::test_fixtures::activate(&fx.svc).await;
+    std::fs::remove_dir_all(root.join(".oxplow/extensions/acme")).unwrap();
+    crate::extension_deploy::remove(&fx.svc, "acme")
+        .await
+        .unwrap();
     assert!(rows(&fx, "SELECT 1 FROM v_prompt WHERE source = 'acme'")
         .await
         .is_empty());

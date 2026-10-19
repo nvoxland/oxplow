@@ -50,8 +50,6 @@ function line(c: SourceCoverage, now: Date): string | null {
       return `${who} hasn't run yet.`;
     case "disabled":
       return `${who} is disabled${why}.`;
-    case "needs_approval":
-      return `${who} needs your approval before it runs.`;
     default:
       return null;
   }

@@ -1,5 +1,5 @@
 //! A job's durability under the things that go wrong around it: a lease
-//! that runs out, a revoked approval, a changed declaration, a restart, a
+//! that runs out, an extension turned off, a changed declaration, a restart, a
 //! full queue, a stalled model, and a person cancelling a queued job. All
 //! against the in-process fixture model, as `extension_job_stream_tests`.
 
@@ -36,6 +36,33 @@ pub(super) async fn state(fx: &Fixture, id: &str) -> Value {
         json!({ "job_run": oxplow_domain::refs::build::job_run_ref(id) }),
     )
     .await
+}
+
+/// A job's state and the text it streamed, read from the models: the
+/// extension's commands are gone while it is off.
+pub(super) async fn recorded(fx: &Fixture, id: &str) -> (String, String) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let state = rows(
+            fx,
+            "SELECT state FROM v_job_run WHERE id = ?1",
+            vec![json!(id)],
+        )
+        .await;
+        let state = state[0][0].as_str().unwrap_or_default().to_string();
+        if state != "running" {
+            let text = rows(
+                fx,
+                "SELECT COALESCE(group_concat(text, ''), '') FROM
+                   (SELECT text FROM v_job_run_output WHERE job_id = ?1 AND kind = 'text' ORDER BY seq)",
+                vec![json!(id)],
+            )
+            .await;
+            return (state, text[0][0].as_str().unwrap_or_default().to_string());
+        }
+        assert!(tokio::time::Instant::now() < deadline, "still {state}");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
 }
 
 /// Make the running attempt's lease a thing of the past, as if oxplow had
@@ -90,21 +117,6 @@ pub(super) async fn observations(fx: &Fixture, id: &str) -> i64 {
         .expect("observations are counted")
 }
 
-/// The key the fixture job's approval is recorded under (not a bundled
-/// extension's job).
-pub(super) fn job_key(fx: &Fixture) -> String {
-    let project = fx.svc.layout.project_dir.clone();
-    let extensions = fx
-        .svc
-        .extension_catalog
-        .unpinned(&project, "a test reads declarations");
-    crate::exec_consent::list(&fx.svc.approvals, &project, &extensions)
-        .into_iter()
-        .find(|p| p.kind == crate::exec_consent::ProgramKind::Job && p.name.starts_with("triage/"))
-        .expect("the job is a program")
-        .key()
-}
-
 /// A `never` job whose lease ran out ends `interrupted` — it isn't
 /// replayed, and nothing the stopped worker says later changes that.
 #[tokio::test(flavor = "multi_thread")]
@@ -124,23 +136,22 @@ async fn a_job_whose_lease_ran_out_is_interrupted() {
     assert_eq!(completions(&fx, &id).await, ["interrupted"]);
 }
 
-/// Revoking the job's approval while it streams stops it: it ends
+/// Turning the job's extension off while it streams stops it: it ends
 /// `cancelled`, keeping the partial reply.
 #[tokio::test(flavor = "multi_thread")]
-async fn revoking_the_approval_stops_a_streaming_job() {
+async fn turning_the_extension_off_stops_a_streaming_job() {
     let fx = fixture(MANIFEST, vec![slow(&words(200), 20)]).await;
     let id = ask(&fx, "revoke").await;
     streaming(&fx, &id).await;
 
-    assert!(fx.svc.approvals.revoke(&job_key(&fx)).unwrap());
-    let done = until(&fx, &id, |s| s["state"] != json!("running")).await;
-    assert_eq!(done["state"], json!("cancelled"), "{done}");
-    let text = done["result"]["parts"][0]["text"]
-        .as_str()
-        .unwrap_or_default();
+    crate::extension_deploy::set_enabled(&fx.svc, "triage", false, true)
+        .await
+        .unwrap();
+    let (state, text) = recorded(&fx, &id).await;
+    assert_eq!(state, "cancelled");
     assert!(
         text.starts_with("w0 ") && text.len() < words(200).len(),
-        "{done}"
+        "{text}"
     );
     assert_eq!(completions(&fx, &id).await, ["cancelled"]);
 }
@@ -148,18 +159,14 @@ async fn revoking_the_approval_stops_a_streaming_job() {
 /// Add an extension of no concern to the job and activate the catalog
 /// with it.
 async fn change_another_extension(fx: &Fixture) {
-    let other = fx._dir.path().join("oxplow/extensions/other");
+    let other = fx._dir.path().join(".oxplow/extensions/other");
     std::fs::create_dir_all(&other).unwrap();
     std::fs::write(
         other.join("extension.yaml"),
         "manifest: 2\nname: other\nintent:\n  purpose: p\n",
     )
     .unwrap();
-    fx.svc
-        .extension_activation
-        .activate(fx.svc.clone())
-        .await
-        .expect("the catalog activates with the other extension");
+    crate::test_fixtures::activate(&fx.svc).await;
 }
 
 /// A job belongs to its extension's version, not to the whole catalog: one
@@ -195,7 +202,7 @@ async fn an_activation_does_not_wait_for_a_running_job() {
     assert_eq!(done["text"], json!(words(60)), "{done}");
 }
 
-/// A declaration changed (and re-approved) while the job streams: the
+/// A declaration changed while the job streams: the
 /// activation stops it, and what it had is not published as the old
 /// declaration's success.
 #[tokio::test(flavor = "multi_thread")]
@@ -208,16 +215,11 @@ async fn a_job_does_not_succeed_across_a_change_to_its_declaration() {
     std::fs::write(
         fx._dir
             .path()
-            .join("oxplow/extensions/triage/extension.yaml"),
+            .join(".oxplow/extensions/triage/extension.yaml"),
         changed,
     )
     .unwrap();
-    crate::exec_consent::approve_every(&fx.svc, crate::exec_consent::ProgramKind::Job).unwrap();
-    fx.svc
-        .extension_activation
-        .activate(fx.svc.clone())
-        .await
-        .expect("the new declaration activates");
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
 
     let done = until(&fx, &id, |s| s["state"] != json!("running")).await;
     assert_eq!(done["state"], json!("cancelled"), "{done}");
@@ -237,7 +239,7 @@ async fn a_job_does_not_succeed_across_a_change_to_its_declaration() {
 async fn a_restart_runs_what_was_queued_and_interrupts_what_was_running() {
     let dir = tempfile::tempdir().unwrap();
     crate::test_fixtures::init_git_repo(dir.path());
-    let ext = dir.path().join("oxplow/extensions/triage");
+    let ext = dir.path().join(".oxplow/extensions/triage");
     std::fs::create_dir_all(ext.join("commands")).unwrap();
     std::fs::write(ext.join("extension.yaml"), MANIFEST).unwrap();
     std::fs::write(ext.join("commands/lookup.star"), LOOKUP).unwrap();
@@ -443,7 +445,7 @@ async fn an_idempotent_job_interrupted_three_times_ends_interrupted() {
 async fn a_restart_replays_an_idempotent_job_that_was_running() {
     let dir = tempfile::tempdir().unwrap();
     crate::test_fixtures::init_git_repo(dir.path());
-    let ext = dir.path().join("oxplow/extensions/triage");
+    let ext = dir.path().join(".oxplow/extensions/triage");
     std::fs::create_dir_all(ext.join("commands")).unwrap();
     std::fs::write(ext.join("extension.yaml"), manifest_idempotent()).unwrap();
     std::fs::write(ext.join("commands/lookup.star"), LOOKUP).unwrap();

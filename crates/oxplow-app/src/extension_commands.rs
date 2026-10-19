@@ -74,8 +74,8 @@ pub struct ExtensionCommand {
     pub needs: Vec<String>,
     /// How a person meets it (label, group, …), as core's commands do.
     pub ui: Option<oxplow_domain::CommandUi>,
-    /// Stable: a shared extension's commands are; a private one's are
-    /// experimental.
+    /// Stable: the commands of an extension that ships with oxplow are;
+    /// any other's are experimental.
     pub stable: bool,
     pub examples: Vec<CommandExample>,
     /// Its example input (`example:`, else a script's first example that
@@ -169,7 +169,7 @@ pub(crate) struct CommandFile {
     needs: Vec<String>,
     #[serde(default)]
     ui: Option<oxplow_domain::CommandUi>,
-    /// `experimental` keeps a shared extension's command experimental.
+    /// `experimental` keeps a bundled extension's command experimental.
     #[serde(default)]
     lifecycle: Option<String>,
     #[serde(default)]
@@ -325,7 +325,7 @@ fn inside(rel: &str) -> bool {
 /// manifest's text (for lines); `read` reads a file in the extension.
 pub fn parse_commands(
     namespace: &str,
-    shared: bool,
+    bundled: bool,
     value: &serde_yaml::Value,
     file: &str,
     manifest: &str,
@@ -351,7 +351,7 @@ pub fn parse_commands(
                 continue;
             }
         };
-        match command_of(namespace, shared, entry, read, provider_ops) {
+        match command_of(namespace, bundled, entry, read, provider_ops) {
             Ok(c) if out.iter().any(|o| o.name == c.name) => errors.push(at(
                 file,
                 line,
@@ -396,7 +396,7 @@ fn same_provider_op<'a>(
 
 fn command_of(
     namespace: &str,
-    shared: bool,
+    bundled: bool,
     f: CommandFile,
     read: &dyn Fn(&str) -> Option<String>,
     provider_ops: &ProviderOps<'_>,
@@ -543,10 +543,10 @@ fn command_of(
             f.examples.len()
         )));
     }
-    // Stable when shared, unless it says it's experimental; a private
-    // extension's are experimental.
+    // Stable when it ships with oxplow, unless it says it's experimental;
+    // any other extension's are experimental.
     let stable = match f.lifecycle.as_deref() {
-        None | Some("stable") => shared,
+        None | Some("stable") => bundled,
         Some("experimental") => false,
         Some(other) => {
             return Err(at_name(format!(
@@ -1162,6 +1162,8 @@ fn provider_command(
 #[derive(Clone, PartialEq)]
 struct RegisteredCommands {
     namespace: String,
+    /// What its extension may reach: its scripts' runs are within it.
+    grant: oxplow_domain::grant::Grant,
     commands: Vec<ExtensionCommand>,
     version: Option<String>,
     generation: String,
@@ -1252,6 +1254,7 @@ impl ExtensionCommands {
                     e.name.clone(),
                     RegisteredCommands {
                         namespace: e.namespace.clone(),
+                        grant: crate::grants::grant_of(e),
                         commands: e.commands.clone(),
                         version: e.version.clone(),
                         generation: snapshot.generation().to_string(),
@@ -1402,6 +1405,7 @@ impl ExtensionCommands {
                     }
                 }
                 let declared = crate::grants::script_request(&needs);
+                let grant = registration.grant.clone();
                 let (catalog, root, owner) = (
                     self.catalog.clone(),
                     self.root.clone(),
@@ -1423,8 +1427,8 @@ impl ExtensionCommands {
                     });
                 let named: std::sync::Arc<crate::commands::ContributionOf> =
                     std::sync::Arc::new(move |parent: &oxplow_domain::run::RunContext| {
-                        // A script command needs no person's approval: it
-                        // may do what it declares.
+                        // A script command may do what it declares, within its
+                        // extension's permissions.
                         parent
                             .child(
                                 Some(contribution.clone()),
@@ -1432,7 +1436,7 @@ impl ExtensionCommands {
                             )
                             .authorized(oxplow_domain::run::Authority {
                                 declared: declared.clone(),
-                                grant: None,
+                                grant: grant.clone(),
                                 enforcement: crate::grants::enforcement(),
                             })
                             .guarded(live.clone())
@@ -1642,11 +1646,11 @@ mod tests {
     fn write_ext(root: &Path, name: &str, commands: &str, files: &[(&str, &str)]) {
         write(
             root,
-            &format!("oxplow/extensions/{name}/extension.yaml"),
-            &format!("manifest: 2\nname: {name}\nintent:\n  purpose: p\ncommands:\n{commands}"),
+            &format!(".oxplow/extensions/{name}/extension.yaml"),
+            &format!("manifest: 2\nname: {name}\nintent:\n  purpose: p\npermissions: {{ sql: read, commands: [oxplow.work_item.*] }}\ncommands:\n{commands}"),
         );
         for (rel, body) in files {
-            write(root, &format!("oxplow/extensions/{name}/{rel}"), body);
+            write(root, &format!(".oxplow/extensions/{name}/{rel}"), body);
         }
     }
 
@@ -1805,12 +1809,12 @@ mod tests {
         for name in ["first", "second"] {
             write(
                 d.path(),
-                &format!("oxplow/extensions/{name}/extension.yaml"),
+                &format!(".oxplow/extensions/{name}/extension.yaml"),
                 &format!("manifest: 2\nname: {name}\nintent:\n  purpose: p\n"),
             );
             write(
                 d.path(),
-                &format!("oxplow/extensions/{name}/lenses/waiting.yaml"),
+                &format!(".oxplow/extensions/{name}/lenses/waiting.yaml"),
                 "title: Waiting\nquery: SELECT 1 AS n\ntool: waiting\n",
             );
         }
@@ -1994,7 +1998,7 @@ mod tests {
         let files = [("handlers/finish_review.star", HANDLER)];
         write_ext(d.path(), "a-b", GOOD, &files);
         write_ext(d.path(), "ab", GOOD, &files);
-        let manifest = d.path().join("oxplow/extensions/ab/extension.yaml");
+        let manifest = d.path().join(".oxplow/extensions/ab/extension.yaml");
         let text = std::fs::read_to_string(&manifest).unwrap();
         std::fs::write(
             &manifest,
@@ -2014,8 +2018,8 @@ mod tests {
         }
         write(
             d.path(),
-            ".oxplow/project.yaml",
-            "extensions:\n  disabled: [ab]\n",
+            ".oxplow/personal.yaml",
+            "disableExtensions: [ab]\n",
         );
         let ext = project(d.path(), "a-b");
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
@@ -2112,7 +2116,7 @@ mod tests {
         // Reconcile is all-or-nothing: an enabled extension with an error
         // (`held`) rejects the whole candidate, so drop it before `mine`
         // can register.
-        std::fs::remove_dir_all(root.join("oxplow/extensions/held")).unwrap();
+        std::fs::remove_dir_all(root.join(".oxplow/extensions/held")).unwrap();
         write_ext(root, "mine", GOOD, &files);
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
         assert_eq!(
@@ -2296,17 +2300,17 @@ mod tests {
         let root = fx._dir.path();
         write(
             root,
-            "oxplow/extensions/my-review/extension.yaml",
+            ".oxplow/extensions/my-review/extension.yaml",
             "manifest: 2\nname: my-review\nintent:\n  purpose: p\nevent_types:\n  types:\n    - { type: my_review.finished, v: 1, schema: finished.json, summary: A review finished. }\ncommands:\n  - name: review.finish\n    summary: Finish the review.\n    input_schema: { type: object, required: [ref], properties: { ref: { type: string } } }\n    entry: finish.star\n    invokers: { human: true, agent: true, lens: true }\n",
         );
         write(
             root,
-            "oxplow/extensions/my-review/finished.json",
+            ".oxplow/extensions/my-review/finished.json",
             r#"{"type": "object", "required": ["ref"], "properties": {"ref": {"type": "string"}}}"#,
         );
         write(
             root,
-            "oxplow/extensions/my-review/finish.star",
+            ".oxplow/extensions/my-review/finish.star",
             &format!(
                 "def transform(x):\n    return {{\"commands\": [], \"events\": [{{\"type\": \"{event_type}\", \"payload\": {{\"ref\": x[\"input\"][\"ref\"]}}, \"subject\": [x[\"input\"][\"ref\"]]}}]}}\n"
             ),
@@ -2779,8 +2783,8 @@ mod tests {
 
         write(
             fx._dir.path(),
-            ".oxplow/project.yaml",
-            "extensions:\n  disabled: [my-review]\n",
+            ".oxplow/personal.yaml",
+            "disableExtensions: [my-review]\n",
         );
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
         assert!(
@@ -2789,7 +2793,7 @@ mod tests {
         );
 
         // A namespace someone else holds (a provider's) is refused whole.
-        std::fs::remove_file(fx._dir.path().join(".oxplow/project.yaml")).unwrap();
+        std::fs::remove_file(fx._dir.path().join(".oxplow/personal.yaml")).unwrap();
         bus.register_namespace(
             "my_review",
             "provider:held",

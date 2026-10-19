@@ -6,6 +6,8 @@
 
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
 use std::path::Path;
 
 use oxplow_app::extension_catalog::ExtensionCatalog;
@@ -33,7 +35,7 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
         .await
         .unwrap();
     let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/github");
-    copy_dir(&example, &root.join("oxplow/extensions/github"));
+    copy_dir(&example, &root.join(".oxplow/extensions/github"));
 
     let report = check(root, "github", &ExtensionCatalog::new(), None, None, None)
         .await
@@ -49,7 +51,7 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
 
     // A real oxplow over the project, one pull request collected.
     // Its entity is created empty at activation, as before a first run.
-    let svc = oxplow_app::Services::in_memory(root).await.unwrap();
+    let svc = common::booted(root).await;
     svc.db
         .transaction(|tx| {
             tx.execute(
@@ -118,8 +120,7 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
 
     // P11 (tsk962): PR Lifetimes — the component made `custom_components`
     // stable. Its lens filters by state; the component acts (it runs the
-    // sync), so it's a program on Programs, unapproved until a person
-    // approves it.
+    // sync).
     svc.db
         .transaction(|tx| {
             tx.execute(
@@ -166,19 +167,6 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
     );
     assert_eq!(lifetimes("open").await, [serde_json::json!(12)]);
     assert_eq!(lifetimes("merged").await, [serde_json::json!(11)]);
-    let programs = oxplow_app::exec_consent::list(
-        &svc.approvals,
-        root,
-        svc.extension_catalog.get(root).as_ref(),
-    );
-    let component = programs
-        .iter()
-        .find(|p| p.kind == oxplow_app::exec_consent::ProgramKind::Component)
-        .expect("the component is on Programs");
-    assert_eq!(component.name, "github/pr-lifetimes");
-    assert_eq!(component.commands, ["oxplow.collector.sync"]);
-    assert!(!component.approved);
-
     // tsk935: `searchable: pull_request` — site search finds the pull
     // request by its title, under its kind, the ref a hit opens.
     svc.assets.sync_search_kinds().await.unwrap();
@@ -217,7 +205,7 @@ async fn the_prompt_efforts_example_checks_and_passes_the_policy_suite() {
         .unwrap();
     let example =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/prompt-efforts");
-    copy_dir(&example, &root.join("oxplow/extensions/prompt-efforts"));
+    copy_dir(&example, &root.join(".oxplow/extensions/prompt-efforts"));
 
     let report = check(
         root,
@@ -260,7 +248,7 @@ async fn the_prompt_efforts_example_tests_clean() {
         .unwrap();
     let example =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/prompt-efforts");
-    copy_dir(&example, &root.join("oxplow/extensions/prompt-efforts"));
+    copy_dir(&example, &root.join(".oxplow/extensions/prompt-efforts"));
     let tested = test_extension(root, "prompt-efforts", false).await.unwrap();
     assert_eq!(tested.errors, Vec::<String>::new());
     for ran in [
@@ -280,8 +268,8 @@ async fn the_prompt_efforts_example_tests_clean() {
 
 /// The triage example uses all three host services in one fact collector:
 /// the tree it implies, the semantic layer and a model it declares. It
-/// checks clean and lists them; `test` skips it until a person approves
-/// it; and in a real oxplow, approved, one snapshot's TODO becomes a
+/// checks clean and lists them; `test` runs its fixtures; and in a real
+/// oxplow one snapshot's TODO becomes a
 /// classified fact beside the open work, every service decided on its
 /// run.
 #[tokio::test(flavor = "multi_thread")]
@@ -294,7 +282,7 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
         .await
         .unwrap();
     let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/triage");
-    copy_dir(&example, &root.join("oxplow/extensions/triage"));
+    copy_dir(&example, &root.join(".oxplow/extensions/triage"));
 
     let report = check(root, "triage", &ExtensionCatalog::new(), None, None, None)
         .await
@@ -362,14 +350,14 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
     assert!(!root.join(".oxplow/local.sqlite").exists());
 
     // A real oxplow: a source file with a TODO, one open work item, a
-    // model that calls everything a bug, and the person's approval.
+    // model that calls everything a bug.
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(
         root.join("src/lib.rs"),
         "// TODO: the cache never expires\nfn a() {}\n",
     )
     .unwrap();
-    let svc = oxplow_app::Services::in_memory(root).await.unwrap();
+    let svc = common::booted(root).await;
     // The preview's generation contributes what a real one over the same
     // project does.
     let mut real: Vec<String> = svc
@@ -416,29 +404,6 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
             Some(RoleBinding::new("m", "x")),
         )
         .unwrap();
-    // The provider kind is itself a script a person approves.
-    let extensions = svc.extension_catalog.get(root);
-    let provider = oxplow_app::exec_consent::list(&svc.approvals, root, &extensions)
-        .into_iter()
-        .find(|p| {
-            p.kind == oxplow_app::exec_consent::ProgramKind::AiProvider
-                && p.name.ends_with("/openai_compatible")
-        })
-        .expect("the provider is on Programs");
-    oxplow_app::exec_consent::approve_program(
-        &svc.approvals,
-        root,
-        &extensions,
-        oxplow_app::exec_consent::ProgramKind::AiProvider,
-        &provider.name,
-        provider.version.as_deref().unwrap(),
-    )
-    .unwrap();
-    let ext = svc.extension_catalog.named(root, "triage").unwrap();
-    let hash =
-        oxplow_app::collector_runner::approval_hash(&root.join(&ext.path), &ext.collectors[0])
-            .unwrap();
-    oxplow_app::collector_runner::approve(&svc.approvals, "triage", "todos", &hash).unwrap();
     let stream = svc.streams.list_streams().await.unwrap()[0].id;
     let capture = svc.snapshot_captures.get(&stream).unwrap();
     capture.enqueue_startup_diff().await.unwrap();
@@ -524,8 +489,7 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
 
 /// The task-views example replaces the Board, the Tasks list and the editor
 /// with no provider of its own. It checks clean and every one of its
-/// fixtures passes: the list, the board's reads and its refused update
-/// until approved, and the editor's form.
+/// fixtures passes: the list, the board's reads and its update, and the editor's form.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_task_views_example_checks_and_its_fixtures_pass() {
     let dir = tempfile::tempdir().unwrap();
@@ -536,7 +500,7 @@ async fn the_task_views_example_checks_and_its_fixtures_pass() {
         .unwrap();
     let example =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/task-views");
-    copy_dir(&example, &root.join("oxplow/extensions/task-views"));
+    copy_dir(&example, &root.join(".oxplow/extensions/task-views"));
 
     let report = check(
         root,
@@ -605,7 +569,6 @@ async fn until_row(svc: &oxplow_app::Services, sql: &str) -> Vec<serde_json::Val
 #[tokio::test(flavor = "multi_thread")]
 async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
     use oxplow_app::ai_service::{ProviderConfig, Role, RoleBinding};
-    use oxplow_app::exec_consent::{approve_every, ProgramKind};
     use serde_json::json;
 
     let dir = tempfile::tempdir().unwrap();
@@ -616,12 +579,12 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
         .unwrap();
     let example =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/effort-review");
-    copy_dir(&example, &root.join("oxplow/extensions/effort-review"));
+    copy_dir(&example, &root.join(".oxplow/extensions/effort-review"));
 
     let tested = test_extension(root, "effort-review", false).await.unwrap();
     assert_eq!(tested.errors, Vec::<String>::new());
 
-    let svc = oxplow_app::Services::in_memory(root).await.unwrap();
+    let svc = common::booted(root).await;
     // The model: a call to the evidence tool, the review, then a slow one
     // to cancel.
     let replies: Vec<oxplow_ai::fixture::FixtureReply> = serde_json::from_value(json!([
@@ -648,12 +611,9 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
             Some(RoleBinding::new("fixture", "fixture")),
         )
         .unwrap();
-    // A person approves the job and the two effects.
-    approve_every(&svc, ProgramKind::Job).unwrap();
-    approve_every(&svc, ProgramKind::Effect).unwrap();
     let ext = svc.extension_catalog.named(root, "effort-review").unwrap();
     for decl in &ext.effects {
-        oxplow_app::effects::approved(&svc.db, &decl.name())
+        oxplow_app::effects::start_at_head(&svc.db, &decl.name())
             .await
             .unwrap();
     }
@@ -842,7 +802,6 @@ async fn inferred_reasoning_run(
     std::sync::Arc<oxplow_ai::fixture::FixtureModel>,
 ) {
     use oxplow_app::ai_service::{ProviderConfig, Role, RoleBinding};
-    use oxplow_app::exec_consent::{approve_every, ProgramKind};
     use serde_json::json;
 
     let dir = tempfile::tempdir().unwrap();
@@ -851,7 +810,7 @@ async fn inferred_reasoning_run(
         .init_repository(root)
         .await
         .unwrap();
-    let svc = oxplow_app::Services::in_memory(root).await.unwrap();
+    let svc = common::booted(root).await;
     let model = std::sync::Arc::new(oxplow_ai::fixture::FixtureModel::new(
         serde_json::from_value::<Vec<oxplow_ai::fixture::FixtureReply>>(serde_json::json!([
             "```json\n{\"decisions\": [{\"question\": \"Which CSV library?\", \"choice\": \"csv crate\", \"alternatives\": [\"hand-rolled\"], \"confidence\": \"medium\"}], \"claims\": [{\"statement\": \"The export tests pass.\", \"kind\": \"tests_pass\", \"evidence_ref\": \"run:12\"}]}\n```"
@@ -877,15 +836,12 @@ async fn inferred_reasoning_run(
             )
             .unwrap();
     }
-    // A person approves the job and the effects.
-    approve_every(&svc, ProgramKind::Job).unwrap();
-    approve_every(&svc, ProgramKind::Effect).unwrap();
     let ext = svc
         .extension_catalog
         .named(root, "oxplow-bundled")
         .expect("oxplow-bundled is active");
     for decl in &ext.effects {
-        oxplow_app::effects::approved(&svc.db, &decl.name())
+        oxplow_app::effects::start_at_head(&svc.db, &decl.name())
             .await
             .unwrap();
     }
@@ -1054,7 +1010,7 @@ async fn the_session_notes_example_adds_a_section_to_the_new_session_page() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions");
     copy_dir(
         &examples.join("session-notes"),
-        &root.join("oxplow/extensions/session-notes"),
+        &root.join(".oxplow/extensions/session-notes"),
     );
     let report = check(
         root,
@@ -1099,12 +1055,12 @@ async fn review_project(with_producer: bool) -> tempfile::TempDir {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions");
     copy_dir(
         &examples.join("review-badges"),
-        &root.join("oxplow/extensions/review-badges"),
+        &root.join(".oxplow/extensions/review-badges"),
     );
     if with_producer {
         copy_dir(
             &examples.join("effort-review"),
-            &root.join("oxplow/extensions/effort-review"),
+            &root.join(".oxplow/extensions/effort-review"),
         );
     }
     dir
@@ -1159,8 +1115,8 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
     let root = dir.path();
     std::fs::create_dir_all(root.join(".oxplow")).unwrap();
     std::fs::write(
-        root.join(".oxplow/project.yaml"),
-        "extensions:\n  disabled: [effort-review]\n",
+        root.join(".oxplow/personal.yaml"),
+        "disableExtensions: [effort-review]\n",
     )
     .unwrap();
     let tested = test_extension(root, "review-badges", false).await.unwrap();
@@ -1215,14 +1171,14 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
             tested.warnings
         );
     }
-    let svc = oxplow_app::Services::in_memory(root).await.unwrap();
+    let svc = common::booted(root).await;
     let consumer = svc.extension_catalog.named(root, "review-badges").unwrap();
     assert!(consumer.ui.slots.is_empty(), "{:?}", consumer.ui.slots);
 
     // The producer exports another version.
     let dir = review_project(true).await;
     let root = dir.path();
-    let manifest = root.join("oxplow/extensions/effort-review/extension.yaml");
+    let manifest = root.join(".oxplow/extensions/effort-review/extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
     let bumped = text
         .replace(
@@ -1259,12 +1215,11 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
 #[tokio::test(flavor = "multi_thread")]
 async fn a_review_effort_review_wrote_shows_in_review_badges() {
     use oxplow_app::ai_service::{ProviderConfig, Role, RoleBinding};
-    use oxplow_app::exec_consent::{approve_every, ProgramKind};
     use serde_json::json;
 
     let dir = review_project(true).await;
     let root = dir.path();
-    let svc = oxplow_app::Services::in_memory(root).await.unwrap();
+    let svc = common::booted(root).await;
     let replies: Vec<oxplow_ai::fixture::FixtureReply> = serde_json::from_value(json!([
         "The tests pass and coverage is fine; one untested branch remains in the parser.",
     ]))
@@ -1287,7 +1242,6 @@ async fn a_review_effort_review_wrote_shows_in_review_badges() {
             Some(RoleBinding::new("fixture", "fixture")),
         )
         .unwrap();
-    approve_every(&svc, ProgramKind::Job).unwrap();
     svc.extension_activation
         .activate(svc.clone())
         .await
@@ -1400,7 +1354,7 @@ async fn the_schema_review_example_joins_its_facts_with_core_evidence() {
         .unwrap();
     let example =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/schema-review");
-    copy_dir(&example, &root.join("oxplow/extensions/schema-review"));
+    copy_dir(&example, &root.join(".oxplow/extensions/schema-review"));
     let report = check(
         root,
         "schema-review",
@@ -1421,7 +1375,7 @@ async fn the_schema_review_example_joins_its_facts_with_core_evidence() {
     );
 
     // A real oxplow: an effort that adds a migration and a function.
-    let svc = oxplow_app::Services::in_memory(root).await.unwrap();
+    let svc = common::booted(root).await;
     // Both review policies offer an effort's verdict; the person chooses.
     let offering: Vec<String> = svc
         .extension_catalog

@@ -16,6 +16,11 @@
 //! - **Assets.** Each asset whose inputs it touched is marked dirty
 //!   (`assets::Assets`), and recomputes once its inputs are quiet.
 //!
+//! A live model (`live_models`) has no table to touch: it is announced
+//! with the models it reads through ([`live_models_reading`], in the loop
+//! below), and after the events about the state it reads
+//! ([`live_models_after`], which the bus asks as it posts one).
+//!
 //! The watermarks are in memory: they're derivable (nothing is lost by a
 //! restart but "changed since boot"), and they change on every write.
 
@@ -281,6 +286,31 @@ pub(crate) async fn react(
     }
 }
 
+/// The live models (`v_<name>`) that `event` can change.
+pub fn live_models_after(event: &OxplowEvent) -> Vec<String> {
+    live_following(&crate::live_models::Change::Event(event))
+}
+
+/// The live models (`v_<name>`) that read through any of `models`.
+pub fn live_models_reading(models: &[String]) -> Vec<String> {
+    live_following(&crate::live_models::Change::Models(models))
+}
+
+fn live_following(change: &crate::live_models::Change<'_>) -> Vec<String> {
+    crate::live_models::NAMES
+        .iter()
+        .filter(|name| crate::live_models::follows(name, change))
+        .map(|name| format!("v_{name}"))
+        .collect()
+}
+
+/// The announcement that follows `event` on the bus: the live models it
+/// changed, if any.
+pub fn announced_after(event: &OxplowEvent) -> Option<OxplowEvent> {
+    let models = live_models_after(event);
+    (!models.is_empty()).then_some(OxplowEvent::ModelsChanged { models })
+}
+
 /// Follow the database's changes — models, metric samples, assets, and
 /// new events for the pump (a commit that logged one wakes it, whoever
 /// made it) — for the life of the process.
@@ -315,7 +345,8 @@ pub fn spawn(
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => Changed::Everything,
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
             };
-            let (models, samples) = react(&db, &mut lineage, &assets, &pump, &changed).await;
+            let (mut models, samples) = react(&db, &mut lineage, &assets, &pump, &changed).await;
+            models.extend(live_models_reading(&models));
             if !models.is_empty() {
                 watermarks.mark(&models, Timestamp::now());
                 events.emit(OxplowEvent::ModelsChanged { models });

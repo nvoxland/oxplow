@@ -20,13 +20,13 @@ async fn a_fact_collectors_examples_run_over_their_files() {
         .init_repository(root)
         .await
         .unwrap();
-    let ext = "oxplow/extensions/todos";
+    let ext = ".oxplow/extensions/todos";
     write(
         root,
         &format!("{ext}/extension.yaml"),
         "manifest: 2\n\
          name: todos\n\
-         sharing: private\n\
+         permissions: { files: read }\n\
          intent:\n  purpose: Count TODO comments.\n  origin: null\n  examples:\n    - { name: one-todo }\n    - { name: wrong-count }\n\
          measures:\n  - { key: todos.count, title: TODO comments, subjectKind: file, captureScope: per-path }\n\
          collectors:\n  - id: todos.scan\n    doc: TODO comments per file\n    runtime: starlark\n    entry: collectors/scan.star\n    trigger: { on: [snapshot.taken] }\n    facts: [todos.count]\n",

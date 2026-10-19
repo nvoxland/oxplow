@@ -45,7 +45,9 @@ pub struct Import {
 pub struct Candidate {
     pub name: String,
     pub enabled: bool,
-    pub shared: bool,
+    /// It ships with oxplow: it imports only stable contracts and exports
+    /// nothing as experimental.
+    pub bundled: bool,
     pub contributions: Vec<ContractContribution>,
     pub exports: Vec<Export>,
     pub imports: Vec<Import>,
@@ -99,7 +101,7 @@ impl UnavailableReason {
             Self::Blocked => format!("{producer} is blocked by its own imports"),
             Self::Private => format!("{producer} doesn't export it"),
             Self::Experimental => format!(
-                "{producer} exports it as experimental, which a shared extension can't import"
+                "{producer} exports it as experimental, which an extension that ships with oxplow can't import"
             ),
             Self::Incompatible { actual } => format!("{producer} exports v{actual}"),
             Self::Ambiguous => "more than one producer has that name".to_string(),
@@ -370,14 +372,14 @@ pub fn validate_with_blocked(
                     }
                 }
             }
-            if candidate.shared && export.visibility == ExportVisibility::Experimental {
+            if candidate.bundled && export.visibility == ExportVisibility::Experimental {
                 invalid_export(
                     &mut resolution,
                     candidate,
                     export,
-                    "shared_experimental_export",
+                    "bundled_experimental_export",
                     format!(
-                        "shared extension `{}` cannot export `{}` as experimental",
+                        "bundled extension `{}` cannot export `{}` as experimental",
                         candidate.name, export.id
                     ),
                 );
@@ -738,7 +740,7 @@ fn resolve_import(
                 Some(producer_index),
             );
         }
-        ExportVisibility::Experimental if catalog[consumer_index].shared => {
+        ExportVisibility::Experimental if catalog[consumer_index].bundled => {
             return (
                 unavailable(UnavailableReason::Experimental),
                 Some(producer_index),

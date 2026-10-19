@@ -781,9 +781,38 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "then": {
+          "description": "What becomes of the page after a submit whose command opens one.",
+          "default": "open",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ActionThen"
+            }
+          ]
         }
       },
       "additionalProperties": false
+    },
+    "ActionThen": {
+      "description": "What becomes of the page a lens is on after one of its actions (or its\nform) ran a command whose `ui.open_after` names a page.",
+      "oneOf": [
+        {
+          "description": "The page opens in this tab; Back returns to the lens's page.",
+          "type": "string",
+          "const": "open"
+        },
+        {
+          "description": "The page takes this tab and the lens's page leaves its history: Back\nnever returns to a submitted form. A page that can't live in a tab\n(an agent session) closes this one and is focused.",
+          "type": "string",
+          "const": "replace"
+        },
+        {
+          "description": "Nothing opens; the lens's page stays (a form for the next entry).",
+          "type": "string",
+          "const": "stay"
+        }
+      ]
     },
     "LensCustom": {
       "description": "A `custom` lens's component and the props it starts with.",
@@ -966,6 +995,23 @@
             "type": "string"
           },
           "default": {}
+        },
+        "then": {
+          "description": "What becomes of the lens's page when the command opens one:\n`open` (default), `replace` or `stay`.",
+          "default": "open",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ActionThen"
+            }
+          ]
+        },
+        "when": {
+          "description": "A row action's column: offered only on rows where it is truthy.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,

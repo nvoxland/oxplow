@@ -1197,16 +1197,16 @@ fn scripted_implementation(
 }
 
 /// Every skill and slash command the agent gets now: core's, and each
-/// consented extension's that's offered — what it needs is active, and,
+/// extension's that's offered (one with skills declares `agent`: it doesn't
+/// load otherwise) — what it needs is active, and,
 /// when an implementation lists it, that implementation is the active one.
 /// A name another extension already took is left out (logged).
 pub fn agent_text(svc: &crate::Services) -> oxplow_domain::agent::text::AgentText {
     let project_dir = svc.worktrees.project_dir();
-    let extensions =
-        crate::advisories::consented(&svc.approvals, &svc.extension_catalog.get(project_dir));
+    let extensions = svc.extension_catalog.get(project_dir).to_vec();
     let config = crate::config_service::read_config(&svc.config);
-    offered_text(&svc.capabilities, &config, &extensions, |ext, file| {
-        crate::extensions::read_extension_file(project_dir, ext, file)
+    offered_text(&svc.capabilities, &config, &extensions, |path, file| {
+        crate::extensions::read_extension_file(project_dir, path, file)
     })
 }
 
@@ -1281,6 +1281,8 @@ pub fn offered_text(
     registry: &CapabilityRegistry,
     config: &OxplowConfig,
     extensions: &[crate::extensions::Extension],
+    // `(extension's path, file)`: a file of a skill, read through its
+    // extension's folder.
     read: impl Fn(&str, &str) -> Option<String>,
 ) -> oxplow_domain::agent::text::AgentText {
     use crate::extensions::skills::SkillKind;
@@ -1305,7 +1307,7 @@ pub fn offered_text(
                 tracing::warn!(extension = %ext.name, skill = %skill.name, "another extension's skill has this name; leaving it out");
                 continue;
             }
-            let Some(body) = read(&ext.name, &skill.file) else {
+            let Some(body) = read(&ext.path, &skill.file) else {
                 continue;
             };
             let item = oxplow_domain::agent::text::Text {
@@ -1546,11 +1548,11 @@ mod tests {
     async fn disabling_the_bundled_extension_leaves_core_usable() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
-        svc.config.write().unwrap().extensions_disabled = vec!["oxplow-bundled".into()];
+        svc.config.write().unwrap().extensions = Vec::new();
         std::fs::create_dir_all(svc.layout.project_dir.join(".oxplow")).unwrap();
         std::fs::write(
             oxplow_config::config_path(&svc.layout.project_dir),
-            "extensions:\n  disabled: [oxplow-bundled]\n",
+            "extensions: []\n",
         )
         .unwrap();
         svc.extension_catalog.changed();
@@ -1974,11 +1976,11 @@ mod contribution_tests {
     #[tokio::test]
     async fn a_refresh_publishes_the_contributions() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        let dir = fx.svc.layout.project_dir.join("oxplow/extensions/acme");
+        let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(dir.join("skills")).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),
-            "manifest: 2\nname: acme\nversion: 1.2.0\nintent:\n  purpose: p\n  examples: [{ name: a }]\nskills:\n  - { name: deploy, file: skills/deploy.md }\n",
+            "manifest: 2\nname: acme\nversion: 1.2.0\nintent:\n  purpose: p\n  examples: [{ name: a }]\npermissions: { agent: true }\nskills:\n  - { name: deploy, file: skills/deploy.md }\n",
         )
         .unwrap();
         std::fs::write(

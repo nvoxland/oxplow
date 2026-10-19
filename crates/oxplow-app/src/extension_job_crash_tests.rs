@@ -1,5 +1,5 @@
 //! A job's persistence boundaries under a crash, two schedulers, a full
-//! queue, a late result and a revoked approval: each cut at the exact step
+//! queue, a late result and an extension turned off: each cut at the exact step
 //! it is, and what is left to recover from. A crash here is the dispatch
 //! panicking (or its transaction aborting) at a [`Stage`]: the durable
 //! state is all that remains, which is what a dead process leaves.
@@ -26,7 +26,7 @@ use serde_json::{json, Value};
 use crate::extension_job_dispatch::{
     CrashHook, DispatchError, DispatchOutcome, ExtensionJobDispatcher, Stage,
 };
-use crate::extension_job_hardening_tests::{expire_lease, job_key, observations, state, words};
+use crate::extension_job_hardening_tests::{expire_lease, observations, state, words};
 use crate::extension_job_stream_tests::{
     ask, completions, fixture_idle, manifest_idempotent, reply, rows, slow, Fixture, MANIFEST,
 };
@@ -329,20 +329,26 @@ async fn a_result_after_lease_recovery_is_one_readable_observation() {
     assert_eq!(completions(&fx, &id).await, ["interrupted"]);
 }
 
-/// The approval is revoked between the worker returning and the publish
+/// The extension is turned off between the worker returning and the publish
 /// transaction: nothing is published as a success, the job is cancelled
 /// with what it streamed, and the result is kept as a late observation.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_revocation_between_the_worker_and_the_publish_cancels_the_job() {
+async fn turning_the_extension_off_between_the_worker_and_the_publish_cancels_the_job() {
     let fx = fixture_idle(MANIFEST, vec![slow(&words(8), 10)]).await;
-    let key = job_key(&fx);
     let svc = fx.svc.clone();
     let revoked = Arc::new(AtomicBool::new(false));
     let hook: CrashHook = {
         let revoked = revoked.clone();
         Arc::new(move |stage| {
             if stage == Stage::BeforePublish && !revoked.swap(true, Ordering::SeqCst) {
-                assert!(svc.approvals.revoke(&key).unwrap());
+                let svc = svc.clone();
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async move {
+                        crate::extension_deploy::set_enabled(&svc, "triage", false, true)
+                            .await
+                            .unwrap();
+                    })
+                });
             }
         })
     };
@@ -356,14 +362,9 @@ async fn a_revocation_between_the_worker_and_the_publish_cancels_the_job() {
     let outcome = running.await.unwrap().unwrap();
     assert_eq!(outcome, DispatchOutcome::Cancelled);
 
-    let done = state(&fx, &id).await;
-    assert_eq!(done["state"], json!("cancelled"), "{done}");
-    assert_eq!(done["result"]["stopped"], json!("cancelled"), "{done}");
-    assert_eq!(
-        done["result"]["parts"][0]["text"],
-        json!(words(8)),
-        "{done}"
-    );
+    let (state, text) = crate::extension_job_hardening_tests::recorded(&fx, &id).await;
+    assert_eq!(state, "cancelled");
+    assert_eq!(text, words(8));
     assert_eq!(completions(&fx, &id).await, ["cancelled"]);
     assert_eq!(observations(&fx, &id).await, 1);
     let kept = rows(

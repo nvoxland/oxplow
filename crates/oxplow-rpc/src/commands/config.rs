@@ -197,10 +197,6 @@ mod tests {
                 "set_generated",
                 json!({ "generated": { "exclude": ["dist"], "include": [] } }),
             ),
-            (
-                "set_extension_enabled",
-                json!({ "name": "oxplow-bundled", "enabled": false }),
-            ),
         ] {
             crate::dispatch(command, args, &svc)
                 .await
@@ -216,16 +212,10 @@ mod tests {
             .collect();
         assert_eq!(
             keys,
-            [
-                "agents",
-                "agentPromptAppend",
-                "agentConfig",
-                "generated",
-                "extensions",
-            ]
+            ["agents", "agentPromptAppend", "agentConfig", "generated",]
         );
         let file = std::fs::read_to_string(dir.path().join(".oxplow/project.yaml")).unwrap();
-        for expected in ["codex", "Be brief.", "m1", "dist", "oxplow-bundled"] {
+        for expected in ["codex", "Be brief.", "m1", "dist"] {
             assert!(file.contains(expected), "{expected} missing from:\n{file}");
         }
         // Clearing a value unsets its key.

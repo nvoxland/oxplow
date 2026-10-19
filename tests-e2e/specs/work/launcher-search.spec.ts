@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { run, searchable } from "../../support/daemon.js";
+import { deploy, extensionSource, run, searchable } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { searchLauncher } from "../../support/ui.js";
 
@@ -31,16 +31,17 @@ test("a lens added while the page is open is in the launcher", async ({ page, da
   await searchLauncher(page, "Wombat");
   await expect(page.locator('[data-testid^="launcher-page-"]').filter({ hasText: "Wombat" })).toHaveCount(0);
   await page.keyboard.press("Escape");
-  const dir = join(daemon.project, "oxplow", "extensions", "wombat");
+  const dir = extensionSource(daemon, "wombat");
   mkdirSync(join(dir, "lenses"), { recursive: true });
   writeFileSync(
     join(dir, "extension.yaml"),
-    "manifest: 2\nname: wombat\nsharing: private\nintent:\n  purpose: Wombat tasks.\n  origin: null\n  examples: []\n",
+    "manifest: 2\nname: wombat\nintent:\n  purpose: Wombat tasks.\n  origin: null\n  examples: []\n",
   );
   writeFileSync(
     join(dir, "lenses", "wombats.yaml"),
     "title: Wombat Tasks\nquery: SELECT ref FROM v_work_item\nviz: table\nlauncher: { category: Work }\n",
   );
+  await deploy(daemon, "wombat");
   await expect(async () => {
     await searchLauncher(page, "Wombat Tasks");
     await expect(page.locator('[data-testid^="launcher-page-"]').filter({ hasText: "Wombat Tasks" })).toHaveCount(1, {

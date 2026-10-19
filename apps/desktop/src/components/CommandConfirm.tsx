@@ -14,6 +14,7 @@ export function CommandConfirm({
   command,
   onConfirm,
   onCancel,
+  details = [],
   testIdPrefix = "command-confirm",
 }: {
   /** What the person pressed (`Finish`). */
@@ -22,6 +23,9 @@ export function CommandConfirm({
   command: string;
   onConfirm(): void;
   onCancel(): void;
+  /** What it asks about beyond itself, one line each (the permissions a
+   *  deploy adds), from the bus's `NEEDS_CONFIRMATION`. */
+  details?: string[];
   testIdPrefix?: string;
 }) {
   const [spec, setSpec] = useState<CommandSpec | null>(null);
@@ -58,6 +62,13 @@ export function CommandConfirm({
         {destructive ? <span style={{ color: "var(--severity-critical)" }}> — it can't be undone</span> : null}.
       </div>
       {spec ? <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{spec.summary}</div> : null}
+      {details.length > 0 ? (
+        <ul data-testid={`${testIdPrefix}-details`} style={detailsStyle}>
+          {details.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      ) : null}
       <div style={{ display: "flex", gap: 6 }}>
         <button type="button" data-testid={`${testIdPrefix}-run`} autoFocus onClick={onConfirm}>
           Run {label}
@@ -69,6 +80,12 @@ export function CommandConfirm({
     </div>
   );
 }
+
+const detailsStyle: CSSProperties = {
+  margin: 0,
+  paddingLeft: 18,
+  fontSize: "var(--text-xs)",
+};
 
 const boxStyle: CSSProperties = {
   border: "1px solid var(--border-subtle)",

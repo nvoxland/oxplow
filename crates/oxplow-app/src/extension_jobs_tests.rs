@@ -1,5 +1,5 @@
 //! A declared job end to end: an extension's command records intent, the
-//! scheduler runs the typed AI operation outside SQL once a person approved
+//! scheduler runs the typed AI operation outside SQL for
 //! the job, and the extension reads its recorded result back.
 
 use oxplow_ai::config::{ProviderConfig, Role, RoleBinding};
@@ -11,6 +11,7 @@ const MANIFEST: &str = "manifest: 2
 name: triage
 intent:
   purpose: p
+permissions: { sql: read, ai: true }
 ai_profiles:
   - { id: sort, description: Sorts items., fallback: summarize }
 jobs:
@@ -29,14 +30,13 @@ struct Fixture {
 }
 
 /// A project with the `triage` extension, a mock OpenAI-compatible model on
-/// the summarize role and every AI provider approved; `approve_jobs` also
-/// approves its job, as a person does in Settings → Data → Programs.
-async fn fixture(approve_jobs: bool) -> Fixture {
+/// the summarize role and the job scheduler running.
+async fn fixture() -> Fixture {
     let dir = project();
     let (base, seen) = model().await;
     let svc = crate::Services::in_memory(dir.path()).await.unwrap();
     configure(&svc, base);
-    start(&svc, approve_jobs).await;
+    start(&svc, true).await;
     Fixture {
         _dir: dir,
         svc,
@@ -47,7 +47,7 @@ async fn fixture(approve_jobs: bool) -> Fixture {
 fn project() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     crate::test_fixtures::init_git_repo(dir.path());
-    let ext = dir.path().join("oxplow/extensions/triage");
+    let ext = dir.path().join(".oxplow/extensions/triage");
     std::fs::create_dir_all(&ext).unwrap();
     std::fs::write(ext.join("extension.yaml"), MANIFEST).unwrap();
     dir
@@ -85,30 +85,18 @@ fn configure(svc: &crate::Services, base: String) {
     svc.ai
         .set_role(&Role::SUMMARIZE, Some(RoleBinding::new("a", "m")))
         .unwrap();
-    crate::test_fixtures::approve_ai_providers(svc);
 }
 
-/// Activate the project's extensions and start the job scheduler, as boot does.
-async fn start(svc: &Arc<crate::Services>, approve_jobs: bool) {
-    if approve_jobs {
-        approve(svc, crate::exec_consent::ProgramKind::Job);
-    }
-    svc.extension_activation
-        .activate(svc.clone())
-        .await
-        .expect("the extension activates");
+/// Activate the project's extensions and, with `scheduler`, start the job
+/// scheduler, as boot does.
+async fn start(svc: &Arc<crate::Services>, scheduler: bool) {
+    crate::test_fixtures::activate(svc).await;
     let problems = svc.extension_activation.problems();
     assert!(problems.is_empty(), "{problems:?}");
-    svc.jobs
-        .spawn(svc.extension_activation.clone(), svc.commands.clone());
-}
-
-fn approve(svc: &crate::Services, kind: crate::exec_consent::ProgramKind) {
-    let approved = crate::exec_consent::approve_every(svc, kind).expect("approved");
-    assert!(
-        !approved.is_empty(),
-        "a {kind:?} program is listed to approve"
-    );
+    if scheduler {
+        svc.jobs
+            .spawn(svc.extension_activation.clone(), svc.commands.clone());
+    }
 }
 
 async fn run(fx: &Fixture, command: &str, input: Value) -> Value {
@@ -165,8 +153,8 @@ async fn until_on(svc: &crate::Services, id: &str, done: impl Fn(&Value) -> bool
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_approved_job_runs_and_its_result_is_read_back() {
-    let fx = fixture(true).await;
+async fn a_job_runs_and_its_result_is_read_back() {
+    let fx = fixture().await;
     let queued = run(&fx, "triage.summary.ask", ask("item-1")).await;
     assert_eq!(queued["created"], json!(true), "{queued}");
     let id = oxplow_domain::refs::build::id_of(queued["jobRun"].as_str().unwrap(), "job_run")
@@ -207,7 +195,7 @@ async fn an_approved_job_runs_and_its_result_is_read_back() {
 /// nothing it forbids runs on the same binding.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_restricted_binding_fails_a_job_needing_what_it_forbids() {
-    let fx = fixture(true).await;
+    let fx = fixture().await;
     fx.svc
         .ai
         .set_role(
@@ -244,7 +232,7 @@ async fn a_restricted_binding_fails_a_job_needing_what_it_forbids() {
 /// qualified profile. A name the extension doesn't declare is refused.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_job_runs_on_its_extensions_ai_profile() {
-    let fx = fixture(true).await;
+    let fx = fixture().await;
     let id = oxplow_domain::refs::build::id_of(
         run(&fx, "triage.summary.ask", ask_as("item-p", "sort")).await["jobRun"]
             .as_str()
@@ -282,41 +270,8 @@ async fn a_job_runs_on_its_extensions_ai_profile() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn an_unapproved_job_waits_and_cancelling_it_stops_it() {
-    let fx = fixture(false).await;
-    let id = oxplow_domain::refs::build::id_of(
-        run(&fx, "triage.summary.ask", ask("item-2")).await["jobRun"]
-            .as_str()
-            .unwrap(),
-        "job_run",
-    )
-    .unwrap()
-    .to_owned();
-    tokio::time::sleep(Duration::from_millis(1500)).await;
-    let waiting = run(
-        &fx,
-        "triage.summary.result",
-        json!({ "job_run": oxplow_domain::refs::build::job_run_ref(&id) }),
-    )
-    .await;
-    assert_eq!(waiting["state"], json!("queued"), "{waiting}");
-    assert!(fx.seen.lock().unwrap().is_empty(), "nothing was sent");
-
-    let cancelled = run(
-        &fx,
-        "triage.summary.cancel",
-        json!({ "job_run": oxplow_domain::refs::build::job_run_ref(&id) }),
-    )
-    .await;
-    assert_eq!(cancelled["cancellationRequested"], json!(true));
-    let done = until(&fx, &id, |s| s["state"] == json!("cancelled")).await;
-    assert_eq!(done["cancellationRequested"], json!(true), "{done}");
-    assert!(fx.seen.lock().unwrap().is_empty(), "nothing was sent");
-}
-
 /// Intent is durable: a job recorded before oxplow stopped runs after it
-/// starts again, once a person approves it.
+/// starts again.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_recorded_job_runs_after_a_restart() {
     let dir = project();

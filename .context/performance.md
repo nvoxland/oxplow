@@ -463,6 +463,19 @@ for a window it isn't drawing, while a real block starts after frames were
 running. A hidden document (`visibilitychange`) is still discounted. At
 most one tick right after a window is covered can still report.
 
+## A worktree's files as a live model (measured 2026-10-18)
+
+`v_workspace_file` reads a stream's worktree on every query: the VCS
+status, the filtered walk, and the rows into a temp table. On this repo
+(2,321 files kept by the filter): status ~28 ms, walk ~40 ms, temp table
+~2 ms — about 70 ms a query, and the walk grows with the tree. Listing one
+folder through `list_workspace_entries` costs the status and one
+`read_dir`, about 30 ms. So the Project panel, Quick Open's file index and
+the Directory page keep their workspace-listing IPCs until a live model
+can be read for one folder (a pushdown of `parent = ?` into the read);
+`v_workspace_file` serves lenses and the agent's whole-tree questions,
+where one walk per query is fine.
+
 ## Daemon transport: what a loopback HTTP hop costs (tsk255)
 
 Measured for the daemon-backed shell epic ([[tsk254]]), from **inside the real
@@ -515,24 +528,13 @@ calls averaged):
 | `load_extensions`, bundled + one project extension with 10 lenses | ~3.1 ms |
 | `ExtensionCatalog::get`, same root, cache hit | ~62 µs |
 
-`crates/oxplow-app/src/extension_catalog.rs` caches the loaded `Vec<Extension>`
-per worktree root behind a **stat-only fingerprint** of
-`root/oxplow/extensions/**` and the project's `.oxplow/project.yaml` (the
-main worktree's in the daemon, whatever the root; path, size,
-mtime of every file). A hit walks the tree with `stat` and parses nothing;
-any edit, add or delete — or a config change that disables an extension —
-misses and reloads on the next call. No watcher and no explicit
-invalidation, so there is no window in which an agent's freshly written
-lens is invisible, and worktrees the watcher doesn't cover behave the
-same. Hidden entries directly under the extensions root are excluded, matching
-the loader; install staging must not cause cache misses or a new generation.
-Hidden files inside a declared extension still participate. Write paths (install,
-update, `oxplow.lens.keep`) read the disk directly, and consent hashing
-(`approval_hash`) always reads the bytes it approves. A cache entry now owns a
-`CatalogSnapshot`: declarations and the generation hash from that entry's
-fingerprint. `get` retains its existing Arc/cache-hit behavior; snapshot callers
-can retain the load identity without another filesystem walk. The current-files
-`generation(root)` remains separate. No new performance measurement was run.
+The daemon's catalog (`ExtensionCatalog::for_project`) loads the live set
+once per generation, from the deployments in the store; it reads no source
+and keeps no per-root cache or fingerprint. Source loads
+(`load_extensions`, used by `oxplow_validate_extension` and the CLI) parse on
+every call. Consent hashing (`approval_hash`) always reads the bytes it
+approves. A cache entry owns a `CatalogSnapshot`: declarations and the
+generation hash. No new performance measurement was run.
 
 ## Metric visibility: ancestry in bulk (2026-10-06)
 

@@ -32,7 +32,7 @@ export interface LensPageProps {
 
 /**
  * A lens: a user/agent-built query over the semantic layer, read from
- * `oxplow/extensions/<ext>/lenses/<slug>.yaml` in this stream's worktree.
+ * `.oxplow/extensions/<ext>/lenses/<slug>.yaml` in this stream's worktree.
  * Re-runs when oxplow data changes, so it stays live. Params are edited
  * in the right rail (Enter applies). See `.context/extensions.md`.
  */

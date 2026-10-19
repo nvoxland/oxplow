@@ -12,8 +12,8 @@
 //! together — so a redelivered event writes nothing.
 //! A collector that fails is recorded and announced like any run; it
 //! doesn't dead-letter the event, so one broken collector never holds up
-//! the others. An exec collector nobody approved is recorded as
-//! `needs_approval` and doesn't run.
+//! the others. One whose extension lacks a permission it needs is
+//! recorded as an `error` and doesn't run.
 //!
 //! `after_for(event)` is the union of the `after:` lists of the
 //! collectors that event triggers (limited to consumers the pump has): an
@@ -350,7 +350,7 @@ impl CollectorTriggers {
                     EventRun::Guarded => {
                         tracing::warn!(collector = %format!("{owner}/{}", spec.id), "collector skipped by the loop guard");
                     }
-                    EventRun::Ran(Ok(_)) | EventRun::Skipped | EventRun::NeedsApproval => {}
+                    EventRun::Ran(Ok(_)) | EventRun::Skipped | EventRun::Denied => {}
                 }
             }
         }
@@ -366,10 +366,14 @@ mod tests {
     use serde_json::json;
 
     const HEAD: &str =
-        "manifest: 2\nname: work\nsharing: private\nintent: { purpose: t, origin: null, examples: [] }\n";
+        "manifest: 2\nname: work\nintent: { purpose: t, origin: null, examples: [] }\npermissions: { process: true }\n";
 
-    async fn extension(svc: &std::sync::Arc<Services>, collectors: &str, files: &[(&str, &str)]) {
-        let dir = svc.layout.project_dir.join("oxplow/extensions/work");
+    async fn extension(
+        svc: &std::sync::Arc<Services>,
+        collectors: &str,
+        files: &[(&str, &str)],
+    ) -> crate::vocabulary_reactor::VocabularyErrors {
+        let dir = svc.layout.project_dir.join(".oxplow/extensions/work");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),
@@ -379,7 +383,7 @@ mod tests {
         for (name, body) in files {
             std::fs::write(dir.join(name), body).unwrap();
         }
-        crate::test_fixtures::activate_with_problems(svc).await;
+        crate::test_fixtures::activate_with_problems(svc).await
     }
 
     const SEEN: &str = "def transform(input):\n    return {\"entities\": {\"seen\": [{\"ev\": r[\"ev\"], \"id\": r[\"id\"], \"effort\": r[\"effort\"], \"kind\": input[\"event\"][\"type\"]} for r in input[\"rows\"]]}}\n";
@@ -627,32 +631,6 @@ mod tests {
         );
     }
 
-    /// An exec collector on an event runs only once a person approved it;
-    /// until then each event records `needs_approval` and runs nothing.
-    #[tokio::test]
-    async fn an_unapproved_exec_collector_records_needs_approval() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        extension(&fx.svc,
-            "  - id: pull\n    runtime: exec\n    entry: pull.sh\n    trigger: { on: [effort.claim_verified] }\n    entities:\n      - { name: pr, key: n, columns: { n: int } }\n",
-            &[("pull.sh", "#!/bin/sh\necho '{\"entities\":{\"pr\":[{\"n\":1}]}}'\n")],
-        ).await;
-        let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
-        let ev = log(&fx.svc, fx.effort, "reviewer").await;
-        consumer.handle(&ev).await.unwrap();
-        assert_eq!(
-            rows(&fx.svc, "SELECT status, last_event_id FROM v_collector_run").await,
-            json!([["needs_approval", ev.seq]])
-        );
-        assert_eq!(
-            rows(
-                &fx.svc,
-                "SELECT count(*) FROM v_event WHERE type = 'collector.synced'"
-            )
-            .await,
-            json!([[0]])
-        );
-    }
-
     /// `after()` is the core consumers the collectors' `after:` lists
     /// name; a collector's own type never triggers one.
     #[tokio::test]
@@ -727,32 +705,29 @@ mod tests {
     #[tokio::test]
     async fn a_collector_after_nothing_is_a_load_error() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        extension(
+        let held = extension(
             &fx.svc,
             &on_claims("").replace("    input:", "    after: [no.such_consumer]\n    input:"),
             &[("seen.star", SEEN)],
         )
         .await;
-        // Held back from the active catalog; the load says why.
+        // Held back from the active catalog; the activation says why.
+        let why = held.get("work").map(|l| l.join("\n")).unwrap_or_default();
+        assert!(why.contains("`no.such_consumer` is none of"), "{held:?}");
         let load = fx
             .svc
             .extension_catalog
             .snapshot(&fx.svc.layout.project_dir);
-        let work = load.extensions().iter().find(|e| e.name == "work").unwrap();
-        assert!(work.collectors.is_empty());
-        assert!(
-            work.errors
-                .iter()
-                .any(|e| e.contains("`no.such_consumer` is none of")),
-            "{:?}",
-            work.errors
-        );
+        assert!(load
+            .extensions()
+            .iter()
+            .all(|e| e.name != "work" || e.collectors.is_empty()));
     }
 
     /// `acme-pr`: it declares `acme_pr.merged`, `.ping` and `.pong`
     /// (payload `{ number }`), and the given collectors.
     async fn emitter(svc: &std::sync::Arc<Services>, collectors: &str, files: &[(&str, &str)]) {
-        let dir = svc.layout.project_dir.join("oxplow/extensions/acme-pr");
+        let dir = svc.layout.project_dir.join(".oxplow/extensions/acme-pr");
         std::fs::create_dir_all(&dir).unwrap();
         let types: String = ["merged", "ping", "pong"]
             .iter()
@@ -764,7 +739,7 @@ mod tests {
             .collect();
         std::fs::write(
             dir.join("extension.yaml"),
-            format!("manifest: 2\nname: acme-pr\nsharing: private\nintent: {{ purpose: t, origin: null, examples: [] }}\nevent_types:\n  types:\n{types}collectors:\n{collectors}"),
+            format!("manifest: 2\nname: acme-pr\nintent: {{ purpose: t, origin: null, examples: [] }}\nevent_types:\n  types:\n{types}collectors:\n{collectors}"),
         )
         .unwrap();
         std::fs::write(

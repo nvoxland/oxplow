@@ -11,7 +11,7 @@ use std::sync::Arc;
 use oxplow_domain::events::{Anchors, Envelope, EventView, StoredEvent};
 use serde_json::{json, Value};
 
-use crate::collector_runner::{approval_hash, approve, run_for_event, Collectors};
+use crate::collector_runner::{run_for_event, Collectors};
 use crate::Services;
 
 fn write(root: &Path, rel: &str, body: &str) {
@@ -25,7 +25,7 @@ fn write(root: &Path, rel: &str, body: &str) {
     }
 }
 
-const OWNER_HEAD: &str = "manifest: 2\nname: acme-pr\nsharing: private\nintent: { purpose: PRs., origin: null, examples: [] }\nevent_types:\n  types:\n";
+const OWNER_HEAD: &str = "manifest: 2\nname: acme-pr\nintent: { purpose: PRs., origin: null, examples: [] }\nevent_types:\n  types:\n";
 const V1: &str = "    - { type: acme_pr.merged, v: 1, schema: merged.v1.json, summary: A pull request merged. }\n";
 const V2: &str = "    - { type: acme_pr.merged, v: 2, schema: merged.v2.json, summary: A pull request merged by someone., upcast: merged.star }\n";
 
@@ -34,28 +34,29 @@ const V2: &str = "    - { type: acme_pr.merged, v: 2, schema: merged.v2.json, su
 fn extensions(root: &Path, with_v2: bool) {
     write(
         root,
-        "oxplow/extensions/acme-pr/extension.yaml",
+        ".oxplow/extensions/acme-pr/extension.yaml",
         &format!("{OWNER_HEAD}{V1}{}", if with_v2 { V2 } else { "" }),
     );
     write(
         root,
-        "oxplow/extensions/acme-pr/merged.v1.json",
+        ".oxplow/extensions/acme-pr/merged.v1.json",
         r#"{"type": "object", "required": ["number"], "properties": {"number": {"type": "integer"}}}"#,
     );
     write(
         root,
-        "oxplow/extensions/acme-pr/merged.v2.json",
+        ".oxplow/extensions/acme-pr/merged.v2.json",
         r#"{"type": "object", "required": ["number", "by"], "properties": {"number": {"type": "integer"}, "by": {"type": "string"}}}"#,
     );
     write(
         root,
-        "oxplow/extensions/acme-pr/merged.star",
+        ".oxplow/extensions/acme-pr/merged.star",
         "def transform(x):\n    p = dict(x[\"payload\"])\n    p[\"by\"] = \"unknown\"\n    return p\n",
     );
     write(
         root,
-        "oxplow/extensions/acme/extension.yaml",
-        "manifest: 2\nname: acme\nsharing: private\nintent: { purpose: Reads merges., origin: null, examples: [] }\n\
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2\nname: acme\nintent: { purpose: Reads merges., origin: null, examples: [] }\n\
+         permissions: { process: true }\n\
          collectors:\n\
          \x20 - id: star\n    runtime: starlark\n    entry: star.star\n    trigger: { on: [acme_pr.merged] }\n    entities:\n      - { name: seen_star, key: k, columns: { k: text, event: text } }\n\
          \x20 - id: prog\n    runtime: exec\n    entry: prog.sh\n    trigger: { on: [acme_pr.merged] }\n    entities:\n      - { name: seen_prog, key: k, columns: { k: text, event: text } }\n\
@@ -64,18 +65,18 @@ fn extensions(root: &Path, with_v2: bool) {
     );
     write(
         root,
-        "oxplow/extensions/acme/star.star",
+        ".oxplow/extensions/acme/star.star",
         "def transform(input):\n    return {\"entities\": {\"seen_star\": [{\"k\": \"x\", \"event\": json.encode(input[\"event\"])}]}}\n",
     );
     // The program's stdin, as one escaped JSON string.
     write(
         root,
-        "oxplow/extensions/acme/prog.sh",
+        ".oxplow/extensions/acme/prog.sh",
         "#!/bin/sh\nbody=$(sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g')\nprintf '{\"entities\":{\"seen_prog\":[{\"k\":\"x\",\"event\":\"%s\"}]}}' \"$body\"\n",
     );
     write(
         root,
-        "oxplow/extensions/acme/note.star",
+        ".oxplow/extensions/acme/note.star",
         "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": \"work_item:oxplow:tsk1\", \"title\": json.encode(x[\"event\"])}}]}\n",
     );
 }
@@ -166,22 +167,6 @@ async fn every_path_hands_over_the_same_envelope() {
     assert_eq!(seen(svc, "v_acme_seen_star").await, expected);
 
     // An exec collector's stdin: `{ event }`.
-    let ext_dir = root.join("oxplow/extensions/acme");
-    let spec = crate::extensions::load_extensions(&root)
-        .into_iter()
-        .find(|e| e.name == "acme")
-        .unwrap()
-        .collectors
-        .into_iter()
-        .find(|c| c.id == "prog")
-        .unwrap();
-    approve(
-        &svc.approvals,
-        "acme",
-        "prog",
-        &approval_hash(&ext_dir, &spec).unwrap(),
-    )
-    .unwrap();
     run_for_event(&collectors, "acme", "prog", Arc::new(event.clone()))
         .await
         .unwrap();

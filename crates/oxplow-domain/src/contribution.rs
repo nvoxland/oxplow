@@ -732,7 +732,7 @@ mod tests {
             owner(ext),
             RunsOn::Query,
             DeclaredAt {
-                file: format!("oxplow/extensions/{ext}/extension.yaml"),
+                file: format!(".oxplow/extensions/{ext}/extension.yaml"),
                 line: None,
             },
         );

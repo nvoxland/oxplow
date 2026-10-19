@@ -19,7 +19,6 @@ pub mod agent_tools;
 pub mod ai_calls;
 pub mod ai_compute;
 pub mod ai_service;
-pub(crate) mod approved_code;
 pub mod assets;
 pub mod attribution;
 pub mod background_task;
@@ -80,7 +79,6 @@ pub mod event_pump;
 #[cfg(test)]
 mod event_view_tests;
 pub mod events;
-pub mod exec_consent;
 pub mod extension_activation;
 #[cfg(test)]
 mod extension_activation_tests;
@@ -90,6 +88,7 @@ pub mod extension_config_migration;
 #[cfg(test)]
 mod extension_config_tests;
 pub mod extension_configuration;
+pub mod extension_deploy;
 pub mod extension_event_types;
 pub mod extension_generation;
 #[cfg(test)]
@@ -125,6 +124,7 @@ pub mod extension_secrets;
 #[cfg(test)]
 mod extension_sql_config_tests;
 pub mod extension_state;
+pub mod extension_store;
 pub mod extensions;
 pub mod external_process;
 pub mod file_ref_version;
@@ -502,17 +502,13 @@ mod instance_lock_tests {
 }
 
 /// What differs between the app and [`Services::in_memory`]: this
-/// machine's keychain, global config dir and approvals (stand-ins in
-/// tests), and how long a failed provider waits before restarting.
+/// machine's keychain and global config dir (stand-ins in tests), and how
+/// long a failed provider waits before restarting.
 struct MachineEnv {
     secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
     config_dir: Option<PathBuf>,
-    /// Where program approvals live; `None` = this machine's oxplow home.
-    approvals_file: Option<PathBuf>,
     /// A failed provider's first restart wait (doubling from there).
     provider_backoff: std::time::Duration,
-    /// Where approved provider copies run from, outside the repo.
-    provider_copies: PathBuf,
     /// How long a provider's `check` or `invoke` may take.
     provider_call_timeout: std::time::Duration,
     /// How long a provider asked to `shutdown` has to exit.
@@ -574,7 +570,7 @@ pub struct Services {
     /// Producers `wake()` it after they commit; `boot.rs` spawns the loop.
     pub event_pump: Arc<event_pump::EventPump>,
     /// Loaded extensions per worktree root, reloaded when a file under
-    /// `oxplow/extensions/` or the project config changes.
+    /// `.oxplow/extensions/` or the project config changes.
     pub extension_catalog: Arc<extension_catalog::ExtensionCatalog>,
     pub jobs: Arc<extension_jobs::ExtensionJobs>,
     pub extension_secrets: Arc<extension_secrets::ExtensionSecrets>,
@@ -730,8 +726,6 @@ pub struct Services {
     /// Open ACP agent sessions (tsk281). Sessions get a
     /// `chat::host::ServicesChatHost` holding `Services` weakly.
     pub chat: Arc<chat::manager::ChatManager>,
-    /// This machine's approvals of the project's programs (`exec_consent`).
-    pub approvals: Arc<exec_consent::ApprovalStore>,
     pub lsp_installer: lsp_installer::LspInstallerService,
     pub terminal_sessions: terminal_sessions::TerminalSessionRegistry,
     /// Shared per-thread PTY liveness, written by the terminal forwarder
@@ -939,7 +933,6 @@ impl Services {
             effort_store: self.effort_store.clone(),
             thread_store: self.thread_store.clone(),
             worktrees: self.worktrees.clone(),
-            approvals: self.approvals.clone(),
             extension_catalog: self.extension_catalog.clone(),
             db: self.db.clone(),
             sql: self.sql.clone(),
@@ -975,17 +968,6 @@ impl Services {
         secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
     ) -> Result<Self, AppInitError> {
         ensure_state_dir(&layout.state_dir)?;
-        let recovery = extensions::candidates::recover_installations(&layout.project_dir)
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
-        if recovery.scanned != 0 {
-            info!(
-                restored = recovery.restored,
-                cleaned = recovery.cleaned,
-                preserved = recovery.preserved,
-                "extension install recovery finished"
-            );
-        }
-
         let config = oxplow_config::load_project_config(&layout.project_dir)?;
         info!(project = %layout.project_dir.display(), agents = ?config.agents, "config loaded");
 
@@ -993,12 +975,7 @@ impl Services {
         let machine = MachineEnv {
             secrets,
             config_dir: oxplow_config::global_config_dir(),
-            approvals_file: None,
             provider_backoff: std::time::Duration::from_secs(1),
-            provider_copies: oxplow_config::global_config_dir()
-                .unwrap_or_else(|| layout.state_dir.join("global-config"))
-                .join("provider-copies")
-                .join(collector_runner::project_key(&layout.project_dir)),
             provider_call_timeout: std::time::Duration::from_secs(60),
             provider_shutdown_grace: std::time::Duration::from_secs(5),
             provider_max_uncheckpointed: 10_000,
@@ -1149,16 +1126,6 @@ impl Services {
         // Lazily-built per-(stream, language) LSP proxies. Spawn cost
         // is paid on first request, not at boot.
         let project_config = config_arc.clone();
-        // Program approvals: this machine's, outside the repo (tsk344).
-        let approvals = Arc::new(match machine.approvals_file.clone() {
-            Some(f) => {
-                exec_consent::ApprovalStore::at(f, &layout.project_dir, machine.secrets.clone())
-            }
-            None => exec_consent::ApprovalStore::for_project(
-                &layout.project_dir,
-                machine.secrets.clone(),
-            ),
-        });
         // The model providers foundation declares, registered with the
         // other declarations below.
         let model_providers = oxplow_ai::client::ModelProviders::default();
@@ -1307,7 +1274,6 @@ impl Services {
             lsp: lsp.clone(),
             worktrees: worktrees.clone(),
             project: collector_runner::project_key(&layout.project_dir),
-            approvals: approvals.clone(),
             collector_store: collector_store.clone(),
             db: db.clone(),
             vocabulary: event_log_store.vocabulary().clone(),
@@ -1315,6 +1281,9 @@ impl Services {
             catalog: extension_catalog.clone(),
             config: config_arc.clone(),
             workspace_files: workspace_files.clone(),
+            streams: stream_store.clone(),
+            harnesses: harnesses.clone(),
+            vcs: vcs.clone(),
         });
         let extension_secrets = Arc::new(extension_secrets::ExtensionSecrets::new(
             extension_catalog.clone(),
@@ -1328,7 +1297,6 @@ impl Services {
                 catalog: extension_catalog.clone(),
                 root: layout.project_dir.clone(),
                 ai: ai_compute.clone(),
-                approvals: approvals.clone(),
                 threads: thread_store.clone(),
                 vocabulary: vocabulary.clone(),
                 sql: sql.clone(),
@@ -1410,7 +1378,6 @@ impl Services {
         )
         .with_fact_store(fact_store.clone())
         .with_background_tasks(background_tasks.clone())
-        .with_approvals(approvals.clone())
         .with_extension_catalog(extension_catalog.clone())
         .with_snapshot_captures(snapshot_captures.clone())
         .with_run_log(collector_runner::RunLog {
@@ -1642,7 +1609,6 @@ impl Services {
             providers::HostDeps {
                 project_dir: layout.project_dir.clone(),
                 project: collector_runner::project_key(&layout.project_dir),
-                approvals: approvals.clone(),
                 secrets: machine.secrets.clone(),
                 config: config_arc.clone(),
                 catalog: extension_catalog.clone(),
@@ -1652,7 +1618,6 @@ impl Services {
                 log: (*event_log_store).clone(),
                 host_env: machine.host_env.clone(),
                 backoff: machine.provider_backoff,
-                copies: machine.provider_copies.clone(),
                 call_timeout: machine.provider_call_timeout,
                 shutdown_grace: machine.provider_shutdown_grace,
                 max_uncheckpointed: machine.provider_max_uncheckpointed,
@@ -1721,7 +1686,6 @@ impl Services {
             config_arc.clone(),
             metric_engine.clone(),
         )
-        .with_approvals(approvals.clone())
         .with_extensions(extension_catalog.clone())
         .with_marks(snapshots.clone())
         .with_vocabulary(vocabulary.clone())
@@ -1732,7 +1696,6 @@ impl Services {
         });
         let collector_runner = collector_runner::CollectorRunner {
             project_dir: layout.project_dir.clone(),
-            approvals: approvals.clone(),
             store: collector_store.clone(),
             db: db.clone(),
             vocabulary: event_log_store.vocabulary().clone(),
@@ -1789,11 +1752,6 @@ impl Services {
         }
         for command in commands::test_runs::ops(collection.clone())
             .into_iter()
-            .chain(commands::extension_install::ops(
-                commands::extension_install::InstallDeps {
-                    worktrees: worktrees.clone(),
-                },
-            ))
             .chain([commands::snapshot::restore_file_op(
                 snapshot_files::SnapshotFiles {
                     snapshots: snapshot_store.clone(),
@@ -1830,6 +1788,7 @@ impl Services {
                 ),
             ))
             .chain(commands::effect::ops(services_slot.clone()))
+            .chain(commands::extension_deploy::ops(services_slot.clone()))
             .chain(commands::agent_reads::ops(services_slot.clone()))
             .chain(client_host::ops(&client_host))
             .chain([
@@ -1893,7 +1852,6 @@ impl Services {
             effort_store: effort_store.clone(),
             thread_store: thread_store.clone(),
             worktrees: worktrees.clone(),
-            approvals: approvals.clone(),
             extension_catalog: extension_catalog.clone(),
             db: db.clone(),
             sql: sql.clone(),
@@ -2000,7 +1958,6 @@ impl Services {
             agent_context: Arc::new(agent_context::AgentContext::default()),
             context_changes,
             chat,
-            approvals,
             lsp_installer: lsp_installer_svc,
             terminal_sessions,
             output_activity,
@@ -2116,12 +2073,8 @@ impl Services {
         let machine = MachineEnv {
             secrets,
             config_dir: Some(global_dir.clone()),
-            approvals_file: Some(exec_consent::approvals_file(&global_dir, &project_dir)),
             // A test's failing provider restarts at once.
             provider_backoff: std::time::Duration::ZERO,
-            provider_copies: global_dir
-                .join("provider-copies")
-                .join(collector_runner::project_key(&project_dir)),
             // A test's hung provider fails fast.
             provider_call_timeout: std::time::Duration::from_secs(2),
             provider_shutdown_grace: std::time::Duration::from_secs(1),
@@ -2319,11 +2272,15 @@ mod tests {
                 "oxplow.effect.backfill",
                 "oxplow.effect.retry",
                 "oxplow.effort.report",
-                // A clone into a stream's worktree, a person's call (P8.A9).
-                "oxplow.extension.install",
+                // Writes the store, the settings and `.oxplow/.gitignore`.
+                "oxplow.extension.deploy",
+                "oxplow.extension.disable",
+                "oxplow.extension.enable",
                 "oxplow.extension.preview",
-                "oxplow.extension.review",
-                "oxplow.extension.update",
+                "oxplow.extension.remove",
+                "oxplow.extension.rollback",
+                "oxplow.extension.share",
+                "oxplow.extension.unshare",
                 "oxplow.extension.validate",
                 "oxplow.file.create",
                 "oxplow.file.create_directory",
@@ -2347,7 +2304,6 @@ mod tests {
                 "oxplow.lens.keep",
                 "oxplow.lens.run",
                 "oxplow.lens.run_action",
-                "oxplow.lens.share",
                 // It returns the answer's text, rendered once it's stored.
                 "oxplow.lens.show",
                 // A download into .oxplow/lsp/, a person's call (P8.A9).
@@ -2455,8 +2411,11 @@ mod tests {
                 "extension_config.read/snapshot",
                 "extension_config.write/compare_exchange",
                 "extensions.check/preview",
-                "extensions.check/review",
                 "extensions.check/validate",
+                // An agent deploys what it wrote (and takes it back): what
+                // a program does still waits for a person's approval.
+                "extensions.deploy/deploy",
+                "extensions.deploy/rollback",
                 "files.write/create",
                 "files.write/create_directory",
                 "files.write/rename",

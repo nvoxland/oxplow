@@ -12,6 +12,8 @@ const realQuerySql = realApi.querySql;
 const realRunCommand = realApi.runCommand;
 const ran: Array<[string, unknown]> = [];
 let extensions: unknown[] = [];
+// Held: a thread-scoped read waits for it, then answers with no items.
+let threadReadGate: Promise<void> | null = null;
 mock.module("../../api.js", () => ({
   ...realApi,
   listExtensions: async () => extensions,
@@ -21,6 +23,10 @@ mock.module("../../api.js", () => ({
   ],
   querySql: async (sql: string, ...rest: unknown[]) => {
     if (!sql.includes("FROM v_work_item w")) return (realQuerySql as (...a: unknown[]) => unknown)(sql, ...rest);
+    if (threadReadGate && sql.includes("w.thread_id = ?1")) {
+      await threadReadGate;
+      return { columns: [], rows: [], truncated: false, reads: { models: ["v_work_item"], tables: [], measures: [] }, freshness: {} };
+    }
     return {
       columns: ["ref", "provider", "title", "body", "state", "parent_ref", "thread_id", "rank", "closed_at", "created_at", "updated_at", "native", "comment_count"],
       rows: [
@@ -46,6 +52,7 @@ const drag = (ref: string) => JSON.stringify({ refs: [ref], items: [], fromThrea
 
 afterEach(() => {
   extensions = [];
+  threadReadGate = null;
   ran.length = 0;
   cleanup();
 });
@@ -56,6 +63,21 @@ test("cards sit in their state's column", async () => {
   expect(todo.textContent).toContain("Plan it");
   expect(view.getByTestId("board-column-in_progress").textContent).toContain("Ship it");
   expect(view.getByTestId("board-column-done").textContent).not.toContain("Plan it");
+});
+
+// The scope changed while the old scope's read was out: its late answer
+// must not replace the new scope's cards.
+test("a read for a scope left behind doesn't overwrite the board", async () => {
+  let release = () => {};
+  threadReadGate = new Promise<void>((r) => {
+    release = r;
+  });
+  const view = render(<WorkBoard scope={{ thread: "thr1" }} onOpenPage={() => {}} />);
+  view.rerender(<WorkBoard scope="all" onOpenPage={() => {}} />);
+  await waitFor(() => view.getByText("Plan it"));
+  release();
+  await new Promise((r) => setTimeout(r, 0));
+  expect(view.getByTestId("board-column-todo").textContent).toContain("Plan it");
 });
 
 test("dropping a card on a column, or its menu's Move To, transitions it", async () => {

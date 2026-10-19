@@ -290,67 +290,10 @@ pub async fn earlier_sessions_of(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
-    use oxplow_domain::agent::harness::{Launch, LaunchInput};
-    use oxplow_domain::agent::observe::HookAnswer;
-    use oxplow_domain::agent::tool::ToolUse;
     use oxplow_domain::agent_session::BindingOrigin;
     use oxplow_domain::AgentSessionId;
 
-    /// A harness that lists what it is told to, or fails.
-    struct Listing {
-        id: &'static str,
-        answer: Result<Vec<NativeConversation>, String>,
-    }
-
-    #[async_trait]
-    impl AgentHarness for Listing {
-        fn id(&self) -> &str {
-            self.id
-        }
-        fn title(&self) -> &str {
-            self.id
-        }
-        async fn launch(&self, _input: &LaunchInput) -> Result<Launch, HarnessError> {
-            Err(HarnessError::Unsupported {
-                harness: self.id.into(),
-                what: "launch".into(),
-            })
-        }
-        async fn tool_use(&self, _body: &serde_json::Value) -> Option<ToolUse> {
-            None
-        }
-        async fn render(&self, _answer: &HookAnswer) -> serde_json::Value {
-            serde_json::json!({})
-        }
-        async fn conversations(
-            &self,
-            _query: &ConversationQuery,
-        ) -> Result<Vec<NativeConversation>, HarnessError> {
-            self.answer.clone().map_err(HarnessError::Unavailable)
-        }
-    }
-
-    fn conversation(id: &str, minute: u32) -> NativeConversation {
-        NativeConversation {
-            id: id.into(),
-            title: Some(format!("about {id}")),
-            first_prompt: None,
-            started_at: None,
-            updated_at: Some(
-                oxplow_domain::Timestamp::parse(&format!("2026-10-10T10:{minute:02}:00Z")).unwrap(),
-            ),
-            size_bytes: None,
-            parent: None,
-        }
-    }
-
-    fn harness(id: &'static str, found: Vec<NativeConversation>) -> Arc<dyn AgentHarness> {
-        Arc::new(Listing {
-            id,
-            answer: Ok(found),
-        })
-    }
+    use crate::test_fixtures::{conversation, listing_harness as harness, Listing};
 
     /// A session of `harness` on `thread`, on `native` when given, closed
     /// for `reason` when given.

@@ -51,7 +51,6 @@ pub struct JobsDependencies {
     pub catalog: Arc<ExtensionCatalog>,
     pub root: PathBuf,
     pub ai: Arc<crate::ai_compute::AiCompute>,
-    pub approvals: Arc<crate::exec_consent::ApprovalStore>,
     pub threads: Arc<dyn oxplow_domain::stores::ThreadStore>,
     pub vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
     pub sql: crate::sql_gateway::SqlGateway,
@@ -64,7 +63,6 @@ pub struct ExtensionJobs {
     ownership: crate::extension_state::StateHost,
     operations: JobOperations,
     ai: Arc<crate::ai_compute::AiCompute>,
-    approvals: Arc<crate::exec_consent::ApprovalStore>,
     threads: Arc<dyn oxplow_domain::stores::ThreadStore>,
     vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
     sql: crate::sql_gateway::SqlGateway,
@@ -80,7 +78,6 @@ impl ExtensionJobs {
             catalog,
             root,
             ai,
-            approvals,
             threads,
             vocabulary,
             sql,
@@ -91,7 +88,6 @@ impl ExtensionJobs {
             catalog,
             root,
             ai,
-            approvals,
             threads,
             vocabulary,
             tools: Arc::new(crate::extension_job_runner::ToolHost::new(sql.clone())),
@@ -418,7 +414,6 @@ impl ExtensionJobs {
         let grants = Arc::new(DeclaredJobGrants::new(
             self.catalog.clone(),
             self.root.clone(),
-            self.approvals.clone(),
         ));
         let host = Arc::new(
             JobAuthorityHost::new(

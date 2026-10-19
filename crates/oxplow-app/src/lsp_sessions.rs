@@ -907,7 +907,13 @@ mod tests {
             replacements: Default::default(),
             event_retention: Default::default(),
             ai_roles: Default::default(),
-            extensions_disabled: Vec::new(),
+            extensions: oxplow_config::DEFAULT_EXTENSIONS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            extension_sources: Default::default(),
+            personal_extensions: Default::default(),
+            personal_extension_sources: Default::default(),
         }))
     }
 

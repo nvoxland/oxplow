@@ -17,6 +17,15 @@
   then a closing `other` row) and `v_zone_unmatched` (paths no rule matched);
   both are read live. Read the rules with `oxplow.config.get { key: "zones" }`,
   change them with `oxplow.config.set` (the whole ordered table).
+- Also read live, for the stream a lens runs for (its `stream_id`; the
+  primary checkout's without one): `v_workspace_file` (the worktree's files
+  and folders, with each file's change; a folder's listing is `WHERE parent
+  = 'src'`) and `v_agent_conversation` (every harness's saved conversations
+  begun there; join `v_agent_session` on `resume_session_id = native_id`).
+  And for the project: `v_config_value` (every setting's value now and
+  where it comes from) and `v_vcs_workspace` (the repository's working
+  copies and the stream in each; `stream_id IS NULL` is adoptable). A lens
+  over a live model re-runs when what it reads changes.
 - Only `v_*` views can be read; a physical table is refused, naming the
   view to read instead. Metrics are read with `metric_grid()` and
   `MEASURE('<key>')` (see the `oxplow-metrics` skill).

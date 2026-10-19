@@ -1280,10 +1280,8 @@ impl PreparedModelProviders {
 /// provider is published or called.
 pub fn prepare_built_ins(
     declared: &[crate::capabilities::Implementation],
-    approvals: &Arc<crate::exec_consent::ApprovalStore>,
-    project_dir: &std::path::Path,
 ) -> Result<PreparedModelProviders, BTreeMap<String, String>> {
-    let (prepared, errors) = build_built_ins(declared, approvals, project_dir);
+    let (prepared, errors) = build_built_ins(declared);
     if errors.is_empty() {
         Ok(prepared)
     } else {
@@ -1293,35 +1291,14 @@ pub fn prepare_built_ins(
 
 fn build_built_ins(
     declared: &[crate::capabilities::Implementation],
-    approvals: &Arc<crate::exec_consent::ApprovalStore>,
-    project_dir: &std::path::Path,
 ) -> (PreparedModelProviders, BTreeMap<String, String>) {
     let mut built: Vec<Arc<dyn ModelProvider>> = Vec::new();
     let mut errors = BTreeMap::new();
     for implementation in declared.iter().filter(|i| i.capability == "ai_provider") {
-        if let crate::capabilities::Source::Script {
-            entry,
-            tree,
-            script,
-            ..
-        } = &implementation.source
-        {
-            let program = crate::exec_consent::ai_provider_program(
-                tree,
-                implementation.extension.as_deref().unwrap_or_default(),
-                &implementation.id,
-                entry,
-                implementation
-                    .config
-                    .get("baseUrl")
-                    .and_then(serde_json::Value::as_str),
-            );
-            let gate = crate::exec_consent::loaded_script_gate(
-                approvals.clone(),
-                project_dir.to_path_buf(),
-                program,
-                script.clone(),
-            );
+        if let crate::capabilities::Source::Script { entry, script, .. } = &implementation.source {
+            // Its extension's deployment declares `ai` (it doesn't load
+            // otherwise); a generation that drops it drops this provider.
+            let gate: crate::run_context::LiveCheck = Arc::new(|| Ok(()));
             match oxplow_ai_providers::scripted(
                 &implementation.id,
                 &implementation.title,
@@ -1370,7 +1347,7 @@ pub(crate) fn test_providers() -> ModelProviders {
     // The shipped providers, each a script oxplow-foundation declares —
     // open here: a test of the service isn't one of consent.
     let providers = ModelProviders::default();
-    let bundled = crate::extensions::load_extensions(std::path::Path::new("/nonexistent"));
+    let bundled = crate::test_fixtures::shipped_extensions();
     let built = crate::capabilities::declared_by(&bundled)
         .into_iter()
         .filter(|i| i.capability == "ai_provider")
@@ -1818,10 +1795,7 @@ mod tests {
         svc.ai
             .set_role(&Role::SUMMARIZE, Some(RoleBinding::new("fixture", "m")))
             .unwrap();
-        svc.extension_activation
-            .activate(svc.clone())
-            .await
-            .unwrap();
+        crate::test_fixtures::activate_with_problems(&svc).await;
         let out = svc
             .ai
             .complete(&Role::SUMMARIZE, "t", None, "hi", false)
@@ -1856,17 +1830,17 @@ mod tests {
     }
 
     /// An AI provider an extension writes as a script is a kind a person
-    /// may configure; its calls go out only once they approved the script
-    /// in Settings → Data → Programs, and an edit to it stops them again.
+    /// may configure; its calls go out with the extension's `ai` permission,
+    /// and an edit to the script is used once deployed.
     #[tokio::test]
-    async fn a_scripted_provider_calls_once_a_person_approves_it() {
+    async fn a_scripted_provider_calls_with_the_ai_permission() {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
-        let ext = dir.path().join("oxplow/extensions/acme");
+        let ext = dir.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(ext.join("providers")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: p\nimplementations:\n  - { capability: ai_provider, id: acme, title: Acme, entry: providers/acme.star }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: { ai: true }\nimplementations:\n  - { capability: ai_provider, id: acme, title: Acme, entry: providers/acme.star }\n",
         )
         .unwrap();
         let script = |reply: &str| {
@@ -1880,6 +1854,7 @@ mod tests {
         )
         .unwrap();
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+        crate::test_fixtures::activate(&svc).await;
         let (base, seen) = mock("/chat/completions", 200, chat_reply()).await;
         svc.ai
             .save_provider(
@@ -1895,36 +1870,12 @@ mod tests {
             .set_role(&Role::SUMMARIZE, Some(RoleBinding::new("a", "m")))
             .unwrap();
         let call = || svc.ai.complete(&Role::SUMMARIZE, "t", None, "hi", false);
-        let err = call().await.unwrap_err().to_string();
-        assert!(err.contains("Settings → Data → Programs"), "{err}");
-        assert!(seen.lock().unwrap().is_empty(), "nothing was sent");
-
-        let extensions = svc
-            .extension_catalog
-            .unpinned(dir.path(), "a test reads declarations");
-        let listed = crate::exec_consent::list(&svc.approvals, dir.path(), &extensions)
-            .into_iter()
-            .find(|p| p.kind == crate::exec_consent::ProgramKind::AiProvider)
-            .expect("it is listed to approve");
-        assert_eq!(listed.name, "acme/acme");
-        crate::exec_consent::approve_program(
-            &svc.approvals,
-            dir.path(),
-            &extensions,
-            crate::exec_consent::ProgramKind::AiProvider,
-            &listed.name,
-            listed.version.as_deref().unwrap(),
-        )
-        .unwrap();
         assert_eq!(call().await.unwrap().text, "hello");
         assert_eq!(seen.lock().unwrap()[0].1["authorization"], "Bearer sk-1");
 
         std::fs::write(ext.join("providers/acme.star"), script("\"changed\"")).unwrap();
-        let err = call().await.unwrap_err().to_string();
-        assert!(
-            err.contains("Settings → Data → Programs"),
-            "an edit asks again: {err}"
-        );
+        crate::test_fixtures::activate(&svc).await;
+        assert_eq!(call().await.unwrap().text, "changed");
     }
 
     /// The shipped providers are scripts (oxplow-foundation's
@@ -1980,7 +1931,7 @@ mod tests {
     /// none is a built-in, and each loads.
     #[test]
     fn every_shipped_ai_provider_is_a_script() {
-        let bundled = crate::extensions::load_extensions(std::path::Path::new("/nonexistent"));
+        let bundled = crate::test_fixtures::shipped_extensions();
         let providers: Vec<_> = crate::capabilities::declared_by(&bundled)
             .into_iter()
             .filter(|i| i.capability == "ai_provider")

@@ -252,6 +252,15 @@ impl Router<'_> {
                         name: call.name.clone(),
                     })?;
             super::offered(self.active, &command.spec, &name_field)?;
+            // A script composes its own extension's commands freely; any
+            // other one its `permissions.commands` must name.
+            if let oxplow_domain::grant::Decision::Denied(why) =
+                parent.decide(oxplow_domain::grant::Need::Command(call.name.clone()))
+            {
+                return Err(CommandError::Denied {
+                    reason: format!("composing `{}`: {why}", call.name),
+                });
+            }
             if command.spec.access.reads_only() {
                 return Err(CommandError::Invalid {
                     field: Some(name_field),
@@ -386,6 +395,7 @@ pub(super) fn run_composed(
                 summary: parent.summary.clone(),
                 input: composed.preview_input(),
                 destructive,
+                details: Vec::new(),
             }),
         });
     }
@@ -598,6 +608,7 @@ impl CommandBus {
                     summary: spec.summary.clone(),
                     input: plan.preview_input(),
                     destructive,
+                    details: Vec::new(),
                 }),
             });
         }

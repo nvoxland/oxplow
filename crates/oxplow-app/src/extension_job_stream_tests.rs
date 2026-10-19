@@ -12,6 +12,7 @@ pub(super) const MANIFEST: &str = r#"manifest: 2
 name: triage
 intent:
   purpose: p
+permissions: { sql: read, ai: true }
 jobs:
   - id: review
     description: Review the TODOs.
@@ -53,7 +54,7 @@ pub(super) struct Fixture {
 }
 
 /// `svc` with the summarize role on a fixture model answering `replies` in
-/// turn, every job approved and the extensions (re)activated.
+/// turn, the extensions it has deployed and its jobs.
 pub(super) async fn prepare(
     svc: &Arc<crate::Services>,
     replies: Vec<FixtureReply>,
@@ -76,17 +77,12 @@ pub(super) async fn prepare(
             Some(RoleBinding::new("fixture", "fixture")),
         )
         .unwrap();
-    crate::exec_consent::approve_every(svc, crate::exec_consent::ProgramKind::Job).unwrap();
-    svc.extension_activation
-        .activate(svc.clone())
-        .await
-        .expect("the extension activates");
-    let problems = svc.extension_activation.problems();
-    assert!(problems.is_empty(), "{problems:?}");
+    // The extension the test wrote is deployed.
+    crate::test_fixtures::activate(svc).await;
     model
 }
 
-/// The `triage` extension with its `review` job approved, and the
+/// The `triage` extension with its `review` job, and the
 /// summarize role on a fixture model answering `replies` in turn.
 pub(super) async fn fixture(manifest: &str, replies: Vec<FixtureReply>) -> Fixture {
     let fx = fixture_idle(manifest, replies).await;
@@ -101,7 +97,7 @@ pub(super) async fn fixture(manifest: &str, replies: Vec<FixtureReply>) -> Fixtu
 pub(super) async fn fixture_idle(manifest: &str, replies: Vec<FixtureReply>) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     crate::test_fixtures::init_git_repo(dir.path());
-    let ext = dir.path().join("oxplow/extensions/triage");
+    let ext = dir.path().join(".oxplow/extensions/triage");
     std::fs::create_dir_all(ext.join("commands")).unwrap();
     std::fs::write(ext.join("extension.yaml"), manifest).unwrap();
     std::fs::write(ext.join("commands/lookup.star"), LOOKUP).unwrap();
@@ -533,7 +529,7 @@ async fn a_person_cancels_any_job() {
 async fn a_tool_that_does_not_admit_a_job_is_a_load_error() {
     let dir = tempfile::tempdir().unwrap();
     crate::test_fixtures::init_git_repo(dir.path());
-    let ext = dir.path().join("oxplow/extensions/triage");
+    let ext = dir.path().join(".oxplow/extensions/triage");
     std::fs::create_dir_all(ext.join("commands")).unwrap();
     std::fs::write(ext.join("commands/lookup.star"), LOOKUP).unwrap();
     for (manifest, says) in [

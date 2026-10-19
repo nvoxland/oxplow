@@ -1,13 +1,14 @@
 //! What each kind of contribution asks to do, derived from what it
 //! declares (`oxplow_domain::grant`, `.context/extensions.md` "Grants"),
-//! and what this machine can hold a grant to. A request is what a person
-//! approves; a run decides each thing it does against it.
+//! what its extension may do (its `permissions:`, approved when it was
+//! deployed), and what this machine can hold that to. A run decides each
+//! thing it does against them.
 
 use oxplow_config::collectors::{CollectorRuntime, CollectorSpec};
-use oxplow_domain::grant::{Enforcement, Grant, GrantRequest, GrantedBy};
+use oxplow_domain::grant::{Enforcement, Grant, GrantRequest};
 use oxplow_domain::run::Authority;
 
-use crate::exec_consent::{ApprovalStore, ProgramKind, ProjectProgram};
+use crate::extensions::Extension;
 
 /// Where a grant is held here: network egress only where the sandbox
 /// confines it (`net_sandbox`).
@@ -52,26 +53,8 @@ pub fn script_request(needs: &[String]) -> GrantRequest {
     }
 }
 
-/// A project program's request, as Settings → Data → Programs lists it.
-pub fn program_request(p: &ProjectProgram) -> GrantRequest {
-    let runs_program = matches!(p.kind, ProgramKind::Provider);
-    GrantRequest {
-        scopes: scopes(&p.scopes),
-        program: runs_program.then(|| p.program.clone()),
-        hosts: p.network.iter().cloned().collect(),
-        credentials: p.credentials.iter().cloned().collect(),
-        env: p
-            .env
-            .iter()
-            .map(|e| e.split('=').next().unwrap_or(e).to_string())
-            .collect(),
-        commands: p.commands.iter().cloned().collect(),
-    }
-}
-
-/// What granting `request` lets it do that this machine can't hold it to,
-/// as a person reads it — what Programs and a review show beside the
-/// grant.
+/// What permitting `request` lets it do that this machine can't hold it
+/// to, as a person reads it — what a review shows beside it.
 pub fn gaps(request: &GrantRequest) -> Vec<String> {
     let here = enforcement();
     let mut out = Vec::new();
@@ -88,27 +71,17 @@ pub fn gaps(request: &GrantRequest) -> Vec<String> {
     out
 }
 
-/// The authority a run of a contribution declaring `declared` has: its
-/// grant when a person's approval of `key` holds now (`approved`), else
-/// its declaration alone.
-pub fn authority(
-    approvals: &ApprovalStore,
-    key: &str,
-    approved: bool,
-    declared: GrantRequest,
-) -> Authority {
-    let grant = approved.then(|| Grant {
-        request: declared.clone(),
-        granted_at: approvals
-            .granted_at(key)
-            .and_then(|t| oxplow_domain::Timestamp::parse(&t).ok())
-            .unwrap_or_else(oxplow_domain::Timestamp::now),
-        granted_by: GrantedBy::Human,
-        revoked_at: None,
-    });
+/// What `ext` may reach: its permissions, and its own commands.
+pub fn grant_of(ext: &Extension) -> Grant {
+    Grant::from_permissions(&ext.namespace, &ext.permissions)
+}
+
+/// The authority a run of one of `ext`'s contributions declaring
+/// `declared` has.
+pub fn authority(ext: &Extension, declared: GrantRequest) -> Authority {
     Authority {
         declared,
-        grant,
+        grant: grant_of(ext),
         enforcement: enforcement(),
     }
 }

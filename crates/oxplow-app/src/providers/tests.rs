@@ -9,7 +9,6 @@ use oxplow_oauth_sim::OAuthSim;
 use serde_json::json;
 
 use super::*;
-use crate::exec_consent::{self, ProgramKind};
 use crate::extensions::Extension;
 use crate::test_fixtures::{
     services_with_effort, services_with_task_effort, EffortFixture, TaskEffortFixture,
@@ -37,12 +36,24 @@ fn fake_bin() -> PathBuf {
 
 /// A private extension declaring the fake as its work-items provider,
 /// its entry a script running the fake with `hooks`.
+/// The manifest `text` with `secrets` declared beside its `process` permission.
+fn permit_secrets(text: &str, secrets: &[&str]) -> String {
+    text.replacen(
+        "permissions: { process: true }",
+        &format!(
+            "permissions: {{ process: true, secrets: [{}] }}",
+            secrets.join(", ")
+        ),
+        1,
+    )
+}
+
 fn write_extension(project: &Path, hooks: &str) {
-    let dir = project.join("oxplow/extensions").join(EXT);
+    let dir = project.join(".oxplow/extensions").join(EXT);
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: tracker\nsharing: private\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a work item's points.\n    provider: fake\n    op: estimate\n    invokers: { human: true, agent: true, lens: true }\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: work_item, input: { ref: \"{{ref}}\", points: 3 } }\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: tracker\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a work item's points.\n    provider: fake\n    op: estimate\n    invokers: { human: true, agent: true, lens: true }\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: work_item, input: { ref: \"{{ref}}\", points: 3 } }\npermissions: { process: true }\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -87,45 +98,19 @@ fn extension(project: &Path) -> Extension {
     ext
 }
 
-/// The listing's view of the provider, as a person sees it.
-fn program(fx: &EffortFixture, ext: &Extension) -> exec_consent::ProjectProgram {
-    exec_consent::list(
-        &fx.svc.approvals,
-        &fx.svc.layout.project_dir,
-        std::slice::from_ref(ext),
-    )
-    .into_iter()
-    .find(|p| p.kind == ProgramKind::Provider)
-    .expect("the provider is listed")
-}
-
-/// The person approves the program, which publishes a generation that can
-/// start it (the catalog change an approval raises).
-async fn approve(fx: &EffortFixture, ext: &Extension) {
-    approve_without_activating(fx, ext);
+/// Deploys the extension, which publishes a generation that can start
+/// its provider.
+async fn deploy(fx: &EffortFixture, _ext: &Extension) {
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
 }
 
-fn approve_without_activating(fx: &EffortFixture, ext: &Extension) {
-    let p = program(fx, ext);
-    exec_consent::approve_program(
-        &fx.svc.approvals,
-        &fx.svc.layout.project_dir,
-        std::slice::from_ref(ext),
-        ProgramKind::Provider,
-        &p.name,
-        p.version.as_deref().unwrap(),
-    )
-    .unwrap();
-}
-
 /// The fixture with the tracker extension (running the fake with
-/// `hooks`) approved on this machine.
-async fn approved(hooks: &str) -> (EffortFixture, Extension) {
+/// `hooks`) deployed on this machine.
+async fn deployed(hooks: &str) -> (EffortFixture, Extension) {
     let fx = services_with_effort().await;
     write_extension(&fx.svc.layout.project_dir, hooks);
     let ext = extension(&fx.svc.layout.project_dir);
-    approve(&fx, &ext).await;
+    deploy(&fx, &ext).await;
     // The fake is the project's tracker: where every create files.
     make_active(&fx, "fake").await;
     crate::test_fixtures::activate(&fx.svc).await;
@@ -184,6 +169,9 @@ async fn enable_on(
     spec: &spec::ProviderSpec,
     config: serde_json::Value,
 ) {
+    // Deploying the sources turns them on in the person's file and
+    // reloads the config, so the in-memory entry is written after.
+    crate::test_fixtures::activate_with_problems(svc).await;
     svc.config.write().unwrap().extension_instances.insert(
         spec::instance_name(&ext.name, &spec.id),
         oxplow_config::ExtensionInstanceConfig {
@@ -240,54 +228,8 @@ async fn logged(fx: &EffortFixture, event_type: &str) -> Vec<serde_json::Value> 
 }
 
 #[tokio::test]
-async fn an_unapproved_provider_is_refused_and_registers_nothing() {
-    let fx = services_with_effort().await;
-    write_extension(&fx.svc.layout.project_dir, "");
-    let ext = extension(&fx.svc.layout.project_dir);
-    let listed = program(&fx, &ext);
-    assert_eq!(listed.name, INSTANCE);
-    assert!(!listed.approved);
-
-    // The generation activates; the unapproved instance stays off.
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    assert!(!running(&fx.svc, "fake"));
-    assert!(fx.svc.work_items.get("fake").is_err());
-    assert_eq!(
-        fx.svc.providers.health(INSTANCE).unwrap().state,
-        InstanceState::Unapproved
-    );
-}
-
-#[tokio::test]
-async fn edited_declarations_need_approving_again() {
-    let (fx, ext) = approved("").await;
-    let providers = &fx.svc.providers;
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    // Its start's first read, in the background (tsk716).
-    first_read(&fx).await;
-    assert!(running(&fx.svc, "fake"));
-    turn_off(&fx.svc, INSTANCE).await;
-    assert!(!running(&fx.svc, "fake"));
-
-    // A widened declaration is a new version: shown unapproved, refused.
-    let project = fx.svc.layout.project_dir.clone();
-    let file = project.join("oxplow/extensions/tracker/provider.json");
-    let mut declared = oxplow_provider_fake::declarations();
-    declared.commands[0].summary = "Create a work item, now everywhere.".into();
-    std::fs::write(&file, serde_json::to_string(&declared).unwrap()).unwrap();
-    let ext = extension(&project);
-    assert!(!program(&fx, &ext).approved);
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    assert!(!running(&fx.svc, "fake"));
-    assert_eq!(
-        providers.health(INSTANCE).unwrap().state,
-        InstanceState::Unapproved
-    );
-}
-
-#[tokio::test]
 async fn a_provider_must_answer_with_its_approved_declarations() {
-    let (fx, ext) = approved("bad-declarations").await;
+    let (fx, ext) = deployed("bad-declarations").await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     assert!(!running(&fx.svc, "fake"));
     // Not what was approved: off, and logged, until a person looks.
@@ -303,7 +245,7 @@ async fn a_provider_must_answer_with_its_approved_declarations() {
 /// refuses it naming the config field, and nothing is written.
 #[tokio::test]
 async fn an_unconfigured_instance_cannot_be_enabled() {
-    let (fx, _ext) = approved("").await;
+    let (fx, _ext) = deployed("").await;
     let providers = &fx.svc.providers;
     let checked = providers.check_instance(INSTANCE, json!({})).await.unwrap();
     assert!(
@@ -357,7 +299,7 @@ async fn an_unconfigured_instance_cannot_be_enabled() {
 /// `oxplow.contribution.enable`.
 #[tokio::test]
 async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it() {
-    let (fx, _ext) = approved("fail-next:3").await;
+    let (fx, _ext) = deployed("fail-next:3").await;
     let providers = &fx.svc.providers;
     configure(&fx, true, json!({ "team": "core" }));
 
@@ -420,7 +362,7 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
         Err(oxplow_domain::CommandError::Denied { .. })
     ));
     write_extension(&fx.svc.layout.project_dir, "");
-    approve(&fx, &extension(&fx.svc.layout.project_dir)).await;
+    deploy(&fx, &extension(&fx.svc.layout.project_dir)).await;
     let enabled = fx
         .svc
         .commands
@@ -445,7 +387,7 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
 /// that doesn't restate what the writes recorded is a finding.
 #[tokio::test]
 async fn the_suite_finds_a_read_that_doesnt_restate_the_writes() {
-    let (fx, ext) = approved("stale-read").await;
+    let (fx, ext) = deployed("stale-read").await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
@@ -474,7 +416,7 @@ async fn the_suite_finds_a_read_that_doesnt_restate_the_writes() {
 #[tokio::test]
 async fn the_suite_finds_a_provider_that_forgets_its_keys() {
     for (hooks, finds) in [("forget-keys", true), ("plain-writes", false)] {
-        let (fx, ext) = approved(hooks).await;
+        let (fx, ext) = deployed(hooks).await;
         enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
         first_read(&fx).await;
         let provider = fx.svc.work_items.get("fake").unwrap();
@@ -498,7 +440,7 @@ async fn the_suite_finds_a_provider_that_forgets_its_keys() {
 
 #[tokio::test]
 async fn the_work_items_suite_passes_through_the_host_over_the_fake() {
-    let (fx, ext) = approved("").await;
+    let (fx, ext) = deployed("").await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
@@ -546,10 +488,10 @@ async fn the_work_items_suite_passes_through_the_host_over_the_fake() {
 /// through `oxplow.work_item.create`, and the health view finds it.
 #[tokio::test]
 async fn a_repair_item_is_filed_on_the_active_alternate_provider() {
-    let (fx, ext) = approved("").await;
+    let (fx, ext) = deployed("").await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     first_read(&fx).await;
-    crate::test_fixtures::approve_effect(&fx.svc, "oxplow-bundled/repair-disabled").await;
+    crate::test_fixtures::start_effect(&fx.svc, "oxplow-bundled/repair-disabled").await;
     let event =
         crate::test_fixtures::disable_collector(&fx.svc, "work", "hot", "3 failures: boom").await;
     crate::test_fixtures::deliver(&fx.svc, &event).await;
@@ -588,7 +530,7 @@ async fn a_repair_item_is_filed_on_the_active_alternate_provider() {
 /// aren't commands of their own; its extra command is.
 #[tokio::test]
 async fn work_item_commands_write_another_providers_items_through_its_process() {
-    let (fx, ext) = approved("").await;
+    let (fx, ext) = deployed("").await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
@@ -717,7 +659,7 @@ async fn work_item_commands_write_another_providers_items_through_its_process() 
 /// tracker never sees it: the thread is oxplow's record.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_outside_item_is_filed_on_the_thread_named_or_the_agents() {
-    let (fx, ext) = approved("").await;
+    let (fx, ext) = deployed("").await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     first_read(&fx).await;
     let thread_of = |item: String| {
@@ -772,7 +714,7 @@ async fn an_outside_item_is_filed_on_the_thread_named_or_the_agents() {
 
 #[tokio::test]
 async fn a_composite_writes_another_providers_item_as_steps() {
-    let (fx, ext) = approved("").await;
+    let (fx, ext) = deployed("").await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     first_read(&fx).await;
     let item = fx
@@ -827,7 +769,7 @@ async fn a_composite_writes_another_providers_item_as_steps() {
 /// external run that needs a person is proposed with no dry run.
 #[tokio::test]
 async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
-    let (fx, ext) = approved("").await;
+    let (fx, ext) = deployed("").await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
@@ -924,7 +866,7 @@ async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
 /// listed, as the project's choice, with `available = 0`.
 #[tokio::test]
 async fn a_running_instance_publishes_its_features() {
-    let (fx, ext) = approved("").await;
+    let (fx, ext) = deployed("").await;
     let store = oxplow_db::SqliteCapabilityStore::new(fx.svc.db.clone());
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
@@ -962,13 +904,18 @@ async fn a_provider_reads_the_host_through_what_it_needs() {
         let root = fx.svc.layout.project_dir.clone();
         write_extension(&root, "host-read");
         if needs {
-            let manifest = root.join("oxplow/extensions/tracker/extension.yaml");
+            let manifest = root.join(".oxplow/extensions/tracker/extension.yaml");
             let text = std::fs::read_to_string(&manifest).unwrap();
+            let text = text.replacen(
+                "permissions: { process: true }",
+                "permissions: { process: true, sql: read }",
+                1,
+            );
             std::fs::write(&manifest, format!("{text}    needs: [sql.read]\n")).unwrap();
         }
         let ext = extension(&root);
         assert_eq!(ext.providers[0].needs.is_empty(), !needs);
-        approve(&fx, &ext).await;
+        deploy(&fx, &ext).await;
         make_active(&fx, "fake").await;
         enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
         crate::test_fixtures::activate(&fx.svc).await;
@@ -1023,11 +970,11 @@ async fn a_provider_reads_its_extensions_configuration_through_host_call() {
     let fx = services_with_effort().await;
     let root = fx.svc.layout.project_dir.clone();
     write_extension(&root, "config-read");
-    let manifest = root.join("oxplow/extensions/tracker/extension.yaml");
+    let manifest = root.join(".oxplow/extensions/tracker/extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
     let text = text.replace(
-        "sharing: private\n",
-        "sharing: private\nconfiguration:\n  version: 1\n  schema:\n    type: object\n    additionalProperties: false\n    properties:\n      limit: { type: integer }\n  defaults: { limit: 4 }\n",
+        "intent:\n",
+        "configuration:\n  version: 1\n  schema:\n    type: object\n    additionalProperties: false\n    properties:\n      limit: { type: integer }\n  defaults: { limit: 4 }\nintent:\n",
     );
     std::fs::write(
         &manifest,
@@ -1036,7 +983,7 @@ async fn a_provider_reads_its_extensions_configuration_through_host_call() {
     .unwrap();
     let ext = extension(&root);
     assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-    approve(&fx, &ext).await;
+    deploy(&fx, &ext).await;
     make_active(&fx, "fake").await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     crate::test_fixtures::activate(&fx.svc).await;
@@ -1097,11 +1044,16 @@ async fn a_verbs_host_reads_are_recorded_with_its_run() {
     let fx = services_with_effort().await;
     let root = fx.svc.layout.project_dir.clone();
     write_extension(&root, "host-read");
-    let manifest = root.join("oxplow/extensions/tracker/extension.yaml");
+    let manifest = root.join(".oxplow/extensions/tracker/extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
+    let text = text.replacen(
+        "permissions: { process: true }",
+        "permissions: { process: true, sql: read }",
+        1,
+    );
     std::fs::write(&manifest, format!("{text}    needs: [sql.read]\n")).unwrap();
     let ext = extension(&root);
-    approve(&fx, &ext).await;
+    deploy(&fx, &ext).await;
     make_active(&fx, "fake").await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     let item = fx
@@ -1158,7 +1110,7 @@ async fn a_provider_command_is_declared_over_an_operation_it_lists() {
     let schema = estimate.input_schema.as_ref().unwrap();
     assert_eq!(schema["required"], json!(["ref", "points"]));
     assert_eq!(schema["properties"]["instance"]["type"], json!("string"));
-    let manifest = root.join("oxplow/extensions/tracker/extension.yaml");
+    let manifest = root.join(".oxplow/extensions/tracker/extension.yaml");
     let base = std::fs::read_to_string(&manifest).unwrap();
     for (entry, says) in [
         (
@@ -1182,7 +1134,7 @@ async fn a_provider_command_is_declared_over_an_operation_it_lists() {
     ] {
         std::fs::write(
             &manifest,
-            base.replacen("providers:\n", &format!("{entry}providers:\n"), 1),
+            base.replacen("permissions:", &format!("{entry}permissions:"), 1),
         )
         .unwrap();
         let loaded = crate::extensions::load_extensions(&root)
@@ -1194,139 +1146,21 @@ async fn a_provider_command_is_declared_over_an_operation_it_lists() {
     }
 }
 
-/// What approving a provider's declarations would change: all new
-/// before it runs; against the running declarations after an edit.
-#[tokio::test]
-async fn declaration_impact_compare_the_files_with_what_runs() {
-    let (fx, ext) = approved("").await;
-    let first = fx.svc.providers.declaration_impact(INSTANCE).await.unwrap();
-    assert_eq!(first.change, crate::extension_impact::Change::Added);
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    // Its start's first read, in the background (tsk716).
-    first_read(&fx).await;
-    let path = fx
-        .svc
-        .layout
-        .project_dir
-        .join("oxplow/extensions/tracker/provider.json");
-    let mut declared = oxplow_provider_fake::declarations();
-    let mut extra = declared.commands[0].clone();
-    extra.name = "archive".into();
-    extra.confirm = "destructive".into();
-    declared.commands.push(extra);
-    std::fs::write(&path, serde_json::to_string_pretty(&declared).unwrap()).unwrap();
-    let after = fx.svc.providers.declaration_impact(INSTANCE).await.unwrap();
-    assert_eq!(after.change, crate::extension_impact::Change::Changed);
-    let archive = after.commands.iter().find(|c| c.name == "archive").unwrap();
-    assert_eq!(archive.change, crate::extension_impact::Change::Added);
-    assert!(after
-        .commands
-        .iter()
-        .filter(|c| c.name != "archive")
-        .all(|c| c.change == crate::extension_impact::Change::Unchanged));
-}
-
 /// A coverage run's profile path reaches the provider, so an instrumented
-/// provider doesn't write its `.profraw` into its approved copy (which would
-/// change the copy's hash and lose the baseline below).
+/// provider doesn't write its `.profraw` into its deployment.
 #[test]
 fn a_coverage_runs_profile_path_reaches_the_provider() {
     assert!(super::host::PASSED_ENV.contains(&"LLVM_PROFILE_FILE"));
 }
 
-/// R7: the baseline is the last approved copy, not the running instance —
-/// a changed spec stops the instance (and a restart starts none), and the
-/// re-approval must still show what changed.
+/// A provider's args are read where it runs (its extension folder), and
+/// an arg reaching outside the folder is refused.
 #[tokio::test]
-async fn declaration_impact_compare_against_the_last_approved_copy() {
-    let (fx, ext) = approved("").await;
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    // Its start's first read, in the background (tsk716).
-    first_read(&fx).await;
-    let project = fx.svc.layout.project_dir.clone();
-    let manifest = project.join("oxplow/extensions/tracker/extension.yaml");
-    let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(
-        &manifest,
-        text.replace(
-            "    entry: bin/provider\n",
-            "    entry: bin/provider\n    network: [api.example.com]\n",
-        ),
-    )
-    .unwrap();
-    crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    assert!(fx.svc.providers.get(INSTANCE).await.is_none());
-    let effect = fx.svc.providers.declaration_impact(INSTANCE).await.unwrap();
-    assert_eq!(effect.change, crate::extension_impact::Change::Changed);
-    assert_eq!(effect.before.unwrap().hosts, Vec::<String>::new());
-    assert_eq!(effect.after.unwrap().hosts, vec!["api.example.com"]);
-    assert!(effect
-        .commands
-        .iter()
-        .all(|c| c.change == crate::extension_impact::Change::Unchanged));
-}
-
-/// Every reader of the copies directory holds the lock the writer does: a
-/// start replacing a copy is half done while it holds it, so `last_approved`
-/// waits for it rather than finding no copy.
-#[tokio::test]
-async fn reading_the_approved_copy_waits_for_a_start_replacing_it() {
-    let (fx, ext) = approved("").await;
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    first_read(&fx).await;
-    let copies = fx
-        .svc
-        .layout
-        .project_dir
-        .join(".oxplow/global-config/provider-copies")
-        .join(crate::collector_runner::project_key(
-            &fx.svc.layout.project_dir,
-        ));
-    let spec = ext.providers[0].clone();
-    let read = {
-        let (copies, ext, spec) = (copies.clone(), ext.clone(), spec.clone());
-        move || {
-            let (copies, ext, spec) = (copies.clone(), ext.clone(), spec.clone());
-            tokio::task::spawn_blocking(move || host::last_approved(&copies, &ext, &spec))
-        }
-    };
-    assert!(read().await.unwrap().is_some(), "the copy is there to read");
-
-    // A start mid-replacement: the lock held, the old copy moved aside.
-    let base = copies.join(&ext.name).join(&spec.id);
-    let held = host::lock_copies(&base).unwrap();
-    let kept: Vec<_> = std::fs::read_dir(&base)
-        .unwrap()
-        .flatten()
-        .map(|e| e.path())
-        .collect();
-    let aside = base.join(".aside");
-    std::fs::create_dir_all(&aside).unwrap();
-    for path in &kept {
-        std::fs::rename(path, aside.join(path.file_name().unwrap())).unwrap();
-    }
-    let reading = tokio::spawn(read());
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-    assert!(!reading.is_finished(), "it read while the lock was held");
-    for path in &kept {
-        std::fs::rename(aside.join(path.file_name().unwrap()), path).unwrap();
-    }
-    drop(held);
-    assert!(
-        reading.await.unwrap().unwrap().is_some(),
-        "it read the copy once the replacement was whole"
-    );
-}
-
-/// tsk546: a provider's args are hashed where it runs (its extension
-/// folder), and an arg reaching outside the folder is refused, so no file
-/// it runs escapes the approval.
-#[tokio::test]
-async fn provider_args_stay_inside_the_approved_folder() {
+async fn provider_args_stay_inside_the_extension_folder() {
     let fx = services_with_effort().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "");
-    let manifest = project.join("oxplow/extensions/tracker/extension.yaml");
+    let manifest = project.join(".oxplow/extensions/tracker/extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
     std::fs::write(
         &manifest,
@@ -1349,32 +1183,14 @@ async fn provider_args_stay_inside_the_approved_folder() {
         "{:?}",
         loaded.errors
     );
-
-    // An arg inside the folder is part of the approval.
-    std::fs::write(
-        &manifest,
-        text.replace(
-            "    entry: bin/provider\n",
-            "    entry: bin/provider\n    args: [lib/main.py]\n",
-        ),
-    )
-    .unwrap();
-    let dir = project.join("oxplow/extensions/tracker");
-    std::fs::create_dir_all(dir.join("lib")).unwrap();
-    std::fs::write(dir.join("lib/main.py"), "good()").unwrap();
-    let ext = extension(&project);
-    approve(&fx, &ext).await;
-    assert!(program(&fx, &ext).approved);
-    std::fs::write(dir.join("lib/main.py"), "evil()").unwrap();
-    assert!(!program(&fx, &ext).approved);
 }
 
-const ADAPTER_MANIFEST: &str = "manifest: 2\nname: tracker\nsharing: private\nintent:\n  purpose: notes over MCP\n  examples: [{ name: a }]\nproviders:\n  - id: notes\n    capability: work_items\n    adapter:\n      mcp: { command: [bin/server, --stdio] }\n      mapping: mcp/x.star\n      tools: mcp/tools.json\n    declarations: provider.json\n";
+const ADAPTER_MANIFEST: &str = "manifest: 2\nname: tracker\nintent:\n  purpose: notes over MCP\n  examples: [{ name: a }]\npermissions: { process: true }\nproviders:\n  - id: notes\n    capability: work_items\n    adapter:\n      mcp: { command: [bin/server, --stdio] }\n      mapping: mcp/x.star\n      tools: mcp/tools.json\n    declarations: provider.json\n";
 
 /// A private extension whose provider is an MCP server behind oxplow's
 /// adapter: the server, its mapping and its pinned tools.
 fn write_adapter_extension(project: &Path) -> PathBuf {
-    let dir = project.join("oxplow/extensions").join(EXT);
+    let dir = project.join(".oxplow/extensions").join(EXT);
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::create_dir_all(dir.join("mcp")).unwrap();
     std::fs::write(dir.join("extension.yaml"), ADAPTER_MANIFEST).unwrap();
@@ -1447,37 +1263,14 @@ async fn an_adapter_provider_names_its_server_mapping_and_tools_inside_the_folde
     );
 }
 
-/// P7.A6: approving an adapter provider approves its mapping, its pinned
-/// tools and its server: changing any of them needs approving again.
+/// A provider runs from its extension's deployment, not from the live
+/// tree.
 #[tokio::test]
-async fn an_adapter_providers_approval_covers_its_mapping_pins_and_server() {
-    let fx = services_with_effort().await;
-    let project = fx.svc.layout.project_dir.clone();
-    let dir = write_adapter_extension(&project);
-    for file in ["mcp/x.star", "mcp/tools.json", "bin/server"] {
-        let ext = extension(&project);
-        approve(&fx, &ext).await;
-        assert!(program(&fx, &ext).approved);
-        let path = dir.join(file);
-        let text = std::fs::read_to_string(&path).unwrap();
-        let edited = match file {
-            "mcp/tools.json" => text.replace("List.", "List them all."),
-            _ => format!("{text}# changed\n"),
-        };
-        std::fs::write(&path, edited).unwrap();
-        assert!(!program(&fx, &extension(&project)).approved, "{file}");
-    }
-}
-
-/// tsk547: a provider runs from a verified copy of its approved folder,
-/// outside the repo — not from the live tree — and a tampered copy is
-/// replaced before it runs.
-#[tokio::test]
-async fn a_provider_runs_from_its_verified_copy() {
+async fn a_provider_runs_from_its_deployment() {
     let fx = services_with_effort().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "");
-    let script = project.join("oxplow/extensions/tracker/bin/provider");
+    let script = project.join(".oxplow/extensions/tracker/bin/provider");
     let seen = tempfile::tempdir().unwrap();
     let cwd_file = seen.path().join("cwd");
     std::fs::write(
@@ -1490,41 +1283,25 @@ async fn a_provider_runs_from_its_verified_copy() {
     )
     .unwrap();
     let ext = extension(&project);
-    approve(&fx, &ext).await;
-    let providers = &fx.svc.providers;
+    deploy(&fx, &ext).await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
-    let copies = fx
-        .svc
-        .layout
-        .state_dir
-        .join("global-config/provider-copies");
-    let ran_in = std::path::PathBuf::from(std::fs::read_to_string(&cwd_file).unwrap().trim());
-    let copies = copies.canonicalize().unwrap();
-    assert!(
-        ran_in.starts_with(&copies),
-        "{} not under {}",
-        ran_in.display(),
-        copies.display()
-    );
-    assert!(
-        ran_in.ends_with("oxplow/extensions/tracker"),
-        "{}",
-        ran_in.display()
-    );
-
-    // Someone edits the copy: the next start replaces it from the
-    // approved tree before running.
-    assert!(providers.stop(INSTANCE).await);
-    let copied = ran_in.join("bin/provider");
-    std::fs::write(&copied, "#!/bin/sh\necho tampered\nexit 1\n").unwrap();
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    // Its start's first read, in the background (tsk716).
-    first_read(&fx).await;
-    assert_eq!(
-        std::fs::read_to_string(&copied).unwrap(),
-        std::fs::read_to_string(&script).unwrap()
+    // It ran in its extension's deployment, not in the live tree.
+    let ran_in = std::path::PathBuf::from(std::fs::read_to_string(&cwd_file).unwrap().trim())
+        .canonicalize()
+        .unwrap();
+    let hash = fx.svc.extension_catalog.live()["tracker"].clone();
+    let deployment = crate::extension_store::deployment_dir(&project, EXT, &hash)
+        .canonicalize()
+        .unwrap();
+    assert_eq!(ran_in, deployment);
+    assert_ne!(
+        ran_in,
+        project
+            .join(".oxplow/extensions/tracker")
+            .canonicalize()
+            .unwrap()
     );
 }
 
@@ -1547,7 +1324,7 @@ async fn a_provider_cannot_declare_another_core_event_type() {
             >(),
         });
     std::fs::write(
-        project.join("oxplow/extensions/tracker/provider.json"),
+        project.join(".oxplow/extensions/tracker/provider.json"),
         serde_json::to_string(&declared).unwrap(),
     )
     .unwrap();
@@ -1601,7 +1378,7 @@ fn a_provider_event_names_only_its_own_refs() {
 /// failure — and never blocks stopping it.
 #[tokio::test]
 async fn a_hung_check_times_out_and_the_instance_can_still_stop() {
-    let (fx, ext) = approved("slow-check:30000").await;
+    let (fx, ext) = deployed("slow-check:30000").await;
     let providers = &fx.svc.providers;
     // A start that merely failed stays enabled, and the generation activates.
     tokio::time::timeout(
@@ -1627,7 +1404,7 @@ async fn a_hung_check_times_out_and_the_instance_can_still_stop() {
 /// failure, instead of blocking the caller forever with health `ready`.
 #[tokio::test]
 async fn a_hung_invoke_times_out_and_counts() {
-    let (fx, ext) = approved("").await;
+    let (fx, ext) = deployed("").await;
     let providers = &fx.svc.providers;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
@@ -1653,7 +1430,7 @@ async fn a_hung_invoke_times_out_and_counts() {
 /// doesn't bring back what was just disabled.
 #[tokio::test]
 async fn a_disable_while_starting_keeps_the_instance_off() {
-    let (fx, ext) = approved("slow-check:400").await;
+    let (fx, ext) = deployed("slow-check:400").await;
     let providers = fx.svc.providers.clone();
     let spec = ext.providers[0].clone();
     let starting = {
@@ -1677,7 +1454,7 @@ async fn a_disable_while_starting_keeps_the_instance_off() {
 /// reconcile doesn't start it (it fails closed).
 #[tokio::test]
 async fn an_unreadable_disable_record_keeps_the_instance_off() {
-    let (fx, _ext) = approved("").await;
+    let (fx, _ext) = deployed("").await;
     configure(&fx, true, json!({ "team": "core" }));
     fx.svc
         .db
@@ -1698,56 +1475,23 @@ async fn an_unreadable_disable_record_keeps_the_instance_off() {
     );
 }
 
-/// tsk569: approving an updated provider restarts a running instance on
-/// what was approved, instead of leaving it to be disabled at its next
-/// start as changed.
-/// tsk1062: an enabled instance that's down for want of approval starts
-/// once a person approves its program — not only one already running.
+/// Deploying an updated provider restarts a running instance on what was
+/// deployed.
 #[tokio::test]
-async fn approving_a_program_starts_its_enabled_instance() {
-    let fx = services_with_effort().await;
-    write_extension(&fx.svc.layout.project_dir, "");
-    let ext = extension(&fx.svc.layout.project_dir);
-    configure(&fx, true, json!({ "team": "core" }));
-    crate::test_fixtures::activate(&fx.svc).await;
-    assert!(
-        fx.svc.providers.get(INSTANCE).await.is_none(),
-        "not approved yet"
-    );
-
-    approve(&fx, &ext).await;
-    fx.svc.providers.approved(INSTANCE).await;
-    crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    assert!(
-        fx.svc.providers.get(INSTANCE).await.is_some(),
-        "started on approval"
-    );
-    assert_eq!(
-        fx.svc.providers.health(INSTANCE).unwrap().state,
-        InstanceState::Ready
-    );
-}
-
-#[tokio::test]
-async fn approving_updated_declarations_restarts_the_instance() {
-    let (fx, _ext) = approved("").await;
+async fn deploying_updated_declarations_restarts_the_instance() {
+    let (fx, _ext) = deployed("").await;
     configure(&fx, true, json!({ "team": "core" }));
     crate::test_fixtures::activate(&fx.svc).await;
     assert!(running(&fx.svc, "fake"));
 
-    // The provider updates: new behaviour and new declarations, approved.
+    // The provider updates: new behaviour and new declarations.
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "bad-declarations");
     std::fs::write(
-        project.join("oxplow/extensions/tracker/provider.json"),
+        project.join(".oxplow/extensions/tracker/provider.json"),
         serde_json::to_string_pretty(&oxplow_provider_fake::bad_declarations()).unwrap(),
     )
     .unwrap();
-    // The approval is recorded, then the registry is told (it re-baselines
-    // what the running instance was enabled with) before a generation
-    // starts the instance on the new declarations.
-    approve_without_activating(&fx, &extension(&project));
-    fx.svc.providers.approved(INSTANCE).await;
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
     let running = fx.svc.providers.get(INSTANCE).await.expect("running");
     assert_eq!(running.declared, oxplow_provider_fake::bad_declarations());
@@ -1772,46 +1516,34 @@ async fn approving_updated_declarations_restarts_the_instance() {
     );
 }
 
-/// Declarations on disk that don't parse fail the extension's load, so
-/// the provider isn't there to compare: `NotFound`, never an empty diff,
-/// and the load error names the file.
+/// Declarations that don't parse fail the extension's load: the edit is
+/// held back naming the file, and the provider that was working goes on
+/// being described by its last working declarations.
 #[tokio::test]
-async fn declaration_impact_of_unreadable_declarations_is_an_error() {
-    let (fx, _ext) = approved("").await;
+async fn unreadable_declarations_are_held_back_naming_the_file() {
+    let (fx, _ext) = deployed("").await;
     std::fs::write(
         fx.svc
             .layout
             .project_dir
-            .join("oxplow/extensions/tracker/provider.json"),
+            .join(".oxplow/extensions/tracker/provider.json"),
         "{ not json",
     )
     .unwrap();
     let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    assert!(problems.contains_key(EXT), "{problems:?}");
-    let err = fx
-        .svc
-        .providers
-        .declaration_impact(INSTANCE)
-        .await
-        .unwrap_err();
     assert!(
-        err.to_string().contains("provider.json"),
-        "an error naming the file, never an empty diff: {err:?}"
+        problems
+            .get(EXT)
+            .is_some_and(|why| why.join("\n").contains("provider.json")),
+        "{problems:?}"
     );
-    let errors = crate::extensions::load_extensions(&fx.svc.layout.project_dir)
-        .into_iter()
-        .find(|e| e.name == EXT)
-        .unwrap()
-        .errors
-        .join("\n");
-    assert!(errors.contains("provider.json"), "{errors}");
 }
 
 /// tsk569: enabling from Settings writes nothing when the enable itself
 /// fails — the config never says enabled for an instance that wasn't.
 #[tokio::test]
 async fn a_failed_enable_writes_no_config() {
-    let (fx, _ext) = approved("").await;
+    let (fx, _ext) = deployed("").await;
     fx.svc
         .db
         .transaction(|c| {
@@ -2094,7 +1826,7 @@ async fn recorded_for(fx: &EffortFixture, item: &str) -> usize {
 /// it once.
 #[tokio::test]
 async fn a_read_streams_records_into_work_item_and_keeps_its_cursor() {
-    let (fx, ext) = approved("").await;
+    let (fx, ext) = deployed("").await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
@@ -2167,7 +1899,7 @@ async fn a_read_streams_records_into_work_item_and_keeps_its_cursor() {
 #[tokio::test]
 async fn enabling_returns_before_the_first_read_finishes() {
     // Under the in-memory 2 s call timeout, so the read itself succeeds.
-    let (fx, ext) = approved("slow:1500").await;
+    let (fx, ext) = deployed("slow:1500").await;
     let started = std::time::Instant::now();
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     assert!(
@@ -2198,7 +1930,7 @@ async fn first_read(fx: &EffortFixture) -> oxplow_db::CollectorState {
 /// first — so each item is recorded once and the cursor never goes back.
 #[tokio::test]
 async fn concurrent_syncs_of_one_collector_record_each_item_once() {
-    let (fx, ext) = approved("").await;
+    let (fx, ext) = deployed("").await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
@@ -2236,7 +1968,7 @@ async fn concurrent_syncs_of_one_collector_record_each_item_once() {
 /// record of another provider's item fails the read and writes nothing.
 #[tokio::test]
 async fn a_failed_read_keeps_what_its_checkpoints_covered() {
-    let (fx, ext) = approved("").await;
+    let (fx, ext) = deployed("").await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
@@ -2288,7 +2020,7 @@ async fn a_failed_read_keeps_what_its_checkpoints_covered() {
 /// and counts as a failure.
 #[tokio::test]
 async fn a_silent_read_is_cancelled_and_counts() {
-    let (fx, ext) = approved("").await;
+    let (fx, ext) = deployed("").await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
@@ -2320,7 +2052,7 @@ async fn a_silent_read_is_cancelled_and_counts() {
 /// instance set to `syncMinutes: 0` is read only on request.
 #[tokio::test]
 async fn scheduled_syncs_run_due_collectors_as_the_system() {
-    let (fx, _ext) = approved("").await;
+    let (fx, _ext) = deployed("").await;
     configure(&fx, true, json!({ "team": "core" }));
     crate::test_fixtures::activate(&fx.svc).await;
     // Its start's first read, in the background (tsk716).
@@ -2419,7 +2151,7 @@ async fn create_on_fake(
 }
 
 async fn enabled_fake() -> (EffortFixture, Extension) {
-    let (fx, ext) = approved("").await;
+    let (fx, ext) = deployed("").await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
@@ -2556,11 +2288,11 @@ async fn an_effect_doesnt_hear_its_own_external_write_echoed_by_a_read() {
     let fx = services_with_effort().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "");
-    let dir = project.join("oxplow/extensions").join(EXT);
+    let dir = project.join(".oxplow/extensions").join(EXT);
     let manifest = std::fs::read_to_string(dir.join("extension.yaml")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        format!("{manifest}effects:\n  - id: shout\n    summary: Shout a recorded item's title.\n    on: [work_item.recorded]\n    entry: shout.star\n"),
+        format!("{}effects:\n  - id: shout\n    summary: Shout a recorded item's title.\n    on: [work_item.recorded]\n    entry: shout.star\n", manifest.replacen("permissions: { process: true }", "permissions: { process: true, commands: [oxplow.work_item.*] }", 1)),
     )
     .unwrap();
     std::fs::write(
@@ -2569,24 +2301,12 @@ async fn an_effect_doesnt_hear_its_own_external_write_echoed_by_a_read() {
     )
     .unwrap();
     let ext = extension(&project);
-    approve(&fx, &ext).await;
+    deploy(&fx, &ext).await;
     make_active(&fx, "fake").await;
     let decl = &ext.effects[0];
-    let effect = crate::effects::effect_program(&ext, decl);
-    exec_consent::approve_program(
-        &fx.svc.approvals,
-        &project,
-        std::slice::from_ref(&ext),
-        ProgramKind::Effect,
-        &effect.name,
-        &effect.hash(&project).unwrap(),
-    )
-    .unwrap();
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     first_read(&fx).await;
-    crate::effects::approved(&fx.svc.db, &decl.name())
-        .await
-        .unwrap();
+    crate::test_fixtures::start_effect(&fx.svc, &decl.name()).await;
 
     let consumer = crate::effect_triggers::EffectTriggers::new(std::sync::Arc::downgrade(&fx.svc));
     let mut seen = fx
@@ -2690,21 +2410,28 @@ const SECOND: &str = "tracker/fake_second";
 /// tsk841: removing an instance — here one whose provider is gone, which
 /// is when the row offers Remove — takes everything of it: its config,
 /// the active-provider choice naming it, its read checkpoints (an
-/// instance added again under the id starts fresh), its health row and
-/// its credentials, read from the copy it last ran when the extension no
-/// longer declares it.
+/// instance added again under the id starts fresh) and its health row. An
+/// extension that no longer declares the provider has no credentials left
+/// to name.
 #[tokio::test]
 async fn removing_an_instance_leaves_nothing_behind() {
     let fx = services_with_effort().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "needs:FAKE_TOKEN");
     let manifest = project
-        .join("oxplow/extensions")
+        .join(".oxplow/extensions")
         .join(EXT)
         .join("extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, format!("{text}    credentials: [FAKE_TOKEN]\n")).unwrap();
-    approve(&fx, &extension(&project)).await;
+    std::fs::write(
+        &manifest,
+        format!(
+            "{}    credentials: [FAKE_TOKEN]\n",
+            permit_secrets(&text, &["FAKE_TOKEN"])
+        ),
+    )
+    .unwrap();
+    deploy(&fx, &extension(&project)).await;
     let providers = &fx.svc.providers;
     providers
         .add_instance(&Actor::Human, SECOND, "fake", Scope::Project)
@@ -2777,11 +2504,6 @@ async fn removing_an_instance_leaves_nothing_behind() {
             .unwrap(),
         None
     );
-    assert_eq!(
-        fx.svc.secrets.get(&account).unwrap(),
-        None,
-        "its credential went"
-    );
 
     // A global instance of an extension this project has, that doesn't
     // resolve, is listed — so it can be removed here.
@@ -2827,7 +2549,7 @@ async fn removing_an_instance_leaves_nothing_behind() {
 /// rather than showing enabled and "Off" with no reason.
 #[tokio::test]
 async fn a_refused_enable_says_why() {
-    let (fx, _ext) = approved("").await;
+    let (fx, _ext) = deployed("").await;
     fx.svc
         .commands
         .register_namespace("fake_second", "a test", Vec::new())
@@ -2857,49 +2579,13 @@ async fn a_refused_enable_says_why() {
     );
 }
 
-/// tsk839: instances of one program start at once — each makes its
-/// approved copy. None removes another's copy under way (a temp folder
-/// it is about to keep) or the one another kept: each start gets an
-/// intact copy, and one copy of the program is left.
-#[tokio::test(flavor = "multi_thread")]
-async fn starts_of_one_program_at_once_each_get_their_copy() {
-    let (fx, ext) = approved("").await;
-    let spec = ext.providers[0].clone();
-    let deps = fx.svc.providers.deps.clone();
-    let starts: Vec<_> = (0..12)
-        .map(|_| {
-            let (deps, ext, spec) = (deps.clone(), ext.clone(), spec.clone());
-            tokio::task::spawn_blocking(move || {
-                host::approved_copy(
-                    &deps.project_dir,
-                    &deps.copies,
-                    &deps.approvals,
-                    &ext,
-                    &spec,
-                )
-                .map(|copy| copy.ext_dir)
-            })
-        })
-        .collect();
-    for start in starts {
-        let dir = start.await.unwrap().expect("each start gets its copy");
-        assert!(dir.join("extension.yaml").is_file(), "{}", dir.display());
-    }
-    let kept: Vec<_> = std::fs::read_dir(deps.copies.join(EXT).join("fake"))
-        .unwrap()
-        .flatten()
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .collect();
-    assert_eq!(kept.len(), 1, "{kept:?}");
-}
-
 /// tsk837: a person's Enables on two rows at once — the second while the
 /// first still checks — both stand. Each write is a read-modify-write of
 /// the instances as they are when it writes, not as they were before its
 /// check.
 #[tokio::test]
 async fn enabling_two_instances_at_once_keeps_both() {
-    let (fx, _ext) = approved("slow-check:400").await;
+    let (fx, _ext) = deployed("slow-check:400").await;
     configure(&fx, false, json!({ "team": "core" }));
     configure_named(&fx, SECOND, Some("fake"), json!({ "team": "second" }));
     fx.svc
@@ -2937,7 +2623,7 @@ async fn enabling_two_instances_at_once_keeps_both() {
 /// commands' namespace, its `v_capability_provider` row, its health.
 #[tokio::test]
 async fn two_instances_of_one_provider_run_side_by_side() {
-    let (fx, _ext) = approved("").await;
+    let (fx, _ext) = deployed("").await;
     configure(&fx, true, json!({ "team": "core" }));
     configure_named(&fx, SECOND, Some("fake"), json!({ "team": "second" }));
     crate::test_fixtures::activate(&fx.svc).await;
@@ -2996,7 +2682,6 @@ async fn two_instances_of_one_provider_run_side_by_side() {
         (second.provider.as_str(), second.instance_id.as_str()),
         ("fake", "fake_second")
     );
-    assert!(second.approved, "one approval: the program's");
 
     // Stopping one leaves the other.
     turn_off(&fx.svc, SECOND).await;
@@ -3013,13 +2698,20 @@ async fn an_instance_credential_is_its_own() {
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "needs:FAKE_TOKEN");
     let manifest = project
-        .join("oxplow/extensions")
+        .join(".oxplow/extensions")
         .join(EXT)
         .join("extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, format!("{text}    credentials: [FAKE_TOKEN]\n")).unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            "{}    credentials: [FAKE_TOKEN]\n",
+            permit_secrets(&text, &["FAKE_TOKEN"])
+        ),
+    )
+    .unwrap();
     let ext = extension(&project);
-    approve(&fx, &ext).await;
+    deploy(&fx, &ext).await;
     fx.svc
         .providers
         .set_credential(SECOND, "FAKE_TOKEN", Some("s3cret"))
@@ -3069,7 +2761,7 @@ async fn an_instance_credential_is_its_own() {
 /// is; one that doesn't is listed missing, with the fix.
 #[tokio::test]
 async fn a_named_instance_says_which_provider_it_is() {
-    let (fx, _ext) = approved("").await;
+    let (fx, _ext) = deployed("").await;
     configure_named(&fx, SECOND, None, json!({ "team": "second" }));
     crate::test_fixtures::activate(&fx.svc).await;
     match fx.svc.providers.health(SECOND).map(|h| h.state) {
@@ -3164,37 +2856,26 @@ async fn sibling_project(
     (svc, dir)
 }
 
-/// Approve the tracker's provider program as it is in `svc`'s project.
+/// Deploy the tracker's provider as it is in `svc`'s project.
 async fn approve_in(svc: &std::sync::Arc<crate::Services>) {
-    let ext = extension(&svc.layout.project_dir);
-    let program = exec_consent::list(
-        &svc.approvals,
-        &svc.layout.project_dir,
-        std::slice::from_ref(&ext),
-    )
-    .into_iter()
-    .find(|p| p.kind == ProgramKind::Provider)
-    .unwrap();
-    exec_consent::approve_program(
-        &svc.approvals,
-        &svc.layout.project_dir,
-        std::slice::from_ref(&ext),
-        ProgramKind::Provider,
-        &program.name,
-        program.version.as_deref().unwrap(),
-    )
-    .unwrap();
     crate::test_fixtures::activate_with_problems(svc).await;
 }
 
 /// The tracker's provider in `root` declares the credential `FAKE_TOKEN`.
 fn declare_token(root: &Path) {
     let manifest = root
-        .join("oxplow/extensions")
+        .join(".oxplow/extensions")
         .join(EXT)
         .join("extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, format!("{text}    credentials: [FAKE_TOKEN]\n")).unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            "{}    credentials: [FAKE_TOKEN]\n",
+            permit_secrets(&text, &["FAKE_TOKEN"])
+        ),
+    )
+    .unwrap();
 }
 
 /// tsk842: a global instance's credential is the person's in every
@@ -3207,7 +2888,7 @@ async fn a_global_credential_change_restarts_it_in_every_project() {
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "needs:FAKE_TOKEN");
     declare_token(&project);
-    approve(&fx, &extension(&project)).await;
+    deploy(&fx, &extension(&project)).await;
     let providers = &fx.svc.providers;
     providers
         .add_instance(&Actor::Human, SHARED, "fake", Scope::Global)
@@ -3265,7 +2946,7 @@ async fn state_of(svc: &crate::Services, instance: &str) -> Option<InstanceState
 /// listed where the extension isn't.
 #[tokio::test]
 async fn a_global_instance_runs_in_every_project_with_the_extension() {
-    let (fx, _ext) = approved("").await;
+    let (fx, _ext) = deployed("").await;
     let providers = &fx.svc.providers;
     let added = providers
         .add_instance(&Actor::Human, SHARED, "fake", Scope::Global)
@@ -3336,7 +3017,7 @@ async fn a_global_instance_runs_in_every_project_with_the_extension() {
 /// the global one back here.
 #[tokio::test]
 async fn a_global_instance_is_turned_off_in_one_project() {
-    let (fx, _ext) = approved("").await;
+    let (fx, _ext) = deployed("").await;
     let providers = &fx.svc.providers;
     providers
         .add_instance(&Actor::Human, SHARED, "fake", Scope::Global)
@@ -3391,7 +3072,7 @@ async fn a_global_instance_is_turned_off_in_one_project() {
 /// there, whole — and only there.
 #[tokio::test]
 async fn a_project_entry_overrides_a_global_instance_whole() {
-    let (fx, _ext) = approved("").await;
+    let (fx, _ext) = deployed("").await;
     let providers = &fx.svc.providers;
     providers
         .add_instance(&Actor::Human, SHARED, "fake", Scope::Global)
@@ -3448,13 +3129,20 @@ async fn a_project_instance_keeps_its_credentials_beside_a_global_one() {
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "needs:FAKE_TOKEN");
     let manifest = project
-        .join("oxplow/extensions")
+        .join(".oxplow/extensions")
         .join(EXT)
         .join("extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, format!("{text}    credentials: [FAKE_TOKEN]\n")).unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            "{}    credentials: [FAKE_TOKEN]\n",
+            permit_secrets(&text, &["FAKE_TOKEN"])
+        ),
+    )
+    .unwrap();
     let ext = extension(&project);
-    approve(&fx, &ext).await;
+    deploy(&fx, &ext).await;
     let providers = &fx.svc.providers;
     providers
         .add_instance(&Actor::Human, SHARED, "fake", Scope::Project)
@@ -3527,16 +3215,23 @@ async fn a_global_instances_credential_is_shared_across_projects() {
     let project = fx.svc.layout.project_dir.clone();
     let credentialed = |root: &Path| {
         let manifest = root
-            .join("oxplow/extensions")
+            .join(".oxplow/extensions")
             .join(EXT)
             .join("extension.yaml");
         let text = std::fs::read_to_string(&manifest).unwrap();
-        std::fs::write(&manifest, format!("{text}    credentials: [FAKE_TOKEN]\n")).unwrap();
+        std::fs::write(
+            &manifest,
+            format!(
+                "{}    credentials: [FAKE_TOKEN]\n",
+                permit_secrets(&text, &["FAKE_TOKEN"])
+            ),
+        )
+        .unwrap();
     };
     write_extension(&project, "needs:FAKE_TOKEN");
     credentialed(&project);
     let ext = extension(&project);
-    approve(&fx, &ext).await;
+    deploy(&fx, &ext).await;
     let providers = &fx.svc.providers;
     providers
         .add_instance(&Actor::Human, SHARED, "fake", Scope::Global)
@@ -3553,7 +3248,7 @@ async fn a_global_instances_credential_is_shared_across_projects() {
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert_eq!(state_of(&fx.svc, SHARED).await, Some(InstanceState::Ready));
 
-    // Another project: the same extension, approved there; nothing set there.
+    // Another project: the same extension, deployed there; nothing set there.
     let dir = tempfile::tempdir().unwrap();
     crate::test_fixtures::init_git_repo(dir.path());
     write_extension(dir.path(), "needs:FAKE_TOKEN");
@@ -3567,24 +3262,9 @@ async fn a_global_instances_credential_is_shared_across_projects() {
     )
     .await
     .unwrap();
-    let other_ext = extension(dir.path());
-    let program = exec_consent::list(
-        &other.approvals,
-        dir.path(),
-        std::slice::from_ref(&other_ext),
-    )
-    .into_iter()
-    .find(|p| p.kind == ProgramKind::Provider)
-    .unwrap();
-    exec_consent::approve_program(
-        &other.approvals,
-        dir.path(),
-        std::slice::from_ref(&other_ext),
-        ProgramKind::Provider,
-        &program.name,
-        program.version.as_deref().unwrap(),
-    )
-    .unwrap();
+    // Deploying its sources reloads its config, so the project instance is
+    // added after.
+    crate::test_fixtures::activate_with_problems(&other).await;
     // A project instance of the same provider there has no token of its own.
     other.config.write().unwrap().extension_instances.insert(
         INSTANCE.into(),
@@ -3608,7 +3288,7 @@ async fn a_global_instances_credential_is_shared_across_projects() {
 /// isn't running, not a failure counted against it.
 #[tokio::test]
 async fn a_call_finishing_after_its_instance_stopped_changes_nothing() {
-    let (fx, ext) = approved("").await;
+    let (fx, ext) = deployed("").await;
     configure(&fx, true, json!({ "team": "core" }));
     crate::test_fixtures::activate(&fx.svc).await;
     first_read(&fx).await;
@@ -3661,20 +3341,30 @@ async fn a_call_finishing_after_its_instance_stopped_changes_nothing() {
 /// edit to its own program or its config restarts it.
 #[tokio::test]
 async fn a_generation_restarts_only_the_instances_it_changed() {
-    let (fx, ext) = approved("").await;
+    let (fx, ext) = deployed("").await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     first_read(&fx).await;
     let running = fx.svc.providers.get(INSTANCE).await.expect("running");
 
     // Another extension is added: nothing of the provider changed.
-    let other = fx.svc.layout.project_dir.join("oxplow/extensions/other");
+    let other = fx.svc.layout.project_dir.join(".oxplow/extensions/other");
     std::fs::create_dir_all(&other).unwrap();
     std::fs::write(
         other.join("extension.yaml"),
         "manifest: 2\nname: other\nintent:\n  purpose: unrelated\n",
     )
     .unwrap();
-    crate::test_fixtures::activate(&fx.svc).await;
+    // Deploying `other` turns it on in the person's file and reloads the
+    // config; the instance's in-memory entry is put back before the
+    // generation that carries it publishes.
+    let kept = fx.svc.config.read().unwrap().extension_instances.clone();
+    let changes = crate::extension_deploy::stage_sources(&fx.svc).await;
+    fx.svc.config.write().unwrap().extension_instances = kept;
+    fx.svc
+        .extension_activation
+        .activate_live(fx.svc.clone(), &changes)
+        .await
+        .unwrap();
     let after = fx.svc.providers.get(INSTANCE).await.expect("still running");
     assert!(
         std::sync::Arc::ptr_eq(&running, &after),
@@ -3700,10 +3390,10 @@ async fn a_generation_restarts_only_the_instances_it_changed() {
         .svc
         .layout
         .project_dir
-        .join("oxplow/extensions/tracker/bin/provider");
+        .join(".oxplow/extensions/tracker/bin/provider");
     let text = std::fs::read_to_string(&script).unwrap();
     std::fs::write(&script, format!("{text}\n# edited\n")).unwrap();
-    approve(&fx, &extension(&fx.svc.layout.project_dir)).await;
+    deploy(&fx, &extension(&fx.svc.layout.project_dir)).await;
     let edited = fx.svc.providers.get(INSTANCE).await.expect("running");
     assert!(
         !std::sync::Arc::ptr_eq(&before, &edited),
@@ -3719,7 +3409,7 @@ async fn a_generation_restarts_only_the_instances_it_changed() {
 /// would report as `unapproved` and stop the healthy successor for.
 #[tokio::test]
 async fn a_late_read_on_a_stopped_instance_doesnt_touch_its_successor() {
-    let (fx, _ext) = approved("").await;
+    let (fx, _ext) = deployed("").await;
     configure(&fx, true, json!({ "team": "core" }));
     crate::test_fixtures::activate(&fx.svc).await;
     first_read(&fx).await;
@@ -3751,10 +3441,20 @@ async fn a_late_read_on_a_stopped_instance_doesnt_touch_its_successor() {
 fn write_oauth_extension(project: &Path, hooks: &str, authorize: &str, token: &str, more: &str) {
     write_extension(project, hooks);
     let manifest = project
-        .join("oxplow/extensions")
+        .join(".oxplow/extensions")
         .join(EXT)
         .join("extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
+    let mut names = vec!["FAKE_TOKEN".to_string()];
+    for line in more.lines() {
+        let line = line.trim().trim_start_matches("- ");
+        if let Some(name) = line.strip_prefix("name: ") {
+            names.push(name.to_string());
+        } else if !line.is_empty() && !line.contains(':') {
+            names.push(line.to_string());
+        }
+    }
+    let text = permit_secrets(&text, &names.iter().map(String::as_str).collect::<Vec<_>>());
     std::fs::write(
         &manifest,
         format!(
@@ -3765,10 +3465,9 @@ fn write_oauth_extension(project: &Path, hooks: &str, authorize: &str, token: &s
 }
 
 /// P9.B3: a credential may be one the person signs in for. It is declared
-/// with its endpoints, checked at load, and what approving the provider
-/// shows.
+/// with its endpoints and checked at load.
 #[tokio::test]
-async fn an_oauth_credential_is_declared_checked_and_shown_for_approval() {
+async fn an_oauth_credential_is_declared_and_checked() {
     let fx = services_with_effort().await;
     let project = fx.svc.layout.project_dir.clone();
     let (authorize, token) = (
@@ -3792,25 +3491,6 @@ async fn an_oauth_credential_is_declared_checked_and_shown_for_approval() {
         spec.credentials[1].oauth.is_none(),
         "a bare name is a static one"
     );
-    // What a person approves names where it signs in.
-    let listed = program(&fx, &ext);
-    assert_eq!(
-        listed.credentials,
-        vec![
-            format!("FAKE_TOKEN (signs in at {authorize}; tokens from {token}; client oxplow-test; scopes read, write)"),
-            "PLAIN".to_string()
-        ]
-    );
-    let before = listed.version.clone();
-    write_oauth_extension(
-        &project,
-        "",
-        authorize,
-        "https://auth.example.com/token2",
-        "      - PLAIN\n",
-    );
-    assert_ne!(program(&fx, &extension(&project)).version, before);
-
     let refused = |authorize: &str, more: &str, says: &str| {
         write_oauth_extension(&project, "", authorize, token, more);
         let loaded = crate::extensions::load_extensions(&project)
@@ -3861,7 +3541,7 @@ async fn signing_in(hooks: &str, more: &str) -> (EffortFixture, OAuthSim) {
     let sim = OAuthSim::start().await;
     let project = fx.svc.layout.project_dir.clone();
     write_oauth_extension(&project, hooks, &sim.authorize_url, &sim.token_url, more);
-    approve(&fx, &extension(&project)).await;
+    deploy(&fx, &extension(&project)).await;
     make_active(&fx, "fake").await;
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
     (fx, sim)
@@ -4161,7 +3841,7 @@ async fn signed_in_twice(hooks: &str) -> (EffortFixture, OAuthSim) {
         sim.authorize_url, sim.token_url
     );
     write_oauth_extension(&project, hooks, &sim.authorize_url, &sim.token_url, &other);
-    approve(&fx, &extension(&project)).await;
+    deploy(&fx, &extension(&project)).await;
     make_active(&fx, "fake").await;
     configure(&fx, true, json!({ "team": "core" }));
     assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
@@ -4182,7 +3862,7 @@ async fn a_slow_exchange_holds_up_only_its_own_sign_in() {
         sim.authorize_url, sim.token_url
     );
     write_oauth_extension(&project, "", &sim.authorize_url, &sim.token_url, &other);
-    approve(&fx, &extension(&project)).await;
+    deploy(&fx, &extension(&project)).await;
     configure(&fx, true, json!({ "team": "core" }));
     let page = fx
         .svc
@@ -4666,7 +4346,7 @@ async fn a_completed_sign_in_cannot_be_completed_again() {
     assert_eq!(sim.grants(), vec!["authorization_code"]);
 }
 
-/// P10: finishing re-checks what was approved: a provider whose token
+/// P10: finishing re-checks the endpoints: a provider whose token
 /// endpoint changed since the sign-in began sends its code nowhere.
 #[tokio::test]
 async fn a_sign_in_whose_endpoints_changed_meanwhile_sends_nothing() {
@@ -4689,7 +4369,7 @@ async fn a_sign_in_whose_endpoints_changed_meanwhile_sends_nothing() {
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
     let failed = complete(&fx, "FAKE_TOKEN", &redirect).await.unwrap();
     assert!(
-        matches!(&failed, SignInCompletion::Failed { error } if error.contains("approv")),
+        matches!(&failed, SignInCompletion::Failed { error } if error.contains("changed since the sign-in began")),
         "{failed:?}"
     );
     assert!(
@@ -4770,7 +4450,7 @@ async fn a_sign_in_whose_approved_endpoints_changed_meanwhile_sends_nothing() {
         "",
     );
     // A person approves the new endpoints before the redirect comes back.
-    approve(&fx, &extension(&fx.svc.layout.project_dir)).await;
+    deploy(&fx, &extension(&fx.svc.layout.project_dir)).await;
     let failed = complete(&fx, "FAKE_TOKEN", &redirect).await.unwrap();
     assert!(
         matches!(&failed, SignInCompletion::Failed { error } if error.contains("signs in changed")),
@@ -4817,10 +4497,16 @@ async fn an_unfinished_sign_in_ends_after_its_wait() {
 /// The adapter manifest with its server reached by url, authenticated by
 /// the credential `NOTES_TOKEN`.
 fn url_manifest() -> String {
-    ADAPTER_MANIFEST.replace(
-        "      mcp: { command: [bin/server, --stdio] }\n",
-        "      mcp: { url: \"https://mcp.example.com/mcp\", auth: NOTES_TOKEN }\n",
-    ) + "    credentials: [NOTES_TOKEN]\n    network: [mcp.example.com]\n"
+    ADAPTER_MANIFEST
+        .replace(
+            "permissions: { process: true }",
+            "permissions: { network: [mcp.example.com], secrets: [NOTES_TOKEN] }",
+        )
+        .replace(
+            "      mcp: { command: [bin/server, --stdio] }\n",
+            "      mcp: { url: \"https://mcp.example.com/mcp\", auth: NOTES_TOKEN }\n",
+        )
+        + "    credentials: [NOTES_TOKEN]\n    network: [mcp.example.com]\n"
 }
 
 /// P9.B4: an adapter's MCP server may be one reached by `url` instead of
@@ -4842,16 +4528,6 @@ async fn an_adapter_server_by_url_is_declared_and_checked() {
             auth: Some("NOTES_TOKEN".into()),
         }
     );
-    // What a person approves: the url, not a file of the folder.
-    let listed = program(&fx, &ext);
-    assert!(listed.remote);
-    assert_eq!(listed.program, "https://mcp.example.com/mcp");
-    assert_eq!(
-        listed.args,
-        ["mcp/x.star", "mcp/tools.json", "--auth-env", "NOTES_TOKEN"]
-    );
-    assert!(listed.version.is_some(), "no program file to read");
-
     for (from, to, says) in [
         (
             "mcp: { url: \"https://mcp.example.com/mcp\", auth: NOTES_TOKEN }",
@@ -4926,99 +4602,6 @@ async fn an_adapter_server_by_url_is_declared_and_checked() {
     )
     .unwrap();
     extension(&project);
-}
-
-/// P9.B4: approving a server by url approves the url, its pins, its
-/// mapping and what it is authenticated with: changing any needs
-/// approving again.
-#[tokio::test]
-async fn a_url_servers_approval_covers_the_url_its_pins_mapping_and_credentials() {
-    let fx = services_with_effort().await;
-    let project = fx.svc.layout.project_dir.clone();
-    let dir = write_adapter_extension(&project);
-    std::fs::remove_file(dir.join("bin/server")).unwrap();
-    let manifest = url_manifest();
-    let approved_now = |fx: &EffortFixture| {
-        std::fs::write(dir.join("extension.yaml"), &manifest).unwrap();
-        let ext = extension(&project);
-        approve_without_activating(fx, &ext);
-        assert!(program(fx, &ext).approved);
-    };
-    for (from, to) in [
-        (
-            "https://mcp.example.com/mcp",
-            "https://mcp.example.com/other",
-        ),
-        ("auth: NOTES_TOKEN }", "}"),
-        (
-            "credentials: [NOTES_TOKEN]",
-            "credentials: [NOTES_TOKEN, MORE]",
-        ),
-    ] {
-        approved_now(&fx);
-        assert!(manifest.contains(from), "{from}");
-        std::fs::write(dir.join("extension.yaml"), manifest.replace(from, to)).unwrap();
-        assert!(!program(&fx, &extension(&project)).approved, "{to}");
-    }
-    for file in ["mcp/x.star", "mcp/tools.json"] {
-        approved_now(&fx);
-        let path = dir.join(file);
-        let text = std::fs::read_to_string(&path).unwrap();
-        let edited = match file {
-            "mcp/tools.json" => text.replace("List.", "List them all."),
-            _ => format!("{text}# changed\n"),
-        };
-        std::fs::write(&path, &edited).unwrap();
-        assert!(!program(&fx, &extension(&project)).approved, "{file}");
-        std::fs::write(&path, text).unwrap();
-    }
-}
-
-/// tsk824: signing in sends a code, a PKCE verifier and a client secret to
-/// the endpoints the manifest names, so they must be the approved ones. An
-/// edited endpoint makes the provider unapproved, and its sign-in is
-/// refused until a person approves it again — nothing listens, nothing is
-/// sent.
-#[tokio::test]
-async fn sign_in_is_refused_until_the_endpoints_are_approved() {
-    let (fx, sim) = signing_in("", "").await;
-    let project = fx.svc.layout.project_dir.clone();
-    configure(&fx, true, json!({ "team": "core" }));
-    // Someone points the token endpoint elsewhere.
-    write_oauth_extension(
-        &project,
-        "",
-        &sim.authorize_url,
-        "https://elsewhere.example/token",
-        "",
-    );
-    crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    let refused = fx
-        .svc
-        .providers
-        .begin_sign_in(INSTANCE, "FAKE_TOKEN", REDIRECT_PORT)
-        .await
-        .unwrap_err()
-        .to_string();
-    assert!(refused.contains("approv"), "{refused}");
-    assert!(
-        sim.grants().is_empty(),
-        "nothing reached any token endpoint"
-    );
-    // The row says so: no Sign in on an unapproved instance.
-    let view = fx
-        .svc
-        .providers
-        .list()
-        .await
-        .into_iter()
-        .find(|v| v.instance == INSTANCE)
-        .unwrap();
-    assert!(!view.approved);
-    // Approved as it is now, it signs in.
-    write_oauth_extension(&project, "", &sim.authorize_url, &sim.token_url, "");
-    crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
 }
 
 /// tsk826: two sign-ins for one credential started at once leave one
@@ -5161,32 +4744,23 @@ async fn with_effect(hooks: &str, script: &str) -> TaskEffortFixture {
     let fx = services_with_task_effort().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, hooks);
-    let dir = project.join("oxplow/extensions").join(EXT);
+    let dir = project.join(".oxplow/extensions").join(EXT);
     let manifest = std::fs::read_to_string(dir.join("extension.yaml")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        manifest
-            + "effects:\n  - id: file\n    summary: File an item on the tracker.\n    on: [work_item.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: file.star\n",
+        manifest.replacen(
+            "permissions: { process: true",
+            "permissions: { sql: read, commands: [oxplow.work_item.*], process: true",
+            1,
+        ) + "effects:\n  - id: file\n    summary: File an item on the tracker.\n    on: [work_item.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: file.star\n",
     )
     .unwrap();
     std::fs::write(dir.join("file.star"), script).unwrap();
     let ext = extension(&project);
-    approve(&fx, &ext).await;
+    deploy(&fx, &ext).await;
     make_active(&fx, "fake").await;
     let decl = ext.effects[0].clone();
-    let program = crate::effects::effect_program(&ext, &decl);
-    exec_consent::approve_program(
-        &fx.svc.approvals,
-        &project,
-        std::slice::from_ref(&ext),
-        ProgramKind::Effect,
-        &program.name,
-        &program.hash(&project).unwrap(),
-    )
-    .unwrap();
-    crate::effects::approved(&fx.svc.db, &decl.name())
-        .await
-        .unwrap();
+    crate::test_fixtures::start_effect(&fx.svc, &decl.name()).await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     first_read(&fx).await;
     fx
@@ -5455,9 +5029,7 @@ async fn a_backfill_stops_after_three_failures_even_while_they_retry() {
         fx.svc.event_log_store.append(env).await.unwrap();
     }
     // Approved again past them: they are the past a backfill reacts to.
-    crate::effects::approved(&fx.svc.db, &format!("{EXT}/file"))
-        .await
-        .unwrap();
+    crate::test_fixtures::start_effect(&fx.svc, &format!("{EXT}/file")).await;
     set_hooks(&fx, "fail-next:20").await;
     let (ext, decl) =
         crate::effect_triggers::find_effect(&fx.svc, &format!("{EXT}/file")).expect("its effect");
@@ -5489,9 +5061,7 @@ async fn a_backfill_attempt_whose_reply_was_lost_is_sent_again() {
         .append(done_envelope(&fx))
         .await
         .unwrap();
-    crate::effects::approved(&fx.svc.db, &format!("{EXT}/file"))
-        .await
-        .unwrap();
+    crate::test_fixtures::start_effect(&fx.svc, &format!("{EXT}/file")).await;
     set_hooks(&fx, "lose-reply").await;
     let (ext, decl) =
         crate::effect_triggers::find_effect(&fx.svc, &format!("{EXT}/file")).expect("its effect");
@@ -5645,9 +5215,7 @@ async fn a_cut_off_backfill_is_sent_again_at_start() {
     let fx = with_effect("", FILE_ON_FAKE).await;
     cut_off(&fx, |svc, _| async move {
         // Approved again after the event: it's the past a backfill covers.
-        crate::effects::approved(&svc.db, &format!("{EXT}/file"))
-            .await
-            .unwrap();
+        crate::test_fixtures::start_effect(&svc, &format!("{EXT}/file")).await;
         let (ext, decl) =
             crate::effect_triggers::find_effect(&svc, &format!("{EXT}/file")).expect("its effect");
         let range = crate::commands::effect::Range {
@@ -5803,9 +5371,7 @@ async fn a_retry_files_on_the_tracker_active_when_sent() {
 async fn a_cut_off_found_at_start_counts_toward_health() {
     let fx = with_effect("plain-writes", FILE_ON_FAKE).await;
     cut_off(&fx, |svc, _| async move {
-        crate::effects::approved(&svc.db, &format!("{EXT}/file"))
-            .await
-            .unwrap();
+        crate::test_fixtures::start_effect(&svc, &format!("{EXT}/file")).await;
         let (ext, decl) =
             crate::effect_triggers::find_effect(&svc, &format!("{EXT}/file")).expect("its effect");
         let range = crate::commands::effect::Range {
@@ -5951,9 +5517,8 @@ async fn the_retry_loop_sends_a_due_retry() {
 }
 
 /// tsk935: every way a scheduled retry can't run drops it, so the failure
-/// is a person's: the effect disabled (its failure counts), its program
-/// no longer approved as it is (counts), or the effect gone from its
-/// extension (nothing left to count it on).
+/// is a person's: the effect disabled (its failure counts), or the effect
+/// gone from its extension (nothing left to count it on).
 #[tokio::test(flavor = "multi_thread")]
 async fn a_retry_that_cant_run_is_dropped() {
     let key = oxplow_db::ContributionKey {
@@ -5961,7 +5526,7 @@ async fn a_retry_that_cant_run_is_dropped() {
         contribution: "file".into(),
         kind: "effect",
     };
-    for (case, counted) in [("disabled", 1), ("changed", 1), ("gone", 0)] {
+    for (case, counted) in [("disabled", 1), ("gone", 0)] {
         let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
         react(&fx).await;
         assert_eq!(
@@ -5973,7 +5538,7 @@ async fn a_retry_that_cant_run_is_dropped() {
             .svc
             .layout
             .project_dir
-            .join("oxplow/extensions")
+            .join(".oxplow/extensions")
             .join(EXT);
         match case {
             "disabled" => crate::contribution_health::ContributionHealth::new(
@@ -5983,10 +5548,6 @@ async fn a_retry_that_cant_run_is_dropped() {
             .disable(&key, "a person turned it off")
             .await
             .unwrap(),
-            "changed" => {
-                std::fs::write(dir.join("file.star"), format!("{FILE_ON_FAKE}\n# edited\n"))
-                    .unwrap()
-            }
             _ => {
                 let manifest = std::fs::read_to_string(dir.join("extension.yaml")).unwrap();
                 let cut = manifest.find("effects:").unwrap();
@@ -6090,7 +5651,7 @@ async fn auto_retry_stops_after_two_and_counts_one_failure() {
 async fn a_stop_shuts_the_process_down_gracefully() {
     let marker = tempfile::tempdir().unwrap();
     let file = marker.path().join("shut-down");
-    let (fx, _ext) = approved(&format!("shutdown-file:{}", file.display())).await;
+    let (fx, _ext) = deployed(&format!("shutdown-file:{}", file.display())).await;
     configure(&fx, true, json!({ "team": "core" }));
     crate::test_fixtures::activate(&fx.svc).await;
     first_read(&fx).await;
@@ -6102,7 +5663,7 @@ async fn a_stop_shuts_the_process_down_gracefully() {
 /// grace is up: a stop never hangs on it.
 #[tokio::test]
 async fn a_process_that_wont_exit_is_killed_after_its_grace() {
-    let (fx, _ext) = approved("ignore-shutdown").await;
+    let (fx, _ext) = deployed("ignore-shutdown").await;
     configure(&fx, true, json!({ "team": "core" }));
     crate::test_fixtures::activate(&fx.svc).await;
     first_read(&fx).await;
@@ -6135,7 +5696,7 @@ async fn syncs(fx: &EffortFixture) -> i64 {
 /// the next poll — and announcements close together are one read.
 #[tokio::test]
 async fn a_change_the_provider_announces_is_read_now() {
-    let (fx, _ext) = approved("").await;
+    let (fx, _ext) = deployed("").await;
     configure(&fx, true, json!({ "team": "core" }));
     crate::test_fixtures::activate(&fx.svc).await;
     first_read(&fx).await;
@@ -6165,7 +5726,7 @@ async fn a_change_the_provider_announces_is_read_now() {
 /// next call: the exit counts toward its health and it starts again.
 #[tokio::test]
 async fn a_process_that_exits_is_restarted_and_counted() {
-    let (fx, _ext) = approved("").await;
+    let (fx, _ext) = deployed("").await;
     configure(&fx, true, json!({ "team": "core" }));
     crate::test_fixtures::activate(&fx.svc).await;
     first_read(&fx).await;
@@ -6192,7 +5753,7 @@ async fn a_process_that_exits_is_restarted_and_counted() {
 /// checkpoint fails rather than growing without end.
 #[tokio::test]
 async fn a_read_must_checkpoint_within_its_limit() {
-    let (fx, ext) = approved("").await;
+    let (fx, ext) = deployed("").await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     first_read(&fx).await;
     for _ in 0..101 {
@@ -6223,7 +5784,7 @@ async fn a_read_must_checkpoint_within_its_limit() {
 async fn shutting_down_ends_every_process_gracefully() {
     let marker = tempfile::tempdir().unwrap();
     let file = marker.path().join("shut-down");
-    let (fx, _ext) = approved(&format!("shutdown-file:{}", file.display())).await;
+    let (fx, _ext) = deployed(&format!("shutdown-file:{}", file.display())).await;
     configure(&fx, true, json!({ "team": "core" }));
     crate::test_fixtures::activate(&fx.svc).await;
     first_read(&fx).await;
@@ -6244,7 +5805,9 @@ async fn shutting_down_ends_every_process_gracefully() {
 async fn a_provider_needs_only_scopes_host_call_serves() {
     let root = tempfile::tempdir().unwrap();
     write_extension(root.path(), "");
-    let manifest = root.path().join("oxplow/extensions/tracker/extension.yaml");
+    let manifest = root
+        .path()
+        .join(".oxplow/extensions/tracker/extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
     std::fs::write(&manifest, format!("{text}    needs: [config.read]\n")).unwrap();
     let loaded = crate::extensions::load_extensions(root.path())
@@ -6263,11 +5826,11 @@ const POLICY: &str = "steward/fake";
 /// A private extension whose provider runs the fake as an effort policy
 /// with `hooks` (its state, `reacts` included, kept beside the project).
 fn write_policy_extension(project: &Path, hooks: &str) {
-    let dir = project.join("oxplow/extensions/steward");
+    let dir = project.join(".oxplow/extensions/steward");
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: steward\nsharing: private\nintent:\n  purpose: the fake effort policy\n  examples: [{ name: a }]\nproviders:\n  - id: fake\n    capability: effort_policy\n    entry: bin/provider\n    declarations: provider.json\n    needs: [sql.read]\n",
+        "manifest: 2\nname: steward\nintent:\n  purpose: the fake effort policy\n  examples: [{ name: a }]\npermissions: { process: true, sql: read, commands: [oxplow.effort.**] }\nproviders:\n  - id: fake\n    capability: effort_policy\n    entry: bin/provider\n    declarations: provider.json\n    needs: [sql.read]\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -6301,7 +5864,7 @@ async fn running_policy(hooks: &str) -> (EffortFixture, Extension) {
         .find(|e| e.name == "steward")
         .expect("the policy extension loads");
     assert_eq!(ext.errors, Vec::<String>::new());
-    approve(&fx, &ext).await;
+    deploy(&fx, &ext).await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     fx.svc
         .commands
@@ -6564,11 +6127,11 @@ const HARNESS: &str = "conductor/fake";
 /// A private extension whose provider runs the fake as an agent harness
 /// with `hooks`.
 fn write_harness_extension(project: &Path, hooks: &str) {
-    let dir = project.join("oxplow/extensions/conductor");
+    let dir = project.join(".oxplow/extensions/conductor");
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: conductor\nsharing: private\nintent:\n  purpose: the fake agent harness\n  examples: [{ name: a }]\nproviders:\n  - id: fake\n    capability: agent_harness\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: conductor\nintent:\n  purpose: the fake agent harness\n  examples: [{ name: a }]\npermissions: { process: true }\nproviders:\n  - id: fake\n    capability: agent_harness\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -6601,7 +6164,7 @@ async fn running_harness(hooks: &str) -> (EffortFixture, Extension) {
         .find(|e| e.name == "conductor")
         .expect("the harness extension loads");
     assert_eq!(ext.errors, Vec::<String>::new());
-    approve(&fx, &ext).await;
+    deploy(&fx, &ext).await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     (fx, ext)
 }
@@ -6770,11 +6333,11 @@ fn launch_input(
 /// A project extension `shutter` whose provider `shutter` is the fake as a
 /// snapshots provider, keeping contents when `contents`.
 fn write_snapshots_extension(project: &Path, contents: bool) {
-    let dir = project.join("oxplow/extensions/shutter");
+    let dir = project.join(".oxplow/extensions/shutter");
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: shutter\nsharing: private\nintent:\n  purpose: the fake snapshots provider\n  examples: [{ name: a }]\nproviders:\n  - id: shutter\n    capability: snapshots\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: shutter\nintent:\n  purpose: the fake snapshots provider\n  examples: [{ name: a }]\npermissions: { process: true }\nproviders:\n  - id: shutter\n    capability: snapshots\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -6816,7 +6379,7 @@ async fn running_snapshots(
         .find(|e| e.name == "shutter")
         .expect("the snapshots extension loads");
     assert_eq!(ext.errors, Vec::<String>::new());
-    approve(&fx, &ext).await;
+    deploy(&fx, &ext).await;
     let stream = oxplow_domain::StreamId::new(1);
     let capture = std::sync::Arc::new(
         crate::snapshot_capture::SnapshotCaptureService::new(
@@ -6977,11 +6540,11 @@ async fn a_snapshots_provider_without_contents_records_identities_only() {
 /// knowledge store, its pages kept in `state` (seeded by the caller, as a
 /// store holding pages written outside oxplow).
 fn write_knowledge_extension(project: &Path, state: &Path) {
-    let dir = project.join("oxplow/extensions/shelf");
+    let dir = project.join(".oxplow/extensions/shelf");
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: shelf\nsharing: private\nintent:\n  purpose: the fake knowledge store\n  examples: [{ name: a }]\nproviders:\n  - id: shelf\n    capability: knowledge\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: shelf\nintent:\n  purpose: the fake knowledge store\n  examples: [{ name: a }]\npermissions: { process: true }\nproviders:\n  - id: shelf\n    capability: knowledge\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -7032,7 +6595,7 @@ async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
         .find(|e| e.name == "shelf")
         .expect("the knowledge extension loads");
     assert_eq!(ext.errors, Vec::<String>::new());
-    approve(&fx, &ext).await;
+    deploy(&fx, &ext).await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     fx.svc
         .config
@@ -7131,7 +6694,14 @@ async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_providers_host_read_reaches_the_metric_functions() {
     let fx = services_with_effort().await;
-    let calls = host::HostCalls::new(vec!["sql.read".into()], fx.svc.sql.clone(), None);
+    let grant = oxplow_domain::grant::Grant::from_permissions(
+        "tracker",
+        &oxplow_domain::permissions::Permissions {
+            sql: Some(oxplow_domain::permissions::SqlAccess::Read),
+            ..Default::default()
+        },
+    );
+    let calls = host::HostCalls::new(vec!["sql.read".into()], grant, fx.svc.sql.clone(), None);
     let run =
         oxplow_domain::run::RunContext::core(Actor::Human, oxplow_domain::run::Mode::External);
     let _serving = calls.register("k", run).unwrap();

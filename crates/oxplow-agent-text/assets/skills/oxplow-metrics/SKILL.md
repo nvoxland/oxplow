@@ -14,7 +14,7 @@ asks to track/measure/chart something, author a metric.
 ## The four blocks
 
 An extension's `extension.yaml` (a code metric you author, or the project's own
-extension, `oxplow/extensions/project/extension.yaml`) has four orthogonal metric blocks, mirroring the substrate:
+extension, `.oxplow/extensions/project/extension.yaml`) has four orthogonal metric blocks, mirroring the substrate:
 
 | block | what it declares | cardinality |
 |---|---|---|

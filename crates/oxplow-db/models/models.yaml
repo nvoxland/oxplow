@@ -1272,12 +1272,12 @@
     - { not_null: subject }
     - { relationships: { column: stream_id, to: stream, field: id } }
 - name: collector_run
-  version: 3
+  version: 4
   description: "Each collector's last run: its outcome, the row counts it wrote and its checkpoint. A collector is owned by an extension, the project (`project`) or oxplow (`built-in`)."
   columns:
     - { name: "owner", type: "TEXT", doc: "The extension that declares it, `project` for `.oxplow/project.yaml`, or `built-in`." }
     - { name: "id", type: "TEXT", doc: "The collector's id within its owner (may be dotted: `repo.scan_clone`)." }
-    - { name: "status", type: "TEXT", doc: "`ok`, `error`, `needs_approval` (an exec collector a person hasn't approved), or `skipped` (the loop guard refused its run for an event; `error` says why)." }
+    - { name: "status", type: "TEXT", doc: "`ok`, `error` (what failed, or a permission its extension lacks; v4), or `skipped` (the loop guard refused its run for an event; `error` says why)." }
     - { name: "last_run_at", type: "TEXT", doc: "When it last ran (RFC 3339)." }
     - { name: "error", type: "TEXT", doc: "The last run's error, when it failed." }
     - { name: "row_counts_json", type: "TEXT", doc: "Rows per entity after the last successful run, as JSON." }
@@ -1339,24 +1339,43 @@
     - { not_null: ref }
     - { unique: ref }
 - name: extension
-  version: 1
+  version: 4
   key: [ref]
-  description: "Every extension the catalog loaded — the project's own (`oxplow/extensions/`) and the ones that ship with oxplow — enabled or not, with why it loaded badly if it did. What an extension contributes is in `v_contribution` (count it by `extension` and `kind`); its lenses are `v_lens`. Restated with each extension generation; an extension that fails to load holds its generation back, so it is not a row — `oxplow_validate_extension` says why. `errors` and `warnings` are what a loaded one reports."
+  description: "Every extension the project knows — its own (sources in `.oxplow/extensions/`, or where `extensionSources` says) and the ones that ship with oxplow — enabled or not, with where its files come from (`deployment`) and why it loaded badly if it did. One listed as on that has nothing to run here is a row too (`undeployed`, `not_here`). What an extension contributes is in `v_contribution` (count it by `extension` and `kind`); its lenses are `v_lens`. Restated with each extension generation; an extension that fails to load holds its generation back, so it is not a row — `oxplow_validate_extension` says why. `errors` and `warnings` are what a loaded one reports."
   columns:
     - { name: "ref", type: "TEXT", doc: "`extension:<name>`." }
-    - { name: "name", type: "TEXT", doc: "Its name: the folder under `oxplow/extensions/`." }
+    - { name: "name", type: "TEXT", doc: "Its name." }
     - { name: "namespace", type: "TEXT", doc: "The namespace its commands' ids are under." }
     - { name: "description", type: "TEXT", doc: "What it is, in a line." }
-    - { name: "path", type: "TEXT", doc: "Its folder, relative to the worktree." }
+    - { name: "path", type: "TEXT", doc: "The folder its files are read from: its deployment in the store, or its source relative to the checkout." }
     - { name: "origin", type: "TEXT", doc: "`project` or `bundled` (ships with oxplow, read-only)." }
     - { name: "version", type: "TEXT", doc: "Its `version:`; NULL when it declares none." }
     - { name: "enabled", type: "INTEGER", doc: "0 when configuration disables it or a public contract blocks it: it contributes nothing." }
-    - { name: "sharing", type: "TEXT", doc: "`private` or `shared` (committed for the team)." }
     - { name: "purpose", type: "TEXT", doc: "Why it exists (its intent); NULL when the manifest didn't load." }
-    - { name: "source_git", type: "TEXT", doc: "The git URL it was installed from; NULL for one written in this repo." }
-    - { name: "source_sha", type: "TEXT", doc: "The commit installed; NULL for one written in this repo." }
+    - { name: "deployment", type: "TEXT", doc: "Where its files come from: `deployed` (a deployment in the store, `v_extension_deployment`), `shipped` (the deployment that ships with oxplow), `source` (read from its source folder), `undeployed` (its source is here but it was never deployed; it runs nothing) or `not_here` (listed as on, but neither its source nor a deployment is on this machine). (v2)" }
+    - { name: "hash", type: "TEXT", doc: "The hash of the deployment it runs; NULL when it runs none. (v2)" }
     - { name: "errors", type: "TEXT", doc: "Problems reported while loading it that did not hold it back, as a JSON array of strings; `[]` when healthy." }
     - { name: "warnings", type: "TEXT", doc: "Things worth fixing that don't stop it loading, as a JSON array of strings." }
+    - { name: "permissions", type: "TEXT", doc: "What its manifest declares it may reach beyond the baseline (`permissions:`: `sql`, `commands`, `files`, `ai`, `network`, `process`, `secrets`, `agent`), as a JSON object; `{}` is the baseline. Approved when it is deployed. (v3)" }
+    - { name: "pending", type: "TEXT", doc: "What an extension that is on but undeployed waits on a person for: the permissions its source would add, one line each, as a JSON array; `[]` when nothing waits. Startup deploys an undeployed extension only when it asks for nothing. (v3)" }
+    - { name: "shared", type: "INTEGER", doc: "1 when it is the team's: the project's `extensions:` list names it (`oxplow.extension.share`). (v4)" }
+  tests:
+    - { not_null: ref }
+    - { unique: ref }
+- name: extension_deployment
+  version: 2
+  key: [ref]
+  description: "Each deployment of an extension: an immutable copy of its source in the store (`.oxplow/runtime/extensions/<name>/<hash>/`), named by the hash of the source it was copied from, and which one runs now (`active`). `oxplow.extension.deploy` makes one; `oxplow.extension.rollback` makes an older one active again. The store keeps the active one and the five newest. A bundled extension with no active row runs the copy that ships with oxplow."
+  columns:
+    - { name: "ref", type: "TEXT", doc: "`extension_deployment:<name>@<hash>`." }
+    - { name: "extension_ref", type: "TEXT", doc: "`extension:<name>`: the extension it is a deployment of; NULL when the catalog no longer lists it." }
+    - { name: "name", type: "TEXT", doc: "The extension's name." }
+    - { name: "hash", type: "TEXT", doc: "The hash of the source it was copied from: its identity." }
+    - { name: "deployed_at", type: "TEXT", doc: "When it was first deployed." }
+    - { name: "stream_id", type: "INTEGER", doc: "The stream whose checkout it was deployed from; NULL when oxplow deployed it at startup." }
+    - { name: "source", type: "TEXT", doc: "The source folder it was copied from." }
+    - { name: "active", type: "INTEGER", doc: "1 for the deployment the extension runs now." }
+    - { name: "permissions", type: "TEXT", doc: "What it declares it may reach beyond the baseline, as a JSON object (`v_extension.permissions`'s shape): what a person approved when it was deployed. (v2)" }
   tests:
     - { not_null: ref }
     - { unique: ref }
@@ -1448,6 +1467,58 @@
     - { name: "patterns", type: "TEXT", doc: "The rule's globs, as a JSON array; `[]` on the `other` row." }
     - { name: "color", type: "TEXT", doc: "The rule's display colour, if it gave one." }
     - { name: "files", type: "INT", doc: "Files in the worktree this rule claims (none of its earlier siblings did); on `other`, the files no rule matched." }
+- name: config_value
+  version: 1
+  key: [key]
+  description: "Every setting with its value now and where that comes from: the project keys (`.oxplow/project.yaml`, else their default), a person's own layer (`personal.*`, `.oxplow/personal.yaml`), the AI roles (`ai.roles.*`), and the metrics and dimensions extensions declare. Read live when a query names it; what Settings shows. `v_config_key` says what a project key is for; change a value with `oxplow.config.set`."
+  columns:
+    - { name: "key", type: "TEXT", doc: "A project key (`snapshotRetentionDays`), or a scoped name (`ai.roles.main`, `personal.activeProviders`, `metrics.<key>`, `dimensions.<key>`)." }
+    - { name: "value", type: "TEXT", doc: "Its value now, as JSON." }
+    - { name: "origin", type: "TEXT", doc: "Where the value comes from: `default`, `global`, `project`, `personal` or `extension`." }
+    - { name: "extension", type: "TEXT", doc: "The extension it comes from, when `origin` is `extension`." }
+    - { name: "human_only", type: "INT", doc: "1 when only a person may set it; an agent's change waits for their approval." }
+    - { name: "doc", type: "TEXT", doc: "What it is for." }
+    - { name: "schema", type: "TEXT", doc: "A project key's value schema, as JSON; NULL for the rest." }
+  tests:
+    - { not_null: key }
+    - { unique: key }
+- name: agent_conversation
+  version: 1
+  description: "Every agent harness's saved conversations begun in a stream's worktree — started in oxplow or outside it — most recent first per harness, up to 50 each. Read live when a query names it, for the stream the query runs for (the primary checkout's when none). Join `v_agent_session` on `resume_session_id = native_id` for the oxplow session bound to one. A harness that can't list now is one row with `problem` and no `native_id`."
+  columns:
+    - { name: "stream_id", type: "INT", doc: "The stream whose worktree it was begun in (v_stream.id)." }
+    - { name: "harness", type: "TEXT", doc: "The harness that keeps it (`claude`, `codex`, `opencode`)." }
+    - { name: "native_id", type: "TEXT", doc: "The harness's own id for it: what a resume names. NULL on a `problem` row." }
+    - { name: "title", type: "TEXT", doc: "Its title, if the harness keeps one." }
+    - { name: "first_prompt", type: "TEXT", doc: "The first thing the person asked, if the harness keeps it." }
+    - { name: "started_at", type: "TEXT", doc: "When it began." }
+    - { name: "updated_at", type: "TEXT", doc: "When it was last active." }
+    - { name: "size_bytes", type: "INT", doc: "How large its saved transcript is." }
+    - { name: "parent", type: "TEXT", doc: "The conversation it was forked from, if any." }
+    - { name: "problem", type: "TEXT", doc: "Why the harness couldn't list its conversations now; NULL on a conversation." }
+- name: vcs_workspace
+  version: 1
+  key: [path]
+  description: "The repository's working copies (git worktrees), the primary one first, with the stream working in each. Read live when a query names it. A working copy no stream uses — `WHERE NOT is_main AND stream_id IS NULL` — is what a new stream can adopt."
+  columns:
+    - { name: "path", type: "TEXT", doc: "Where it is on disk." }
+    - { name: "branch", type: "TEXT", doc: "The branch it has checked out; NULL on a detached HEAD." }
+    - { name: "head", type: "TEXT", doc: "The commit it is at." }
+    - { name: "is_main", type: "INT", doc: "1 for the repository's primary working copy." }
+    - { name: "stream_id", type: "INT", doc: "The stream working in it (v_stream.id); NULL when none does." }
+  tests:
+    - { not_null: path }
+    - { unique: path }
+- name: workspace_file
+  version: 1
+  description: "The files and folders of a stream's worktree that its filter keeps (the project's `generated:` lists and the worktree's `.gitignore`s), with each file's change status. Read live when a query names it, for the stream the query runs for (the primary checkout's when none); each query walks the worktree. A folder's listing is `WHERE parent = 'src'` (the top level: `parent = ''`)."
+  columns:
+    - { name: "stream_id", type: "INT", doc: "The stream whose worktree it lists (v_stream.id)." }
+    - { name: "path", type: "TEXT", doc: "Its path in the worktree, `/`-separated." }
+    - { name: "parent", type: "TEXT", doc: "The folder it is in; `''` at the top level." }
+    - { name: "name", type: "TEXT", doc: "Its last path segment." }
+    - { name: "kind", type: "TEXT", doc: "`file` or `dir`." }
+    - { name: "status", type: "TEXT", doc: "A file's change against HEAD (`added`, `modified`, `deleted`, `renamed`, `untracked`, `conflicted`); NULL when unchanged, and on a folder." }
 - name: zone_unmatched
   version: 1
   description: "Up to 20 paths in the primary worktree that no zone rule matched (they read zone `other`), read live when a query names it: the sign that the table needs a rule, or that the repo grew a new area."
@@ -1900,17 +1971,23 @@
     - { name: "running_streams", type: "TEXT", doc: "Those streams' ids, a JSON array." }
     - { name: "completion_trigger_characters", type: "TEXT", doc: "A running session's completion trigger characters, a JSON array; NULL when none runs." }
 - name: collector_state
-  version: 1
+  version: 2
   key: [ref]
-  description: "Each declared collector's standing on this machine: whether a person approved its current script, whether this OS enforces its `network` list, and why failures disabled it. Read live when a query names it (approvals are per machine, outside the repo). Its runs are `v_collector_run`; its declaration `v_contribution`."
+  description: "Each declared collector's standing on this machine: whether this OS enforces its `network` list, and why failures disabled it. Read live when a query names it. What it may do is its extension's `permissions:` (`v_extension.permissions`). Its runs are `v_collector_run`; its declaration `v_contribution`."
   columns:
     - { name: "ref", type: "TEXT", doc: "`collector:<owner>/<id>`." }
     - { name: "owner", type: "TEXT", doc: "The extension that declares it." }
     - { name: "id", type: "TEXT", doc: "Its id within the extension." }
-    - { name: "approved", type: "INT", doc: "1 when it needs no approval or this machine approved its script as it is now; 0 means `run_collector` is refused until a person approves it in Settings → Data." }
     - { name: "network_enforced", type: "INT", doc: "1 when this OS enforces the collector's `network` list." }
-    - { name: "version", type: "TEXT", doc: "Its approval hash as it is now — what a person's approval names; NULL for a collector needing none." }
     - { name: "disabled", type: "TEXT", doc: "Why failures disabled it on this machine; NULL when it isn't." }
+- name: extension_source
+  version: 1
+  key: [name]
+  description: "Each extension source in the main checkout as it is now (`.oxplow/extensions/<name>/`, or where `extensionSources` points): read live when a query names it, so an edit shows at once. Its `hash` is what a deploy of it would be: one unlike `v_extension.hash` is a source that moved on from what runs (out of date), and an extension with no row here has no source on this machine."
+  columns:
+    - { name: "name", type: "TEXT", doc: "The extension's name." }
+    - { name: "path", type: "TEXT", doc: "Its source folder, relative to the project when inside it." }
+    - { name: "hash", type: "TEXT", doc: "The hash of the source as it is now (`v_extension_deployment.hash` of a deploy of it)." }
 - name: collector_credential
   version: 1
   key: [collector, name]

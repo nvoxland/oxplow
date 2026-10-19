@@ -162,7 +162,7 @@ test("history reads v_commit from the stream's head, not git log", async () => {
 });
 
 // An effort's review shows "Extension Changes" only when files under
-// `oxplow/extensions/` changed — what each change does, in the server's
+// `.oxplow/extensions/` changed — what each change does, in the server's
 // lines, with a changed lens's text before and after.
 test("extension changes show only when an extension's files changed", async () => {
   const first = render(
@@ -173,7 +173,7 @@ test("extension changes show only when an extension's files changed", async () =
   expect(extensionCalls).toEqual([]);
   cleanup();
 
-  diffFiles = [{ path: "oxplow/extensions/acme/lenses/count.yaml", status: "modified", additions: 1, deletions: 1 }];
+  diffFiles = [{ path: ".oxplow/extensions/acme/lenses/count.yaml", status: "modified", additions: 1, deletions: 1 }];
   const second = render(
     <DiffViewPage stream={STREAM} spec={{ mode: "endpoints", start: "snap:1", end: "snap:2" }} onOpenPage={() => {}} onOpenFile={() => {}} />,
   );
@@ -186,7 +186,7 @@ test("extension changes show only when an extension's files changed", async () =
 
 // tsk793: a review that fails says so, instead of "Reviewing…" forever.
 test("a failed extension review shows its error", async () => {
-  diffFiles = [{ path: "oxplow/extensions/acme/lenses/count.yaml", status: "modified", additions: 1, deletions: 1 }];
+  diffFiles = [{ path: ".oxplow/extensions/acme/lenses/count.yaml", status: "modified", additions: 1, deletions: 1 }];
   extensionFailure = "no such revision";
   try {
     const page = render(

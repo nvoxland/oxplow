@@ -171,11 +171,11 @@ describe("inProgressNotice", () => {
 test("the extensions a change touches, by folder", () => {
   expect(
     changedExtensions([
-      "oxplow/extensions/b/lenses/x.yaml",
+      ".oxplow/extensions/b/lenses/x.yaml",
       "src/a.rs",
-      "oxplow/extensions/a/extension.yaml",
-      "oxplow/extensions/b/models/y.sql",
-      "oxplow/extensions.yaml",
+      ".oxplow/extensions/a/extension.yaml",
+      ".oxplow/extensions/b/models/y.sql",
+      ".oxplow/extensions.yaml",
     ]),
   ).toEqual(["a", "b"]);
 });

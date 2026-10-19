@@ -64,17 +64,17 @@ pub(crate) fn declare(root: &Path, name: &str, configuration: &str) {
     );
     write(
         root,
-        &format!("oxplow/extensions/{name}/extension.yaml"),
+        &format!(".oxplow/extensions/{name}/extension.yaml"),
         &manifest,
     );
     write(
         root,
-        &format!("oxplow/extensions/{name}/handlers/config_peek.star"),
+        &format!(".oxplow/extensions/{name}/handlers/config_peek.star"),
         "def transform(x):\n    return {\"commands\": [], \"result\": scope(\"extension_config.read\", {})}\n",
     );
     write(
         root,
-        &format!("oxplow/extensions/{name}/handlers/peek.star"),
+        &format!(".oxplow/extensions/{name}/handlers/peek.star"),
         "def transform(x):\n    return {\"commands\": [], \"result\": scope(\"state.read\", {\"scope\": \"project\", \"area\": \"state\"})}\n",
     );
 }
@@ -272,8 +272,8 @@ async fn a_disabled_extension_is_denied_while_its_rows_are_kept() {
 
     write(
         fx._dir.path(),
-        ".oxplow/project.yaml",
-        "extensions:\n  disabled: [alpha]\n",
+        ".oxplow/personal.yaml",
+        "disableExtensions: [alpha]\n",
     );
     reconcile(&fx).await;
     assert!(fx.svc.commands.spec("alpha.state.read").is_none());
@@ -298,7 +298,7 @@ async fn a_disabled_extension_is_denied_while_its_rows_are_kept() {
         .expect("disabling keeps the state row");
     assert_eq!(rows.values["kept"], json!(true));
 
-    std::fs::remove_file(fx._dir.path().join(".oxplow/project.yaml")).unwrap();
+    std::fs::remove_file(fx._dir.path().join(".oxplow/personal.yaml")).unwrap();
     reconcile(&fx).await;
     let read = run(
         &fx,

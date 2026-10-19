@@ -48,11 +48,12 @@ const instance = {
   enabled: true, pages: [],
   config: { team: "core" },
   configSchema: { type: "object", properties: { team: { type: "string" } } },
-  approved: true,
   credentials: STATIC_CREDENTIALS,
   health: { state: { state: "ready" }, consecutiveFailures: 0, lastOkAt: null, meanInvokeMs: null, rateLimitedUntil: null, activity: null },
   collectors: [{ name: "work_items", entity: "work_item", status: "ok", error: null, lastReadAt: "2026-10-01T00:00:00Z", records: 3 }],
 };
+import { configValueResult, readsSettings } from "../configValuesTestSupport.js";
+
 mock.module("../api.js", () => ({
   ...realApi,
   // A fresh copy each read, as over IPC.
@@ -72,10 +73,13 @@ mock.module("../api.js", () => ({
     more = [];
     return [instance];
   },
-  effectiveConfig: async () => [
-    { key: "activeProviders", doc: "", value: active, origin: "default", extension: null, humanOnly: true, schema: {} },
-    { key: "replacements", doc: "", value: chosenReplacements, origin: "default", extension: null, humanOnly: true, schema: {} },
-  ],
+  querySql: async (sql: string, ...rest: unknown[]) =>
+    readsSettings(sql)
+      ? configValueResult([
+          { key: "activeProviders", value: active },
+          { key: "replacements", value: chosenReplacements },
+        ])
+      : (realApi.querySql as (...a: unknown[]) => unknown)(sql, ...rest),
   // Nothing unless a test declares a replacement: this fake outlives the
   // file (a module mock is process-wide).
   listExtensions: async () =>
@@ -307,24 +311,6 @@ test("an instance is added by name and scope, and a named one removed", async ()
   await waitFor(() => expect(view.queryByTestId("integration-row-tracker/fake_two") === null).toBe(true));
 });
 
-// tsk824: where a credential signs in is part of what a person approves, so
-// an unapproved provider's Sign in is off (the core refuses it too).
-test("Sign in is off while the provider isn't approved", async () => {
-  instance.credentials = [{ name: "FAKE_TOKEN", set: false, signIn: { state: "not_signed_in" }, redirectPort: null }];
-  const approved = instance.approved;
-  instance.approved = false;
-  try {
-    const view = render(<IntegrationsSection />);
-    const button = (await waitFor(() => view.getByTestId("sign-in-button-tracker/fake-FAKE_TOKEN"))) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
-    expect(button.title).toContain("Approve");
-    fireEvent.click(button);
-    expect(signIns).toEqual([]);
-  } finally {
-    instance.approved = approved;
-  }
-});
-
 // P10: the redirect comes back to the person's machine, where only the
 // desktop app can listen: a plain browser can't sign in, and says why.
 test("Sign in is off without the desktop app", async () => {
@@ -451,7 +437,7 @@ test("what the person typed survives a re-read", async () => {
   const team = await waitFor(() => view.getByTestId("integration-config-tracker/fake-team") as HTMLInputElement);
   fireEvent.change(team, { target: { value: "platform" } });
   await act(async () => {
-    for (const l of listeners) l({ kind: "approvalsChanged" });
+    for (const l of listeners) l({ kind: "extensionsChanged" });
     await new Promise((resolve) => setTimeout(resolve, 50));
   });
   expect((view.getByTestId("integration-config-tracker/fake-team") as HTMLInputElement).value).toBe("platform");

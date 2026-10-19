@@ -324,7 +324,6 @@ mod tests {
 
     use super::*;
     use oxplow_app::Services;
-    use oxplow_domain::stores::StreamStore as _;
     use std::process::Command;
     use std::sync::Arc;
 
@@ -424,7 +423,7 @@ mod tests {
     #[tokio::test]
     async fn component_bundles_are_served_with_their_csp_and_nothing_else() {
         let (svc, dir) = services().await;
-        let ext = dir.path().join("oxplow/extensions/x");
+        let ext = dir.path().join(".oxplow/extensions/x");
         std::fs::create_dir_all(ext.join("components/c/assets")).unwrap();
         std::fs::create_dir_all(ext.join("lenses")).unwrap();
         std::fs::write(
@@ -514,12 +513,10 @@ mod tests {
         ext: &str,
         component: &str,
     ) -> String {
-        // What was written since is published first, as the owner of
-        // generations does on the file change.
-        svc.extension_activation
-            .activate(svc.clone())
+        // What was written is deployed first, as a person or agent does.
+        oxplow_app::extension_deploy::deploy(svc, ext, root, None, true)
             .await
-            .expect("the extension activates");
+            .expect("the extension deploys");
         let ext = svc.extension_catalog.named(root, ext).unwrap();
         let declared = ext
             .custom_components
@@ -596,7 +593,7 @@ mod tests {
     #[tokio::test]
     async fn component_bundles_answer_only_a_loopback_host() {
         let (svc, dir) = services().await;
-        let ext = dir.path().join("oxplow/extensions/x");
+        let ext = dir.path().join(".oxplow/extensions/x");
         std::fs::create_dir_all(ext.join("components/c")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
@@ -651,58 +648,6 @@ mod tests {
 
     /// A stream's lens loads its component from the stream's worktree: a
     /// version of its own, served from what that worktree held.
-    #[tokio::test]
-    async fn a_streams_bundle_is_loaded_from_its_worktree() {
-        let (svc, dir) = services().await;
-        let wt = tempfile::tempdir().unwrap();
-        for (root, js) in [(dir.path(), "primary"), (wt.path(), "stream")] {
-            let ext = root.join("oxplow/extensions/x");
-            std::fs::create_dir_all(ext.join("components/c")).unwrap();
-            std::fs::write(
-                ext.join("extension.yaml"),
-                "manifest: 2\nname: x\nintent:\n  purpose: p\ncustom_components:\n  - { id: c }\n",
-            )
-            .unwrap();
-            std::fs::write(ext.join("components/c/index.html"), "hi").unwrap();
-            std::fs::write(ext.join("components/c/app.js"), js).unwrap();
-        }
-        let ts = oxplow_domain::Timestamp::from_unix_ms(1_700_000_000_000);
-        svc.stream_store
-            .upsert(&oxplow_domain::Stream {
-                id: oxplow_domain::StreamId::new(2),
-                kind: oxplow_domain::StreamKind::Worktree,
-                title: "w".into(),
-                branch: "w".into(),
-                branch_ref: "refs/heads/w".into(),
-                branch_source: "main".into(),
-                worktree_path: wt.path().to_string_lossy().into(),
-                working_pane: String::new(),
-                talking_pane: String::new(),
-                working_session_id: String::new(),
-                talking_session_id: String::new(),
-                host: oxplow_domain::HostId::LOCAL,
-                custom_prompt: None,
-                created_at: ts,
-                updated_at: ts,
-                archived_at: None,
-            })
-            .await
-            .unwrap();
-        let primary = load(&svc, dir.path(), "x", "c").await;
-        let stream = load(&svc, wt.path(), "x", "c").await;
-        assert_ne!(primary, stream);
-        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
-            .await
-            .unwrap();
-        let base = format!("http://{}", daemon.bind_addr);
-        let text = |version: String| {
-            let url = format!("{base}/components/v/{version}/app.js");
-            async move { reqwest::get(url).await.unwrap().text().await.unwrap() }
-        };
-        assert_eq!(text(stream).await, "stream");
-        assert_eq!(text(primary).await, "primary");
-    }
-
     #[tokio::test]
     async fn ipc_ping_returns_ok_envelope() {
         let (svc, _dir) = services().await;

@@ -25,7 +25,9 @@ pub fn list_git_statuses(repo_path: &Path) -> HashMap<String, GitFileStatus> {
         return out;
     };
     let mut opts = git2::StatusOptions::new();
+    // A new folder's files by their own paths, not the folder (`lib/`).
     opts.include_untracked(true)
+        .recurse_untracked_dirs(true)
         .include_ignored(false)
         .include_unmodified(false)
         .renames_head_to_index(true)
@@ -299,6 +301,22 @@ mod tests {
         std::fs::write(dir.path().join("new.txt"), "x").unwrap();
         let s = list_git_statuses(dir.path());
         assert_eq!(s.get("new.txt"), Some(&GitFileStatus::Untracked));
+    }
+
+    /// A file in a folder git doesn't track yet is listed by its own path,
+    /// not as the folder (`lib/`), which no caller can open or diff.
+    #[test]
+    fn an_untracked_folders_files_are_listed_by_their_paths() {
+        let dir = init_repo();
+        std::fs::create_dir_all(dir.path().join("lib/deep")).unwrap();
+        std::fs::write(dir.path().join("lib/deep/b.rs"), "b").unwrap();
+        let s = list_git_statuses(dir.path());
+        assert_eq!(
+            s.get("lib/deep/b.rs"),
+            Some(&GitFileStatus::Untracked),
+            "{s:?}"
+        );
+        assert!(!s.contains_key("lib/"), "{s:?}");
     }
 
     #[test]

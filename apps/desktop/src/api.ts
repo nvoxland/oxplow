@@ -12,7 +12,6 @@ import type {
   OpOutcome,
   OxplowConfig,
   OxplowEvent,
-  ProviderImpact,
   Reads,
   SymbolLocation,
   Scope,
@@ -39,11 +38,10 @@ import {
   type MetricSpec,
   type SeriesPoint,
 } from "./metricsSql.js";
-import { IpcCallError, ipcErrorCode, ipcErrorField, ipcErrorMessage } from "./ipc-error.js";
+import { IpcCallError, ipcErrorCode, ipcErrorDetails, ipcErrorField, ipcErrorMessage } from "./ipc-error.js";
 import type {
   AiSettings,
   HarnessListing,
-  EffectiveSetting,
   PanelPlacement,
   ChangeRow,
   ChangeTarget,
@@ -55,7 +53,6 @@ import type {
   ChangedPath,
   DiffEntry,
   Extension,
-  ExtensionReview,
   Lens,
   LensRun,
   LensViz,
@@ -71,8 +68,6 @@ import type {
   CommandOutcome,
   CommandSpec,
   FormStart,
-  ProgramKind,
-  ProjectProgram,
   ProviderInstanceView,
   SearchHit,
   SqlCell,
@@ -82,7 +77,7 @@ import type {
 export type { AiSettings, ProviderConfig, RoleBinding };
 export type { ChangedPath, DiffEntry };
 export type { ServiceListing, ScriptServices };
-export type { DataEntity, Extension, ExtensionReview, Lens, LensRun, LensViz, LensSpec, SearchHit, CollectorListing, CollectorRunReport, SqlCell, SqlQueryResult };
+export type { DataEntity, Extension, Lens, LensRun, LensViz, LensSpec, SearchHit, CollectorListing, CollectorRunReport, SqlCell, SqlQueryResult };
 export type { ProviderInstanceView };
 
 /// Convert the tauri-specta {status, data|error} envelope into a
@@ -92,7 +87,12 @@ export type { ProviderInstanceView };
 /// instead of collapsing to a generic "ipc error" (see ipc-error.ts).
 function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error: unknown }): T {
   if (result.status === "ok") return result.data;
-  throw new IpcCallError(ipcErrorMessage(result.error), ipcErrorCode(result.error), ipcErrorField(result.error));
+  throw new IpcCallError(
+    ipcErrorMessage(result.error),
+    ipcErrorCode(result.error),
+    ipcErrorField(result.error),
+    ipcErrorDetails(result.error),
+  );
 }
 
 /// Pure slug derivation: lowercase ASCII alphanumerics, runs of any
@@ -634,11 +634,6 @@ export async function invokeComponentCommand(
 /** What the person can ask: every capability's questions and the enabled
  *  extensions' prompts (the catalog; contextual suggestions). */
 
-/** Every setting with its value and where it comes from (P6.H1). */
-export async function effectiveConfig(): Promise<EffectiveSetting[]> {
-  return unwrap(await commands.effectiveConfig());
-}
-
 /** The person's left-nav layout: each panel's order, and whether it's
  *  hidden or collapsed (P6.G1). */
 export async function getPanelLayout(): Promise<PanelPlacement[]> {
@@ -675,30 +670,12 @@ export async function reportTabs(report: TabReport): Promise<void> {
   unwrap(await commands.reportTabs(report));
 }
 
-/// Turn an extension on or off for the project (`extensions.disabled` in
-/// `.oxplow/project.yaml`). Returns the updated extension list.
-export async function setExtensionEnabled(name: string, enabled: boolean): Promise<Extension[]> {
-  return unwrap(await commands.setExtensionEnabled(name, enabled));
-}
-
-/// Extension-declared collectors with their last run and consent.
+/// Extension-declared collectors with their last run.
 export async function listCollectors(): Promise<CollectorListing[]> {
   return unwrap(await commands.listCollectors());
 }
 
-/** A person approves an exec collector at the listing's `version` they
- *  reviewed (refused if it changed since). */
-export async function approveCollector(owner: string, id: string, version: string): Promise<void> {
-  unwrap(await commands.approveCollector(owner, id, version));
-}
-
-/// A person takes back a collector's approval: its next run is refused
-/// until they approve it again.
-export async function revokeCollector(owner: string, id: string): Promise<void> {
-  unwrap(await commands.revokeCollector(owner, id));
-}
-
-/** Run a collector now (`oxplow.collector.sync`); it never approves. */
+/** Run a collector now (`oxplow.collector.sync`). */
 export async function syncCollector(collector: string): Promise<CollectorRunReport> {
   return (await runCommand("oxplow.collector.sync", { collector })).result as CollectorRunReport;
 }
@@ -760,23 +737,21 @@ export async function testAiProvider(id: string, model: string): Promise<string>
   return unwrap(await commands.testAiProvider(id, model));
 }
 
-/** What `oxplow.lens.keep` kept: the lens id, and whether the app shows it now
- *  (kept in the main worktree) or once its stream is merged. */
+/** What `oxplow.lens.keep` kept: the lens id. It is live when the command
+ *  returns (keep deploys its extension). */
 export interface KeptLens {
   lens: string;
-  live: boolean;
 }
 
 /** `oxplow.lens.keep`'s result as a [`KeptLens`]. */
 export function keptLens(result: unknown): KeptLens {
-  const r = (result ?? {}) as { lens?: unknown; live?: unknown };
-  return { lens: String(r.lens ?? ""), live: r.live !== false };
+  const r = (result ?? {}) as { lens?: unknown };
+  return { lens: String(r.lens ?? "") };
 }
 
-/// Keep a lens spec as a private lens (`oxplow.lens.keep`) in `extension`, in this
-/// stream's worktree (`oxplow/extensions/<extension>/lenses/<slug>.yaml`).
-/// Returns the lens id and whether the app shows it now (`live`) or once
-/// the stream is merged.
+/// Keep a lens spec (`oxplow.lens.keep`) in `extension`'s source in this
+/// stream's checkout (`.oxplow/extensions/<extension>/lenses/<slug>.yaml`) and
+/// deploy it. Returns the lens id, live by then.
 export async function keepLensSpec(
   spec: LensSpec,
   extension: string,
@@ -787,92 +762,6 @@ export async function keepLensSpec(
   if (streamId) input.stream = streamRef(streamId);
   const outcome = await runCommand("oxplow.lens.keep", input);
   return keptLens(outcome.result);
-}
-
-/// What installing (`gitUrl`) or updating (`name`) an extension would
-/// bring in, installing nothing: shown for the person to confirm.
-export async function reviewExtension(
-  target: { gitUrl: string; gitRef?: string | null } | { name: string },
-  streamId: string | null,
-): Promise<ExtensionReview> {
-  return "name" in target
-    ? unwrap(await commands.reviewExtension(null, null, target.name, streamId))
-    : unwrap(await commands.reviewExtension(target.gitUrl, target.gitRef ?? null, null, streamId));
-}
-
-/// Install an extension from a git repo into the stream's worktree, at the
-/// commit the person reviewed.
-export async function installExtension(
-  gitUrl: string,
-  gitRef: string | null,
-  reviewedSha: string,
-  streamId: string | null,
-): Promise<Extension> {
-  // The install review is the person's confirmation (`oxplow.extension.install`
-  // always asks).
-  const outcome = await runCommand(
-    "oxplow.extension.install",
-    {
-      git_url: gitUrl,
-      ...(gitRef ? { git_ref: gitRef } : {}),
-      reviewed_sha: reviewedSha,
-      ...(streamId ? { stream: streamRef(streamId) } : {}),
-    },
-    true,
-  );
-  return outcome.result as Extension;
-}
-
-/// Re-install a git-installed extension from its recorded source, at the
-/// commit the person reviewed.
-export async function updateExtension(
-  name: string,
-  reviewedSha: string,
-  streamId: string | null,
-): Promise<Extension> {
-  const outcome = await runCommand(
-    "oxplow.extension.update",
-    { name, reviewed_sha: reviewedSha, ...(streamId ? { stream: streamRef(streamId) } : {}) },
-    true,
-  );
-  return outcome.result as Extension;
-}
-
-/// Programs the project's config would run, and whether each is approved.
-export async function listProjectPrograms(): Promise<ProjectProgram[]> {
-  return unwrap(await commands.listProjectPrograms());
-}
-
-/** What approving provider `instance` as it is on disk would change
- *  against what was approved last. */
-export async function providerDeclarationImpact(instance: string): Promise<ProviderImpact> {
-  return unwrap(await commands.providerDeclarationImpact(instance));
-}
-
-/// A person approves one of the project's programs (Settings → Data).
-/// `version` is the listing's, the one the person reviewed; a program that
-/// changed since is refused.
-export async function approveProjectProgram(
-  kind: ProgramKind,
-  name: string,
-  version: string,
-): Promise<ProjectProgram[]> {
-  return unwrap(await commands.approveProjectProgram(kind, name, version));
-}
-
-/// A person takes back a program's approval: from the next thing it does,
-/// nothing it was granted holds.
-export async function revokeProjectProgram(
-  kind: ProgramKind,
-  name: string,
-): Promise<ProjectProgram[]> {
-  return unwrap(await commands.revokeProjectProgram(kind, name));
-}
-
-/// A program's entry, to read before approving it (a bundled extension's
-/// comes from its embedded files).
-export async function programSource(kind: ProgramKind, name: string): Promise<string> {
-  return unwrap(await commands.programSource(kind, name));
 }
 
 /// Extension providers' instances on this machine, with health

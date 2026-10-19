@@ -45,7 +45,7 @@ yours.
 
 ## Use it
 
-1. Copy this folder to `oxplow/extensions/effort-review/`.
+1. Copy this folder to `.oxplow/extensions/effort-review/`.
 2. Settings → AI: bind **effort-review/review** to a model (it needs tool
    calling), or give the **Summarize** role one and it is used instead.
 3. Settings → Data → Programs: approve **Job effort-review/review** and
@@ -72,7 +72,7 @@ another version; `oxplow extension check` prints how the import resolved.
 
 ## Test it
 
-`oxplow extension test oxplow/extensions/effort-review` runs its eight
+`oxplow extension test .oxplow/extensions/effort-review` runs its eight
 examples on a throwaway oxplow with a fixture model: the job with a tool
 call over an effort its `setup` makes (a work item, the agent's test run),
 answered once the evidence carries the test run, cancelled mid-reply, its end reaching `publish-review`, the effect

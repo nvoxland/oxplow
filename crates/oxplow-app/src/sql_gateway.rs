@@ -314,7 +314,7 @@ impl SqlGateway {
                 live[0]
             )));
         }
-        let (live_tables, live_views) = self.live.materialize(&live, with_rows).await?;
+        let (live_tables, live_views) = self.live.materialize(&live, stream, with_rows).await?;
         temp.extend(live_tables);
         if let Some(plan) = crate::metric_grid::plan(&sql)? {
             let grid = plan

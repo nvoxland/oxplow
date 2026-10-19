@@ -1,6 +1,6 @@
 # Extensions
 
-An extension is a folder under `oxplow/extensions/<name>/` with an
+An extension is a folder under `.oxplow/extensions/<name>/` with an
 `extension.yaml`. Everything it adds is declared there as data:
 lenses, models, collectors, commands, effects, providers and the rest.
 Each of those is a *contribution*.
@@ -35,6 +35,36 @@ scaffold checks clean and passes `test` as written; an `advisory` or
 `skill` has no example `test` can run (it runs lenses, collectors,
 commands, effects and providers), so `test` notes that and nothing more.
 
+## Sources, deploying and sharing
+
+An extension has a **source** (the files you edit) and **deployments**
+(the copies oxplow runs). Nothing runs a source. An edit changes nothing
+until you deploy it.
+
+- The source is `.oxplow/extensions/<name>/`, or the folder that
+  `extensionSources: { <name>: <folder> }` names in `.oxplow/project.yaml`
+  or `.oxplow/personal.yaml`. `.oxplow/.gitignore` keeps a source out of
+  git, so a new extension is personal.
+- `oxplow.extension.deploy { name }` (or `oxplow extension deploy <name>`)
+  copies the source into `.oxplow/runtime/extensions/<name>/<hash>/` and
+  makes it live. It returns once the extension runs. If the extension does
+  not load, the deploy fails and the old deployment keeps running.
+  `oxplow.extension.rollback { name, to? }` makes an earlier one live.
+- Oxplow starts every enabled extension that has no deployment on this
+  machine, so a fresh clone runs without a manual deploy.
+- Which extensions are on: `extensions: [..]` in `.oxplow/project.yaml`
+  (absent means `[oxplow-bundled]`), plus `enableExtensions` and
+  `disableExtensions` in `.oxplow/personal.yaml`.
+  `oxplow.extension.enable`, `disable` and `remove` change the lists.
+  `remove` never deletes the source.
+- `oxplow.extension.share { name }` un-ignores the source and moves the name
+  to the team list; you commit the files. `oxplow.extension.unshare { name }`
+  reverses it.
+- To use someone else's extension, clone it into
+  `.oxplow/extensions/<name>/` (or point `extensionSources` at it), list it
+  and deploy it.
+- `oxplow extension check` and `test` read the source, so they need no deploy.
+
 ## Editor support
 
 The scaffolded files start with a schema line, so an editor running
@@ -56,7 +86,6 @@ lens naming a column its query doesn't return.
 manifest: 2
 name: my-review          # must equal the folder name
 description: Lenses for reviewing agent work
-sharing: private         # private (default) or shared
 intent:
   purpose: What question it answers, or what job it does
   examples:
@@ -66,10 +95,8 @@ intent:
 - `manifest: 2` and `intent` are required. Unknown keys are errors.
 - `intent.examples` are the inputs `oxplow extension test` runs, each
   with a fixture under `fixtures/<example>.yaml` saying what to expect.
-- `sharing: shared` is for an extension committed for a team or
-  installed from git. A shared extension needs `engine: ">=0.7"` (the
-  oxplow it targets) and its own `version: 1.2.0` (`MAJOR.MINOR.PATCH`),
-  A private one may declare a version too.
+- `version: 1.2.0` (`MAJOR.MINOR.PATCH`) and `engine: ">=0.7"` (the oxplow
+  it targets) are optional.
 - The folder name is lowercase letters, digits and single dashes,
   starting with a letter.
 - A metric, measure, dimension or fact collector's key is shared by every
@@ -117,17 +144,14 @@ dependency cycles block the extension with source-located errors.
 Versions must match exactly. A model or event export must use its native
 contract version. Package `version` and host `engine` are separate.
 Visibility defaults to `private`, which other extensions cannot import.
-`experimental` exports accept private consumers; `stable` exports accept either
-sharing mode. Shared packages cannot expose experimental exports. Import targets resolve by canonical
+`experimental` and `stable` exports can be imported. Import targets resolve by canonical
 ID; published reference metadata is returned only after resolution.
 
 Imports grant no SQL, network, command or other authority. Existing foreign-event
 subscriptions retain their behavior. There is no general extension service-call
 surface in this contract. Authoring checks and change review resolve the candidate
-alongside current project dependencies. A required consumer broken by an update
-is reported before installation replaces files. Review can inspect a disabled
-package without enabling it; update commands still honor configuration disabling.
-Both impact sides use current dependencies. Coherent runtime generation
+alongside current project dependencies. A required consumer broken by a change
+is reported by `check --impact` before you deploy it. Coherent runtime generation
 activation is still in progress.
 
 ### Configuration declarations
@@ -332,11 +356,11 @@ so an opt-in metric costs nothing until someone wants it. Keys starting
 `oxplow.` are oxplow's own.
 
 The project's own measures, collectors and metrics are an extension too:
-`oxplow/extensions/project/extension.yaml`, with no `source.yaml` (an
-*own* extension). Only an own extension may declare an `exec` fact
-collector, a `records:` report collector (test, coverage and analysis
-reports) or `promote:`, and its programs are approved like any
-extension's. `.oxplow/project.yaml` takes only `use:` entries and
+`.oxplow/extensions/project/extension.yaml`. Every extension that does not
+ship with oxplow is the project's own. Only a non-bundled extension may
+declare an `exec` fact collector, a `records:` report collector (test,
+coverage and analysis reports) or `promote:`, and its programs are approved
+like any extension's. `.oxplow/project.yaml` takes only `use:` entries and
 `enabled: false` markers for them.
 
 ### Commands
@@ -676,14 +700,7 @@ A fixture runs only when an intent
 example names it, so `check` warns about a `fixtures/<name>.yaml` no
 example lists (`model-*` and `provider-*` fixtures belong to their model
 or provider), and `test` warns about a listed example with no fixture;
-each names the file and the fix. For a `sharing: shared` extension, `check`
-also warns about text that looks like an embedded credential in
-`extension.yaml`, a script or a fixture: a known token prefix (`ghp_`,
-`github_pat_`, `sk-`, `sk-ant-`, `xoxb-`, `AKIA`, `glpat-`, …), a private
-key header, or a long random-looking literal (hex digests and uuids
-excepted). The warning names the file and line and shows the prefix and
-length, never the value; a collector's `credentials:` keeps a real one
-in the keychain, and one that was ever committed should be rotated.
+each names the file and the fix.
 `--impact` adds what your working
 tree's version changes against git `HEAD`. `--services` lists the
 services each script uses.

@@ -83,8 +83,8 @@ Ask your agent for a view over the collected data, such as:
 
 **New Lens with Your Agent…** in the launcher provides a starter prompt.
 The agent inspects the data, writes an extension under
-`oxplow/extensions/<name>/`, and validates it. Open the lens like another
-page. Commit the extension files to share the view with your team.
+`.oxplow/extensions/<name>/`, and validates it. Open the lens like another
+page. Share the extension (`oxplow.extension.share`) and commit its files to give the view to your team.
 
 If the data is missing, a collector can add it; metrics and dimensions
 can turn it into comparisons over time. Extensions that run programs or

@@ -82,11 +82,7 @@ async fn a_project_setting_changes_a_bundled_models_result() {
     assert_eq!(struggles(&fx).await, json!([]), "the default is five");
 
     set_threshold(&fx, 3).await;
-    fx.svc
-        .extension_activation
-        .activate(fx.svc.clone())
-        .await
-        .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert_eq!(struggles(&fx).await, json!([["src/warm.rs", 3]]));
 }
 
@@ -192,23 +188,15 @@ const CONFIGURED: &str = "manifest: 2\nname: mine\nintent:\n  purpose: p\n  exam
 async fn an_extension_reads_only_its_own_settings() {
     let fx = services_with_effort().await;
     let root = fx.svc.layout.project_dir.clone();
-    write(&root, "oxplow/extensions/mine/extension.yaml", CONFIGURED);
+    write(&root, ".oxplow/extensions/mine/extension.yaml", CONFIGURED);
     // `struggle` is oxplow-bundled's key, not `mine`'s.
     write(
         &root,
-        "oxplow/extensions/mine/models/limited.sql",
+        ".oxplow/extensions/mine/models/limited.sql",
         "SELECT config('/struggle/repeatedEdits') AS n",
     );
-    let ext = fx
-        .svc
-        .extension_catalog
-        .snapshot(&root)
-        .extensions()
-        .iter()
-        .find(|e| e.name == "mine")
-        .cloned()
-        .unwrap();
-    let errors = ext.errors.join("\n");
+    let load_errors = held_errors(&fx, "mine").await;
+    let errors = load_errors;
     assert!(
         errors.contains("config('/struggle/repeatedEdits') names no key"),
         "{errors}"
@@ -217,7 +205,7 @@ async fn an_extension_reads_only_its_own_settings() {
     // And one that declares no configuration can't read any.
     write(
         &root,
-        "oxplow/extensions/mine/extension.yaml",
+        ".oxplow/extensions/mine/extension.yaml",
         &CONFIGURED.replace("configuration:", "unused_marker_removed:").replace(
             "unused_marker_removed:\n  version: 1\n  schema:\n    type: object\n    properties:\n      limit: { type: integer }\n      nested: { type: object }\n  defaults: { limit: 7, nested: {} }\n",
             "",
@@ -225,23 +213,18 @@ async fn an_extension_reads_only_its_own_settings() {
     );
     write(
         &root,
-        "oxplow/extensions/mine/models/limited.sql",
+        ".oxplow/extensions/mine/models/limited.sql",
         "SELECT config('/limit') AS n",
     );
-    let ext = fx
-        .svc
-        .extension_catalog
-        .snapshot(&root)
-        .extensions()
-        .iter()
-        .find(|e| e.name == "mine")
-        .cloned()
-        .unwrap();
+    let load_errors = held_errors(&fx, "mine").await;
     assert!(
-        ext.errors.join("\n").contains("which it doesn't declare"),
-        "{:?}",
-        ext.errors
+        load_errors.contains("which it doesn't declare"),
+        "{load_errors}"
     );
+}
+
+async fn held_errors(fx: &EffortFixture, name: &str) -> String {
+    crate::test_fixtures::load_errors(&fx.svc, name).await
 }
 
 /// An extension's own key compiles into its model, and the reads are checked
@@ -250,10 +233,10 @@ async fn an_extension_reads_only_its_own_settings() {
 async fn an_own_key_reads_and_a_key_that_is_not_a_scalar_fails_the_load() {
     let fx = services_with_effort().await;
     let root = fx.svc.layout.project_dir.clone();
-    write(&root, "oxplow/extensions/mine/extension.yaml", CONFIGURED);
+    write(&root, ".oxplow/extensions/mine/extension.yaml", CONFIGURED);
     write(
         &root,
-        "oxplow/extensions/mine/models/limited.sql",
+        ".oxplow/extensions/mine/models/limited.sql",
         "SELECT config('/limit') AS n",
     );
     let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
@@ -270,23 +253,13 @@ async fn an_own_key_reads_and_a_key_that_is_not_a_scalar_fails_the_load() {
 
     write(
         &root,
-        "oxplow/extensions/mine/models/limited.sql",
+        ".oxplow/extensions/mine/models/limited.sql",
         "SELECT config('/nested') AS n",
     );
-    let ext = fx
-        .svc
-        .extension_catalog
-        .snapshot(&root)
-        .extensions()
-        .iter()
-        .find(|e| e.name == "mine")
-        .cloned()
-        .unwrap();
+    let load_errors = held_errors(&fx, "mine").await;
     assert!(
-        ext.errors.join("\n").contains("scalar `type`")
-            || ext.errors.join("\n").contains("is a `object`"),
-        "{:?}",
-        ext.errors
+        load_errors.contains("scalar `type`") || load_errors.contains("is a `object`"),
+        "{load_errors}"
     );
 }
 
@@ -300,7 +273,7 @@ async fn a_materialized_model_is_refilled_when_its_setting_changes() {
     let root = fx.svc.layout.project_dir.clone();
     write(
         &root,
-        "oxplow/extensions/mine/extension.yaml",
+        ".oxplow/extensions/mine/extension.yaml",
         &CONFIGURED.replace(
             "    version: 1\n    description: Limited.",
             "    version: 1\n    materialize: { every: 1h }\n    description: Limited.",
@@ -308,7 +281,7 @@ async fn a_materialized_model_is_refilled_when_its_setting_changes() {
     );
     write(
         &root,
-        "oxplow/extensions/mine/models/limited.sql",
+        ".oxplow/extensions/mine/models/limited.sql",
         "SELECT config('/limit') AS n",
     );
     let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
@@ -343,11 +316,7 @@ async fn a_materialized_model_is_refilled_when_its_setting_changes() {
         })
         .await
         .unwrap();
-    fx.svc
-        .extension_activation
-        .activate(fx.svc.clone())
-        .await
-        .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assets.sync_models().await.unwrap();
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(limit().await, json!([[9]]));

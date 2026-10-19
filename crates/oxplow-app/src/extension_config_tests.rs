@@ -17,7 +17,7 @@ use crate::test_fixtures::{services_with_effort, EffortFixture};
 fn ext_file(fx: &EffortFixture, rel: &str, body: &str) {
     write(
         fx._dir.path(),
-        &format!("oxplow/extensions/alpha/{rel}"),
+        &format!(".oxplow/extensions/alpha/{rel}"),
         body,
     );
 }
@@ -499,13 +499,13 @@ async fn writes_racing_a_disable_and_a_generation_change_leave_a_consistent_laye
     let project = fx._dir.path().to_path_buf();
     write(
         &project,
-        ".oxplow/project.yaml",
-        "extensions:\n  disabled: [alpha]\n",
+        ".oxplow/personal.yaml",
+        "disableExtensions: [alpha]\n",
     );
     reconcile(&fx).await;
     declare(&project, "beta", "");
     reconcile(&fx).await;
-    std::fs::remove_file(project.join(".oxplow/project.yaml")).unwrap();
+    std::fs::remove_file(project.join(".oxplow/personal.yaml")).unwrap();
     reconcile(&fx).await;
     let accepted = writer.await.unwrap();
 
@@ -564,7 +564,7 @@ fn declaring(scope: &str, run: RunContext) -> RunContext {
             scopes: [scope.to_string()].into(),
             ..Default::default()
         },
-        grant: None,
+        grant: oxplow_domain::grant::Grant::none(),
         enforcement: crate::grants::enforcement(),
     })
 }
@@ -714,8 +714,10 @@ async fn a_script_reads_its_own_configuration() {
     assert_eq!(theirs["result"]["values"]["limit"], json!(77));
 }
 
+/// Removing an extension forgets its stored settings along with its
+/// deployments; putting it back starts from the defaults.
 #[tokio::test(flavor = "multi_thread")]
-async fn uninstalling_and_reinstalling_keeps_the_stored_layers() {
+async fn removing_an_extension_forgets_its_stored_layers() {
     let fx = services_with_effort().await;
     declare(fx._dir.path(), "alpha", CONFIGURATION);
     reconcile(&fx).await;
@@ -729,17 +731,16 @@ async fn uninstalling_and_reinstalling_keeps_the_stored_layers() {
     .await
     .unwrap();
 
-    std::fs::remove_dir_all(fx._dir.path().join("oxplow/extensions/alpha")).unwrap();
-    reconcile(&fx).await;
+    std::fs::remove_dir_all(fx._dir.path().join(".oxplow/extensions/alpha")).unwrap();
+    crate::extension_deploy::remove(&fx.svc, "alpha")
+        .await
+        .unwrap();
     assert!(fx.svc.commands.spec("alpha.config.read").is_none());
 
     declare(fx._dir.path(), "alpha", CONFIGURATION);
     reconcile(&fx).await;
     let config = run(&fx, "alpha.config.read", json!({})).await.unwrap();
-    assert_eq!(config["values"]["limit"], json!(21));
-    assert_eq!(config["values"]["label"], json!("mine"));
-    assert_eq!(
-        stamp_of(&fx, "project").await,
-        json!({"schema_version": 1, "revision": 1})
-    );
+    assert_eq!(config["values"]["limit"], json!(10));
+    assert_ne!(config["values"]["label"], json!("mine"));
+    assert_eq!(stamp_of(&fx, "project").await, Value::Null);
 }

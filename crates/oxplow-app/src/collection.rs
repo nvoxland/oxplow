@@ -479,8 +479,6 @@ pub struct CollectionService {
     content: crate::snapshot_content::SnapshotContent,
     vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
     config: Arc<RwLock<OxplowConfig>>,
-    /// This machine's program approvals (`exec_consent`).
-    approvals: Arc<crate::exec_consent::ApprovalStore>,
     /// The project's extensions: its own declare its report collectors.
     extensions: Arc<crate::extension_catalog::ExtensionCatalog>,
     /// Where a report collector's run is recorded (`collector_run`,
@@ -658,7 +656,6 @@ impl CollectionService {
             content,
             vcs,
             config,
-            approvals: Arc::new(crate::exec_consent::ApprovalStore::disabled()),
             extensions: Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
             run_log: None,
             metric_engine,
@@ -684,12 +681,6 @@ impl CollectionService {
         vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
     ) -> Self {
         self.vocabulary = vocabulary;
-        self
-    }
-
-    /// The program approvals an `exec` report collector is checked against.
-    pub fn with_approvals(mut self, approvals: Arc<crate::exec_consent::ApprovalStore>) -> Self {
-        self.approvals = approvals;
         self
     }
 
@@ -814,41 +805,25 @@ impl CollectionService {
             .unwrap_or_else(|| root.join(&entry));
         if spec.runtime == oxplow_config::collectors::CollectorRuntime::Exec {
             let ext_dir = root.join(&collector.dir);
-            let hash = crate::collector_runner::approval_hash(&ext_dir, spec)
-                .map_err(|e| ParserProblem::Broken(format!("entry `{entry}`: {e}")))?;
-            if !crate::collector_runner::is_approved(
-                &self.approvals,
-                &collector.owner,
-                &spec.id,
-                &hash,
-            ) {
-                return Err(ParserProblem::NeedsApproval(format!(
-                    "collector `{}/{}` runs a program (`{entry}`) and needs a person's approval \
-                     at this version first (Settings → Data)",
-                    collector.owner, spec.id
-                )));
-            }
-            let code = crate::approved_code::extension_collector(
-                self.approvals.clone(),
-                root.to_path_buf(),
-                ext_dir,
-                &collector.owner,
-                spec,
-            )
-            .map_err(ParserProblem::Broken)?;
+            // A program, run from its extension's deployment (which declares
+            // `process`: it doesn't load otherwise).
+            let location = oxplow_script::runtime::ExecLocation {
+                directory: ext_dir.clone(),
+                project: root.to_path_buf(),
+            };
             return Ok(Collector::exec(
                 spec.id.clone(),
                 kind,
-                [code.entry.to_string_lossy().into_owned()],
+                [ext_dir
+                    .join(spec.entry.as_deref().unwrap_or_default())
+                    .to_string_lossy()
+                    .into_owned()],
             )
-            .with_exec_location(code.location)
-            .with_authority(
-                oxplow_domain::run::RunContext::core(
-                    oxplow_domain::Actor::System,
-                    oxplow_domain::run::Mode::External,
-                )
-                .guarded(code.gate),
-            ));
+            .with_exec_location(location)
+            .with_authority(oxplow_domain::run::RunContext::core(
+                oxplow_domain::Actor::System,
+                oxplow_domain::run::Mode::External,
+            )));
         }
         // The host reads the script; the script never touches the files.
         let script = std::fs::read_to_string(&abs)
@@ -915,22 +890,6 @@ impl CollectionService {
         }
         let started = std::time::Instant::now();
         let parsed = match self.report_parser(collector, root) {
-            Err(ParserProblem::NeedsApproval(reason)) => {
-                if let Some(log) = &self.run_log {
-                    if let Err(e) = log
-                        .record_needs_approval(
-                            &collector.owner,
-                            &spec.id,
-                            how.cause.map(|c| c.seq),
-                            reason.clone(),
-                        )
-                        .await
-                    {
-                        tracing::warn!(collector = %spec.id, error = %e, "recording its run failed");
-                    }
-                }
-                return ReportRead::NeedsApproval(reason);
-            }
             Err(ParserProblem::Broken(e)) => Err(e),
             Ok(parser) => {
                 // A whole-workspace report is seconds of script work: off the
@@ -1074,7 +1033,7 @@ impl CollectionService {
                 } => out.add(output, exec, label),
                 // Why it didn't count, kept for the run's nudge (tsk893); a
                 // coverage collector's is the lost coverage's failed capture.
-                ReportRead::Failed(e) | ReportRead::Disabled(e) | ReportRead::NeedsApproval(e) => {
+                ReportRead::Failed(e) | ReportRead::Disabled(e) => {
                     tracing::warn!(collector = %spec.id, "{e}");
                     let why = if e.contains(&spec.id) {
                         e
@@ -1568,7 +1527,6 @@ impl CollectionService {
             } => reads.add(output, exec, label),
             ReportRead::Failed(e) => return Err(RunCollectorError::Failed(e)),
             ReportRead::Disabled(m) => return Err(RunCollectorError::Disabled(m)),
-            ReportRead::NeedsApproval(m) => return Err(RunCollectorError::NeedsApproval(m)),
             ReportRead::Missing(path) => {
                 return Err(RunCollectorError::Failed(format!(
                     "collector `{id}`: report `{path}` isn't there; run what writes it first"
@@ -3946,8 +3904,6 @@ const MTIME_GRANULARITY_MS: i64 = 1000;
 
 /// Why a report collector's parser couldn't be made.
 enum ParserProblem {
-    /// An `exec` parser nobody on this machine approved as it is now.
-    NeedsApproval(String),
     /// Its script can't be read or its format isn't one oxplow reads.
     Broken(String),
 }
@@ -3958,7 +3914,7 @@ enum ParserProblem {
 #[derive(Debug, Clone)]
 struct ReportCollector {
     owner: String,
-    /// Its extension's folder, project-relative (`oxplow/extensions/project`).
+    /// Its extension's folder, project-relative (`.oxplow/extensions/project`).
     dir: String,
     spec: CollectorSpec,
 }
@@ -3978,8 +3934,6 @@ enum ReportRead {
     Missing(String),
     /// Its failures disabled it until a person enables it: nothing ran.
     Disabled(String),
-    /// An `exec` parser nobody approved: recorded, nothing ran.
-    NeedsApproval(String),
     /// It ran and parsed. `exec` names a program parser (a lower-trust
     /// source); `label` is the parser (`clippy`, or the collector's id).
     Parsed {
@@ -4172,10 +4126,10 @@ pub(crate) mod test_support {
     }
 
     /// Declare `entries` (from [`report_collector`]) as the collectors of the
-    /// project extension under `root` (`oxplow/extensions/project/`),
+    /// project extension under `root` (`.oxplow/extensions/project/`),
     /// replacing what it declared.
     pub(crate) fn write_project_extension(root: &std::path::Path, entries: &[String]) {
-        let dir = root.join("oxplow/extensions/project");
+        let dir = root.join(".oxplow/extensions/project");
         std::fs::create_dir_all(&dir).unwrap();
         let mut manifest =
             String::from("manifest: 2\nname: project\nintent:\n  purpose: test\ncollectors:\n");
@@ -7402,16 +7356,15 @@ mod tests {
             assert_eq!(synced[0]["status"], "ok");
         }
 
-        /// tsk863: a program parser runs only once a person approved it on
-        /// this machine, like any project collector's program; until then
-        /// its run says why, and nothing is read.
+        /// tsk863: a program parser reads the report; its output is
+        /// lower-trust than a built-in parser's.
         #[cfg(unix)]
         #[tokio::test]
-        async fn an_exec_parser_waits_for_the_collector_approval() {
+        async fn an_exec_parser_reads_the_report() {
             use std::os::unix::fs::PermissionsExt;
             let h = build(None).await;
             let dir = h.tmp.path();
-            let ext_dir = dir.join("oxplow/extensions/project");
+            let ext_dir = dir.join(".oxplow/extensions/project");
             std::fs::create_dir_all(ext_dir.join("tools")).unwrap();
             let program = ext_dir.join("tools/parse.sh");
             std::fs::write(
@@ -7423,16 +7376,14 @@ mod tests {
             std::fs::write(dir.join("out.txt"), "whatever the tool wrote").unwrap();
             let entry = "- { id: tests.parse, records: tests, runtime: exec, entry: tools/parse.sh, report: { path: out.txt }, trigger: { on_run: test } }";
             let value: serde_yaml::Value = serde_yaml::from_str(entry).unwrap();
-            let (mut specs, errors) = oxplow_config::collectors::parse_collectors(
+            let (_, errors) = oxplow_config::collectors::parse_collectors(
                 &oxplow_config::collectors::Declarer::own("project"),
                 &value,
                 &|_| true,
             );
             assert_eq!(errors, Vec::<String>::new());
-            let spec = specs.remove(0);
             declare(&h, vec![entry.to_string()]);
-            let approvals = Arc::new(crate::exec_consent::ApprovalStore::for_tests(dir));
-            let service = h.service.clone().with_approvals(approvals.clone());
+            let service = h.service.clone();
             let root = h.tmp.path().to_path_buf();
             let read = |service: CollectionService| {
                 let root = root.clone();
@@ -7448,84 +7399,14 @@ mod tests {
                 }
             };
 
-            assert!(read(service.clone()).await.tests().is_none());
-            let (status, error) = collector_run(&h, "tests.parse").await.unwrap();
-            assert_eq!(status, "needs_approval");
-            assert!(error.unwrap().contains("approval"));
-
-            let hash = crate::collector_runner::approval_hash(&ext_dir, &spec).unwrap();
-            crate::collector_runner::approve(&approvals, "project", &spec.id, &hash).unwrap();
             let reads = read(service).await;
-            let (tests, source) = reads.tests().expect("the approved program parsed");
+            let (tests, source) = reads.tests().expect("the program parsed");
             assert_eq!(tests.suites[0].cases.len(), 1);
             assert_eq!(
                 source, "exec:tests.parse",
                 "a program's output is lower-trust"
             );
             assert_eq!(collector_run(&h, "tests.parse").await.unwrap().0, "ok");
-        }
-
-        /// tsk935: a by-hand sync (`oxplow.collector.sync`, whoever asks — an
-        /// agent can't approve) runs no unapproved program, and an approved
-        /// one whose program changed asks again before it runs.
-        #[tokio::test]
-        async fn a_by_hand_sync_waits_for_approval_and_a_changed_parser_asks_again() {
-            use std::os::unix::fs::PermissionsExt;
-            let h = build(None).await;
-            let dir = h.tmp.path();
-            let ext_dir = dir.join("oxplow/extensions/project");
-            std::fs::create_dir_all(ext_dir.join("tools")).unwrap();
-            let program = ext_dir.join("tools/parse.sh");
-            let script = |extra: &str| {
-                format!(
-                    "#!/bin/sh\ncat >/dev/null\n{extra}echo '{{\"suites\":[{{\"name\":\"s\",\"cases\":[{{\"classname\":\"c\",\"name\":\"t\",\"status\":\"passed\"}}]}}]}}'\n"
-                )
-            };
-            std::fs::write(&program, script("")).unwrap();
-            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
-            std::fs::write(dir.join("out.txt"), "whatever the tool wrote").unwrap();
-            let entry = "- { id: tests.parse, records: tests, runtime: exec, entry: tools/parse.sh, report: { path: out.txt }, trigger: { on_run: test } }";
-            let value: serde_yaml::Value = serde_yaml::from_str(entry).unwrap();
-            let (mut specs, errors) = oxplow_config::collectors::parse_collectors(
-                &oxplow_config::collectors::Declarer::own("project"),
-                &value,
-                &|_| true,
-            );
-            assert_eq!(errors, Vec::<String>::new());
-            let spec = specs.remove(0);
-            declare(&h, vec![entry.to_string()]);
-            let approvals = Arc::new(crate::exec_consent::ApprovalStore::for_tests(dir));
-            let service = h.service.clone().with_approvals(approvals.clone());
-            let sync = || {
-                let service = service.clone();
-                let thread = h.thread;
-                async move {
-                    service
-                        .sync_report_collector(&thread, "project", "tests.parse", "agent", None)
-                        .await
-                }
-            };
-            assert!(
-                matches!(sync().await, Err(crate::collector_runner::RunCollectorError::NeedsApproval(m)) if m.contains("approval")),
-                "unapproved"
-            );
-            let approve = || {
-                let hash = crate::collector_runner::approval_hash(&ext_dir, &spec).unwrap();
-                crate::collector_runner::approve(&approvals, "project", &spec.id, &hash).unwrap();
-            };
-            approve();
-            assert!(
-                matches!(sync().await, Ok(ReportSync::Tests { run: Some(_) })),
-                "approved, it runs"
-            );
-            std::fs::write(&program, script("echo changed >&2\n")).unwrap();
-            assert!(
-                matches!(
-                    sync().await,
-                    Err(crate::collector_runner::RunCollectorError::NeedsApproval(_))
-                ),
-                "a changed program asks again"
-            );
         }
 
         /// tsk863: a report collector is held to the contribution failure policy
@@ -8468,7 +8349,7 @@ mod tests {
             .unwrap();
             std::fs::write(h.tmp.path().join("reports/ok.json"), ESLINT_JSON).unwrap();
             // The parser's entry is the project extension's own file.
-            let ext_dir = h.tmp.path().join("oxplow/extensions/project");
+            let ext_dir = h.tmp.path().join(".oxplow/extensions/project");
             std::fs::create_dir_all(&ext_dir).unwrap();
             std::os::unix::fs::symlink(outside.path().join("p.jq"), ext_dir.join("p.jq")).unwrap();
             declare(

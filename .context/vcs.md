@@ -319,7 +319,8 @@ provider runs the same list:
    holds now, through the object store; the clean baseline vouches for
    an untouched committed file by its stat and never for an edited one;
 2. two revisions diff to what changed, deletions included;
-3. status reports added/modified/deleted/untracked and is clean after a
+3. status reports added/modified/deleted/untracked — a file in a new
+   folder by its own path, never the folder — and is clean after a
    commit;
 4. two lines of history meet at their merge base (checkout creates and
    switches branches);

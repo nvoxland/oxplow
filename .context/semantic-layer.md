@@ -242,8 +242,8 @@ fails (resolution, lineage, contract, a name that belongs to core or an
 entity), and every model reading it, is left out and reported for its
 extension; a cycle is reported for each model in it. Only the primary
 worktree's extensions compile (views are project-wide, like source
-data). `ExtensionModelsService` runs a pass at boot and after an edit
-under `oxplow/extensions/`, a config change, or a registry change (a
+data). `ExtensionModelsService` runs a pass at boot and after a
+deployment change, a config change, or a registry change (a
 source syncing a new entity); its fingerprint — the enabled extensions'
 model sources plus the registered entity views — makes a pass over the
 same inputs, including the one its own registry writes set off, a no-op.
@@ -486,8 +486,12 @@ from: whether a key is in the keychain (`v_ai_provider.key_set`,
 hand), which language servers run and whose binary is on disk
 (`v_lsp_server`), and a machine's collector approvals and credentials
 (`v_collector_state`, `v_collector_credential`; per machine, outside the
-repo), and what the zone table does to the worktree (`v_zone`,
-`v_zone_unmatched`: `project.yaml` edited by hand, and the files on disk). A restated table (as `v_lens` and `v_extension` are, in the
+repo), what the zone table does to the worktree (`v_zone`,
+`v_zone_unmatched`: `project.yaml` edited by hand, and the files on disk),
+every setting's effective value (`v_config_value`), a worktree's files
+(`v_workspace_file`), the harnesses' saved conversations
+(`v_agent_conversation`: files the harness writes outside oxplow), and the
+repository's working copies (`v_vcs_workspace`). A restated table (as `v_lens` and `v_extension` are, in the
 extension-generation transaction) would be wrong between the change and the
 next restatement, and nothing says when that is. So these are **live
 models** (`crates/oxplow-app/src/live_models.rs`, `LiveModels::NAMES`): the
@@ -497,7 +501,8 @@ rows are read when a query names the model.
   takes a connection, `SqlGateway::materialize` finds each live model the SQL
   names (`v_<name>`, bare or quoted), reads its rows from the registry the app
   bound (`LiveSources`: the AI service, the LSP session manager, the
-  collector listing, the config and the worktree's file list), and hands them to the query as a temp table
+  collector listing, the config, the worktree's file list, the stream
+  store, the harness registry and the VCS), and hands them to the query as a temp table
   `live_<name>` with a temp view `v_<name>` over it. The temp view shadows
   the core view of the same name for that query alone, and both are dropped
   with it.
@@ -507,16 +512,35 @@ rows are read when a query names the model.
   to read the sources (a bare `SqlGateway::new`) **refuses** a run naming one
   rather than answer empty, and a test pins that no core model is built on a
   live one (it would read the stub).
-- **Cheap and lock-free:** a read walks in-memory registries, a config file
-  and the keychain; it takes no database connection and holds no lock while
-  the query runs. Nothing is cached, so a result is as current as the query.
-  A live read has no watermark, so a result's `freshness` doesn't mention it.
+- **Stream-scoped:** a query runs for a stream (`SqlQuery::stream`, which a
+  lens sets from its `stream_id` param). A model of a worktree —
+  `v_workspace_file`, `v_agent_conversation` — reads that stream's, and the
+  primary checkout's when the query names none; its rows carry the
+  `stream_id` they list. `LiveModels::materialize` takes the stream.
+- **Cheap, and current:** a read walks in-memory registries, a config file,
+  the keychain, the stream store, a worktree's files (`v_workspace_file` and
+  `v_zone` walk them on every query) or each harness's conversation index;
+  it holds no lock while the query runs. Nothing is cached, so a result is
+  as current as the query. A live read has no watermark, so a result's
+  `freshness` doesn't mention it.
+- **Changed, as any model is:** `live_models::follows` says what changes
+  each one — the events about the state it reads (`ConfigChanged`,
+  `WorkspaceChanged`, `VcsRefsChanged`, `LspServersChanged`,
+  `ApprovalsChanged`, `CredentialChanged`, `ExtensionsChanged`) and the
+  models it reads through (`v_agent_conversation` follows `v_agent_session`
+  and `v_agent_turn`; `v_vcs_workspace` follows `v_stream`). The bus, as
+  it posts such an event, posts the `ModelsChanged` naming the live models
+  that follow it (`models_changed::announced_after`, so every emitter is
+  covered and no backend code listens to the bus), and the change loop adds
+  the live models that read through the models a commit changed
+  (`live_models_reading`). A lens over a live model then re-runs like one
+  over a table: its `reads.models` names it.
 - **Never a secret:** the keychain is asked whether an entry exists
   (`key_set`, `is_set`), never for its value; a test stores a key and a
   credential and proves neither reaches any column.
 - **Adding one:** a stub `models/<name>.sql` and its `models.yaml` entry (with
-  column docs), the name and columns in `live_models.rs`, a read in
-  `LiveSources`, and an answerability question. Declare an integer column
+  column docs), the name, columns and what it `follows` in `live_models.rs`,
+  a read in `LiveSources`, and an answerability question. Declare an integer column
   `INT` (what SQLite infers for a `CAST`). If the state does have a change
   hook, restate it in a table instead.
 
@@ -568,8 +592,8 @@ What a query read is what it subscribes to.
   `modelsChanged` names a model it read, `metricSamplesChanged` names one
   of its measures (an empty list is "unknown", so it re-runs), or
   `extensionsChanged` says the extension catalog changed (the daemon
-  relays the catalog's own signal: a file under `oxplow/extensions/` or the
-  `extensions` key; tsk1030 — a file path is not the signal). Hosts that
+  relays the catalog's own signal: a change to the live deployments or the
+  `extensions` key; a file path is not the signal). Hosts that
   list what extensions contribute (`extensionsStore`, the launcher, the
   prompt catalog) reload on it, on `configChanged`, and on a daemon
   reconnect (a change while it was unreachable sent nothing). Nothing else re-runs it:
@@ -898,8 +922,8 @@ extension's own declared event types, logged with the run (P9.D2;
   Snapshot runs keep the delta / full-baseline machinery (pending-baseline
   queue, `scan_kind`, fingerprint, dominated-capture prune).
 - A **report collector** (`records: tests | coverage | analysis`,
-  tsk863) is an own extension's (`Extension::is_own()`; the project's, in
-  `oxplow/extensions/project/`): it parses one `report:` file with a bundled
+  tsk863) is a non-bundled extension's (`Extension::is_own()`; the project's, in
+  `.oxplow/extensions/project/`): it parses one `report:` file with a bundled
   parser (`entry: "oxplow:<junit|lcov|cobertura|jacoco|clippy|eslint>"`)
   or its own jaq / Starlark / exec script (paths relative to the extension
   folder; `report.path` relative to the project root), on `trigger: { on_run: test |
@@ -912,15 +936,15 @@ extension's own declared event types, logged with the run (P9.D2;
 
 **Owners.** An extension (its name), always: the project's own collectors
 belong to its own extension, `project` by convention
-(`oxplow/extensions/project/`, `collector:project/<id>`), and `project` is an
+(`.oxplow/extensions/project/`, `collector:project/<id>`), and `project` is an
 ordinary extension name. There are no global collectors. oxplow's `oxplow.*` code collectors are oxplow-foundation's; one
 that metrics name runs only while one of them is on.
 
 - **The project's own extension** declares its collectors in its
   `extension.yaml`, scripts under `collectors/` (relative to the extension
   folder).
-- **An extension's fact collector is sandboxed** (starlark or jaq). Only an
-  own extension (no `source.yaml`) may declare an `exec` fact collector or
+- **An extension's fact collector is sandboxed** (starlark or jaq). Only a
+  non-bundled extension (the project's own) may declare an `exec` fact collector or
   report collectors, and those need a person's approval like any extension
   collector (Settings → Data → Collectors; `collector_runner::approval_hash`,
   key `<ext>/<id>`, run from `approved_code::extension_collector`).

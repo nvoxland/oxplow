@@ -123,3 +123,10 @@ metrics:
 - use: oxplow.tests.red_runs
 - use: oxplow.analysis.errors
   target: 10.0
+extensions:
+- oxplow-bundled
+- project
+# This repo works on oxplow's own extensions: their sources are the repo's.
+extensionSources:
+  oxplow-foundation: extensions/oxplow-foundation
+  oxplow-bundled: extensions/oxplow-bundled

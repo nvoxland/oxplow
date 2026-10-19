@@ -1,7 +1,6 @@
 manifest: 2
 name: review-badges
 description: The latest model review of each work item, from effort-review, as a list and on the task page.
-sharing: private
 engine: ">=0.7"
 version: 0.1.0
 intent:

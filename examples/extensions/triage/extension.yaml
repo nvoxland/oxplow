@@ -1,7 +1,6 @@
 manifest: 2
 name: triage
 description: Sorts the code's TODO comments into bugs, cleanup and features, next to how much open work there is.
-sharing: shared
 engine: ">=0.7"
 version: 0.1.0
 intent:
@@ -29,13 +28,18 @@ intent:
       expect: publish-summary writes the triage-summary page
     - name: todo-board
       input: { component: todo-board }
-      expect: the board reads its lens; approved, it records a decision on a TODO and reads it back
+      expect: the board reads its lens, records a decision on a TODO and reads it back
     - name: decide-a-todo
       input: { command: triage.todos.decide }
       expect: deciding composes the state write against the stamp it read
     - name: todos-and-open-work
       input: { collector: todos }
       expect: one open-items fact and one TODO fact for src/lib.rs line 1, classified
+permissions:
+  sql: read
+  ai: true
+  files: read
+  commands: [oxplow.command.sequence, oxplow.knowledge.write_page]
 measures:
   - key: triage.todos
     title: TODO comments

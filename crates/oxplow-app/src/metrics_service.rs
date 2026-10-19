@@ -146,6 +146,9 @@ pub struct FactCollector {
     pub key: String,
     /// `project` or the extension's name.
     pub owner: String,
+    /// The folder its entry is read from: its owner's deployment, or for a
+    /// preview, the owner's source (relative to the checkout, or absolute).
+    pub path: String,
     pub trigger: Trigger,
     /// The measures its facts may land on.
     pub facts: Vec<String>,
@@ -169,10 +172,11 @@ pub struct FactCollector {
 impl FactCollector {
     /// The fact collector `spec` declares, or `None` when it writes
     /// entities instead.
-    pub fn from_spec(owner: &str, spec: &CollectorSpec) -> Option<Self> {
+    pub fn from_spec(owner: &str, path: &str, spec: &CollectorSpec) -> Option<Self> {
         (!spec.facts.is_empty()).then(|| FactCollector {
             key: spec.id.clone(),
             owner: owner.to_string(),
+            path: path.to_string(),
             trigger: spec.trigger.clone(),
             facts: spec.facts.clone(),
             runtime: spec.runtime,
@@ -272,7 +276,6 @@ pub struct MetricsService {
     config: Arc<RwLock<OxplowConfig>>,
     project_dir: PathBuf,
     /// This machine's program approvals (`exec_consent`).
-    approvals: Arc<crate::exec_consent::ApprovalStore>,
     /// Override for the global config dir (the parent of `metrics/`). `None` →
     /// the platform `global_config_dir()`. A field (not the free fn) so tests
     /// can point it at a tempdir without racing on a process-global env var.
@@ -462,7 +465,6 @@ impl MetricsService {
             vcs,
             config,
             project_dir,
-            approvals: Arc::new(crate::exec_consent::ApprovalStore::disabled()),
             global_dir: None,
             fact_store: None,
             background_tasks: None,
@@ -506,12 +508,6 @@ impl MetricsService {
         tasks: crate::background_task::BackgroundTaskStore,
     ) -> Self {
         self.background_tasks = Some(tasks);
-        self
-    }
-
-    /// The program approvals a project's exec collectors are checked against.
-    pub fn with_approvals(mut self, approvals: Arc<crate::exec_consent::ApprovalStore>) -> Self {
-        self.approvals = approvals;
         self
     }
 
@@ -604,7 +600,7 @@ impl MetricsService {
             out.collectors.extend(
                 e.collectors
                     .iter()
-                    .filter_map(|c| FactCollector::from_spec(&e.name, c)),
+                    .filter_map(|c| FactCollector::from_spec(&e.name, &e.path, c)),
             );
             if !e.dimensions.is_empty() {
                 out.dimensions.push((e.name.clone(), e.dimensions));
@@ -1864,51 +1860,49 @@ impl MetricsService {
         };
         Ok(match c.runtime {
             CollectorRuntime::Starlark => {
-                let text = script()?;
-                // A script that asks a model spends the person's key each
-                // run: it runs once they approved it.
-                if oxplow_script::ai::calls_ai(&text) && !self.approved_to_ask(c) {
-                    return Err(format!(
-                        "collector `{}` calls a model (`ai_*`), spending your AI provider's key \
-                         each run, and needs a person's approval first (Settings → Data). \
-                         Approval is per machine and per script version.",
-                        c.key
-                    ));
-                }
-                FactRunner::Starlark(text)
+                // A script that asks a model is decided on its run: its
+                // extension's `ai` permission.
+                FactRunner::Starlark(script()?)
             }
             CollectorRuntime::Jaq => FactRunner::Jaq(script()?),
             CollectorRuntime::Exec => {
-                // The project's own extension's program: it runs from an
-                // approved copy, once a person approved it on this machine.
+                // A program, run from its extension's deployment (which
+                // declares `process`: it doesn't load otherwise) while the
+                // extension stays live at that version.
                 let root = &self.project_dir;
                 let extensions = self.extensions_cache.get(root);
                 let ext = extensions
                     .iter()
-                    .find(|e| e.name == c.owner && e.is_own())
-                    .ok_or_else(|| {
-                        format!(
-                            "collector `{}/{}` runs a program; only the project's own extension \
-                             runs one to record facts",
-                            c.owner, c.key
-                        )
-                    })?;
-                let spec = ext
-                    .collectors
-                    .iter()
-                    .find(|s| s.id == c.key)
+                    .find(|e| e.name == c.owner)
                     .ok_or_else(|| format!("collector `{}/{}` isn't declared", c.owner, c.key))?;
-                let code = crate::approved_code::extension_collector(
-                    self.approvals.clone(),
-                    root.clone(),
-                    root.join(&ext.path),
-                    &c.owner,
-                    spec,
-                )?;
+                let entry = c.entry.clone().unwrap_or_default();
+                if !oxplow_domain::service::valid_path(&entry) {
+                    return Err(format!(
+                        "collector `{}/{}`: entry `{entry}` isn't a path in its extension",
+                        c.owner, c.key
+                    ));
+                }
+                let location = oxplow_script::runtime::ExecLocation {
+                    directory: root.join(&ext.path),
+                    project: root.clone(),
+                };
+                let live = crate::run_context::live_owner(
+                    self.extensions_cache.clone(),
+                    root,
+                    crate::run_context::unpinned_contribution(
+                        ext,
+                        oxplow_domain::contribution::ContributionKind::Collector,
+                        &c.key,
+                    ),
+                );
                 FactRunner::Exec(
-                    vec![code.entry.to_string_lossy().into_owned()],
-                    code.gate,
-                    code.location,
+                    vec![location
+                        .directory
+                        .join(&entry)
+                        .to_string_lossy()
+                        .into_owned()],
+                    live,
+                    location,
                 )
             }
             CollectorRuntime::Read => {
@@ -1934,7 +1928,9 @@ impl MetricsService {
         input: serde_json::Value,
         mode: Mode,
     ) -> Result<Vec<serde_json::Value>, String> {
-        let collector = FactCollector::from_spec(owner, spec)
+        let path =
+            crate::extensions::source_or_shipped(&self.project_dir, &self.project_dir, owner);
+        let collector = FactCollector::from_spec(owner, &path, spec)
             .ok_or_else(|| format!("collector `{}` declares no `facts:`", spec.id))?;
         let runner = self.preview_runner(&collector, &self.project_dir)?;
         self.preview_with(&collector, runner, files, input, mode)
@@ -1956,7 +1952,8 @@ impl MetricsService {
         event: Option<&serde_json::Value>,
     ) -> Result<Vec<serde_json::Value>, String> {
         use crate::services::TreeSource as _;
-        let collector = FactCollector::from_spec(owner, spec)
+        let path = crate::extensions::source_or_shipped(&self.project_dir, root, owner);
+        let collector = FactCollector::from_spec(owner, &path, spec)
             .ok_or_else(|| format!("collector `{}` declares no `facts:`", spec.id))?;
         if collector.input.is_some() {
             return Err(format!(
@@ -1999,12 +1996,12 @@ impl MetricsService {
         .await
     }
 
-    /// The runner a preview uses: refused for a program, which only a
-    /// person's approval runs.
+    /// The runner a preview uses: refused for a program, which a preview
+    /// never runs.
     fn preview_runner(&self, collector: &FactCollector, root: &Path) -> Result<FactRunner, String> {
         if matches!(collector.runtime, CollectorRuntime::Exec) {
             return Err(format!(
-                "collector `{}` runs a program, which only a person's approval runs",
+                "collector `{}` runs a program, which a preview never runs",
                 collector.key
             ));
         }
@@ -2043,28 +2040,9 @@ impl MetricsService {
             .collect())
     }
 
-    /// Whether a person approved fact collector `c` — whose script asks a
-    /// model — as it is now: an extension's in Settings → Data (its
-    /// approval covers its extension's files), the project's under
-    /// Programs.
-    fn approved_to_ask(&self, c: &FactCollector) -> bool {
-        let root = &self.project_dir;
-        self.extensions_cache
-            .unpinned(root, "approval is read from the declaration")
-            .iter()
-            .find(|e| e.name == c.owner)
-            .and_then(|ext| {
-                let spec = ext.collectors.iter().find(|s| s.id == c.key)?;
-                crate::collector_runner::approval_hash(&root.join(&ext.path), spec).ok()
-            })
-            .is_some_and(|hash| {
-                crate::collector_runner::is_approved(&self.approvals, &c.owner, &c.key, &hash)
-            })
-    }
-
     /// Fact collector `collector`'s run, a child of `parent`: named for the
     /// collector its extension declares, and deciding what it does against
-    /// what it declares — or, once a person approved it, their grant.
+    /// what it declares, within its extension's permissions.
     fn collector_run(&self, collector: &FactCollector, parent: &RunContext) -> RunContext {
         self.collector_run_in(collector, parent, Mode::External)
     }
@@ -2099,44 +2077,10 @@ impl MetricsService {
         let Some(spec) = ext.collectors.iter().find(|s| s.id == collector.key) else {
             return run;
         };
-        let approved = crate::collector_runner::approval_hash(&root.join(&ext.path), spec)
-            .is_ok_and(|h| {
-                crate::collector_runner::is_approved(
-                    &self.approvals,
-                    &collector.owner,
-                    &collector.key,
-                    &h,
-                )
-            });
         run.authorized(crate::grants::authority(
-            &self.approvals,
-            &format!("{}/{}", collector.owner, collector.key),
-            approved,
+            ext,
             crate::grants::collector_request(spec, &collector.needs),
         ))
-        .guarded({
-            let dir = root.join(&ext.path);
-            let spec = spec.clone();
-            let hash = crate::collector_runner::approval_hash(&dir, &spec).ok();
-            let gate = self.approvals.pinned_gate(
-                format!("{}/{}", collector.owner, collector.key),
-                hash.clone().unwrap_or_default(),
-            );
-            std::sync::Arc::new(move || {
-                if !approved {
-                    return Ok(());
-                }
-                gate()?;
-                if hash.as_ref().is_some_and(|h| {
-                    crate::collector_runner::approval_hash(&dir, &spec)
-                        .is_ok_and(|current| current == *h)
-                }) {
-                    Ok(())
-                } else {
-                    Err("collector changed after approval".into())
-                }
-            })
-        })
     }
 
     /// Bind the loaded text too: a newly approved file cannot authorize an
@@ -2807,7 +2751,7 @@ enum FactRunner {
     /// A project's approved program: `argv`, the input as JSON on stdin.
     Exec(
         Vec<String>,
-        crate::exec_consent::Gate,
+        crate::run_context::LiveCheck,
         oxplow_script::runtime::ExecLocation,
     ),
 }
@@ -2890,7 +2834,7 @@ impl FactRunner {
 /// (bundled or on disk). `None` when it can't be read.
 fn collector_script_text(collector: &FactCollector, root: &Path) -> Option<String> {
     let entry = collector.entry.as_deref()?;
-    crate::extensions::read_extension_file(root, &collector.owner, entry)
+    crate::extensions::read_extension_file(root, &collector.path, entry)
 }
 
 /// A fingerprint of the LOGIC that produces a collector's facts (tsk45): its script
@@ -3128,10 +3072,10 @@ mod tests {
         snap
     }
 
-    /// A file of the project extension (`oxplow/extensions/project/`) under
+    /// A file of the project extension (`.oxplow/extensions/project/`) under
     /// `root`, its folder made: where its collectors' scripts live.
     fn project_ext_file(root: &Path, rel: &str) -> std::path::PathBuf {
-        let path = root.join("oxplow/extensions/project").join(rel);
+        let path = root.join(".oxplow/extensions/project").join(rel);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         path
     }
@@ -3140,9 +3084,15 @@ mod tests {
     /// `collectors:` YAML), replacing what it declared.
     fn write_project_extension(root: &Path, blocks: &str) {
         let manifest = project_ext_file(root, "extension.yaml");
+        // A fact collector reads the code, so it needs `files: read`.
+        let permissions = if blocks.contains("permissions:") {
+            ""
+        } else {
+            "permissions: { files: read }\n"
+        };
         std::fs::write(
             manifest,
-            format!("manifest: 2\nname: project\nintent:\n  purpose: test\n{blocks}"),
+            format!("manifest: 2\nname: project\nintent:\n  purpose: test\n{permissions}{blocks}"),
         )
         .unwrap();
     }
@@ -3264,8 +3214,8 @@ mod tests {
             let root = root.clone();
             let trigger = trigger.to_string();
             async move {
-                declare_project_collectors(&root, &format!(
-                    "- {{ id: repo.seen, runtime: starlark, entry: seen.star, trigger: {trigger}, facts: [oxplow.ast_hit] }}"
+                write_project_extension(&root, &format!(
+                    "permissions: {{ files: read }}\ncollectors:\n  - {{ id: repo.seen, runtime: starlark, entry: seen.star, trigger: {trigger}, facts: [oxplow.ast_hit] }}\n"
                 ));
                 crate::test_fixtures::activate_with_problems(&svc).await;
             }
@@ -3868,6 +3818,11 @@ mod tests {
         FactCollector {
             key: key.into(),
             owner: oxplow_config::collectors::PROJECT_EXTENSION.into(),
+            path: format!(
+                "{}/{}",
+                crate::extensions::EXTENSIONS_DIR,
+                oxplow_config::collectors::PROJECT_EXTENSION
+            ),
             trigger: Trigger::On {
                 events: vec![SNAPSHOT_TAKEN.into()],
                 filter: Default::default(),
@@ -4790,9 +4745,14 @@ def transform(input):
             &|_| true,
         );
         assert_eq!(errors, Vec::<String>::new());
+        let path = crate::test_fixtures::shipped_extensions()
+            .into_iter()
+            .find(|e| e.name == "oxplow-foundation")
+            .unwrap()
+            .path;
         specs
             .iter()
-            .filter_map(|s| FactCollector::from_spec("oxplow-foundation", s))
+            .filter_map(|s| FactCollector::from_spec("oxplow-foundation", &path, s))
             .collect()
     }
 
@@ -5771,11 +5731,11 @@ def transform(input):
     #[tokio::test]
     async fn an_extension_contributes_measures_metrics_and_collectors() {
         let (svc, dir) = fixture().await;
-        let ext = dir.path().join("oxplow/extensions/acme");
+        let ext = dir.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(ext.join("collectors")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\n\
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { files: read }\n\
              measures:\n  - { key: acme.todo, title: TODOs }\n\
              metrics:\n  - { key: acme.todos, title: TODOs, sourceMeasure: acme.todo, aggregation: sum }\n\
              collectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, facts: [acme.todo] }\n",
@@ -5827,8 +5787,8 @@ def transform(input):
         // measure (and its facts) stay for when it's turned back on.
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
         std::fs::write(
-            dir.path().join(".oxplow/project.yaml"),
-            "extensions:\n  disabled: [acme]\n",
+            dir.path().join(".oxplow/personal.yaml"),
+            "disableExtensions: [acme]\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
@@ -5866,7 +5826,7 @@ def transform(input):
     async fn two_extensions_declaring_one_metric_key_report_it_and_keep_the_first() {
         let (svc, dir) = fixture().await;
         for (name, measure) in [("alpha", "alpha.todo"), ("beta", "beta.todo")] {
-            let ext = dir.path().join("oxplow/extensions").join(name);
+            let ext = dir.path().join(".oxplow/extensions").join(name);
             std::fs::create_dir_all(&ext).unwrap();
             std::fs::write(
                 ext.join("extension.yaml"),
@@ -5906,8 +5866,8 @@ def transform(input):
         let (svc, dir) = fixture().await;
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
         std::fs::write(
-            dir.path().join(".oxplow/project.yaml"),
-            "extensions:\n  disabled: [oxplow-bundled]\n",
+            dir.path().join(".oxplow/personal.yaml"),
+            "disableExtensions: [oxplow-bundled]\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
@@ -5949,11 +5909,11 @@ def transform(input):
     #[tokio::test]
     async fn a_collector_metrics_name_runs_only_while_one_of_them_is_active() {
         let (svc, dir) = fixture().await;
-        let ext = dir.path().join("oxplow/extensions/acme");
+        let ext = dir.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(ext.join("collectors")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\n\
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { files: read }\n\
              measures:\n  - { key: acme.todo, title: TODOs }\n\
              metrics:\n  - { key: acme.todos, title: TODOs, sourceMeasure: acme.todo, aggregation: sum, default: off, collector: acme.todo_scan }\n\
              collectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, facts: [acme.todo] }\n  \
@@ -6007,11 +5967,11 @@ def transform(input):
     #[tokio::test]
     async fn an_extension_contributes_dimensions_that_slice_its_entity_metrics() {
         let (svc, dir) = fixture().await;
-        let ext = dir.path().join("oxplow/extensions/acme");
+        let ext = dir.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\n\
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { files: read }\n\
              dimensions:\n  - { key: acme.status, label: Status, entity: v_work_item, expr: e.state }\n\
              metrics:\n  - { key: acme.tasks, title: Tasks, entity: v_work_item }\n",
         )
@@ -6038,8 +5998,8 @@ def transform(input):
         // Disabling the extension removes its dimension too.
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
         std::fs::write(
-            dir.path().join(".oxplow/project.yaml"),
-            "extensions:\n  disabled: [acme]\n",
+            dir.path().join(".oxplow/personal.yaml"),
+            "disableExtensions: [acme]\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
@@ -6054,7 +6014,7 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn a_project_exec_collector_runs_only_once_a_person_approved_it() {
+    async fn a_project_exec_collector_runs_with_the_process_permission() {
         use std::os::unix::fs::PermissionsExt;
         let (svc, dir) = fixture().await;
         let script = project_ext_file(dir.path(), "tools/count.sh");
@@ -6067,32 +6027,11 @@ def transform(input):
         let entry = "- { id: repo.count, runtime: exec, entry: tools/count.sh, facts: [repo.n] }";
         write_project_extension(
             dir.path(),
-            &format!("measures:\n  - {{ key: repo.n, title: N }}\ncollectors:\n  {entry}\n"),
+            &format!(
+                "permissions: {{ process: true }}\nmeasures:\n  - {{ key: repo.n, title: N }}\ncollectors:\n  {entry}\n"
+            ),
         );
         crate::test_fixtures::activate_with_problems(&svc).await;
-        let err = svc
-            .metrics
-            .run_collector_by_key(
-                "project",
-                "repo.count",
-                None,
-                &RunContext::core(Actor::Human, Mode::External),
-            )
-            .await
-            .unwrap_err();
-        assert!(err.contains("approval"), "{err}");
-        let (specs, errors) = oxplow_config::collectors::parse_collectors(
-            &oxplow_config::collectors::Declarer::own("project"),
-            &serde_yaml::from_str(&format!("[{}]", entry.trim_start_matches("- "))).unwrap(),
-            &|_| true,
-        );
-        assert!(errors.is_empty(), "{errors:?}");
-        let hash = crate::collector_runner::approval_hash(
-            &dir.path().join("oxplow/extensions/project"),
-            &specs[0],
-        )
-        .unwrap();
-        crate::collector_runner::approve(&svc.approvals, "project", "repo.count", &hash).unwrap();
         assert_eq!(
             svc.metrics
                 .run_collector_by_key(
@@ -6376,15 +6315,15 @@ def transform(input):
             )
             .unwrap();
         assert_eq!(t.name, "complex-fns");
-        assert_eq!(t.dir, "oxplow/extensions/complex-fns");
+        assert_eq!(t.dir, ".oxplow/extensions/complex-fns");
         let paths: Vec<&str> = t.files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(
             paths,
             [
-                "oxplow/extensions/complex-fns/extension.yaml",
-                "oxplow/extensions/complex-fns/collectors/complex_functions.star",
-                "oxplow/extensions/complex-fns/lenses/complex-fns.yaml",
-                "oxplow/extensions/complex-fns/fixtures/basic.yaml",
+                ".oxplow/extensions/complex-fns/extension.yaml",
+                ".oxplow/extensions/complex-fns/collectors/complex_functions.star",
+                ".oxplow/extensions/complex-fns/lenses/complex-fns.yaml",
+                ".oxplow/extensions/complex-fns/fixtures/basic.yaml",
             ]
         );
         let script = &t.files[1].content;

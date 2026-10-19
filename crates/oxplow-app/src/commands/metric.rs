@@ -628,7 +628,7 @@ mod tests {
     #[tokio::test]
     async fn collector_sync_runs_a_project_fact_collector() {
         let (svc, dir) = services().await;
-        let ext = dir.path().join("oxplow/extensions/project");
+        let ext = dir.path().join(".oxplow/extensions/project");
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("count.star"),
@@ -637,7 +637,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: project\nintent:\n  purpose: test\ncollectors:\n  - { id: repo.answer, doc: answer, runtime: starlark, entry: count.star, facts: [oxplow.ast_hit] }\n",
+            "manifest: 2\nname: project\nintent:\n  purpose: test\npermissions: { files: read }\ncollectors:\n  - { id: repo.answer, doc: answer, runtime: starlark, entry: count.star, facts: [oxplow.ast_hit] }\n",
         )
         .unwrap();
         crate::test_fixtures::activate_with_problems(&svc).await;
@@ -679,7 +679,7 @@ mod tests {
     #[tokio::test]
     async fn a_failing_fact_collector_is_disabled() {
         let (svc, dir) = services().await;
-        let ext = dir.path().join("oxplow/extensions/project");
+        let ext = dir.path().join(".oxplow/extensions/project");
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("bad.star"),
@@ -688,7 +688,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: project\nintent:\n  purpose: test\ncollectors:\n  - { id: repo.bad, runtime: starlark, entry: bad.star, facts: [oxplow.ast_hit] }\n",
+            "manifest: 2\nname: project\nintent:\n  purpose: test\npermissions: { files: read }\ncollectors:\n  - { id: repo.bad, runtime: starlark, entry: bad.star, facts: [oxplow.ast_hit] }\n",
         )
         .unwrap();
         crate::test_fixtures::activate_with_problems(&svc).await;
@@ -723,16 +723,16 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(out["name"], "complex-fns");
-        assert_eq!(out["dir"], "oxplow/extensions/complex-fns");
+        assert_eq!(out["dir"], ".oxplow/extensions/complex-fns");
         let files = out["files"].as_array().unwrap();
         assert!(files.iter().any(
-            |f| f["path"] == "oxplow/extensions/complex-fns/extension.yaml"
+            |f| f["path"] == ".oxplow/extensions/complex-fns/extension.yaml"
                 && f["content"].as_str().unwrap().contains("collectors:")
         ));
         assert!(files
             .iter()
             .any(|f| f["content"].as_str().unwrap().contains("def transform")));
-        assert!(!dir.path().join("oxplow/extensions").exists());
+        assert!(!dir.path().join(".oxplow/extensions").exists());
         let err = run(&svc, SCAFFOLD, json!({ "name": "oxplow" }))
             .await
             .unwrap_err();

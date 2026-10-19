@@ -49,9 +49,6 @@ describe("completeness", () => {
     expect(line({ status: "disabled", error: "failed 3 times" })).toBe(
       "Pull request (collector my-gh/gh) is disabled: failed 3 times.",
     );
-    expect(line({ status: "needs_approval", at: null })).toBe(
-      "Pull request (collector my-gh/gh) needs your approval before it runs.",
-    );
   });
 
   test("an earlier day names the day", () => {

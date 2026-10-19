@@ -52,9 +52,8 @@ pub fn commit_index(dir: &Path, message: &str) -> String {
         .to_string()
 }
 
-/// Publish a new extension generation from the files on disk, as the
-/// activation owner does after a file or config change, and assert that
-/// nothing was held back. Fixtures activate once when built (as boot does);
+/// Deploy every extension source the test wrote and publish the new
+/// generation, and assert that nothing was held back. Fixtures activate once when built (as boot does);
 /// a test that writes extension files after that calls this.
 pub async fn activate(svc: &Arc<crate::Services>) {
     let problems = activate_with_problems(svc).await;
@@ -65,7 +64,8 @@ pub async fn activate(svc: &Arc<crate::Services>) {
 }
 
 /// [`activate`] for a test that expects some extension to be held back or
-/// rejected: what the activation recorded, by extension.
+/// rejected: what the activation recorded, by extension. Every source the
+/// test wrote is deployed first (`extension_deploy::stage_sources`).
 pub async fn activate_with_problems(
     svc: &Arc<crate::Services>,
 ) -> crate::vocabulary_reactor::VocabularyErrors {
@@ -76,7 +76,12 @@ pub async fn activate_with_problems(
     let mut attempts = 0;
     loop {
         attempts += 1;
-        match svc.extension_activation.activate(svc.clone()).await {
+        let changes = crate::extension_deploy::stage_sources(svc).await;
+        match svc
+            .extension_activation
+            .activate_live(svc.clone(), &changes)
+            .await
+        {
             Ok(_) => return svc.extension_activation.problems(),
             // A rejected candidate: the previous generation stays, and why.
             Err(TxError::Aborted(problems)) if problems.contains_key("<host>") && attempts < 3 => {}
@@ -84,6 +89,23 @@ pub async fn activate_with_problems(
             Err(error) => panic!("activation failed: {error:?}"),
         }
     }
+}
+
+/// Deploy and activate what the test wrote, then everything that is said
+/// against extension `name`: the errors of what is live and what held the
+/// new source back (a source that doesn't load never goes live).
+pub async fn load_errors(svc: &Arc<crate::Services>, name: &str) -> String {
+    let held = activate_with_problems(svc).await;
+    let live = svc
+        .extension_catalog
+        .snapshot(&svc.layout.project_dir)
+        .extensions()
+        .iter()
+        .find(|e| e.name == name)
+        .map(|e| e.errors.join("\n"))
+        .unwrap_or_default();
+    let held = held.get(name).map(|l| l.join("\n")).unwrap_or_default();
+    format!("{live}\n{held}")
 }
 
 pub struct EffortFixture {
@@ -288,14 +310,6 @@ pub async fn new_thread(
     serde_json::from_value(out.result).unwrap()
 }
 
-/// Approve every AI provider script the project's extensions declare —
-/// the shipped ones too — as a person does in Settings → Data → Programs,
-/// so a test's model calls go out.
-pub fn approve_ai_providers(svc: &crate::Services) {
-    crate::exec_consent::approve_every(svc, crate::exec_consent::ProgramKind::AiProvider)
-        .expect("approved");
-}
-
 /// A tool hook's call as the hook route maps it (`AgentHarness::tool_use`
 /// of the bearer's harness), for a test posting Claude Code's bodies;
 /// `None` for any other hook.
@@ -346,36 +360,10 @@ pub fn generated_section(doc: &str, name: &str, generated: &str) {
     );
 }
 
-/// A person approves bundled effect `id` (`<extension>/<effect>`) as it is
-/// now: its files, and events from now on.
-pub async fn approve_effect(svc: &Arc<crate::Services>, id: &str) {
-    let (ext, decl) = crate::effect_triggers::find_effect(svc, id).expect("its effect");
-    let program = crate::effects::effect_program(&ext, &decl);
-    let root = svc.layout.project_dir.clone();
-    crate::exec_consent::approve_program(
-        &svc.approvals,
-        &root,
-        std::slice::from_ref(&ext),
-        crate::exec_consent::ProgramKind::Effect,
-        &program.name,
-        &program.hash(&root).unwrap(),
-    )
-    .unwrap();
-    crate::effects::approved(&svc.db, id).await.unwrap();
-}
-
-/// A person takes their approval of effect `id` back.
-pub fn revoke_effect(svc: &Arc<crate::Services>, id: &str) {
-    let (ext, decl) = crate::effect_triggers::find_effect(svc, id).expect("its effect");
-    let program = crate::effects::effect_program(&ext, &decl);
-    crate::exec_consent::revoke_program(
-        &svc.approvals,
-        &svc.layout.project_dir,
-        std::slice::from_ref(&ext),
-        crate::exec_consent::ProgramKind::Effect,
-        &program.name,
-    )
-    .unwrap();
+/// Start effect `id` (`<extension>/<effect>`) at the log's head now: it
+/// reacts to what is logged from here on.
+pub async fn start_effect(svc: &Arc<crate::Services>, id: &str) {
+    crate::effects::start_at_head(&svc.db, id).await.unwrap();
 }
 
 /// Disable collector `extension`/`contribution` for `reason`, as three
@@ -458,4 +446,90 @@ pub(crate) fn foundation_producer_specs() -> Vec<oxplow_db::NewMetricSpec> {
         .into_iter()
         .filter(|spec| spec.entity_json.is_none())
         .collect()
+}
+
+/// A harness that lists the conversations it is told to, or fails with
+/// `answer`'s message; it launches nothing.
+pub struct Listing {
+    pub id: &'static str,
+    pub answer: Result<Vec<oxplow_domain::agent::harness::NativeConversation>, String>,
+}
+
+#[async_trait::async_trait]
+impl oxplow_domain::agent::harness::AgentHarness for Listing {
+    fn id(&self) -> &str {
+        self.id
+    }
+    fn title(&self) -> &str {
+        self.id
+    }
+    async fn launch(
+        &self,
+        _input: &oxplow_domain::agent::harness::LaunchInput,
+    ) -> Result<oxplow_domain::agent::harness::Launch, oxplow_domain::agent::harness::HarnessError>
+    {
+        Err(oxplow_domain::agent::harness::HarnessError::Unsupported {
+            harness: self.id.into(),
+            what: "launch".into(),
+        })
+    }
+    async fn tool_use(
+        &self,
+        _body: &serde_json::Value,
+    ) -> Option<oxplow_domain::agent::tool::ToolUse> {
+        None
+    }
+    async fn render(
+        &self,
+        _answer: &oxplow_domain::agent::observe::HookAnswer,
+    ) -> serde_json::Value {
+        serde_json::json!({})
+    }
+    async fn conversations(
+        &self,
+        _query: &oxplow_domain::agent::harness::ConversationQuery,
+    ) -> Result<
+        Vec<oxplow_domain::agent::harness::NativeConversation>,
+        oxplow_domain::agent::harness::HarnessError,
+    > {
+        self.answer
+            .clone()
+            .map_err(oxplow_domain::agent::harness::HarnessError::Unavailable)
+    }
+}
+
+/// A [`Listing`] harness that lists `found`.
+pub fn listing_harness(
+    id: &'static str,
+    found: Vec<oxplow_domain::agent::harness::NativeConversation>,
+) -> Arc<dyn oxplow_domain::agent::harness::AgentHarness> {
+    Arc::new(Listing {
+        id,
+        answer: Ok(found),
+    })
+}
+
+/// A saved conversation `id`, last active at minute `minute` of a fixed
+/// hour, titled `about <id>`.
+pub fn conversation(id: &str, minute: u32) -> oxplow_domain::agent::harness::NativeConversation {
+    oxplow_domain::agent::harness::NativeConversation {
+        id: id.into(),
+        title: Some(format!("about {id}")),
+        first_prompt: None,
+        started_at: None,
+        updated_at: Some(
+            oxplow_domain::Timestamp::parse(&format!("2026-10-10T10:{minute:02}:00Z")).unwrap(),
+        ),
+        size_bytes: None,
+        parent: None,
+    }
+}
+
+/// The extensions that ship with oxplow, loaded as a project with none of
+/// its own loads them (each from its shipped deployment, written once to a
+/// store that lasts the test run).
+pub fn shipped_extensions() -> Vec<crate::extensions::Extension> {
+    static PROJECT: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    let project = PROJECT.get_or_init(|| tempfile::tempdir().unwrap());
+    crate::extensions::load_extensions(project.path())
 }

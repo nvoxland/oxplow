@@ -14,20 +14,16 @@
 //!     after: [page_ref.work_item]    # optional: what it runs after on one event
 //! ```
 //!
-//! Nothing runs until a person approves the effect on this machine
-//! (`exec_consent::ProgramKind::Effect`, hashed over every file of its
-//! extension — a bundled one's embedded files too — so any edit needs
-//! approving again), and an approval starts it
-//! at the log's head (`effect_state`): an effect never reacts to what
-//! happened before its approval.
+//! It starts when a generation that runs it first publishes — its
+//! extension deployed (or a bundled one shipping it) — at the log's head
+//! (`effect_state`): an effect never reacts to what happened before it
+//! started. What it may compose and read is its extension's `permissions:`.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::exec_consent::{ApprovalStore, ProgramKind, ProjectProgram};
 use crate::extensions::manifest_v2::{at, item_lines, key_line};
-use crate::extensions::Extension;
 
 /// An effect as loaded (valid ones; invalid ones are in the extension's
 /// `errors`).
@@ -187,63 +183,31 @@ fn decl_of(
     })
 }
 
-/// An effect as a program to approve: its script, over every file of its
-/// extension's folder (the manifest, whose `on`/`where`/`needs` decide
-/// when and with what it runs, included).
-pub fn effect_program(ext: &Extension, decl: &EffectDecl) -> ProjectProgram {
-    let dir = ext.path.trim_end_matches('/');
-    ProjectProgram {
-        kind: ProgramKind::Effect,
-        capability: None,
-        name: decl.name(),
-        program: format!("{dir}/{}", decl.entry),
-        args: Vec::new(),
-        env: Vec::new(),
-        credentials: Vec::new(),
-        network: Vec::new(),
-        commands: Vec::new(),
-        scopes: Vec::new(),
-        tree: Some(dir.to_string()),
-        remote: false,
-        approved: false,
-        version: None,
-        unenforced: Vec::new(),
-        granted_at: None,
-        revoked_at: None,
-    }
-}
-
 /// Whether an effect may react to the event at `seq`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Gate {
-    /// Not approved as it is now (never approved, or edited since).
-    Unapproved,
-    /// Approved, but the event was logged before (or at) its approval.
-    BeforeApproval,
+    /// It hasn't started: no deployment of it has run yet.
+    NotStarted,
+    /// The event was logged before (or at) it started.
+    BeforeStart,
     Runs,
 }
 
-/// Whether a person approved `program` at `hash` (its folder now; `None`
-/// when that couldn't be read, which nothing approves).
-pub fn is_approved(store: &ApprovalStore, program: &ProjectProgram, hash: Option<&str>) -> bool {
-    hash.is_some_and(|h| store.is_approved(&program.key(), h))
-}
-
-/// Decide [`Gate`] at event `seq` for an effect `approved` as it is now
-/// (its program's key at its folder's current hash), given where it
-/// starts (`effect_state`).
-pub fn gate(approved: bool, start_after: Option<i64>, seq: i64) -> Gate {
+/// Decide [`Gate`] at event `seq`, given where the effect starts
+/// (`effect_state`: set when a generation with it first publishes).
+pub fn gate(start_after: Option<i64>, seq: i64) -> Gate {
     match start_after {
-        _ if !approved => Gate::Unapproved,
-        None => Gate::Unapproved,
-        Some(start) if seq <= start => Gate::BeforeApproval,
+        None => Gate::NotStarted,
+        Some(start) if seq <= start => Gate::BeforeStart,
         Some(_) => Gate::Runs,
     }
 }
 
-/// A person approved effect `name`: it starts after the log's head, and
-/// its scheduled automatic retries are dropped (tsk990).
-pub async fn approved(
+/// Start effect `name` after the log's head now, dropping its scheduled
+/// automatic retries (tsk990): what a test does to have it react to what
+/// it logs next. A generation that first runs an effect starts it in its
+/// publication ([`oxplow_db::effect_state_store::start_if_new_tx`]).
+pub async fn start_at_head(
     db: &oxplow_db::Database,
     name: &str,
 ) -> Result<i64, oxplow_domain::DomainError> {
@@ -252,15 +216,13 @@ pub async fn approved(
         oxplow_domain::Timestamp::now().to_string(),
     );
     db.transaction(move |tx| {
-        // What a scheduled retry would send was composed by the script as
-        // it was; this approval is of the script as it is (tsk990).
         oxplow_db::effect_run_store::drop_retries_of_tx(tx, &name)?;
         oxplow_db::effect_state_store::start_at_head_tx(tx, &name, &now)
     })
     .await
 }
 
-/// Where effect `name` starts reading the log; `None` before approval.
+/// Where effect `name` starts reading the log; `None` before it started.
 pub async fn start_after(
     db: &oxplow_db::Database,
     name: &str,
@@ -515,12 +477,12 @@ pub fn finished_tx(
 #[cfg(test)]
 pub(crate) mod tests {
 
-    /// tsk990: what a scheduled retry would send was composed by the
-    /// script as it was when it failed. A new approval is of the script as
-    /// it is now, so approving drops the effect's scheduled retries — the
-    /// reactions stay failed, for a person's Retry, which composes afresh.
+    /// What a scheduled retry would send was composed by the script as it
+    /// was when it failed. Starting an effect drops its scheduled retries —
+    /// the reactions stay failed, for a person's Retry, which composes
+    /// afresh.
     #[tokio::test]
-    async fn a_new_approval_drops_the_effects_scheduled_retries() {
+    async fn starting_an_effect_drops_its_scheduled_retries() {
         use oxplow_db::effect_run_store as runs;
         let db = oxplow_db::Database::in_memory();
         let key = runs::EffectRunKey::first("acme/notify", "e1", 3, runs::ReactionOrigin::Live);
@@ -548,7 +510,7 @@ pub(crate) mod tests {
         })
         .await
         .unwrap();
-        approved(&db, "acme/notify").await.unwrap();
+        start_at_head(&db, "acme/notify").await.unwrap();
         let due = db
             .read(|tx| runs::due_retries_tx(tx, "2026-10-02T00:00:00Z"))
             .await
@@ -556,17 +518,16 @@ pub(crate) mod tests {
         assert_eq!(
             due.into_iter().map(|(k, _)| k.effect).collect::<Vec<_>>(),
             vec!["acme/other".to_string()],
-            "only the approved effect's retry is dropped"
+            "only the started effect's retry is dropped"
         );
     }
 
     use super::*;
-    use crate::extensions::load_extensions;
+    use crate::extensions::{load_extensions, Extension};
     use std::path::Path;
 
     pub(crate) const MANIFEST: &str = "manifest: 2
 name: acme
-sharing: private
 intent: { purpose: Effects., origin: null, examples: [] }
 effects:
   - id: announce-done
@@ -579,9 +540,13 @@ effects:
     pub(crate) const SCRIPT: &str = "def transform(x):\n    return {\"skip\": \"nothing to do\"}\n";
 
     pub(crate) fn write_acme(root: &Path, manifest: &str, script: &str) {
-        let dir = root.join("oxplow/extensions/acme/effects");
+        let dir = root.join(".oxplow/extensions/acme/effects");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(root.join("oxplow/extensions/acme/extension.yaml"), manifest).unwrap();
+        std::fs::write(
+            root.join(".oxplow/extensions/acme/extension.yaml"),
+            manifest,
+        )
+        .unwrap();
         std::fs::write(dir.join("announce.star"), script).unwrap();
     }
 
@@ -602,7 +567,7 @@ effects:
         assert_eq!(e.name(), "acme/announce-done");
         assert_eq!(e.on, vec!["work_item.state_changed".to_string()]);
         assert_eq!(e.filter.get("to").map(String::as_str), Some("done"));
-        assert_eq!(e.declared_at, "oxplow/extensions/acme/extension.yaml:6");
+        assert_eq!(e.declared_at, ".oxplow/extensions/acme/extension.yaml:5");
     }
 
     #[test]
@@ -641,30 +606,22 @@ effects:
             assert!(ext.effects.is_empty(), "{to}");
             let errors = ext.errors.join("\n");
             assert!(
-                errors.contains("extension.yaml:6:") && errors.contains(says),
+                errors.contains("extension.yaml:5:") && errors.contains(says),
                 "{to}: {errors}"
             );
         }
     }
 
-    async fn gate_at(svc: &crate::Services, root: &Path, seq: i64) -> Gate {
-        let ext = acme(root);
-        let decl = &ext.effects[0];
-        let start = start_after(&svc.db, &decl.name()).await.unwrap();
-        let program = effect_program(&ext, decl);
-        let hash = program.hash(root).ok();
-        gate(
-            is_approved(&svc.approvals, &program, hash.as_deref()),
-            start,
-            seq,
-        )
+    async fn gate_at(svc: &crate::Services, seq: i64) -> Gate {
+        let start = start_after(&svc.db, "acme/announce-done").await.unwrap();
+        gate(start, seq)
     }
 
-    /// P8.D9: an unapproved effect never runs; a person's approval starts
-    /// it at the log's head; an edit stops it until it's approved again,
-    /// which starts it at the head again.
+    /// An effect starts when the generation that runs it first publishes —
+    /// its extension's deploy — at the log's head: it never reacts to what
+    /// happened before. A later deploy of it keeps where it started.
     #[tokio::test]
-    async fn an_effect_runs_only_approved_and_only_on_what_follows_its_approval() {
+    async fn an_effect_reacts_only_to_events_after_its_deployment() {
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
@@ -684,33 +641,19 @@ effects:
                 .unwrap()
         };
         let before = log().await;
-        assert_eq!(gate_at(svc, &root, before).await, Gate::Unapproved);
+        assert_eq!(gate_at(svc, before).await, Gate::NotStarted);
 
-        let approve = || {
-            let ext = acme(&root);
-            let program = effect_program(&ext, &ext.effects[0]);
-            crate::exec_consent::approve_program(
-                &svc.approvals,
-                &root,
-                std::slice::from_ref(&ext),
-                ProgramKind::Effect,
-                &program.name,
-                &program.hash(&root).unwrap(),
-            )
+        crate::extension_deploy::deploy(svc, "acme", &root, None, true)
+            .await
             .unwrap();
-        };
-        approve();
-        let head = approved(&svc.db, "acme/announce-done").await.unwrap();
-        assert_eq!(head, before);
-        assert_eq!(gate_at(svc, &root, before).await, Gate::BeforeApproval);
+        assert_eq!(gate_at(svc, before).await, Gate::BeforeStart);
         let after = log().await;
-        assert_eq!(gate_at(svc, &root, after).await, Gate::Runs);
+        assert_eq!(gate_at(svc, after).await, Gate::Runs);
 
         write_acme(&root, MANIFEST, &format!("{SCRIPT}# edited\n"));
-        assert_eq!(gate_at(svc, &root, after).await, Gate::Unapproved);
-        approve();
-        let head = approved(&svc.db, "acme/announce-done").await.unwrap();
-        assert_eq!(gate_at(svc, &root, head).await, Gate::BeforeApproval);
-        assert_eq!(gate_at(svc, &root, log().await).await, Gate::Runs);
+        crate::extension_deploy::deploy(svc, "acme", &root, None, true)
+            .await
+            .unwrap();
+        assert_eq!(gate_at(svc, after).await, Gate::Runs);
     }
 }

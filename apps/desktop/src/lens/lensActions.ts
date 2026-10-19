@@ -4,7 +4,7 @@
 /// Agent Context are on every lens (kit affordances, not declared). See
 /// `.context/extensions.md`.
 import { formatContextMention } from "../agent-context-ref.js";
-import { needsConfirmation } from "../ipc-error.js";
+import { IpcCallError, needsConfirmation } from "../ipc-error.js";
 import type { CommandOutcome, LensAction, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 
 export interface LensActionDeps {
@@ -21,12 +21,15 @@ export interface LensActionDeps {
   /** The page the command opens after a run with `result` (its
    *  `ui.open_after`, bound by the server), or null. */
   openAfter(command: string, result: unknown): Promise<string | null>;
-  openPage(page: string): void;
+  /** Open `page` from the lens's page; `replace`: in its place, the lens's
+   *  page leaving history. */
+  openPage(page: string, replace: boolean): void;
 }
 
 /** What pressing an action came to: it ran, the command asks the person
- *  first (press again confirmed), or it failed (recorded). */
-export type LensActionOutcome = "done" | "needs-confirmation" | "failed";
+ *  first (press again confirmed; `confirm` is what it asks about beyond
+ *  itself, one line each), or it failed (recorded). */
+export type LensActionOutcome = "done" | { confirm: string[] } | "failed";
 
 /** A row as its column → value map (what a row action binds `{{row.*}}`
  *  to). */
@@ -36,6 +39,15 @@ export function rowRecord(columns: string[], row: SqlCell[]): Record<string, Sql
     out[c] = row[i] ?? null;
   });
   return out;
+}
+
+/** Whether row action `action` is offered on `row`: always, unless its
+ *  `when` names a column, which must then be truthy there (not null, 0,
+ *  `""` or false). The server refuses it on any other row too. */
+export function actionOffered(action: LensAction, row: Record<string, SqlCell>): boolean {
+  if (!action.when) return true;
+  const v = row[action.when];
+  return v !== null && v !== undefined && v !== 0 && v !== "" && v !== false;
 }
 
 export async function performLensAction(
@@ -52,7 +64,7 @@ export async function performLensAction(
     await openAfterAction(action, outcome, deps);
     return "done";
   } catch (e) {
-    if (!confirmed && needsConfirmation(e)) return "needs-confirmation";
+    if (!confirmed && needsConfirmation(e)) return { confirm: e instanceof IpcCallError ? e.details : [] };
     deps.recordError(action.label, e instanceof Error ? e.message : String(e));
     return "failed";
   }
@@ -60,15 +72,18 @@ export async function performLensAction(
 
 /** A command that declares where a person goes after it (`ui.open_after`)
  *  takes them there from a lens action too, as it does from a command
- *  offer. A page the result can't name is the action's failure. */
+ *  offer — as the action's `then` says: `open` (Back returns), `replace`
+ *  (the lens's page leaves history) or `stay` (nothing opens). A page the
+ *  result can't name is the action's failure. */
 export async function openAfterAction(
-  action: Pick<LensAction, "label" | "command">,
+  action: Pick<LensAction, "label" | "command" | "then">,
   outcome: CommandOutcome,
   deps: Pick<LensActionDeps, "openAfter" | "openPage" | "recordError">,
 ): Promise<void> {
+  if (action.then === "stay") return;
   try {
     const page = await deps.openAfter(action.command, outcome.result);
-    if (page) deps.openPage(page);
+    if (page) deps.openPage(page, action.then === "replace");
   } catch (e) {
     deps.recordError(action.label, e instanceof Error ? e.message : String(e));
   }

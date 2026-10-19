@@ -98,6 +98,21 @@ async fn run_lens_action_unpinned(
         }
         _ => {}
     }
+    if let (Some(when), Some(row)) = (&action.when, &row) {
+        let truthy = match row.get(when) {
+            None | Some(SqlCell::Null(())) => false,
+            Some(SqlCell::Int(n)) => *n != 0,
+            Some(SqlCell::Real(n)) => *n != 0.0,
+            Some(SqlCell::Bool(b)) => *b,
+            Some(SqlCell::Text(t)) => !t.is_empty(),
+        };
+        if !truthy {
+            return Err(invalid(
+                "/row",
+                format!("`{action_id}` isn't offered on this row (`when: {when}`)"),
+            ));
+        }
+    }
     let params = extensions::resolve_params(&lens, &params, ctx).map_err(CommandError::from)?;
     let bound = bind_input(&action.input, &params, row)?;
     let input = match given {
@@ -599,16 +614,6 @@ async fn invoke_component_command_unpinned(
             ),
         });
     }
-    let program = crate::exec_consent::component_program(&ext, &component);
-    if !svc.approvals.is_approved(&program.key(), &loaded.version) {
-        return Err(CommandError::Denied {
-            reason: crate::exec_consent::needs_approval(
-                program.kind,
-                &program.name,
-                &program.program,
-            ),
-        });
-    }
     svc.commands
         .run(
             &Actor::Lens {
@@ -708,7 +713,7 @@ mod tests {
     async fn fixture() -> (crate::test_fixtures::TaskEffortFixture, std::path::PathBuf) {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let root = fx.svc.layout.project_dir.clone();
-        let ext = root.join("oxplow/extensions/acme");
+        let ext = root.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(ext.join("lenses")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
@@ -723,6 +728,7 @@ params: [{ name: item, default: "" }]
 actions:
   - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { ref: "{{param.item}}", to: done } }
   - { id: finish-row, label: Finish, command: oxplow.work_item.transition, row: true, input: { ref: "{{row.ref}}", to: done } }
+  - { id: finish-open, label: Finish, command: oxplow.work_item.transition, row: true, when: open, input: { ref: "{{row.ref}}", to: done } }
   - { id: commit, label: Commit, command: oxplow.vcs.commit, input: { stream: str1, message: "x" } }
   - { id: prompt, label: Prompt, command: oxplow.config.set, input: { key: agentPromptAppend, value: be brief } }
   - { id: retitle, label: Retitle…, command: oxplow.work_item.update, row: true, form: true, fixed: [ref], input: { ref: "{{row.ref}}", title: "{{row.title}}" } }
@@ -824,6 +830,54 @@ actions:
         assert!(run("finish-row", None).await.is_err());
         assert!(run("finish", Some(row.clone())).await.is_err());
         run("finish-row", Some(row)).await.unwrap();
+        assert_eq!(state(&fx.svc, fx.task).await, "done");
+    }
+
+    /// A row action with `when` is offered only on rows whose column is
+    /// truthy, and refused on any other.
+    #[tokio::test]
+    async fn a_row_action_with_when_is_offered_only_on_truthy_rows() {
+        let (fx, root) = fixture().await;
+        let row = |open: SqlCell| {
+            BTreeMap::from([
+                (
+                    "ref".to_string(),
+                    SqlCell::Text(oxplow_tasks::work_item_ref(fx.task)),
+                ),
+                ("open".to_string(), open),
+            ])
+        };
+        let run = |row: BTreeMap<String, SqlCell>| {
+            let (svc, root) = (fx.svc.clone(), root.clone());
+            async move {
+                run_lens_action(
+                    &svc,
+                    &root,
+                    call(
+                        "finish-open",
+                        BTreeMap::new(),
+                        Some(row),
+                        Actor::Human,
+                        false,
+                    ),
+                    &extensions::LensContext::default(),
+                )
+                .await
+            }
+        };
+        for closed in [
+            SqlCell::Int(0),
+            SqlCell::Null(()),
+            SqlCell::Text(String::new()),
+        ] {
+            let err = run(row(closed)).await.unwrap_err();
+            assert!(
+                format!("{err:?}").contains("isn't offered on this row"),
+                "{err:?}"
+            );
+        }
+        assert_ne!(state(&fx.svc, fx.task).await, "done");
+        run(row(SqlCell::Int(1))).await.unwrap();
         assert_eq!(state(&fx.svc, fx.task).await, "done");
     }
 
@@ -994,7 +1048,7 @@ actions:
         let (fx, root) = fixture().await;
         let item = work_item_ref(fx.task);
         std::fs::write(
-            root.join("oxplow/extensions/acme/lenses/edit.yaml"),
+            root.join(".oxplow/extensions/acme/lenses/edit.yaml"),
             "title: Edit\nviz: form\nparams: [{ name: ref }]\nquery: SELECT title FROM v_work_item WHERE ref = :ref\nform: { command: oxplow.work_item.update, defaults: { ref: '{{param.ref}}' }, fixed: [ref], fields: [title] }\n",
         )
         .unwrap();
@@ -1063,7 +1117,7 @@ actions:
     async fn a_form_submits_its_command_as_the_lens() {
         let (fx, root) = fixture().await;
         std::fs::write(
-            root.join("oxplow/extensions/acme/lenses/new-task.yaml"),
+            root.join(".oxplow/extensions/acme/lenses/new-task.yaml"),
             "title: New Task\nviz: form\nparams: [{ name: body, default: from the form }]\nform: { command: oxplow.work_item.create, defaults: { body: '{{param.body}}' } }\n",
         )
         .unwrap();
@@ -1121,10 +1175,10 @@ actions:
     /// query `acme/tasks` and invoke `oxplow.work_item.transition`.
     async fn component_fixture() -> (crate::test_fixtures::TaskEffortFixture, std::path::PathBuf) {
         let (fx, root) = fixture().await;
-        let ext = root.join("oxplow/extensions/acme");
+        let ext = root.join(".oxplow/extensions/acme");
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\ncustom_components:\n  - { id: board, assets: [tasks], commands: [oxplow.work_item.transition] }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { commands: [oxplow.work_item.transition] }\ncustom_components:\n  - { id: board, assets: [tasks], commands: [oxplow.work_item.transition] }\n",
         )
         .unwrap();
         std::fs::create_dir_all(ext.join("components/board")).unwrap();
@@ -1136,22 +1190,6 @@ actions:
         .unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
         (fx, root)
-    }
-
-    /// Approve `acme/board` as it is now, as a person on Programs does.
-    async fn approve_board(fx: &crate::test_fixtures::EffortFixture, root: &Path) {
-        let ext = fx.svc.extension_catalog.named(root, "acme").unwrap();
-        let program = crate::exec_consent::component_program(&ext, &ext.custom_components[0]);
-        crate::exec_consent::approve_program(
-            &fx.svc.approvals,
-            root,
-            std::slice::from_ref(&ext),
-            crate::exec_consent::ProgramKind::Component,
-            &program.name,
-            &program.hash(root).unwrap(),
-        )
-        .unwrap();
-        crate::test_fixtures::activate_with_problems(&fx.svc).await;
     }
 
     /// Load `acme/view`'s bundle as its frame does: the version it runs.
@@ -1178,79 +1216,6 @@ actions:
         }
     }
 
-    /// The programs a person is asked to approve, as Programs lists them.
-    fn programs(
-        fx: &crate::test_fixtures::EffortFixture,
-        root: &Path,
-    ) -> Vec<crate::exec_consent::ProjectProgram> {
-        crate::exec_consent::list(
-            &fx.svc.approvals,
-            root,
-            fx.svc
-                .extension_catalog
-                .unpinned(root, "a test reads declarations")
-                .as_ref(),
-        )
-    }
-
-    /// P11 (tsk960): a component that declares commands acts with a
-    /// person's rights, so it is a program a person approves — its bundle
-    /// and the commands it may run. Until then its invoke is refused and
-    /// nothing runs; approved as it is now, it runs; a changed bundle asks
-    /// again.
-    #[tokio::test]
-    async fn an_unapproved_components_invoke_is_refused() {
-        let (fx, root) = component_fixture().await;
-        let listed = programs(&fx, &root);
-        let board = listed
-            .iter()
-            .find(|p| p.kind == crate::exec_consent::ProgramKind::Component)
-            .expect("listed on Programs");
-        assert_eq!(board.name, "acme/board");
-        assert_eq!(
-            board.commands,
-            vec!["oxplow.work_item.transition".to_string()]
-        );
-        assert!(!board.approved);
-        let version = load_board(&fx, &root).await;
-        assert_eq!(
-            board.version.as_deref(),
-            Some(version.as_str()),
-            "the listing's version is the frame's"
-        );
-        let invoke = || board_invoke(&fx, "oxplow.work_item.transition", &version);
-        refused(
-            invoke_component_command(&fx.svc, &root, invoke())
-                .await
-                .unwrap_err(),
-            "approval",
-        );
-        assert_ne!(state(&fx.svc, fx.task).await, "done");
-        approve_board(&fx, &root).await;
-        invoke_component_command(&fx.svc, &root, invoke())
-            .await
-            .unwrap();
-        assert_eq!(state(&fx.svc, fx.task).await, "done");
-        // A changed bundle is another version: loaded again, it asks again.
-        std::fs::write(
-            root.join("oxplow/extensions/acme/components/board/index.html"),
-            "<!doctype html><script src=other.js></script>",
-        )
-        .unwrap();
-        let changed = load_board(&fx, &root).await;
-        assert_ne!(changed, version);
-        refused(
-            invoke_component_command(
-                &fx.svc,
-                &root,
-                board_invoke(&fx, "oxplow.work_item.transition", &changed),
-            )
-            .await
-            .unwrap_err(),
-            "approval",
-        );
-    }
-
     /// `err` is a refusal saying `why`.
     fn refused(err: CommandError, why: &str) {
         assert!(
@@ -1260,33 +1225,14 @@ actions:
         );
     }
 
-    /// tsk984: what acts is what the frame loaded. A frame loaded while the
-    /// bundle was edited can't act on the approval of what the disk says
-    /// once it's put back; one loaded at the approved version keeps acting
-    /// whatever the disk says later — it runs what was approved. A version
-    /// that isn't loaded, or is another component's, is refused.
+    /// tsk984: what acts is what the frame loaded. A frame keeps acting at
+    /// the version it loaded whatever the disk says later. A version that
+    /// isn't loaded, or is another component's, is refused.
     #[tokio::test]
-    async fn an_invoke_acts_only_for_the_version_its_frame_loaded() {
+    async fn an_invoke_acts_only_for_a_version_that_is_loaded() {
         let (fx, root) = component_fixture().await;
-        let index = root.join("oxplow/extensions/acme/components/board/index.html");
-        let approved = load_board(&fx, &root).await;
-        approve_board(&fx, &root).await;
-        std::fs::write(&index, "<!doctype html><script src=evil.js></script>").unwrap();
-        let tampered = load_board(&fx, &root).await;
-        refused(
-            invoke_component_command(
-                &fx.svc,
-                &root,
-                board_invoke(&fx, "oxplow.work_item.transition", &tampered),
-            )
-            .await
-            .unwrap_err(),
-            "approval",
-        );
-        assert_ne!(state(&fx.svc, fx.task).await, "done");
-        // Put back, the next generation serves the approved bytes again.
-        std::fs::write(&index, "<!doctype html>").unwrap();
-        assert_eq!(load_board(&fx, &root).await, approved);
+        let index = root.join(".oxplow/extensions/acme/components/board/index.html");
+        let loaded = load_board(&fx, &root).await;
         refused(
             invoke_component_command(
                 &fx.svc,
@@ -1301,7 +1247,7 @@ actions:
         invoke_component_command(
             &fx.svc,
             &root,
-            board_invoke(&fx, "oxplow.work_item.transition", &approved),
+            board_invoke(&fx, "oxplow.work_item.transition", &loaded),
         )
         .await
         .unwrap();
@@ -1310,24 +1256,18 @@ actions:
 
     /// A hot update: once a changed bundle is activated, a frame still on
     /// the old version can't act — it's told to reload — and the version
-    /// it reloads at acts only once a person approves that code; the old
-    /// approval doesn't carry over.
+    /// it reloads at acts.
     #[tokio::test(flavor = "multi_thread")]
-    async fn an_activated_edit_needs_a_reload_and_its_own_approval() {
+    async fn an_activated_edit_needs_a_reload() {
         let (fx, root) = component_fixture().await;
         let activate = || async {
-            fx.svc
-                .extension_activation
-                .activate(fx.svc.clone())
-                .await
-                .expect("activates");
+            crate::test_fixtures::activate_with_problems(&fx.svc).await;
         };
         activate().await;
         let old = load_board(&fx, &root).await;
-        approve_board(&fx, &root).await;
 
         std::fs::write(
-            root.join("oxplow/extensions/acme/components/board/index.html"),
+            root.join(".oxplow/extensions/acme/components/board/index.html"),
             "<!doctype html><p>2</p>",
         )
         .unwrap();
@@ -1344,18 +1284,7 @@ actions:
         );
         let new = load_board(&fx, &root).await;
         assert_ne!(new, old);
-        refused(
-            invoke_component_command(
-                &fx.svc,
-                &root,
-                board_invoke(&fx, "oxplow.work_item.transition", &new),
-            )
-            .await
-            .unwrap_err(),
-            "approval",
-        );
         assert_ne!(state(&fx.svc, fx.task).await, "done");
-        approve_board(&fx, &root).await;
         invoke_component_command(
             &fx.svc,
             &root,
@@ -1366,6 +1295,39 @@ actions:
         assert_eq!(state(&fx.svc, fx.task).await, "done");
     }
 
+    /// A frame is served from its deployment on disk: an open frame on an
+    /// older version keeps loading that version's files while its
+    /// deployment is in the store, and once the deployment is pruned the
+    /// frame has nothing to load and must reload its lens.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_open_frame_is_served_from_its_deployment_on_disk() {
+        let (fx, root) = component_fixture().await;
+        let first = load_board(&fx, &root).await;
+        let first_hash = fx.svc.extension_catalog.live()["acme"].clone();
+        std::fs::write(
+            root.join(".oxplow/extensions/acme/components/board/index.html"),
+            "<!doctype html><p>2</p>",
+        )
+        .unwrap();
+        let second = load_board(&fx, &root).await;
+        assert_ne!(first, second);
+        let file = |version: &str| {
+            fx.svc
+                .component_bundles
+                .get(version)
+                .and_then(|bundle| bundle.file(""))
+        };
+        assert_eq!(file(&first).as_deref(), Some(&b"<!doctype html>"[..]));
+        assert_eq!(
+            file(&second).as_deref(),
+            Some(&b"<!doctype html><p>2</p>"[..])
+        );
+
+        crate::extension_store::remove(&root, "acme", &[first_hash]);
+        assert_eq!(file(&first), None);
+        assert!(file(&second).is_some());
+    }
+
     /// tsk984: the bundle is read as it is served — the extension's folder
     /// joined with the manifest's `bundle` — so on a case-insensitive disk a
     /// spelling that differs only in case still covers every file it
@@ -1373,7 +1335,7 @@ actions:
     #[tokio::test]
     async fn a_bundle_spelled_in_another_case_is_hashed_as_served() {
         let (fx, root) = fixture().await;
-        let ext = root.join("oxplow/extensions/acme");
+        let ext = root.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(ext.join("components/board")).unwrap();
         if !ext.join("components/BOARD").exists() {
             // A case-sensitive disk: the manifest's spelling is a missing
@@ -1382,7 +1344,7 @@ actions:
         }
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\ncustom_components:\n  - { id: board, bundle: components/Board, assets: [tasks], commands: [oxplow.work_item.transition] }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { commands: [oxplow.work_item.transition] }\ncustom_components:\n  - { id: board, bundle: components/Board, assets: [tasks], commands: [oxplow.work_item.transition] }\n",
         )
         .unwrap();
         std::fs::write(ext.join("components/board/index.html"), "<!doctype html>").unwrap();
@@ -1393,22 +1355,17 @@ actions:
         .unwrap();
         let first = load_board(&fx, &root).await;
         let served = fx.svc.component_bundles.get(&first).unwrap();
-        assert_eq!(served.file(""), Some(&b"<!doctype html>"[..]));
+        assert_eq!(served.file("").as_deref(), Some(&b"<!doctype html>"[..]));
         std::fs::write(ext.join("components/board/index.html"), "<!doctype html>2").unwrap();
         assert_ne!(load_board(&fx, &root).await, first);
-        let program = programs(&fx, &root)
-            .into_iter()
-            .find(|p| p.kind == crate::exec_consent::ProgramKind::Component)
-            .unwrap();
-        assert_ne!(program.version.as_deref(), Some(first.as_str()));
     }
 
     /// P11 (tsk960): a component that declares no commands can only show
-    /// and query — nothing to approve, and it isn't listed.
+    /// and query.
     #[tokio::test]
-    async fn a_component_without_commands_needs_no_approval() {
+    async fn a_component_without_commands_can_query() {
         let (fx, root) = fixture().await;
-        let ext = root.join("oxplow/extensions/acme");
+        let ext = root.join(".oxplow/extensions/acme");
         std::fs::write(
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\ncustom_components:\n  - { id: board, assets: [tasks] }\n",
@@ -1421,9 +1378,6 @@ actions:
             "title: View\nquery: SELECT 1 AS n\nviz: custom\ncustom: { component: board }\n",
         )
         .unwrap();
-        assert!(programs(&fx, &root)
-            .iter()
-            .all(|p| p.kind != crate::exec_consent::ProgramKind::Component));
         let ctx = extensions::LensContext::default();
         run_component_query(
             &fx.svc,
@@ -1499,7 +1453,6 @@ actions:
                 .contains("isn't one of component `board`'s commands"),
             "{err}"
         );
-        approve_board(&fx, &root).await;
         let out = invoke_component_command(&fx.svc, &root, invoke("oxplow.work_item.transition"))
             .await
             .unwrap();
@@ -1525,7 +1478,6 @@ actions:
     async fn a_component_invoke_with_a_non_object_input_is_invalid() {
         let (fx, root) = component_fixture().await;
         let version = load_board(&fx, &root).await;
-        approve_board(&fx, &root).await;
         for input in [
             serde_json::json!([1, 2]),
             serde_json::json!("done"),

@@ -203,10 +203,6 @@ pub const MANIFEST: &[Capability] = &[
         "list_data_entities",
         "the Data settings list, which joins the extensions' manifests: an agent reads published entities in `v_model` and one declared but not synced yet in its extension's `extension.yaml`",
     ),
-    ui(
-        "effective_config",
-        "the Settings view of every setting and its origin; an agent reads `oxplow.config.list_keys`",
-    ),
     ui("get_panel_layout", "the person's left-nav layout (P6.G1)"),
     ui("set_panel_layout", "the person's left-nav layout (P6.G1)"),
     model("list_extensions", &["v_extension", "v_contribution"]),
@@ -249,7 +245,6 @@ pub const MANIFEST: &[Capability] = &[
         "a custom component's bridged command, from its sandboxed frame through the host (P6b.D2)",
     ),
     both_named("validate_extension", "validate_extension", "oxplow_validate_extension"),
-    both_named("review_extension", "review_extension", "oxplow_review_extension"),
     ui(
         "list_native_conversations",
         "a harness's saved conversations, for the person choosing one to resume or fork (their selection)",
@@ -262,24 +257,12 @@ pub const MANIFEST: &[Capability] = &[
         "report_tabs",
         "the tabs a window shows, which an agent reads with `list_tabs` and `get_open_page`",
     ),
-    ui(
-        "set_extension_enabled",
-        "turning extensions on or off is a person's call",
-    ),
     model(
         "list_collectors",
         &["v_collector_state", "v_collector_credential", "v_collector_run"],
     ),
     // The `oxplow.collector.sync` command: the UI runs it through `run_command`,
     // an agent through this tool (as itself, so it never approves).
-    ui(
-        "approve_collector",
-        "consent to run a collector's program is a person's",
-    ),
-    ui(
-        "revoke_collector",
-        "consent is a person's to take back, as it is to give",
-    ),
     ui(
         "set_credential",
         "secrets are a person's to set; an agent only sees whether one is set",
@@ -295,26 +278,6 @@ pub const MANIFEST: &[Capability] = &[
     ui(
         "revoke_extension_secret",
         "a person takes a host secret back, as they gave it",
-    ),
-    ui(
-        "list_project_programs",
-        "the programs waiting on a person's consent (tsk331); an agent learns of an unapproved one from the run's error",
-    ),
-    ui(
-        "approve_project_program",
-        "consent to run a program from the repo is a person's (tsk331)",
-    ),
-    ui(
-        "revoke_project_program",
-        "consent is a person's to take back, as it is to give",
-    ),
-    ui(
-        "program_source",
-        "a person reads what they're asked to approve; an agent reads its worktree's files",
-    ),
-    ui(
-        "provider_declaration_impact",
-        "what a provider's approval would change, shown before a person approves it (P6b.E3)",
     ),
     ui(
         "list_provider_instances",

@@ -2,7 +2,7 @@
 
 ## Step 2 — a new metric: scaffold a metric extension
 
-A metric you author is a private **extension**. Get it from the
+A metric you author is an **extension** (a source under `.oxplow/extensions/<name>/`; it runs after `oxplow.extension.deploy { name }`). Get it from the
 `oxplow.metric.scaffold` command (`run_command`), which writes nothing and
 returns the files (`oxplow extension new metric <name> [--language rust]
 [--glob '**/*.rs'] [--origin <your effort ref>]` writes the same ones from a
@@ -10,7 +10,7 @@ terminal):
 
 ```
 oxplow.metric.scaffold { "name": "complex-fns", "language": "rust", "glob": "src/**/*.rs", "origin": "<your effort ref>" }
-→ { "name": "complex-fns", "dir": "oxplow/extensions/complex-fns", "files": [ { "path", "content" }, … ] }
+→ { "name": "complex-fns", "dir": ".oxplow/extensions/complex-fns", "files": [ { "path", "content" }, … ] }
 ```
 
 Write each file with your file tools (the write guard applies), then change
@@ -63,7 +63,7 @@ metrics:
 ```
 
 The project's own metrics (a report-derived or `exec` collector) go in the same
-four blocks of its own extension, `oxplow/extensions/project/extension.yaml` —
+four blocks of its own extension, `.oxplow/extensions/project/extension.yaml` —
 `.oxplow/project.yaml` takes no `collectors:`, `measures:`, `dimensions:` or
 `metrics:` definitions, only `use:` entries and `enabled: false` markers. Create
 the file with the `manifest: 2` / `name: project` / `intent:` header when it is
@@ -124,7 +124,7 @@ A collector with `entities:` instead of `facts:` is an **entity collector**
   `extension.yaml` declares its own measures, dimensions, collectors and
   metrics (its fact collectors are sandboxed — starlark or jaq).
 - **Project**: the project's own extension,
-  `oxplow/extensions/project/extension.yaml` + scripts under its `collectors/`
+  `.oxplow/extensions/project/extension.yaml` + scripts under its `collectors/`
   (checked into the repo, shared with the team; turn a metric on/off or set
   its target with `use:` / `enabled: false` in `.oxplow/project.yaml`) — for a collector that must be
   an approved `exec` program, or a report-derived one.

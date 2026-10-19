@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use oxplow_domain::contribution::{ContributionId, ContributionKind, ContributionRef, DeclaredAt};
 use serde::{Deserialize, Serialize};
 
-use super::{imports, manifest_v2, Extension, Sharing};
+use super::{imports, manifest_v2, Extension};
 
 #[derive(
     Debug,
@@ -368,7 +368,7 @@ fn candidate(
     imports::Candidate {
         name: ext.name.clone(),
         enabled: ext.enabled,
-        shared: ext.sharing == Sharing::Shared,
+        bundled: ext.origin == "bundled",
         contributions: ext
             .contributions
             .iter()

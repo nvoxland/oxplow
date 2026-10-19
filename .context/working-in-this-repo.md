@@ -95,7 +95,8 @@ peer message UUIDs individually. A file does not wake an idle session.
 ### oxplow-dev: tasks and the wiki while the work list is none
 
 Stripping oxplow to its core (disabling `oxplow-bundled` in
-`.oxplow/project.yaml`, uncommitted) leaves this project with no work
+`.oxplow/personal.yaml` with `disableExtensions: [oxplow-bundled]`, never
+committed) leaves this project with no work
 list, so `work_item.*` is refused and the task tools are hidden. The
 development helper `oxplow-dev` (`crates/oxplow-dev`, never shipped or
 bundled) keeps oxplow's own tasks usable meanwhile:

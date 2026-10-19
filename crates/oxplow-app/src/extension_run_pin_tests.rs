@@ -12,7 +12,7 @@ use crate::test_fixtures::{services_with_task_effort, TaskEffortFixture};
 
 fn manifest(version: &str) -> String {
     format!(
-        "manifest: 2\nname: acme\nversion: {version}\nintent:\n  purpose: p\ncollectors:
+        "manifest: 2\nname: acme\nversion: {version}\nintent:\n  purpose: p\npermissions: {{ process: true }}\ncollectors:
   - id: sync
     runtime: exec
     entry: sync.sh
@@ -33,15 +33,15 @@ async fn long_collector(fx: &TaskEffortFixture) {
     let root = fx.svc.layout.project_dir.clone();
     write(
         &root,
-        "oxplow/extensions/acme/extension.yaml",
+        ".oxplow/extensions/acme/extension.yaml",
         &manifest("1.0.0"),
     );
     let started = root.join("started");
     let release = root.join("release");
-    let sync = root.join("oxplow/extensions/acme/sync.sh");
+    let sync = root.join(".oxplow/extensions/acme/sync.sh");
     write(
         &root,
-        "oxplow/extensions/acme/sync.sh",
+        ".oxplow/extensions/acme/sync.sh",
         &format!(
             "#!/bin/sh\ntouch {}\nwhile [ ! -f {} ]; do sleep 0.05; done\necho '{{\"entities\":{{\"seen\":[{{\"k\":\"a\",\"v\":\"one\"}}]}}}}'\n",
             started.display(),
@@ -50,18 +50,6 @@ async fn long_collector(fx: &TaskEffortFixture) {
     );
     std::fs::set_permissions(&sync, std::fs::Permissions::from_mode(0o755)).unwrap();
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    let ext = fx
-        .svc
-        .extension_catalog
-        .snapshot(&root)
-        .extensions()
-        .iter()
-        .find(|e| e.name == "acme")
-        .cloned()
-        .unwrap();
-    let spec = ext.collectors[0].clone();
-    let hash = crate::collector_runner::approval_hash(&root.join(&ext.path), &spec).unwrap();
-    crate::collector_runner::approve(&fx.svc.approvals, "acme", "sync", &hash).unwrap();
 }
 
 /// Start the collector through the bus, as a person would, and wait until
@@ -122,16 +110,15 @@ async fn an_activation_does_not_wait_for_a_running_collector() {
     );
     write(
         &fx.svc.layout.project_dir,
-        "oxplow/extensions/other/extension.yaml",
+        ".oxplow/extensions/other/extension.yaml",
         "manifest: 2\nname: other\nintent:\n  purpose: p\n",
     );
     tokio::time::timeout(
         Duration::from_secs(5),
-        fx.svc.extension_activation.activate(fx.svc.clone()),
+        crate::test_fixtures::activate_with_problems(&fx.svc),
     )
     .await
-    .expect("the activation doesn't wait for the collector")
-    .expect("it activates");
+    .expect("the activation doesn't wait for the collector");
 
     release(&fx);
     run.await.unwrap().expect("the collector finishes");
@@ -148,14 +135,10 @@ async fn a_collector_does_not_publish_across_a_change_to_its_extension() {
 
     write(
         &fx.svc.layout.project_dir,
-        "oxplow/extensions/acme/extension.yaml",
+        ".oxplow/extensions/acme/extension.yaml",
         &manifest("1.0.1"),
     );
-    fx.svc
-        .extension_activation
-        .activate(fx.svc.clone())
-        .await
-        .expect("the new version activates");
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
 
     release(&fx);
     let error = run.await.unwrap().expect_err("the old run is refused");
@@ -175,15 +158,11 @@ async fn a_collector_does_not_publish_after_its_extension_is_disabled() {
 
     write(
         &fx.svc.layout.project_dir,
-        ".oxplow/project.yaml",
-        "extensions:\n  disabled: [acme]\n",
+        ".oxplow/personal.yaml",
+        "disableExtensions: [acme]\n",
     );
     fx.svc.reload_config_from_disk().unwrap();
-    fx.svc
-        .extension_activation
-        .activate(fx.svc.clone())
-        .await
-        .expect("the disabled catalog activates");
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
 
     release(&fx);
     let error = run.await.unwrap().expect_err("the run is refused");
@@ -202,12 +181,12 @@ async fn an_effects_run_holds_no_generation_and_ends_with_its_extension() {
     let root = fx.svc.layout.project_dir.clone();
     write(
         &root,
-        "oxplow/extensions/acme/extension.yaml",
+        ".oxplow/extensions/acme/extension.yaml",
         "manifest: 2\nname: acme\nversion: 1.0.0\nintent: { purpose: p, origin: null, examples: [] }\neffects:\n  - id: note\n    summary: s\n    on: [work_item.state_changed]\n    entry: note.star\n",
     );
     write(
         &root,
-        "oxplow/extensions/acme/note.star",
+        ".oxplow/extensions/acme/note.star",
         "def transform(x):\n    return {\"skip\": \"noted\"}\n",
     );
     crate::test_fixtures::activate(&fx.svc).await;
@@ -234,8 +213,8 @@ async fn an_effects_run_holds_no_generation_and_ends_with_its_extension() {
 
     write(
         &root,
-        ".oxplow/project.yaml",
-        "extensions:\n  disabled: [acme]\n",
+        ".oxplow/personal.yaml",
+        "disableExtensions: [acme]\n",
     );
     fx.svc.reload_config_from_disk().unwrap();
     let error = run

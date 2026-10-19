@@ -1,7 +1,8 @@
 /// "Data" section body for SettingsPage: every semantic-layer entity with
-/// its owner (core or an extension) and row count (counted per model after the list shows), and every extension source with its last
-/// sync and a Run button (Approve & Run for an exec source, or a Starlark
-/// one that calls a model, nobody on this machine approved yet). Credentials and enabling stay under Extensions.
+/// its owner (core or an extension) and row count (counted per model after the list shows), every extension source with its last
+/// sync and a Run button, and every effect with its Backfill. What an
+/// extension may do is its permissions, approved when it is deployed
+/// (the Extensions page). Credentials and enabling stay under Extensions.
 /// Delivery lists the events a consumer couldn't take, with Retry and
 /// Discard (confirmed inline). See `.context/semantic-layer.md`.
 ///
@@ -9,43 +10,30 @@
 /// opErrorsStore, not alerts.
 
 import type { CSSProperties } from "react";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
-  approveProjectProgram,
-  programSource,
   listDataEntities,
-  providerDeclarationImpact,
-  listProjectPrograms,
   listCollectors,
-  approveCollector,
-  revokeCollector,
-  revokeProjectProgram,
   querySql,
   runCommand,
   syncCollector,
   subscribeOxplowEvents,
   type CollectorListing,
 } from "../api.js";
-import type { DataEntity, ProjectProgram, Reads } from "../tauri-bridge/generated/bindings.js";
+import type { DataEntity, Reads } from "../tauri-bridge/generated/bindings.js";
 import { coalesce, extensionsChanged, readsChanged, useRerunOnChange } from "../lens/lensRerun.js";
 import { collectorRef } from "../refs/ref.js";
 import { pageTabRef } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { enableAgain, type ContributionHealth } from "../contributionHealth.js";
-import { useContextMenu } from "./useRowContextMenu.js";
 import {
   backfillAsk, backfillRunLabel,
   backfillDone,
-  canApprove,
-  collectorRevoke,
   entityRows,
   entitySummary,
-  programRow,
-  providerImpactLines,
   type BackfillResult,
   type EntityCount,
-  type ProviderImpactState,
 } from "./dataSectionModel.js";
 import { collectorRowModel, COLLECTOR_RUNS } from "./extensionRowModel.js";
 import { DeliveryList } from "./DeliveryList.js";
@@ -61,14 +49,9 @@ export function DataSection() {
   // Each refresh recounts; a newer one stops an older one's counting.
   const counting = useRef(0);
   const [collectors, setCollectors] = useState<CollectorListing[]>([]);
-  const [programs, setPrograms] = useState<ProjectProgram[]>([]);
-  // The row whose revoke is being confirmed (a program's `kind:name`, or a
-  // collector's `owner/id`); right-click offers it, the strip asks.
-  const [revoking, setRevoking] = useState<string | null>(null);
-  const rowMenu = useContextMenu();
+  // Every effect, `<extension>/<id>`.
+  const [effects, setEffects] = useState<string[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
-  // What approving each unapproved provider would change, by instance.
-  const [impacts, setImpacts] = useState<Record<string, ProviderImpactState>>({});
 
   /// What each model's count read, so a commit that touches one recounts
   /// that model alone.
@@ -88,9 +71,8 @@ export function DataSection() {
 
   // Each list re-reads on the change that touches what it shows, not on
   // any event (tsk1403): the entities when the catalog or config changes,
-  // the collectors when a run commits (`v_collector_run`) or an approval
-  // does, the programs on an approval or a catalog change, and a model's
-  // count when that model changes.
+  // the collectors when a run commits (`v_collector_run`), the effects on
+  // a catalog change, and a model's count when that model changes.
   const loadEntities = useCallback(async () => {
     try {
       const found = await listDataEntities();
@@ -102,12 +84,22 @@ export function DataSection() {
     }
   }, []);
   const loadCollectors = useCallback(() => listed("List data", listCollectors, setCollectors), [listed]);
-  const loadPrograms = useCallback(() => listed("List data", listProjectPrograms, setPrograms), [listed]);
-  /** The collectors and programs again: what an approval, a run or a
-   *  revoke leaves different. */
+  const loadEffects = useCallback(
+    () =>
+      listed(
+        "List data",
+        async () =>
+          (
+            await querySql("SELECT extension || '/' || local FROM v_contribution WHERE kind = 'effect' ORDER BY 1")
+          ).rows.map((r) => String(r[0])),
+        setEffects,
+      ),
+    [listed],
+  );
+  /** The collectors again: what a run leaves different. */
   const refresh = useCallback(async () => {
-    await Promise.all([loadCollectors(), loadPrograms()]);
-  }, [loadCollectors, loadPrograms]);
+    await loadCollectors();
+  }, [loadCollectors]);
 
   // One model at a time, so counting never crowds the daemon: a model too
   // big to count within query_sql's timeout costs its own cell (tsk1065).
@@ -144,7 +136,7 @@ export function DataSection() {
   useEffect(() => {
     void loadEntities();
     void loadCollectors();
-    void loadPrograms();
+    void loadEffects();
     // A burst of commits recounts the models it touched once.
     const touched = new Set<string>();
     const recount = coalesce(() => {
@@ -157,12 +149,7 @@ export function DataSection() {
       if (extensionsChanged(e)) {
         void loadEntities();
         void loadCollectors();
-        void loadPrograms();
-        return;
-      }
-      if (e.kind === "approvalsChanged") {
-        void loadCollectors();
-        void loadPrograms();
+        void loadEffects();
         return;
       }
       for (const [name, reads] of Object.entries(countReads.current)) {
@@ -174,45 +161,14 @@ export function DataSection() {
       recount.cancel();
       off();
     };
-  }, [loadEntities, loadCollectors, loadPrograms]);
+  }, [loadEntities, loadCollectors, loadEffects]);
   // Scheduled and agent-triggered runs each commit a `collector_run` row.
   useRerunOnChange(COLLECTOR_RUNS, () => void loadCollectors());
-
-  // The unapproved providers, by name and the version on disk: their
-  // diffs reload only when one of those changes, not on every refresh.
-  const pendingKey = programs
-    .filter((p) => p.kind === "provider" && !p.approved)
-    .map((p) => `${p.name}\u0000${p.version ?? ""}`)
-    .sort()
-    .join("\n");
-  useEffect(() => {
-    let live = true;
-    const pending = pendingKey === "" ? [] : pendingKey.split("\n").map((k) => k.split("\u0000")[0]!);
-    setImpacts(Object.fromEntries(pending.map((name) => [name, "loading" as const])));
-    for (const name of pending) {
-      void providerDeclarationImpact(name)
-        .then((e) => {
-          if (live) setImpacts((prev) => ({ ...prev, [name]: e }));
-        })
-        .catch((e: unknown) => {
-          if (live) setImpacts((prev) => ({ ...prev, [name]: { error: e instanceof Error ? e.message : String(e) } }));
-        });
-    }
-    return () => {
-      live = false;
-    };
-  }, [pendingKey]);
 
   async function run(l: CollectorListing) {
     const key = `${l.owner}/${l.spec.id}`;
     setBusy(key);
     try {
-      // Approve & Run approves exactly the version this listing showed,
-      // then runs it (`oxplow.collector.sync` itself never approves).
-      if (!l.approved) {
-        if (!l.version) throw new Error(`${key} can't be read, so it can't be approved`);
-        await approveCollector(l.owner, l.spec.id, l.version);
-      }
       const report = await syncCollector(collectorRef(l.owner, l.spec.id));
       const counts = Object.entries(report.rowCounts)
         .map(([e, n]) => `${n} ${e}`)
@@ -223,48 +179,6 @@ export function DataSection() {
     } finally {
       setBusy(null);
       await refresh();
-    }
-  }
-
-  async function revokeProgram(p: ProjectProgram) {
-    setRevoking(null);
-    setBusy(`${p.kind}:${p.name}`);
-    try {
-      setPrograms(await revokeProjectProgram(p.kind, p.name));
-      showToast({ message: `Revoked ${p.name}. It won't run until you approve it again.` });
-    } catch (e) {
-      recordOpError({ label: `Revoke ${p.name}`, message: String(e) });
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function revokeListed(l: CollectorListing) {
-    const key = `${l.owner}/${l.spec.id}`;
-    setRevoking(null);
-    setBusy(key);
-    try {
-      await revokeCollector(l.owner, l.spec.id);
-      showToast({ message: `Revoked ${key}. It won't run until you approve it again.` });
-    } catch (e) {
-      recordOpError({ label: `Revoke ${key}`, message: String(e) });
-    } finally {
-      setBusy(null);
-      await refresh();
-    }
-  }
-
-  async function approve(p: ProjectProgram) {
-    const key = `${p.kind}:${p.name}`;
-    setBusy(key);
-    try {
-      if (!p.version) throw new Error(`${p.program} can't be read, so it can't be approved`);
-      setPrograms(await approveProjectProgram(p.kind, p.name, p.version));
-      showToast({ message: `Approved ${p.name}. It runs from the next trigger on this machine.` });
-    } catch (e) {
-      recordOpError({ label: `Approve ${p.name}`, message: String(e) });
-    } finally {
-      setBusy(null);
     }
   }
 
@@ -302,19 +216,8 @@ export function DataSection() {
         collectors.map((l) => {
           const s = collectorRowModel(l);
           const key = `${l.owner}/${s.id}`;
-          const revoke = collectorRevoke(l);
           return (
-            <div
-              key={key}
-              data-testid={`collector-row-${key}`}
-              style={rowStyle}
-              onContextMenu={(e) =>
-                rowMenu.open(
-                  e,
-                  revoke ? [{ id: "revoke", label: "Revoke approval…", enabled: busy === null, run: () => setRevoking(key) }] : [],
-                )
-              }
-            >
+            <div key={key} data-testid={`collector-row-${key}`} style={rowStyle}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span>
                   <code>{key}</code>
@@ -343,7 +246,7 @@ export function DataSection() {
                   type="button"
                   data-testid={`collector-run-${key}`}
                   title={s.actionTitle}
-                  disabled={busy !== null || s.action === "approve-in-programs"}
+                  disabled={busy !== null}
                   onClick={() => void run(l)}
                 >
                   {busy === key ? "Running…" : s.actionLabel}
@@ -352,90 +255,25 @@ export function DataSection() {
               {s.disabled ? <div style={errorStyle}>{s.disabled}</div> : null}
               {s.error ? <div style={errorStyle}>{s.error}</div> : null}
               {s.missingCredentials ? <div style={mutedStyle}>{s.missingCredentials}</div> : null}
-              {revoke && revoking === key ? (
-                <RevokeAsk
-                  testId={`collector-revoke-${key}`}
-                  ask={revoke.ask}
-                  onConfirm={() => void revokeListed(l)}
-                  onCancel={() => setRevoking(null)}
-                />
-              ) : null}
             </div>
           );
         })
       )}
-      <h3 style={subheadStyle} id="settings-data-programs">Programs</h3>
-      {programs.length === 0 ? (
-        <div style={mutedStyle} data-testid="data-programs-empty">
-          This project&apos;s config runs no programs.
+      <h3 style={subheadStyle} id="settings-data-effects">Effects</h3>
+      {effects.length === 0 ? (
+        <div style={mutedStyle} data-testid="data-effects-empty">
+          No effects. An extension can declare one to react to what happens.
         </div>
       ) : (
-        programs.map((p) => {
-          const m = programRow(p);
-          const impact = p.kind === "provider" && !p.approved ? impacts[p.name] : undefined;
-          const failed = impact !== undefined && impact !== "loading" && "error" in impact ? impact.error : null;
-          const diff = impact !== undefined && impact !== "loading" && !("error" in impact) ? impact : null;
-          return (
-            <div
-              key={m.key}
-              data-testid={`program-row-${m.key}`}
-              style={rowStyle}
-              onContextMenu={(e) =>
-                rowMenu.open(
-                  e,
-                  m.canRevoke ? [{ id: "revoke", label: "Revoke approval…", enabled: busy === null, run: () => setRevoking(m.key) }] : [],
-                )
-              }
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span>{m.label}</span>
-                <code style={{ ...mutedStyle, whiteSpace: "pre-wrap" }}>{m.command}</code>
-                <span style={{ flex: 1 }} />
-                <span style={m.approved ? mutedStyle : errorStyle}>{m.status}</span>
-                {m.approved ? null : (
-                  <button
-                    type="button"
-                    data-testid={`program-approve-${m.key}`}
-                    title={failed !== null ? "We couldn't compare what approving would change; fix the error first" : m.approveTitle}
-                    disabled={busy !== null || !canApprove(p, impact)}
-                    onClick={() => void approve(p)}
-                  >
-                    {busy === m.key ? "Approving…" : "Approve"}
-                  </button>
-                )}
-              </div>
-              {m.grant ? <div style={mutedStyle} data-testid={`program-grant-${m.key}`}>{m.grant}</div> : null}
-              {m.unenforced ? <div style={mutedStyle} data-testid={`program-unenforced-${m.key}`}>{m.unenforced}</div> : null}
-              {revoking === m.key ? (
-                <RevokeAsk
-                  testId={`program-revoke-${m.key}`}
-                  ask={m.revokeAsk}
-                  onConfirm={() => void revokeProgram(p)}
-                  onCancel={() => setRevoking(null)}
-                />
-              ) : null}
-              {m.showsSource ? <ProgramSource rowKey={m.key} program={p} /> : null}
-              {p.kind === "effect" && p.approved ? <BackfillAction rowKey={m.key} effect={p.name} /> : null}
-              {impact === "loading" ? (
-                <div style={mutedStyle}>Comparing its declarations…</div>
-              ) : failed !== null ? (
-                <div data-testid={`program-impact-error-${m.key}`} style={errorStyle}>
-                  Couldn&apos;t compare its declarations: {failed}
-                </div>
-              ) : diff ? (
-                <ul data-testid={`program-impact-${m.key}`} style={{ margin: "4px 0 0", paddingLeft: 18, ...mutedStyle }}>
-                  {providerImpactLines(diff).map((line, i) => (
-                    <li key={i}>{line}</li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
-          );
-        })
+        effects.map((name) => (
+          <div key={name} data-testid={`effect-row-${name}`} style={rowStyle}>
+            <code>{name}</code>
+            <BackfillAction rowKey={name} effect={name} />
+          </div>
+        ))
       )}
       <h3 style={subheadStyle} id="settings-data-delivery">Delivery</h3>
       <DeliveryList emptyLabel="Every event reached its consumers." />
-      {rowMenu.menu}
     </div>
   );
 }
@@ -445,46 +283,8 @@ const subheadStyle: CSSProperties = { fontSize: "var(--text-sm)", margin: "16px 
 const rowStyle: CSSProperties = { padding: "6px 0", borderBottom: "1px solid var(--border-subtle)", fontSize: "var(--text-sm)" };
 const errorStyle: CSSProperties = { fontSize: "var(--text-xs)", color: "var(--severity-critical)", marginTop: 4 };
 
-/** The inline question under a row whose approval is being revoked: no
- *  modal (usability.md), Enter on the focused Revoke runs it, Escape or
- *  Cancel backs out. */
-function RevokeAsk({
-  testId,
-  ask,
-  onConfirm,
-  onCancel,
-}: {
-  testId: string;
-  ask: string;
-  onConfirm(): void;
-  onCancel(): void;
-}) {
-  const confirm = useRef<HTMLButtonElement>(null);
-  useEffect(() => confirm.current?.focus(), []);
-  return (
-    <div
-      data-testid={`${testId.replace(/-revoke-/, "-revoke-ask-")}`}
-      style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, fontSize: "var(--text-xs)" }}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") {
-          e.stopPropagation();
-          onCancel();
-        }
-      }}
-    >
-      <span style={{ color: "var(--severity-critical)" }}>{ask}</span>
-      <button ref={confirm} type="button" data-testid={testId.replace(/-revoke-/, "-revoke-confirm-")} onClick={onConfirm}>
-        Revoke
-      </button>
-      <button type="button" onClick={onCancel}>
-        Cancel
-      </button>
-    </div>
-  );
-}
-
-/** Backfill… on an approved effect's row (P9.D5): the live consumer never
- *  reacts to what was logged before the effect's approval, so a person has
+/** Backfill… on an effect's row (P9.D5): the live consumer never reacts
+ *  to what was logged before the effect started, so a person has
  *  it react to those events — told first how many there are
  *  (`oxplow.effect.backfill_plan`), and that the effect may call outside oxplow
  *  for each. The second click is the confirmation `oxplow.effect.backfill` asks
@@ -570,45 +370,6 @@ function BackfillAction({ rowKey, effect }: { rowKey: string; effect: string }) 
       >
         {planned > 0 ? "Cancel" : "Close"}
       </button>
-    </div>
-  );
-}
-
-/** A program's entry, shown on request: a bundled one's files come with
- *  oxplow, and an AI provider's script is what's approved — this is where
- *  a person reads what they approve (tsk953). */
-function ProgramSource({ rowKey, program }: { rowKey: string; program: ProjectProgram }) {
-  const [source, setSource] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
-  const sourceId = `program-source-${useId()}`;
-  async function toggle() {
-    if (open) {
-      setOpen(false);
-      return;
-    }
-    try {
-      setSource(await programSource(program.kind, program.name));
-      setOpen(true);
-    } catch (e) {
-      recordOpError({ label: `Read ${program.name}`, message: e instanceof Error ? e.message : String(e) });
-    }
-  }
-  return (
-    <div>
-      <button
-        type="button"
-        data-testid={`program-source-toggle-${rowKey}`}
-        aria-expanded={open}
-        aria-controls={sourceId}
-        onClick={() => void toggle()}
-      >
-        {open ? "Hide the script" : "Read the script"}
-      </button>
-      {open && source !== null ? (
-        <pre id={sourceId} data-testid={`program-source-${rowKey}`} style={{ ...mutedStyle, whiteSpace: "pre-wrap", margin: "4px 0 0" }}>
-          {source}
-        </pre>
-      ) : null}
     </div>
   );
 }

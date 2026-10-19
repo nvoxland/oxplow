@@ -4,9 +4,7 @@
 //! Its script is an effect's shape — `transform({event})` →
 //! `{ commands: [{ name, input }] }` or `{ skip: "why" }` — run under the
 //! effects' sandbox, reading oxplow through the scopes its entry `needs`.
-//! It runs only while a person has approved it as it is
-//! (`ProgramKind::EffortPolicy`); unapproved, each event it's offered fails
-//! saying so, and the pump dead-letters it. Its reads aren't audited:
+//! Its reads aren't audited:
 //! `react` is no command run; what it composes is, as
 //! `effect:effort_policy:<id>`.
 
@@ -18,7 +16,6 @@ use oxplow_domain::events::EventView;
 use oxplow_domain::{CommandCall, DomainError};
 
 use crate::effects::Reaction;
-use crate::exec_consent::Gate;
 use crate::sql_gateway::SqlGateway;
 
 pub struct ScriptedPolicy {
@@ -29,8 +26,6 @@ pub struct ScriptedPolicy {
     pub sql: SqlGateway,
     /// Where it reads the tree, when it declares `tree.read`.
     pub trees: Arc<dyn crate::services::TreeSource>,
-    /// Whether a person approved it as it is now, asked before each event.
-    pub gate: Gate,
 }
 
 #[async_trait]
@@ -47,12 +42,9 @@ impl EffortPolicy for ScriptedPolicy {
         let failed = |message: String| {
             DomainError::Invariant(format!("effort policy `{}`: {message}", self.id))
         };
-        (self.gate)().map_err(&failed)?;
         let event = serde_json::to_value(event).map_err(|e| failed(e.to_string()))?;
         // The script is the run's pure part; what it reads is counted on it.
-        let composing = run
-            .child(None, oxplow_domain::run::Mode::Pure)
-            .guarded(self.gate.clone());
+        let composing = run.child(None, oxplow_domain::run::Mode::Pure);
         match crate::effects::run_over(
             &self.sql,
             &composing,
@@ -77,7 +69,6 @@ impl EffortPolicy for ScriptedPolicy {
 
 #[cfg(test)]
 mod tests {
-    use crate::exec_consent::{approve_program, list, ProgramKind};
     use crate::test_fixtures::{services_with_effort, EffortFixture};
     use oxplow_db::SqlCell;
     use oxplow_domain::Actor;
@@ -118,14 +109,17 @@ def transform(x):
     /// `script` as the private extension `acme`'s effort policy `tidy`,
     /// chosen as the project's, the fixture's own effort closed.
     async fn install(fx: &EffortFixture, script: &str) {
-        let dir = fx.svc.layout.project_dir.join("oxplow/extensions/acme");
+        let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(dir.join("policies")).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),
-            "manifest: 2\nname: acme\nsharing: private\nintent:\n  purpose: a policy\n  examples: [{ name: a }]\nimplementations:\n  - { capability: effort_policy, id: tidy, title: Tidy, entry: policies/tidy.star, needs: [sql.read] }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: a policy\n  examples: [{ name: a }]\npermissions: { sql: read, commands: [oxplow.effort.**] }\nimplementations:\n  - { capability: effort_policy, id: tidy, title: Tidy, entry: policies/tidy.star, needs: [sql.read] }\n",
         )
         .unwrap();
         std::fs::write(dir.join("policies/tidy.star"), script).unwrap();
+        // Deploying turns it on in the person's file and reloads the config,
+        // so the choice is made after.
+        crate::test_fixtures::activate(&fx.svc).await;
         fx.svc
             .config
             .write()
@@ -143,27 +137,6 @@ def transform(x):
             )
             .await
             .unwrap();
-    }
-
-    fn approve(fx: &EffortFixture) {
-        let project = fx.svc.layout.project_dir.clone();
-        let extensions = fx
-            .svc
-            .extension_catalog
-            .unpinned(&project, "a test reads declarations");
-        let program = list(&fx.svc.approvals, &project, &extensions)
-            .into_iter()
-            .find(|p| p.kind == ProgramKind::EffortPolicy)
-            .expect("the policy is a program");
-        approve_program(
-            &fx.svc.approvals,
-            &project,
-            &extensions,
-            program.kind,
-            &program.name,
-            program.version.as_deref().unwrap(),
-        )
-        .unwrap();
     }
 
     async fn task(fx: &EffortFixture) -> String {
@@ -263,13 +236,12 @@ def transform(x):
             .collect()
     }
 
-    /// Approved and chosen, the script is the policy: an agent starting a
+    /// Chosen, the script is the policy: an agent starting a
     /// task on its thread opens an effort linked to it, as the policy's own
     /// effect, and finishing it closes the effort its read found.
     #[tokio::test]
-    async fn an_approved_policy_script_opens_and_closes_efforts() {
+    async fn a_policy_script_opens_and_closes_efforts() {
         let fx = scripted(TIDY).await;
-        approve(&fx);
         let item = task(&fx).await;
         agent_moves(&fx, &item, "in_progress").await;
         assert_eq!(open_for(&fx, &item).await, 1);
@@ -285,41 +257,6 @@ def transform(x):
         assert_eq!(dead_letters(&fx).await, Vec::<String>::new());
     }
 
-    /// Unapproved, it opens nothing and the event is dead-lettered saying
-    /// why; approving it makes the next event run. An edit to any file of
-    /// its extension stops it again.
-    #[tokio::test]
-    async fn an_unapproved_policy_script_runs_nothing_until_approved() {
-        let fx = scripted(TIDY).await;
-        let first = task(&fx).await;
-        agent_moves(&fx, &first, "in_progress").await;
-        assert_eq!(open_for(&fx, &first).await, 0);
-        let letters = dead_letters(&fx).await;
-        assert!(
-            letters
-                .iter()
-                .any(|e| e.contains("Settings → Data → Programs")),
-            "{letters:?}"
-        );
-        approve(&fx);
-        let second = task(&fx).await;
-        agent_moves(&fx, &second, "in_progress").await;
-        assert_eq!(open_for(&fx, &second).await, 1);
-
-        std::fs::write(
-            fx.svc
-                .layout
-                .project_dir
-                .join("oxplow/extensions/acme/README.md"),
-            "# Acme\n",
-        )
-        .unwrap();
-        crate::test_fixtures::activate_with_problems(&fx.svc).await;
-        let third = task(&fx).await;
-        agent_moves(&fx, &third, "in_progress").await;
-        assert_eq!(open_for(&fx, &third).await, 0);
-    }
-
     /// A policy emits nothing of its own: a script composing events runs
     /// nothing.
     #[tokio::test]
@@ -328,7 +265,6 @@ def transform(x):
             "def transform(x):\n    return {\"commands\": [], \"events\": [{\"type\": \"acme.x\", \"payload\": {}}]}\n",
         )
         .await;
-        approve(&fx);
         let item = task(&fx).await;
         agent_moves(&fx, &item, "in_progress").await;
         let letters = dead_letters(&fx).await;
@@ -343,7 +279,6 @@ def transform(x):
     #[tokio::test]
     async fn a_reload_keeps_the_policy_script() {
         let fx = scripted(TIDY).await;
-        approve(&fx);
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
         assert!(fx.svc.effort_policies.has("tidy"));
         let item = task(&fx).await;
@@ -362,7 +297,6 @@ def transform(x):
         );
         let fx = crate::thread_checkpoint::tests::with_baseline().await;
         install(&fx, EXAMPLE).await;
-        approve(&fx);
         let settle = || async {
             fx.svc
                 .event_pump

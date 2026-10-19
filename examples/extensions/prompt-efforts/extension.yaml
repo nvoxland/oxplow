@@ -1,7 +1,6 @@
 manifest: 2
 name: prompt-efforts
 description: An effort policy that gives every prompt that changes files its own effort.
-sharing: shared
 engine: ">=0.7"
 version: 0.1.0
 intent:
@@ -27,6 +26,9 @@ intent:
     - name: an-item-finished
       input: { implementation: prompt_efforts, event: { type: work_item.state_changed } }
       expect: the item's open effort closes
+permissions:
+  sql: read
+  commands: [oxplow.effort.open, oxplow.effort.close, oxplow.effort.link]
 implementations:
   # The project's effort policy once chosen in Settings → Capabilities. It
   # runs once a person approves it (Settings → Data → Programs) and reads

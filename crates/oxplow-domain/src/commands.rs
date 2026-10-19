@@ -799,6 +799,10 @@ pub struct Preview {
     pub summary: String,
     pub input: Value,
     pub destructive: bool,
+    /// What the person is asked about beyond the command and its input,
+    /// one line each: the permissions a deploy adds.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub details: Vec<String>,
 }
 
 /// A completed run.
@@ -870,7 +874,11 @@ impl std::fmt::Display for CommandError {
             } => write!(f, "invalid input: {message}"),
             CommandError::Denied { reason } => write!(f, "denied: {reason}"),
             CommandError::NeedsConfirmation { preview } => {
-                write!(f, "`{}` needs confirmation", preview.command)
+                write!(f, "`{}` needs confirmation", preview.command)?;
+                if !preview.details.is_empty() {
+                    write!(f, ": {}", preview.details.join("; "))?;
+                }
+                Ok(())
             }
             CommandError::Proposed {
                 proposal,
@@ -882,6 +890,9 @@ impl std::fmt::Display for CommandError {
                     "`{}` needs a person's approval; it is recorded as {proposal}",
                     preview.command
                 )?;
+                if !preview.details.is_empty() {
+                    write!(f, " ({})", preview.details.join("; "))?;
+                }
                 if !supersedes.is_empty() {
                     write!(f, " (replaces {})", supersedes.join(", "))?;
                 }

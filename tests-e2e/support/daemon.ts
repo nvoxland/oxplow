@@ -29,18 +29,19 @@ export const LOG_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", ".out
 
 /** The project's `.oxplow/project.yaml`: its threads run the fake terminal
  *  harness (the test extension's `terminal` provider, enabled here), so no
- *  spec ever starts a real agent CLI. */
+ *  spec ever starts a real agent CLI. The suite's extensions are on, so the
+ *  daemon deploys them from their sources when it starts. */
 function projectYaml(): string {
-  return `agents: [terminal]\nextensionInstances:\n  e2e/terminal: { enabled: true, config: { team: core } }\n`;
+  return `agents: [terminal]\nextensions: [oxplow-bundled, e2e, github]\nextensionInstances:\n  e2e/terminal: { enabled: true, config: { team: core } }\n`;
 }
 
-/** Put the suite's test extension (`tests-e2e/fixtures/extension`) into
- *  `project`, with the wrapper that runs the fake provider this checkout
+/** Put the suite's test extension's source (`tests-e2e/fixtures/extension`)
+ *  into `project`, with the wrapper that runs the fake provider this checkout
  *  built: its service's state in the project's `.oxplow/`, one file per
  *  instance, as the provider tests keep it. */
 function installTestExtension(project: string, providerFake: string): void {
   const fixture = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "extension");
-  const dir = join(project, "oxplow", "extensions", "e2e");
+  const dir = join(project, ".oxplow", "extensions", "e2e");
   cpSync(fixture, dir, { recursive: true });
   mkdirSync(join(dir, "bin"), { recursive: true });
   const state = join(project, ".oxplow");
@@ -60,7 +61,7 @@ function installTestExtension(project: string, providerFake: string): void {
  *  requests (`fixtures/github-prs.json`) — no GitHub, the same entity. */
 function installGithubExample(project: string): void {
   const here = dirname(fileURLToPath(import.meta.url));
-  const dir = join(project, "oxplow", "extensions", "github");
+  const dir = join(project, ".oxplow", "extensions", "github");
   cpSync(join(here, "..", "..", "examples", "extensions", "github"), dir, { recursive: true });
   cpSync(join(here, "..", "fixtures", "github-prs.json"), join(dir, "prs.json"));
   writeFileSync(join(dir, "sync.sh"), `#!/bin/sh\nexec cat "$(dirname "$0")/prs.json"\n`);
@@ -69,8 +70,9 @@ function installGithubExample(project: string): void {
 
 /** The environment a daemon runs in: its own home (so a terminal's shell
  *  reads no rc file and writes no history of the person's), a PATH without
- *  the person's own bin dirs, a plain `/bin/sh`, and no global or system
- *  git config. */
+ *  the person's own bin dirs, a plain `/bin/sh`, no global or system git
+ *  config, and not Terminal.app's session (macOS's bash would save one into
+ *  the home after its shell exits, racing the cleanup). */
 function isolated(dir: string, harnessFake: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -92,7 +94,7 @@ function isolated(dir: string, harnessFake: string): NodeJS.ProcessEnv {
     GIT_COMMITTER_EMAIL: "e2e@example.com",
     RUST_LOG: process.env.RUST_LOG ?? "warn",
   };
-  for (const name of ["ZDOTDIR", "BASH_ENV", "ENV", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"]) {
+  for (const name of ["ZDOTDIR", "BASH_ENV", "ENV", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "TERM_SESSION_ID", "TERM_PROGRAM"]) {
     delete env[name];
   }
   return env;
@@ -199,6 +201,24 @@ export function run<T = unknown>(daemon: Daemon, name: string, input: Record<str
   return ipc<T>(daemon, "run_command", { id: name, input, confirmed: true });
 }
 
+/** Where extension `name`'s source goes in `daemon`'s project. */
+export function extensionSource(daemon: Daemon, name: string): string {
+  return join(daemon.project, ".oxplow", "extensions", name);
+}
+
+/** Deploy extension `name` from its source: it runs once this returns. */
+export async function deploy(daemon: Daemon, name: string): Promise<void> {
+  await run(daemon, "oxplow.extension.deploy", { name });
+}
+
+/** Copy the documented example `name` (`examples/extensions/<name>`) into
+ *  `daemon`'s project and deploy it. */
+export async function installExample(daemon: Daemon, name: string): Promise<void> {
+  const here = dirname(fileURLToPath(import.meta.url));
+  cpSync(join(here, "..", "..", "examples", "extensions", name), extensionSource(daemon, name), { recursive: true });
+  await deploy(daemon, name);
+}
+
 /** Poll `check` every 200 ms until it holds; throw `what` after `ms`. A
  *  check that throws is tried again — the timeout names the last error —
  *  so a call the daemon isn't ready for yet doesn't end the wait. For
@@ -262,30 +282,6 @@ export async function waitForModels<T>(daemon: Daemon, models: string[], write: 
   } finally {
     socket.close();
   }
-}
-
-type Program = { kind: string; name: string; version: string | null; approved: boolean };
-
-/** Approve one of the project's programs (`<kind>`, `<name>`: `provider`,
- *  `e2e/fake`) as a person does, at the version it is now. */
-export async function approveProgram(daemon: Daemon, kind: string, name: string): Promise<void> {
-  const programs = await ipc<Program[]>(daemon, "list_project_programs");
-  const program = programs.find((p) => p.kind === kind && p.name === name);
-  if (!program) throw new Error(`no program ${kind}:${name}`);
-  if (program.approved) return;
-  await ipc(daemon, "approve_project_program", { kind, name, version: program.version });
-}
-
-type Collector = { owner: string; spec: { id: string }; approved: boolean; version: string | null };
-
-/** Approve an extension's collector (`owner`/`id`) as a person does on
- *  Settings → Data, at the version listed now. */
-export async function approveCollector(daemon: Daemon, owner: string, id: string): Promise<void> {
-  const collectors = await ipc<Collector[]>(daemon, "list_collectors");
-  const collector = collectors.find((c) => c.owner === owner && c.spec.id === id);
-  if (!collector?.version) throw new Error(`no collector ${owner}/${id} to approve`);
-  if (collector.approved) return;
-  await ipc(daemon, "approve_collector", { owner, id, version: collector.version });
 }
 
 type SearchHit = { kind: string; title: string };

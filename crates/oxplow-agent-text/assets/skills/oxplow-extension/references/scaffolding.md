@@ -2,9 +2,10 @@
 
 A **lens** is a saved query over oxplow's data plus how to show it. The user
 opens it as a page (Cmd+P → Lenses), and it updates as the work changes.
-Lenses live in **extensions**: folders of plain files in the repo. The user
-can use a lens themselves, share it with their team by committing it, or
-publish the extension for anyone.
+Lenses live in **extensions**: folders of plain files in
+`.oxplow/extensions/<name>/`. A source runs only after
+`oxplow.extension.deploy { name }`. The user can use a lens themselves or
+share the extension with their team (`oxplow.extension.share`).
 
 You build them with your normal file tools. `oxplow extension new <kind>
 <name> --origin <your effort ref>` scaffolds the folder with a v2 manifest,
