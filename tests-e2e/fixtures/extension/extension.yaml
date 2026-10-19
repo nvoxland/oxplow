@@ -1,6 +1,5 @@
 manifest: 2
 name: e2e
-sharing: private
 intent:
   purpose: >-
     The browser suite's extension: a fake work-item tracker, an effect, a

@@ -448,11 +448,10 @@ mod tests {
     fn acme(root: &Path, searchable: &str) {
         write(
             root,
-            "oxplow/extensions/acme/extension.yaml",
+            ".oxplow/extensions/acme/extension.yaml",
             &format!(
                 "manifest: 2
 name: acme
-sharing: private
 intent: {{ purpose: PRs., origin: null, examples: [] }}
 collectors:
   - id: prs
@@ -488,17 +487,17 @@ ref_kinds:
         );
         write(
             root,
-            "oxplow/extensions/acme/models/prs.sql",
+            ".oxplow/extensions/acme/models/prs.sql",
             "SELECT CAST('acme_pr:' || n AS TEXT) AS ref, title FROM ref('pr')",
         );
         write(
             root,
-            "oxplow/extensions/acme/models/found.sql",
+            ".oxplow/extensions/acme/models/found.sql",
             "SELECT CAST('acme_pr:' || n AS TEXT) AS ref, title, body FROM ref('pr')",
         );
         write(
             root,
-            "oxplow/extensions/acme/lenses/open.yaml",
+            ".oxplow/extensions/acme/lenses/open.yaml",
             "title: Open\nquery: \"SELECT 1 AS n\"\n",
         );
     }
@@ -506,7 +505,7 @@ ref_kinds:
     fn rows(root: &Path, rows: &str) {
         write(
             root,
-            "oxplow/extensions/acme/prs.star",
+            ".oxplow/extensions/acme/prs.star",
             &format!("def transform(input):\n    return {{\"entities\": {{\"pr\": {rows}}}}}\n"),
         );
     }
@@ -517,7 +516,9 @@ ref_kinds:
         crate::test_fixtures::activate(svc).await;
     }
 
-    async fn collect(svc: &crate::Services) {
+    async fn collect(svc: &std::sync::Arc<crate::Services>) {
+        // What was written since (the collector's script) is deployed first.
+        crate::test_fixtures::activate_with_problems(svc).await;
         let root = svc.layout.project_dir.clone();
         collector_runner::run_collector(
             &Collectors::of(svc, &root),
@@ -649,7 +650,7 @@ ref_kinds:
         // follows the new SQL without waiting for a collector to write.
         write(
             &root,
-            "oxplow/extensions/acme/models/found.sql",
+            ".oxplow/extensions/acme/models/found.sql",
             "SELECT CAST('acme_pr:' || n AS TEXT) AS ref, CAST(title || ' (open)' AS TEXT) AS title, body FROM ref('pr')",
         );
         crate::test_fixtures::activate_with_problems(svc).await;

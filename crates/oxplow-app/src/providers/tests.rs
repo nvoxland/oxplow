@@ -38,11 +38,11 @@ fn fake_bin() -> PathBuf {
 /// A private extension declaring the fake as its work-items provider,
 /// its entry a script running the fake with `hooks`.
 fn write_extension(project: &Path, hooks: &str) {
-    let dir = project.join("oxplow/extensions").join(EXT);
+    let dir = project.join(".oxplow/extensions").join(EXT);
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: tracker\nsharing: private\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a work item's points.\n    provider: fake\n    op: estimate\n    invokers: { human: true, agent: true, lens: true }\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: work_item, input: { ref: \"{{ref}}\", points: 3 } }\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: tracker\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a work item's points.\n    provider: fake\n    op: estimate\n    invokers: { human: true, agent: true, lens: true }\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: work_item, input: { ref: \"{{ref}}\", points: 3 } }\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -184,6 +184,9 @@ async fn enable_on(
     spec: &spec::ProviderSpec,
     config: serde_json::Value,
 ) {
+    // Deploying the sources turns them on in the person's file and
+    // reloads the config, so the in-memory entry is written after.
+    crate::test_fixtures::activate_with_problems(svc).await;
     svc.config.write().unwrap().extension_instances.insert(
         spec::instance_name(&ext.name, &spec.id),
         oxplow_config::ExtensionInstanceConfig {
@@ -271,7 +274,7 @@ async fn edited_declarations_need_approving_again() {
 
     // A widened declaration is a new version: shown unapproved, refused.
     let project = fx.svc.layout.project_dir.clone();
-    let file = project.join("oxplow/extensions/tracker/provider.json");
+    let file = project.join(".oxplow/extensions/tracker/provider.json");
     let mut declared = oxplow_provider_fake::declarations();
     declared.commands[0].summary = "Create a work item, now everywhere.".into();
     std::fs::write(&file, serde_json::to_string(&declared).unwrap()).unwrap();
@@ -962,7 +965,7 @@ async fn a_provider_reads_the_host_through_what_it_needs() {
         let root = fx.svc.layout.project_dir.clone();
         write_extension(&root, "host-read");
         if needs {
-            let manifest = root.join("oxplow/extensions/tracker/extension.yaml");
+            let manifest = root.join(".oxplow/extensions/tracker/extension.yaml");
             let text = std::fs::read_to_string(&manifest).unwrap();
             std::fs::write(&manifest, format!("{text}    needs: [sql.read]\n")).unwrap();
         }
@@ -1023,11 +1026,11 @@ async fn a_provider_reads_its_extensions_configuration_through_host_call() {
     let fx = services_with_effort().await;
     let root = fx.svc.layout.project_dir.clone();
     write_extension(&root, "config-read");
-    let manifest = root.join("oxplow/extensions/tracker/extension.yaml");
+    let manifest = root.join(".oxplow/extensions/tracker/extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
     let text = text.replace(
-        "sharing: private\n",
-        "sharing: private\nconfiguration:\n  version: 1\n  schema:\n    type: object\n    additionalProperties: false\n    properties:\n      limit: { type: integer }\n  defaults: { limit: 4 }\n",
+        "intent:\n",
+        "configuration:\n  version: 1\n  schema:\n    type: object\n    additionalProperties: false\n    properties:\n      limit: { type: integer }\n  defaults: { limit: 4 }\nintent:\n",
     );
     std::fs::write(
         &manifest,
@@ -1097,7 +1100,7 @@ async fn a_verbs_host_reads_are_recorded_with_its_run() {
     let fx = services_with_effort().await;
     let root = fx.svc.layout.project_dir.clone();
     write_extension(&root, "host-read");
-    let manifest = root.join("oxplow/extensions/tracker/extension.yaml");
+    let manifest = root.join(".oxplow/extensions/tracker/extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
     std::fs::write(&manifest, format!("{text}    needs: [sql.read]\n")).unwrap();
     let ext = extension(&root);
@@ -1158,7 +1161,7 @@ async fn a_provider_command_is_declared_over_an_operation_it_lists() {
     let schema = estimate.input_schema.as_ref().unwrap();
     assert_eq!(schema["required"], json!(["ref", "points"]));
     assert_eq!(schema["properties"]["instance"]["type"], json!("string"));
-    let manifest = root.join("oxplow/extensions/tracker/extension.yaml");
+    let manifest = root.join(".oxplow/extensions/tracker/extension.yaml");
     let base = std::fs::read_to_string(&manifest).unwrap();
     for (entry, says) in [
         (
@@ -1208,13 +1211,15 @@ async fn declaration_impact_compare_the_files_with_what_runs() {
         .svc
         .layout
         .project_dir
-        .join("oxplow/extensions/tracker/provider.json");
+        .join(".oxplow/extensions/tracker/provider.json");
     let mut declared = oxplow_provider_fake::declarations();
     let mut extra = declared.commands[0].clone();
     extra.name = "archive".into();
     extra.confirm = "destructive".into();
     declared.commands.push(extra);
     std::fs::write(&path, serde_json::to_string_pretty(&declared).unwrap()).unwrap();
+    // Deployed, the edited declarations are what is there to approve.
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     let after = fx.svc.providers.declaration_impact(INSTANCE).await.unwrap();
     assert_eq!(after.change, crate::extension_impact::Change::Changed);
     let archive = after.commands.iter().find(|c| c.name == "archive").unwrap();
@@ -1244,7 +1249,7 @@ async fn declaration_impact_compare_against_the_last_approved_copy() {
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
     let project = fx.svc.layout.project_dir.clone();
-    let manifest = project.join("oxplow/extensions/tracker/extension.yaml");
+    let manifest = project.join(".oxplow/extensions/tracker/extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
     std::fs::write(
         &manifest,
@@ -1326,7 +1331,7 @@ async fn provider_args_stay_inside_the_approved_folder() {
     let fx = services_with_effort().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "");
-    let manifest = project.join("oxplow/extensions/tracker/extension.yaml");
+    let manifest = project.join(".oxplow/extensions/tracker/extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
     std::fs::write(
         &manifest,
@@ -1359,7 +1364,7 @@ async fn provider_args_stay_inside_the_approved_folder() {
         ),
     )
     .unwrap();
-    let dir = project.join("oxplow/extensions/tracker");
+    let dir = project.join(".oxplow/extensions/tracker");
     std::fs::create_dir_all(dir.join("lib")).unwrap();
     std::fs::write(dir.join("lib/main.py"), "good()").unwrap();
     let ext = extension(&project);
@@ -1369,12 +1374,12 @@ async fn provider_args_stay_inside_the_approved_folder() {
     assert!(!program(&fx, &ext).approved);
 }
 
-const ADAPTER_MANIFEST: &str = "manifest: 2\nname: tracker\nsharing: private\nintent:\n  purpose: notes over MCP\n  examples: [{ name: a }]\nproviders:\n  - id: notes\n    capability: work_items\n    adapter:\n      mcp: { command: [bin/server, --stdio] }\n      mapping: mcp/x.star\n      tools: mcp/tools.json\n    declarations: provider.json\n";
+const ADAPTER_MANIFEST: &str = "manifest: 2\nname: tracker\nintent:\n  purpose: notes over MCP\n  examples: [{ name: a }]\nproviders:\n  - id: notes\n    capability: work_items\n    adapter:\n      mcp: { command: [bin/server, --stdio] }\n      mapping: mcp/x.star\n      tools: mcp/tools.json\n    declarations: provider.json\n";
 
 /// A private extension whose provider is an MCP server behind oxplow's
 /// adapter: the server, its mapping and its pinned tools.
 fn write_adapter_extension(project: &Path) -> PathBuf {
-    let dir = project.join("oxplow/extensions").join(EXT);
+    let dir = project.join(".oxplow/extensions").join(EXT);
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::create_dir_all(dir.join("mcp")).unwrap();
     std::fs::write(dir.join("extension.yaml"), ADAPTER_MANIFEST).unwrap();
@@ -1469,15 +1474,14 @@ async fn an_adapter_providers_approval_covers_its_mapping_pins_and_server() {
     }
 }
 
-/// tsk547: a provider runs from a verified copy of its approved folder,
-/// outside the repo — not from the live tree — and a tampered copy is
-/// replaced before it runs.
+/// A provider runs from its extension's deployment, not from the live
+/// tree, and one whose deployment was edited is no longer what was approved.
 #[tokio::test]
-async fn a_provider_runs_from_its_verified_copy() {
+async fn a_provider_runs_from_its_deployment() {
     let fx = services_with_effort().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "");
-    let script = project.join("oxplow/extensions/tracker/bin/provider");
+    let script = project.join(".oxplow/extensions/tracker/bin/provider");
     let seen = tempfile::tempdir().unwrap();
     let cwd_file = seen.path().join("cwd");
     std::fs::write(
@@ -1495,36 +1499,55 @@ async fn a_provider_runs_from_its_verified_copy() {
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
     first_read(&fx).await;
-    let copies = fx
-        .svc
-        .layout
-        .state_dir
-        .join("global-config/provider-copies");
-    let ran_in = std::path::PathBuf::from(std::fs::read_to_string(&cwd_file).unwrap().trim());
-    let copies = copies.canonicalize().unwrap();
-    assert!(
-        ran_in.starts_with(&copies),
-        "{} not under {}",
-        ran_in.display(),
-        copies.display()
+    // It ran in its extension's deployment, not in the live tree.
+    let ran_in = std::path::PathBuf::from(std::fs::read_to_string(&cwd_file).unwrap().trim())
+        .canonicalize()
+        .unwrap();
+    let hash = fx.svc.extension_catalog.live()["tracker"].clone();
+    let deployment = crate::extension_store::deployment_dir(&project, EXT, &hash)
+        .canonicalize()
+        .unwrap();
+    assert_eq!(ran_in, deployment);
+    assert_ne!(
+        ran_in,
+        project
+            .join(".oxplow/extensions/tracker")
+            .canonicalize()
+            .unwrap()
     );
+    // And what a start ran is recorded: the hash it was approved at and
+    // the deployment.
+    let record = std::fs::read_to_string(
+        fx.svc
+            .layout
+            .state_dir
+            .join("global-config/provider-copies")
+            .join(crate::collector_runner::project_key(&project))
+            .join("tracker/fake/last"),
+    )
+    .unwrap();
+    assert_eq!(record.lines().count(), 2, "{record}");
     assert!(
-        ran_in.ends_with("oxplow/extensions/tracker"),
-        "{}",
-        ran_in.display()
+        record
+            .lines()
+            .nth(1)
+            .is_some_and(|dir| dir.ends_with(&hash)),
+        "{record}"
     );
 
-    // Someone edits the copy: the next start replaces it from the
-    // approved tree before running.
+    // Someone edits the deployment: it is no longer what was approved, so
+    // the next start is refused.
     assert!(providers.stop(INSTANCE).await);
-    let copied = ran_in.join("bin/provider");
-    std::fs::write(&copied, "#!/bin/sh\necho tampered\nexit 1\n").unwrap();
+    std::fs::write(
+        deployment.join("bin/provider"),
+        "#!/bin/sh\necho tampered\nexit 1\n",
+    )
+    .unwrap();
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    // Its start's first read, in the background (tsk716).
-    first_read(&fx).await;
+    assert!(!running(&fx.svc, "fake"));
     assert_eq!(
-        std::fs::read_to_string(&copied).unwrap(),
-        std::fs::read_to_string(&script).unwrap()
+        providers.health(INSTANCE).unwrap().state,
+        InstanceState::Unapproved
     );
 }
 
@@ -1547,7 +1570,7 @@ async fn a_provider_cannot_declare_another_core_event_type() {
             >(),
         });
     std::fs::write(
-        project.join("oxplow/extensions/tracker/provider.json"),
+        project.join(".oxplow/extensions/tracker/provider.json"),
         serde_json::to_string(&declared).unwrap(),
     )
     .unwrap();
@@ -1708,6 +1731,8 @@ async fn approving_a_program_starts_its_enabled_instance() {
     let fx = services_with_effort().await;
     write_extension(&fx.svc.layout.project_dir, "");
     let ext = extension(&fx.svc.layout.project_dir);
+    // Deploying reloads the config, so the instance is enabled after.
+    crate::test_fixtures::activate(&fx.svc).await;
     configure(&fx, true, json!({ "team": "core" }));
     crate::test_fixtures::activate(&fx.svc).await;
     assert!(
@@ -1739,7 +1764,7 @@ async fn approving_updated_declarations_restarts_the_instance() {
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "bad-declarations");
     std::fs::write(
-        project.join("oxplow/extensions/tracker/provider.json"),
+        project.join(".oxplow/extensions/tracker/provider.json"),
         serde_json::to_string_pretty(&oxplow_provider_fake::bad_declarations()).unwrap(),
     )
     .unwrap();
@@ -1772,39 +1797,28 @@ async fn approving_updated_declarations_restarts_the_instance() {
     );
 }
 
-/// Declarations on disk that don't parse fail the extension's load, so
-/// the provider isn't there to compare: `NotFound`, never an empty diff,
-/// and the load error names the file.
+/// Declarations that don't parse fail the extension's load: the edit is
+/// held back naming the file, and the provider that was working goes on
+/// being described by its last working declarations.
 #[tokio::test]
-async fn declaration_impact_of_unreadable_declarations_is_an_error() {
+async fn unreadable_declarations_are_held_back_naming_the_file() {
     let (fx, _ext) = approved("").await;
     std::fs::write(
         fx.svc
             .layout
             .project_dir
-            .join("oxplow/extensions/tracker/provider.json"),
+            .join(".oxplow/extensions/tracker/provider.json"),
         "{ not json",
     )
     .unwrap();
     let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    assert!(problems.contains_key(EXT), "{problems:?}");
-    let err = fx
-        .svc
-        .providers
-        .declaration_impact(INSTANCE)
-        .await
-        .unwrap_err();
     assert!(
-        err.to_string().contains("provider.json"),
-        "an error naming the file, never an empty diff: {err:?}"
+        problems
+            .get(EXT)
+            .is_some_and(|why| why.join("\n").contains("provider.json")),
+        "{problems:?}"
     );
-    let errors = crate::extensions::load_extensions(&fx.svc.layout.project_dir)
-        .into_iter()
-        .find(|e| e.name == EXT)
-        .unwrap()
-        .errors
-        .join("\n");
-    assert!(errors.contains("provider.json"), "{errors}");
+    assert!(fx.svc.providers.declaration_impact(INSTANCE).await.is_ok());
 }
 
 /// tsk569: enabling from Settings writes nothing when the enable itself
@@ -2556,7 +2570,7 @@ async fn an_effect_doesnt_hear_its_own_external_write_echoed_by_a_read() {
     let fx = services_with_effort().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "");
-    let dir = project.join("oxplow/extensions").join(EXT);
+    let dir = project.join(".oxplow/extensions").join(EXT);
     let manifest = std::fs::read_to_string(dir.join("extension.yaml")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
@@ -2699,7 +2713,7 @@ async fn removing_an_instance_leaves_nothing_behind() {
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "needs:FAKE_TOKEN");
     let manifest = project
-        .join("oxplow/extensions")
+        .join(".oxplow/extensions")
         .join(EXT)
         .join("extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
@@ -3013,7 +3027,7 @@ async fn an_instance_credential_is_its_own() {
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "needs:FAKE_TOKEN");
     let manifest = project
-        .join("oxplow/extensions")
+        .join(".oxplow/extensions")
         .join(EXT)
         .join("extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
@@ -3190,7 +3204,7 @@ async fn approve_in(svc: &std::sync::Arc<crate::Services>) {
 /// The tracker's provider in `root` declares the credential `FAKE_TOKEN`.
 fn declare_token(root: &Path) {
     let manifest = root
-        .join("oxplow/extensions")
+        .join(".oxplow/extensions")
         .join(EXT)
         .join("extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
@@ -3448,7 +3462,7 @@ async fn a_project_instance_keeps_its_credentials_beside_a_global_one() {
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "needs:FAKE_TOKEN");
     let manifest = project
-        .join("oxplow/extensions")
+        .join(".oxplow/extensions")
         .join(EXT)
         .join("extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
@@ -3527,7 +3541,7 @@ async fn a_global_instances_credential_is_shared_across_projects() {
     let project = fx.svc.layout.project_dir.clone();
     let credentialed = |root: &Path| {
         let manifest = root
-            .join("oxplow/extensions")
+            .join(".oxplow/extensions")
             .join(EXT)
             .join("extension.yaml");
         let text = std::fs::read_to_string(&manifest).unwrap();
@@ -3585,6 +3599,9 @@ async fn a_global_instances_credential_is_shared_across_projects() {
         program.version.as_deref().unwrap(),
     )
     .unwrap();
+    // Deploying its sources reloads its config, so the project instance is
+    // added after.
+    crate::test_fixtures::activate_with_problems(&other).await;
     // A project instance of the same provider there has no token of its own.
     other.config.write().unwrap().extension_instances.insert(
         INSTANCE.into(),
@@ -3667,14 +3684,24 @@ async fn a_generation_restarts_only_the_instances_it_changed() {
     let running = fx.svc.providers.get(INSTANCE).await.expect("running");
 
     // Another extension is added: nothing of the provider changed.
-    let other = fx.svc.layout.project_dir.join("oxplow/extensions/other");
+    let other = fx.svc.layout.project_dir.join(".oxplow/extensions/other");
     std::fs::create_dir_all(&other).unwrap();
     std::fs::write(
         other.join("extension.yaml"),
         "manifest: 2\nname: other\nintent:\n  purpose: unrelated\n",
     )
     .unwrap();
-    crate::test_fixtures::activate(&fx.svc).await;
+    // Deploying `other` turns it on in the person's file and reloads the
+    // config; the instance's in-memory entry is put back before the
+    // generation that carries it publishes.
+    let kept = fx.svc.config.read().unwrap().extension_instances.clone();
+    let changes = crate::extension_deploy::stage_sources(&fx.svc).await;
+    fx.svc.config.write().unwrap().extension_instances = kept;
+    fx.svc
+        .extension_activation
+        .activate_live(fx.svc.clone(), &changes)
+        .await
+        .unwrap();
     let after = fx.svc.providers.get(INSTANCE).await.expect("still running");
     assert!(
         std::sync::Arc::ptr_eq(&running, &after),
@@ -3700,7 +3727,7 @@ async fn a_generation_restarts_only_the_instances_it_changed() {
         .svc
         .layout
         .project_dir
-        .join("oxplow/extensions/tracker/bin/provider");
+        .join(".oxplow/extensions/tracker/bin/provider");
     let text = std::fs::read_to_string(&script).unwrap();
     std::fs::write(&script, format!("{text}\n# edited\n")).unwrap();
     approve(&fx, &extension(&fx.svc.layout.project_dir)).await;
@@ -3751,7 +3778,7 @@ async fn a_late_read_on_a_stopped_instance_doesnt_touch_its_successor() {
 fn write_oauth_extension(project: &Path, hooks: &str, authorize: &str, token: &str, more: &str) {
     write_extension(project, hooks);
     let manifest = project
-        .join("oxplow/extensions")
+        .join(".oxplow/extensions")
         .join(EXT)
         .join("extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
@@ -5161,7 +5188,7 @@ async fn with_effect(hooks: &str, script: &str) -> TaskEffortFixture {
     let fx = services_with_task_effort().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, hooks);
-    let dir = project.join("oxplow/extensions").join(EXT);
+    let dir = project.join(".oxplow/extensions").join(EXT);
     let manifest = std::fs::read_to_string(dir.join("extension.yaml")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
@@ -5973,7 +6000,7 @@ async fn a_retry_that_cant_run_is_dropped() {
             .svc
             .layout
             .project_dir
-            .join("oxplow/extensions")
+            .join(".oxplow/extensions")
             .join(EXT);
         match case {
             "disabled" => crate::contribution_health::ContributionHealth::new(
@@ -6244,7 +6271,9 @@ async fn shutting_down_ends_every_process_gracefully() {
 async fn a_provider_needs_only_scopes_host_call_serves() {
     let root = tempfile::tempdir().unwrap();
     write_extension(root.path(), "");
-    let manifest = root.path().join("oxplow/extensions/tracker/extension.yaml");
+    let manifest = root
+        .path()
+        .join(".oxplow/extensions/tracker/extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
     std::fs::write(&manifest, format!("{text}    needs: [config.read]\n")).unwrap();
     let loaded = crate::extensions::load_extensions(root.path())
@@ -6263,11 +6292,11 @@ const POLICY: &str = "steward/fake";
 /// A private extension whose provider runs the fake as an effort policy
 /// with `hooks` (its state, `reacts` included, kept beside the project).
 fn write_policy_extension(project: &Path, hooks: &str) {
-    let dir = project.join("oxplow/extensions/steward");
+    let dir = project.join(".oxplow/extensions/steward");
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: steward\nsharing: private\nintent:\n  purpose: the fake effort policy\n  examples: [{ name: a }]\nproviders:\n  - id: fake\n    capability: effort_policy\n    entry: bin/provider\n    declarations: provider.json\n    needs: [sql.read]\n",
+        "manifest: 2\nname: steward\nintent:\n  purpose: the fake effort policy\n  examples: [{ name: a }]\nproviders:\n  - id: fake\n    capability: effort_policy\n    entry: bin/provider\n    declarations: provider.json\n    needs: [sql.read]\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -6564,11 +6593,11 @@ const HARNESS: &str = "conductor/fake";
 /// A private extension whose provider runs the fake as an agent harness
 /// with `hooks`.
 fn write_harness_extension(project: &Path, hooks: &str) {
-    let dir = project.join("oxplow/extensions/conductor");
+    let dir = project.join(".oxplow/extensions/conductor");
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: conductor\nsharing: private\nintent:\n  purpose: the fake agent harness\n  examples: [{ name: a }]\nproviders:\n  - id: fake\n    capability: agent_harness\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: conductor\nintent:\n  purpose: the fake agent harness\n  examples: [{ name: a }]\nproviders:\n  - id: fake\n    capability: agent_harness\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -6770,11 +6799,11 @@ fn launch_input(
 /// A project extension `shutter` whose provider `shutter` is the fake as a
 /// snapshots provider, keeping contents when `contents`.
 fn write_snapshots_extension(project: &Path, contents: bool) {
-    let dir = project.join("oxplow/extensions/shutter");
+    let dir = project.join(".oxplow/extensions/shutter");
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: shutter\nsharing: private\nintent:\n  purpose: the fake snapshots provider\n  examples: [{ name: a }]\nproviders:\n  - id: shutter\n    capability: snapshots\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: shutter\nintent:\n  purpose: the fake snapshots provider\n  examples: [{ name: a }]\nproviders:\n  - id: shutter\n    capability: snapshots\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -6977,11 +7006,11 @@ async fn a_snapshots_provider_without_contents_records_identities_only() {
 /// knowledge store, its pages kept in `state` (seeded by the caller, as a
 /// store holding pages written outside oxplow).
 fn write_knowledge_extension(project: &Path, state: &Path) {
-    let dir = project.join("oxplow/extensions/shelf");
+    let dir = project.join(".oxplow/extensions/shelf");
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: shelf\nsharing: private\nintent:\n  purpose: the fake knowledge store\n  examples: [{ name: a }]\nproviders:\n  - id: shelf\n    capability: knowledge\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: shelf\nintent:\n  purpose: the fake knowledge store\n  examples: [{ name: a }]\nproviders:\n  - id: shelf\n    capability: knowledge\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");

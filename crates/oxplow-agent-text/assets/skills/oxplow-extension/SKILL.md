@@ -1,6 +1,6 @@
 ---
 name: oxplow-extension
-description: Build oxplow lenses and extensions on request: custom pages over oxplow's data (tasks, efforts, threads, comments, wiki, snapshots, metrics facts) that the user sees in the app and can share with their team. Loads when the user asks to "make/build/show me a lens/page/view/list/report of X", "a place where I can see X", "track X across threads/efforts", "what's waiting on me", or asks to change an existing lens. Teaches the semantic layer (`v_model`, `oxplow_query_sql` over `v_*` views), the `oxplow/extensions/<name>/` file format, and the validate → oxplow_run_lens loop.
+description: Build oxplow lenses and extensions on request: custom pages over oxplow's data (tasks, efforts, threads, comments, wiki, snapshots, metrics facts) that the user sees in the app and can share with their team. Loads when the user asks to "make/build/show me a lens/page/view/list/report of X", "a place where I can see X", "track X across threads/efforts", "what's waiting on me", or asks to change an existing lens. Teaches the semantic layer (`v_model`, `oxplow_query_sql` over `v_*` views), the `.oxplow/extensions/<name>/` file format, and the validate → oxplow_run_lens loop.
 ---
 
 
@@ -8,10 +8,11 @@ description: Build oxplow lenses and extensions on request: custom pages over ox
 
 A **lens** is a saved query over oxplow's data plus how to show it, opened
 as a page; it updates as the work changes. Lenses live in **extensions**:
-plain-file folders at `oxplow/extensions/<name>/` (`extension.yaml`,
-`lenses/<slug>.yaml`) the user can keep, commit for their team or publish.
+plain-file folders at `.oxplow/extensions/<name>/` (`extension.yaml`,
+`lenses/<slug>.yaml`) the user can keep and share with their team.
 Scaffold with `oxplow extension new <kind> <name> --origin <your effort
-ref>`, then edit; the scaffold passes `check` as written.
+ref>`, then edit; the scaffold passes `check` as written. Nothing runs a
+source: an extension is live only after `oxplow.extension.deploy { name }`.
 
 **To answer a question** with a table, chart or list, call `oxplow_show_lens`
 (an existing `lens` plus `params`, or your own `spec`) instead of pasting
@@ -20,8 +21,11 @@ rows; build a lens file only for a lasting page.
 **The loop:** find the data (`v_model`, `v_model_column`, `oxplow_query_sql`:
 read the columns, never guess) → write the files → `oxplow_validate_extension`
 (`oxplow extension check`) after every edit → `oxplow_run_lens` → tell the user
-the title and how to open it (Cmd+P). Pass your own `stream_id` when in a
-worktree stream. `check` always dry-runs, so no sync is needed first.
+`oxplow.extension.deploy { name }` when it is right (it returns once the
+extension is live) → tell the user the title and how to open it (Cmd+P).
+Pass your own `stream_id` when in a worktree stream. `check`,
+`oxplow_preview_extension`, `oxplow_run_lens` and `oxplow_show_lens` with a
+`spec` read the source and dry-run, so no deploy is needed first.
 
 **Open the reference for the task at hand** (a file here, or `oxplow_get_skill`
 with `name: oxplow-extension` and `reference: <name>`):
@@ -39,11 +43,11 @@ with `name: oxplow-extension` and `reference: <name>`):
 - `references/testing.md`: `oxplow_preview_extension` and the fixture shape of every kind.
 - `references/providers.md`: external providers: testing, credentials, MCP adapters.
 - `references/lenses-in-use.md`: `oxplow_show_lens` details, changing "this lens", handing over.
-- `references/repair-and-sharing.md`: disabled contributions and repair, install, share.
+- `references/repair-and-sharing.md`: disabled contributions and repair, deploy, share.
 - `references/reading-data.md`: before you report numbers: `truncated`, `coverage`, metric folds, scope, example queries.
 - `references/dashboards.md`: choosing a lens, dashboard, component or snapshot; building a dashboard; adapting outside HTML into a component.
 
 Rules that live in other skills: wikilinks and refs in prose, see
 `oxplow-wiki-capture`; waiting on the person, `oxplow-runtime`; test
 commands run in the foreground, `oxplow-collection`; metrics, `oxplow-metrics`.
-A person approves programs, collectors and installs; you can't.
+A person approves programs and collectors; you can't.

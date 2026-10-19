@@ -27,8 +27,8 @@ fn write(root: &Path, rel: &str, body: &str) {
 fn acme(root: &Path, task: &str) {
     write(
         root,
-        "oxplow/extensions/acme/extension.yaml",
-        "manifest: 2\nname: acme\nversion: 1.2.0\nsharing: private\nintent: { purpose: Runs., origin: null, examples: [] }\n\
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2\nname: acme\nversion: 1.2.0\nintent: { purpose: Runs., origin: null, examples: [] }\n\
          event_types:\n  types:\n    - { type: acme.merged, v: 1, schema: merged.json, summary: A merge. }\n\
          collectors:\n\
          \x20 - id: star\n    runtime: starlark\n    entry: star.star\n    trigger: { on: [acme.merged] }\n    entities:\n      - { name: seen, key: k, columns: { k: text } }\n\
@@ -39,12 +39,12 @@ fn acme(root: &Path, task: &str) {
     );
     write(
         root,
-        "oxplow/extensions/acme/merged.json",
+        ".oxplow/extensions/acme/merged.json",
         r#"{"type": "object", "required": ["number"], "properties": {"number": {"type": "integer"}}}"#,
     );
     write(
         root,
-        "oxplow/extensions/acme/star.star",
+        ".oxplow/extensions/acme/star.star",
         "def transform(input):\n    return {\"entities\": {\"seen\": [{\"k\": \"x\"}]}}\n",
     );
     let compose = format!(
@@ -52,12 +52,12 @@ fn acme(root: &Path, task: &str) {
     );
     write(
         root,
-        "oxplow/extensions/acme/note.star",
+        ".oxplow/extensions/acme/note.star",
         &format!("def transform(x):\n    return {compose}\n"),
     );
     write(
         root,
-        "oxplow/extensions/acme/write.star",
+        ".oxplow/extensions/acme/write.star",
         &format!("def transform(x):\n    return {compose}\n"),
     );
 }
@@ -262,8 +262,8 @@ async fn a_run_records_what_its_grant_decided() {
     let root = svc.layout.project_dir.clone();
     write(
         &root,
-        "oxplow/extensions/acme/extension.yaml",
-        "manifest: 2\nname: acme\nsharing: private\nintent: { purpose: Runs., origin: null, examples: [] }\n\
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2\nname: acme\nintent: { purpose: Runs., origin: null, examples: [] }\n\
          collectors:\n\
          \x20 - id: gh\n    runtime: exec\n    entry: sync.sh\n    credentials: [GH_TOKEN]\n    network: [api.github.com]\n    entities:\n      - { name: pr, key: n, columns: { n: int } }\n\
          commands:\n\
@@ -271,17 +271,17 @@ async fn a_run_records_what_its_grant_decided() {
     );
     write(
         &root,
-        "oxplow/extensions/acme/sync.sh",
+        ".oxplow/extensions/acme/sync.sh",
         "#!/bin/sh\necho '{\"entities\":{\"pr\":[{\"n\":1}]}}'\n",
     );
     std::fs::set_permissions(
-        root.join("oxplow/extensions/acme/sync.sh"),
+        root.join(".oxplow/extensions/acme/sync.sh"),
         std::fs::Permissions::from_mode(0o755),
     )
     .unwrap();
     write(
         &root,
-        "oxplow/extensions/acme/count.star",
+        ".oxplow/extensions/acme/count.star",
         "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT 1 AS n\"})\n    return {\"commands\": [], \"result\": {\"n\": len(rows)}}\n",
     );
     crate::test_fixtures::activate(svc).await;

@@ -1060,7 +1060,7 @@ mod tests {
     use serde_json::Value;
     use std::path::Path;
 
-    const HEAD: &str = "manifest: 2\nname: acme\nsharing: private\nintent: { purpose: Effects., origin: null, examples: [] }\neffects:\n";
+    const HEAD: &str = "manifest: 2\nname: acme\nintent: { purpose: Effects., origin: null, examples: [] }\neffects:\n";
 
     /// Marks a finished item's title.
     const MARK_DONE: &str = "  - id: mark-done\n    summary: Mark a finished item.\n    on: [work_item.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: mark.star\n";
@@ -1069,7 +1069,7 @@ mod tests {
     /// Write extension `acme` into the project and publish the generation
     /// that carries it.
     async fn extension(svc: &std::sync::Arc<Services>, effects: &str, files: &[(&str, &str)]) {
-        let dir = svc.layout.project_dir.join("oxplow/extensions/acme");
+        let dir = svc.layout.project_dir.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("extension.yaml"), format!("{HEAD}{effects}")).unwrap();
         for (name, body) in files {
@@ -1283,7 +1283,7 @@ mod tests {
         std::fs::write(
             svc.layout
                 .project_dir
-                .join("oxplow/extensions/acme/mark.star"),
+                .join(".oxplow/extensions/acme/mark.star"),
             format!("{MARK}# edited\n"),
         )
         .unwrap();
@@ -1912,10 +1912,11 @@ mod tests {
         let svc = &fx.svc;
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         let before = title(&fx).await;
+        // The deployed folder is edited in place (a source edit changes
+        // nothing until it is deployed).
+        let deployed = effects(svc).into_iter().next().unwrap().0.path;
         std::fs::write(
-            svc.layout
-                .project_dir
-                .join("oxplow/extensions/acme/mark.star"),
+            std::path::Path::new(&deployed).join("mark.star"),
             format!("{MARK}# edited on disk\n"),
         )
         .unwrap();
@@ -1933,7 +1934,14 @@ mod tests {
                 .is_some_and(|e| e.contains("loaded script differs")),
             "{rows}"
         );
-        // Republished, the approved text is the loaded one.
+        // Deployed, the approved text is the loaded one.
+        std::fs::write(
+            svc.layout
+                .project_dir
+                .join(".oxplow/extensions/acme/mark.star"),
+            format!("{MARK}# edited on disk\n"),
+        )
+        .unwrap();
         crate::test_fixtures::activate(svc).await;
         let again = log(svc, state_changed(&fx, CanonicalState::Done)).await;
         consumer.handle(&again).await.unwrap();
@@ -2086,40 +2094,40 @@ mod tests {
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         let owner = |types: &str| {
-            format!("manifest: 2\nname: acme-pr\nsharing: private\nintent: {{ purpose: PRs., origin: null, examples: [] }}\nevent_types:\n  types:\n{types}")
+            format!("manifest: 2\nname: acme-pr\nintent: {{ purpose: PRs., origin: null, examples: [] }}\nevent_types:\n  types:\n{types}")
         };
         let v1 = "    - { type: acme_pr.merged, v: 1, schema: merged.v1.json, summary: A pull request merged. }\n";
         let v2 = "    - { type: acme_pr.merged, v: 2, schema: merged.v2.json, summary: A pull request merged by someone., upcast: merged.star }\n";
         write(
             &root,
-            "oxplow/extensions/acme-pr/extension.yaml",
+            ".oxplow/extensions/acme-pr/extension.yaml",
             &owner(v1),
         );
         write(
             &root,
-            "oxplow/extensions/acme-pr/merged.v1.json",
+            ".oxplow/extensions/acme-pr/merged.v1.json",
             r#"{"type": "object", "required": ["number"], "properties": {"number": {"type": "integer"}}}"#,
         );
         write(
             &root,
-            "oxplow/extensions/acme-pr/merged.v2.json",
+            ".oxplow/extensions/acme-pr/merged.v2.json",
             r#"{"type": "object", "required": ["number", "by"], "properties": {"number": {"type": "integer"}, "by": {"type": "string"}}}"#,
         );
         write(
             &root,
-            "oxplow/extensions/acme-pr/merged.star",
+            ".oxplow/extensions/acme-pr/merged.star",
             "def transform(x):\n    p = dict(x[\"payload\"])\n    p[\"by\"] = \"unknown\"\n    return p\n",
         );
         // The subscriber: retitles the fixture's task with what it saw.
         let task = oxplow_tasks::work_item_ref(fx.task);
         write(
             &root,
-            "oxplow/extensions/acme/extension.yaml",
+            ".oxplow/extensions/acme/extension.yaml",
             &format!("{HEAD}  - id: note\n    summary: Note a merge.\n    on: [acme_pr.merged]\n    entry: note.star\n"),
         );
         write(
             &root,
-            "oxplow/extensions/acme/note.star",
+            ".oxplow/extensions/acme/note.star",
             &format!(
                 "def transform(x):\n    e = x[\"event\"]\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.update\", \"input\": {{\"ref\": \"{task}\", \"title\": \"#%d v%d by %s\" % (e[\"payload\"][\"number\"], e[\"v\"], e[\"payload\"][\"by\"])}}}}]}}\n"
             ),
@@ -2150,7 +2158,7 @@ mod tests {
         // The owner publishes v2; the pump delivers the old row at it.
         write(
             &root,
-            "oxplow/extensions/acme-pr/extension.yaml",
+            ".oxplow/extensions/acme-pr/extension.yaml",
             &owner(&format!("{v1}{v2}")),
         );
         crate::test_fixtures::activate_with_problems(svc).await;
@@ -2526,15 +2534,11 @@ mod tests {
         approve(svc).await;
         let (ext, decl) = find_effect(svc, "acme/mark-done").unwrap();
         // The script changes under the run: the approval was of another.
-        extension(
-            svc,
-            MARK_DONE,
-            &[(
-                "mark.star",
-                "def transform(x):\n    return {\"skip\": \"changed\"}\n",
-            )],
+        std::fs::write(
+            std::path::Path::new(&ext.path).join("mark.star"),
+            "def transform(x):\n    return {\"skip\": \"changed\"}\n",
         )
-        .await;
+        .unwrap();
         let out = crate::commands::effect::backfill(
             svc,
             &ext,

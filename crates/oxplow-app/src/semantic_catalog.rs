@@ -96,7 +96,7 @@ mod tests {
     #[tokio::test]
     async fn data_entities_cover_models_and_unsynced_entities() {
         let root = tempfile::tempdir().unwrap();
-        let ext = root.path().join("oxplow/extensions/my-gh");
+        let ext = root.path().join(".oxplow/extensions/my-gh");
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),

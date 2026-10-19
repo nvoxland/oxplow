@@ -4,6 +4,8 @@
 //! asks for the approval again. Over an on-disk database, so a restart is
 //! real.
 
+mod common;
+
 use std::path::Path;
 use std::sync::Arc;
 
@@ -41,7 +43,7 @@ impl Project {
             .expect("it works");
         let example =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/triage");
-        copy_dir(&example, &dir.path().join("oxplow/extensions/triage"));
+        copy_dir(&example, &dir.path().join(".oxplow/extensions/triage"));
         Self {
             dir,
             secrets: Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
@@ -56,10 +58,7 @@ impl Project {
         let layout = oxplow_app::AppLayout::for_project(self.dir.path());
         let svc =
             Arc::new(oxplow_app::Services::boot(layout, self.secrets.clone()).expect("it works"));
-        svc.extension_activation
-            .activate(svc.clone())
-            .await
-            .expect("it works");
+        common::deploy_sources(&svc, self.dir.path()).await;
         svc
     }
 }
@@ -206,23 +205,17 @@ async fn an_edited_bundle_asks_for_the_approval_again_and_the_decisions_read_bac
 
     // A comment in the manifest isn't what they reviewed: the bundle and
     // the commands it may run are, so the approval stands.
-    let manifest = root.join("oxplow/extensions/triage/extension.yaml");
+    let manifest = root.join(".oxplow/extensions/triage/extension.yaml");
     let text = std::fs::read_to_string(&manifest).expect("it works");
     std::fs::write(&manifest, format!("# reviewed again\n{text}")).expect("it works");
-    svc.extension_activation
-        .activate(svc.clone())
-        .await
-        .expect("it works");
+    common::deploy_sources(&svc, root).await;
     assert_eq!(component_version(&svc, root), reviewed);
 
     // The bundle changes after they reviewed it.
-    let script = root.join("oxplow/extensions/triage/components/todo-board/app.js");
+    let script = root.join(".oxplow/extensions/triage/components/todo-board/app.js");
     let code = std::fs::read_to_string(&script).expect("it works");
     std::fs::write(&script, format!("{code}\n// edited\n")).expect("it works");
-    svc.extension_activation
-        .activate(svc.clone())
-        .await
-        .expect("it works");
+    common::deploy_sources(&svc, root).await;
 
     let stale = approve_board(&svc, root, &reviewed).unwrap_err();
     assert!(stale.contains("changed since you reviewed it"), "{stale}");

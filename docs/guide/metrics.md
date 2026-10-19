@@ -83,7 +83,7 @@ terminal the same scaffold is:
 oxplow extension new metric complex-fns --language rust --glob 'src/**/*.rs'
 ```
 
-That writes `oxplow/extensions/complex-fns/` with:
+That writes `.oxplow/extensions/complex-fns/` with:
 
 - a measure with one fact per file, so a change that touches three files
   rescans three files and keeps the rest;
@@ -113,7 +113,7 @@ looks low.
 The `/oxplow:new-metric` skill walks the same path with more structure.
 A metric that has to run an external program, or parse a report a tool
 writes, goes in the project's own extension,
-`oxplow/extensions/project/extension.yaml` (below); the external program
+`.oxplow/extensions/project/extension.yaml` (below); the external program
 needs your approval first.
 
 ## Where the numbers come from
@@ -127,7 +127,7 @@ understanding the software and its development, not only measuring agent
 collaboration. See [Lenses and extensions](lenses.md).
 
 A metric extension, including the project's own
-(`oxplow/extensions/project/extension.yaml`), takes four blocks:
+(`.oxplow/extensions/project/extension.yaml`), takes four blocks:
 
 - `measures` -- what is being counted, and how it aggregates.
 - `collectors` -- the script that produces the raw numbers, and when it

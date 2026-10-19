@@ -148,18 +148,14 @@ async fn revoking_the_approval_stops_a_streaming_job() {
 /// Add an extension of no concern to the job and activate the catalog
 /// with it.
 async fn change_another_extension(fx: &Fixture) {
-    let other = fx._dir.path().join("oxplow/extensions/other");
+    let other = fx._dir.path().join(".oxplow/extensions/other");
     std::fs::create_dir_all(&other).unwrap();
     std::fs::write(
         other.join("extension.yaml"),
         "manifest: 2\nname: other\nintent:\n  purpose: p\n",
     )
     .unwrap();
-    fx.svc
-        .extension_activation
-        .activate(fx.svc.clone())
-        .await
-        .expect("the catalog activates with the other extension");
+    crate::test_fixtures::activate(&fx.svc).await;
 }
 
 /// A job belongs to its extension's version, not to the whole catalog: one
@@ -208,16 +204,13 @@ async fn a_job_does_not_succeed_across_a_change_to_its_declaration() {
     std::fs::write(
         fx._dir
             .path()
-            .join("oxplow/extensions/triage/extension.yaml"),
+            .join(".oxplow/extensions/triage/extension.yaml"),
         changed,
     )
     .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     crate::exec_consent::approve_every(&fx.svc, crate::exec_consent::ProgramKind::Job).unwrap();
-    fx.svc
-        .extension_activation
-        .activate(fx.svc.clone())
-        .await
-        .expect("the new declaration activates");
+    crate::test_fixtures::activate(&fx.svc).await;
 
     let done = until(&fx, &id, |s| s["state"] != json!("running")).await;
     assert_eq!(done["state"], json!("cancelled"), "{done}");
@@ -237,7 +230,7 @@ async fn a_job_does_not_succeed_across_a_change_to_its_declaration() {
 async fn a_restart_runs_what_was_queued_and_interrupts_what_was_running() {
     let dir = tempfile::tempdir().unwrap();
     crate::test_fixtures::init_git_repo(dir.path());
-    let ext = dir.path().join("oxplow/extensions/triage");
+    let ext = dir.path().join(".oxplow/extensions/triage");
     std::fs::create_dir_all(ext.join("commands")).unwrap();
     std::fs::write(ext.join("extension.yaml"), MANIFEST).unwrap();
     std::fs::write(ext.join("commands/lookup.star"), LOOKUP).unwrap();
@@ -443,7 +436,7 @@ async fn an_idempotent_job_interrupted_three_times_ends_interrupted() {
 async fn a_restart_replays_an_idempotent_job_that_was_running() {
     let dir = tempfile::tempdir().unwrap();
     crate::test_fixtures::init_git_repo(dir.path());
-    let ext = dir.path().join("oxplow/extensions/triage");
+    let ext = dir.path().join(".oxplow/extensions/triage");
     std::fs::create_dir_all(ext.join("commands")).unwrap();
     std::fs::write(ext.join("extension.yaml"), manifest_idempotent()).unwrap();
     std::fs::write(ext.join("commands/lookup.star"), LOOKUP).unwrap();

@@ -16,28 +16,6 @@ use serde_yaml::Value;
 /// The manifest version this loader writes and prefers.
 pub const CURRENT: u32 = 2;
 
-/// Who the extension is for. Explicit and checked: a shared extension
-/// (committed for a team, installed from git, bundled) must name the
-/// engine it targets and its own version.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    specta::Type,
-    Default,
-    schemars::JsonSchema,
-)]
-#[serde(rename_all = "lowercase")]
-pub enum Sharing {
-    #[default]
-    Private,
-    Shared,
-}
-
 /// One acceptance example: an input and what the extension should make
 /// of it. Fixtures for `oxplow extension test`; data here.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
@@ -162,17 +140,11 @@ pub struct ManifestV2 {
     pub namespace: Option<String>,
     #[serde(default)]
     pub description: String,
-    /// `private` (the default: this project) or `shared` (`engine`
-    /// required).
-    #[serde(default)]
-    pub sharing: Sharing,
     /// The oxplow version range it targets, `>=MAJOR.MINOR[.PATCH]`.
-    /// Required when shared.
     #[serde(default)]
     pub engine: Option<String>,
     /// Its own version, `MAJOR.MINOR.PATCH` (semver; a `-pre` suffix is
-    /// fine). Recorded on every contribution it makes. Required when
-    /// shared.
+    /// fine). Recorded on every contribution it makes.
     #[serde(default)]
     pub version: Option<String>,
     /// Why it exists: its purpose, the ref that created it, and examples.
@@ -523,7 +495,7 @@ pub fn configuration_of(
 /// Problems with a manifest's own shape and lifecycle (not its
 /// cross-references, which need the loaded lenses). `file` is how the
 /// manifest is named in messages; `text` its source, for lines.
-pub fn check(m: &ManifestV2, file: &str, text: &str, bundled: bool) -> (Vec<String>, Vec<String>) {
+pub fn check(m: &ManifestV2, file: &str, text: &str) -> (Vec<String>, Vec<String>) {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
     errors.extend(configuration_of(m, file, text).1);
@@ -586,42 +558,19 @@ pub fn check(m: &ManifestV2, file: &str, text: &str, bundled: bool) -> (Vec<Stri
             }
         }
     }
-    if bundled && m.sharing != Sharing::Shared {
-        errors.push(at(
-            file,
-            key_line(text, "sharing").or(Some(1)),
-            "a bundled extension must declare `sharing: shared`",
-        ));
-    }
-    if m.sharing == Sharing::Shared {
-        match &m.engine {
-            None => errors.push(at(
+    // An `engine` it names must be met by this oxplow.
+    if let Some(engine) = &m.engine {
+        match engine_check(engine, current_engine()) {
+            Ok(true) => {}
+            Ok(false) => errors.push(at(
                 file,
-                Some(1),
-                "a shared extension must declare `engine: \">=MAJOR.MINOR\"` (the oxplow it targets)",
+                key_line(text, "engine"),
+                format!("needs oxplow {engine}; this is {}", current_engine()),
             )),
-            Some(engine) => match engine_check(engine, current_engine()) {
-                Ok(true) => {}
-                Ok(false) => errors.push(at(
-                    file,
-                    key_line(text, "engine"),
-                    format!("needs oxplow {engine}; this is {}", current_engine()),
-                )),
-                Err(e) => errors.push(at(file, key_line(text, "engine"), e)),
-            },
-        }
-    } else if let Some(engine) = &m.engine {
-        if let Err(e) = engine_check(engine, current_engine()) {
-            errors.push(at(file, key_line(text, "engine"), e));
+            Err(e) => errors.push(at(file, key_line(text, "engine"), e)),
         }
     }
     match &m.version {
-        // A bundled extension ships with oxplow: its version is oxplow's.
-        None if m.sharing == Sharing::Shared && !bundled => errors.push(at(
-            file,
-            Some(1),
-            "a shared extension must declare its `version: MAJOR.MINOR.PATCH`",
-        )),
         Some(v) if !valid_version(v) => errors.push(at(
             file,
             key_line(text, "version"),
@@ -655,24 +604,23 @@ mod tests {
     const OK: &str = "manifest: 2\nname: acme\nintent:\n  purpose: Count things\n  examples:\n    - { name: one, input: {}, expect: {} }\n";
 
     #[test]
-    fn a_minimal_private_manifest_is_clean() {
+    fn a_minimal_manifest_is_clean() {
         let m = parse(OK);
-        let (errors, warnings) = check(&m, "ext/extension.yaml", OK, false);
+        let (errors, warnings) = check(&m, "ext/extension.yaml", OK);
         assert!(errors.is_empty(), "{errors:?}");
         assert!(warnings.is_empty(), "{warnings:?}");
-        assert_eq!(m.sharing, Sharing::Private);
     }
 
     #[test]
     fn intent_is_required_and_an_empty_examples_list_warns() {
         let text = "manifest: 2\nname: acme\n";
-        let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
+        let (errors, _) = check(&parse(text), "e/extension.yaml", text);
         assert!(
             errors.iter().any(|e| e.contains("`intent` is required")),
             "{errors:?}"
         );
         let text = "manifest: 2\nname: acme\nintent:\n  purpose: x\n";
-        let (errors, warnings) = check(&parse(text), "e/extension.yaml", text, false);
+        let (errors, warnings) = check(&parse(text), "e/extension.yaml", text);
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(warnings.len(), 1);
         assert!(
@@ -683,29 +631,15 @@ mod tests {
     }
 
     #[test]
-    fn shared_needs_engine_and_version() {
-        let text = "manifest: 2\nname: acme\nsharing: shared\nintent:\n  purpose: x\n  examples: [{ name: a }]\nui:\n  replacements: []\n";
-        let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
-        assert!(
-            errors.iter().any(|e| e.contains("must declare `engine")),
-            "{errors:?}"
-        );
-        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\n";
-        let (errors, warnings) = check(&parse(text), "e/extension.yaml", text, true);
+    fn an_engine_named_must_be_met() {
+        let text = "manifest: 2\nname: acme\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\n";
+        let (errors, warnings) = check(&parse(text), "e/extension.yaml", text);
         assert!(
             errors.is_empty() && warnings.is_empty(),
             "{errors:?} {warnings:?}"
         );
-        // Bundled must be shared; a too-new engine is refused.
-        let (errors, _) = check(&parse(OK), "e/extension.yaml", OK, true);
-        assert!(
-            errors
-                .iter()
-                .any(|e| e.contains("bundled extension must declare `sharing: shared`")),
-            "{errors:?}"
-        );
-        let text = "manifest: 2\nname: acme\nsharing: shared\nengine: \">=99.0\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\n";
-        let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
+        let text = "manifest: 2\nname: acme\nengine: \">=99.0\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\n";
+        let (errors, _) = check(&parse(text), "e/extension.yaml", text);
         assert!(
             errors.iter().any(|e| e.contains("needs oxplow >=99.0")),
             "{errors:?}"
@@ -731,13 +665,13 @@ mod tests {
         // schema is its provider's declarations'.
         assert!(serde_yaml::from_str::<ManifestV2>("manifest: 2\nname: a\nconfig: {}\n").is_err());
         let text = "manifest: 3\nname: acme\nintent: { purpose: x, examples: [{ name: a }] }\n";
-        let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
+        let (errors, _) = check(&parse(text), "e/extension.yaml", text);
         assert!(
             errors[0].contains("manifest version 3 is not supported"),
             "{errors:?}"
         );
         let text = "manifest: 2\nname: acme\nintent: { purpose: x, origin: nope, examples: [{ name: a }] }\n";
-        let (errors, _) = check(&parse(text), "e/extension.yaml", text, false);
+        let (errors, _) = check(&parse(text), "e/extension.yaml", text);
         assert!(errors[0].contains("not a canonical ref"), "{errors:?}");
     }
 
@@ -747,7 +681,7 @@ mod tests {
     fn intent_prompts_are_questions_about_a_ref_kind() {
         let text = "manifest: 2\nname: acme\nintent:\n  purpose: x\n  examples: [{ name: a }]\n  prompts:\n    - { prompt: 'Which PRs are waiting on me?' }\n    - { prompt: 'Who reviews this commit?', about: commit }\n";
         let m = parse(text);
-        let (errors, _) = check(&m, "e/extension.yaml", text, false);
+        let (errors, _) = check(&m, "e/extension.yaml", text);
         assert!(errors.is_empty(), "{errors:?}");
         let prompts = intent_of(&m, "e/extension.yaml", text).0.unwrap().prompts;
         assert_eq!(
@@ -765,7 +699,7 @@ mod tests {
             ("{ prompt: x, about: nope }", "`nope` isn't a kind of ref"),
         ] {
             let text = format!("manifest: 2\nname: acme\nintent:\n  purpose: x\n  examples: [{{ name: a }}]\n  prompts:\n    - {entry}\n");
-            let (errors, _) = check(&parse(&text), "e/extension.yaml", &text, false);
+            let (errors, _) = check(&parse(&text), "e/extension.yaml", &text);
             assert!(
                 errors
                     .iter()

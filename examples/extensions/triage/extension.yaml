@@ -1,7 +1,6 @@
 manifest: 2
 name: triage
 description: Sorts the code's TODO comments into bugs, cleanup and features, next to how much open work there is.
-sharing: shared
 engine: ">=0.7"
 version: 0.1.0
 intent:

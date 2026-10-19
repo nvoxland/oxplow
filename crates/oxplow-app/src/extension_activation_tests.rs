@@ -9,7 +9,7 @@ use std::{path::Path, sync::Arc, time::Duration};
 /// Extension `name` with one read command, `<name>.answer.get`, whose
 /// result is `{"v": v}`; `extra` is appended to its manifest.
 fn write_ext(root: &Path, name: &str, v: u32, extra: &str) {
-    let dir = root.join(format!("oxplow/extensions/{name}"));
+    let dir = root.join(format!(".oxplow/extensions/{name}"));
     std::fs::create_dir_all(dir.join("handlers")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
@@ -30,10 +30,7 @@ async fn project() -> (tempfile::TempDir, Arc<crate::Services>) {
     crate::test_fixtures::init_git_repo(dir.path());
     write_ext(dir.path(), "alpha", 1, "");
     let svc = crate::Services::in_memory(dir.path()).await.unwrap();
-    svc.extension_activation
-        .activate(svc.clone())
-        .await
-        .expect("the first candidate activates");
+    crate::test_fixtures::activate_with_problems(&svc).await;
     (dir, svc)
 }
 
@@ -50,6 +47,20 @@ async fn answer(svc: &crate::Services, name: &str) -> Result<Value, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Deploy what the test wrote and activate it, keeping the activation's
+/// own outcome (the fixture retries a rejected candidate).
+async fn deploy_and_activate(
+    svc: &Arc<crate::Services>,
+) -> Result<
+    Arc<crate::extension_catalog::CatalogSnapshot>,
+    oxplow_db::TxError<crate::vocabulary_reactor::VocabularyErrors>,
+> {
+    let changes = crate::extension_deploy::stage_sources(svc).await;
+    svc.extension_activation
+        .activate_live(svc.clone(), &changes)
+        .await
+}
+
 fn problems(svc: &crate::Services) -> String {
     format!("{:?}", svc.extension_activation.problems())
 }
@@ -64,10 +75,7 @@ async fn a_broken_update_keeps_the_last_working_version() {
 
     write_ext(dir.path(), "alpha", 2, "bogus_key: true\n");
     write_ext(dir.path(), "beta", 7, "");
-    svc.extension_activation
-        .activate(svc.clone())
-        .await
-        .expect("the rest activate without alpha's edit");
+    crate::test_fixtures::activate_with_problems(&svc).await;
 
     assert_eq!(answer(&svc, "alpha").await, Ok(json!(1)), "the last good");
     assert_eq!(answer(&svc, "beta").await, Ok(json!(7)));
@@ -78,10 +86,7 @@ async fn a_broken_update_keeps_the_last_working_version() {
     );
 
     write_ext(dir.path(), "alpha", 3, "");
-    svc.extension_activation
-        .activate(svc.clone())
-        .await
-        .unwrap();
+    crate::test_fixtures::activate_with_problems(&svc).await;
     assert_eq!(
         answer(&svc, "alpha").await,
         Ok(json!(3)),
@@ -95,10 +100,7 @@ async fn a_broken_update_keeps_the_last_working_version() {
 async fn a_new_broken_extension_exposes_nothing() {
     let (dir, svc) = project().await;
     write_ext(dir.path(), "gamma", 1, "bogus_key: true\n");
-    svc.extension_activation
-        .activate(svc.clone())
-        .await
-        .unwrap();
+    crate::test_fixtures::activate_with_problems(&svc).await;
     let err = answer(&svc, "gamma").await.unwrap_err();
     assert!(err.contains("unknown command"), "{err}");
     assert!(
@@ -120,7 +122,7 @@ async fn publication_waits_for_the_readers_of_the_last_generation() {
     write_ext(dir.path(), "alpha", 2, "");
     let activating = {
         let svc = svc.clone();
-        tokio::spawn(async move { svc.extension_activation.activate(svc.clone()).await })
+        tokio::spawn(async move { deploy_and_activate(&svc).await })
     };
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(
@@ -161,7 +163,7 @@ async fn a_waiting_publication_names_the_readers_it_waits_for() {
     write_ext(dir.path(), "alpha", 2, "");
     let activating = {
         let svc = svc.clone();
-        tokio::spawn(async move { svc.extension_activation.activate(svc.clone()).await })
+        tokio::spawn(async move { deploy_and_activate(&svc).await })
     };
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(
@@ -199,10 +201,7 @@ async fn a_panic_after_commit_recovers_the_generation() {
     let (dir, svc) = project().await;
     write_ext(dir.path(), "alpha", 2, "");
     svc.extension_activation.panic_once_after_commit();
-    svc.extension_activation
-        .activate(svc.clone())
-        .await
-        .expect("the activation recovers");
+    crate::test_fixtures::activate_with_problems(&svc).await;
     assert!(svc.extension_activation.pin().await.is_ok());
     assert_eq!(answer(&svc, "alpha").await, Ok(json!(2)));
 }
@@ -212,22 +211,16 @@ async fn a_panic_after_commit_recovers_the_generation() {
 async fn a_disabled_extension_exposes_nothing() {
     let (dir, svc) = project().await;
     write_ext(dir.path(), "beta", 7, "");
-    svc.extension_activation
-        .activate(svc.clone())
-        .await
-        .unwrap();
+    crate::test_fixtures::activate_with_problems(&svc).await;
     assert_eq!(answer(&svc, "beta").await, Ok(json!(7)));
 
     std::fs::write(
-        dir.path().join(".oxplow/project.yaml"),
-        "extensions:\n  disabled: [beta]\n",
+        dir.path().join(".oxplow/personal.yaml"),
+        "disableExtensions: [beta]\n",
     )
     .unwrap();
     svc.reload_config_from_disk().unwrap();
-    svc.extension_activation
-        .activate(svc.clone())
-        .await
-        .unwrap();
+    crate::test_fixtures::activate_with_problems(&svc).await;
     let err = answer(&svc, "beta").await.unwrap_err();
     assert!(err.contains("unknown command"), "{err}");
     assert_eq!(answer(&svc, "alpha").await, Ok(json!(1)));
@@ -244,15 +237,15 @@ async fn a_model_that_does_not_compile_holds_back_only_its_extension() {
         1,
         "models:\n  - name: blocked\n    version: 1\n    description: Blocked work items.\n    columns:\n      - { name: ref, type: TEXT, doc: Work item ref. }\n",
     );
-    std::fs::create_dir_all(dir.path().join("oxplow/extensions/late/models")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".oxplow/extensions/late/models")).unwrap();
     std::fs::write(
-        dir.path().join("oxplow/extensions/late/models/blocked.sql"),
+        dir.path()
+            .join(".oxplow/extensions/late/models/blocked.sql"),
         "SELECT no_such_column AS ref FROM ref('work_item')",
     )
     .unwrap();
     write_ext(dir.path(), "alpha", 2, "");
-    let outcome = svc.extension_activation.activate(svc.clone()).await;
-    assert!(outcome.is_ok(), "{:?}", outcome.err());
+    crate::test_fixtures::activate_with_problems(&svc).await;
     assert_eq!(answer(&svc, "alpha").await, Ok(json!(2)));
     assert!(answer(&svc, "late").await.is_err(), "late isn't active");
     assert!(problems(&svc).contains("late"), "{}", problems(&svc));
@@ -273,7 +266,7 @@ async fn the_documented_examples_activate() {
         }
         let to = dir
             .path()
-            .join("oxplow/extensions")
+            .join(".oxplow/extensions")
             .join(from.file_name().unwrap());
         for file in walkdir::WalkDir::new(&from)
             .into_iter()
@@ -287,10 +280,7 @@ async fn the_documented_examples_activate() {
         }
     }
     let svc = crate::Services::in_memory(dir.path()).await.unwrap();
-    svc.extension_activation
-        .activate(svc.clone())
-        .await
-        .expect("activates");
+    crate::test_fixtures::activate_with_problems(&svc).await;
     assert_eq!(problems(&svc), "{}");
     let active = svc
         .extension_catalog
@@ -336,11 +326,17 @@ async fn shutdown_stops_the_background_loops() {
 async fn concurrent_activations_serialize_into_one_generation() {
     let (dir, svc) = project().await;
     write_ext(dir.path(), "alpha", 2, "");
+    let changes = crate::extension_deploy::stage_sources(&svc).await;
     let (a, b) = {
         let (s1, s2) = (svc.clone(), svc.clone());
+        let (c1, c2) = (changes.clone(), changes.clone());
         (
-            tokio::spawn(async move { s1.extension_activation.activate(s1.clone()).await }),
-            tokio::spawn(async move { s2.extension_activation.activate(s2.clone()).await }),
+            tokio::spawn(
+                async move { s1.extension_activation.activate_live(s1.clone(), &c1).await },
+            ),
+            tokio::spawn(
+                async move { s2.extension_activation.activate_live(s2.clone(), &c2).await },
+            ),
         )
     };
     let (a, b) = (a.await.unwrap().unwrap(), b.await.unwrap().unwrap());
@@ -360,10 +356,17 @@ async fn an_edit_during_activation_rejects_it_and_the_next_carries_the_edit() {
     write_ext(dir.path(), "alpha", 2, "");
     let activating = {
         let svc = svc.clone();
-        tokio::spawn(async move { svc.extension_activation.activate(svc.clone()).await })
+        tokio::spawn(async move { deploy_and_activate(&svc).await })
     };
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(!activating.is_finished());
+    // A change to which extensions are on overtakes the candidate.
+    std::fs::write(
+        dir.path().join(".oxplow/personal.yaml"),
+        "enableExtensions: [alpha]\ndisableExtensions: [elsewhere]\n",
+    )
+    .unwrap();
+    svc.reload_config_from_disk().unwrap();
     write_ext(dir.path(), "alpha", 3, "");
     drop(pin);
     let outcome = tokio::time::timeout(Duration::from_secs(10), activating)
@@ -377,10 +380,7 @@ async fn an_edit_during_activation_rejects_it_and_the_next_carries_the_edit() {
         "nothing half-published"
     );
 
-    svc.extension_activation
-        .activate(svc.clone())
-        .await
-        .expect("the next activation carries the edit");
+    crate::test_fixtures::activate_with_problems(&svc).await;
     assert_eq!(answer(&svc, "alpha").await, Ok(json!(3)));
 }
 
@@ -394,7 +394,7 @@ async fn a_panic_on_the_restage_too_leaves_the_boundary_unavailable() {
     write_ext(dir.path(), "alpha", 2, "");
     svc.extension_activation
         .panic_at(PanicPoint::AfterCommit, 2);
-    let Err(error) = svc.extension_activation.activate(svc.clone()).await else {
+    let Err(error) = deploy_and_activate(&svc).await else {
         panic!("two panics are not recovered");
     };
     let text = format!("{error:?}");
@@ -410,10 +410,7 @@ async fn a_panic_on_the_restage_too_leaves_the_boundary_unavailable() {
         .to_string();
     assert!(refused.contains("unavailable"), "{refused}");
 
-    svc.extension_activation
-        .activate(svc.clone())
-        .await
-        .expect("the next activation recovers");
+    crate::test_fixtures::activate_with_problems(&svc).await;
     assert_eq!(answer(&svc, "alpha").await, Ok(json!(2)));
 }
 
@@ -426,10 +423,7 @@ async fn a_panic_after_the_maps_are_published_recovers_the_generation() {
     write_ext(dir.path(), "alpha", 2, "");
     svc.extension_activation
         .panic_at(PanicPoint::BeforeBoundary, 1);
-    svc.extension_activation
-        .activate(svc.clone())
-        .await
-        .expect("the activation recovers");
+    crate::test_fixtures::activate_with_problems(&svc).await;
     assert_eq!(answer(&svc, "alpha").await, Ok(json!(2)));
     assert_eq!(problems(&svc), "{}");
 }

@@ -111,15 +111,15 @@ mod tests {
         // `late` has a good model, `shaky` one that doesn't compile: the
         // broken extension is held back with its error, the other publishes.
         let (good, broken) = MANIFEST.split_once("  - name: broken").unwrap();
-        write(&root, "oxplow/extensions/late/extension.yaml", good);
+        write(&root, ".oxplow/extensions/late/extension.yaml", good);
         write(
             &root,
-            "oxplow/extensions/late/models/blocked.sql",
+            ".oxplow/extensions/late/models/blocked.sql",
             "SELECT ref FROM ref('work_item') WHERE state = 'blocked'",
         );
         write(
             &root,
-            "oxplow/extensions/shaky/extension.yaml",
+            ".oxplow/extensions/shaky/extension.yaml",
             &format!(
                 "{}  - name: broken{broken}",
                 good.replace("name: late", "name: shaky")
@@ -130,7 +130,7 @@ mod tests {
         );
         write(
             &root,
-            "oxplow/extensions/shaky/models/broken.sql",
+            ".oxplow/extensions/shaky/models/broken.sql",
             "SELECT nope FROM ref('work_item')",
         );
         crate::test_fixtures::activate_with_problems(svc).await;
@@ -148,8 +148,8 @@ mod tests {
         // Off: its views go.
         write(
             &root,
-            ".oxplow/project.yaml",
-            "extensions:\n  disabled: [late]\n",
+            ".oxplow/personal.yaml",
+            "disableExtensions: [late]\n",
         );
         crate::test_fixtures::activate_with_problems(svc).await;
         assert!(svc
@@ -167,27 +167,29 @@ mod tests {
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
         // An author's worktree: its extensions aren't the activated
-        // project's, so nothing of them is published.
+        // project's, so nothing of them is published. A standalone catalog
+        // reads its sources, as the author's tools do.
+        let catalog = crate::extension_catalog::ExtensionCatalog::new();
         let authoring = tempfile::tempdir().unwrap();
         let root = authoring.path().to_path_buf();
         write(
             &root,
-            "oxplow/extensions/late/extension.yaml",
+            ".oxplow/extensions/late/extension.yaml",
             "manifest: 2\nname: late\nintent:\n  purpose: x\nmodels:\n  - name: counted\n    version: 1\n    description: The work items.\n    columns:\n      - { name: ref, type: TEXT, doc: Work item ref. }\n",
         );
         write(
             &root,
-            "oxplow/extensions/late/models/counted.sql",
+            ".oxplow/extensions/late/models/counted.sql",
             "SELECT ref FROM ref('work_item')",
         );
         write(
             &root,
-            "oxplow/extensions/late/lenses/counted.yaml",
+            ".oxplow/extensions/late/lenses/counted.yaml",
             "title: Counted\nquery: SELECT count(*) AS n FROM v_late_counted\n",
         );
         let ctx = crate::extensions::LensContext::default();
         let run = |layer: crate::sql_gateway::SqlGateway| {
-            let catalog = &svc.extension_catalog;
+            let catalog = &catalog;
             let root = root.clone();
             let ctx = ctx.clone();
             async move {
@@ -204,8 +206,7 @@ mod tests {
         };
         let plain = run(svc.sql.clone()).await.unwrap_err().to_string();
         assert!(plain.contains("v_late_counted"), "{plain}");
-        let overlay =
-            crate::extensions::lens_overlay(&svc.sql, &svc.extension_catalog, &root, "late").await;
+        let overlay = crate::extensions::lens_overlay(&svc.sql, &catalog, &root, "late").await;
         let answered = run(svc.sql.with_overlay(overlay)).await.unwrap();
         assert_eq!(answered.result.rows.len(), 1);
     }
@@ -227,12 +228,12 @@ mod tests {
         let title = "      - { name: title, type: TEXT, doc: Title. }\n";
         write(
             &root,
-            "oxplow/extensions/late/extension.yaml",
+            ".oxplow/extensions/late/extension.yaml",
             &manifest(id),
         );
         write(
             &root,
-            "oxplow/extensions/late/models/blocked.sql",
+            ".oxplow/extensions/late/models/blocked.sql",
             "SELECT ref FROM ref('work_item') WHERE state = 'blocked'",
         );
         crate::test_fixtures::activate_with_problems(svc).await;
@@ -252,12 +253,12 @@ mod tests {
         assert_eq!(validate().await, "");
         write(
             &root,
-            "oxplow/extensions/late/extension.yaml",
+            ".oxplow/extensions/late/extension.yaml",
             &manifest(&format!("{id}{title}")),
         );
         write(
             &root,
-            "oxplow/extensions/late/models/blocked.sql",
+            ".oxplow/extensions/late/models/blocked.sql",
             "SELECT ref, title FROM ref('work_item') WHERE state = 'blocked'",
         );
         let errors = validate().await;
@@ -267,7 +268,7 @@ mod tests {
         );
         write(
             &root,
-            "oxplow/extensions/late/models/blocked.sql",
+            ".oxplow/extensions/late/models/blocked.sql",
             "SELECT ref, title FROM source('work_item')",
         );
         assert!(validate().await.contains("only its own extension's tables"));

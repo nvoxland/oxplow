@@ -24,7 +24,7 @@ version it declared.
 ## It needs effort-review
 
 Install both: copy `effort-review/` and `review-badges/` into
-`oxplow/extensions/`, then follow effort-review's README (a model on the
+`.oxplow/extensions/`, then follow effort-review's README (a model on the
 **Summarize** role, its job approved). Reviews appear as efforts finish.
 review-badges itself runs no program, so there is nothing of its own to
 approve.
@@ -49,7 +49,7 @@ saying the import withheld them and why.
 
 ## Test it
 
-`oxplow extension test oxplow/extensions/review-badges` runs the two lens
+`oxplow extension test .oxplow/extensions/review-badges` runs the two lens
 examples (both empty in a fresh project).
 `oxplow-sdk/tests/examples.rs` also runs it beside effort-review: present,
 disabled, on another version and missing, and with a real review.

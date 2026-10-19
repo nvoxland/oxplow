@@ -602,31 +602,34 @@ pub fn first_difference(approved: &InitializeResult, live: &InitializeResult) ->
 /// and loses the baseline `last_approved` reads.
 pub(crate) const PASSED_ENV: [&str; 3] = ["PATH", "HOME", "LLVM_PROFILE_FILE"];
 
-/// A verified copy of an approved provider's extension folder: what a
-/// start runs, so the bytes that run are the bytes whose hash was
-/// approved — not the live tree, which a checkout or an edit can change
-/// between the check and the exec (or under a provider that loads its
-/// modules lazily).
+/// An approved provider, as a start runs it: from its extension's
+/// deployment, which nothing changes after it is made, checked against
+/// what this machine approved — the bytes that run are the bytes whose
+/// hash was approved.
 pub struct ApprovedCopy {
     pub hash: String,
+    /// Where `hash` is computed from (the project; the deployment's path is
+    /// whole).
     pub root: PathBuf,
-    /// The provider's folder inside the copy.
+    /// The provider's folder: its extension's deployment.
     pub ext_dir: PathBuf,
-    /// Its declarations, read from the copy.
+    /// Its declarations, read from the deployment.
     pub declared: InitializeResult,
 }
 
-/// Copy `ext`'s folder into `copies/<ext>/<id>/<hash>` and check that the
-/// copy's hash is approved on this machine. An existing copy is re-hashed
-/// (it lives outside the repo, but a process running as the person can
-/// still write there), and older copies of the provider are removed.
+/// The record of what a start of a program last ran (`copies/<ext>/<id>/last`):
+/// its hash and its deployment's folder.
+fn last_record(copies: &Path, ext: &str, id: &str) -> PathBuf {
+    copies.join(ext).join(id).join("last")
+}
+
+/// Check that `ext`'s provider `spec`, as its deployment holds it, is
+/// approved on this machine, and record that a start ran it — what
+/// [`last_approved`] reads.
 ///
-/// One start of a program copies at a time (tsk839): instances of one
-/// program start together routinely, and each start's cleanup removes
-/// what isn't its own hash — another's temp copy, or a kept copy it
-/// replaced — so the whole copy, keep and cleanup runs under an advisory
+/// One start of a program records at a time (tsk839), under an advisory
 /// lock on `copies/<ext>/<id>.lock`, which threads and processes alike
-/// wait on. A temp copy found under the lock was abandoned.
+/// wait on.
 pub fn approved_copy(
     project_dir: &Path,
     copies: &Path,
@@ -640,41 +643,24 @@ pub fn approved_copy(
         message,
     };
     let program = crate::exec_consent::provider_program(ext, spec);
-    let rel = ext.path.trim_end_matches('/');
+    let ext_dir = ext_dir(project_dir, ext);
     let base = copies.join(&ext.name).join(&spec.id);
     let _one_at_a_time =
-        lock_copies(&base).map_err(|e| failed(format!("copying it to run: {e}")))?;
-    let tmp = base.join(format!(".tmp-{}", uuid::Uuid::new_v4()));
-    let copied = crate::approved_code::copy_directory(&project_dir.join(rel), &tmp.join(rel))
-        .and_then(|()| program.hash(&tmp));
-    let hash = match copied {
-        Ok(h) => h,
-        Err(e) => {
-            let _ = std::fs::remove_dir_all(&tmp);
-            return Err(failed(format!("copying it to run: {e}")));
-        }
-    };
+        lock_copies(&base).map_err(|e| failed(format!("checking it to run: {e}")))?;
+    let hash = program
+        .hash(project_dir)
+        .map_err(|e| failed(format!("checking it to run: {e}")))?;
     if !approvals.is_approved(&program.key(), &hash) {
-        let _ = std::fs::remove_dir_all(&tmp);
         return Err(HostError::Unapproved(name));
     }
-    let root = base.join(&hash);
-    let intact = root.is_dir() && program.hash(&root).is_ok_and(|h| h == hash);
-    if intact {
-        let _ = std::fs::remove_dir_all(&tmp);
-    } else {
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::rename(&tmp, &root).map_err(|e| failed(format!("keeping its copy: {e}")))?;
-    }
-    // Older versions (and abandoned temp copies) go.
-    if let Ok(entries) = std::fs::read_dir(&base) {
-        for entry in entries.flatten() {
-            if entry.file_name() != hash.as_str() {
-                let _ = std::fs::remove_dir_all(entry.path());
-            }
-        }
-    }
-    let ext_dir = root.join(rel);
+    std::fs::create_dir_all(&base)
+        .and_then(|()| {
+            std::fs::write(
+                last_record(copies, &ext.name, &spec.id),
+                format!("{hash}\n{}\n", ext_dir.display()),
+            )
+        })
+        .map_err(|e| failed(format!("recording what ran: {e}")))?;
     let declared =
         super::spec::read_declarations(spec, &|f| std::fs::read_to_string(ext_dir.join(f)).ok())
             .map_err(&failed)?;
@@ -682,8 +668,18 @@ pub fn approved_copy(
         ext_dir,
         declared,
         hash,
-        root,
+        root: project_dir.to_path_buf(),
     })
+}
+
+/// The extension a start of `ext`'s provider `id` last ran, loaded from its
+/// deployment, when that deployment is still in the store and unchanged.
+fn last_ran(copies: &Path, ext: &str, id: &str) -> Option<(String, crate::extensions::Extension)> {
+    let text = std::fs::read_to_string(last_record(copies, ext, id)).ok()?;
+    let mut lines = text.lines();
+    let (hash, dir) = (lines.next()?.to_string(), PathBuf::from(lines.next()?));
+    dir.is_dir()
+        .then(|| (hash, crate::extensions::load_extension_at(&dir, ext)))
 }
 
 /// The advisory lock on a program's copies (`<base>.lock`, beside the
@@ -704,48 +700,37 @@ pub(crate) fn lock_copies(base: &Path) -> std::io::Result<std::fs::File> {
     Ok(lock)
 }
 
-/// The copy of `spec` a start last ran (`copies/<ext>/<id>/<hash>`, kept
-/// until a newer approved copy replaces it), when it is still intact: its
-/// spec and declarations, read from the copy — what the person approved
-/// last, whether or not an instance runs now. `None` before it first ran.
+/// The provider `spec` as a start last ran it: its spec and declarations,
+/// read from that deployment — what the person approved last, whether or
+/// not an instance runs now. `None` before it first ran, or once that
+/// deployment left the store.
 pub fn last_approved(
     copies: &Path,
     ext: &crate::extensions::Extension,
     spec: &ProviderSpec,
 ) -> Option<super::spec::DeclaredProvider> {
-    let rel = ext.path.trim_end_matches('/');
     let base = copies.join(&ext.name).join(&spec.id);
     if !base.is_dir() {
         return None;
     }
-    // A start replacing the copy holds this lock: read between its removal
-    // of the old one and its rename of the new and there is no copy to see.
     let _one_at_a_time = lock_copies(&base).ok()?;
-    let entries = std::fs::read_dir(&base).ok()?;
-    entries.flatten().find_map(|entry| {
-        let hash = entry.file_name().into_string().ok()?;
-        if hash.starts_with('.') {
-            return None;
-        }
-        let root = entry.path();
-        let copied = crate::extensions::load_project_extension(&root, &ext.name);
-        let copied_spec = copied.providers.iter().find(|p| p.id == spec.id)?;
-        let program = crate::exec_consent::provider_program(&copied, copied_spec);
-        if program.hash(&root).ok()? != hash {
-            return None;
-        }
-        let dir = root.join(rel);
-        let declared = super::spec::DeclaredProvider::read(copied_spec, &|f| {
-            std::fs::read_to_string(dir.join(f)).ok()
-        });
-        declared.declarations.is_some().then_some(declared)
-    })
+    let (hash, ran) = last_ran(copies, &ext.name, &spec.id)?;
+    let ran_spec = ran.providers.iter().find(|p| p.id == spec.id)?;
+    let program = crate::exec_consent::provider_program(&ran, ran_spec);
+    let dir = PathBuf::from(&ran.path);
+    if program.hash(&dir).ok()? != hash {
+        return None;
+    }
+    let declared = super::spec::DeclaredProvider::read(ran_spec, &|f| {
+        std::fs::read_to_string(dir.join(f)).ok()
+    });
+    declared.declarations.is_some().then_some(declared)
 }
 
 /// The credentials provider `provider` of extension `ext` declared in the
-/// copy a start of it last ran: what a removed instance's are when the
-/// extension no longer declares the provider (tsk841). None when it never
-/// ran.
+/// deployment a start of it last ran: what a removed instance's are when
+/// the extension no longer declares the provider (tsk841). None when it
+/// never ran.
 pub fn last_ran_credentials(copies: &Path, ext: &str, provider: &str) -> Vec<String> {
     let base = copies.join(ext).join(provider);
     if !base.is_dir() {
@@ -754,15 +739,9 @@ pub fn last_ran_credentials(copies: &Path, ext: &str, provider: &str) -> Vec<Str
     let Ok(_one_at_a_time) = lock_copies(&base) else {
         return Vec::new();
     };
-    let Ok(entries) = std::fs::read_dir(&base) else {
-        return Vec::new();
-    };
-    entries
-        .flatten()
-        .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
-        .find_map(|e| {
-            crate::extensions::load_project_extension(&e.path(), ext)
-                .providers
+    last_ran(copies, ext, provider)
+        .and_then(|(_, ran)| {
+            ran.providers
                 .into_iter()
                 .find(|p| p.id == provider)
                 .map(|p| p.credential_names())

@@ -528,24 +528,13 @@ calls averaged):
 | `load_extensions`, bundled + one project extension with 10 lenses | ~3.1 ms |
 | `ExtensionCatalog::get`, same root, cache hit | ~62 µs |
 
-`crates/oxplow-app/src/extension_catalog.rs` caches the loaded `Vec<Extension>`
-per worktree root behind a **stat-only fingerprint** of
-`root/oxplow/extensions/**` and the project's `.oxplow/project.yaml` (the
-main worktree's in the daemon, whatever the root; path, size,
-mtime of every file). A hit walks the tree with `stat` and parses nothing;
-any edit, add or delete — or a config change that disables an extension —
-misses and reloads on the next call. No watcher and no explicit
-invalidation, so there is no window in which an agent's freshly written
-lens is invisible, and worktrees the watcher doesn't cover behave the
-same. Hidden entries directly under the extensions root are excluded, matching
-the loader; install staging must not cause cache misses or a new generation.
-Hidden files inside a declared extension still participate. Write paths (install,
-update, `oxplow.lens.keep`) read the disk directly, and consent hashing
-(`approval_hash`) always reads the bytes it approves. A cache entry now owns a
-`CatalogSnapshot`: declarations and the generation hash from that entry's
-fingerprint. `get` retains its existing Arc/cache-hit behavior; snapshot callers
-can retain the load identity without another filesystem walk. The current-files
-`generation(root)` remains separate. No new performance measurement was run.
+The daemon's catalog (`ExtensionCatalog::for_project`) loads the live set
+once per generation, from the deployments in the store; it reads no source
+and keeps no per-root cache or fingerprint. Source loads
+(`load_extensions`, used by `oxplow_validate_extension` and the CLI) parse on
+every call. Consent hashing (`approval_hash`) always reads the bytes it
+approves. A cache entry owns a `CatalogSnapshot`: declarations and the
+generation hash. No new performance measurement was run.
 
 ## Metric visibility: ancestry in bulk (2026-10-06)
 

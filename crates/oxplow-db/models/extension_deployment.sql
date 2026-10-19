@@ -1,0 +1,4 @@
+SELECT CAST('extension_deployment:' || d.name || '@' || d.hash AS TEXT) AS ref,
+       (SELECT e.ref FROM ref('extension') e WHERE e.name = d.name) AS extension_ref,
+       d.name, d.hash, d.deployed_at, d.from_stream AS stream_id, d.source, d.active
+FROM source('extension_deployment') d

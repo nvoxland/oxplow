@@ -167,7 +167,6 @@ pub fn extension_files(
         example_name: "basic",
         example_input: &sample.input(&collector),
         example_expect: "one fact per file with functions over the limit, in its area",
-        shared: false,
     });
     manifest.push_str(&format!(
         "measures:\n\

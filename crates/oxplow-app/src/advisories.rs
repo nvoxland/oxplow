@@ -643,7 +643,7 @@ mod tests {
     #[tokio::test]
     async fn thread_advisories_use_the_open_effort_and_record_post_tool_use_nudges() {
         let f = crate::test_fixtures::services_with_effort().await;
-        let dir = f.svc.layout.project_dir.join("oxplow/extensions/guide");
+        let dir = f.svc.layout.project_dir.join(".oxplow/extensions/guide");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),
@@ -740,7 +740,7 @@ mod tests {
     /// A project extension at `name` with `advisories` (YAML list items),
     /// approved by a person.
     async fn approved(svc: &std::sync::Arc<crate::Services>, name: &str, advisories: &str) {
-        let dir = svc.layout.project_dir.join("oxplow/extensions").join(name);
+        let dir = svc.layout.project_dir.join(".oxplow/extensions").join(name);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),

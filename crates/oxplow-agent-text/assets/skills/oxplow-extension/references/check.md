@@ -31,8 +31,8 @@ names the file and line and says what to change.
    rows the user will see. Check that they answer the question. It reads
    your extension's models as your worktree has them, published or not.
 3. Pass **your own `stream_id`** to both when you're in a worktree
-   stream. Extensions are read from the stream's worktree, so the primary
-   stream won't see yours until it's merged.
+   stream. These checks read the extension's source in the stream's checkout. The
+   source runs nothing until `oxplow.extension.deploy { name }`.
 
 4. `oxplow extension test` (see `references/testing.md`) also runs the extension's `questions.yaml`, if it
    has one: questions an agent should be able to answer with it, each

@@ -2233,13 +2233,13 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         write(
             d.path(),
-            "oxplow/extensions/x/extension.yaml",
+            ".oxplow/extensions/x/extension.yaml",
             "manifest: 2\nname: x\nintent:\n  purpose: p\n",
         );
         for (slug, body) in lenses {
             write(
                 d.path(),
-                &format!("oxplow/extensions/x/lenses/{slug}.yaml"),
+                &format!(".oxplow/extensions/x/lenses/{slug}.yaml"),
                 body,
             );
         }
@@ -2369,18 +2369,22 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         write(
             d.path(),
-            "oxplow/extensions/x/extension.yaml",
+            ".oxplow/extensions/x/extension.yaml",
             "manifest: 2\nname: x\nintent:\n  purpose: p\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/p\n    network: [api.example.com]\n    declarations: provider.json\n",
         );
-        write(d.path(), "oxplow/extensions/x/bin/p", "#!/bin/sh\nexit 1\n");
+        write(
+            d.path(),
+            ".oxplow/extensions/x/bin/p",
+            "#!/bin/sh\nexit 1\n",
+        );
         let declared = serde_json::to_string(&oxplow_provider_fake::declarations()).unwrap();
-        write(d.path(), "oxplow/extensions/x/provider.json", &declared);
+        write(d.path(), ".oxplow/extensions/x/provider.json", &declared);
         let ext = crate::extensions::load_extensions(d.path())
             .into_iter()
             .find(|e| e.name == "x")
             .unwrap();
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-        let root = d.path().join("oxplow/extensions/x");
+        let root = d.path().join(".oxplow/extensions/x");
         let read = move |rel: &str| std::fs::read_to_string(root.join(rel)).ok();
         let runs = crate::extensions::LensRuns::new();
         let report = impact(
@@ -2552,7 +2556,7 @@ mod tests {
     /// collector labelling its fixture rows `label`, an exec one whose
     /// script would touch `sentinel`, and one asking a model.
     fn acme(root: &std::path::Path, label: &str, sentinel: &std::path::Path) {
-        let dir = root.join("oxplow/extensions/acme");
+        let dir = root.join(".oxplow/extensions/acme");
         let w = |rel: &str, body: &str| {
             let p = dir.join(rel);
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -2593,7 +2597,7 @@ mod tests {
     async fn a_collectors_input_reads_each_sides_own_models() {
         let (old, new) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let write = |root: &std::path::Path, label: &str| {
-            let dir = root.join("oxplow/extensions/acme");
+            let dir = root.join(".oxplow/extensions/acme");
             std::fs::create_dir_all(dir.join("collectors")).unwrap();
             std::fs::write(
                 dir.join("extension.yaml"),
@@ -2614,7 +2618,7 @@ mod tests {
         );
         let reader = |root: std::path::PathBuf| {
             move |rel: &str| {
-                std::fs::read_to_string(root.join("oxplow/extensions/acme").join(rel)).ok()
+                std::fs::read_to_string(root.join(".oxplow/extensions/acme").join(rel)).ok()
             }
         };
         let (rb, ra) = (
@@ -2665,7 +2669,7 @@ mod tests {
     async fn a_collector_whose_script_alone_changed_says_so() {
         let (old, new) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let write = |root: &std::path::Path, label: &str| {
-            let dir = root.join("oxplow/extensions/acme");
+            let dir = root.join(".oxplow/extensions/acme");
             std::fs::create_dir_all(dir.join("collectors")).unwrap();
             std::fs::write(
                 dir.join("extension.yaml"),
@@ -2686,7 +2690,7 @@ mod tests {
         );
         let reader = |root: std::path::PathBuf| {
             move |rel: &str| {
-                std::fs::read_to_string(root.join("oxplow/extensions/acme").join(rel)).ok()
+                std::fs::read_to_string(root.join(".oxplow/extensions/acme").join(rel)).ok()
             }
         };
         let (rb, ra) = (
@@ -2727,7 +2731,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_runaway_collector_is_given_up_on_and_the_review_stops_at_its_deadline() {
         let root = tempfile::tempdir().unwrap();
-        let dir = root.path().join("oxplow/extensions/acme");
+        let dir = root.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(dir.join("collectors")).unwrap();
         std::fs::create_dir_all(dir.join("fixtures")).unwrap();
         std::fs::write(
@@ -2818,12 +2822,12 @@ mod tests {
     async fn an_effects_trigger_and_composed_commands_are_compared() {
         let (old, new) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let write = |root: &std::path::Path, filter: &str, script: &str| {
-            let dir = root.join("oxplow/extensions/acme");
+            let dir = root.join(".oxplow/extensions/acme");
             std::fs::create_dir_all(dir.join("fixtures")).unwrap();
             std::fs::write(
                 dir.join("extension.yaml"),
                 format!(
-                    "manifest: 2\nname: acme\nsharing: private\nintent:\n  purpose: p\n  examples:\n    - {{ name: basic, input: x, expect: y }}\neffects:\n  - {{ id: on-done, summary: s, on: [work_item.state_changed]{filter}, entry: e.star }}\n"
+                    "manifest: 2\nname: acme\nintent:\n  purpose: p\n  examples:\n    - {{ name: basic, input: x, expect: y }}\neffects:\n  - {{ id: on-done, summary: s, on: [work_item.state_changed]{filter}, entry: e.star }}\n"
                 ),
             )
             .unwrap();
@@ -2851,7 +2855,7 @@ mod tests {
         assert!(ea.errors.is_empty(), "{:?}", ea.errors);
         let reader = |root: std::path::PathBuf| {
             move |rel: &str| {
-                std::fs::read_to_string(root.join("oxplow/extensions/acme").join(rel)).ok()
+                std::fs::read_to_string(root.join(".oxplow/extensions/acme").join(rel)).ok()
             }
         };
         let (rb, ra) = (
@@ -2896,11 +2900,11 @@ mod tests {
     #[tokio::test]
     async fn a_review_reads_each_fixture_event_through_its_versions_types() {
         let root = tempfile::tempdir().unwrap();
-        let dir = root.path().join("oxplow/extensions/acme");
+        let dir = root.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(dir.join("fixtures")).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),
-            "manifest: 2\nname: acme\nsharing: private\nintent:\n  purpose: p\n  examples:\n    - { name: old, input: x, expect: y }\n    - { name: bad, input: x, expect: y }\nevent_types:\n  types:\n    - { type: acme.merged, v: 1, schema: m1.json, summary: A merge. }\n    - { type: acme.merged, v: 2, schema: m2.json, summary: A merge by someone., upcast: m.star }\neffects:\n  - { id: note, summary: s, on: [acme.merged], entry: e.star }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: p\n  examples:\n    - { name: old, input: x, expect: y }\n    - { name: bad, input: x, expect: y }\nevent_types:\n  types:\n    - { type: acme.merged, v: 1, schema: m1.json, summary: A merge. }\n    - { type: acme.merged, v: 2, schema: m2.json, summary: A merge by someone., upcast: m.star }\neffects:\n  - { id: note, summary: s, on: [acme.merged], entry: e.star }\n",
         )
         .unwrap();
         std::fs::write(
@@ -2985,7 +2989,7 @@ mod tests {
         );
         let reader = |root: std::path::PathBuf| {
             move |rel: &str| {
-                std::fs::read_to_string(root.join("oxplow/extensions/acme").join(rel)).ok()
+                std::fs::read_to_string(root.join(".oxplow/extensions/acme").join(rel)).ok()
             }
         };
         let (rb, ra) = (

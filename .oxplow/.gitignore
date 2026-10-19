@@ -1,3 +1,7 @@
 *
 !.gitignore
 !project.yaml
+!extensions/
+extensions/*
+!extensions/project/
+!extensions/project/**

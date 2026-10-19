@@ -7,6 +7,8 @@
 
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
 use std::path::{Path, PathBuf};
 
 use oxplow_app::extension_catalog::ExtensionCatalog;
@@ -43,7 +45,7 @@ async fn tested(root: &Path, name: &str) -> Vec<String> {
 
 /// A real oxplow over the project, as at boot.
 async fn booted(root: &Path) -> std::sync::Arc<oxplow_app::Services> {
-    oxplow_app::Services::in_memory(root).await.unwrap()
+    common::booted(root).await
 }
 
 fn loaded(
@@ -99,7 +101,7 @@ async fn a_scaffolded_collector_checks_before_its_first_sync_and_runs() {
         .contains(&"example basic".to_string()));
     // The extension's model reads its collector's entity: activation
     // creates it empty, so the model compiles before the first run.
-    let svc = oxplow_app::Services::in_memory(dir.path()).await.unwrap();
+    let svc = booted(dir.path()).await;
     let ext = loaded(&svc, dir.path(), "open-items");
     let collector = &ext.collectors[0];
     // It runs for real: its entity, then its model, publish.
@@ -300,7 +302,6 @@ async fn a_scaffolded_component_checks_tests_and_uses_the_client_library() {
         .contains(&"example basic".to_string()));
     let svc = booted(dir.path()).await;
     let ext = loaded(&svc, dir.path(), "burn-down");
-    assert_eq!(ext.sharing, oxplow_app::extensions::Sharing::Private);
     assert_eq!(ext.custom_components.len(), 1);
     let component = &ext.custom_components[0];
     let html = std::fs::read_to_string(
@@ -381,7 +382,7 @@ async fn a_scaffolded_provider_is_red_until_a_program_speaks_for_it() {
         "{:?}",
         report.errors
     );
-    let ext = dir.path().join("oxplow/extensions/fake");
+    let ext = dir.path().join(".oxplow/extensions/fake");
     std::fs::write(ext.join("bin/provider"), fake_script(dir.path(), "")).unwrap();
     std::fs::write(
         ext.join("provider.json"),
@@ -447,7 +448,7 @@ async fn a_scaffolded_effort_policy_is_red_until_a_program_speaks_for_it() {
         "{:?}",
         report.errors
     );
-    let ext = dir.path().join("oxplow/extensions/fake");
+    let ext = dir.path().join(".oxplow/extensions/fake");
     std::fs::write(
         ext.join("bin/provider"),
         fake_script(dir.path(), "").replace(
@@ -539,7 +540,7 @@ async fn a_scaffolded_harness_provider_is_red_until_a_program_speaks_for_it() {
         "{:?}",
         report.errors
     );
-    let ext = dir.path().join("oxplow/extensions/relay");
+    let ext = dir.path().join(".oxplow/extensions/relay");
     std::fs::write(
         ext.join("bin/provider"),
         format!(
@@ -601,12 +602,12 @@ fn harness_env() -> (oxplow_app::providers::host::HostEnv, tempfile::TempDir) {
 #[tokio::test(flavor = "multi_thread")]
 async fn extension_test_runs_the_harness_suite_over_a_harness_provider() {
     let dir = project().await;
-    let ext = dir.path().join("oxplow/extensions/relay");
+    let ext = dir.path().join(".oxplow/extensions/relay");
     std::fs::create_dir_all(ext.join("bin")).unwrap();
     std::fs::create_dir_all(ext.join("fixtures")).unwrap();
     std::fs::write(
         ext.join("extension.yaml"),
-        "manifest: 2\nname: relay\nsharing: private\nintent:\n  purpose: A harness over the protocol.\n  examples:\n    - { name: basic, input: { command: render, input: { answer: { kind: ack } } }, expect: its acknowledgement }\nproviders:\n  - id: relay\n    capability: agent_harness\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: relay\nintent:\n  purpose: A harness over the protocol.\n  examples:\n    - { name: basic, input: { command: render, input: { answer: { kind: ack } } }, expect: its acknowledgement }\nproviders:\n  - id: relay\n    capability: agent_harness\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     std::fs::write(
@@ -662,13 +663,13 @@ async fn extension_test_runs_the_harness_suite_over_a_harness_provider() {
 #[tokio::test(flavor = "multi_thread")]
 async fn extension_test_runs_the_knowledge_suite_over_a_knowledge_provider() {
     let dir = project().await;
-    let ext = dir.path().join("oxplow/extensions/shelf");
+    let ext = dir.path().join(".oxplow/extensions/shelf");
     std::fs::create_dir_all(ext.join("bin")).unwrap();
     std::fs::create_dir_all(ext.join("fixtures")).unwrap();
     let write = "{ command: write_page, input: { slug: example, body: '# Example', verified_refs: [], removed_refs: [] } }";
     std::fs::write(
         ext.join("extension.yaml"),
-        format!("manifest: 2\nname: shelf\nsharing: private\nintent:\n  purpose: Knowledge over the protocol.\n  examples:\n    - {{ name: basic, input: {write}, expect: the page }}\nproviders:\n  - id: shelf\n    capability: knowledge\n    entry: bin/provider\n    declarations: provider.json\n"),
+        format!("manifest: 2\nname: shelf\nintent:\n  purpose: Knowledge over the protocol.\n  examples:\n    - {{ name: basic, input: {write}, expect: the page }}\nproviders:\n  - id: shelf\n    capability: knowledge\n    entry: bin/provider\n    declarations: provider.json\n"),
     )
     .unwrap();
     std::fs::write(
@@ -719,7 +720,7 @@ async fn extension_test_runs_the_knowledge_suite_over_a_knowledge_provider() {
 #[tokio::test(flavor = "multi_thread")]
 async fn extension_test_runs_the_snapshot_suite_over_a_snapshots_provider() {
     let dir = project().await;
-    let ext = dir.path().join("oxplow/extensions/shutter");
+    let ext = dir.path().join(".oxplow/extensions/shutter");
     let tree = dir.path().join("example-tree");
     std::fs::create_dir_all(ext.join("bin")).unwrap();
     std::fs::create_dir_all(ext.join("fixtures")).unwrap();
@@ -731,7 +732,7 @@ async fn extension_test_runs_the_snapshot_suite_over_a_snapshots_provider() {
     );
     std::fs::write(
         ext.join("extension.yaml"),
-        format!("manifest: 2\nname: shutter\nsharing: private\nintent:\n  purpose: Snapshots over the protocol.\n  examples:\n    - {{ name: basic, input: {mark}, expect: a handle }}\nproviders:\n  - id: shutter\n    capability: snapshots\n    entry: bin/provider\n    declarations: provider.json\n"),
+        format!("manifest: 2\nname: shutter\nintent:\n  purpose: Snapshots over the protocol.\n  examples:\n    - {{ name: basic, input: {mark}, expect: a handle }}\nproviders:\n  - id: shutter\n    capability: snapshots\n    entry: bin/provider\n    declarations: provider.json\n"),
     )
     .unwrap();
     std::fs::write(
@@ -795,7 +796,7 @@ async fn a_scaffolded_snapshots_provider_is_red_until_a_program_speaks_for_it() 
         "{:?}",
         report.errors
     );
-    let ext = dir.path().join("oxplow/extensions/shutter");
+    let ext = dir.path().join(".oxplow/extensions/shutter");
     std::fs::write(
         ext.join("bin/provider"),
         format!(
@@ -844,7 +845,7 @@ async fn a_scaffolded_knowledge_provider_is_red_until_a_program_speaks_for_it() 
         "{:?}",
         report.errors
     );
-    let ext = dir.path().join("oxplow/extensions/shelf");
+    let ext = dir.path().join(".oxplow/extensions/shelf");
     std::fs::write(
         ext.join("bin/provider"),
         format!(
@@ -926,7 +927,7 @@ async fn recorded_agent_runs_still_check_and_test_clean() {
             kind.file_name().unwrap().to_string_lossy()
         );
         let dir = project().await;
-        let extensions = dir.path().join("oxplow/extensions");
+        let extensions = dir.path().join(".oxplow/extensions");
         std::fs::create_dir_all(&extensions).unwrap();
         for ext in std::fs::read_dir(&produced).unwrap() {
             let ext = ext.unwrap().path();

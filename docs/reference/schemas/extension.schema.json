@@ -26,17 +26,8 @@
       "type": "string",
       "default": ""
     },
-    "sharing": {
-      "description": "`private` (the default: this project) or `shared` (`engine`\nrequired).",
-      "default": "private",
-      "allOf": [
-        {
-          "$ref": "#/definitions/Sharing"
-        }
-      ]
-    },
     "engine": {
-      "description": "The oxplow version range it targets, `>=MAJOR.MINOR[.PATCH]`.\nRequired when shared.",
+      "description": "The oxplow version range it targets, `>=MAJOR.MINOR[.PATCH]`.",
       "type": [
         "string",
         "null"
@@ -44,7 +35,7 @@
       "default": null
     },
     "version": {
-      "description": "Its own version, `MAJOR.MINOR.PATCH` (semver; a `-pre` suffix is\nfine). Recorded on every contribution it makes. Required when\nshared.",
+      "description": "Its own version, `MAJOR.MINOR.PATCH` (semver; a `-pre` suffix is\nfine). Recorded on every contribution it makes.",
       "type": [
         "string",
         "null"
@@ -332,14 +323,6 @@
     "intent"
   ],
   "definitions": {
-    "Sharing": {
-      "description": "Who the extension is for. Explicit and checked: a shared extension\n(committed for a team, installed from git, bundled) must name the\nengine it targets and its own version.",
-      "type": "string",
-      "enum": [
-        "private",
-        "shared"
-      ]
-    },
     "IntentExample": {
       "description": "One acceptance example: an input and what the extension should make\nof it. Fixtures for `oxplow extension test`; data here.",
       "type": "object",
@@ -1776,7 +1759,7 @@
           "default": null
         },
         "lifecycle": {
-          "description": "`experimental` keeps a shared extension's command experimental.",
+          "description": "`experimental` keeps a bundled extension's command experimental.",
           "type": [
             "string",
             "null"

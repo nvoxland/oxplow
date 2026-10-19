@@ -3,7 +3,6 @@ name: oxplow-foundation
 # Its commands are oxplow's own: `oxplow.<area>.<verb>`.
 namespace: oxplow
 description: oxplow's own commands, declared like any extension's — each backed by an operation of a scope. Required; it can't be disabled.
-sharing: shared
 engine: ">=0.7"
 intent:
   purpose: >-
@@ -524,19 +523,56 @@ commands:
     invokers: { human: true, agent: true, lens: true }
     tool: preview_extension
     example: {"name": "my-extension"}
-  - name: extension.review
-    summary: "Review an extension before installing (`git_url`) or updating (`name`) it. Clones it (into .oxplow/tmp, changing no record) and report what it would bring in, installing nothing: the extension as it would load (lenses, sources with the programs they run, the hosts they reach and the credentials they read, advisories, collectors; `errors` block the install), the commit `sha`, and `problems` a dry run of its lenses found. Show the person what it declares and get their go-ahead, then pass `sha` as `reviewed_sha` to the `oxplow.extension.install` / `oxplow.extension.update` commands (a person approves them)."
-    scope: extensions.check
-    op: review
-    invokers: { human: true, agent: true, lens: true }
-    tool: review_extension
-    example: {"git_url": "https://github.com/acme/oxplow-pr-triage"}
   - name: extension.validate
     summary: "Check an extension after editing it. The same report as `oxplow extension check`: manifest and lifecycle errors with file:line, unresolved cross-references, plus a dry run of every lens and advisory (SQL errors, `columns` keys the query doesn't return). `ok: true` means it works; `warnings` are worth fixing but don't block."
     scope: extensions.check
     op: validate
     invokers: { human: true, agent: true, lens: true }
     tool: validate_extension
+    example: {"name": "my-extension"}
+  # extensions.deploy
+  - name: extension.deploy
+    summary: "Deploy an extension from its source: check it, copy it into the store (`.oxplow/runtime/extensions/<name>/<hash>/`) and make that deployment the one oxplow runs. The source is the stream's checkout (`stream`, else yours): `.oxplow/extensions/<name>/`, or where `extensionSources` points. Nothing runs an edit to a source until it is deployed. The same source again is `already: true`. A deployment that doesn't load or prepare changes nothing and its problems are the error. Turns the extension on for the person when nothing turns it on yet. Returns `{ name, hash, already }` once the deployment runs."
+    scope: extensions.deploy
+    op: deploy
+    invokers: { human: true, agent: true, lens: true }
+    example: {"name": "my-extension"}
+  - name: extension.rollback
+    summary: "Make an earlier deployment of an extension the one oxplow runs: `to` (a hash or its start, from `v_extension_deployment`), else the one before the active one. A bundled extension with nothing older returns to the deployment that ships with oxplow."
+    scope: extensions.deploy
+    op: rollback
+    invokers: { human: true, agent: true, lens: true }
+    example: {"name": "my-extension"}
+  - name: extension.enable
+    summary: "Turn an extension on for you (`.oxplow/personal.yaml`), over the project's list. One with no deployment here is deployed from the main checkout's source."
+    scope: extensions.deploy
+    op: enable
+    invokers: { human: true, agent: false, lens: true }
+    example: {"name": "my-extension"}
+  - name: extension.disable
+    summary: "Turn an extension off for you (`.oxplow/personal.yaml`), whoever listed it. oxplow-foundation is always on."
+    scope: extensions.deploy
+    op: disable
+    invokers: { human: true, agent: false, lens: true }
+    example: {"name": "my-extension"}
+  - name: extension.remove
+    summary: "Remove an extension: out of both lists, no longer run, its deployments, stored state and settings forgotten. Its source folder stays; delete it yourself if you want it gone."
+    scope: extensions.deploy
+    op: remove
+    invokers: { human: true, agent: false, lens: true }
+    confirm: destructive
+    example: {"name": "my-extension"}
+  - name: extension.share
+    summary: "Share an extension with the team: git sees its source (`.oxplow/.gitignore`) and it moves from your list to the project's (`.oxplow/project.yaml`). Commit both. Only a source in `.oxplow/extensions/` is shared this way."
+    scope: extensions.deploy
+    op: share
+    invokers: { human: true, agent: false, lens: true }
+    example: {"name": "my-extension"}
+  - name: extension.unshare
+    summary: "Stop sharing an extension: git no longer sees its source and it moves back from the project's list to yours."
+    scope: extensions.deploy
+    op: unshare
+    invokers: { human: true, agent: false, lens: true }
     example: {"name": "my-extension"}
   # extensions.enable
   - name: contribution.enable
@@ -551,21 +587,6 @@ commands:
     op: enable_all
     invokers: { human: true, agent: false, lens: false }
     lifecycle: experimental
-  # extensions.install
-  - name: extension.install
-    summary: "Install a published extension from a git repo (its root holds `extension.yaml`) into `oxplow/extensions/<name>/` of a stream's worktree, at the commit a person reviewed (`reviewed_sha`, from `oxplow_review_extension`). Always a person's decision: an agent's run becomes a proposal. Refuses to overwrite — `oxplow.extension.update` does that."
-    scope: extensions.install
-    op: install
-    invokers: { human: true, agent: true, lens: true }
-    confirm: always
-    example: {"git_url": "https://github.com/acme/oxplow-issues", "reviewed_sha": "3f9c2a1d7b4e5a60c8d1e2f3a4b5c6d7e8f90a1b"}
-  - name: extension.update
-    summary: "Update an installed extension to the reviewed commit of the git URL and ref it was installed from. Only for extensions installed with `oxplow.extension.install`; ones written in this repo are edited in place. Always a person's decision."
-    scope: extensions.install
-    op: update
-    invokers: { human: true, agent: true, lens: true }
-    confirm: always
-    example: {"name": "issues", "reviewed_sha": "3f9c2a1d7b4e5a60c8d1e2f3a4b5c6d7e8f90a1b"}
   # files.write
   - name: snapshot.restore_file
     summary: "Restore a captured file (a `file_snapshot` id) into its stream's worktree, overwriting what's at its path now. A person confirms it."
@@ -713,7 +734,7 @@ commands:
     example: {"spec": {"title": "Open tasks", "query": "SELECT ref, title, state FROM v_work_item WHERE state = 'todo' ORDER BY rank", "viz": "table"}}
   # lenses.write
   - name: lens.keep
-    summary: "Keep an answer from a thread, or a lens spec of your own, as a private lens (a page the person can reopen, pin and share), recording where it came from. Kept in another stream's worktree, it shows in the app once that stream is merged (`live: false`)."
+    summary: "Keep an answer from a thread, or a lens spec of your own, as a lens (a page the person can reopen and pin), recording where it came from. It is written into the extension's source (`my-lenses` unless `extension` names another, created when missing) in the stream's checkout and that extension is deployed: it returns once the lens is live."
     scope: lenses.write
     op: keep
     invokers: { human: true, agent: true, lens: true }
@@ -725,11 +746,6 @@ commands:
     invokers: { human: true, agent: true, lens: true }
     tool: run_lens_action
     example: {"id": "review/waiting", "action": "finish", "params": {"item": "work_item:oxplow:tsk12"}}
-  - name: lens.share
-    summary: "Move a private lens into a shared extension (created shared when missing), refused unless it passes the shared checks; committing it is how the team gets it."
-    scope: lenses.write
-    op: share
-    invokers: { human: true, agent: false, lens: false }
   # lsp.install
   - name: lsp.install_server
     summary: "Download and install a language server (a Mason package) and register its binary. A person's decision: an agent's run becomes a proposal."
@@ -790,7 +806,7 @@ commands:
     example: {"language": "rust", "query": "Services"}
   # metrics.read
   - name: metric.scaffold
-    summary: "A starter for a new metric, as a private extension; writes nothing. Returns `name`, `dir` (`oxplow/extensions/<name>`) and `files`, each with its project-relative path: the extension.yaml (a measure, a Starlark fact collector, the metric), the collector script, a lens and an example with its fixture. Write them with your own tools, then check it (`oxplow_validate_extension`); its collector runs only once a person approves it. `oxplow.metric.enable` turns the metric on or off in .oxplow/project.yaml."
+    summary: "A starter for a new metric, as an extension of its own; writes nothing. Returns `name`, `dir` (`.oxplow/extensions/<name>`) and `files`, each with its project-relative path: the extension.yaml (a measure, a Starlark fact collector, the metric), the collector script, a lens and an example with its fixture. Write them with your own tools, check it (`oxplow_validate_extension`), then deploy it (`oxplow.extension.deploy`); its collector runs only once a person approves it. `oxplow.metric.enable` turns the metric on or off in .oxplow/project.yaml."
     scope: metrics.read
     op: scaffold
     invokers: { human: true, agent: true, lens: true }

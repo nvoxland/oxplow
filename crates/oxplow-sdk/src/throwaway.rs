@@ -1,6 +1,6 @@
 //! A throwaway oxplow (P7.C6): in memory, over a copy of a project's
-//! `oxplow/extensions/` and which of them it turned off, activated as boot
-//! activates — the same staged generation, registries and declared
+//! extension sources and which of them are on (the one under test always
+//! is), deployed and activated as boot does it — the same staged generation, registries and declared
 //! entities (empty, as before any collector ran) a running oxplow has. What
 //! `extension test` and MCP `oxplow_preview_extension` run everything on, and what
 //! `check` asks for a command registry when no oxplow is running.
@@ -30,27 +30,51 @@ pub(crate) struct Host {
 }
 
 impl Host {
-    /// A throwaway over `project`'s extensions, activated. Its programs
-    /// see `env`.
-    pub(crate) async fn start(project: &Path, env: HostEnv) -> Result<Host, String> {
+    /// A throwaway over `project`'s extensions with `testing` on too,
+    /// activated. Its programs see `env`.
+    pub(crate) async fn start(project: &Path, testing: &str, env: HostEnv) -> Result<Host, String> {
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
         let root = dir.path().to_path_buf();
-        let extensions = project.join(EXTENSIONS_DIR);
-        if extensions.is_dir() {
-            copy_dir(&extensions, &root.join(EXTENSIONS_DIR)).map_err(|e| e.to_string())?;
+        let settings = oxplow_config::extension_settings(project);
+        for name in oxplow_app::extensions::known_names(project, &settings) {
+            let source = settings.source(project, &name);
+            if source.is_dir() {
+                copy_dir(&source, &root.join(EXTENSIONS_DIR).join(&name))
+                    .map_err(|e| e.to_string())?;
+            }
         }
-        // Which of them the project turned off, and nothing else of its
-        // config: its provider instances would start its programs here.
-        let disabled = oxplow_config::disabled_extensions(project);
-        if !disabled.is_empty() {
-            let config = root.join(".oxplow/project.yaml");
-            std::fs::create_dir_all(config.parent().expect("a folder"))
-                .map_err(|e| e.to_string())?;
-            let yaml = serde_yaml::to_string(&serde_json::json!({
-                "extensions": { "disabled": disabled }
-            }))
+        // Which of them are on, and nothing else of its config: its
+        // provider instances would start its programs here.
+        let mut on: Vec<String> = settings.enabled().into_iter().map(|(n, _)| n).collect();
+        // Every source here is on unless the person turned it off, as in a
+        // source load.
+        for name in oxplow_app::extensions::known_names(project, &settings) {
+            if settings.source(project, &name).is_dir()
+                && !settings.personal.disable.contains(&name)
+                && !on.contains(&name)
+            {
+                on.push(name);
+            }
+        }
+        if !on.iter().any(|n| n == testing) {
+            on.push(testing.to_string());
+        }
+        let config = root.join(".oxplow/project.yaml");
+        std::fs::create_dir_all(config.parent().expect("a folder")).map_err(|e| e.to_string())?;
+        let yaml = serde_yaml::to_string(&serde_json::json!({ "extensions": on }))
             .map_err(|e| e.to_string())?;
-            std::fs::write(config, yaml).map_err(|e| e.to_string())?;
+        std::fs::write(config, yaml).map_err(|e| e.to_string())?;
+        // And the ones the person turned off stay off in the copy.
+        let off: Vec<&String> = settings
+            .personal
+            .disable
+            .iter()
+            .filter(|n| *n != testing)
+            .collect();
+        if !off.is_empty() {
+            let yaml = serde_yaml::to_string(&serde_json::json!({ "disableExtensions": off }))
+                .map_err(|e| e.to_string())?;
+            std::fs::write(root.join(".oxplow/personal.yaml"), yaml).map_err(|e| e.to_string())?;
         }
         oxplow_app::vcs::GitProvider
             .init_repository(&root)

@@ -567,13 +567,13 @@ mod tests {
     /// that's there but has no `index.html` is still an error.
     #[test]
     fn a_revision_loads_a_custom_component_without_a_bogus_error() {
-        let manifest = "manifest: 2\nname: acme\nsharing: private\nintent: { purpose: p, origin: null, examples: [] }\ncustom_components:\n  - { id: chart, bundle: ui/chart }\n";
+        let manifest = "manifest: 2\nname: acme\nintent: { purpose: p, origin: null, examples: [] }\ncustom_components:\n  - { id: chart, bundle: ui/chart }\n";
         let tree = |extra: &[(&str, &str)]| {
             crate::extensions::Tree::new(
                 std::iter::once(("extension.yaml".to_string(), manifest.to_string()))
                     .chain(extra.iter().map(|(p, b)| (p.to_string(), b.to_string()))),
             )
-            .load("acme", "oxplow/extensions/acme")
+            .load("acme", ".oxplow/extensions/acme")
         };
         let unbuilt = tree(&[]);
         assert!(unbuilt.errors.is_empty(), "{:?}", unbuilt.errors);
@@ -603,26 +603,26 @@ mod tests {
 
     const LENS: &str = "title: Burn\nquery: SELECT 1 AS day, 3 AS remaining\nviz: custom\ncustom: { component: burndown, props: { color: accent } }\n";
 
-    /// Extension `x` (`sharing`) declaring `components` (the block's
+    /// Extension `x` declaring `components` (the block's
     /// entries), with a `burndown` bundle and the `burn` lens.
-    fn load(root: &Path, sharing: &str, components: &str) -> Extension {
+    fn load(root: &Path, components: &str) -> Extension {
         write(
             root,
-            "oxplow/extensions/x/extension.yaml",
+            ".oxplow/extensions/x/extension.yaml",
             &format!(
-                "manifest: 2\nname: x\nsharing: {sharing}\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: p\n  examples: [{{ name: a }}]\ncustom_components:\n{components}"
+                "manifest: 2\nname: x\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: p\n  examples: [{{ name: a }}]\ncustom_components:\n{components}"
             ),
         );
         write(
             root,
-            "oxplow/extensions/x/components/burndown/index.html",
+            ".oxplow/extensions/x/components/burndown/index.html",
             &format!("<!doctype html>{LIB_TAG}<script src=\"app.js\"></script>"),
         );
-        write(root, "oxplow/extensions/x/components/burndown/app.js", "1");
-        write(root, "oxplow/extensions/x/lenses/burn.yaml", LENS);
+        write(root, ".oxplow/extensions/x/components/burndown/app.js", "1");
+        write(root, ".oxplow/extensions/x/lenses/burn.yaml", LENS);
         write(
             root,
-            "oxplow/extensions/x/lenses/open-tasks.yaml",
+            ".oxplow/extensions/x/lenses/open-tasks.yaml",
             "title: Open\nquery: SELECT 1\n",
         );
         load_extensions(root)
@@ -779,15 +779,16 @@ mod tests {
     #[test]
     fn a_bundles_page_is_read_from_the_files_being_checked() {
         let d = tempfile::tempdir().unwrap();
-        let ext = load(d.path(), "private", "  - { id: burndown }\n");
+        let ext = load(d.path(), "  - { id: burndown }\n");
         let candidate = |rel: &str| {
             (rel == "components/burndown/index.html")
                 .then(|| "<!doctype html><script>render()</script>".to_string())
         };
         let problems = bundle_problems(&ext, &candidate).join("\n");
         assert!(
-            problems
-                .contains("oxplow/extensions/x/components/burndown/index.html: an inline <script>"),
+            problems.contains(
+                ".oxplow/extensions/x/components/burndown/index.html: an inline <script>"
+            ),
             "{problems}"
         );
         // A version without the built page (a revision's tree) has nothing
@@ -801,10 +802,10 @@ mod tests {
     #[tokio::test]
     async fn a_bundles_pages_are_checked_whatever_its_origin() {
         let d = tempfile::tempdir().unwrap();
-        load(d.path(), "private", "  - { id: burndown }\n");
+        load(d.path(), "  - { id: burndown }\n");
         write(
             d.path(),
-            "oxplow/extensions/x/components/burndown/index.html",
+            ".oxplow/extensions/x/components/burndown/index.html",
             "<!doctype html><script>render()</script>",
         );
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
@@ -814,11 +815,13 @@ mod tests {
             .unwrap();
         let errs = v.errors.join("\n");
         assert!(
-            errs.contains("oxplow/extensions/x/components/burndown/index.html: an inline <script>"),
+            errs.contains(
+                ".oxplow/extensions/x/components/burndown/index.html: an inline <script>"
+            ),
             "{errs}"
         );
         assert!(errs.contains("doesn't load the client library"), "{errs}");
-        let mut ext = load(d.path(), "private", "  - { id: burndown }\n");
+        let mut ext = load(d.path(), "  - { id: burndown }\n");
         ext.origin = "bundled".into();
         let page = |rel: &str| {
             (rel == "components/burndown/index.html")
@@ -834,7 +837,6 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let ext = load(
             d.path(),
-            "private",
             "  - { id: burndown, title: Burndown, assets: [open-tasks, oxplow-bundled/visits], commands: [oxplow.work_item.transition] }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
@@ -908,35 +910,31 @@ mod tests {
             ),
         ] {
             let d = tempfile::tempdir().unwrap();
-            let base = d.path().join("oxplow/extensions/x");
+            let base = d.path().join(".oxplow/extensions/x");
             match setup {
-                "empty" => write(d.path(), "oxplow/extensions/x/empty/readme.txt", "x"),
+                "empty" => write(d.path(), ".oxplow/extensions/x/empty/readme.txt", "x"),
                 "symlink" => {
-                    write(d.path(), "oxplow/extensions/x/linked/index.html", "x");
+                    write(d.path(), ".oxplow/extensions/x/linked/index.html", "x");
                     std::os::unix::fs::symlink("/etc/hosts", base.join("linked/hosts")).unwrap();
                 }
                 "linked-folder" => {
-                    write(d.path(), "oxplow/extensions/x/real/index.html", "x");
+                    write(d.path(), ".oxplow/extensions/x/real/index.html", "x");
                     std::os::unix::fs::symlink(base.join("real"), base.join("aliased")).unwrap();
                 }
                 "index-dir" => write(
                     d.path(),
-                    "oxplow/extensions/x/dirindex/index.html/a.js",
+                    ".oxplow/extensions/x/dirindex/index.html/a.js",
                     "x",
                 ),
                 "big" => {
-                    write(d.path(), "oxplow/extensions/x/big/index.html", "x");
+                    write(d.path(), ".oxplow/extensions/x/big/index.html", "x");
                     for i in 0..256 {
-                        write(d.path(), &format!("oxplow/extensions/x/big/f{i}.js"), "x");
+                        write(d.path(), &format!(".oxplow/extensions/x/big/f{i}.js"), "x");
                     }
                 }
                 _ => {}
             }
-            let ext = load(
-                d.path(),
-                "private",
-                &format!("  - {entry}\n  - {{ id: burndown }}\n"),
-            );
+            let ext = load(d.path(), &format!("  - {entry}\n  - {{ id: burndown }}\n"));
             let errs = ext.errors.join("\n");
             assert!(
                 errs.contains(says) && errs.contains("extension.yaml:"),
@@ -958,7 +956,7 @@ mod tests {
     #[test]
     fn a_shared_extension_loads_a_component_and_its_lens() {
         let d = tempfile::tempdir().unwrap();
-        let ext = load(d.path(), "shared", "  - { id: burndown }\n");
+        let ext = load(d.path(), "  - { id: burndown }\n");
         assert_eq!(ext.errors, Vec::<String>::new());
         assert_eq!(
             ext.custom_components
@@ -983,8 +981,8 @@ mod tests {
             ),
         ] {
             let d = tempfile::tempdir().unwrap();
-            write(d.path(), "oxplow/extensions/x/lenses/other.yaml", lens);
-            let ext = load(d.path(), "private", "  - { id: burndown }\n");
+            write(d.path(), ".oxplow/extensions/x/lenses/other.yaml", lens);
+            let ext = load(d.path(), "  - { id: burndown }\n");
             assert!(
                 ext.errors.join("\n").contains(says),
                 "{lens}: {:?}",
@@ -1007,12 +1005,11 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         load(
             d.path(),
-            "private",
             "  - { id: burndown, commands: [nope.no.cmd, oxplow.work_item.transition] }\n",
         );
         write(
             d.path(),
-            "oxplow/extensions/x/lenses/burn.yaml",
+            ".oxplow/extensions/x/lenses/burn.yaml",
             "title: Burn\nquery: SELECT 1 AS day, 3 AS remaining\nviz: custom\ncustom: { component: burndown }\nchart: { x: day, y: remaining }\n",
         );
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());

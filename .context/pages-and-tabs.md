@@ -110,7 +110,7 @@ extension host lands.
   `terminal`
 - **Knowledge:** `wiki`
 - **Lenses:** `lens` (`lens:<extension>/<slug>`, user/agent-built from
-  `oxplow/extensions/`; see [extensions.md](./extensions.md))
+  `.oxplow/extensions/`; see [extensions.md](./extensions.md))
 - **System:** `settings`, `external-url`
 - **Data (the core explorer; stays core):** `explore-data`, `metrics`,
   `metrics-recorded`, `metric`,
@@ -273,8 +273,8 @@ proposals, failed operations, undelivered events, firing badges — isn't
 a rail panel: it's the status bar's bell and the Alerts page (see usability.md). A
 layout stored before a core panel existed gets it appended at the bottom.
 The set of extension panels (like extension pages and slot mounts)
-reloads on `lensRerun.extensionsChanged`: a file under
-`oxplow/extensions/` changed, or the config did — enabling or disabling
+reloads on `lensRerun.extensionsChanged`: a deployment changed (`oxplow.extension.deploy`, `rollback`, `enable`,
+`disable`), or the config did — enabling or disabling
 an extension is a `configChanged`, so its panel appears or leaves at once.
 
 The person's layout — order (drag the ⠿ handle), collapsed (the chevron),

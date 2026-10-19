@@ -1,6 +1,6 @@
 //! Project extensions and their lenses.
 //!
-//! An extension is a folder `oxplow/extensions/<name>/` in a stream's
+//! An extension is a folder `.oxplow/extensions/<name>/` in a stream's
 //! worktree with an `extension.yaml` and `lenses/<slug>.yaml` files. A
 //! lens is a query over the semantic layer (`v_*` views) plus how to
 //! show it. See `.context/extensions.md`.
@@ -32,10 +32,31 @@ pub mod replacements;
 pub mod schema;
 pub mod skills;
 use manifest_v2::{at, entry_line, item_lines, key_line, line_under, ManifestV2};
-pub use manifest_v2::{Intent, IntentExample, IntentPrompt, Sharing};
+pub use manifest_v2::{Intent, IntentExample, IntentPrompt};
 
-/// Where project extensions live, relative to a worktree root.
-pub const EXTENSIONS_DIR: &str = "oxplow/extensions";
+/// Where an extension's source is by default, relative to a checkout
+/// (`extensionSources` may point a name elsewhere).
+pub const EXTENSIONS_DIR: &str = oxplow_config::EXTENSION_SOURCES_DIR;
+
+/// Where a loaded extension's files came from.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Deployment {
+    /// Read from its source folder: an authoring check, the CLI, a
+    /// standalone load.
+    #[default]
+    Source,
+    /// The deployment that ships inside oxplow (a bundled extension with no
+    /// deployment of its own), written to the store once per hash.
+    Shipped { hash: String },
+    /// A deployment in the store.
+    Deployed { hash: String },
+    /// Its source is here but it has no deployment yet: listed, not run.
+    Undeployed,
+    /// Listed as on, but neither its source nor a deployment is on this
+    /// machine: listed, not run, and not an error.
+    NotHere,
+}
 
 /// How a lens renders its rows.
 #[derive(
@@ -1577,13 +1598,9 @@ pub struct Extension {
     pub warnings: Vec<String>,
     /// The manifest version it was read as (`manifest:`).
     pub manifest_version: u32,
-    pub sharing: Sharing,
     /// Why it exists (required; `None` only when the manifest didn't load).
     pub intent: Option<Intent>,
     pub lenses: Vec<Lens>,
-    /// Where it was installed from, for extensions added with
-    /// `install_extension`; `None` for ones written in this repo.
-    pub source: Option<ExtensionSource>,
     /// Declared collectors (valid ones; invalid ones are in `errors`).
     pub collectors: Vec<oxplow_config::collectors::CollectorSpec>,
     /// Declared providers (valid ones — invalid ones are in `errors`).
@@ -1609,7 +1626,7 @@ pub struct Extension {
     /// to (P9.D1): each resolves when an enabled extension registers the
     /// type (`vocabulary_reactor`).
     pub subscriptions: Vec<ForeignSubscription>,
-    /// `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
+    /// `project` (in `.oxplow/extensions/`) or `bundled` (ships with oxplow,
     /// read-only).
     pub origin: String,
     /// What it adds to the core UI (`ui:`).
@@ -1658,6 +1675,9 @@ pub struct Extension {
     pub config_scripts: std::collections::BTreeMap<String, String>,
     #[serde(default)]
     pub public_contracts: public_contracts::PublicContracts,
+    /// Where its files came from.
+    #[serde(default)]
+    pub deployment: Deployment,
 }
 
 impl Extension {
@@ -1670,11 +1690,11 @@ impl Extension {
             .map(|resolved| resolved.values)
     }
 
-    /// The project's own: in its `oxplow/extensions/` folder and not
-    /// installed from elsewhere. Only it may run its own programs to record
-    /// facts and parse reports, each once a person approved it.
+    /// The project's own: not one that ships with oxplow. Only it may run
+    /// its own programs to record facts and parse reports, each once a
+    /// person approved it.
     pub fn is_own(&self) -> bool {
-        self.origin == "project" && self.source.is_none()
+        self.origin == "project"
     }
 }
 
@@ -1690,21 +1710,6 @@ pub struct ExtensionUi {
     /// provider is the capability's active one (valid ones).
     pub replacements: Vec<replacements::UiReplacement>,
 }
-
-/// Provenance of an installed extension, kept in its `source.yaml`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ExtensionSource {
-    /// The git URL it was cloned from.
-    pub git: String,
-    /// The branch, tag or commit asked for; `None` = the remote's default branch.
-    pub git_ref: Option<String>,
-    /// The commit actually installed.
-    pub sha: String,
-}
-
-/// File recording an installed extension's [`ExtensionSource`].
-pub const SOURCE_FILE: &str = "source.yaml";
 
 /// The result of running a lens.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -1734,65 +1739,210 @@ pub struct LensInactive {
     pub message: String,
 }
 
-/// Load bundled extensions plus every project extension under
-/// `root/oxplow/extensions/`, sorted by name, with `root` as its own
-/// project (its `.oxplow/project.yaml` says what's disabled). A project
-/// extension using a bundled name is listed with an error and never
-/// shadows the bundled one.
+/// Load every extension of the project at `root` from its source:
+/// bundled ones from their source when `root` has one (`extensionSources`,
+/// or `.oxplow/extensions/<name>/`), else as they ship; every other one found
+/// in `.oxplow/extensions/` or named by the settings. A source load is what
+/// an author's sources would do ([`sources_on`]); what runs is the deployed
+/// load ([`load_deployed`]).
 pub fn load_extensions(root: &Path) -> Vec<Extension> {
     load_extensions_in(root, root)
 }
 
-/// [`load_extensions`] of `root`'s files, with `project`'s config saying
-/// what's disabled — a stream's working copy read under the main
-/// worktree's `project.yaml`.
+/// [`load_extensions`] of `root`'s sources, with `project`'s settings
+/// saying which are on and where sources are — a stream's working copy
+/// read under the main checkout's config.
 pub fn load_extensions_in(root: &Path, project: &Path) -> Vec<Extension> {
-    resolve_catalog(
-        load_sources(root),
-        &oxplow_config::disabled_extensions(project),
-    )
+    let settings = oxplow_config::extension_settings(project);
+    let sources = load_sources(root, &settings);
+    let settings = sources_on(settings, &sources);
+    resolve_catalog(sources, &settings)
 }
 
-pub(super) fn load_sources(root: &Path) -> Vec<Extension> {
-    let mut out: Vec<Extension> = crate::bundled_extensions::BUNDLED
-        .iter()
-        .map(|b| {
-            load_one(
-                &Embedded(b),
-                b.name,
-                &format!("bundled:{}", b.name),
-                "bundled",
-            )
-        })
+/// `settings` for a source load: every project source loaded is on unless
+/// the person turned it off (`disableExtensions`); for the extensions that
+/// ship with oxplow, the lists decide as always.
+pub(crate) fn sources_on(
+    mut settings: oxplow_config::ExtensionSettings,
+    sources: &[Extension],
+) -> oxplow_config::ExtensionSettings {
+    for ext in sources {
+        let present = ext.origin == "project" && ext.deployment == Deployment::Source;
+        if present
+            && !settings.personal.disable.contains(&ext.name)
+            && !settings.is_enabled(&ext.name)
+        {
+            settings.personal.enable.push(ext.name.clone());
+        }
+    }
+    settings
+}
+
+/// How a folder is shown: relative to `root` when inside it, else whole.
+fn shown(root: &Path, dir: &Path) -> String {
+    dir.strip_prefix(root)
+        .map(|rel| rel.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| dir.to_string_lossy().into_owned())
+}
+
+/// Every extension name the project at `root` knows: the bundled ones, the
+/// folders in `.oxplow/extensions/`, the names `extensionSources` points
+/// at and the names listed as on. Bundled first, then the rest by name.
+pub fn known_names(root: &Path, settings: &oxplow_config::ExtensionSettings) -> Vec<String> {
+    let mut names: BTreeSet<String> = std::fs::read_dir(root.join(EXTENSIONS_DIR))
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| !n.starts_with('.'))
         .collect();
-    if let Ok(entries) = std::fs::read_dir(root.join(EXTENSIONS_DIR)) {
-        let mut names: Vec<String> = entries
-            .filter_map(Result::ok)
-            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-            .filter_map(|e| e.file_name().into_string().ok())
-            .filter(|n| !n.starts_with('.'))
-            .collect();
-        names.sort();
-        for n in names {
-            let rel = format!("{EXTENSIONS_DIR}/{n}");
-            if crate::bundled_extensions::is_reserved(&n) {
-                out.push(Extension {
-                    enabled: false,
-                    errors: vec![format!(
-                        "{rel}: the name `{n}` is reserved for an extension that ships with oxplow; rename the folder"
-                    )],
-                    ..empty_extension(&n, &rel, "project")
-                });
-                continue;
+    names.extend(settings.team_sources.keys().cloned());
+    names.extend(settings.personal_sources.keys().cloned());
+    names.extend(settings.enabled().into_iter().map(|(name, _)| name));
+    let bundled = crate::bundled_extensions::BUNDLED
+        .iter()
+        .map(|b| b.name.to_string());
+    let rest: Vec<String> = names
+        .into_iter()
+        .filter(|n| crate::bundled_extensions::find(n).is_none())
+        .collect();
+    bundled.chain(rest).collect()
+}
+
+/// A bundled extension as it ships, from its shipped deployment in
+/// `project`'s store (written there the first time).
+fn shipped(project: &Path, b: &crate::bundled_extensions::BundledExtension) -> Extension {
+    match crate::extension_store::extract_shipped(project, b) {
+        Ok(hash) => {
+            let dir = crate::extension_store::deployment_dir(project, b.name, &hash);
+            Extension {
+                deployment: Deployment::Shipped { hash },
+                ..load_one(
+                    &Disk(dir.clone()),
+                    b.name,
+                    &dir.to_string_lossy(),
+                    "bundled",
+                )
             }
-            out.push(load_one(&Disk(root.join(&rel)), &n, &rel, "project"));
+        }
+        Err(e) => Extension {
+            errors: vec![format!(
+                "{}: the copy that ships with oxplow couldn't be written to {}: {e}",
+                b.name,
+                crate::extension_store::STORE_DIR
+            )],
+            ..empty_extension(b.name, b.name, "bundled")
+        },
+    }
+}
+
+/// A listed extension that has nothing to run here.
+fn listed_only(name: &str, path: &str, deployment: Deployment) -> Extension {
+    Extension {
+        enabled: false,
+        deployment,
+        ..empty_extension(name, path, "project")
+    }
+}
+
+fn origin_of(name: &str) -> &'static str {
+    if crate::bundled_extensions::find(name).is_some() {
+        "bundled"
+    } else {
+        "project"
+    }
+}
+
+pub(super) fn load_sources(
+    root: &Path,
+    settings: &oxplow_config::ExtensionSettings,
+) -> Vec<Extension> {
+    let mut out = Vec::new();
+    for name in known_names(root, settings) {
+        let dir = settings.source(root, &name);
+        let bundled = crate::bundled_extensions::find(&name);
+        if dir.is_dir() {
+            out.push(load_one(
+                &Disk(dir.clone()),
+                &name,
+                &shown(root, &dir),
+                origin_of(&name),
+            ));
+        } else if let Some(b) = bundled {
+            out.push(shipped(root, b));
+        } else if settings.is_enabled(&name) {
+            out.push(listed_only(&name, &shown(root, &dir), Deployment::NotHere));
         }
     }
     out.sort_by(|a, b| a.name.cmp(&b.name).then(a.origin.cmp(&b.origin)));
     out
 }
 
-pub(super) fn resolve_catalog(mut out: Vec<Extension>, disabled: &[String]) -> Vec<Extension> {
+/// Load the extensions the project at `project` runs: each one's
+/// deployment in `live` (`name → hash`), a bundled one without a
+/// deployment as it ships, and the rest it knows listed but not run
+/// (undeployed when its source is here, not here otherwise).
+pub fn load_deployed(
+    project: &Path,
+    settings: &oxplow_config::ExtensionSettings,
+    live: &BTreeMap<String, String>,
+) -> Vec<Extension> {
+    let mut names = known_names(project, settings);
+    for name in live.keys() {
+        if !names.contains(name) {
+            names.push(name.clone());
+        }
+    }
+    let mut out: Vec<Extension> = names
+        .iter()
+        .filter_map(|name| {
+            if let Some(hash) = live.get(name) {
+                let dir = crate::extension_store::deployment_dir(project, name, hash);
+                return Some(Extension {
+                    deployment: Deployment::Deployed { hash: hash.clone() },
+                    ..load_one(
+                        &Disk(dir.clone()),
+                        name,
+                        &dir.to_string_lossy(),
+                        origin_of(name),
+                    )
+                });
+            }
+            if let Some(b) = crate::bundled_extensions::find(name) {
+                return Some(shipped(project, b));
+            }
+            let source = settings.source(project, name);
+            if source.is_dir() {
+                Some(listed_only(
+                    name,
+                    &shown(project, &source),
+                    Deployment::Undeployed,
+                ))
+            } else if settings.is_enabled(name) {
+                Some(listed_only(
+                    name,
+                    &shown(project, &source),
+                    Deployment::NotHere,
+                ))
+            } else {
+                None
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name).then(a.origin.cmp(&b.origin)));
+    resolve_catalog(out, settings)
+}
+
+/// Whether the settings leave `name` off. A required extension is never off.
+pub(crate) fn is_off(settings: &oxplow_config::ExtensionSettings, name: &str) -> bool {
+    !crate::bundled_extensions::is_required(name) && !settings.is_enabled(name)
+}
+
+pub(super) fn resolve_catalog(
+    mut out: Vec<Extension>,
+    settings: &oxplow_config::ExtensionSettings,
+) -> Vec<Extension> {
     out.sort_by(|a, b| a.name.cmp(&b.name).then(a.origin.cmp(&b.origin)));
     // A document's or dashboard's part from ANOTHER extension resolves
     // here, once every extension is loaded; a missing one is an error and
@@ -1826,9 +1976,7 @@ pub(super) fn resolve_catalog(mut out: Vec<Extension>, disabled: &[String]) -> V
     let mut out: Vec<Extension> = out
         .into_iter()
         .map(|mut e| {
-            if disabled.iter().any(|name| name == &e.name)
-                && !crate::bundled_extensions::is_required(&e.name)
-            {
+            if is_off(settings, &e.name) {
                 e.enabled = false;
             }
             e
@@ -1854,7 +2002,7 @@ pub(super) fn resolve_catalog(mut out: Vec<Extension>, disabled: &[String]) -> V
             if ext.public_contracts.blocked {
                 clear_contributions(&mut ext);
             }
-            apply_disabled(ext, disabled)
+            apply_disabled(ext, settings)
         })
         .collect();
     place_lens_mounts(&mut out);
@@ -2017,61 +2165,60 @@ fn parse_block<T: serde::de::DeserializeOwned>(
         .transpose()
 }
 
-/// Project extension `name` alone, from `root/oxplow/extensions/<name>`
-/// — a tree laid out like a project, e.g. a provider's approved copy.
+/// Where `name`'s files are for a preview in the checkout at `root`: its
+/// source when the checkout has one, else, for an extension that ships with
+/// oxplow, its shipped deployment in `project`'s store.
+pub fn source_or_shipped(project: &Path, root: &Path, name: &str) -> String {
+    let source = oxplow_config::extension_settings(project).source(root, name);
+    if !source.is_dir() {
+        if let Some(b) = crate::bundled_extensions::find(name) {
+            if let Ok(hash) = crate::extension_store::extract_shipped(project, b) {
+                return crate::extension_store::deployment_dir(project, name, &hash)
+                    .to_string_lossy()
+                    .into_owned();
+            }
+        }
+    }
+    shown(root, &source)
+}
+
+/// Extension `name` alone, from its default source folder under `root`
+/// (`.oxplow/extensions/<name>/`).
 pub fn load_project_extension(root: &Path, name: &str) -> Extension {
     let rel = format!("{EXTENSIONS_DIR}/{name}");
-    load_one(&Disk(root.join(&rel)), name, &rel, "project")
+    load_one(&Disk(root.join(&rel)), name, &rel, origin_of(name))
 }
 
-/// A file inside extension `name` (bundled or in `oxplow/extensions/`),
-/// e.g. a collector's script. `None` when there's no such extension or file.
-pub fn read_extension_file(root: &Path, name: &str, rel: &str) -> Option<String> {
-    if !oxplow_domain::service::valid_path(rel)
-        || !oxplow_domain::service::valid_path(name)
-        || name.contains('/')
-    {
+/// Extension `name` alone, from the folder `dir` (its source, or a copy
+/// laid out like one).
+pub fn load_extension_at(dir: &Path, name: &str) -> Extension {
+    load_one(
+        &Disk(dir.to_path_buf()),
+        name,
+        &dir.to_string_lossy(),
+        origin_of(name),
+    )
+}
+
+/// A file inside the extension whose listed `path` is `path` (its
+/// folder), e.g. a collector's script. `None` when there's no such file.
+pub fn read_extension_file(root: &Path, path: &str, rel: &str) -> Option<String> {
+    if !oxplow_domain::service::valid_path(rel) {
         return None;
     }
-    if let Some(b) = crate::bundled_extensions::BUNDLED
-        .iter()
-        .find(|b| b.name == name)
-    {
-        return Embedded(b).read(rel);
-    }
-    Disk(root.join(EXTENSIONS_DIR).join(name)).read(rel)
+    files_at(root, path).ok()?.read(rel)
 }
 
-/// The files at an extension's `path` as a listing gives it: a bundled
-/// extension's embedded files for `bundled:<name>`, else the folder
-/// `project_dir/path` on disk — one resolver, so what an approval covers is
-/// read the same way wherever the extension lives (tsk953).
+/// The files at an extension's `path` as a listing gives it: the folder
+/// `project_dir/path` on disk (an absolute `path`, a deployment's, is
+/// itself) — one resolver, so what an approval covers is read the same way
+/// wherever the extension lives.
 pub(crate) fn files_at(project_dir: &Path, path: &str) -> std::io::Result<Box<dyn ExtensionFiles>> {
-    let Some(rest) = path.strip_prefix("bundled:") else {
-        return Ok(Box::new(Disk(project_dir.join(path))));
-    };
-    // `bundled:<name>` is the extension; `bundled:<name>/<folder>` one of
-    // its folders (a component's bundle), as a path on disk would be.
-    let rest = rest.trim_end_matches('/');
-    let (name, folder) = rest.split_once('/').unwrap_or((rest, ""));
-    let ext = crate::bundled_extensions::find(name).ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!("no bundled extension `{name}`"),
-        )
-    })?;
-    Ok(if folder.is_empty() {
-        Box::new(Embedded(ext))
-    } else {
-        Box::new(EmbeddedDir {
-            ext,
-            prefix: format!("{folder}/"),
-        })
-    })
+    Ok(Box::new(Disk(project_dir.join(path))))
 }
 
-/// Where an extension's files come from: a folder on disk, a bundled
-/// extension's embedded files, or one revision's in memory.
+/// Where an extension's files come from: a folder on disk, or one
+/// revision's in memory.
 pub(crate) trait ExtensionFiles {
     /// Contents of a file, by path inside the extension folder.
     fn read(&self, rel: &str) -> Option<String>;
@@ -2252,7 +2399,7 @@ impl ExtensionFiles for Tree {
 
 /// Project extension `name` as it is at `rev` of the workspace `ws` — a
 /// commit, a snapshot, the working tree — through `Trees` (P8.C1). `None`
-/// when that revision has no `oxplow/extensions/<name>/extension.yaml`.
+/// when that revision has no `.oxplow/extensions/<name>/extension.yaml`.
 pub async fn extension_at(
     trees: &crate::trees::Trees,
     ws: &Path,
@@ -2297,7 +2444,7 @@ pub struct ExtensionChange {
     pub errors: Vec<String>,
 }
 
-/// The extensions under `oxplow/extensions/` whose files differ between
+/// The extensions under `.oxplow/extensions/` whose files differ between
 /// `start` (none: nothing before) and `end` of workspace `ws`, each with
 /// what the change does — both versions loaded as their revision holds
 /// them and reviewed on their own overlays.
@@ -2424,90 +2571,6 @@ pub async fn impact_between(
     .await
 }
 
-pub(crate) struct Embedded(pub(crate) &'static crate::bundled_extensions::BundledExtension);
-
-impl ExtensionFiles for Embedded {
-    fn read(&self, rel: &str) -> Option<String> {
-        self.0.file(rel).map(str::to_string)
-    }
-    fn paths(&self) -> std::io::Result<Vec<String>> {
-        Ok(self.0.files.iter().map(|(p, _)| (*p).to_string()).collect())
-    }
-    fn bytes(&self, rel: &str) -> std::io::Result<Vec<u8>> {
-        self.0
-            .bytes(rel)
-            .map(<[u8]>::to_vec)
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, rel.to_string()))
-    }
-    fn list(&self, dir: &str) -> Vec<String> {
-        let prefix = format!("{dir}/");
-        self.0
-            .files
-            .iter()
-            .filter_map(|(p, _)| p.strip_prefix(&prefix))
-            .filter(|rest| !rest.contains('/'))
-            .map(str::to_string)
-            .collect()
-    }
-    /// From the embedded paths, as a folder's is from the disk. Every file
-    /// it ships is here, so a bundle with none is absent, not unknown.
-    fn bundle_stat(&self, rel: &str) -> custom_components::BundleLook {
-        match custom_components::look_in_paths(rel, self.0.files.iter().map(|(p, b)| (*p, b.len())))
-        {
-            custom_components::BundleLook::Unknown => custom_components::BundleLook::Absent,
-            found => found,
-        }
-    }
-}
-
-/// One folder of a bundled extension (`bundled:<name>/<folder>`): its
-/// files by path inside the folder, as [`Disk`] gives a folder's.
-pub(crate) struct EmbeddedDir {
-    ext: &'static crate::bundled_extensions::BundledExtension,
-    /// `<folder>/`.
-    prefix: String,
-}
-
-impl EmbeddedDir {
-    fn inner(&self) -> impl Iterator<Item = (&'static str, &'static [u8])> + '_ {
-        self.ext
-            .files
-            .iter()
-            .filter_map(|(p, b)| p.strip_prefix(self.prefix.as_str()).map(|rel| (rel, *b)))
-    }
-}
-
-impl ExtensionFiles for EmbeddedDir {
-    fn read(&self, rel: &str) -> Option<String> {
-        self.ext
-            .file(&format!("{}{rel}", self.prefix))
-            .map(str::to_string)
-    }
-    fn paths(&self) -> std::io::Result<Vec<String>> {
-        Ok(self.inner().map(|(p, _)| p.to_string()).collect())
-    }
-    fn bytes(&self, rel: &str) -> std::io::Result<Vec<u8>> {
-        self.ext
-            .bytes(&format!("{}{rel}", self.prefix))
-            .map(<[u8]>::to_vec)
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, rel.to_string()))
-    }
-    fn list(&self, dir: &str) -> Vec<String> {
-        let prefix = format!("{dir}/");
-        self.inner()
-            .filter_map(|(p, _)| p.strip_prefix(prefix.as_str()))
-            .filter(|rest| !rest.contains('/'))
-            .map(str::to_string)
-            .collect()
-    }
-    fn bundle_stat(&self, rel: &str) -> custom_components::BundleLook {
-        match custom_components::look_in_paths(rel, self.inner().map(|(p, b)| (p, b.len()))) {
-            custom_components::BundleLook::Unknown => custom_components::BundleLook::Absent,
-            found => found,
-        }
-    }
-}
-
 /// An effect's or collector's `on:` naming an event type of another
 /// extension's namespace (P9.D1). The type's name is the dependency —
 /// there is no `depends:` key, as a model's `ref('<ext>/<name>')` has
@@ -2571,10 +2634,8 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         errors: Vec::new(),
         warnings: Vec::new(),
         manifest_version: manifest_v2::CURRENT,
-        sharing: Sharing::Private,
         intent: None,
         lenses: Vec::new(),
-        source: None,
         collectors: Vec::new(),
         providers: Vec::new(),
         custom_components: Vec::new(),
@@ -2602,6 +2663,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         configuration: None,
         config_scripts: Default::default(),
         public_contracts: Default::default(),
+        deployment: Deployment::Source,
     }
 }
 
@@ -2665,7 +2727,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 .push(at(&file, key_line(&manifest, "namespace"), e)),
         }
     }
-    ext.sharing = m.sharing;
     ext.intent = manifest_v2::intent_of(&m, &file, &manifest).0;
     ext.description = m.description.clone();
     ext.configuration = manifest_v2::configuration_of(&m, &file, &manifest).0;
@@ -2700,7 +2761,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         }
     }
     public_contracts::load(&mut ext, &m, &manifest, &file);
-    let (errors, warnings) = manifest_v2::check(&m, &file, &manifest, origin == "bundled");
+    let (errors, warnings) = manifest_v2::check(&m, &file, &manifest);
     if !errors.is_empty()
         && (!m.exports.is_empty() || !m.imports.is_empty() || !m.import_guards.is_empty())
     {
@@ -2710,13 +2771,10 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     ext.warnings.extend(warnings);
     let panel_files = m.panels.clone();
     let decorator_files = m.ui.decorators.clone();
-    // A stable kind: a shared extension's load too.
     let replacement_files = m.ui.replacements.clone();
     let page_files = m.pages.clone();
-    // A stable kind (P10): a shared extension's load too.
     let ref_kind_files = m.ref_kinds.clone();
     let slot_files = {
-        // A stable kind (P9.D6): a shared extension's load too.
         if let Some(v) = m.event_types.as_ref() {
             let (declared, errors) = crate::extension_event_types::parse_event_types(
                 name,
@@ -2782,8 +2840,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ext.implementations = declared;
             ext.errors.extend(errors);
         }
-        // The project's own: in its folder, not installed from elsewhere.
-        let own = origin == "project" && files.read(SOURCE_FILE).is_none();
+        // The project's own: not one that ships with oxplow.
+        let own = origin == "project";
         if let Some(v) = &m.collectors {
             // A collector may follow core types, its own extension's, and
             // another's.
@@ -2863,8 +2921,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             .map(ForeignSubscription::warning)
             .collect();
         ext.warnings.extend(foreign);
-        // Stable since the command model's providers phase: a shared
-        // extension's are loaded too.
         if let Some(v) = &m.providers {
             let (providers, errors) = crate::providers::parse_providers(v, &|rel| files.read(rel));
             ext.providers = providers;
@@ -2899,7 +2955,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             };
             let (commands, errors) = crate::extension_commands::parse_commands(
                 &ext.namespace,
-                m.sharing == Sharing::Shared,
+                origin == "bundled",
                 v,
                 &file,
                 &manifest,
@@ -3111,13 +3167,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         ext.errors.extend(errors);
         slots
     };
-    if let Some(text) = files.read(SOURCE_FILE) {
-        match serde_yaml::from_str::<ExtensionSource>(&text) {
-            Ok(src) => ext.source = Some(src),
-            Err(e) => ext.errors.push(format!("{rel}/{SOURCE_FILE}: {e}")),
-        }
-    }
-
     let mut lens_files: Vec<String> = files
         .list("lenses")
         .into_iter()
@@ -3855,10 +3904,10 @@ impl Lens {
 
 /// Clear what a disabled extension contributes; it stays listed so
 /// Settings can turn it back on.
-fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
-    // One oxplow relies on stays: its name in the list is ignored.
-    if disabled.iter().any(|d| d == &ext.name) && !crate::bundled_extensions::is_required(&ext.name)
-    {
+fn apply_disabled(mut ext: Extension, settings: &oxplow_config::ExtensionSettings) -> Extension {
+    // A listed-only one runs nothing; one oxplow relies on is never off.
+    let runs = !matches!(ext.deployment, Deployment::Undeployed | Deployment::NotHere);
+    if !runs || is_off(settings, &ext.name) {
         ext.enabled = false;
         clear_contributions(&mut ext);
     }
@@ -3892,7 +3941,7 @@ pub(super) fn clear_contributions(ext: &mut Extension) {
 
 pub(crate) fn disabled_error(name: &str) -> DomainError {
     DomainError::Invalid(format!(
-        "extension `{name}` is disabled in .oxplow/project.yaml (extensions.disabled); enable it in Settings → Extensions"
+        "extension `{name}` is disabled (`disableExtensions` in .oxplow/personal.yaml, or left off the project's `extensions` list); enable it in Settings → Extensions"
     ))
 }
 
@@ -4283,14 +4332,10 @@ pub async fn validate_extension(
     name: &str,
     commands: Option<CommandSchemas<'_>>,
 ) -> Result<Extension, DomainError> {
-    if oxplow_config::disabled_extensions(catalog.project_of(root))
-        .iter()
-        .any(|disabled| disabled == name)
-        && !crate::bundled_extensions::is_required(name)
-    {
-        return Err(disabled_error(name));
-    }
-    let mut declared = load_sources(root);
+    // A check reads the source whether or not the extension is on: it is
+    // how an extension is made ready to deploy.
+    let settings = oxplow_config::extension_settings(catalog.project_of(root));
+    let mut declared = load_sources(root, &settings);
     let index = declared
         .iter()
         .position(|ext| ext.name == name && ext.origin == "bundled")
@@ -4302,15 +4347,14 @@ pub async fn validate_extension(
     prepare(layer, catalog, root, &mut ext, &read, commands).await;
     if let Ok(files) = files_at(root, &path) {
         check_fixture_pairing(&mut ext, files.as_ref());
-        if ext.sharing == Sharing::Shared {
-            check_credentials(&mut ext, files.as_ref());
-        }
+        check_credentials(&mut ext, files.as_ref());
     }
     Ok(ext)
 }
 
-/// A shared extension's manifest, scripts and fixtures, read for what looks
-/// like a credential (`credential_lint`): warnings, never the value.
+/// An extension's manifest, scripts and fixtures, read for what looks like
+/// a credential (`credential_lint`): warnings, never the value — a source
+/// is one `share` away from a commit.
 fn check_credentials(ext: &mut Extension, files: &dyn ExtensionFiles) {
     let Ok(mut paths) = files.paths() else { return };
     paths.sort_unstable();
@@ -4671,221 +4715,21 @@ async fn prepare(
     }
 }
 
-/// What installing an extension from git would bring in, for a person to
-/// look at first (tsk378): the extension as it would load (its lenses,
-/// sources with their programs, hosts and credentials, advisories,
-/// gauges; `extension.errors` are load errors, which block the install),
-/// the commit it's at, and `problems` a dry run of its lenses and
-/// advisories found (reported, not blocking: a lens over a source that
-/// hasn't synced can't run yet).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct ExtensionReview {
-    pub extension: Extension,
-    pub git: String,
-    pub git_ref: Option<String>,
-    /// The commit reviewed; pass it back to install exactly this.
-    pub sha: String,
-    pub problems: Vec<String>,
-    /// What installing it would change, against the installed version
-    /// when it replaces one; `None` when the candidate doesn't
-    /// load (its `problems` say why).
-    pub impact: Option<crate::extension_impact::ImpactReport>,
-    /// The services each of its Starlark scripts declares or is given
-    /// (`services::of_extension`), so a person sees what a script can
-    /// reach before installing — read from the candidate's own files.
-    pub services: Vec<crate::services::ScriptServices>,
-}
-
-/// Clone an extension and report what it declares, installing nothing.
-/// `replacing` names the installed extension an update must match.
-pub async fn review_extension(
-    layer: &crate::sql_gateway::SqlGateway,
-    catalog: &crate::extension_catalog::ExtensionCatalog,
-    root: &Path,
-    git_url: &str,
-    git_ref: Option<&str>,
-    replacing: Option<&str>,
-    commands: CommandSchemas<'_>,
-) -> Result<ExtensionReview, DomainError> {
-    let fetched = {
-        let (root, url, r, rep) = (
-            root.to_path_buf(),
-            git_url.to_string(),
-            git_ref.map(str::to_string),
-            replacing.map(str::to_string),
-        );
-        tokio::task::spawn_blocking(move || fetch(&root, &url, r.as_deref(), rep.as_deref()))
-            .await
-            .map_err(|e| DomainError::Storage(format!("extension review: {e}")))??
-    };
-    let mut extension = catalog.candidate(root, fetched.load()).into_candidate();
-    let load_errors = extension.errors.len();
-    let installed: Option<Extension> = replacing.and_then(|name| {
-        load_sources(root)
-            .into_iter()
-            .find(|e| e.name == name && e.origin == "project")
-    });
-    let name = extension.name.clone();
-    let read_installed = |rel: &str| read_extension_file(root, &name, rel);
-    let clone = Disk(fetched.clone.clone());
-    let read_candidate = |rel: &str| clone.read(rel);
-    let impact = if load_errors > 0 {
-        // A candidate that doesn't load has nothing reliable to compare;
-        // its check still says what else is wrong.
-        prepare(
-            layer,
-            catalog,
-            root,
-            &mut extension,
-            &read_candidate,
-            Some(commands),
-        )
-        .await;
-        None
-    } else {
-        // The installed side through its own models, too: what's
-        // published may not be it (a disabled extension, a model that
-        // failed, another worktree's copy).
-        let mut after = ReviewSide {
-            extension,
-            read: &read_candidate,
-        };
-        let report = impact_between(
-            layer,
-            catalog,
-            root,
-            installed.map(|e| ReviewSide {
-                extension: e,
-                read: &read_installed,
-            }),
-            &mut after,
-            commands,
-        )
-        .await;
-        extension = after.extension;
-        Some(report)
-    };
-    let problems = extension.errors.split_off(load_errors);
-    // The candidate's own files, never the installed copy of the same
-    // name.
-    let services = crate::services::of_extension(&extension, &read_candidate);
-    Ok(ExtensionReview {
-        extension,
-        git: git_url.to_string(),
-        git_ref: git_ref.map(str::to_string),
-        sha: fetched.sha,
-        problems,
-        impact,
-        services,
-    })
-}
-
-/// [`review_extension`] for an update: the installed extension's recorded
-/// source.
-pub async fn review_update(
-    layer: &crate::sql_gateway::SqlGateway,
-    catalog: &crate::extension_catalog::ExtensionCatalog,
-    root: &Path,
-    name: &str,
-    commands: CommandSchemas<'_>,
-) -> Result<ExtensionReview, DomainError> {
-    let source = installed_source(root, catalog.project_of(root), name)?;
-    review_extension(
-        layer,
-        catalog,
-        root,
-        &source.git,
-        source.git_ref.as_deref(),
-        Some(name),
-        commands,
-    )
-    .await
-}
-
-/// Install an extension from a git repo whose root holds `extension.yaml`:
-/// clone it (inside `.oxplow/tmp/`, per workspace isolation), copy it to
-/// `oxplow/extensions/<name>/` without `.git`, and record its source.
-/// Installs only `reviewed_sha`, the commit a person looked at with
-/// [`review_extension`], and only when it loads without errors. Refuses
-/// to overwrite an existing folder; use [`update_extension`]. `project`'s
-/// config says what's disabled.
-pub fn install_extension(
-    root: &Path,
-    project: &Path,
-    git_url: &str,
-    git_ref: Option<&str>,
-    reviewed_sha: &str,
-) -> Result<Extension, DomainError> {
-    install_from_git(root, project, git_url, git_ref, None, reviewed_sha)
-}
-
-/// Re-install an installed extension from its recorded source (same URL
-/// and ref), at the new commit a person reviewed with [`review_update`].
-pub fn update_extension(
-    root: &Path,
-    project: &Path,
-    name: &str,
-    reviewed_sha: &str,
-) -> Result<Extension, DomainError> {
-    let source = installed_source(root, project, name)?;
-    install_from_git(
-        root,
-        project,
-        &source.git,
-        source.git_ref.as_deref(),
-        Some(name),
-        reviewed_sha,
-    )
-}
-
-/// One extension by name, read from `root` now under `project`'s config —
-/// for the write paths (install, update, save), which must see their own
-/// result whatever a cache holds. Reads go through
-/// `extension_catalog::ExtensionCatalog`.
+/// One extension by name, read from its source under `root` now, with
+/// `project`'s settings saying where that is — for the write paths
+/// (`save_lens`), which must see their own result.
 fn load_fresh(root: &Path, project: &Path, name: &str) -> Result<Extension, DomainError> {
-    let all = load_extensions_in(root, project);
-    let ext = all
-        .iter()
-        .find(|e| e.name == name && e.origin == "bundled")
-        .or_else(|| all.iter().find(|e| e.name == name))
-        .ok_or(DomainError::NotFound)?;
-    if !ext.enabled {
-        if ext.public_contracts.blocked {
-            return Err(DomainError::Invalid(format!(
-                "extension `{name}` cannot activate because its public contracts are invalid or unavailable: {}",
-                ext.errors.join("; ")
-            )));
-        }
-        return Err(disabled_error(name));
+    let settings = oxplow_config::extension_settings(project);
+    let dir = settings.source(root, name);
+    if !dir.join("extension.yaml").is_file() {
+        return Err(DomainError::NotFound);
     }
-    Ok(ext.clone())
-}
-
-/// Where an installed extension came from.
-fn installed_source(
-    root: &Path,
-    project: &Path,
-    name: &str,
-) -> Result<ExtensionSource, DomainError> {
-    if oxplow_config::disabled_extensions(project)
-        .iter()
-        .any(|disabled| disabled == name)
-        && !crate::bundled_extensions::is_required(name)
-    {
-        return Err(disabled_error(name));
-    }
-    // Broken contracts must not prevent reviewing an update that repairs
-    // them. Source metadata does not execute contributions or grant access.
-    let ext = load_sources(root)
-        .into_iter()
-        .find(|ext| ext.name == name && ext.origin == "project")
-        .ok_or(DomainError::NotFound)?;
-    ext.source.ok_or_else(|| {
-        DomainError::Invalid(format!(
-            "extension `{name}` wasn't installed from git (no {SOURCE_FILE}); edit it in place instead"
-        ))
-    })
+    Ok(load_one(
+        &Disk(dir.clone()),
+        name,
+        &shown(root, &dir),
+        origin_of(name),
+    ))
 }
 
 /// A lowercase letter, then lowercase letters, digits and single dashes —
@@ -4893,303 +4737,6 @@ fn installed_source(
 /// command namespace.
 pub fn is_valid_name(name: &str) -> bool {
     oxplow_domain::contribution::valid_extension_name(name)
-}
-
-fn run_git(dir: &Path, args: &[&str]) -> Result<String, String> {
-    let out = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .map_err(|e| e.to_string())?;
-    if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
-    }
-}
-
-/// A published extension cloned into `.oxplow/tmp/` (removed on drop).
-struct Fetched {
-    _tmp: tempfile::TempDir,
-    clone: std::path::PathBuf,
-    sha: String,
-    name: String,
-}
-
-impl Fetched {
-    /// The extension as it would load once installed.
-    fn load(&self) -> Extension {
-        load_one(
-            &Disk(self.clone.clone()),
-            &self.name,
-            &format!("{EXTENSIONS_DIR}/{}", self.name),
-            "project",
-        )
-    }
-}
-
-/// Clone `git_url` at `git_ref` and check it is an installable extension:
-/// `extension.yaml` at its root, a safe name that isn't bundled, and for
-/// an update (`replacing`) the same name.
-fn fetch(
-    root: &Path,
-    git_url: &str,
-    git_ref: Option<&str>,
-    replacing: Option<&str>,
-) -> Result<Fetched, DomainError> {
-    let invalid = |m: String| DomainError::Invalid(m);
-    if git_url.starts_with('-') || git_ref.is_some_and(|r| r.starts_with('-')) {
-        return Err(invalid("git URL and ref may not start with `-`".into()));
-    }
-    let storage = |e: std::io::Error| DomainError::Storage(format!("extension install: {e}"));
-
-    let tmp_parent = root.join(".oxplow").join("tmp");
-    std::fs::create_dir_all(&tmp_parent).map_err(storage)?;
-    let tmp = tempfile::Builder::new()
-        .prefix("ext-install-")
-        .tempdir_in(&tmp_parent)
-        .map_err(storage)?;
-    let clone = tmp.path().join("repo");
-    let clone_str = clone.to_string_lossy().to_string();
-    run_git(tmp.path(), &["clone", "--quiet", "--", git_url, &clone_str])
-        .map_err(|e| invalid(format!("couldn't clone {git_url}: {e}")))?;
-    if let Some(r) = git_ref {
-        run_git(&clone, &["checkout", "--quiet", r])
-            .map_err(|e| invalid(format!("couldn't check out `{r}` in {git_url}: {e}")))?;
-    }
-    let sha = run_git(&clone, &["rev-parse", "HEAD"])
-        .map_err(|e| invalid(format!("couldn't read the cloned commit: {e}")))?;
-
-    let manifest = std::fs::read_to_string(clone.join("extension.yaml")).map_err(|_| {
-        invalid(format!(
-            "{git_url} has no extension.yaml at its root, so it isn't an oxplow extension"
-        ))
-    })?;
-    // Only the name matters here; the full load reports the rest.
-    #[derive(Deserialize)]
-    struct Named {
-        name: String,
-    }
-    let name = serde_yaml::from_str::<Named>(&manifest)
-        .map_err(|e| invalid(format!("{git_url}: extension.yaml: {e}")))?
-        .name;
-    if crate::bundled_extensions::is_reserved(&name) {
-        return Err(invalid(format!(
-            "`{name}` is the name of an extension that ships with oxplow; it can't be installed over"
-        )));
-    }
-    if !is_valid_name(&name) {
-        return Err(invalid(format!(
-            "extension name `{name}` must start with a letter and be lowercase letters, digits and single dashes"
-        )));
-    }
-    if let Some(expected) = replacing {
-        if name != expected {
-            return Err(invalid(format!(
-                "{git_url} now names itself `{name}`, not `{expected}`; install it separately"
-            )));
-        }
-    }
-    Ok(Fetched {
-        _tmp: tmp,
-        clone,
-        sha,
-        name,
-    })
-}
-
-/// Clone, check it's the reviewed commit and loads cleanly, then copy
-/// into a staging directory before replacing the installed folder. A
-/// failed publication restores the old folder or retains its backup.
-fn install_from_git(
-    root: &Path,
-    project: &Path,
-    git_url: &str,
-    git_ref: Option<&str>,
-    replacing: Option<&str>,
-    reviewed_sha: &str,
-) -> Result<Extension, DomainError> {
-    let invalid = |m: String| DomainError::Invalid(m);
-    let fetched = fetch(root, git_url, git_ref, replacing)?;
-    // Serialize candidate checks and publication across threads and
-    // processes. Otherwise two concurrent installs could each validate
-    // against the old catalog. The clone above is unique to this attempt
-    // (its own temp dir), so only the decision and publication wait.
-    let _publication = candidates::InstallLock::acquire(root)
-        .map_err(|e| DomainError::Storage(format!("extension install: {e}")))?;
-    let name = fetched.name.clone();
-    if fetched.sha != reviewed_sha {
-        return Err(invalid(format!(
-            "{git_url} changed since you reviewed it (now at {}); review it again",
-            &fetched.sha[..fetched.sha.len().min(12)]
-        )));
-    }
-    let loaded = candidates::build(root, project, fetched.load()).into_candidate();
-    if !loaded.errors.is_empty() {
-        return Err(invalid(format!(
-            "extension `{name}` has errors, so it wasn't installed: {}",
-            loaded.errors.join("; ")
-        )));
-    }
-
-    let source = ExtensionSource {
-        git: git_url.to_string(),
-        git_ref: git_ref.map(str::to_string),
-        sha: fetched.sha.clone(),
-    };
-    let yaml = serde_yaml::to_string(&source)
-        .map_err(|e| DomainError::Storage(format!("extension install: {e}")))?;
-    publish_install(
-        root,
-        project,
-        &name,
-        &fetched.clone,
-        &yaml,
-        replacing.is_some(),
-    )?;
-    Ok(load_fresh(root, project, &name)
-        .unwrap_or_else(|_| empty_extension(&name, &format!("{EXTENSIONS_DIR}/{name}"), "project")))
-}
-
-/// Stage on the destination filesystem so publication uses renames. The
-/// two renames stage files; coordinated runtime activation remains separate.
-fn publish_install(
-    root: &Path,
-    project: &Path,
-    name: &str,
-    from: &Path,
-    source_yaml: &str,
-    replacing: bool,
-) -> Result<(), DomainError> {
-    let storage =
-        |error: std::io::Error| DomainError::Storage(format!("extension install: {error}"));
-    let parent = candidates::install_parent(root, true)
-        .map_err(storage)?
-        .expect("creating an install parent returns its path");
-    let target = parent.join(name);
-    let exists = match std::fs::symlink_metadata(&target) {
-        Ok(metadata) if metadata.file_type().is_dir() => true,
-        Ok(_) => {
-            return Err(DomainError::Invalid(
-                "extension target is not a plain directory".into(),
-            ))
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-        Err(error) => return Err(storage(error)),
-    };
-    if exists && !replacing {
-        return Err(DomainError::Invalid(
-            format!("extension `{name}` is already installed at {EXTENSIONS_DIR}/{name}; use update_extension"),
-        ));
-    }
-    let staged = tempfile::Builder::new()
-        .prefix(".ext-publish-")
-        .tempdir_in(&parent)
-        .map_err(storage)?;
-    let candidate = staged.path().join("candidate");
-    copy_tree_without_git(from, &candidate).map_err(storage)?;
-    std::fs::write(candidate.join(SOURCE_FILE), source_yaml).map_err(storage)?;
-    std::fs::File::open(candidate.join(SOURCE_FILE))
-        .and_then(|file| file.sync_all())
-        .map_err(storage)?;
-    // Validate the copy that will actually be published, rather than
-    // assuming it is identical to the earlier fetched candidate.
-    let loaded = load_one(
-        &Disk(candidate.clone()),
-        name,
-        &format!("{EXTENSIONS_DIR}/{name}"),
-        "project",
-    );
-    let loaded = candidates::build(root, project, loaded).into_candidate();
-    if !loaded.errors.is_empty() {
-        return Err(DomainError::Invalid(format!(
-            "staged extension `{name}` has errors, so it wasn't installed: {}",
-            loaded.errors.join("; ")
-        )));
-    }
-    candidates::sync_dir(&candidate).map_err(storage)?;
-    candidates::write_install_marker(staged.path(), name, replacing).map_err(storage)?;
-    candidates::sync_dir(&parent).map_err(storage)?;
-    let previous = staged.path().join("previous");
-    if exists {
-        std::fs::rename(&target, &previous).map_err(storage)?;
-        if let Err(error) =
-            candidates::sync_dir(staged.path()).and_then(|()| candidates::sync_dir(&parent))
-        {
-            // Keep the staging directory even if immediate restoration
-            // fails: it may contain the only known prior copy.
-            let _ = std::fs::rename(&previous, &target);
-            let _retained = staged.keep();
-            return Err(storage(error));
-        }
-    }
-    if let Err(error) = std::fs::rename(&candidate, &target) {
-        if exists {
-            if let Err(rollback) = std::fs::rename(&previous, &target) {
-                // TempDir must not delete the only remaining installed copy.
-                let retained = staged.keep();
-                return Err(DomainError::Storage(format!(
-                    "couldn't publish extension `{name}`: {error}; couldn't restore it: {rollback}; previous copy retained at {}",
-                    retained.join("previous").display()
-                )));
-            }
-            if let Err(sync_error) =
-                candidates::sync_dir(staged.path()).and_then(|()| candidates::sync_dir(&parent))
-            {
-                let _retained = staged.keep();
-                return Err(storage(sync_error));
-            }
-        }
-        return Err(storage(error));
-    }
-    if let Err(error) =
-        candidates::sync_dir(staged.path()).and_then(|()| candidates::sync_dir(&parent))
-    {
-        // The new target is published. Retain its old backup so startup
-        // recovery can classify this state after a crash.
-        let _retained = staged.keep();
-        tracing::warn!(extension = name, %error, "published extension; rename sync failed");
-        return Ok(());
-    }
-    // Publication succeeded. Failure to remove the old backup is cleanup,
-    // not an installation failure that could invite an unsafe retry.
-    if let Err(error) = staged.close() {
-        tracing::warn!(extension = name, %error, "published extension; staging cleanup failed");
-    }
-    if let Err(error) = candidates::sync_dir(&parent) {
-        tracing::warn!(extension = name, %error, "published extension; cleanup sync failed");
-    }
-    Ok(())
-}
-
-/// Copy regular files and directories from `from` to `to`, skipping
-/// `.git` and anything that isn't a plain file or directory (symlinks
-/// could point outside the extension).
-fn copy_tree_without_git(from: &Path, to: &Path) -> std::io::Result<()> {
-    let mut directories = Vec::new();
-    for entry in walkdir::WalkDir::new(from)
-        .into_iter()
-        .filter_entry(|e| e.file_name() != ".git")
-    {
-        let entry = entry.map_err(std::io::Error::other)?;
-        let rel = entry
-            .path()
-            .strip_prefix(from)
-            .map_err(std::io::Error::other)?;
-        let dest = to.join(rel);
-        let ft = entry.file_type();
-        if ft.is_dir() {
-            std::fs::create_dir_all(&dest)?;
-            directories.push(dest);
-        } else if ft.is_file() {
-            std::fs::copy(entry.path(), &dest)?;
-            std::fs::File::open(&dest)?.sync_all()?;
-        }
-    }
-    for directory in directories.into_iter().rev() {
-        candidates::sync_dir(&directory)?;
-    }
-    Ok(())
 }
 
 /// What a lens shows — the view part of a lens file, and the one shape a
@@ -5355,17 +4902,16 @@ pub struct LensOrigin<'a> {
     pub origin: Option<&'a str>,
 }
 
-/// Write `spec` as a new lens file
-/// `oxplow/extensions/<extension>/lenses/<slug>.yaml`, creating the
-/// extension (a private v2 manifest whose intent is `origin`) if needed.
-/// Refuses a spec with a problem, overwriting a lens, and bundled or
-/// git-installed extensions (their files are replaced on update).
-/// The directory of extension `name` under `root`, if oxplow may write
-/// lens files into it: a valid name, not a bundled (read-only) extension,
-/// not an installed one (its files are replaced on update). The one check
-/// every writer of an extension's files — `save_lens`, `oxplow.lens.share` —
-/// runs first, so a path or a reserved name never reaches the filesystem.
-pub fn writable_extension_dir(root: &Path, name: &str) -> Result<PathBuf, DomainError> {
+/// The source folder of extension `name` in the checkout at `root` (where
+/// `project`'s settings say it is), if oxplow may write lens files into it:
+/// a valid name, not a bundled extension. The one check every writer of an
+/// extension's files (`save_lens`) runs first, so a
+/// path or a reserved name never reaches the filesystem.
+pub fn writable_extension_dir(
+    root: &Path,
+    project: &Path,
+    name: &str,
+) -> Result<PathBuf, DomainError> {
     if !is_valid_name(name) {
         return Err(DomainError::Invalid(format!(
             "extension name `{name}` must start with a letter and be lowercase letters, digits and single dashes"
@@ -5376,17 +4922,14 @@ pub fn writable_extension_dir(root: &Path, name: &str) -> Result<PathBuf, Domain
             "`{name}` is a bundled extension (read-only); save to another extension"
         )));
     }
-    let dir = root.join(EXTENSIONS_DIR).join(name);
-    if dir.join(SOURCE_FILE).exists() {
-        return Err(DomainError::Invalid(format!(
-            "`{name}` is an installed extension (its files are replaced on update); save to another extension"
-        )));
-    }
-    Ok(dir)
+    Ok(oxplow_config::extension_settings(project).source(root, name))
 }
 
-/// Write `spec` as lens `<extension>/<slug>` under `root`, `project`'s
-/// config saying what's disabled.
+/// Write `spec` as a new lens file `lenses/<slug>.yaml` in extension
+/// `extension`'s source in the checkout at `root` (where `project`'s
+/// settings say it is), creating the extension (a v2 manifest whose intent
+/// is `origin`) if needed. Refuses a spec with a problem, overwriting a
+/// lens, and the bundled extensions. Nothing runs it until it is deployed.
 pub fn save_lens(
     root: &Path,
     project: &Path,
@@ -5397,7 +4940,7 @@ pub fn save_lens(
 ) -> Result<Lens, DomainError> {
     let invalid = |m: String| DomainError::Invalid(m);
     let storage = |e: std::io::Error| DomainError::Storage(format!("save lens: {e}"));
-    let dir = writable_extension_dir(root, extension)?;
+    let dir = writable_extension_dir(root, project, extension)?;
     if !is_valid_name(slug) {
         return Err(invalid(format!(
             "lens slug `{slug}` must start with a letter and be lowercase letters, digits and single dashes"
@@ -5411,13 +4954,6 @@ pub fn save_lens(
         return Err(invalid(format!("lens `{extension}/{slug}` already exists")));
     }
     let manifest = dir.join("extension.yaml");
-    // A kept lens goes to a private extension; moving one into a shared
-    // extension is `oxplow.lens.share`, a person's (tsk988).
-    if manifest.exists() && load_fresh(root, project, extension)?.sharing == Sharing::Shared {
-        return Err(invalid(format!(
-            "`{extension}` is shared: keep the lens in a private extension, then a person moves it with `oxplow.lens.share`"
-        )));
-    }
     std::fs::create_dir_all(file.parent().unwrap_or(&dir)).map_err(storage)?;
     if !manifest.exists() {
         // The same v2 manifest `oxplow extension new` writes, so a lens saved
@@ -5432,7 +4968,6 @@ pub fn save_lens(
                 example_name: slug,
                 example_input: &format!("{{ lens: {slug} }}"),
                 example_expect: "the rows the answer showed",
-                shared: false,
             }),
         )
         .map_err(storage)?;
@@ -5507,13 +5042,10 @@ pub struct ManifestScaffold<'a> {
     /// YAML flow text for the example's input (`{ lens: demo }`).
     pub example_input: &'a str,
     pub example_expect: &'a str,
-    /// A shared extension (`sharing: shared`, targeting this oxplow's
-    /// engine) rather than a private one.
-    pub shared: bool,
 }
 
-/// A v2 manifest with an `intent` and one example — private, or shared
-/// with the `engine` it targets — naming its schema on the first line.
+/// A v2 manifest with an `intent` and one example, naming its schema on the
+/// first line.
 pub fn scaffold_manifest(m: &ManifestScaffold<'_>) -> String {
     let quote = |s: &str| {
         serde_yaml::to_string(s)
@@ -5522,17 +5054,7 @@ pub fn scaffold_manifest(m: &ManifestScaffold<'_>) -> String {
             .to_string()
     };
     format!(
-        "{modeline}manifest: 2\nname: {name}\ndescription: {description}\n{sharing}intent:\n  purpose: {purpose}\n  origin: {origin}\n  examples:\n    - name: {example_name}\n      input: {input}\n      expect: {expect}\n",
-        sharing = if m.shared {
-            let version = manifest_v2::current_engine();
-            let major_minor: Vec<&str> = version.split('.').take(2).collect();
-            format!(
-                "sharing: shared\nengine: \">={}\"\nversion: 0.1.0\n",
-                major_minor.join(".")
-            )
-        } else {
-            "sharing: private\n".to_string()
-        },
+        "{modeline}manifest: 2\nname: {name}\ndescription: {description}\nintent:\n  purpose: {purpose}\n  origin: {origin}\n  examples:\n    - name: {example_name}\n      input: {input}\n      expect: {expect}\n",
         modeline = schema::modeline(schema::MANIFEST_SCHEMA_URL),
         name = m.name,
         description = quote(m.description),
@@ -5546,47 +5068,6 @@ pub fn scaffold_manifest(m: &ManifestScaffold<'_>) -> String {
 
 #[cfg(test)]
 mod tests {
-
-    /// A bundled extension's files are bytes, so a component's assets
-    /// ship with oxplow as they are; its bundle is found from the embedded
-    /// paths as a folder's is from the disk.
-    #[test]
-    fn an_embedded_extension_holds_a_component_bundle() {
-        static FILES: &[(&str, &[u8])] = &[
-            ("extension.yaml", b"manifest: 2\nname: e\n"),
-            ("components/c/index.html", b"<!doctype html>"),
-            (
-                "components/c/logo.png",
-                &[0x89, b'P', b'N', b'G', 0xff, 0x00],
-            ),
-        ];
-        static EXT: crate::bundled_extensions::BundledExtension =
-            crate::bundled_extensions::BundledExtension {
-                name: "e",
-                files: FILES,
-                required: false,
-            };
-        let files = Embedded(&EXT);
-        assert_eq!(
-            files.bytes("components/c/logo.png").unwrap(),
-            vec![0x89, b'P', b'N', b'G', 0xff, 0x00]
-        );
-        assert_eq!(files.read("components/c/logo.png"), None, "not text");
-        assert_eq!(
-            files.read("extension.yaml").as_deref(),
-            Some("manifest: 2\nname: e\n")
-        );
-        let custom_components::BundleLook::Found(stat) = files.bundle_stat("components/c") else {
-            panic!("{:?}", files.bundle_stat("components/c"));
-        };
-        assert!(stat.has_index);
-        assert_eq!((stat.files, stat.bytes), (2, 21));
-        assert_eq!(
-            files.bundle_stat("components/none"),
-            custom_components::BundleLook::Absent,
-            "every embedded file is known: a missing bundle is absent"
-        );
-    }
 
     /// A malformed list entry is reported on its own line — the shape
     /// error too, which has no name to find it by — in every list block.
@@ -5608,8 +5089,8 @@ mod tests {
                 .expect("a broken entry")
                 // Its `- ` line is the one before.
                 ;
-            std::fs::create_dir_all(d.path().join("oxplow/extensions/x")).unwrap();
-            std::fs::write(d.path().join("oxplow/extensions/x/extension.yaml"), &manifest).unwrap();
+            std::fs::create_dir_all(d.path().join(".oxplow/extensions/x")).unwrap();
+            std::fs::write(d.path().join(".oxplow/extensions/x/extension.yaml"), &manifest).unwrap();
             let ext = load_extensions(d.path())
                 .into_iter()
                 .find(|e| e.name == "x")
@@ -5629,14 +5110,14 @@ mod tests {
     fn a_broken_nested_entry_doesnt_sink_the_manifest() {
         let d = tempfile::tempdir().unwrap();
         let manifest = "manifest: 2\nname: x\nintent:\n  purpose: p\n  examples:\n    - { name: a }\n    - { name: b, bogus: 1 }\nui:\n  slots:\n    - { slot: effort.review.details, lens: l, bogus: 1 }\nskills:\n  - name: s\n    file: s.md\n";
-        std::fs::create_dir_all(d.path().join("oxplow/extensions/x")).unwrap();
+        std::fs::create_dir_all(d.path().join(".oxplow/extensions/x")).unwrap();
         std::fs::write(
-            d.path().join("oxplow/extensions/x/extension.yaml"),
+            d.path().join(".oxplow/extensions/x/extension.yaml"),
             manifest,
         )
         .unwrap();
         std::fs::write(
-            d.path().join("oxplow/extensions/x/s.md"),
+            d.path().join(".oxplow/extensions/x/s.md"),
             "---\nname: s\ndescription: S.\n---\n# s\n",
         )
         .unwrap();
@@ -5752,10 +5233,10 @@ empty: No items.
     #[test]
     fn loads_an_extension_and_its_lenses() {
         let dir = tempfile::tempdir().unwrap();
-        write(dir.path(), "oxplow/extensions/review/extension.yaml", EXT);
+        write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/by-status.yaml",
+            ".oxplow/extensions/review/lenses/by-status.yaml",
             LENS,
         );
 
@@ -5764,7 +5245,7 @@ empty: No items.
         let e = &exts[0];
         assert_eq!(e.name, "review");
         assert_eq!(e.description, "Review helpers");
-        assert_eq!(e.path, "oxplow/extensions/review");
+        assert_eq!(e.path, ".oxplow/extensions/review");
         assert!(e.errors.is_empty(), "{:?}", e.errors);
         assert_eq!(e.lenses.len(), 1);
         let l = &e.lenses[0];
@@ -5772,7 +5253,7 @@ empty: No items.
         assert_eq!(l.slug, "by-status");
         assert_eq!(l.title, "Items by state");
         assert_eq!(l.viz, LensViz::Table);
-        assert_eq!(l.path, "oxplow/extensions/review/lenses/by-status.yaml");
+        assert_eq!(l.path, ".oxplow/extensions/review/lenses/by-status.yaml");
         assert_eq!(
             l.params[0].default,
             Some(SqlCell::Text("in_progress".into()))
@@ -5792,25 +5273,25 @@ empty: No items.
     #[test]
     fn a_broken_extension_reports_errors_without_hiding_others() {
         let dir = tempfile::tempdir().unwrap();
-        write(dir.path(), "oxplow/extensions/review/extension.yaml", EXT);
+        write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/good.yaml",
+            ".oxplow/extensions/review/lenses/good.yaml",
             LENS,
         );
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/bad.yaml",
+            ".oxplow/extensions/review/lenses/bad.yaml",
             "title: x\nqueery: SELECT 1\n",
         );
         write(
             dir.path(),
-            "oxplow/extensions/nomanifest/lenses/a.yaml",
+            ".oxplow/extensions/nomanifest/lenses/a.yaml",
             LENS,
         );
         write(
             dir.path(),
-            "oxplow/extensions/misnamed/extension.yaml",
+            ".oxplow/extensions/misnamed/extension.yaml",
             "manifest: 2\nname: other\nintent:\n  purpose: test\n",
         );
 
@@ -5852,10 +5333,10 @@ empty: No items.
     #[test]
     fn find_lens_by_id() {
         let dir = tempfile::tempdir().unwrap();
-        write(dir.path(), "oxplow/extensions/review/extension.yaml", EXT);
+        write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/by-status.yaml",
+            ".oxplow/extensions/review/lenses/by-status.yaml",
             LENS,
         );
         assert_eq!(
@@ -5877,10 +5358,10 @@ empty: No items.
     #[tokio::test]
     async fn run_lens_binds_defaults_and_overrides() {
         let dir = tempfile::tempdir().unwrap();
-        write(dir.path(), "oxplow/extensions/review/extension.yaml", EXT);
+        write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/echo.yaml",
+            ".oxplow/extensions/review/lenses/echo.yaml",
             "title: Echo\nparams:\n  - { name: a, default: 1 }\n  - { name: b, default: two }\nquery: SELECT :a AS a, :b AS b\n",
         );
         let sl = layer().await;
@@ -5926,10 +5407,10 @@ empty: No items.
     #[tokio::test]
     async fn run_lens_binds_the_current_stream_and_thread() {
         let dir = tempfile::tempdir().unwrap();
-        write(dir.path(), "oxplow/extensions/review/extension.yaml", EXT);
+        write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/mine.yaml",
+            ".oxplow/extensions/review/lenses/mine.yaml",
             "title: Mine\nparams:\n  - { name: stream_id }\n  - { name: thread_id, default: 9 }\nquery: SELECT :stream_id AS s, :thread_id AS t\n",
         );
         let sl = layer().await;
@@ -6006,15 +5487,15 @@ empty: No items.
     #[tokio::test]
     async fn run_lens_rejects_unknown_params_and_reports_query_errors() {
         let dir = tempfile::tempdir().unwrap();
-        write(dir.path(), "oxplow/extensions/review/extension.yaml", EXT);
+        write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/by-status.yaml",
+            ".oxplow/extensions/review/lenses/by-status.yaml",
             LENS,
         );
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/broken.yaml",
+            ".oxplow/extensions/review/lenses/broken.yaml",
             "title: Broken\nquery: SELECT nope FROM v_nothing\n",
         );
         let sl = layer().await;
@@ -6055,20 +5536,20 @@ empty: No items.
     #[tokio::test]
     async fn validate_dry_runs_every_lens() {
         let dir = tempfile::tempdir().unwrap();
-        write(dir.path(), "oxplow/extensions/review/extension.yaml", EXT);
+        write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/by-status.yaml",
+            ".oxplow/extensions/review/lenses/by-status.yaml",
             LENS,
         );
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/broken.yaml",
+            ".oxplow/extensions/review/lenses/broken.yaml",
             "title: Broken\nquery: SELECT nope FROM v_nothing\n",
         );
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/badcol.yaml",
+            ".oxplow/extensions/review/lenses/badcol.yaml",
             "title: Bad column\nquery: SELECT 1 AS n\ncolumns:\n  - { key: missing }\n",
         );
         let sl = layer().await;
@@ -6087,522 +5568,6 @@ empty: No items.
             validate_extension(&sl, &cat(), dir.path(), "nope", None).await,
             Err(DomainError::NotFound)
         ));
-    }
-
-    fn git(dir: &Path, args: &[&str]) {
-        let ok = std::process::Command::new("git")
-            .args(["-c", "user.email=t@t", "-c", "user.name=t"])
-            .args(args)
-            .current_dir(dir)
-            .status()
-            .unwrap()
-            .success();
-        assert!(ok, "git {args:?} failed");
-    }
-
-    /// A git repo shaped like a published extension.
-    fn published_repo(lens_title: &str) -> tempfile::TempDir {
-        let repo = tempfile::tempdir().unwrap();
-        write(
-            repo.path(),
-            "extension.yaml",
-            "manifest: 2\nname: shared\nintent:\n  purpose: test\ndescription: Shared lenses\n",
-        );
-        write(
-            repo.path(),
-            "lenses/count.yaml",
-            &format!("title: {lens_title}\nquery: SELECT 1 AS n\nviz: number\n"),
-        );
-        git(repo.path(), &["init", "-q", "-b", "main"]);
-        git(repo.path(), &["add", "."]);
-        git(repo.path(), &["commit", "-q", "-m", "init"]);
-        repo
-    }
-
-    fn head(repo: &Path) -> String {
-        run_git(repo, &["rev-parse", "HEAD"]).unwrap()
-    }
-
-    /// Each side of a review reads through its own overlay — a lens
-    /// over a model whose SQL changed renders against each version's own
-    /// SQL, though neither version's models are published.
-    #[tokio::test]
-    async fn each_side_of_a_review_reads_its_own_models() {
-        let project = tempfile::tempdir().unwrap();
-        let repo = tempfile::tempdir().unwrap();
-        write(
-            repo.path(),
-            "extension.yaml",
-            "manifest: 2\nname: shared\nintent:\n  purpose: test\ndescription: Shared lenses\nmodels:\n  - name: x\n    version: 1\n    description: X.\n    columns:\n      - { name: n, type: \"\", doc: N. }\n",
-        );
-        write(repo.path(), "models/x.sql", "SELECT 1 AS n\n");
-        write(
-            repo.path(),
-            "lenses/count.yaml",
-            "title: Count\nquery: SELECT n FROM v_shared_x\nviz: number\n",
-        );
-        git(repo.path(), &["init", "-q", "-b", "main"]);
-        git(repo.path(), &["add", "."]);
-        git(repo.path(), &["commit", "-q", "-m", "init"]);
-        let url = repo.path().to_string_lossy().to_string();
-        let sl = layer().await;
-        let none = &|_: &str| -> Option<serde_json::Value> { None };
-        let first = review_extension(&sl, &cat(), project.path(), &url, None, None, none)
-            .await
-            .unwrap();
-        install_extension(project.path(), project.path(), &url, None, &first.sha).unwrap();
-        write(repo.path(), "models/x.sql", "SELECT 2 AS n\n");
-        git(repo.path(), &["commit", "-qam", "two"]);
-        let update = review_update(&sl, &cat(), project.path(), "shared", none)
-            .await
-            .unwrap();
-        let count = update
-            .impact
-            .as_ref()
-            .unwrap()
-            .lenses
-            .iter()
-            .find(|l| l.id == "shared/count")
-            .unwrap();
-        assert_eq!(
-            (
-                count.before.as_deref(),
-                count.after.as_deref(),
-                count.error.as_deref()
-            ),
-            (Some("1"), Some("2"), None)
-        );
-        // Its rows, each side's own — counts, since it has no key.
-        let x = update
-            .impact
-            .as_ref()
-            .unwrap()
-            .models
-            .iter()
-            .find(|m| m.view == "v_shared_x")
-            .unwrap();
-        let rows = x.rows.as_ref().expect("a changed model's rows");
-        assert_eq!((rows.before, rows.after), (Some(1), Some(1)));
-        assert!(
-            rows.note.as_deref().unwrap_or("").contains("no key"),
-            "{rows:?}"
-        );
-    }
-
-    /// An update is reviewed against the installed version — a
-    /// changed lens shows its text before and after.
-    #[tokio::test]
-    async fn review_update_shows_before_and_after_against_the_installed_version() {
-        let project = tempfile::tempdir().unwrap();
-        let repo = published_repo("Count");
-        let url = repo.path().to_string_lossy().to_string();
-        let sl = layer().await;
-        let first = review_extension(
-            &sl,
-            &cat(),
-            project.path(),
-            &url,
-            None,
-            None,
-            &|_: &str| -> Option<serde_json::Value> { None },
-        )
-        .await
-        .unwrap();
-        assert!(first
-            .impact
-            .as_ref()
-            .unwrap()
-            .lenses
-            .iter()
-            .all(|l| l.change == crate::extension_impact::Change::Added));
-        install_extension(project.path(), project.path(), &url, None, &first.sha).unwrap();
-        write(
-            repo.path(),
-            "lenses/count.yaml",
-            "title: Count\nquery: SELECT 2 AS n\nviz: number\n",
-        );
-        git(repo.path(), &["commit", "-qam", "two"]);
-        let update = review_update(&sl, &cat(), project.path(), "shared", &|_: &str| -> Option<
-            serde_json::Value,
-        > { None })
-        .await
-        .unwrap();
-        let count = update
-            .impact
-            .as_ref()
-            .unwrap()
-            .lenses
-            .iter()
-            .find(|l| l.id == "shared/count")
-            .unwrap();
-        assert_eq!(count.change, crate::extension_impact::Change::Changed);
-        assert_eq!(
-            (count.before.as_deref(), count.after.as_deref()),
-            (Some("1"), Some("2"))
-        );
-        // A candidate that doesn't load has no impact to show: its
-        // problems say why.
-        write(
-            repo.path(),
-            "extension.yaml",
-            "manifest: 2\nname: shared\nbogus_kind: 1\n",
-        );
-        git(repo.path(), &["commit", "-qam", "broken"]);
-        let broken = review_update(&sl, &cat(), project.path(), "shared", &|_: &str| -> Option<
-            serde_json::Value,
-        > { None })
-        .await
-        .unwrap();
-        assert!(!broken.extension.errors.is_empty());
-        assert_eq!(broken.impact, None);
-    }
-
-    /// Before anything lands in the repo a person sees what the extension
-    /// declares (sources with their programs, hosts and credentials) and
-    /// what's wrong with it; install then takes exactly the commit they
-    /// reviewed (tsk378).
-    #[tokio::test]
-    async fn review_shows_the_services_a_script_is_given() {
-        let project = tempfile::tempdir().unwrap();
-        let repo = published_repo("Count");
-        write(
-            repo.path(),
-            "extension.yaml",
-            "manifest: 2\nname: shared\nintent:\n  purpose: test\nmeasures:\n  - { key: acme.todo }\ncollectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, trigger: { on: [snapshot.taken] }, facts: [acme.todo] }\n",
-        );
-        write(
-            repo.path(),
-            "collectors/todo.star",
-            "def transform(input):\n    return {\"facts\": [], \"n\": len(files(\"**\"))}\n",
-        );
-        git(repo.path(), &["add", "."]);
-        git(repo.path(), &["commit", "-q", "-m", "source"]);
-        let url = repo.path().to_string_lossy().to_string();
-        let review = review_extension(
-            &layer().await,
-            &cat(),
-            project.path(),
-            &url,
-            None,
-            None,
-            &|_: &str| -> Option<serde_json::Value> { None },
-        )
-        .await
-        .unwrap();
-        let [script] = review.services.as_slice() else {
-            panic!("{:?}", review.services)
-        };
-        assert_eq!(script.script, "collector `acme.todo_scan`");
-        // Read from the candidate's script, not the project's.
-        let scopes: Vec<_> = script
-            .services
-            .iter()
-            .map(|s| (s.scope.as_str(), s.declared, s.used))
-            .collect();
-        assert_eq!(
-            scopes,
-            vec![("tree.read", crate::services::Declared::Implied, true)]
-        );
-    }
-
-    #[tokio::test]
-    async fn review_shows_what_an_extension_declares_before_install() {
-        let project = tempfile::tempdir().unwrap();
-        let repo = published_repo("Count");
-        write(
-            repo.path(),
-            "extension.yaml",
-            "manifest: 2\nname: shared\nintent:\n  purpose: test\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    network: [api.github.com]\n    credentials: [TOKEN]\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
-        );
-        write(repo.path(), "sync.sh", "echo '{}'\n");
-        write(
-            repo.path(),
-            "lenses/broken.yaml",
-            "title: Broken\nquery: SELECT 1 AS n\ncolumns:\n  - { key: missing }\n",
-        );
-        git(repo.path(), &["add", "."]);
-        git(repo.path(), &["commit", "-q", "-m", "source"]);
-        let url = repo.path().to_string_lossy().to_string();
-        let sl = layer().await;
-
-        let review = review_extension(
-            &sl,
-            &cat(),
-            project.path(),
-            &url,
-            None,
-            None,
-            &|_: &str| -> Option<serde_json::Value> { None },
-        )
-        .await
-        .unwrap();
-        assert_eq!(review.extension.name, "shared");
-        // The review lists no Starlark scripts here (its one collector is a
-        // program), so no services.
-        assert!(review.services.is_empty(), "{:?}", review.services);
-        assert_eq!(review.sha, head(repo.path()));
-        let source = &review.extension.collectors[0];
-        assert_eq!(source.network, vec!["api.github.com".to_string()]);
-        assert_eq!(source.credentials, vec!["TOKEN".to_string()]);
-        assert!(
-            review.extension.errors.is_empty(),
-            "{:?}",
-            review.extension.errors
-        );
-        assert!(
-            review.problems.iter().any(|p| p.contains("missing")),
-            "{:?}",
-            review.problems
-        );
-        assert!(
-            !project.path().join("oxplow/extensions").exists(),
-            "a review installs nothing"
-        );
-        let tmp = project.path().join(".oxplow/tmp");
-        assert!(!tmp.exists() || std::fs::read_dir(&tmp).unwrap().next().is_none());
-
-        // A commit that isn't the reviewed one is refused.
-        write(repo.path(), "sync.sh", "curl evil.example\n");
-        git(repo.path(), &["commit", "-q", "-am", "swap"]);
-        let err =
-            install_extension(project.path(), project.path(), &url, None, &review.sha).unwrap_err();
-        assert!(
-            matches!(err, DomainError::Invalid(ref m) if m.contains("changed since")),
-            "{err:?}"
-        );
-        assert!(!project.path().join("oxplow/extensions").exists());
-        let ext = install_extension(
-            project.path(),
-            project.path(),
-            &url,
-            None,
-            &head(repo.path()),
-        )
-        .unwrap();
-        assert_eq!(ext.name, "shared");
-    }
-
-    /// An extension that doesn't load cleanly isn't installed (tsk378).
-    #[test]
-    fn install_refuses_an_extension_with_load_errors() {
-        let project = tempfile::tempdir().unwrap();
-        let repo = published_repo("Count");
-        write(
-            repo.path(),
-            "extension.yaml",
-            "manifest: 2\nname: shared\nintent:\n  purpose: test\nbogus: 1\n",
-        );
-        git(repo.path(), &["commit", "-q", "-am", "bad"]);
-        let url = repo.path().to_string_lossy().to_string();
-        let err = install_extension(
-            project.path(),
-            project.path(),
-            &url,
-            None,
-            &head(repo.path()),
-        )
-        .unwrap_err();
-        assert!(
-            matches!(err, DomainError::Invalid(ref m) if m.contains("bogus")),
-            "{err:?}"
-        );
-        assert!(!project.path().join("oxplow/extensions").exists());
-    }
-
-    #[test]
-    fn installs_from_git_and_records_the_source() {
-        let project = tempfile::tempdir().unwrap();
-        let repo = published_repo("Count");
-        let url = repo.path().to_string_lossy().to_string();
-
-        let ext = install_extension(
-            project.path(),
-            project.path(),
-            &url,
-            None,
-            &head(repo.path()),
-        )
-        .unwrap();
-        assert_eq!(ext.name, "shared");
-        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-        assert_eq!(ext.lenses[0].title, "Count");
-        let src = ext.source.clone().unwrap();
-        assert_eq!(src.git, url);
-        assert_eq!(src.git_ref, None);
-        assert_eq!(src.sha.len(), 40);
-
-        let dir = project.path().join("oxplow/extensions/shared");
-        assert!(dir.join("lenses/count.yaml").is_file());
-        assert!(
-            !dir.join(".git").exists(),
-            "the clone's .git must not be copied"
-        );
-        assert!(dir.join(SOURCE_FILE).is_file());
-        // Loading later still reports the source.
-        assert_eq!(project_extensions(project.path())[0].source, Some(src));
-        // The temporary clone is gone.
-        let tmp = project.path().join(".oxplow/tmp");
-        assert!(!tmp.exists() || std::fs::read_dir(&tmp).unwrap().next().is_none());
-    }
-
-    /// The install lock is a file in the project, so another holder of it
-    /// (another thread, or another oxplow process on the same project)
-    /// makes an install wait rather than race it; it goes ahead on release.
-    #[test]
-    fn an_install_waits_for_another_holder_of_the_install_lock() {
-        let project = tempfile::tempdir().unwrap();
-        let repo = published_repo("Count");
-        let url = repo.path().to_string_lossy().to_string();
-        let sha = head(repo.path());
-        let held = candidates::InstallLock::acquire(project.path()).unwrap();
-
-        let installing = {
-            let root = project.path().to_path_buf();
-            std::thread::spawn(move || install_extension(&root, &root, &url, None, &sha))
-        };
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        assert!(!installing.is_finished(), "the install waits for the lock");
-        assert!(!project.path().join("oxplow/extensions/shared").exists());
-
-        drop(held);
-        let ext = installing.join().unwrap().unwrap();
-        assert_eq!(ext.name, "shared");
-        assert!(project.path().join("oxplow/extensions/shared").is_dir());
-        // The lock is not an extension, nor a stage recovery acts on.
-        assert_eq!(project_extensions(project.path()).len(), 1);
-        let report = candidates::recover_installations(project.path()).unwrap();
-        assert_eq!(report, candidates::InstallRecoveryReport::default());
-    }
-
-    /// Startup recovery takes the same lock, so it never reads a stage an
-    /// install is still publishing.
-    #[test]
-    fn recovery_waits_for_an_install_in_flight() {
-        let project = tempfile::tempdir().unwrap();
-        let held = candidates::InstallLock::acquire(project.path()).unwrap();
-        let recovering = {
-            let root = project.path().to_path_buf();
-            std::thread::spawn(move || candidates::recover_installations(&root))
-        };
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        assert!(!recovering.is_finished(), "recovery waits for the lock");
-        drop(held);
-        recovering.join().unwrap().unwrap();
-    }
-
-    #[test]
-    fn refuses_to_overwrite_and_update_pulls_new_commits() {
-        let project = tempfile::tempdir().unwrap();
-        let repo = published_repo("Count");
-        let url = repo.path().to_string_lossy().to_string();
-        install_extension(
-            project.path(),
-            project.path(),
-            &url,
-            None,
-            &head(repo.path()),
-        )
-        .unwrap();
-
-        let err = install_extension(
-            project.path(),
-            project.path(),
-            &url,
-            None,
-            &head(repo.path()),
-        )
-        .unwrap_err();
-        assert!(
-            matches!(err, DomainError::Invalid(ref m) if m.contains("already")),
-            "{err:?}"
-        );
-
-        write(
-            repo.path(),
-            "lenses/count.yaml",
-            "title: Count v2\nquery: SELECT 2 AS n\nviz: number\n",
-        );
-        git(repo.path(), &["commit", "-q", "-am", "v2"]);
-        let ext =
-            update_extension(project.path(), project.path(), "shared", &head(repo.path())).unwrap();
-        assert_eq!(ext.lenses[0].title, "Count v2");
-    }
-
-    #[test]
-    fn update_only_applies_to_installed_extensions() {
-        let project = tempfile::tempdir().unwrap();
-        write(
-            project.path(),
-            "oxplow/extensions/local/extension.yaml",
-            "manifest: 2\nname: local\nintent:\n  purpose: test\n",
-        );
-        let err = update_extension(project.path(), project.path(), "local", "x").unwrap_err();
-        assert!(
-            matches!(err, DomainError::Invalid(ref m) if m.contains("wasn't installed")),
-            "{err:?}"
-        );
-        assert!(matches!(
-            update_extension(project.path(), project.path(), "nope", "x"),
-            Err(DomainError::NotFound)
-        ));
-    }
-
-    #[test]
-    fn rejects_repos_that_are_not_extensions() {
-        let project = tempfile::tempdir().unwrap();
-        let repo = tempfile::tempdir().unwrap();
-        write(repo.path(), "README.md", "hi");
-        git(repo.path(), &["init", "-q", "-b", "main"]);
-        git(repo.path(), &["add", "."]);
-        git(repo.path(), &["commit", "-q", "-m", "init"]);
-        let err = install_extension(
-            project.path(),
-            project.path(),
-            &repo.path().to_string_lossy(),
-            None,
-            "x",
-        )
-        .unwrap_err();
-        assert!(
-            matches!(err, DomainError::Invalid(ref m) if m.contains("extension.yaml")),
-            "{err:?}"
-        );
-        assert!(!project.path().join("oxplow/extensions").exists());
-
-        let err = install_extension(
-            project.path(),
-            project.path(),
-            "/definitely/not/a/repo",
-            None,
-            "x",
-        )
-        .unwrap_err();
-        assert!(
-            matches!(err, DomainError::Invalid(ref m) if m.contains("clone")),
-            "{err:?}"
-        );
-    }
-
-    #[test]
-    fn rejects_unsafe_extension_names() {
-        let project = tempfile::tempdir().unwrap();
-        let repo = tempfile::tempdir().unwrap();
-        write(repo.path(), "extension.yaml", "name: ../escape\n");
-        git(repo.path(), &["init", "-q", "-b", "main"]);
-        git(repo.path(), &["add", "."]);
-        git(repo.path(), &["commit", "-q", "-m", "init"]);
-        let err = install_extension(
-            project.path(),
-            project.path(),
-            &repo.path().to_string_lossy(),
-            None,
-            "x",
-        )
-        .unwrap_err();
-        assert!(
-            matches!(err, DomainError::Invalid(ref m) if m.contains("name")),
-            "{err:?}"
-        );
     }
 
     fn spec_base() -> LensSpec {
@@ -6631,37 +5596,6 @@ empty: No items.
             purpose: "TODO: what it answers",
             origin: None,
         }
-    }
-
-    /// A lens kept into a stream's working copy answers to the main
-    /// worktree's `project.yaml`, not the copy's own.
-    #[test]
-    fn a_lens_kept_in_a_working_copy_answers_to_the_projects_config() {
-        let main = tempfile::tempdir().unwrap();
-        let side = tempfile::tempdir().unwrap();
-        let origin = LensOrigin {
-            purpose: "Busy",
-            origin: None,
-        };
-        let spec = LensSpec {
-            title: "Busy".into(),
-            query: "SELECT 1 AS n".into(),
-            ..spec_base()
-        };
-        save_lens(side.path(), main.path(), "mine", "one", &spec, &origin).unwrap();
-        let disable = |dir: &Path| {
-            std::fs::create_dir_all(dir.join(".oxplow")).unwrap();
-            std::fs::write(
-                dir.join(".oxplow/project.yaml"),
-                "extensions:\n  disabled: [mine]\n",
-            )
-            .unwrap();
-        };
-        disable(side.path());
-        save_lens(side.path(), main.path(), "mine", "two", &spec, &origin).unwrap();
-        disable(main.path());
-        let err = save_lens(side.path(), main.path(), "mine", "three", &spec, &origin).unwrap_err();
-        assert!(err.to_string().contains("disabled"), "{err}");
     }
 
     /// P6.C1: a spec round-trips through a lens file, and one with a
@@ -6697,7 +5631,7 @@ empty: No items.
         let manifest = std::fs::read_to_string(
             project
                 .path()
-                .join("oxplow/extensions/my-lenses/extension.yaml"),
+                .join(".oxplow/extensions/my-lenses/extension.yaml"),
         )
         .unwrap();
         assert!(manifest.contains("origin: thread:thr1"), "{manifest}");
@@ -6718,7 +5652,7 @@ empty: No items.
         assert!(err.to_string().contains("chart"), "{err}");
         assert!(!project
             .path()
-            .join("oxplow/extensions/my-lenses/lenses/bad.yaml")
+            .join(".oxplow/extensions/my-lenses/lenses/bad.yaml")
             .exists());
     }
 
@@ -6751,7 +5685,7 @@ empty: No items.
                 .contains("never runs a command as the person"),
             "{err}"
         );
-        assert!(!project.path().join("oxplow/extensions/mine").exists());
+        assert!(!project.path().join(".oxplow/extensions/mine").exists());
     }
 
     /// What a scaffold or a kept lens writes points an editor at its
@@ -6766,7 +5700,6 @@ empty: No items.
             example_name: "e",
             example_input: "{}",
             example_expect: "x",
-            shared: false,
         });
         assert!(
             manifest.starts_with(&schema::modeline(schema::MANIFEST_SCHEMA_URL)),
@@ -6790,7 +5723,7 @@ empty: No items.
         let lens = fs::read_to_string(
             project
                 .path()
-                .join("oxplow/extensions/mine/lenses/open-tasks.yaml"),
+                .join(".oxplow/extensions/mine/lenses/open-tasks.yaml"),
         )
         .unwrap();
         assert!(
@@ -6821,7 +5754,7 @@ empty: No items.
         assert_eq!(lens.title, "Open Tasks");
         assert!(project
             .path()
-            .join("oxplow/extensions/mine/extension.yaml")
+            .join(".oxplow/extensions/mine/extension.yaml")
             .is_file());
         let ext = &project_extensions(project.path())[0];
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
@@ -6855,54 +5788,21 @@ empty: No items.
     }
 
     #[test]
-    fn save_lens_refuses_installed_extensions() {
-        let project = tempfile::tempdir().unwrap();
-        write(
-            project.path(),
-            "oxplow/extensions/shared/extension.yaml",
-            "manifest: 2\nname: shared\nintent:\n  purpose: test\n",
-        );
-        write(
-            project.path(),
-            "oxplow/extensions/shared/source.yaml",
-            "git: x\ngitRef: null\nsha: abc\n",
-        );
-        let err = save_lens(
-            project.path(),
-            project.path(),
-            "shared",
-            "x",
-            &LensSpec {
-                title: "X".into(),
-                query: "SELECT 1".into(),
-                viz: LensViz::Number,
-                ..spec_base()
-            },
-            &todo_origin(),
-        )
-        .unwrap_err();
-        assert!(
-            matches!(err, DomainError::Invalid(ref m) if m.contains("installed")),
-            "{err:?}"
-        );
-    }
-
-    #[test]
     fn loads_declared_sources_and_reports_bad_ones_without_dropping_lenses() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
-            "oxplow/extensions/review/extension.yaml",
+            ".oxplow/extensions/review/extension.yaml",
             "manifest: 2\nname: review\nintent:\n  purpose: test\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: bin/sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n  - id: bad\n    runtime: python\n    entry: x\n    entities: []\n",
         );
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/by-status.yaml",
+            ".oxplow/extensions/review/lenses/by-status.yaml",
             LENS,
         );
         write(
             dir.path(),
-            "oxplow/extensions/review/bin/sync.sh",
+            ".oxplow/extensions/review/bin/sync.sh",
             "#!/bin/sh\n",
         );
         let e = &project_extensions(dir.path())[0];
@@ -6922,13 +5822,13 @@ empty: No items.
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
-            "oxplow/extensions/gh/extension.yaml",
+            ".oxplow/extensions/gh/extension.yaml",
             "manifest: 2\nname: gh\nintent:\n  purpose: test\ncollectors:\n  - id: prs\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
         );
-        write(dir.path(), "oxplow/extensions/gh/sync.sh", "#!/bin/sh\n");
+        write(dir.path(), ".oxplow/extensions/gh/sync.sh", "#!/bin/sh\n");
         write(
             dir.path(),
-            "oxplow/extensions/gh/lenses/all.yaml",
+            ".oxplow/extensions/gh/lenses/all.yaml",
             "title: All\nquery: SELECT number FROM v_gh_pr\n",
         );
         let sl = layer().await;
@@ -6962,13 +5862,13 @@ empty: No items.
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
-            "oxplow/extensions/gh/extension.yaml",
+            ".oxplow/extensions/gh/extension.yaml",
             "manifest: 2\nname: gh\nintent:\n  purpose: test\ncollectors:\n  - id: prs\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
         );
-        write(dir.path(), "oxplow/extensions/gh/sync.sh", "#!/bin/sh\n");
+        write(dir.path(), ".oxplow/extensions/gh/sync.sh", "#!/bin/sh\n");
         write(
             dir.path(),
-            "oxplow/extensions/gh/lenses/all.yaml",
+            ".oxplow/extensions/gh/lenses/all.yaml",
             "title: All\nquery: SELECT number FROM v_gh_pr\n",
         );
         let db = Database::in_memory();
@@ -7033,19 +5933,19 @@ empty: No items.
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
-            "oxplow/extensions/review/extension.yaml",
+            ".oxplow/extensions/review/extension.yaml",
             "manifest: 2\nname: review\n",
         );
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/tasks.yaml",
+            ".oxplow/extensions/review/lenses/tasks.yaml",
             LENS,
         );
         let e = only(dir.path(), "review");
         assert_eq!(e.manifest_version, 2);
         assert!(
             e.errors.iter().any(
-                |m| m.starts_with("oxplow/extensions/review/extension.yaml:1:")
+                |m| m.starts_with(".oxplow/extensions/review/extension.yaml:1:")
                     && m.contains("`intent` is required")
             ),
             "{:?}",
@@ -7056,7 +5956,7 @@ empty: No items.
         // A clean v2 manifest has no errors and no warnings.
         write(
             dir.path(),
-            "oxplow/extensions/review/extension.yaml",
+            ".oxplow/extensions/review/extension.yaml",
             EXT_V2,
         );
         let e = only(dir.path(), "review");
@@ -7066,7 +5966,6 @@ empty: No items.
             e.errors,
             e.warnings
         );
-        assert_eq!(e.sharing, Sharing::Private);
         assert_eq!(e.intent.as_ref().unwrap().purpose, "Review agent work");
     }
 
@@ -7076,12 +5975,12 @@ empty: No items.
         let manifest = format!("{EXT_V2}ui:\n  slots:\n    - {{ slot: rail, lens: tasks }}\n    - {{ slot: work_item.detail.body, lens: nope }}\n");
         write(
             dir.path(),
-            "oxplow/extensions/review/extension.yaml",
+            ".oxplow/extensions/review/extension.yaml",
             &manifest,
         );
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/tasks.yaml",
+            ".oxplow/extensions/review/lenses/tasks.yaml",
             LENS,
         );
         let e = only(dir.path(), "review");
@@ -7091,7 +5990,7 @@ empty: No items.
             .find(|m| m.contains("mounts lens `nope`"))
             .unwrap_or_else(|| panic!("{:?}", e.errors));
         assert!(
-            err.starts_with("oxplow/extensions/review/extension.yaml:11:"),
+            err.starts_with(".oxplow/extensions/review/extension.yaml:11:"),
             "{err}"
         );
     }
@@ -7104,7 +6003,7 @@ empty: No items.
         );
         write(
             dir.path(),
-            "oxplow/extensions/review/extension.yaml",
+            ".oxplow/extensions/review/extension.yaml",
             &manifest,
         );
         let e = only(dir.path(), "review");
@@ -7125,7 +6024,7 @@ empty: No items.
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
-            "oxplow/extensions/review/extension.yaml",
+            ".oxplow/extensions/review/extension.yaml",
             "name: review\ndescription: Review helpers\n",
         );
         let e = only(dir.path(), "review");
@@ -7144,22 +6043,22 @@ empty: No items.
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
-            "oxplow/extensions/review/extension.yaml",
+            ".oxplow/extensions/review/extension.yaml",
             EXT_V2,
         );
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/tasks.yaml",
+            ".oxplow/extensions/review/lenses/tasks.yaml",
             LENS,
         );
         write(
             dir.path(),
-            "oxplow/extensions/board/extension.yaml",
+            ".oxplow/extensions/board/extension.yaml",
             "manifest: 2\nname: board\nintent:\n  purpose: x\n  examples: [{ name: a }]\n",
         );
         write(
             dir.path(),
-            "oxplow/extensions/board/lenses/all.yaml",
+            ".oxplow/extensions/board/lenses/all.yaml",
             "title: All\nviz: document\nsections: [{ lens: review/tasks }, { lens: review/missing }]\n",
         );
         let board = only(dir.path(), "board");
@@ -7179,7 +6078,7 @@ empty: No items.
     fn write_tally(root: &Path, script: &str) {
         write(
             root,
-            "oxplow/extensions/tally/extension.yaml",
+            ".oxplow/extensions/tally/extension.yaml",
             "manifest: 2
 name: tally
 intent: { purpose: x, examples: [{ name: a }] }
@@ -7207,27 +6106,27 @@ commands:
         );
         write(
             root,
-            "oxplow/extensions/tally/collectors/things.star",
+            ".oxplow/extensions/tally/collectors/things.star",
             script,
         );
         write(
             root,
-            "oxplow/extensions/tally/models/labelled.sql",
+            ".oxplow/extensions/tally/models/labelled.sql",
             "SELECT id, label FROM ref('thing') WHERE label IS NOT NULL\n",
         );
         write(
             root,
-            "oxplow/extensions/tally/handlers/note.star",
+            ".oxplow/extensions/tally/handlers/note.star",
             "def transform(x):\n    return {\"commands\": []}\n",
         );
         write(
             root,
-            "oxplow/extensions/tally/lenses/labelled.yaml",
+            ".oxplow/extensions/tally/lenses/labelled.yaml",
             "title: Labelled\nquery: SELECT id, label FROM v_tally_labelled\n",
         );
         write(
             root,
-            "oxplow/extensions/tally/lenses/things.yaml",
+            ".oxplow/extensions/tally/lenses/things.yaml",
             "title: Things\nquery: SELECT id, label FROM v_tally_thing\n",
         );
     }
@@ -7251,7 +6150,7 @@ commands:
         // Still a real check: a column the model doesn't have is an error.
         write(
             dir.path(),
-            "oxplow/extensions/tally/lenses/labelled.yaml",
+            ".oxplow/extensions/tally/lenses/labelled.yaml",
             "title: Labelled\nquery: SELECT id, colour FROM v_tally_labelled\n",
         );
         let v = validate_extension(&layer().await, &cat(), dir.path(), "tally", None)
@@ -7282,7 +6181,7 @@ commands:
     #[test]
     fn a_script_can_declare_ai_discover() {
         let d = tempfile::tempdir().unwrap();
-        let dir = d.path().join("oxplow/extensions/x");
+        let dir = d.path().join(".oxplow/extensions/x");
         std::fs::create_dir_all(dir.join("effects")).unwrap();
         std::fs::create_dir_all(dir.join("commands")).unwrap();
         std::fs::write(
@@ -7307,10 +6206,10 @@ commands:
     #[test]
     fn ai_profiles_load_and_are_described() {
         let d = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(d.path().join("oxplow/extensions/x")).unwrap();
+        std::fs::create_dir_all(d.path().join(".oxplow/extensions/x")).unwrap();
         let manifest = "manifest: 2\nname: x\nintent:\n  purpose: p\nai_profiles:\n  - { id: review, description: Reviews., fallback: summarize, features: [tool_calling] }\n  - { id: bad, description: x, fallback: huge }\n";
         std::fs::write(
-            d.path().join("oxplow/extensions/x/extension.yaml"),
+            d.path().join(".oxplow/extensions/x/extension.yaml"),
             manifest,
         )
         .unwrap();
@@ -7416,10 +6315,9 @@ commands:
         );
         let b = bundled[0];
         assert!(b.errors.is_empty(), "{:?}", b.errors);
-        // Its manifest is v2, shared, with an intent, and clean.
+        // Its manifest is v2, with an intent, and clean.
         assert!(b.warnings.is_empty(), "{:?}", b.warnings);
         assert_eq!(b.manifest_version, 2);
-        assert_eq!(b.sharing, Sharing::Shared);
         assert!(!b.intent.as_ref().unwrap().examples.is_empty());
         // The review packet and the analytics lenses, mounted together.
         for (slot, lens) in [
@@ -7529,25 +6427,15 @@ commands:
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
-            "oxplow/extensions/oxplow-bundled/extension.yaml",
+            ".oxplow/extensions/oxplow-bundled/extension.yaml",
             "manifest: 2\nname: oxplow-bundled\nintent:\n  purpose: test\n",
         );
         let exts = load_extensions(dir.path());
         let named: Vec<&Extension> = exts.iter().filter(|e| e.name == "oxplow-bundled").collect();
-        assert_eq!(named.len(), 2);
-        let project = named.iter().find(|e| e.origin == "project").unwrap();
-        assert!(
-            project.errors[0].contains("reserved"),
-            "{:?}",
-            project.errors
-        );
-        // The bundled one still wins lookups.
-        assert_eq!(
-            find_lens(&cat(), dir.path(), "oxplow-bundled/decisions")
-                .unwrap()
-                .title,
-            "Decisions Made"
-        );
+        // A source under a bundled name is never loaded: the bundled one
+        // is the only one.
+        assert_eq!(named.len(), 1);
+        assert_eq!(named[0].origin, "bundled");
         let err = save_lens(
             dir.path(),
             dir.path(),
@@ -7573,12 +6461,12 @@ commands:
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
-            "oxplow/extensions/mine/extension.yaml",
+            ".oxplow/extensions/mine/extension.yaml",
             "manifest: 2\nname: mine\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: effort.review.details, lens: nope }\n    - { slot: sidebar, lens: a }\n    - { slot: effort.review.details, lens: a }\n",
         );
         write(
             dir.path(),
-            "oxplow/extensions/mine/lenses/a.yaml",
+            ".oxplow/extensions/mine/lenses/a.yaml",
             "title: A\nparams: [{ name: effort_id }]\nquery: SELECT :effort_id\n",
         );
         let e = load_extensions(dir.path())
@@ -7599,12 +6487,12 @@ commands:
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
-            "oxplow/extensions/mine/extension.yaml",
+            ".oxplow/extensions/mine/extension.yaml",
             "manifest: 2\nname: mine\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: settings.integrations.sections, lens: status, at: { after: integrations } }\n",
         );
         write(
             dir.path(),
-            "oxplow/extensions/mine/lenses/status.yaml",
+            ".oxplow/extensions/mine/lenses/status.yaml",
             "title: Status\nquery: SELECT 1\n",
         );
         let e = load_extensions(dir.path())
@@ -7735,27 +6623,27 @@ commands:
         };
         write(
             dir.path(),
-            "oxplow/extensions/base/extension.yaml",
+            ".oxplow/extensions/base/extension.yaml",
             &ext_yaml("base", ""),
         );
         write(
             dir.path(),
-            "oxplow/extensions/base/lenses/a.yaml",
+            ".oxplow/extensions/base/lenses/a.yaml",
             "title: A\nparams: [{ name: stream_id }]\nquery: SELECT 1\n",
         );
         write(
             dir.path(),
-            "oxplow/extensions/base/lenses/b.yaml",
+            ".oxplow/extensions/base/lenses/b.yaml",
             "title: B\nquery: SELECT 1\n",
         );
         write(
             dir.path(),
-            "oxplow/extensions/base/lenses/page.yaml",
+            ".oxplow/extensions/base/lenses/page.yaml",
             "title: Page\nparams: [{ name: stream_id }]\nviz: document\nsections: [{ lens: a }, { lens: b }]\n",
         );
         write(
             dir.path(),
-            "oxplow/extensions/addon/extension.yaml",
+            ".oxplow/extensions/addon/extension.yaml",
             &ext_yaml(
                 "addon",
                 "ui:\n  slots:\n    - { slot: base/page.sections, lens: extra, at: { after: a } }\n    - { slot: base/a.sections, lens: extra }\n    - { slot: base/page.tiles, lens: extra }\n",
@@ -7763,7 +6651,7 @@ commands:
         );
         write(
             dir.path(),
-            "oxplow/extensions/addon/lenses/extra.yaml",
+            ".oxplow/extensions/addon/lenses/extra.yaml",
             "title: Extra\nparams: [{ name: stream_id }]\nquery: SELECT 1\n",
         );
         let base = only(dir.path(), "base");
@@ -7822,7 +6710,7 @@ commands:
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
-            "oxplow/extensions/x/extension.yaml",
+            ".oxplow/extensions/x/extension.yaml",
             &if manifest_tail.starts_with("manifest:") {
                 format!("name: x\n{manifest_tail}")
             } else {
@@ -7832,7 +6720,7 @@ commands:
         for (slug, body) in files {
             write(
                 dir.path(),
-                &format!("oxplow/extensions/x/lenses/{slug}.yaml"),
+                &format!(".oxplow/extensions/x/lenses/{slug}.yaml"),
                 body,
             );
         }
@@ -8097,17 +6985,17 @@ commands:
         );
         write(
             dir.path(),
-            "oxplow/extensions/review/extension.yaml",
+            ".oxplow/extensions/review/extension.yaml",
             &manifest,
         );
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/partners.yaml",
+            ".oxplow/extensions/review/lenses/partners.yaml",
             "title: Partners\nparams: [{ name: path }]\nquery: SELECT :path AS path\n",
         );
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/plain.yaml",
+            ".oxplow/extensions/review/lenses/plain.yaml",
             "title: Plain\nquery: SELECT 1 AS n\n",
         );
         let e = only(dir.path(), "review");
@@ -8178,29 +7066,23 @@ commands:
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
-            "oxplow/extensions/x/extension.yaml",
+            ".oxplow/extensions/x/extension.yaml",
             &format!("manifest: 2\nname: x\nintent:\n  purpose: test\n{manifest}"),
         );
         write(
             dir.path(),
-            "oxplow/extensions/x/collectors/todo.star",
+            ".oxplow/extensions/x/collectors/todo.star",
             "def transform(input):\n    return {\"facts\": []}\n",
-        );
-        // An installed one: only the project's own extension runs a program.
-        write(
-            dir.path(),
-            "oxplow/extensions/x/source.yaml",
-            "git: x\ngitRef: null\nsha: abc\n",
         );
         let ext = project_extensions(dir.path()).remove(0);
         assert_eq!(ext.measures.len(), 1, "{:?}", ext.errors);
         assert_eq!(ext.metrics.len(), 1, "{:?}", ext.errors);
-        // A missing script and an extension's program recording facts are
-        // refused; so is a `use:`, which only a project can write.
+        // A missing script or program is refused; so is a `use:`, which
+        // only the project's config can write.
         assert!(ext.collectors.iter().all(|c| c.id == "acme.stray"));
         for (needle, also) in [
             ("acme.missing", "collectors/nope.star"),
-            ("acme.shell", "sandboxed"),
+            ("acme.shell", "collectors/todo.sh"),
             ("use: oxplow.rust.unsafe_blocks", "project.yaml"),
         ] {
             assert!(
@@ -8249,15 +7131,15 @@ commands:
             "",
         ]
         .join("\n");
-        write(dir.path(), "oxplow/extensions/x/extension.yaml", &manifest);
+        write(dir.path(), ".oxplow/extensions/x/extension.yaml", &manifest);
         write(
             dir.path(),
-            "oxplow/extensions/x/models/late.sql",
+            ".oxplow/extensions/x/models/late.sql",
             "SELECT ref FROM ref('work_item') WHERE state = 'blocked'",
         );
         write(
             dir.path(),
-            "oxplow/extensions/x/models/stray.sql",
+            ".oxplow/extensions/x/models/stray.sql",
             "SELECT 1",
         );
         let ext = project_extensions(dir.path()).remove(0);
@@ -8271,28 +7153,28 @@ commands:
         );
         let errors = ext.errors.join("\n");
         assert!(
-            errors.contains("oxplow/extensions/x/models/gone.sql is missing"),
+            errors.contains(".oxplow/extensions/x/models/gone.sql is missing"),
             "{errors}"
         );
 
         write(
             dir.path(),
-            "oxplow/extensions/x/extension.yaml",
+            ".oxplow/extensions/x/extension.yaml",
             &manifest.replace(
                 "  - { name: gone, version: 1, description: No file., columns: [] }\n",
                 "",
             ),
         );
-        std::fs::remove_file(dir.path().join("oxplow/extensions/x/models/stray.sql")).unwrap();
+        std::fs::remove_file(dir.path().join(".oxplow/extensions/x/models/stray.sql")).unwrap();
         let ext = project_extensions(dir.path()).remove(0);
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(ext.models.len(), 1);
-        assert_eq!(ext.models[0].file, "oxplow/extensions/x/models/late.sql");
+        assert_eq!(ext.models[0].file, ".oxplow/extensions/x/models/late.sql");
         assert!(ext.models[0].sql.contains("ref('work_item')"));
 
         write(
             dir.path(),
-            "oxplow/extensions/x/models/stray.sql",
+            ".oxplow/extensions/x/models/stray.sql",
             "SELECT 1",
         );
         let ext = project_extensions(dir.path()).remove(0);
@@ -8313,7 +7195,7 @@ commands:
     }
 
     #[test]
-    fn extensions_declare_dimensions_but_not_promoted_ones() {
+    fn extensions_declare_dimensions() {
         let manifest = [
             "dimensions:",
             "  - { key: acme.team, label: Team }",
@@ -8323,68 +7205,40 @@ commands:
         ]
         .join("\n");
         let (d, _) = load_x(&[], &manifest);
-        // An installed one: promoting is the project's own extension's.
-        write(
-            d.path(),
-            "oxplow/extensions/x/source.yaml",
-            "git: x\ngitRef: null\nsha: abc\n",
-        );
         let ext = project_extensions(d.path()).remove(0);
         let keys: Vec<_> = ext
             .dimensions
             .iter()
             .filter_map(|d| d.key.clone())
             .collect();
-        assert_eq!(keys, vec!["acme.team", "acme.prio"], "{:?}", ext.errors);
-        assert!(
-            ext.errors
-                .iter()
-                .any(|e| e.contains("acme.hot") && e.contains("promote")),
+        assert_eq!(
+            keys,
+            vec!["acme.team", "acme.prio", "acme.hot"],
             "{:?}",
             ext.errors
         );
-        // The project's own extension (not installed) may promote, and
-        // run a program to record facts.
-        std::fs::remove_file(d.path().join("oxplow/extensions/x/source.yaml")).unwrap();
-        let own = project_extensions(d.path()).remove(0);
-        assert!(own.is_own());
-        assert!(
-            own.dimensions
-                .iter()
-                .any(|d| d.key.as_deref() == Some("acme.hot")),
-            "{:?}",
-            own.errors
-        );
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
     }
 
     #[test]
-    fn only_an_own_extension_declares_a_program_collector() {
+    fn a_project_extension_declares_a_program_collector() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
-            "oxplow/extensions/x/extension.yaml",
+            ".oxplow/extensions/x/extension.yaml",
             "manifest: 2\nname: x\nintent:\n  purpose: test\nmeasures:\n  - { key: acme.todo }\ncollectors:\n  - { id: acme.shell, runtime: exec, entry: collectors/todo.sh, facts: [acme.todo] }\n",
         );
-        write(dir.path(), "oxplow/extensions/x/collectors/todo.sh", "echo");
+        write(
+            dir.path(),
+            ".oxplow/extensions/x/collectors/todo.sh",
+            "echo",
+        );
         let own = project_extensions(dir.path()).remove(0);
         assert!(own.is_own());
         assert!(
             own.collectors.iter().any(|c| c.id == "acme.shell"),
             "{:?}",
             own.errors
-        );
-        write(
-            dir.path(),
-            "oxplow/extensions/x/source.yaml",
-            "git: x\ngitRef: null\nsha: abc\n",
-        );
-        let installed = project_extensions(dir.path()).remove(0);
-        assert!(!installed.is_own());
-        assert!(installed.collectors.is_empty());
-        assert!(
-            installed.errors.iter().any(|e| e.contains("acme.shell")),
-            "{:?}",
-            installed.errors
         );
     }
 
@@ -8393,23 +7247,23 @@ commands:
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
-            "oxplow/extensions/x/extension.yaml",
+            ".oxplow/extensions/x/extension.yaml",
             "manifest: 2\nname: x\nintent:\n  purpose: test\nmeasures:\n  - { key: acme.todo }\ncollectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, trigger: { on: [snapshot.taken] }, facts: [acme.todo] }\n",
         );
         write(
             dir.path(),
-            "oxplow/extensions/x/collectors/todo.star",
+            ".oxplow/extensions/x/collectors/todo.star",
             "def transform(input):\n    return {\"facts\": []}\n",
         );
         let ext = project_extensions(dir.path()).remove(0);
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(ext.collectors.len(), 1);
         assert_eq!(
-            read_extension_file(dir.path(), "x", "collectors/todo.star").as_deref(),
+            read_extension_file(dir.path(), &ext.path, "collectors/todo.star").as_deref(),
             Some("def transform(input):\n    return {\"facts\": []}\n")
         );
         assert_eq!(
-            read_extension_file(dir.path(), "x", "collectors/none.star"),
+            read_extension_file(dir.path(), &ext.path, "collectors/none.star"),
             None
         );
     }
@@ -8460,15 +7314,15 @@ commands:
     #[tokio::test]
     async fn a_run_carries_its_alert_state() {
         let dir = tempfile::tempdir().unwrap();
-        write(dir.path(), "oxplow/extensions/review/extension.yaml", EXT);
+        write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/rows.yaml",
+            ".oxplow/extensions/review/lenses/rows.yaml",
             "title: Rows\nparams: [{ name: n, default: 0 }]\nquery: SELECT value FROM json_each('[1,2,3]') WHERE value <= :n\nalert: { min_rows: 2 }\n",
         );
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/cov.yaml",
+            ".oxplow/extensions/review/lenses/cov.yaml",
             "title: Cov\nparams: [{ name: v, default: 90 }]\nquery: SELECT :v AS pct\nalert: { column: pct, below: 80, label: Coverage low }\n",
         );
         let sl = layer().await;
@@ -8916,16 +7770,16 @@ commands:
     #[tokio::test]
     async fn disabled_extensions_load_empty_and_their_lenses_refuse_to_run() {
         let dir = tempfile::tempdir().unwrap();
-        write(dir.path(), "oxplow/extensions/review/extension.yaml", EXT);
+        write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/by-status.yaml",
+            ".oxplow/extensions/review/lenses/by-status.yaml",
             LENS,
         );
         write(
             dir.path(),
-            ".oxplow/project.yaml",
-            "extensions:\n  disabled: [review, oxplow-bundled]\n",
+            ".oxplow/personal.yaml",
+            "disableExtensions: [review, oxplow-bundled]\n",
         );
         let exts = load_extensions(dir.path());
         for name in ["review", "oxplow-bundled"] {
@@ -9137,12 +7991,14 @@ commands:
         use oxplow_domain::vcs::Revision;
         let f = crate::test_fixtures::services_with_effort().await;
         let ws = f.svc.layout.project_dir.clone();
+        // Git sees an extension's source once it is shared.
+        crate::extension_deploy::share(&f.svc, "acme").unwrap();
         let manifest = |purpose: &str| {
             format!(
                 "manifest: 2\nname: acme\ndescription: {purpose}\nintent:\n  purpose: {purpose}\n  origin: thread:thr1\n  examples: []\n"
             )
         };
-        let dir = ws.join("oxplow/extensions/acme");
+        let dir = ws.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(dir.join("lenses")).unwrap();
         std::fs::write(dir.join("extension.yaml"), manifest("Committed.")).unwrap();
         std::fs::write(
@@ -9176,7 +8032,7 @@ commands:
             .capture(oxplow_db::FileSnapshot {
                 id: 0,
                 stream_id: stream,
-                path: "oxplow/extensions/acme/extension.yaml".into(),
+                path: ".oxplow/extensions/acme/extension.yaml".into(),
                 blob_hash: Some(hash),
                 size_bytes: edited.len() as i64,
                 captured_at: oxplow_domain::Timestamp::now(),
@@ -9196,13 +8052,15 @@ commands:
 
     /// An effort's review names the extensions that changed between
     /// its two revisions, each with what the change does; files outside
-    /// `oxplow/extensions/` change nothing here.
+    /// `.oxplow/extensions/` change nothing here.
     #[tokio::test]
     async fn an_effort_review_names_the_extensions_that_changed() {
         use oxplow_domain::stores::StreamStore as _;
         use oxplow_domain::vcs::Revision;
         let f = crate::test_fixtures::services_with_effort().await;
         let ws = f.svc.layout.project_dir.clone();
+        // Git sees an extension's source once it is shared.
+        crate::extension_deploy::share(&f.svc, "acme").unwrap();
         let stream = f.svc.stream_store.list().await.unwrap()[0].id;
         let snapshot = |files: Vec<(&'static str, String)>| {
             let svc = f.svc.clone();
@@ -9232,13 +8090,13 @@ commands:
         let manifest = "manifest: 2\nname: acme\nintent:\n  purpose: Count.\n  origin: thread:thr1\n  examples: []\n".to_string();
         let lens = |n: u32| format!("title: Count\nquery: SELECT {n} AS n\nviz: number\n");
         let start = snapshot(vec![
-            ("oxplow/extensions/acme/extension.yaml", manifest.clone()),
-            ("oxplow/extensions/acme/lenses/count.yaml", lens(1)),
+            (".oxplow/extensions/acme/extension.yaml", manifest.clone()),
+            (".oxplow/extensions/acme/lenses/count.yaml", lens(1)),
             ("src/a.rs", "fn a() {}\n".into()),
         ])
         .await;
         let end = snapshot(vec![
-            ("oxplow/extensions/acme/lenses/count.yaml", lens(2)),
+            (".oxplow/extensions/acme/lenses/count.yaml", lens(2)),
             ("src/a.rs", "fn a() { 1 }\n".into()),
         ])
         .await;
@@ -9270,6 +8128,8 @@ commands:
         use oxplow_domain::vcs::Revision;
         let f = crate::test_fixtures::services_with_effort().await;
         let ws = f.svc.layout.project_dir.clone();
+        // Git sees an extension's source once it is shared.
+        crate::extension_deploy::share(&f.svc, "acme").unwrap();
         let stream = f.svc.stream_store.list().await.unwrap()[0].id;
         let snapshot = |files: Vec<(&'static str, String)>| {
             let svc = f.svc.clone();
@@ -9300,17 +8160,17 @@ commands:
         let command = "commands:\n  - name: spin\n    summary: Spin.\n    input_schema: { type: object }\n    entry: handlers/spin.star\n    invokers: { human: true, agent: true, lens: true }\n    examples:\n      - { name: once, input: {}, expect_commands: [] }\n";
         let start = snapshot(vec![
             (
-                "oxplow/extensions/acme/extension.yaml",
+                ".oxplow/extensions/acme/extension.yaml",
                 format!("{manifest}{command}"),
             ),
             (
-                "oxplow/extensions/acme/handlers/spin.star",
+                ".oxplow/extensions/acme/handlers/spin.star",
                 "def transform(x):\n    n = 0\n    for i in range(400000000):\n        n += i\n    return {\"commands\": []}\n".into(),
             ),
         ])
         .await;
         let end = snapshot(vec![(
-            "oxplow/extensions/acme/extension.yaml",
+            ".oxplow/extensions/acme/extension.yaml",
             manifest.to_string(),
         )])
         .await;

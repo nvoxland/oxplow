@@ -566,7 +566,6 @@ pub(crate) mod tests {
 
     pub(crate) const MANIFEST: &str = "manifest: 2
 name: acme
-sharing: private
 intent: { purpose: Effects., origin: null, examples: [] }
 effects:
   - id: announce-done
@@ -579,9 +578,13 @@ effects:
     pub(crate) const SCRIPT: &str = "def transform(x):\n    return {\"skip\": \"nothing to do\"}\n";
 
     pub(crate) fn write_acme(root: &Path, manifest: &str, script: &str) {
-        let dir = root.join("oxplow/extensions/acme/effects");
+        let dir = root.join(".oxplow/extensions/acme/effects");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(root.join("oxplow/extensions/acme/extension.yaml"), manifest).unwrap();
+        std::fs::write(
+            root.join(".oxplow/extensions/acme/extension.yaml"),
+            manifest,
+        )
+        .unwrap();
         std::fs::write(dir.join("announce.star"), script).unwrap();
     }
 
@@ -602,7 +605,7 @@ effects:
         assert_eq!(e.name(), "acme/announce-done");
         assert_eq!(e.on, vec!["work_item.state_changed".to_string()]);
         assert_eq!(e.filter.get("to").map(String::as_str), Some("done"));
-        assert_eq!(e.declared_at, "oxplow/extensions/acme/extension.yaml:6");
+        assert_eq!(e.declared_at, ".oxplow/extensions/acme/extension.yaml:5");
     }
 
     #[test]
@@ -641,7 +644,7 @@ effects:
             assert!(ext.effects.is_empty(), "{to}");
             let errors = ext.errors.join("\n");
             assert!(
-                errors.contains("extension.yaml:6:") && errors.contains(says),
+                errors.contains("extension.yaml:5:") && errors.contains(says),
                 "{to}: {errors}"
             );
         }

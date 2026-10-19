@@ -1,5 +1,5 @@
 ---
-description: Set up oxplow collection — wire EVERY test stack in the project to emit standard-format coverage + test reports and declare them as report collectors in the project's own extension (oxplow/extensions/project/extension.yaml) and the test commands in .oxplow/project.yaml.
+description: Set up oxplow collection — wire EVERY test stack in the project to emit standard-format coverage + test reports and declare them as report collectors in the project's own extension (.oxplow/extensions/project/extension.yaml) and the test commands in .oxplow/project.yaml.
 ---
 
 Set up oxplow's **collection** so it can track which tests ran (the
@@ -14,7 +14,7 @@ JS/TS frontend, or a backend + a separate e2e suite. Find them all
 (look for `Cargo.toml`, `package.json`, `pyproject.toml`/`pytest.ini`,
 `go.mod`, `pom.xml`/`build.gradle`, etc.). You will wire **each** one
 to emit reports and declare **each** report as a report collector in
-the project's own extension (`oxplow/extensions/project/extension.yaml`) —
+the project's own extension (`.oxplow/extensions/project/extension.yaml`, shared and committed; deploy it with `oxplow.extension.deploy { name: "project" }` when it is right) —
 oxplow reads every collector a run's kind
 triggers and keeps what that run wrote, so every stack lights up.
 
@@ -64,7 +64,7 @@ testing:
 ```
 
 Each report is read by a **report collector** under `collectors:` in
-`oxplow/extensions/project/extension.yaml` — one per report, across
+`.oxplow/extensions/project/extension.yaml` — one per report, across
 **all** stacks. `project.yaml` no longer takes `collectors:`. Create the
 file with this header when it is missing (keep any other blocks it
 already has):
@@ -109,18 +109,18 @@ script that maps the report into oxplow's coverage/test/analysis shape,
 run in-process (no recompile):
 
 ```yaml
-# in oxplow/extensions/project/extension.yaml
+# in .oxplow/extensions/project/extension.yaml
 collectors:
   - id: tests.clover
     records: coverage
     runtime: jaq                        # jaq (jq) | starlark | exec
-    entry: collectors/clover.jq         # the script file, relative to oxplow/extensions/project/
+    entry: collectors/clover.jq         # the script file, relative to .oxplow/extensions/project/
     report: { path: target/clover.xml, format: xml }   # host pre-parse: text | json | xml | lcov | lines
     trigger: { on_run: test }
 ```
 
 The script goes in its own file under
-`oxplow/extensions/project/collectors/` (`entry` is relative to the
+`.oxplow/extensions/project/collectors/` (`entry` is relative to the
 extension folder; `report.path` stays project-relative), not inline in
 the yaml. Prefer `jaq` (jq) — the host pre-parses the report
 (`format`) so the script just reshapes JSON. Use `starlark` for logic jq

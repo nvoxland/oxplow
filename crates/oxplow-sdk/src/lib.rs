@@ -138,7 +138,7 @@ pub struct Scaffolded {
     pub files: Vec<String>,
 }
 
-/// Create `oxplow/extensions/<name>/` with a v2 manifest carrying an
+/// Create `.oxplow/extensions/<name>/` with a v2 manifest carrying an
 /// `intent` (its `origin` = the thread/effort ref that asked for it), one
 /// example and a matching fixture, and — for a lens — one starter lens the
 /// example names. Refuses an existing folder, a bad name, or a non-ref
@@ -273,7 +273,6 @@ pub fn scaffold_with(
         example_name: "basic",
         example_input: &example_input,
         example_expect,
-        shared: false,
     });
     // Every service the table offers, with the builtin that reaches it.
     let services = oxplow_domain::service::SERVICES
@@ -1019,7 +1018,7 @@ pub async fn check(
         Some(_) => None,
         None => Some(
             // Check runs no program: it sees no environment.
-            throwaway::Host::start(root, std::sync::Arc::new(|_: &str| None))
+            throwaway::Host::start(root, name, std::sync::Arc::new(|_: &str| None))
                 .await
                 .map_err(SdkError::Invalid)?,
         ),
@@ -1074,7 +1073,7 @@ pub async fn check(
         },
         dry_run,
         services: oxplow_app::services::of_extension(&extension, &|file| {
-            extensions::read_extension_file(root, name, file)
+            extensions::read_extension_file(root, &extension.path, file)
         }),
         profiles: profile_lines(&extension, &ai_bindings(root)),
         extension,
@@ -1121,11 +1120,12 @@ async fn impact_against(
     .map_err(SdkError::Domain)?;
     let rel = format!("{EXTENSIONS_DIR}/{name}");
     let read_before = |file: &str| before.as_ref().and_then(|t| t.file(file));
-    let read_after = |file: &str| extensions::read_extension_file(root, name, file);
     let after = catalog.named(root, name).map_err(|e| match e {
         DomainError::NotFound => SdkError::NotFound(name.to_string()),
         other => SdkError::Domain(other),
     })?;
+    let after_path = after.path.clone();
+    let read_after = |file: &str| extensions::read_extension_file(root, &after_path, file);
     let mut after = ReviewSide {
         extension: after,
         read: &read_after,
@@ -1144,7 +1144,7 @@ async fn impact_against(
     .await)
 }
 
-/// `check` for a folder path (`oxplow/extensions/<name>` or an absolute
+/// `check` for a folder path (`.oxplow/extensions/<name>` or an absolute
 /// path to it) or a bare name: the name is its last component.
 pub fn name_of(path_or_name: &str) -> &str {
     Path::new(path_or_name.trim_end_matches('/'))
@@ -1426,7 +1426,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         scaffold(dir.path(), Kind::Collector, "demo", None).unwrap();
         let manifest =
-            std::fs::read_to_string(dir.path().join("oxplow/extensions/demo/extension.yaml"))
+            std::fs::read_to_string(dir.path().join(".oxplow/extensions/demo/extension.yaml"))
                 .unwrap();
         let comment = manifest
             .lines()
@@ -1440,7 +1440,7 @@ mod tests {
 
     fn declarations(root: &Path, name: &str) -> serde_json::Value {
         let text =
-            std::fs::read_to_string(root.join(format!("oxplow/extensions/{name}/provider.json")))
+            std::fs::read_to_string(root.join(format!(".oxplow/extensions/{name}/provider.json")))
                 .unwrap();
         serde_json::from_str(&text).unwrap()
     }
@@ -1643,13 +1643,13 @@ mod tests {
     async fn new_lens_then_check_is_clean() {
         let dir = tempfile::tempdir().unwrap();
         let made = scaffold(dir.path(), Kind::Lens, "demo", Some("effort:eff42")).unwrap();
-        assert_eq!(made.dir, "oxplow/extensions/demo");
+        assert_eq!(made.dir, ".oxplow/extensions/demo");
         assert_eq!(
             made.files,
             vec![
-                "oxplow/extensions/demo/extension.yaml",
-                "oxplow/extensions/demo/fixtures/basic.yaml",
-                "oxplow/extensions/demo/lenses/demo.yaml",
+                ".oxplow/extensions/demo/extension.yaml",
+                ".oxplow/extensions/demo/fixtures/basic.yaml",
+                ".oxplow/extensions/demo/lenses/demo.yaml",
             ]
         );
         let report = check(
@@ -1676,7 +1676,7 @@ mod tests {
         let text = render_findings(&report, Format::Text);
         assert!(text.contains("demo: 0 errors, 0 warnings"), "{text}");
         assert!(text.contains("dry-run on an empty database"), "{text}");
-        let lens = dir.path().join("oxplow/extensions/demo/lenses/demo.yaml");
+        let lens = dir.path().join(".oxplow/extensions/demo/lenses/demo.yaml");
         let body = std::fs::read_to_string(&lens).unwrap();
         std::fs::write(
             &lens,
@@ -1706,7 +1706,7 @@ mod tests {
         let ext_only = scaffold(dir.path(), Kind::Extension, "bare", None).unwrap();
         assert_eq!(
             ext_only.files,
-            vec!["oxplow/extensions/bare/extension.yaml"]
+            vec![".oxplow/extensions/bare/extension.yaml"]
         );
         assert!(
             check(
@@ -1728,8 +1728,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
-            "oxplow/extensions/team/extension.yaml",
-            "manifest: 2\nname: team\nsharing: shared\nengine: \">=99.0\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\n",
+            ".oxplow/extensions/team/extension.yaml",
+            "manifest: 2\nname: team\nengine: \">=99.0\"\nversion: 0.1.0\nintent:\n  purpose: x\n  examples: [{ name: a }]\n",
         );
         let report = check(
             dir.path(),
@@ -1744,7 +1744,7 @@ mod tests {
         assert!(!report.ok);
         let text = render_findings(&report, Format::Text);
         assert!(
-            text.contains("error: oxplow/extensions/team/extension.yaml:4: needs oxplow >=99.0"),
+            text.contains("error: .oxplow/extensions/team/extension.yaml:3: needs oxplow >=99.0"),
             "{text}"
         );
         assert!(text.contains("team: 1 error, 0 warnings"), "{text}");
@@ -1772,12 +1772,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
-            "oxplow/extensions/ord/extension.yaml",
-            "manifest: 2\nname: ord\nsharing: private\nintent:\n  purpose: x\n  examples: [{ name: a }]\neffects:\n  - { id: first, summary: s, on: [work_item.state_changed], entry: e.star }\n  - { id: second, summary: s, on: [work_item.state_changed], entry: e.star, after: [first, change.analyze] }\n",
+            ".oxplow/extensions/ord/extension.yaml",
+            "manifest: 2\nname: ord\nintent:\n  purpose: x\n  examples: [{ name: a }]\neffects:\n  - { id: first, summary: s, on: [work_item.state_changed], entry: e.star }\n  - { id: second, summary: s, on: [work_item.state_changed], entry: e.star, after: [first, change.analyze] }\n",
         );
         write(
             dir.path(),
-            "oxplow/extensions/ord/e.star",
+            ".oxplow/extensions/ord/e.star",
             "def transform(x):\n    return {\"skip\": \"x\"}\n",
         );
         let report = check(
@@ -1805,8 +1805,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
-            "oxplow/extensions/prof/extension.yaml",
-            "manifest: 2\nname: prof\nsharing: private\nintent:\n  purpose: x\n  examples: [{ name: a }]\nai_profiles:\n  - { id: review, description: Reviews., fallback: summarize, features: [tool_calling, streaming] }\n  - { id: plain, description: Plain., fallback: main }\n",
+            ".oxplow/extensions/prof/extension.yaml",
+            "manifest: 2\nname: prof\nintent:\n  purpose: x\n  examples: [{ name: a }]\nai_profiles:\n  - { id: review, description: Reviews., fallback: summarize, features: [tool_calling, streaming] }\n  - { id: plain, description: Plain., fallback: main }\n",
         );
         write(
             dir.path(),
@@ -1844,31 +1844,23 @@ mod tests {
         );
     }
 
-    /// A shared extension travels with the repository: a token in its
+    /// A source is one `share` away from a commit: a token in its
     /// manifest, a script or a fixture is a warning that names the file and
-    /// line and never the value. A private extension isn't scanned.
+    /// line and never the value.
     #[tokio::test]
-    async fn check_warns_about_a_credential_in_a_shared_extension_only() {
+    async fn check_warns_about_a_credential_in_an_extension() {
         let token = format!("ghp_{}", "Zz9Yy8Xx7W".repeat(4));
         let dir = tempfile::tempdir().unwrap();
-        for (name, sharing) in [("team", "shared"), ("mine", "private")] {
-            let shared = if sharing == "shared" {
-                "engine: \">=0.1\"\nversion: 0.1.0\n"
-            } else {
-                ""
-            };
-            write(
-                dir.path(),
-                &format!("oxplow/extensions/{name}/extension.yaml"),
-                &format!("manifest: 2\nname: {name}\nsharing: {sharing}\n{shared}intent:\n  purpose: x\n  examples: [{{ name: a }}]\n# token: {token}\n"),
-            );
-            write(
-                dir.path(),
-                &format!("oxplow/extensions/{name}/fixtures/a.yaml"),
-                &format!("input: {{}}\nsecret: {token}\n"),
-            );
-        }
-        let text = |report: &CheckReport| render_findings(report, Format::Text);
+        write(
+            dir.path(),
+            ".oxplow/extensions/team/extension.yaml",
+            &format!("manifest: 2\nname: team\nintent:\n  purpose: x\n  examples: [{{ name: a }}]\n# token: {token}\n"),
+        );
+        write(
+            dir.path(),
+            ".oxplow/extensions/team/fixtures/a.yaml",
+            &format!("input: {{}}\nsecret: {token}\n"),
+        );
         let team = check(
             dir.path(),
             "team",
@@ -1879,30 +1871,19 @@ mod tests {
         )
         .await
         .unwrap();
-        let team_text = text(&team);
+        let team_text = render_findings(&team, Format::Text);
         assert!(team.ok, "{team_text}");
         assert!(
-            team_text.contains("warning: oxplow/extensions/team/extension.yaml:9: looks like a GitHub token (`ghp_…`, 44 characters)"),
+            team_text.contains("warning: .oxplow/extensions/team/extension.yaml:6: looks like a GitHub token (`ghp_…`, 44 characters)"),
             "{team_text}"
         );
         assert!(
             team_text.contains(
-                "warning: oxplow/extensions/team/fixtures/a.yaml:2: looks like a GitHub token"
+                "warning: .oxplow/extensions/team/fixtures/a.yaml:2: looks like a GitHub token"
             ),
             "{team_text}"
         );
         assert!(!team_text.contains(&token), "{team_text}");
-        let mine = check(
-            dir.path(),
-            "mine",
-            &ExtensionCatalog::new(),
-            None,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-        assert!(!text(&mine).contains("GitHub token"), "{}", text(&mine));
     }
 
     /// A fixture that no intent example names never runs, and an example
@@ -1913,13 +1894,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
-            "oxplow/extensions/pairs/extension.yaml",
-            "manifest: 2\nname: pairs\nsharing: private\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: listed }, { name: missing }]\n",
+            ".oxplow/extensions/pairs/extension.yaml",
+            "manifest: 2\nname: pairs\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: listed }, { name: missing }]\n",
         );
         for fixture in ["listed", "orphan", "model-counts", "provider-feed"] {
             write(
                 dir.path(),
-                &format!("oxplow/extensions/pairs/fixtures/{fixture}.yaml"),
+                &format!(".oxplow/extensions/pairs/fixtures/{fixture}.yaml"),
                 "input: {}\n",
             );
         }
@@ -1936,7 +1917,7 @@ mod tests {
         let text = render_findings(&report, Format::Text);
         assert!(
             text.contains(
-                "oxplow/extensions/pairs/fixtures/orphan.yaml:1: no intent example names this fixture, so it never runs — fix: add `orphan` to intent.examples"
+                ".oxplow/extensions/pairs/fixtures/orphan.yaml:1: no intent example names this fixture, so it never runs — fix: add `orphan` to intent.examples"
             ),
             "{text}"
         );
@@ -1945,7 +1926,7 @@ mod tests {
             .unwrap();
         assert!(
             tested.warnings.iter().any(|w| w.starts_with(
-                "oxplow/extensions/pairs/extension.yaml:1: intent example `missing` has no fixture, so it isn't run — fix: add fixtures/missing.yaml"
+                ".oxplow/extensions/pairs/extension.yaml:1: intent example `missing` has no fixture, so it isn't run — fix: add fixtures/missing.yaml"
             )),
             "{:?}",
             tested.warnings
@@ -1966,12 +1947,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
-            "oxplow/extensions/beta/extension.yaml",
-            "manifest: 2\nname: beta\nsharing: private\nengine: \">=0.1\"\nintent:\n  purpose: Follows merges.\n  examples: [{ name: a }]\neffects:\n  - id: note\n    summary: Note a merge.\n    on: [acme_pr.merged]\n    entry: note.star\n",
+            ".oxplow/extensions/beta/extension.yaml",
+            "manifest: 2\nname: beta\nengine: \">=0.1\"\nintent:\n  purpose: Follows merges.\n  examples: [{ name: a }]\neffects:\n  - id: note\n    summary: Note a merge.\n    on: [acme_pr.merged]\n    entry: note.star\n",
         );
         write(
             dir.path(),
-            "oxplow/extensions/beta/note.star",
+            ".oxplow/extensions/beta/note.star",
             "def transform(x):\n    return {\"skip\": \"nothing to do\"}\n",
         );
         let report = check(
@@ -1996,7 +1977,7 @@ mod tests {
             report
                 .warnings
                 .iter()
-                .any(|w| w.contains("extension.yaml:9")
+                .any(|w| w.contains("extension.yaml:8")
                     && w.contains("another extension's event type")),
             "{:?}",
             report.warnings
@@ -2005,7 +1986,7 @@ mod tests {
 
     #[test]
     fn name_of_reads_a_folder_or_a_name() {
-        assert_eq!(name_of("oxplow/extensions/old/"), "old");
+        assert_eq!(name_of(".oxplow/extensions/old/"), "old");
         assert_eq!(name_of("old"), "old");
     }
 }

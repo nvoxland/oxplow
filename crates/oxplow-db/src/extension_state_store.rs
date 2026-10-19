@@ -212,6 +212,19 @@ fn map_state_tx_error(error: TxError<StateError>) -> StateError {
     }
 }
 
+/// Forget everything `extension` stored here, every scope: it was removed.
+pub fn forget_extension_tx(
+    conn: &rusqlite::Connection,
+    extension: &str,
+) -> Result<(), oxplow_domain::DomainError> {
+    conn.execute(
+        "DELETE FROM extension_state WHERE extension = ?1",
+        rusqlite::params![extension],
+    )
+    .map_err(crate::database::map_sql_err)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

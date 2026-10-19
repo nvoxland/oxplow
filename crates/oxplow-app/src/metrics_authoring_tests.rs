@@ -83,10 +83,7 @@ async fn project(edit: impl FnOnce(&mut Vec<ScaffoldFile>)) -> (Project, Lines) 
     }
     let svc = crate::Services::in_memory(dir.path()).await.unwrap();
     svc.streams.ensure_primary().await.unwrap();
-    svc.extension_activation
-        .activate(svc.clone())
-        .await
-        .expect("the extension activates");
+    crate::test_fixtures::activate_with_problems(&svc).await;
     (Project { dir, svc }, lines)
 }
 
@@ -498,10 +495,7 @@ async fn an_oversized_file_is_reported_as_excluded_not_silently_dropped() {
     }
     let svc = crate::Services::in_memory(dir.path()).await.unwrap();
     svc.streams.ensure_primary().await.unwrap();
-    svc.extension_activation
-        .activate(svc.clone())
-        .await
-        .expect("activates");
+    crate::test_fixtures::activate_with_problems(&svc).await;
     let p = Project { dir, svc };
 
     let report = p.baseline().await;
@@ -542,10 +536,7 @@ async fn limited_project(max: usize) -> (Project, Lines) {
     }
     let svc = crate::Services::in_memory(dir.path()).await.unwrap();
     svc.streams.ensure_primary().await.unwrap();
-    svc.extension_activation
-        .activate(svc.clone())
-        .await
-        .expect("activates");
+    crate::test_fixtures::activate_with_problems(&svc).await;
     (Project { dir, svc }, lines)
 }
 

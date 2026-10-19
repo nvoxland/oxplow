@@ -17,10 +17,10 @@ const ext = (name: string): Extension =>
   ({
     name,
     description: "",
-    path: `oxplow/extensions/${name}`,
+    path: `.oxplow/extensions/${name}`,
     errors: [],
     lenses: [],
-    source: null,
+    deployment: { kind: "deployed", hash: "0123456789abcdef" },
     collectors: [],
     origin: "project",
     ui: { slots: [], commands: [], decorators: [] },

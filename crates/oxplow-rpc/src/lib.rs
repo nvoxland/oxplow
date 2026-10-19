@@ -265,8 +265,6 @@ macro_rules! oxplow_command_table {
                 lens_text => $crate::commands::extensions::lens_text { id: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> String,
                 list_services => $crate::commands::extensions::list_services {} -> Vec<$crate::commands::extensions::ServiceListing>,
                 validate_extension => $crate::commands::extensions::validate_extension { name: String, stream_id: Option<String> } -> ::oxplow_sdk::CheckReport,
-                review_extension => $crate::commands::extensions::review_extension { git_url: Option<String>, git_ref: Option<String>, name: Option<String>, stream_id: Option<String> } -> ::oxplow_app::extensions::ExtensionReview,
-                set_extension_enabled => $crate::commands::extensions::set_extension_enabled { name: String, enabled: bool } -> Vec<::oxplow_app::extensions::Extension>,
                 list_collectors => $crate::commands::collectors::list_collectors {} -> Vec<::oxplow_app::collector_runner::CollectorListing>,
                 ensure_change => $crate::commands::changes::ensure_change { target: ::oxplow_app::change_analysis::ChangeTarget } -> ::oxplow_db::ChangeRow,
                 // ai (Settings → AI)
@@ -430,6 +428,23 @@ pub(crate) mod test_support {
     /// Publish the generation the files written and the config changed since
     /// ask for, as the owner of generations does on the change.
     pub async fn publish(ctx: &crate::RpcContext) {
+        // Only deployed extensions run: deploy the sources the test wrote
+        // (but not ones the person turned off; one that doesn't load is
+        // left out, as an activation holds it back).
+        let root = ctx.services.layout.project_dir.clone();
+        let off = oxplow_config::extension_settings(&root).personal.disable;
+        let mut names: Vec<String> = std::fs::read_dir(root.join(".oxplow/extensions"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|n| !off.contains(n))
+            .collect();
+        names.sort();
+        for name in names {
+            let _ = oxplow_app::extension_deploy::deploy(&ctx.services, &name, &root, None).await;
+        }
         ctx.services
             .extension_activation
             .activate(ctx.services.clone())

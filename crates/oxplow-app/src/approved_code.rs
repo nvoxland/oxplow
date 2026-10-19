@@ -177,7 +177,7 @@ mod tests {
     /// A project whose own extension `project` has a program and a helper.
     fn project() -> (tempfile::TempDir, PathBuf, Arc<ApprovalStore>) {
         let root = tempfile::tempdir().unwrap();
-        let ext = root.path().join("oxplow/extensions/project");
+        let ext = root.path().join(".oxplow/extensions/project");
         std::fs::create_dir_all(ext.join("tools")).unwrap();
         std::fs::write(ext.join("tools/count.sh"), "echo one").unwrap();
         std::fs::write(ext.join("tools/helper.txt"), "helper").unwrap();

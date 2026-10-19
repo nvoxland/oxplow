@@ -22,7 +22,7 @@ collectors:
 
 - `entry` is inside the extension folder.
 - An extension's fact collector runs `starlark` or `jaq` only. `exec` is
-  refused (only an own extension's fact collectors — no `source.yaml`, e.g. `oxplow/extensions/project/` — may be `exec`); it gets
+  refused (only a project extension's fact collectors, e.g. `.oxplow/extensions/project/`, may be `exec`); it gets
   no `env`, `credentials` or `network`. Its script reads the snapshot
   with `files()` / `ast_query()` and returns `{"facts": [...]}`. It may
   also read the semantic layer or ask a model when it declares them
@@ -30,7 +30,7 @@ collectors:
 - A collector has `entities:` or `facts:`, never both.
 - A `gauges:` block is an unknown key; write `collectors:`.
 - `.oxplow/project.yaml` takes no definitions: the project's own measures,
-  collectors and metrics go in `oxplow/extensions/project/extension.yaml`.
+  collectors and metrics go in `.oxplow/extensions/project/extension.yaml`.
 - Metrics are `key:` definitions and are on while the extension is
   enabled. A project can still turn one off or change its target with a
   `use:` entry in `.oxplow/project.yaml`. `use:` isn't allowed in an

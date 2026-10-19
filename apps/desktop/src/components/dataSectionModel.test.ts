@@ -57,7 +57,7 @@ test("programRow shows a shared extension's advisories as what they'd say", () =
   const m = programRow({
     kind: "advisories",
     name: "team",
-    program: "oxplow/extensions/team/extension.yaml",
+    program: ".oxplow/extensions/team/extension.yaml",
     args: ["nag (on prompt, once per effort): SELECT 'x' AS message"],
     env: [],
     approved: false,
@@ -73,23 +73,23 @@ test("programRow shows a provider with the secrets and hosts it gets", () => {
   const m = programRow({
     kind: "provider",
     name: "tracker/issues",
-    program: "oxplow/extensions/tracker/bin/provider",
+    program: ".oxplow/extensions/tracker/bin/provider",
     args: ["--stdio"],
     env: ["ISSUES_URL"],
     credentials: ["token"],
     network: ["api.tracker.example"],
     scopes: [],
-    tree: "oxplow/extensions/tracker",
+    tree: ".oxplow/extensions/tracker",
     remote: false,
     approved: false,
     version: "abc",
   });
   expect(m.label).toBe("External provider tracker/issues");
   expect(m.command).toBe(
-    "oxplow/extensions/tracker/bin/provider --stdio\nenv: ISSUES_URL\ncredentials: token\nreaches: api.tracker.example",
+    ".oxplow/extensions/tracker/bin/provider --stdio\nenv: ISSUES_URL\ncredentials: token\nreaches: api.tracker.example",
   );
   expect(m.status).toBe("Not approved: it won't run");
-  expect(m.approveTitle).toContain("every file in oxplow/extensions/tracker");
+  expect(m.approveTitle).toContain("every file in .oxplow/extensions/tracker");
 });
 
 // A harness provider launches the person's agent sessions: the command
@@ -99,20 +99,20 @@ test("programRow says an agent harness provider launches agent sessions", () => 
     kind: "provider",
     capability: "agent_harness",
     name: "conductor/fake",
-    program: "oxplow/extensions/conductor/bin/provider",
+    program: ".oxplow/extensions/conductor/bin/provider",
     args: [],
     env: [],
     credentials: [],
     network: [],
     scopes: [],
-    tree: "oxplow/extensions/conductor",
+    tree: ".oxplow/extensions/conductor",
     remote: false,
     approved: false,
     version: "abc",
   } as never);
   expect(m.label).toBe("Agent harness conductor/fake");
   expect(m.command).toBe(
-    "oxplow/extensions/conductor/bin/provider\nlaunches agent sessions: the command it answers runs in your terminal",
+    ".oxplow/extensions/conductor/bin/provider\nlaunches agent sessions: the command it answers runs in your terminal",
   );
   expect(m.approveTitle).toContain("runs in your terminal");
   expect(m.approveTitle).toContain("session's bearer");
@@ -122,21 +122,21 @@ test("programRow shows an effect as reacting to events from approval on (P8.D9)"
   const m = programRow({
     kind: "effect",
     name: "acme/announce-done",
-    program: "oxplow/extensions/acme/effects/announce.star",
+    program: ".oxplow/extensions/acme/effects/announce.star",
     args: [],
     env: [],
     credentials: [],
     network: [],
     scopes: [],
-    tree: "oxplow/extensions/acme",
+    tree: ".oxplow/extensions/acme",
     approved: false,
     version: "abc",
   });
   expect(m.label).toBe("Effect acme/announce-done");
-  expect(m.command).toBe("oxplow/extensions/acme/effects/announce.star");
+  expect(m.command).toBe(".oxplow/extensions/acme/effects/announce.star");
   expect(m.status).toBe("Not approved: it won't run");
   expect(m.approveTitle).toContain("events logged after you approve");
-  expect(m.approveTitle).toContain("every file in oxplow/extensions/acme");
+  expect(m.approveTitle).toContain("every file in .oxplow/extensions/acme");
   expect(m.showsSource).toBe(false);
 });
 
@@ -147,20 +147,20 @@ test("programRow shows a component with the commands it may run", () => {
   const m = programRow({
     kind: "component",
     name: "github/pr-lifetimes",
-    program: "oxplow/extensions/github/components/pr-lifetimes",
+    program: ".oxplow/extensions/github/components/pr-lifetimes",
     args: [],
     env: [],
     credentials: [],
     network: [],
     scopes: [],
     commands: ["oxplow.collector.sync"],
-    tree: "oxplow/extensions/github",
+    tree: ".oxplow/extensions/github",
     remote: false,
     approved: false,
     version: "abc",
   });
   expect(m.label).toBe("Component github/pr-lifetimes");
-  expect(m.command).toBe("oxplow/extensions/github/components/pr-lifetimes\nmay run: oxplow.collector.sync");
+  expect(m.command).toBe(".oxplow/extensions/github/components/pr-lifetimes\nmay run: oxplow.collector.sync");
   expect(m.status).toBe("Not approved: it shows and reads, but can't act");
   expect(m.approveTitle).toContain("with your rights");
   expect(m.approveTitle).toContain("oxplow.collector.sync");
@@ -179,7 +179,7 @@ test("programRow shows a job with the tools its model may call", () => {
       network: [],
       scopes,
       commands,
-      tree: "oxplow/extensions/triage",
+      tree: ".oxplow/extensions/triage",
       remote: false,
       approved: false,
     });
@@ -249,24 +249,24 @@ test("programRow shows an effort policy script, what it reads, and its script", 
   const m = programRow({
     kind: "effort-policy",
     name: "acme/tidy",
-    program: "oxplow/extensions/acme/policies/tidy.star",
+    program: ".oxplow/extensions/acme/policies/tidy.star",
     args: [],
     env: [],
     credentials: [],
     network: [],
     commands: [],
     scopes: ["sql.read"],
-    tree: "oxplow/extensions/acme",
+    tree: ".oxplow/extensions/acme",
     remote: false,
     approved: false,
     version: "abc",
   });
   expect(m.label).toBe("Effort policy acme/tidy");
   expect(m.showsSource).toBe(true);
-  expect(m.command).toContain("oxplow/extensions/acme/policies/tidy.star");
+  expect(m.command).toContain(".oxplow/extensions/acme/policies/tidy.star");
   expect(m.command).toContain("reads oxplow's: sql.read");
   expect(m.status).toBe("Not approved: choosing it opens and closes nothing");
-  expect(m.approveTitle).toContain("every file in oxplow/extensions/acme");
+  expect(m.approveTitle).toContain("every file in .oxplow/extensions/acme");
 });
 
 import { backfillAsk, backfillDone, backfillRunLabel, canApprove, providerImpactLines } from "./dataSectionModel.js";
@@ -310,7 +310,7 @@ test("programRow says a server by url isn't code this approval covers", () => {
     credentials: ["NOTES_TOKEN"],
     network: ["mcp.example.com"],
     scopes: [],
-    tree: "oxplow/extensions/notes",
+    tree: ".oxplow/extensions/notes",
     remote: true,
     approved: false,
     version: "abc",

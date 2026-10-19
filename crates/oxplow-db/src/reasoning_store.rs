@@ -255,7 +255,7 @@ mod tests {
                 work_item: Some("work_item:oxplow:tsk1".into()),
                 effort_id: Some(1),
                 question: "Where do extensions live?".into(),
-                choice: "oxplow/extensions/".into(),
+                choice: ".oxplow/extensions/".into(),
                 alternatives: vec![".oxplow/extensions/".into()],
                 confidence: "high".into(),
                 why: ".oxplow is gitignored".into(),
@@ -275,7 +275,7 @@ mod tests {
             json!([[
                 "work_item:oxplow:tsk1",
                 1,
-                "oxplow/extensions/",
+                ".oxplow/extensions/",
                 "[\".oxplow/extensions/\"]",
                 "high"
             ]])

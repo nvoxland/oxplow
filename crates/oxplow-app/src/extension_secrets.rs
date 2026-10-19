@@ -174,7 +174,7 @@ mod tests {
     async fn fixture() -> (Arc<crate::Services>, Arc<MemorySecrets>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
-        let ext = dir.path().join("oxplow/extensions/alpha");
+        let ext = dir.path().join(".oxplow/extensions/alpha");
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
@@ -190,6 +190,7 @@ mod tests {
         )
         .await
         .unwrap();
+        crate::test_fixtures::activate(&svc).await;
         (svc, keychain, dir)
     }
 

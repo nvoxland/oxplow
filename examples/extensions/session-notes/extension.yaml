@@ -1,7 +1,6 @@
 manifest: 2
 name: session-notes
 description: A thread's notes on its New Session page, between starting a session and picking an earlier one.
-sharing: private
 engine: ">=0.7"
 version: 0.1.0
 intent:

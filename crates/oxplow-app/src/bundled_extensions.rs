@@ -4679,7 +4679,7 @@ mod tests {
     /// Dismiss on an inferred decision.
     #[test]
     fn the_review_lenses_declare_their_row_actions() {
-        let exts = crate::extensions::load_extensions(std::path::Path::new("/nonexistent"));
+        let exts = crate::test_fixtures::shipped_extensions();
         let ext = exts.iter().find(|e| e.name == "oxplow-bundled").unwrap();
         let actions = |slug: &str| {
             ext.lenses

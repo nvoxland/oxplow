@@ -6,7 +6,6 @@ import {
   extensionCredentials,
   extensionRowModel,
   lastRuns,
-  reviewModel,
   secretCredentials,
   secretRowModel,
   serviceLines,
@@ -16,12 +15,12 @@ import {
 const ext = (over: Partial<Extension> = {}): Extension => ({
   name: "review",
   description: "Review lenses",
-  path: "oxplow/extensions/review",
+  path: ".oxplow/runtime/extensions/review/0123456789abcdef",
   errors: [],
   lenses: [],
-  source: null,
   collectors: [],
   origin: "project",
+  deployment: { kind: "deployed", hash: "0123456789abcdef" },
   ui: { slots: [], commands: [], decorators: [] },
   enabled: true,
   ...over,
@@ -39,33 +38,41 @@ describe("extensionRowModel", () => {
     expect(m.healthy).toBe(false);
   });
 
-  test("a local extension can't be updated and says it lives in the repo", () => {
+  test("a deployed extension names its deployment", () => {
     const m = extensionRowModel(ext());
-    expect(m.canUpdate).toBe(false);
-    expect(m.origin).toBe("In this repo");
+    expect(m.origin).toBe("Deployed 0123456");
+    expect(m.canDeploy).toBe(false);
     expect(m.lensCount).toBe(0);
     expect(m.healthy).toBe(true);
   });
 
-  test("an installed extension shows its url, ref and short sha and can update", () => {
-    const m = extensionRowModel(
-      ext({ source: { git: "https://github.com/acme/lenses", gitRef: "v2", sha: "0123456789abcdef0123456789abcdef01234567" } }),
-    );
-    expect(m.canUpdate).toBe(true);
-    expect(m.origin).toBe("https://github.com/acme/lenses @ v2 (0123456)");
+  test("a bundled extension says it ships with oxplow", () => {
+    const m = extensionRowModel(ext({ origin: "bundled", deployment: { kind: "shipped", hash: "0123456789abcdef" } }));
+    expect(m.origin).toBe("Ships with oxplow");
   });
 
-  test("a bundled extension says it ships with oxplow and can't be updated", () => {
-    const m = extensionRowModel(ext({ origin: "bundled" }));
-    expect(m.origin).toBe("Ships with oxplow");
-    expect(m.canUpdate).toBe(false);
+  test("a source never deployed offers Deploy and says why it is off", () => {
+    const m = extensionRowModel(ext({ enabled: false, deployment: { kind: "undeployed" } }));
+    expect(m.origin).toBe("Not deployed");
+    expect(m.canDeploy).toBe(true);
+    expect(m.disabledNote).toBe("Deploy it to run it.");
+  });
+
+  test("a listed extension with no source here is not an error", () => {
+    const m = extensionRowModel(ext({ enabled: false, deployment: { kind: "not_here" } }));
+    expect(m.origin).toBe("Not on this machine");
+    expect(m.canDeploy).toBe(false);
+    expect(m.healthy).toBe(true);
+    expect(m.disabledNote).toBe("Listed as on, but its source isn't on this machine.");
   });
 
   test("a disabled extension says so and can be turned back on", () => {
     const m = extensionRowModel(ext({ enabled: false }));
     expect(m.enabled).toBe(false);
     expect(m.toggleLabel).toBe("Enable");
-    expect(m.disabledNote).toBe("Off for this project (extensions.disabled in .oxplow/project.yaml).");
+    expect(m.disabledNote).toBe(
+      "Off: not in the project's list (.oxplow/project.yaml), or turned off for you (.oxplow/personal.yaml).",
+    );
     const on = extensionRowModel(ext());
     expect(on.toggleLabel).toBe("Disable");
     expect(on.disabledNote).toBeNull();
@@ -240,87 +247,6 @@ test("a collector run is a v_collector_run change", () => {
   expect(collectorRan({ kind: "tasksChanged" })).toBe(false);
 });
 
-describe("reviewModel", () => {
-  const collector = (over: Record<string, unknown> = {}) =>
-    ({
-      id: "gh",
-      doc: "",
-      runtime: "exec",
-      entry: "sync.sh",
-      input: null,
-      sync: "replace",
-      trigger: { kind: "manual" },
-      env: [],
-      network: ["api.github.com"],
-      credentials: ["TOKEN"],
-      entities: [],
-      ...over,
-    }) as unknown as Extension["collectors"][number];
-  const review = (over: Partial<Extension> = {}, problems: string[] = []) => ({
-    extension: ext({ name: "shared", ...over }),
-    git: "https://github.com/acme/lenses",
-    gitRef: null,
-    sha: "0123456789abcdef0123456789abcdef01234567",
-    problems,
-    impact: { lenses: [], models: [], collectors: [], providers: [], effects: [], contributions: [], outOfTime: [], lines: [] },
-    services: [],
-  });
-
-  test("spells out what runs, where it reaches and what it reads", () => {
-    const m = reviewModel(
-      review({
-        lenses: [{} as Extension["lenses"][number], {} as Extension["lenses"][number]],
-        collectors: [collector(), collector({ id: "hot", runtime: "starlark", entry: "hot.star", network: [], credentials: [] })],
-      }),
-    );
-    expect(m.from).toBe("https://github.com/acme/lenses (0123456)");
-    expect(m.declares).toEqual([
-      "2 lenses",
-      "Collector gh runs the program sync.sh · reaches api.github.com · reads TOKEN (you'll approve it before it runs)",
-      "Collector hot runs hot.star (starlark, sandboxed: no network, files or credentials)",
-    ]);
-    expect(m.canInstall).toBe(true);
-  });
-
-  const described = (kind: string, local: string) =>
-    ({ id: { extension: "shared", kind, local } }) as unknown as Extension["contributions"][number];
-
-  test("every other kind of contribution is a row of its own", () => {
-    const m = reviewModel(
-      review({
-        lenses: [{} as Extension["lenses"][number]],
-        contributions: [
-          described("lens", "todos"),
-          described("collector", "gh"),
-          described("metric", "acme.todos"),
-          described("event_type", "acme.opened"),
-          described("custom_component", "chart"),
-          described("slot", "effort.review.details-0"),
-        ],
-      }),
-    );
-    expect(m.declares).toEqual([
-      "1 lens",
-      "Metric acme.todos",
-      "Event type acme.opened",
-      "Custom component chart",
-      "Slot effort.review.details-0",
-    ]);
-  });
-
-  test("load errors block the install; dry-run problems don't", () => {
-    const broken = reviewModel({ ...review({ errors: ["extension.yaml: unknown field `bogus`"] }), impact: null });
-    expect(broken.canInstall).toBe(false);
-    const m = reviewModel(review({}, ["lens shared/x: column `y` isn't in the query result"]));
-    expect(m.canInstall).toBe(true);
-    expect(m.problems).toHaveLength(1);
-  });
-
-});
-
-// Settings → Extensions shows each extension's last run (`v_extension_run`,
-// `latest = 1` per contribution): how it ended and when; failed, denied and
-// stale in the warning color, with why.
 describe("lastRuns", () => {
   const when = (iso: string) => `<${iso}>`;
   const run = (over: Partial<RunRow> = {}): RunRow => ({
@@ -445,26 +371,6 @@ describe("serviceLines", () => {
     expect(
       serviceLines([{ script: "effect `x`", entry: "x.star", services: [use("future.thing", "declared")] }], listing),
     ).toEqual([{ script: "Effect x", text: "future.thing" }]);
-  });
-});
-
-describe("reviewModel services", () => {
-  test("a review carries its scripts' services", () => {
-    const m = reviewModel(
-      {
-        extension: ext({ name: "shared" }),
-        git: "https://github.com/acme/lenses",
-        gitRef: null,
-        sha: "0123456789abcdef0123456789abcdef01234567",
-        problems: [],
-        impact: null,
-        services: [
-          { script: "collector `c`", entry: "c.star", services: [{ scope: "ai.compute", declared: "declared", used: false, approval: true }] },
-        ],
-      },
-      [{ scope: "ai.compute", title: "Ask a model", summary: "", approval: true }],
-    );
-    expect(m.services).toEqual([{ script: "Collector c", text: "Ask a model (you approve it)" }]);
   });
 });
 

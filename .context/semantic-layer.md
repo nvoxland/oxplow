@@ -242,8 +242,8 @@ fails (resolution, lineage, contract, a name that belongs to core or an
 entity), and every model reading it, is left out and reported for its
 extension; a cycle is reported for each model in it. Only the primary
 worktree's extensions compile (views are project-wide, like source
-data). `ExtensionModelsService` runs a pass at boot and after an edit
-under `oxplow/extensions/`, a config change, or a registry change (a
+data). `ExtensionModelsService` runs a pass at boot and after a
+deployment change, a config change, or a registry change (a
 source syncing a new entity); its fingerprint — the enabled extensions'
 model sources plus the registered entity views — makes a pass over the
 same inputs, including the one its own registry writes set off, a no-op.
@@ -592,8 +592,8 @@ What a query read is what it subscribes to.
   `modelsChanged` names a model it read, `metricSamplesChanged` names one
   of its measures (an empty list is "unknown", so it re-runs), or
   `extensionsChanged` says the extension catalog changed (the daemon
-  relays the catalog's own signal: a file under `oxplow/extensions/` or the
-  `extensions` key; tsk1030 — a file path is not the signal). Hosts that
+  relays the catalog's own signal: a change to the live deployments or the
+  `extensions` key; a file path is not the signal). Hosts that
   list what extensions contribute (`extensionsStore`, the launcher, the
   prompt catalog) reload on it, on `configChanged`, and on a daemon
   reconnect (a change while it was unreachable sent nothing). Nothing else re-runs it:
@@ -922,8 +922,8 @@ extension's own declared event types, logged with the run (P9.D2;
   Snapshot runs keep the delta / full-baseline machinery (pending-baseline
   queue, `scan_kind`, fingerprint, dominated-capture prune).
 - A **report collector** (`records: tests | coverage | analysis`,
-  tsk863) is an own extension's (`Extension::is_own()`; the project's, in
-  `oxplow/extensions/project/`): it parses one `report:` file with a bundled
+  tsk863) is a non-bundled extension's (`Extension::is_own()`; the project's, in
+  `.oxplow/extensions/project/`): it parses one `report:` file with a bundled
   parser (`entry: "oxplow:<junit|lcov|cobertura|jacoco|clippy|eslint>"`)
   or its own jaq / Starlark / exec script (paths relative to the extension
   folder; `report.path` relative to the project root), on `trigger: { on_run: test |
@@ -936,15 +936,15 @@ extension's own declared event types, logged with the run (P9.D2;
 
 **Owners.** An extension (its name), always: the project's own collectors
 belong to its own extension, `project` by convention
-(`oxplow/extensions/project/`, `collector:project/<id>`), and `project` is an
+(`.oxplow/extensions/project/`, `collector:project/<id>`), and `project` is an
 ordinary extension name. There are no global collectors. oxplow's `oxplow.*` code collectors are oxplow-foundation's; one
 that metrics name runs only while one of them is on.
 
 - **The project's own extension** declares its collectors in its
   `extension.yaml`, scripts under `collectors/` (relative to the extension
   folder).
-- **An extension's fact collector is sandboxed** (starlark or jaq). Only an
-  own extension (no `source.yaml`) may declare an `exec` fact collector or
+- **An extension's fact collector is sandboxed** (starlark or jaq). Only a
+  non-bundled extension (the project's own) may declare an `exec` fact collector or
   report collectors, and those need a person's approval like any extension
   collector (Settings → Data → Collectors; `collector_runner::approval_hash`,
   key `<ext>/<id>`, run from `approved_code::extension_collector`).

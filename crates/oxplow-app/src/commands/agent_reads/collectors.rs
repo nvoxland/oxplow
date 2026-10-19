@@ -15,7 +15,7 @@ use crate::collector_runner::{self, RunCollectorError};
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct PreviewCollectorParams {
-    /// The extension that declares it (its folder under `oxplow/extensions/`).
+    /// The extension that declares it (its folder under `.oxplow/extensions/`).
     pub owner: String,
     /// The collector's `id` in its `collectors:`.
     pub id: String,
@@ -111,7 +111,7 @@ mod tests {
     async fn a_preview_returns_rows_without_storing() {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
-        let ext = dir.path().join("oxplow/extensions/work");
+        let ext = dir.path().join(".oxplow/extensions/work");
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
@@ -120,10 +120,7 @@ mod tests {
         .unwrap();
         std::fs::write(ext.join("one.jq"), "{entities: {nums: .rows}}").unwrap();
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
-        svc.extension_activation
-            .activate(svc.clone())
-            .await
-            .unwrap();
+        crate::test_fixtures::activate_with_problems(&svc).await;
         let actor = Actor::Agent {
             session_id: None,
             thread_id: None,

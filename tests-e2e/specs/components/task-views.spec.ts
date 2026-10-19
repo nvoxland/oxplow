@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import type { Page } from "@playwright/test";
 
-import { approveProgram, ipc, run, searchable, until, type Daemon } from "../../support/daemon.js";
+import { approveProgram, installExample, ipc, run, searchable, until, type Daemon } from "../../support/daemon.js";
 import { expect, test, type Workspace } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
@@ -17,19 +17,7 @@ import { openFromLauncher } from "../../support/ui.js";
  *  isn't in every suite daemon: replacing the Board would change every
  *  other spec's. */
 async function install(daemon: Daemon) {
-  const here = dirname(fileURLToPath(import.meta.url));
-  cpSync(
-    join(here, "..", "..", "..", "examples", "extensions", "task-views"),
-    join(daemon.project, "oxplow", "extensions", "task-views"),
-    { recursive: true },
-  );
-  await until("task-views to load", 60_000, async () => {
-    const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
-      sql: "SELECT 1 FROM v_replaceable WHERE target = 'work_item.board'",
-    });
-    const ext = await ipc<Array<{ name: string }>>(daemon, "list_extensions");
-    return out.rows.length > 0 && ext.some((e) => e.name === "task-views");
-  });
+  await installExample(daemon, "task-views");
 }
 
 /** Choose whose view shows for `target` on Settings → Integrations. */

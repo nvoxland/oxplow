@@ -1,6 +1,6 @@
 /** Pure row presentation for the Settings → Extensions list. */
 import { contributionOf } from "../refs/ref.js";
-import type { CollectorListing, Extension, SecretRef, ExtensionReview, ScriptServices, ServiceListing, Trigger } from "../tauri-bridge/generated/bindings.js";
+import type { CollectorListing, Extension, SecretRef, ScriptServices, ServiceListing, Trigger } from "../tauri-bridge/generated/bindings.js";
 import { readsChanged } from "../lens/lensRerun.js";
 import type { Reads } from "../tauri-bridge/generated/bindings.js";
 
@@ -8,10 +8,11 @@ export interface ExtensionRowModel {
   name: string;
   description: string;
   lensCount: number;
-  /** Where it came from: "In this repo", or `<url> @ <ref> (<sha7>)`. */
+  /** Where its files come from: "Ships with oxplow", "Deployed <hash7>",
+   *  "Not deployed" or "Not on this machine". */
   origin: string;
-  /** Only git-installed extensions can be updated from their source. */
-  canUpdate: boolean;
+  /** Its source is here but it was never deployed: Deploy runs it. */
+  canDeploy: boolean;
   healthy: boolean;
   errors: string[];
   enabled: boolean;
@@ -26,24 +27,34 @@ export interface ExtensionRowModel {
  *  loading, so its errors show only there (tsk1039). Each error once. */
 export function extensionRowModel(ext: Extension, checked: string[] = []): ExtensionRowModel {
   const errors = [...new Set([...ext.errors, ...checked])];
-  const src = ext.source;
+  const d = ext.deployment;
   const origin =
-    ext.origin === "bundled"
+    d.kind === "shipped"
       ? "Ships with oxplow"
-      : src
-        ? `${src.git}${src.gitRef ? ` @ ${src.gitRef}` : ""} (${src.sha.slice(0, 7)})`
-        : "In this repo";
+      : d.kind === "deployed"
+        ? `Deployed ${d.hash.slice(0, 7)}`
+        : d.kind === "undeployed"
+          ? "Not deployed"
+          : d.kind === "not_here"
+            ? "Not on this machine"
+            : "From its source";
   return {
     name: ext.name,
     description: ext.description,
     lensCount: ext.lenses.length,
     origin,
-    canUpdate: src !== null && ext.origin !== "bundled",
+    canDeploy: d.kind === "undeployed",
     healthy: errors.length === 0,
     errors,
     enabled: ext.enabled,
     toggleLabel: ext.enabled ? "Disable" : "Enable",
-    disabledNote: ext.enabled ? null : "Off for this project (extensions.disabled in .oxplow/project.yaml).",
+    disabledNote: ext.enabled
+      ? null
+      : d.kind === "not_here"
+        ? "Listed as on, but its source isn't on this machine."
+        : d.kind === "undeployed"
+          ? "Deploy it to run it."
+          : "Off: not in the project's list (.oxplow/project.yaml), or turned off for you (.oxplow/personal.yaml).",
   };
 }
 
@@ -196,70 +207,6 @@ export function secretRowModel(isSet: boolean | null): {
 
 /** What installing or updating an extension would bring in, as lines a
  *  person reads before confirming (tsk378). */
-export interface ReviewModel {
-  name: string;
-  description: string;
-  /** `<url> @ <ref> (<sha7>)`. */
-  from: string;
-  /** One line per thing it adds; programs say what they reach and read. */
-  declares: string[];
-  /** Load errors: it can't be installed while there are any. */
-  errors: string[];
-  /** What a dry run of its lenses found; shown, not blocking. */
-  problems: string[];
-  canInstall: boolean;
-  /** What each of its scripts is given (`serviceLines`). */
-  services: ServiceLine[];
-}
-
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
-/** `event_type` → `Event type`: how a person names a kind of contribution. */
-const kindTitle = (kind: string) => {
-  const words = kind.replace(/_/g, " ");
-  return words.charAt(0).toUpperCase() + words.slice(1);
-};
-
-export function reviewModel(review: ExtensionReview, listing: readonly ServiceListing[] = []): ReviewModel {
-  const ext = review.extension;
-  const declares: string[] = [];
-  if (ext.lenses.length > 0) declares.push(plural(ext.lenses.length, "lens", "lenses"));
-  for (const s of ext.collectors) {
-    if (s.runtime === "read") {
-      declares.push(`Collector ${s.id} reads ${s.provider?.instance}'s ${s.provider?.collector}`);
-    } else if (s.runtime === "exec") {
-      const parts = [`Collector ${s.id} runs the program ${s.entry}`];
-      parts.push(s.network.length > 0 ? `reaches ${s.network.join(", ")}` : "no network");
-      if (s.credentials.length > 0) parts.push(`reads ${s.credentials.join(", ")}`);
-      if (s.env.length > 0) parts.push(`reads env ${s.env.join(", ")}`);
-      declares.push(`${parts.join(" · ")} (you'll approve it before it runs)`);
-    } else {
-      declares.push(`Collector ${s.id} runs ${s.entry} (${s.runtime}, sandboxed: no network, files or credentials)`);
-    }
-  }
-  const advisories = ext.advisories ?? [];
-  if (advisories.length > 0) {
-    declares.push(
-      `${plural(advisories.length, "advisory", "advisories")} shown to your agents: ${advisories.map((a) => a.id).join(", ")}`,
-    );
-  }
-  // Every other contribution, one row each: the kinds above say more.
-  for (const d of ext.contributions ?? []) {
-    if (d.id.kind === "lens" || d.id.kind === "collector") continue;
-    declares.push(`${kindTitle(d.id.kind)} ${d.id.local}`);
-  }
-  return {
-    name: ext.name,
-    description: ext.description,
-    from: `${review.git}${review.gitRef ? ` @ ${review.gitRef}` : ""} (${review.sha.slice(0, 7)})`,
-    declares,
-    errors: ext.errors,
-    problems: review.problems,
-    canInstall: ext.errors.length === 0,
-    services: serviceLines(review.services, listing),
-  };
-}
-
 /** One script and the services it is given, in a person's words. */
 export interface ServiceLine {
   /** "Collector paths", "Effect stamp". */

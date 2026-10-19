@@ -1,7 +1,6 @@
 manifest: 2
 name: task-views
 description: Another way to see the work list — swimlanes for the Board, a compact list and a plain editor — over whichever work-items provider is active.
-sharing: private
 engine: ">=0.7"
 version: 0.1.0
 intent:

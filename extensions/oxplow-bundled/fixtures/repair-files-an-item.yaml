@@ -8,6 +8,6 @@ input:
   answers:
     sql.read:
       - [{ provider: oxplow, open_item: null }]
-      - [{ declared: "oxplow/extensions/work/extension.yaml:7", collector_errors: '["boom"]', effect_errors: null, last_error: boom }]
+      - [{ declared: ".oxplow/extensions/work/extension.yaml:7", collector_errors: '["boom"]', effect_errors: null, last_error: boom }]
 expect:
   commands: [oxplow.work_item.create]

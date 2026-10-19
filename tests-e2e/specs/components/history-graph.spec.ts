@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { ipc, type Daemon } from "../../support/daemon.js";
+import { ipc, run, type Daemon } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
@@ -49,7 +49,7 @@ test("the history graph draws lanes, filters and opens a commit", async ({ fresh
 test("without oxplow-bundled, Git History is oxplow's plain list", async ({ fresh }) => {
   const { page, daemon } = fresh;
   history(daemon);
-  await ipc(daemon, "set_extension_enabled", { name: "oxplow-bundled", enabled: false });
+  await run(daemon, "oxplow.extension.disable", { name: "oxplow-bundled" });
   await page.goto("/");
   await openFromLauncher(page, "Git History");
   await expect(page.getByTestId("commit-list-row").filter({ hasText: "Merge side" })).toBeVisible();

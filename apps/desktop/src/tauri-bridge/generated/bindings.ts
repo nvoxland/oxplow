@@ -229,11 +229,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	reviewExtension: (gitUrl: string | null, gitRef: string | null, name: string | null, streamId: string | null) => typedError<ExtensionReview_Serialize, IpcError>(__TAURI_INVOKE("review_extension", { gitUrl, gitRef, name, streamId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	reportTabs: (report: TabReport) => typedError<null, IpcError>(__TAURI_INVOKE("report_tabs", { report })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -250,11 +245,6 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	renameNativeConversation: (sessionId: string, name: string) => typedError<null, IpcError>(__TAURI_INVOKE("rename_native_conversation", { sessionId, name })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	setExtensionEnabled: (name: string, enabled: boolean) => typedError<Extension_Serialize[], IpcError>(__TAURI_INVOKE("set_extension_enabled", { name, enabled })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -2384,6 +2374,28 @@ export type DecoratorPlacement =
 /**  A badge after a lens cell that links to a listed ref. */
 "row-badge";
 
+/**  Where a loaded extension's files came from. */
+export type Deployment = 
+/**
+ *  Read from its source folder: an authoring check, the CLI, a
+ *  standalone load.
+ */
+{ kind: "source" } | 
+/**
+ *  The deployment that ships inside oxplow (a bundled extension with no
+ *  deployment of its own), written to the store once per hash.
+ */
+{ kind: "shipped"; hash: string } | 
+/**  A deployment in the store. */
+{ kind: "deployed"; hash: string } | 
+/**  Its source is here but it has no deployment yet: listed, not run. */
+{ kind: "undeployed" } | 
+/**
+ *  Listed as on, but neither its source nor a deployment is on this
+ *  machine: listed, not run, and not an error.
+ */
+{ kind: "not_here" };
+
 /**
  *  An earlier version kept after a breaking change: its SQL (in `file`,
  *  beside the model's) still keeps the contract that version published,
@@ -2804,8 +2816,8 @@ export type ExtensionCommand = {
 	/**  How a person meets it (label, group, …), as core's commands do. */
 	ui: CommandUi | null,
 	/**
-	 *  Stable: a shared extension's commands are; a private one's are
-	 *  experimental.
+	 *  Stable: the commands of an extension that ships with oxplow are;
+	 *  any other's are experimental.
 	 */
 	stable: boolean,
 	examples: CommandExample[],
@@ -2912,87 +2924,6 @@ export type ExtensionPanel = {
 	count: string | null,
 };
 
-/**
- *  What installing an extension from git would bring in, for a person to
- *  look at first (tsk378): the extension as it would load (its lenses,
- *  sources with their programs, hosts and credentials, advisories,
- *  gauges; `extension.errors` are load errors, which block the install),
- *  the commit it's at, and `problems` a dry run of its lenses and
- *  advisories found (reported, not blocking: a lens over a source that
- *  hasn't synced can't run yet).
- */
-export type ExtensionReview = ExtensionReview_Serialize | ExtensionReview_Deserialize;
-
-/**
- *  What installing an extension from git would bring in, for a person to
- *  look at first (tsk378): the extension as it would load (its lenses,
- *  sources with their programs, hosts and credentials, advisories,
- *  gauges; `extension.errors` are load errors, which block the install),
- *  the commit it's at, and `problems` a dry run of its lenses and
- *  advisories found (reported, not blocking: a lens over a source that
- *  hasn't synced can't run yet).
- */
-export type ExtensionReview_Deserialize = {
-	extension: Extension_Deserialize,
-	git: string,
-	gitRef: string | null,
-	/**  The commit reviewed; pass it back to install exactly this. */
-	sha: string,
-	problems: string[],
-	/**
-	 *  What installing it would change, against the installed version
-	 *  when it replaces one; `None` when the candidate doesn't
-	 *  load (its `problems` say why).
-	 */
-	impact: ImpactReport | null,
-	/**
-	 *  The services each of its Starlark scripts declares or is given
-	 *  (`services::of_extension`), so a person sees what a script can
-	 *  reach before installing — read from the candidate's own files.
-	 */
-	services: ScriptServices[],
-};
-
-/**
- *  What installing an extension from git would bring in, for a person to
- *  look at first (tsk378): the extension as it would load (its lenses,
- *  sources with their programs, hosts and credentials, advisories,
- *  gauges; `extension.errors` are load errors, which block the install),
- *  the commit it's at, and `problems` a dry run of its lenses and
- *  advisories found (reported, not blocking: a lens over a source that
- *  hasn't synced can't run yet).
- */
-export type ExtensionReview_Serialize = {
-	extension: Extension_Serialize,
-	git: string,
-	gitRef: string | null,
-	/**  The commit reviewed; pass it back to install exactly this. */
-	sha: string,
-	problems: string[],
-	/**
-	 *  What installing it would change, against the installed version
-	 *  when it replaces one; `None` when the candidate doesn't
-	 *  load (its `problems` say why).
-	 */
-	impact: ImpactReport | null,
-	/**
-	 *  The services each of its Starlark scripts declares or is given
-	 *  (`services::of_extension`), so a person sees what a script can
-	 *  reach before installing — read from the candidate's own files.
-	 */
-	services: ScriptServices[],
-};
-
-/**  Provenance of an installed extension, kept in its `source.yaml`. */
-export type ExtensionSource = {
-	/**  The git URL it was cloned from. */
-	git: string,
-	/**  The branch, tag or commit asked for; `None` = the remote's default branch. */
-	gitRef: string | null,
-	/**  The commit actually installed. */
-	sha: string,
-};
-
 /**  What an extension adds to the core UI (`ui:` in its manifest). */
 export type ExtensionUi = {
 	/**  Lenses mounted into core pages (valid ones). */
@@ -3029,15 +2960,9 @@ export type Extension_Deserialize = {
 	warnings: string[],
 	/**  The manifest version it was read as (`manifest:`). */
 	manifestVersion: number,
-	sharing: Sharing,
 	/**  Why it exists (required; `None` only when the manifest didn't load). */
 	intent: Intent | null,
 	lenses: Lens_Deserialize[],
-	/**
-	 *  Where it was installed from, for extensions added with
-	 *  `install_extension`; `None` for ones written in this repo.
-	 */
-	source: ExtensionSource | null,
 	/**  Declared collectors (valid ones; invalid ones are in `errors`). */
 	collectors: CollectorSpec[],
 	/**  Declared providers (valid ones — invalid ones are in `errors`). */
@@ -3076,7 +3001,7 @@ export type Extension_Deserialize = {
 	 */
 	subscriptions: ForeignSubscription[],
 	/**
-	 *  `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
+	 *  `project` (in `.oxplow/extensions/`) or `bundled` (ships with oxplow,
 	 *  read-only).
 	 */
 	origin: string,
@@ -3139,6 +3064,8 @@ export type Extension_Deserialize = {
 	 */
 	configScripts?: { [key in string]: string },
 	publicContracts?: PublicContracts,
+	/**  Where its files came from. */
+	deployment?: Deployment,
 };
 
 /**  A loaded extension and anything wrong with it. */
@@ -3164,15 +3091,9 @@ export type Extension_Serialize = {
 	warnings: string[],
 	/**  The manifest version it was read as (`manifest:`). */
 	manifestVersion: number,
-	sharing: Sharing,
 	/**  Why it exists (required; `None` only when the manifest didn't load). */
 	intent: Intent | null,
 	lenses: Lens_Serialize[],
-	/**
-	 *  Where it was installed from, for extensions added with
-	 *  `install_extension`; `None` for ones written in this repo.
-	 */
-	source: ExtensionSource | null,
 	/**  Declared collectors (valid ones; invalid ones are in `errors`). */
 	collectors: CollectorSpec[],
 	/**  Declared providers (valid ones — invalid ones are in `errors`). */
@@ -3211,7 +3132,7 @@ export type Extension_Serialize = {
 	 */
 	subscriptions: ForeignSubscription[],
 	/**
-	 *  `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
+	 *  `project` (in `.oxplow/extensions/`) or `bundled` (ships with oxplow,
 	 *  read-only).
 	 */
 	origin: string,
@@ -3269,6 +3190,8 @@ export type Extension_Serialize = {
 	/**  Validated non-secret settings declaration, not resolved values or grants. */
 	configuration: ConfigurationFile | null,
 	publicContracts: PublicContracts,
+	/**  Where its files came from. */
+	deployment: Deployment,
 };
 
 /**
@@ -5113,10 +5036,27 @@ export type OxplowConfig = {
 	 */
 	aiRoles: { [key in string]: AiRoleOverride },
 	/**
-	 *  Extensions turned off for this project (`extensions: { disabled:
-	 *  [...] }`), bundled ones included. Committed, so it's team-wide.
+	 *  The extensions on for the whole team (`extensions: [...]`;
+	 *  [`DEFAULT_EXTENSIONS`] when absent). Committed. oxplow-foundation is
+	 *  always on and never listed.
 	 */
-	extensionsDisabled: string[],
+	extensions: string[],
+	/**
+	 *  Where an extension's source is when it isn't
+	 *  `.oxplow/extensions/<name>/` (`extensionSources: { <name>: <folder> }`),
+	 *  relative to the checkout or absolute.
+	 */
+	extensionSources: { [key in string]: string },
+	/**
+	 *  A person's own turning on and off over the team's list
+	 *  (`enableExtensions`, `disableExtensions` in `.oxplow/personal.yaml`).
+	 */
+	personalExtensions: PersonalExtensions,
+	/**
+	 *  A person's own sources (`extensionSources` in
+	 *  `.oxplow/personal.yaml`), over the team's.
+	 */
+	personalExtensionSources: { [key in string]: string },
 };
 
 /**
@@ -5190,7 +5130,7 @@ detail: string | null } |
 { kind: "configChanged" } | 
 /**
  *  The extension catalog may have changed: a file under the primary
- *  worktree's `oxplow/extensions/` did, or the `extensions` config key
+ *  worktree's `.oxplow/extensions/` did, or the `extensions` config key
  *  (the catalog's own signal, tsk1030). Every host listing what
  *  extensions contribute — the launcher, pages, panels, slots —
  *  reloads, and a lens re-runs its definition.
@@ -5341,6 +5281,14 @@ export type PastSession = {
 	closed_at: Timestamp | null,
 	turns: number,
 	last_prompt: string | null,
+};
+
+/**  A person's `enableExtensions` and `disableExtensions`. */
+export type PersonalExtensions = {
+	/**  Turned on for this person, beside the team's list. */
+	enable: string[],
+	/**  Turned off for this person, whoever listed them. */
+	disable: string[],
 };
 
 /**  What kind of project program it is. */
@@ -5954,13 +5902,6 @@ export type ServiceUse = {
 	/**  A person approves a script that uses it. */
 	approval: boolean,
 };
-
-/**
- *  Who the extension is for. Explicit and checked: a shared extension
- *  (committed for a team, installed from git, bundled) must name the
- *  engine it targets and its own version.
- */
-export type Sharing = "private" | "shared";
 
 /**  How handing a redirect to a sign-in went (`complete_oauth_sign_in`). */
 export type SignInCompletion = 

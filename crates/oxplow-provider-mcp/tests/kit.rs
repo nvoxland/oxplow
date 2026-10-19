@@ -31,7 +31,7 @@ async fn the_notes_extension_passes_extension_test_over_the_adapter() {
         .await
         .unwrap();
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/notes");
-    let ext = dir.path().join("oxplow/extensions/notes");
+    let ext = dir.path().join(".oxplow/extensions/notes");
     copy_dir(&fixture, &ext);
     let server = ext.join("bin/notes-server");
     std::fs::write(
@@ -87,7 +87,7 @@ async fn the_notes_extension_passes_extension_test_with_its_server_by_url() {
         .await
         .unwrap();
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/notes");
-    let ext = dir.path().join("oxplow/extensions/notes");
+    let ext = dir.path().join(".oxplow/extensions/notes");
     copy_dir(&fixture, &ext);
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await

@@ -1,8 +1,6 @@
 //! `extensions.check` operations: look at an extension before it ships —
 //! validate a folder (`oxplow.extension.validate`), preview it in a
-//! throwaway oxplow (`oxplow.extension.preview`), or review a candidate
-//! install or update (`oxplow.extension.review`, which clones into
-//! `.oxplow/tmp`). None changes a record.
+//! throwaway oxplow (`oxplow.extension.preview`). Neither changes a record.
 
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
@@ -66,22 +64,8 @@ fn check_failed(name: &str, e: CheckError) -> CommandError {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ReviewExtensionParams {
-    /// Git URL to review for an install (a repo whose root holds
-    /// `extension.yaml`). Pass this or `name`.
-    pub git_url: Option<String>,
-    /// Branch, tag or commit; omit for the default branch.
-    pub git_ref: Option<String>,
-    /// An installed extension's name, to review its update. Pass this or
-    /// `git_url`.
-    pub name: Option<String>,
-    /// Stream whose worktree it goes into; omit for your own.
-    pub stream_id: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ValidateExtensionParams {
-    /// Extension folder name under `oxplow/extensions/`.
+    /// Extension folder name under `.oxplow/extensions/`.
     pub name: String,
     /// Stream whose worktree to read from; omit for your own.
     pub stream_id: Option<String>,
@@ -90,7 +74,7 @@ pub struct ValidateExtensionParams {
 fn not_found(name: &str) -> CommandError {
     invalid(
         "/name",
-        format!("no extension `{name}` under oxplow/extensions/ in that stream"),
+        format!("no extension `{name}` under .oxplow/extensions/ in that stream"),
     )
 }
 
@@ -149,57 +133,6 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 result_of(report)
             },
         ),
-        read_op(
-            "extensions.check",
-            "review",
-            services,
-            |svc, actor, p: ReviewExtensionParams| async move {
-                check_optional_stream(
-                    "oxplow_review_extension",
-                    "/stream_id",
-                    p.stream_id.as_deref(),
-                )?;
-                let stream = stream_or_actors(&svc, &actor, p.stream_id.clone()).await?;
-                let root = svc
-                    .worktrees
-                    .resolve(stream.as_deref())
-                    .await
-                    .into_local_path();
-                let layer = svc.sql.clone();
-                let commands = svc.commands.as_ref();
-                let review = match (p.git_url.as_deref(), p.name.as_deref()) {
-                    (Some(url), None) => {
-                        crate::extensions::review_extension(
-                            &layer,
-                            &svc.extension_catalog,
-                            &root,
-                            url,
-                            p.git_ref.as_deref(),
-                            None,
-                            commands,
-                        )
-                        .await
-                    }
-                    (None, Some(name)) => {
-                        crate::extensions::review_update(
-                            &layer,
-                            &svc.extension_catalog,
-                            &root,
-                            name,
-                            commands,
-                        )
-                        .await
-                    }
-                    _ => {
-                        return Err(invalid(
-                            "/git_url",
-                            "pass either git_url (install) or name (update)",
-                        ))
-                    }
-                }?;
-                result_of(review)
-            },
-        ),
     ]
 }
 
@@ -221,7 +154,7 @@ mod tests {
             root: &Path,
             name: &str,
         ) -> Result<Value, CheckError> {
-            root.join("oxplow/extensions")
+            root.join(".oxplow/extensions")
                 .join(name)
                 .exists()
                 .then(|| json!({ "ok": true, "root": root.to_string_lossy() }))
@@ -234,7 +167,7 @@ mod tests {
 
     impl Folder {
         fn validate_in(&self, root: &Path, name: &str) -> Result<Value, CheckError> {
-            root.join("oxplow/extensions")
+            root.join(".oxplow/extensions")
                 .join(name)
                 .exists()
                 .then(|| json!({ "ok": true }))
@@ -252,7 +185,7 @@ mod tests {
         crate::test_fixtures::init_git_repo(dir.path());
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         let elsewhere = tempfile::tempdir().unwrap();
-        let ext = elsewhere.path().join("oxplow/extensions/mine");
+        let ext = elsewhere.path().join(".oxplow/extensions/mine");
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
@@ -303,15 +236,6 @@ mod tests {
             .unwrap_err();
         assert!(
             matches!(&err, CommandError::Invalid { message, .. } if message.contains("no extension `nope`")),
-            "{err:?}"
-        );
-        let err = svc
-            .commands
-            .run(&in_other, "oxplow.extension.review", json!({}), false)
-            .await
-            .unwrap_err();
-        assert!(
-            matches!(&err, CommandError::Invalid { message, .. } if message.contains("git_url")),
             "{err:?}"
         );
     }

@@ -19,11 +19,11 @@ column. Pick one to see sample rows, edit the SQL (++cmd+enter++ runs it), and
 
 ## Writing one by hand
 
-Lenses live in `oxplow/extensions/<extension>/lenses/<slug>.yaml`. The
+Lenses live in `.oxplow/extensions/<extension>/lenses/<slug>.yaml`. The
 extension folder needs an `extension.yaml`:
 
 ```yaml
-# oxplow/extensions/review/extension.yaml
+# .oxplow/extensions/review/extension.yaml
 manifest: 2
 name: review          # must match the folder name
 description: Lenses for reviewing agent work
@@ -39,7 +39,7 @@ file for you. The [Extensions reference](../reference/extensions.md) covers
 everything else an extension can declare.
 
 ```yaml
-# oxplow/extensions/review/lenses/blocked.yaml
+# .oxplow/extensions/review/lenses/blocked.yaml
 title: Blocked Work
 params:
   - { name: thread_id, label: Thread }
@@ -299,9 +299,10 @@ ships the required `oxplow-foundation` extension and the optional
 Quality lenses, Change Analysis, the effort's tests and coverage, the
 review packet, and the token panels. With it off, oxplow is the plain workbench: the pages keep
 their file lists and diffs, and the Metrics pages and dashboards still
-work. It writes
-`extensions: { disabled: [name] }` to `.oxplow/project.yaml`; commit that
-to turn it off for your team.
+work. Turning
+it off in Settings → Extensions changes your own choice
+(`disableExtensions` in `.oxplow/personal.yaml`). To turn it off for your
+team, remove it from `extensions:` in `.oxplow/project.yaml` and commit that.
 
 Problems show under Settings → Extensions. Agents check their work with
 `oxplow_validate_extension`.
@@ -445,11 +446,15 @@ with row actions, and a plain editor form. Copy it and change it.
 
 ## Sharing
 
-- **Your team:** `oxplow/extensions/` is ordinary project files. Commit it.
-- **Anyone:** put an extension in its own git repo (with `extension.yaml` at
-  the root) and install it from Settings → Extensions → paste the git URL.
-  **Update** pulls the latest. Don't edit installed extensions in place;
-  updates overwrite them.
+- **Deploy:** an extension's files are its source. Nothing runs a source.
+  Run `oxplow.extension.deploy { name }` (or `oxplow extension deploy
+  <name>`) to make your edits live.
+- **Your team:** a new extension is personal; `.oxplow/.gitignore` keeps it
+  out of git. `oxplow.extension.share { name }` un-ignores it and lists it
+  in `.oxplow/project.yaml`. Then you commit it. `oxplow.extension.unshare`
+  reverses this.
+- **Someone else's extension:** clone it into `.oxplow/extensions/<name>/`,
+  list it, and deploy it.
 
 ## Collectors: bringing in outside data
 

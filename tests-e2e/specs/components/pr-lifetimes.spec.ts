@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import type { Page } from "@playwright/test";
 
-import { approveCollector, approveProgram, ipc, run, until, type Daemon } from "../../support/daemon.js";
+import { approveCollector, approveProgram, deploy, extensionSource, ipc, run, until, type Daemon } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
@@ -36,12 +36,13 @@ async function openLifetimes(page: Page, daemon: Daemon, count = 2, bars = 2) {
   return frame;
 }
 
-/** Add `prs` to what the example's sync prints. */
-function addPrs(daemon: Daemon, prs: Array<Record<string, unknown>>) {
-  const path = join(daemon.project, "oxplow", "extensions", "github", "prs.json");
+/** Add `prs` to what the example's sync prints, and deploy that. */
+async function addPrs(daemon: Daemon, prs: Array<Record<string, unknown>>) {
+  const path = join(extensionSource(daemon, "github"), "prs.json");
   const printed = JSON.parse(readFileSync(path, "utf8")) as { entities: { pr: unknown[] } };
   printed.entities.pr.push(...prs);
   writeFileSync(path, JSON.stringify(printed));
+  await deploy(daemon, "github");
 }
 
 const pr = (number: number, opened_at: string) => ({
@@ -62,7 +63,7 @@ const pr = (number: number, opened_at: string) => ({
 // the lens again (its models changed), rather than redrawing everything.
 test("a bad date is left out, and a filter holds across the host's re-run", async ({ fresh }) => {
   const { page, daemon } = fresh;
-  addPrs(daemon, [pr(11, "not a date")]);
+  await addPrs(daemon, [pr(11, "not a date")]);
   const frame = await openLifetimes(page, daemon, 3, 2);
   await expect(frame.locator("#note")).toContainText("1 pull request has a date that can't be read");
   for (const rect of await frame.locator(".bar rect").all()) {
@@ -70,7 +71,7 @@ test("a bad date is left out, and a filter holds across the host's re-run", asyn
   }
   await frame.locator('[data-state="open"]').click();
   await expect(frame.locator(".bar")).toHaveCount(1);
-  addPrs(daemon, [pr(14, "2026-09-30T00:00:00Z")]);
+  await addPrs(daemon, [pr(14, "2026-09-30T00:00:00Z")]);
   await collect(daemon, 4);
   // The host's re-run, with the filter kept: the open ones, #13 and #14.
   await expect(frame.locator(".bar")).toHaveCount(2);

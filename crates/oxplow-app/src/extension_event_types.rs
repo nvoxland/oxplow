@@ -232,7 +232,7 @@ pub fn starlark_upcast(event_type: &str, script: &str) -> Upcast {
 mod tests {
     use super::*;
 
-    const FILE: &str = "oxplow/extensions/acme-pr/extension.yaml";
+    const FILE: &str = ".oxplow/extensions/acme-pr/extension.yaml";
 
     fn parse(manifest: &str, files: &[(&str, &str)]) -> (EventTypes, Vec<String>) {
         let doc: serde_yaml::Value = serde_yaml::from_str(manifest).unwrap();

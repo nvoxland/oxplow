@@ -692,12 +692,6 @@ export function childParams(child: Lens, params: Record<string, SqlCell>): Recor
 }
 
 
-/** A lens `oxplow.lens.keep` wrote to its own stream's worktree (`live: false`):
- *  the app shows the main worktree's lenses, so this one shows once the
- *  stream is merged. */
-export const KEPT_IN_STREAM =
-  "Saved in this stream's worktree. It shows in the app once the stream is merged.";
-
 /** The command whose draft starts a lens with the agent: "New Lens with
  *  Your Agent…" (oxplow-foundation; its prompt is its `ui.input.text`,
  *  `useCommandDraft`). The agent's oxplow-extension skill takes it from

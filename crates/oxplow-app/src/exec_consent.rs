@@ -396,9 +396,11 @@ impl ProjectProgram {
         let mut h = Sha256::new();
         match self.kind {
             // Covered by what it says: each advisory is an arg (below).
-            ProgramKind::Advisories => h.update(self.program.as_bytes()),
+            // (Not where the extension's folder is: a new deployment of it
+            // is the same approval.)
+            ProgramKind::Advisories => h.update(b"extension.yaml"),
             ProgramKind::Job => {
-                h.update(self.program.as_bytes());
+                h.update(self.named().as_bytes());
                 h.update([0u8]);
                 h.update(self.files(project_dir)?.bytes("extension.yaml")?);
             }
@@ -406,7 +408,7 @@ impl ProjectProgram {
             // code it runs (the manifest, whose grants are hashed below,
             // and lenses) — so its declarations file too.
             ProgramKind::Provider => {
-                h.update(self.program.as_bytes());
+                h.update(self.named().as_bytes());
                 if self.remote {
                     // No file of its own: the url is what is covered.
                     h.update([6u8]);
@@ -426,7 +428,7 @@ impl ProjectProgram {
             // says when and with what it runs. A bundled extension's are
             // its embedded files, hashed alike (tsk953).
             ProgramKind::Effect | ProgramKind::EffortPolicy => {
-                h.update(self.program.as_bytes());
+                h.update(self.named().as_bytes());
                 h.update([0u8]);
                 h.update(self.entry_bytes(project_dir)?);
                 h.update([2u8]);
@@ -435,7 +437,7 @@ impl ProjectProgram {
             // The script it runs, read where it lives (a shipped one's is
             // embedded); the base URL it sends to is its `network` (below).
             ProgramKind::AiProvider => {
-                h.update(self.program.as_bytes());
+                h.update(self.named().as_bytes());
                 h.update([0u8]);
                 h.update(self.entry_bytes(project_dir)?);
             }
@@ -521,7 +523,7 @@ impl ProjectProgram {
     ) -> std::io::Result<String> {
         use sha2::{Digest, Sha256};
         let mut h = Sha256::new();
-        h.update(self.program.as_bytes());
+        h.update(self.named().as_bytes());
         h.update([2u8]);
         h.update(files_hash(files, &|_| false)?.as_bytes());
         for c in &self.commands {
@@ -533,6 +535,13 @@ impl ProjectProgram {
             h.update(asset.as_bytes());
         }
         Ok(hex::encode(h.finalize()))
+    }
+
+    /// What an approval names it by: `program` relative to its
+    /// extension's folder, so the same program in another deployment of the
+    /// extension is the same approval.
+    fn named(&self) -> &str {
+        self.in_tree().unwrap_or(&self.program)
     }
 
     /// `program` relative to its extension's folder, when it's in it.
@@ -1151,28 +1160,13 @@ mod tests {
 
     const PINNED_DIGEST: &str = "d5f817bd20dd343db4f8f6e30743b005d14604c1ae43dab78e55dde3836ffa4b";
 
-    /// tsk953: a bundled extension's files are hashed as they're embedded,
-    /// alike with the same files on disk — so a bundled effect can be
-    /// approved, and its approval means what a folder's would.
+    /// A folder's files hash the way its tree does, whichever way they are
+    /// read: the approval of a deployment is the approval of the folder.
     #[test]
-    fn a_folder_and_its_embedded_copy_hash_alike() {
-        let bundled = crate::bundled_extensions::BUNDLED
-            .iter()
-            .find(|b| b.name == "oxplow-bundled")
-            .unwrap();
+    fn a_folders_files_hash_like_its_tree() {
         let dir = tempfile::tempdir().unwrap();
-        for (rel, body) in bundled.files {
-            let path = dir.path().join(rel);
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(path, body).unwrap();
-        }
+        pin_folder(dir.path());
         let none = |_: &Path| false;
-        let embedded = files_hash(
-            &*crate::extensions::files_at(dir.path(), "bundled:oxplow-bundled").unwrap(),
-            &none,
-        )
-        .unwrap();
-        assert_eq!(embedded, tree_hash(dir.path()).unwrap());
         assert_eq!(
             files_hash(
                 &*crate::extensions::files_at(Path::new("/"), dir.path().to_str().unwrap())
@@ -1180,101 +1174,41 @@ mod tests {
                 &none
             )
             .unwrap(),
-            embedded
+            tree_hash(dir.path()).unwrap()
         );
-        // An effect program in a bundled extension has a version to approve.
-        let program = ProjectProgram {
-            kind: ProgramKind::Effect,
-            capability: None,
-            name: "oxplow-bundled/x".into(),
-            program: "bundled:oxplow-bundled/extension.yaml".into(),
-            args: Vec::new(),
-            env: Vec::new(),
-            credentials: Vec::new(),
-            network: Vec::new(),
-            commands: Vec::new(),
-            scopes: Vec::new(),
-            tree: Some("bundled:oxplow-bundled".into()),
-            remote: false,
-            approved: false,
-            version: None,
-            unenforced: Vec::new(),
-            granted_at: None,
-            revoked_at: None,
-        };
-        assert!(program.hash(dir.path()).is_ok());
     }
 
     /// tsk953: a person reads what they're asked to approve where it lives —
-    /// a bundled program's entry from its embedded files.
+    /// a program's entry from its extension's folder.
     #[test]
     fn a_programs_source_is_read_where_it_lives() {
         let dir = tempfile::tempdir().unwrap();
-        let bundled = ProjectProgram {
-            kind: ProgramKind::Effect,
-            capability: None,
-            name: "oxplow-bundled/x".into(),
-            program: "bundled:oxplow-bundled/extension.yaml".into(),
-            args: Vec::new(),
-            env: Vec::new(),
-            credentials: Vec::new(),
-            network: Vec::new(),
-            commands: Vec::new(),
-            scopes: Vec::new(),
-            tree: Some("bundled:oxplow-bundled".into()),
-            remote: false,
-            approved: false,
-            version: None,
-            unenforced: Vec::new(),
-            granted_at: None,
-            revoked_at: None,
-        };
-        assert!(bundled
-            .source(dir.path())
-            .unwrap()
-            .contains("name: oxplow-bundled"));
-        std::fs::create_dir_all(dir.path().join("oxplow/extensions/acme/effects")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".oxplow/extensions/acme/effects")).unwrap();
         std::fs::write(
-            dir.path().join("oxplow/extensions/acme/effects/run.star"),
+            dir.path().join(".oxplow/extensions/acme/effects/run.star"),
             "def transform(x): pass\n",
         )
         .unwrap();
         let disk = ProjectProgram {
-            program: "oxplow/extensions/acme/effects/run.star".into(),
-            tree: Some("oxplow/extensions/acme".into()),
-            ..bundled
+            kind: ProgramKind::Effect,
+            capability: None,
+            name: "acme/x".into(),
+            program: ".oxplow/extensions/acme/effects/run.star".into(),
+            args: Vec::new(),
+            env: Vec::new(),
+            credentials: Vec::new(),
+            network: Vec::new(),
+            commands: Vec::new(),
+            scopes: Vec::new(),
+            tree: Some(".oxplow/extensions/acme".into()),
+            remote: false,
+            approved: false,
+            version: None,
+            unenforced: Vec::new(),
+            granted_at: None,
+            revoked_at: None,
         };
         assert_eq!(disk.source(dir.path()).unwrap(), "def transform(x): pass\n");
-    }
-
-    /// tsk953: what an embedded extension's approval covers is every file:
-    /// a new oxplow that changes one asks again.
-    #[test]
-    fn a_changed_embedded_file_changes_the_hash() {
-        let leak = |files: Vec<(&'static str, &'static str)>| -> &'static crate::bundled_extensions::BundledExtension {
-            Box::leak(Box::new(crate::bundled_extensions::BundledExtension {
-                name: "acme",
-                files: Box::leak(
-                    files
-                        .into_iter()
-                        .map(|(p, t)| (p, t.as_bytes()))
-                        .collect::<Vec<_>>()
-                        .into_boxed_slice(),
-                ),
-                required: false,
-            }))
-        };
-        let before = leak(vec![
-            ("extension.yaml", "name: acme"),
-            ("effects/run.star", "one"),
-        ]);
-        let after = leak(vec![
-            ("extension.yaml", "name: acme"),
-            ("effects/run.star", "two"),
-        ]);
-        let none = |_: &Path| false;
-        let hash = |b| files_hash(&crate::extensions::Embedded(b), &none).unwrap();
-        assert_ne!(hash(before), hash(after));
     }
 
     /// An effort policy written as a script is a program a person
@@ -1285,11 +1219,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let home = tempfile::tempdir().unwrap();
         let st = store(home.path(), dir.path());
-        let ext = dir.path().join("oxplow/extensions/acme");
+        let ext = dir.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(ext.join("policies")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nsharing: private\nintent:\n  purpose: a policy\n  examples: [{ name: a }]\nimplementations:\n  - { capability: effort_policy, id: tidy, entry: policies/tidy.star, needs: [sql.read] }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: a policy\n  examples: [{ name: a }]\nimplementations:\n  - { capability: effort_policy, id: tidy, entry: policies/tidy.star, needs: [sql.read] }\n",
         )
         .unwrap();
         std::fs::write(
@@ -1334,11 +1268,11 @@ mod tests {
     /// A project extension with one policy script, on disk, and its listed
     /// program (the extensions are read from disk each time, as boot does).
     fn policy(dir: &Path, body: &str) -> (Vec<crate::extensions::Extension>, ProjectProgram) {
-        let ext = dir.join("oxplow/extensions/acme");
+        let ext = dir.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(ext.join("policies")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nsharing: private\nintent:\n  purpose: a policy\n  examples: [{ name: a }]\nimplementations:\n  - { capability: effort_policy, id: tidy, entry: policies/tidy.star, needs: [sql.read] }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: a policy\n  examples: [{ name: a }]\nimplementations:\n  - { capability: effort_policy, id: tidy, entry: policies/tidy.star, needs: [sql.read] }\n",
         )
         .unwrap();
         std::fs::write(ext.join("policies/tidy.star"), body).unwrap();

@@ -20,7 +20,7 @@ describe("a lens re-runs on what it read", () => {
     // tsk1030: the daemon says when the extension catalog changed; a file
     // path is not the signal.
     expect(lensDefinitionChanged({ kind: "extensionsChanged" })).toBe(true);
-    expect(lensDefinitionChanged({ kind: "workspaceChanged", path: "oxplow/extensions/x/lenses/a.yaml" })).toBe(false);
+    expect(lensDefinitionChanged({ kind: "workspaceChanged", path: ".oxplow/extensions/x/lenses/a.yaml" })).toBe(false);
     expect(lensDefinitionChanged({ kind: "configChanged" })).toBe(false);
   });
   // What an extension contributes (its panels, pages, lenses) changes when

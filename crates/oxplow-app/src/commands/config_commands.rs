@@ -887,7 +887,11 @@ mod tests {
                     let text = std::fs::read_to_string(&path).unwrap();
                     // Production code only: stop at the test module.
                     let prod = text.split("#[cfg(test)]").next().unwrap_or_default();
-                    if prod.contains("write_project_key(") {
+                    // Sharing an extension is the one other writer: it moves a
+                    // name onto the team's list (`extension_deploy::share`).
+                    if prod.contains("write_project_key(")
+                        && path.file_name() != Some(std::ffi::OsStr::new("extension_deploy.rs"))
+                    {
                         writers.push(path.strip_prefix(&crates).unwrap().display().to_string());
                     }
                 }

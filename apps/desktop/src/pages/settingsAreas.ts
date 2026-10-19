@@ -41,7 +41,7 @@ export const SETTINGS_AREAS: readonly SettingsArea[] = [
   {
     id: "extensions",
     title: "Extensions",
-    intro: "Extensions add lenses, pages and data. They are project files under oxplow/extensions/: commit them to share them.",
+    intro: "Extensions add lenses, pages and data. Their sources are in .oxplow/extensions/; what runs is each one's deployment. Sharing one with the team is `oxplow.extension.share`.",
     sections: [{ id: "installed", title: "Extensions" }],
   },
   {

@@ -146,6 +146,9 @@ pub struct FactCollector {
     pub key: String,
     /// `project` or the extension's name.
     pub owner: String,
+    /// The folder its entry is read from: its owner's deployment, or for a
+    /// preview, the owner's source (relative to the checkout, or absolute).
+    pub path: String,
     pub trigger: Trigger,
     /// The measures its facts may land on.
     pub facts: Vec<String>,
@@ -169,10 +172,11 @@ pub struct FactCollector {
 impl FactCollector {
     /// The fact collector `spec` declares, or `None` when it writes
     /// entities instead.
-    pub fn from_spec(owner: &str, spec: &CollectorSpec) -> Option<Self> {
+    pub fn from_spec(owner: &str, path: &str, spec: &CollectorSpec) -> Option<Self> {
         (!spec.facts.is_empty()).then(|| FactCollector {
             key: spec.id.clone(),
             owner: owner.to_string(),
+            path: path.to_string(),
             trigger: spec.trigger.clone(),
             facts: spec.facts.clone(),
             runtime: spec.runtime,
@@ -604,7 +608,7 @@ impl MetricsService {
             out.collectors.extend(
                 e.collectors
                     .iter()
-                    .filter_map(|c| FactCollector::from_spec(&e.name, c)),
+                    .filter_map(|c| FactCollector::from_spec(&e.name, &e.path, c)),
             );
             if !e.dimensions.is_empty() {
                 out.dimensions.push((e.name.clone(), e.dimensions));
@@ -1934,7 +1938,9 @@ impl MetricsService {
         input: serde_json::Value,
         mode: Mode,
     ) -> Result<Vec<serde_json::Value>, String> {
-        let collector = FactCollector::from_spec(owner, spec)
+        let path =
+            crate::extensions::source_or_shipped(&self.project_dir, &self.project_dir, owner);
+        let collector = FactCollector::from_spec(owner, &path, spec)
             .ok_or_else(|| format!("collector `{}` declares no `facts:`", spec.id))?;
         let runner = self.preview_runner(&collector, &self.project_dir)?;
         self.preview_with(&collector, runner, files, input, mode)
@@ -1956,7 +1962,8 @@ impl MetricsService {
         event: Option<&serde_json::Value>,
     ) -> Result<Vec<serde_json::Value>, String> {
         use crate::services::TreeSource as _;
-        let collector = FactCollector::from_spec(owner, spec)
+        let path = crate::extensions::source_or_shipped(&self.project_dir, root, owner);
+        let collector = FactCollector::from_spec(owner, &path, spec)
             .ok_or_else(|| format!("collector `{}` declares no `facts:`", spec.id))?;
         if collector.input.is_some() {
             return Err(format!(
@@ -2890,7 +2897,7 @@ impl FactRunner {
 /// (bundled or on disk). `None` when it can't be read.
 fn collector_script_text(collector: &FactCollector, root: &Path) -> Option<String> {
     let entry = collector.entry.as_deref()?;
-    crate::extensions::read_extension_file(root, &collector.owner, entry)
+    crate::extensions::read_extension_file(root, &collector.path, entry)
 }
 
 /// A fingerprint of the LOGIC that produces a collector's facts (tsk45): its script
@@ -3128,10 +3135,10 @@ mod tests {
         snap
     }
 
-    /// A file of the project extension (`oxplow/extensions/project/`) under
+    /// A file of the project extension (`.oxplow/extensions/project/`) under
     /// `root`, its folder made: where its collectors' scripts live.
     fn project_ext_file(root: &Path, rel: &str) -> std::path::PathBuf {
-        let path = root.join("oxplow/extensions/project").join(rel);
+        let path = root.join(".oxplow/extensions/project").join(rel);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         path
     }
@@ -3868,6 +3875,11 @@ mod tests {
         FactCollector {
             key: key.into(),
             owner: oxplow_config::collectors::PROJECT_EXTENSION.into(),
+            path: format!(
+                "{}/{}",
+                crate::extensions::EXTENSIONS_DIR,
+                oxplow_config::collectors::PROJECT_EXTENSION
+            ),
             trigger: Trigger::On {
                 events: vec![SNAPSHOT_TAKEN.into()],
                 filter: Default::default(),
@@ -4790,9 +4802,14 @@ def transform(input):
             &|_| true,
         );
         assert_eq!(errors, Vec::<String>::new());
+        let path = crate::test_fixtures::shipped_extensions()
+            .into_iter()
+            .find(|e| e.name == "oxplow-foundation")
+            .unwrap()
+            .path;
         specs
             .iter()
-            .filter_map(|s| FactCollector::from_spec("oxplow-foundation", s))
+            .filter_map(|s| FactCollector::from_spec("oxplow-foundation", &path, s))
             .collect()
     }
 
@@ -5771,7 +5788,7 @@ def transform(input):
     #[tokio::test]
     async fn an_extension_contributes_measures_metrics_and_collectors() {
         let (svc, dir) = fixture().await;
-        let ext = dir.path().join("oxplow/extensions/acme");
+        let ext = dir.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(ext.join("collectors")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
@@ -5827,8 +5844,8 @@ def transform(input):
         // measure (and its facts) stay for when it's turned back on.
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
         std::fs::write(
-            dir.path().join(".oxplow/project.yaml"),
-            "extensions:\n  disabled: [acme]\n",
+            dir.path().join(".oxplow/personal.yaml"),
+            "disableExtensions: [acme]\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
@@ -5866,7 +5883,7 @@ def transform(input):
     async fn two_extensions_declaring_one_metric_key_report_it_and_keep_the_first() {
         let (svc, dir) = fixture().await;
         for (name, measure) in [("alpha", "alpha.todo"), ("beta", "beta.todo")] {
-            let ext = dir.path().join("oxplow/extensions").join(name);
+            let ext = dir.path().join(".oxplow/extensions").join(name);
             std::fs::create_dir_all(&ext).unwrap();
             std::fs::write(
                 ext.join("extension.yaml"),
@@ -5906,8 +5923,8 @@ def transform(input):
         let (svc, dir) = fixture().await;
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
         std::fs::write(
-            dir.path().join(".oxplow/project.yaml"),
-            "extensions:\n  disabled: [oxplow-bundled]\n",
+            dir.path().join(".oxplow/personal.yaml"),
+            "disableExtensions: [oxplow-bundled]\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
@@ -5949,7 +5966,7 @@ def transform(input):
     #[tokio::test]
     async fn a_collector_metrics_name_runs_only_while_one_of_them_is_active() {
         let (svc, dir) = fixture().await;
-        let ext = dir.path().join("oxplow/extensions/acme");
+        let ext = dir.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(ext.join("collectors")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
@@ -6007,7 +6024,7 @@ def transform(input):
     #[tokio::test]
     async fn an_extension_contributes_dimensions_that_slice_its_entity_metrics() {
         let (svc, dir) = fixture().await;
-        let ext = dir.path().join("oxplow/extensions/acme");
+        let ext = dir.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
@@ -6038,8 +6055,8 @@ def transform(input):
         // Disabling the extension removes its dimension too.
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
         std::fs::write(
-            dir.path().join(".oxplow/project.yaml"),
-            "extensions:\n  disabled: [acme]\n",
+            dir.path().join(".oxplow/personal.yaml"),
+            "disableExtensions: [acme]\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
@@ -6088,7 +6105,7 @@ def transform(input):
         );
         assert!(errors.is_empty(), "{errors:?}");
         let hash = crate::collector_runner::approval_hash(
-            &dir.path().join("oxplow/extensions/project"),
+            &dir.path().join(".oxplow/extensions/project"),
             &specs[0],
         )
         .unwrap();
@@ -6376,15 +6393,15 @@ def transform(input):
             )
             .unwrap();
         assert_eq!(t.name, "complex-fns");
-        assert_eq!(t.dir, "oxplow/extensions/complex-fns");
+        assert_eq!(t.dir, ".oxplow/extensions/complex-fns");
         let paths: Vec<&str> = t.files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(
             paths,
             [
-                "oxplow/extensions/complex-fns/extension.yaml",
-                "oxplow/extensions/complex-fns/collectors/complex_functions.star",
-                "oxplow/extensions/complex-fns/lenses/complex-fns.yaml",
-                "oxplow/extensions/complex-fns/fixtures/basic.yaml",
+                ".oxplow/extensions/complex-fns/extension.yaml",
+                ".oxplow/extensions/complex-fns/collectors/complex_functions.star",
+                ".oxplow/extensions/complex-fns/lenses/complex-fns.yaml",
+                ".oxplow/extensions/complex-fns/fixtures/basic.yaml",
             ]
         );
         let script = &t.files[1].content;

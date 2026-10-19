@@ -30,7 +30,7 @@ commands:
 ";
 
 fn write(root: &std::path::Path, rel: &str, body: &str) {
-    let path = root.join("oxplow/extensions/acme").join(rel);
+    let path = root.join(".oxplow/extensions/acme").join(rel);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, body).unwrap();
     if rel.ends_with(".sh") {
@@ -307,8 +307,8 @@ async fn disabling_an_extension_stops_a_collector_script_that_is_computing() {
     };
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     std::fs::write(
-        root.join(".oxplow/project.yaml"),
-        "extensions:\n  disabled: [acme]\n",
+        root.join(".oxplow/personal.yaml"),
+        "disableExtensions: [acme]\n",
     )
     .unwrap();
     fx.svc.reload_config_from_disk().unwrap();

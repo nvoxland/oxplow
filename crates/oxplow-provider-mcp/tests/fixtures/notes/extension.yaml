@@ -1,7 +1,6 @@
 manifest: 2
 name: notes
 description: Notes from the oxplow-provider-mcp-notes MCP server, as work items, through oxplow's MCP adapter.
-sharing: private
 engine: ">=0.7"
 intent:
   purpose: >-

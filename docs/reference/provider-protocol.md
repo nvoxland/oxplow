@@ -56,7 +56,7 @@ foreign body.
 ## Declaring one
 
 ```yaml
-# oxplow/extensions/my-tracker/extension.yaml
+# .oxplow/extensions/my-tracker/extension.yaml
 providers:
   - id: tracker
     capability: work_items

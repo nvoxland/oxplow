@@ -47,7 +47,7 @@ async fn fixture(approve_jobs: bool) -> Fixture {
 fn project() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     crate::test_fixtures::init_git_repo(dir.path());
-    let ext = dir.path().join("oxplow/extensions/triage");
+    let ext = dir.path().join(".oxplow/extensions/triage");
     std::fs::create_dir_all(&ext).unwrap();
     std::fs::write(ext.join("extension.yaml"), MANIFEST).unwrap();
     dir
@@ -90,13 +90,12 @@ fn configure(svc: &crate::Services, base: String) {
 
 /// Activate the project's extensions and start the job scheduler, as boot does.
 async fn start(svc: &Arc<crate::Services>, approve_jobs: bool) {
+    // Approvals are listed from the deployed extension, so deploy first.
+    crate::test_fixtures::activate(svc).await;
     if approve_jobs {
         approve(svc, crate::exec_consent::ProgramKind::Job);
+        crate::test_fixtures::activate(svc).await;
     }
-    svc.extension_activation
-        .activate(svc.clone())
-        .await
-        .expect("the extension activates");
     let problems = svc.extension_activation.problems();
     assert!(problems.is_empty(), "{problems:?}");
     svc.jobs

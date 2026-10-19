@@ -95,7 +95,7 @@ pub struct CredentialStatus {
 
 /// Where collectors live and what running them needs.
 pub struct Collectors<'a> {
-    /// The worktree whose `oxplow/extensions/` declares them.
+    /// The worktree whose `.oxplow/extensions/` declares them.
     pub root: &'a Path,
     /// This project's key ([`project_key`]): credentials are scoped by it.
     pub project: String,
@@ -118,7 +118,7 @@ pub struct Collectors<'a> {
     pub trees: Option<std::sync::Arc<dyn crate::services::TreeSource>>,
 }
 
-/// The worktree whose `oxplow/extensions/` declares the collectors: the
+/// The worktree whose `.oxplow/extensions/` declares the collectors: the
 /// primary one.
 pub async fn primary_root(worktrees: &crate::worktrees::WorktreeRouter) -> PathBuf {
     worktrees.resolve(None).await.into_local_path()
@@ -262,8 +262,8 @@ pub async fn list_with(ctx: &Listing<'_>) -> Result<Vec<CollectorListing>, Domai
         .cloned()
     {
         let ext_dir = ctx.root.join(&ext.path);
-        for spec in ext.collectors {
-            let guarded = needs_approval(ctx.root, &ext.name, &spec);
+        for spec in ext.collectors.clone() {
+            let guarded = needs_approval(ctx.root, &ext, &spec);
             let version = guarded
                 .then(|| approval_hash(&ext_dir, &spec).ok())
                 .flatten();
@@ -410,7 +410,11 @@ pub fn entry_hash(ext_dir: &Path, entry: &str) -> std::io::Result<String> {
 /// program (`exec`), or a Starlark script that calls a model (`ai_*`),
 /// which spends the person's key each time it runs — on a schedule, as
 /// nobody. Any other derived script does no I/O an approval would guard.
-pub fn needs_approval(root: &Path, extension: &str, spec: &CollectorSpec) -> bool {
+pub fn needs_approval(
+    root: &Path,
+    extension: &crate::extensions::Extension,
+    spec: &CollectorSpec,
+) -> bool {
     // A report read by one of oxplow's own parsers runs nothing of the
     // extension's.
     if spec.bundled_parser().is_some() {
@@ -418,7 +422,7 @@ pub fn needs_approval(root: &Path, extension: &str, spec: &CollectorSpec) -> boo
     }
     match spec.runtime {
         CollectorRuntime::Starlark => {
-            crate::extensions::read_extension_file(root, extension, entry_of(spec))
+            crate::extensions::read_extension_file(root, &extension.path, entry_of(spec))
                 .is_some_and(|script| oxplow_script::ai::calls_ai(&script))
         }
         runtime => !runtime.is_derived(),
@@ -1165,12 +1169,12 @@ fn collector_context(
     let (ext, spec) = find_collector(ctx, owner, id)?;
     // What it may do: its declaration, and the grant a person's approval
     // of it as it is now gives a program or a model-calling script.
-    let consented = needs_approval(ctx.root, owner, &spec);
+    let consented = needs_approval(ctx.root, &ext, &spec);
     let approved = consented
         && approval_hash(&ctx.root.join(&ext.path), &spec)
             .is_ok_and(|h| is_approved(ctx.approvals, owner, id, &h));
     let script = (spec.runtime == CollectorRuntime::Starlark)
-        .then(|| crate::extensions::read_extension_file(ctx.root, &ext.name, entry_of(&spec)))
+        .then(|| crate::extensions::read_extension_file(ctx.root, &ext.path, entry_of(&spec)))
         .flatten();
     let needs = crate::services::collector_needs(&spec, script.as_deref());
     // It holds no catalog generation while it runs (it can take minutes): it
@@ -1859,7 +1863,7 @@ pub fn approve_reviewed(
     version: &str,
 ) -> Result<(), RunCollectorError> {
     let (ext, spec) = find_collector(ctx, owner, id)?;
-    if !needs_approval(ctx.root, &ext.name, &spec) {
+    if !needs_approval(ctx.root, &ext, &spec) {
         return Ok(());
     }
     let hash = approval_hash(&ctx.root.join(&ext.path), &spec).map_err(|e| {
@@ -1922,7 +1926,7 @@ async fn produce(
         )));
     }
     if spec.runtime.is_derived() {
-        let Some(script) = crate::extensions::read_extension_file(root, &ext.name, entry_of(&spec))
+        let Some(script) = crate::extensions::read_extension_file(root, &ext.path, entry_of(&spec))
         else {
             let missing = format!(
                 "collector `{id}`: entry `{}` doesn't exist in the extension",
@@ -1932,11 +1936,11 @@ async fn produce(
         };
         let run = run.clone().guarded({
             let root = root.to_path_buf();
-            let owner = owner.to_string();
+            let path = ext.path.clone();
             let entry = entry_of(&spec).to_string();
             let loaded = script.clone();
             Arc::new(move || {
-                if crate::extensions::read_extension_file(&root, &owner, &entry)
+                if crate::extensions::read_extension_file(&root, &path, &entry)
                     .is_some_and(|current| current == loaded)
                 {
                     Ok(())
@@ -2552,7 +2556,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn rows_are_published_into_a_declared_entity() {
         let dir = tempfile::tempdir().unwrap();
-        let ext_dir = dir.path().join("oxplow/extensions/my-gh");
+        let ext_dir = dir.path().join(".oxplow/extensions/my-gh");
         std::fs::create_dir_all(&ext_dir).unwrap();
         std::fs::write(
             ext_dir.join("extension.yaml"),
@@ -2778,7 +2782,7 @@ pub(crate) mod tests {
     async fn run_collector_requires_consent_then_stores_queryable_rows() {
         let root = tempfile::tempdir().unwrap();
         let state = root.path().join(".oxplow");
-        let ext = root.path().join("oxplow/extensions/my-gh");
+        let ext = root.path().join(".oxplow/extensions/my-gh");
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
@@ -2966,7 +2970,7 @@ pub(crate) mod tests {
     /// script that echoes it into a row.
     fn two_extensions(root: &Path) {
         for name in ["one", "two"] {
-            let ext = root.join(format!("oxplow/extensions/{name}"));
+            let ext = root.join(format!(".oxplow/extensions/{name}"));
             std::fs::create_dir_all(&ext).unwrap();
             std::fs::write(
                 ext.join("extension.yaml"),
@@ -3089,7 +3093,7 @@ pub(crate) mod tests {
     }
 
     fn extension(root: &Path, name: &str, manifest: &str, files: &[(&str, &str)]) {
-        let ext = root.join(format!("oxplow/extensions/{name}"));
+        let ext = root.join(format!(".oxplow/extensions/{name}"));
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(ext.join("extension.yaml"), manifest).unwrap();
         for (path, body) in files {
@@ -3690,7 +3694,7 @@ pub(crate) mod tests {
             )],
         );
         script(
-            &root.path().join("oxplow/extensions/work"),
+            &root.path().join(".oxplow/extensions/work"),
             "sync.sh",
             r#"echo '{"entities":{"raw":[{"id":1}]}}'"#,
         );
@@ -3756,7 +3760,7 @@ pub(crate) mod tests {
             "manifest: 2\nname: inc\nintent:\n  purpose: test\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    sync: upsert\n    entities:\n      - { name: item, key: id, columns: { id: int, title: text } }\n      - { name: other, key: id, columns: { id: int } }\n",
             &[],
         );
-        let ext = root.path().join("oxplow/extensions/inc");
+        let ext = root.path().join(".oxplow/extensions/inc");
         let db = task_db().await;
         let store = SqliteCollectorStore::new(db.clone());
         let secrets = oxplow_ai::secrets::MemorySecrets::default();
@@ -3878,7 +3882,7 @@ pub(crate) mod tests {
             "manifest: 2\nname: net\nintent:\n  purpose: test\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    network: [localhost]\n    entities:\n      - { name: r, key: id, columns: { id: int, declared: text, undeclared: text, direct: text } }\n",
             &[],
         );
-        let ext = root.path().join("oxplow/extensions/net");
+        let ext = root.path().join(".oxplow/extensions/net");
         script(
             &ext,
             "sync.sh",
@@ -3980,7 +3984,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
     async fn run_approves_only_the_version_the_person_saw() {
         let root = tempfile::tempdir().unwrap();
         let state = root.path().join(".oxplow");
-        let ext = root.path().join("oxplow/extensions/my-gh");
+        let ext = root.path().join(".oxplow/extensions/my-gh");
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),

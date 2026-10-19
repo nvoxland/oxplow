@@ -90,6 +90,7 @@ pub mod extension_config_migration;
 #[cfg(test)]
 mod extension_config_tests;
 pub mod extension_configuration;
+pub mod extension_deploy;
 pub mod extension_event_types;
 pub mod extension_generation;
 #[cfg(test)]
@@ -125,6 +126,7 @@ pub mod extension_secrets;
 #[cfg(test)]
 mod extension_sql_config_tests;
 pub mod extension_state;
+pub mod extension_store;
 pub mod extensions;
 pub mod external_process;
 pub mod file_ref_version;
@@ -574,7 +576,7 @@ pub struct Services {
     /// Producers `wake()` it after they commit; `boot.rs` spawns the loop.
     pub event_pump: Arc<event_pump::EventPump>,
     /// Loaded extensions per worktree root, reloaded when a file under
-    /// `oxplow/extensions/` or the project config changes.
+    /// `.oxplow/extensions/` or the project config changes.
     pub extension_catalog: Arc<extension_catalog::ExtensionCatalog>,
     pub jobs: Arc<extension_jobs::ExtensionJobs>,
     pub extension_secrets: Arc<extension_secrets::ExtensionSecrets>,
@@ -975,17 +977,6 @@ impl Services {
         secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
     ) -> Result<Self, AppInitError> {
         ensure_state_dir(&layout.state_dir)?;
-        let recovery = extensions::candidates::recover_installations(&layout.project_dir)
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
-        if recovery.scanned != 0 {
-            info!(
-                restored = recovery.restored,
-                cleaned = recovery.cleaned,
-                preserved = recovery.preserved,
-                "extension install recovery finished"
-            );
-        }
-
         let config = oxplow_config::load_project_config(&layout.project_dir)?;
         info!(project = %layout.project_dir.display(), agents = ?config.agents, "config loaded");
 
@@ -1792,11 +1783,6 @@ impl Services {
         }
         for command in commands::test_runs::ops(collection.clone())
             .into_iter()
-            .chain(commands::extension_install::ops(
-                commands::extension_install::InstallDeps {
-                    worktrees: worktrees.clone(),
-                },
-            ))
             .chain([commands::snapshot::restore_file_op(
                 snapshot_files::SnapshotFiles {
                     snapshots: snapshot_store.clone(),
@@ -1833,6 +1819,7 @@ impl Services {
                 ),
             ))
             .chain(commands::effect::ops(services_slot.clone()))
+            .chain(commands::extension_deploy::ops(services_slot.clone()))
             .chain(commands::agent_reads::ops(services_slot.clone()))
             .chain(client_host::ops(&client_host))
             .chain([commands::file::save_op(workspace_files.clone())])
@@ -2316,11 +2303,15 @@ mod tests {
                 "oxplow.effect.backfill",
                 "oxplow.effect.retry",
                 "oxplow.effort.report",
-                // A clone into a stream's worktree, a person's call (P8.A9).
-                "oxplow.extension.install",
+                // Writes the store, the settings and `.oxplow/.gitignore`.
+                "oxplow.extension.deploy",
+                "oxplow.extension.disable",
+                "oxplow.extension.enable",
                 "oxplow.extension.preview",
-                "oxplow.extension.review",
-                "oxplow.extension.update",
+                "oxplow.extension.remove",
+                "oxplow.extension.rollback",
+                "oxplow.extension.share",
+                "oxplow.extension.unshare",
                 "oxplow.extension.validate",
                 "oxplow.file.save",
                 "oxplow.git.cherry_pick",
@@ -2340,7 +2331,6 @@ mod tests {
                 "oxplow.lens.keep",
                 "oxplow.lens.run",
                 "oxplow.lens.run_action",
-                "oxplow.lens.share",
                 // It returns the answer's text, rendered once it's stored.
                 "oxplow.lens.show",
                 // A download into .oxplow/lsp/, a person's call (P8.A9).
@@ -2448,8 +2438,11 @@ mod tests {
                 "extension_config.read/snapshot",
                 "extension_config.write/compare_exchange",
                 "extensions.check/preview",
-                "extensions.check/review",
                 "extensions.check/validate",
+                // An agent deploys what it wrote (and takes it back): what
+                // a program does still waits for a person's approval.
+                "extensions.deploy/deploy",
+                "extensions.deploy/rollback",
                 "files.write/save",
                 // Each side settles only its own side of a handoff
                 // (`may_settle`), checked before a take composes its move.

@@ -563,7 +563,7 @@ mod tests {
     fn acme_manifest(name: &str) -> String {
         let ns = name.replace('-', "_");
         format!(
-            "manifest: 2\nname: {name}\nsharing: private\nintent: {{ purpose: p, origin: null, examples: [] }}\n\
+            "manifest: 2\nname: {name}\nintent: {{ purpose: p, origin: null, examples: [] }}\n\
              models:\n  - name: prs\n    version: 3\n    description: Pull requests.\n    columns:\n      - {{ name: ref, type: TEXT, doc: The ref. }}\n      - {{ name: title, type: TEXT, doc: Its title. }}\n\
              event_types:\n  types:\n    - {{ type: {ns}.merged, v: 1, schema: merged.json, summary: Merged. }}\n\
              pages:\n  - {{ id: pr, title: Pull request, category: Work, lens: open }}\n\
@@ -575,7 +575,7 @@ mod tests {
     }
 
     fn write_acme(root: &Path, name: &str) {
-        let dir = format!("oxplow/extensions/{name}");
+        let dir = format!(".oxplow/extensions/{name}");
         write(root, &format!("{dir}/extension.yaml"), &acme_manifest(name));
         write(
             root,
@@ -629,20 +629,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
-            "oxplow/extensions/acme/extension.yaml",
-            "manifest: 2\nname: acme\nsharing: private\nintent: { purpose: p, origin: null, examples: [] }\n\
+            ".oxplow/extensions/acme/extension.yaml",
+            "manifest: 2\nname: acme\nintent: { purpose: p, origin: null, examples: [] }\n\
              implementations:\n\
              \x20 - { capability: effort_policy, id: tidy, entry: policies/tidy.star }\n\
              \x20 - { capability: ai_provider, id: tidy, entry: providers/tidy.star }\n",
         );
         write(
             dir.path(),
-            "oxplow/extensions/acme/policies/tidy.star",
+            ".oxplow/extensions/acme/policies/tidy.star",
             "def transform(x):\n    return []\n",
         );
         write(
             dir.path(),
-            "oxplow/extensions/acme/providers/tidy.star",
+            ".oxplow/extensions/acme/providers/tidy.star",
             "def request(x):\n    return {}\n\ndef response(x):\n    return {}\n",
         );
         let ext = load_extensions(dir.path())
@@ -740,7 +740,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
-            "oxplow/extensions/tracker/extension.yaml",
+            ".oxplow/extensions/tracker/extension.yaml",
             "manifest: 2\nname: tracker\nintent: { purpose: p, origin: null, examples: [] }\n",
         );
         let mut ext = load_extensions(dir.path())
@@ -778,7 +778,7 @@ mod tests {
         let first = acme();
         let mut second = acme();
         second.name = "acme-qr".into();
-        second.path = "oxplow/extensions/acme-qr".into();
+        second.path = ".oxplow/extensions/acme-qr".into();
         // The model's view is named for its extension, so a second one's
         // never matches; claim it outright.
         second.contributions = describe(&second);
@@ -834,7 +834,7 @@ mod tests {
             write_acme(dir.path(), name);
             write(
                 dir.path(),
-                &format!("oxplow/extensions/{name}/extension.yaml"),
+                &format!(".oxplow/extensions/{name}/extension.yaml"),
                 &manifest(name),
             );
         }
@@ -887,7 +887,7 @@ mod catalog_tests {
     }
 
     fn write(root: &std::path::Path, ext: &str, body: &str) {
-        let dir = root.join("oxplow/extensions").join(ext);
+        let dir = root.join(".oxplow/extensions").join(ext);
         std::fs::create_dir_all(dir.join("skills")).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),
@@ -970,10 +970,10 @@ mod ordering_tests {
     /// Write extension `name` with these `effects:` entries (each
     /// `id: after-list`) and `collectors:` entries, then load the catalog.
     fn write(root: &Path, name: &str, effects: &[(&str, &str)], collectors: &[(&str, &str)]) {
-        let dir = root.join(format!("oxplow/extensions/{name}"));
+        let dir = root.join(format!(".oxplow/extensions/{name}"));
         std::fs::create_dir_all(&dir).unwrap();
         let mut yaml = format!(
-            "manifest: 2\nname: {name}\nsharing: private\nintent: {{ purpose: p, origin: null, examples: [] }}\n"
+            "manifest: 2\nname: {name}\nintent: {{ purpose: p, origin: null, examples: [] }}\n"
         );
         if !effects.is_empty() {
             yaml.push_str("effects:\n");
@@ -1117,8 +1117,8 @@ mod ordering_tests {
         );
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
         std::fs::write(
-            dir.path().join(".oxplow/project.yaml"),
-            "extensions:\n  disabled: [first]\n",
+            dir.path().join(".oxplow/personal.yaml"),
+            "disableExtensions: [first]\n",
         )
         .unwrap();
         let exts = load_extensions(dir.path());

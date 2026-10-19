@@ -366,10 +366,14 @@ mod tests {
     use serde_json::json;
 
     const HEAD: &str =
-        "manifest: 2\nname: work\nsharing: private\nintent: { purpose: t, origin: null, examples: [] }\n";
+        "manifest: 2\nname: work\nintent: { purpose: t, origin: null, examples: [] }\n";
 
-    async fn extension(svc: &std::sync::Arc<Services>, collectors: &str, files: &[(&str, &str)]) {
-        let dir = svc.layout.project_dir.join("oxplow/extensions/work");
+    async fn extension(
+        svc: &std::sync::Arc<Services>,
+        collectors: &str,
+        files: &[(&str, &str)],
+    ) -> crate::vocabulary_reactor::VocabularyErrors {
+        let dir = svc.layout.project_dir.join(".oxplow/extensions/work");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),
@@ -379,7 +383,7 @@ mod tests {
         for (name, body) in files {
             std::fs::write(dir.join(name), body).unwrap();
         }
-        crate::test_fixtures::activate_with_problems(svc).await;
+        crate::test_fixtures::activate_with_problems(svc).await
     }
 
     const SEEN: &str = "def transform(input):\n    return {\"entities\": {\"seen\": [{\"ev\": r[\"ev\"], \"id\": r[\"id\"], \"effort\": r[\"effort\"], \"kind\": input[\"event\"][\"type\"]} for r in input[\"rows\"]]}}\n";
@@ -727,32 +731,29 @@ mod tests {
     #[tokio::test]
     async fn a_collector_after_nothing_is_a_load_error() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        extension(
+        let held = extension(
             &fx.svc,
             &on_claims("").replace("    input:", "    after: [no.such_consumer]\n    input:"),
             &[("seen.star", SEEN)],
         )
         .await;
-        // Held back from the active catalog; the load says why.
+        // Held back from the active catalog; the activation says why.
+        let why = held.get("work").map(|l| l.join("\n")).unwrap_or_default();
+        assert!(why.contains("`no.such_consumer` is none of"), "{held:?}");
         let load = fx
             .svc
             .extension_catalog
             .snapshot(&fx.svc.layout.project_dir);
-        let work = load.extensions().iter().find(|e| e.name == "work").unwrap();
-        assert!(work.collectors.is_empty());
-        assert!(
-            work.errors
-                .iter()
-                .any(|e| e.contains("`no.such_consumer` is none of")),
-            "{:?}",
-            work.errors
-        );
+        assert!(load
+            .extensions()
+            .iter()
+            .all(|e| e.name != "work" || e.collectors.is_empty()));
     }
 
     /// `acme-pr`: it declares `acme_pr.merged`, `.ping` and `.pong`
     /// (payload `{ number }`), and the given collectors.
     async fn emitter(svc: &std::sync::Arc<Services>, collectors: &str, files: &[(&str, &str)]) {
-        let dir = svc.layout.project_dir.join("oxplow/extensions/acme-pr");
+        let dir = svc.layout.project_dir.join(".oxplow/extensions/acme-pr");
         std::fs::create_dir_all(&dir).unwrap();
         let types: String = ["merged", "ping", "pong"]
             .iter()
@@ -764,7 +765,7 @@ mod tests {
             .collect();
         std::fs::write(
             dir.join("extension.yaml"),
-            format!("manifest: 2\nname: acme-pr\nsharing: private\nintent: {{ purpose: t, origin: null, examples: [] }}\nevent_types:\n  types:\n{types}collectors:\n{collectors}"),
+            format!("manifest: 2\nname: acme-pr\nintent: {{ purpose: t, origin: null, examples: [] }}\nevent_types:\n  types:\n{types}collectors:\n{collectors}"),
         )
         .unwrap();
         std::fs::write(

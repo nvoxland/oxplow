@@ -52,9 +52,8 @@ pub fn commit_index(dir: &Path, message: &str) -> String {
         .to_string()
 }
 
-/// Publish a new extension generation from the files on disk, as the
-/// activation owner does after a file or config change, and assert that
-/// nothing was held back. Fixtures activate once when built (as boot does);
+/// Deploy every extension source the test wrote and publish the new
+/// generation, and assert that nothing was held back. Fixtures activate once when built (as boot does);
 /// a test that writes extension files after that calls this.
 pub async fn activate(svc: &Arc<crate::Services>) {
     let problems = activate_with_problems(svc).await;
@@ -65,7 +64,8 @@ pub async fn activate(svc: &Arc<crate::Services>) {
 }
 
 /// [`activate`] for a test that expects some extension to be held back or
-/// rejected: what the activation recorded, by extension.
+/// rejected: what the activation recorded, by extension. Every source the
+/// test wrote is deployed first (`extension_deploy::stage_sources`).
 pub async fn activate_with_problems(
     svc: &Arc<crate::Services>,
 ) -> crate::vocabulary_reactor::VocabularyErrors {
@@ -76,7 +76,12 @@ pub async fn activate_with_problems(
     let mut attempts = 0;
     loop {
         attempts += 1;
-        match svc.extension_activation.activate(svc.clone()).await {
+        let changes = crate::extension_deploy::stage_sources(svc).await;
+        match svc
+            .extension_activation
+            .activate_live(svc.clone(), &changes)
+            .await
+        {
             Ok(_) => return svc.extension_activation.problems(),
             // A rejected candidate: the previous generation stays, and why.
             Err(TxError::Aborted(problems)) if problems.contains_key("<host>") && attempts < 3 => {}
@@ -84,6 +89,23 @@ pub async fn activate_with_problems(
             Err(error) => panic!("activation failed: {error:?}"),
         }
     }
+}
+
+/// Deploy and activate what the test wrote, then everything that is said
+/// against extension `name`: the errors of what is live and what held the
+/// new source back (a source that doesn't load never goes live).
+pub async fn load_errors(svc: &Arc<crate::Services>, name: &str) -> String {
+    let held = activate_with_problems(svc).await;
+    let live = svc
+        .extension_catalog
+        .snapshot(&svc.layout.project_dir)
+        .extensions()
+        .iter()
+        .find(|e| e.name == name)
+        .map(|e| e.errors.join("\n"))
+        .unwrap_or_default();
+    let held = held.get(name).map(|l| l.join("\n")).unwrap_or_default();
+    format!("{live}\n{held}")
 }
 
 pub struct EffortFixture {
@@ -535,4 +557,13 @@ pub fn conversation(id: &str, minute: u32) -> oxplow_domain::agent::harness::Nat
         size_bytes: None,
         parent: None,
     }
+}
+
+/// The extensions that ship with oxplow, loaded as a project with none of
+/// its own loads them (each from its shipped deployment, written once to a
+/// store that lasts the test run).
+pub fn shipped_extensions() -> Vec<crate::extensions::Extension> {
+    static PROJECT: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    let project = PROJECT.get_or_init(|| tempfile::tempdir().unwrap());
+    crate::extensions::load_extensions(project.path())
 }

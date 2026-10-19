@@ -1,5 +1,5 @@
 //! Declared cross-extension imports and public contracts end to end: two
-//! extensions in a project's `oxplow/extensions/`, activated together.
+//! extensions in a project's `.oxplow/extensions/`, activated together.
 
 use oxplow_domain::DomainError;
 use std::{path::Path, sync::Arc};
@@ -19,7 +19,6 @@ struct Ext<'a> {
     export: Option<(&'a str, u32)>,
     /// `(producer, version, optional)` read as `import_ref('dep')`.
     import: Option<(&'a str, u32, bool)>,
-    shared: bool,
     /// Other contributions it declares, one of each kind asked for.
     declares: Vec<Kind>,
     /// `(kind, visibility)` exports of those, at contract version 1.
@@ -58,7 +57,6 @@ impl<'a> Ext<'a> {
             model_version: 1,
             export: None,
             import: None,
-            shared: false,
             declares: Vec::new(),
             kind_exports: Vec::new(),
             kind_imports: Vec::new(),
@@ -109,26 +107,19 @@ impl<'a> Ext<'a> {
         self.import = Some((producer, version, optional));
         self
     }
-    fn shared(mut self) -> Self {
-        self.shared = true;
-        self
-    }
 }
 
 /// Every extension has `items` (`v_<name>_items`: over the work items, or
 /// over its import), an always-available `plain` model and, when it imports,
 /// a `seen` lens reading the import.
 fn put(root: &Path, e: &Ext) {
-    put_in(&root.join(format!("oxplow/extensions/{}", e.name)), e);
+    put_in(&root.join(format!(".oxplow/extensions/{}", e.name)), e);
 }
 
 fn put_in(dir: &Path, e: &Ext) {
     let name = e.name;
     let version = e.model_version;
     let mut manifest = format!("manifest: 2\nname: {name}\n");
-    if e.shared {
-        manifest += "sharing: shared\nengine: \">=0.1\"\nversion: 0.1.0\n";
-    }
     manifest += &format!(
         "intent:\n  purpose: p\nmodels:\n  - name: items\n    version: {version}\n    description: Items.\n    columns:\n      - {{ name: ref, type: TEXT, doc: Work item ref. }}\n  - name: plain\n    version: 1\n    description: Plain.\n    columns:\n      - {{ name: ref, type: TEXT, doc: Work item ref. }}\n"
     );
@@ -232,10 +223,7 @@ async fn project(exts: &[Ext<'_>]) -> (tempfile::TempDir, Arc<crate::Services>) 
 
 /// Activate; a held extension is not an activation failure.
 async fn activate(svc: &Arc<crate::Services>) {
-    svc.extension_activation
-        .activate(svc.clone())
-        .await
-        .expect("the project activates");
+    crate::test_fixtures::activate_with_problems(svc).await;
 }
 
 async fn readable(svc: &crate::Services, view: &str) -> bool {
@@ -268,8 +256,8 @@ async fn lens(svc: &crate::Services, id: &str) -> Result<crate::extensions::Lens
 fn disable(root: &Path, names: &str) {
     write(
         root,
-        ".oxplow/project.yaml",
-        &format!("extensions:\n  disabled: [{names}]\n"),
+        ".oxplow/personal.yaml",
+        &format!("disableExtensions: [{names}]\n"),
     );
 }
 
@@ -391,7 +379,13 @@ async fn a_cyclic_import_is_diagnosed_deterministically() {
         activate(&svc).await;
         assert!(readable(&svc, "v_other_items").await);
         assert!(!readable(&svc, "v_a_plain").await && !readable(&svc, "v_b_plain").await);
-        seen.push((problem(&svc, "a"), problem(&svc, "b")));
+        // The messages name the deployment's folder, which sits in the
+        // temp project.
+        let here = _dir.path().to_string_lossy().to_string();
+        seen.push((
+            problem(&svc, "a").replace(&here, ""),
+            problem(&svc, "b").replace(&here, ""),
+        ));
     }
     assert_eq!(seen[0], seen[1]);
     assert!(seen[0].0.contains("a -> b -> a"), "{}", seen[0].0);
@@ -422,26 +416,6 @@ async fn an_unexported_model_is_not_importable() {
     activate(&svc).await;
     assert!(problem(&svc, "cons").contains("`dep`"));
     assert!(readable(&svc, "v_prod_items").await);
-}
-
-/// An experimental export serves private consumers only.
-#[tokio::test]
-async fn an_experimental_export_is_refused_to_a_sconsumer() {
-    let (_dir, svc) = project(&[
-        Ext::new("prod").exports("experimental"),
-        Ext::new("scons").imports("prod", 1, false).shared(),
-        Ext::new("pcons").imports("prod", 1, false),
-    ])
-    .await;
-    activate(&svc).await;
-    let why = problem(&svc, "scons");
-    assert!(
-        why.contains("`dep`") && why.contains("experimental"),
-        "{why}"
-    );
-    assert!(problem(&svc, "pcons").is_empty());
-    assert!(readable(&svc, "v_pcons_items").await);
-    assert!(!readable(&svc, "v_scons_plain").await);
 }
 
 /// Disabling the producer of a running consumer withdraws it, or degrades
@@ -746,60 +720,6 @@ async fn an_available_optional_edge_still_closes_a_cycle() {
     assert!(readable(&svc, "v_other_items").await);
 }
 
-/// What an experimental export reaches, by who exports and who imports.
-#[tokio::test]
-async fn shared_and_experimental_combinations() {
-    // A shared producer can't expose an experimental contract.
-    let (_dir, svc) = project(&[
-        Ext::new("sprod").exports("experimental").shared(),
-        Ext::new("pcons").imports("sprod", 1, false),
-        Ext::new("other"),
-    ])
-    .await;
-    activate(&svc).await;
-    assert!(
-        problem(&svc, "sprod").contains("experimental"),
-        "{}",
-        problem(&svc, "sprod")
-    );
-    assert!(
-        !problem(&svc, "pcons").is_empty(),
-        "its consumer goes with it"
-    );
-    assert!(readable(&svc, "v_other_items").await);
-
-    // Shared to shared and private to shared are fine when stable.
-    let (_dir, svc) = project(&[
-        Ext::new("sprod").exports("stable").shared(),
-        Ext::new("pprod").exports("stable"),
-        Ext::new("sa").imports("sprod", 1, false).shared(),
-        Ext::new("sb").imports("pprod", 1, false).shared(),
-    ])
-    .await;
-    activate(&svc).await;
-    assert!(
-        svc.extension_activation.problems().is_empty(),
-        "{:?}",
-        svc.extension_activation.problems()
-    );
-    assert!(readable(&svc, "v_sa_items").await && readable(&svc, "v_sb_items").await);
-
-    // An experimental export serves a private consumer, and a shared one
-    // of a different producer is unaffected.
-    let (_dir, svc) = project(&[
-        Ext::new("exp").exports("experimental"),
-        Ext::new("pcons").imports("exp", 1, false),
-        Ext::new("scons").imports("exp", 1, false).shared(),
-        Ext::new("stable").exports("stable"),
-        Ext::new("sok").imports("stable", 1, false).shared(),
-    ])
-    .await;
-    activate(&svc).await;
-    assert!(problem(&svc, "pcons").is_empty());
-    assert!(problem(&svc, "scons").contains("experimental"));
-    assert!(problem(&svc, "sok").is_empty());
-}
-
 /// Repairing a producer that was held back lets its consumer, held
 /// because of it, activate at the next activation, with no edit of its own.
 #[tokio::test]
@@ -831,7 +751,8 @@ async fn a_repaired_producer_brings_back_its_consumer() {
         .expect("the lens reads the import");
 
     // And withdrawn again when the base goes.
-    std::fs::remove_dir_all(dir.path().join("oxplow/extensions/base")).unwrap();
+    std::fs::remove_dir_all(dir.path().join(".oxplow/extensions/base")).unwrap();
+    crate::extension_deploy::remove(&svc, "base").await.unwrap();
     activate(&svc).await;
     assert!(!readable(&svc, "v_cons_plain").await);
     assert!(readable(&svc, "v_other_items").await);
@@ -883,53 +804,4 @@ async fn a_guarded_lens_prunes_its_slot_mounts() {
     );
     assert!(cons.lenses.iter().any(|l| l.slug == "seen"));
     assert!(cons.public_contracts.withheld.is_empty());
-}
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    let out = std::process::Command::new("git")
-        .args(["-c", "user.name=t", "-c", "user.email=t@t"])
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "git {args:?}: {out:?}");
-    String::from_utf8(out.stdout).unwrap().trim().to_owned()
-}
-
-/// Updating a producer to a version a consumer does not import is refused
-/// before any file is replaced; a compatible update goes through.
-#[test]
-fn an_update_that_breaks_a_consumers_import_is_refused() {
-    let repo = tempfile::tempdir().unwrap();
-    put_in(repo.path(), &Ext::new("prod").exports("stable"));
-    git(repo.path(), &["init", "-q", "-b", "main"]);
-    git(repo.path(), &["add", "."]);
-    git(repo.path(), &["commit", "-q", "-m", "v1"]);
-    let url = repo.path().to_string_lossy().to_string();
-    let project = tempfile::tempdir().unwrap();
-    let root = project.path();
-    let sha = git(repo.path(), &["rev-parse", "HEAD"]);
-    crate::extensions::install_extension(root, root, &url, None, &sha).unwrap();
-    put(root, &Ext::new("cons").imports("prod", 1, false));
-    let manifest = root.join("oxplow/extensions/prod/extension.yaml");
-    let installed = std::fs::read_to_string(&manifest).unwrap();
-
-    put_in(
-        repo.path(),
-        &Ext::new("prod").at_version(2).exports("stable"),
-    );
-    git(repo.path(), &["commit", "-q", "-am", "v2"]);
-    let sha = git(repo.path(), &["rev-parse", "HEAD"]);
-    let err = crate::extensions::update_extension(root, root, "prod", &sha)
-        .unwrap_err()
-        .to_string();
-    assert!(err.contains("cons") && err.contains("dep"), "{err}");
-    assert_eq!(std::fs::read_to_string(&manifest).unwrap(), installed);
-
-    // A consumer on the new contract lets the same update through.
-    put(root, &Ext::new("cons").imports("prod", 2, false));
-    crate::extensions::update_extension(root, root, "prod", &sha).unwrap();
-    assert!(std::fs::read_to_string(&manifest)
-        .unwrap()
-        .contains("version: 2"));
 }

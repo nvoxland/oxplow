@@ -708,7 +708,7 @@ mod tests {
     async fn fixture() -> (crate::test_fixtures::TaskEffortFixture, std::path::PathBuf) {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let root = fx.svc.layout.project_dir.clone();
-        let ext = root.join("oxplow/extensions/acme");
+        let ext = root.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(ext.join("lenses")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
@@ -994,7 +994,7 @@ actions:
         let (fx, root) = fixture().await;
         let item = work_item_ref(fx.task);
         std::fs::write(
-            root.join("oxplow/extensions/acme/lenses/edit.yaml"),
+            root.join(".oxplow/extensions/acme/lenses/edit.yaml"),
             "title: Edit\nviz: form\nparams: [{ name: ref }]\nquery: SELECT title FROM v_work_item WHERE ref = :ref\nform: { command: oxplow.work_item.update, defaults: { ref: '{{param.ref}}' }, fixed: [ref], fields: [title] }\n",
         )
         .unwrap();
@@ -1063,7 +1063,7 @@ actions:
     async fn a_form_submits_its_command_as_the_lens() {
         let (fx, root) = fixture().await;
         std::fs::write(
-            root.join("oxplow/extensions/acme/lenses/new-task.yaml"),
+            root.join(".oxplow/extensions/acme/lenses/new-task.yaml"),
             "title: New Task\nviz: form\nparams: [{ name: body, default: from the form }]\nform: { command: oxplow.work_item.create, defaults: { body: '{{param.body}}' } }\n",
         )
         .unwrap();
@@ -1121,7 +1121,7 @@ actions:
     /// query `acme/tasks` and invoke `oxplow.work_item.transition`.
     async fn component_fixture() -> (crate::test_fixtures::TaskEffortFixture, std::path::PathBuf) {
         let (fx, root) = fixture().await;
-        let ext = root.join("oxplow/extensions/acme");
+        let ext = root.join(".oxplow/extensions/acme");
         std::fs::write(
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\ncustom_components:\n  - { id: board, assets: [tasks], commands: [oxplow.work_item.transition] }\n",
@@ -1233,7 +1233,7 @@ actions:
         assert_eq!(state(&fx.svc, fx.task).await, "done");
         // A changed bundle is another version: loaded again, it asks again.
         std::fs::write(
-            root.join("oxplow/extensions/acme/components/board/index.html"),
+            root.join(".oxplow/extensions/acme/components/board/index.html"),
             "<!doctype html><script src=other.js></script>",
         )
         .unwrap();
@@ -1268,7 +1268,7 @@ actions:
     #[tokio::test]
     async fn an_invoke_acts_only_for_the_version_its_frame_loaded() {
         let (fx, root) = component_fixture().await;
-        let index = root.join("oxplow/extensions/acme/components/board/index.html");
+        let index = root.join(".oxplow/extensions/acme/components/board/index.html");
         let approved = load_board(&fx, &root).await;
         approve_board(&fx, &root).await;
         std::fs::write(&index, "<!doctype html><script src=evil.js></script>").unwrap();
@@ -1316,18 +1316,14 @@ actions:
     async fn an_activated_edit_needs_a_reload_and_its_own_approval() {
         let (fx, root) = component_fixture().await;
         let activate = || async {
-            fx.svc
-                .extension_activation
-                .activate(fx.svc.clone())
-                .await
-                .expect("activates");
+            crate::test_fixtures::activate_with_problems(&fx.svc).await;
         };
         activate().await;
         let old = load_board(&fx, &root).await;
         approve_board(&fx, &root).await;
 
         std::fs::write(
-            root.join("oxplow/extensions/acme/components/board/index.html"),
+            root.join(".oxplow/extensions/acme/components/board/index.html"),
             "<!doctype html><p>2</p>",
         )
         .unwrap();
@@ -1373,7 +1369,7 @@ actions:
     #[tokio::test]
     async fn a_bundle_spelled_in_another_case_is_hashed_as_served() {
         let (fx, root) = fixture().await;
-        let ext = root.join("oxplow/extensions/acme");
+        let ext = root.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(ext.join("components/board")).unwrap();
         if !ext.join("components/BOARD").exists() {
             // A case-sensitive disk: the manifest's spelling is a missing
@@ -1408,7 +1404,7 @@ actions:
     #[tokio::test]
     async fn a_component_without_commands_needs_no_approval() {
         let (fx, root) = fixture().await;
-        let ext = root.join("oxplow/extensions/acme");
+        let ext = root.join(".oxplow/extensions/acme");
         std::fs::write(
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\ncustom_components:\n  - { id: board, assets: [tasks] }\n",

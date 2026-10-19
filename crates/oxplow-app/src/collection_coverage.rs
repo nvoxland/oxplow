@@ -146,7 +146,7 @@ mod tests {
 
     async fn fixture() -> crate::test_fixtures::EffortFixture {
         let fx = crate::test_fixtures::services_with_effort().await;
-        let dir = fx.svc.layout.project_dir.join("oxplow/extensions/my-gh");
+        let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/my-gh");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),
@@ -216,7 +216,7 @@ mod tests {
             fx.svc
                 .layout
                 .project_dir
-                .join("oxplow/extensions/my-gh/extra.txt"),
+                .join(".oxplow/extensions/my-gh/extra.txt"),
             "x",
         )
         .unwrap();

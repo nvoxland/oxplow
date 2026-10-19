@@ -54,7 +54,6 @@ import type {
   ChangedPath,
   DiffEntry,
   Extension,
-  ExtensionReview,
   Lens,
   LensRun,
   LensViz,
@@ -81,7 +80,7 @@ import type {
 export type { AiSettings, ProviderConfig, RoleBinding };
 export type { ChangedPath, DiffEntry };
 export type { ServiceListing, ScriptServices };
-export type { DataEntity, Extension, ExtensionReview, Lens, LensRun, LensViz, LensSpec, SearchHit, CollectorListing, CollectorRunReport, SqlCell, SqlQueryResult };
+export type { DataEntity, Extension, Lens, LensRun, LensViz, LensSpec, SearchHit, CollectorListing, CollectorRunReport, SqlCell, SqlQueryResult };
 export type { ProviderInstanceView };
 
 /// Convert the tauri-specta {status, data|error} envelope into a
@@ -669,12 +668,6 @@ export async function reportTabs(report: TabReport): Promise<void> {
   unwrap(await commands.reportTabs(report));
 }
 
-/// Turn an extension on or off for the project (`extensions.disabled` in
-/// `.oxplow/project.yaml`). Returns the updated extension list.
-export async function setExtensionEnabled(name: string, enabled: boolean): Promise<Extension[]> {
-  return unwrap(await commands.setExtensionEnabled(name, enabled));
-}
-
 /// Extension-declared collectors with their last run and consent.
 export async function listCollectors(): Promise<CollectorListing[]> {
   return unwrap(await commands.listCollectors());
@@ -754,23 +747,21 @@ export async function testAiProvider(id: string, model: string): Promise<string>
   return unwrap(await commands.testAiProvider(id, model));
 }
 
-/** What `oxplow.lens.keep` kept: the lens id, and whether the app shows it now
- *  (kept in the main worktree) or once its stream is merged. */
+/** What `oxplow.lens.keep` kept: the lens id. It is live when the command
+ *  returns (keep deploys its extension). */
 export interface KeptLens {
   lens: string;
-  live: boolean;
 }
 
 /** `oxplow.lens.keep`'s result as a [`KeptLens`]. */
 export function keptLens(result: unknown): KeptLens {
-  const r = (result ?? {}) as { lens?: unknown; live?: unknown };
-  return { lens: String(r.lens ?? ""), live: r.live !== false };
+  const r = (result ?? {}) as { lens?: unknown };
+  return { lens: String(r.lens ?? "") };
 }
 
-/// Keep a lens spec as a private lens (`oxplow.lens.keep`) in `extension`, in this
-/// stream's worktree (`oxplow/extensions/<extension>/lenses/<slug>.yaml`).
-/// Returns the lens id and whether the app shows it now (`live`) or once
-/// the stream is merged.
+/// Keep a lens spec (`oxplow.lens.keep`) in `extension`'s source in this
+/// stream's checkout (`.oxplow/extensions/<extension>/lenses/<slug>.yaml`) and
+/// deploy it. Returns the lens id, live by then.
 export async function keepLensSpec(
   spec: LensSpec,
   extension: string,
@@ -781,55 +772,6 @@ export async function keepLensSpec(
   if (streamId) input.stream = streamRef(streamId);
   const outcome = await runCommand("oxplow.lens.keep", input);
   return keptLens(outcome.result);
-}
-
-/// What installing (`gitUrl`) or updating (`name`) an extension would
-/// bring in, installing nothing: shown for the person to confirm.
-export async function reviewExtension(
-  target: { gitUrl: string; gitRef?: string | null } | { name: string },
-  streamId: string | null,
-): Promise<ExtensionReview> {
-  return "name" in target
-    ? unwrap(await commands.reviewExtension(null, null, target.name, streamId))
-    : unwrap(await commands.reviewExtension(target.gitUrl, target.gitRef ?? null, null, streamId));
-}
-
-/// Install an extension from a git repo into the stream's worktree, at the
-/// commit the person reviewed.
-export async function installExtension(
-  gitUrl: string,
-  gitRef: string | null,
-  reviewedSha: string,
-  streamId: string | null,
-): Promise<Extension> {
-  // The install review is the person's confirmation (`oxplow.extension.install`
-  // always asks).
-  const outcome = await runCommand(
-    "oxplow.extension.install",
-    {
-      git_url: gitUrl,
-      ...(gitRef ? { git_ref: gitRef } : {}),
-      reviewed_sha: reviewedSha,
-      ...(streamId ? { stream: streamRef(streamId) } : {}),
-    },
-    true,
-  );
-  return outcome.result as Extension;
-}
-
-/// Re-install a git-installed extension from its recorded source, at the
-/// commit the person reviewed.
-export async function updateExtension(
-  name: string,
-  reviewedSha: string,
-  streamId: string | null,
-): Promise<Extension> {
-  const outcome = await runCommand(
-    "oxplow.extension.update",
-    { name, reviewed_sha: reviewedSha, ...(streamId ? { stream: streamRef(streamId) } : {}) },
-    true,
-  );
-  return outcome.result as Extension;
 }
 
 /// Programs the project's config would run, and whether each is approved.

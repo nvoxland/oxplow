@@ -488,11 +488,6 @@ activation owner. A required-bundled repair baseline precedes full activation;
 rejection retains the baseline/last coherent generation. Raw candidates and
 runtime metadata are separate, with immediate disable/removal revocation.
 Reader coverage and runtime acceptance validation remain incomplete.
-Startup now scans bounded, marked install staging before the first catalog read:
-it restores a missing target from a retained prior copy, never publishes an
-unconfirmed first-install candidate and preserves ambiguous backups. Plain
-directory checks, file/directory sync barriers and an in-process publication lock
-are integrated; cross-process filesystem races and crash injection need review.
 Composed command routing now retains each child's own contribution context,
 authority and generation through transactional and external execution, including
 the implicit backing scope of native operations.
@@ -527,7 +522,7 @@ Status: in progress. Canonical identity, visibility, exact contract versions,
 required/optional outcomes and deterministic dependency validation are fixed.
 The pure validator is integrated with manifest declarations, public model SQL
 bindings, optional contribution guards, export withdrawal and dependency
-diagnostics. Authoring/impact overlays and install preflight resolve fresh
+diagnostics. Authoring/impact overlays resolve fresh
 candidate catalogs and reject downstream contract regressions. Coherent runtime
 activation and behavioral validation remain; no runtime tests were added or run.
 
@@ -743,7 +738,7 @@ Prerequisites: Stage and activate one coherent extension generation; Own and dis
 #### Test agent-authored collection, metrics and dimensions end to end
 
 Status: done. `oxplow extension new metric` and `oxplow.metric.scaffold`
-are one template (`oxplow_app::metric_scaffold`): a private extension with
+are one template (`oxplow_app::metric_scaffold`): an extension with
 a per-path measure, a Starlark fact collector over `source_files()` +
 `code_metrics()`, the `<ns>.area` dimension, the metric and a lens linking
 `file` refs, with a fixture `extension test` runs. `metrics_authoring_tests`

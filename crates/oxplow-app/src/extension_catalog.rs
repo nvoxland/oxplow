@@ -1,26 +1,22 @@
-//! The loaded-extensions cache (`.context/extensions.md` "Reading";
+//! The loaded extensions (`.context/extensions.md` "Deployments";
 //! `.context/performance.md` "Extension catalog cache").
 //!
-//! `extensions::load_extensions(root)` parses every bundled and project
-//! lens file on each call — ~3 ms — and it used to run on every
-//! advisory check, extension listing and lens run. This caches the
-//! result per worktree root behind a **stat-only fingerprint** of
-//! `root/oxplow/extensions/**` and the project's `.oxplow/project.yaml`
-//! (the main worktree's in the daemon, whatever the root; paths,
-//! sizes, mtimes): a hit walks the tree with `stat` and parses nothing;
-//! any edit, add or delete under the folder — or a change to the
-//! project config that disables an extension — misses and reloads. No
-//! watcher, no explicit invalidation, no window in which an agent's
-//! fresh lens file is invisible. Consent hashing (`approval_hash`) keeps
-//! reading the disk itself, so a cached `Extension` never stands in for
-//! the bytes a person approved.
+//! **Deployed** (the daemon's, [`ExtensionCatalog::for_project`]): what the
+//! project runs is the live set — each extension's active deployment in the
+//! store (`extension_store`), a bundled one without a deployment as it
+//! ships — whatever root a caller names. A source edit changes nothing here
+//! until it is deployed. The load is cached behind a key of the live set,
+//! the extension settings and the source folders present.
 //!
-//! **The change signal** (P7.B6) is for what follows the primary
-//! worktree's extensions — their models, commands, providers and metric
-//! declarations: [`ExtensionCatalog::changes`] hears that they may have
-//! changed (a file under `oxplow/extensions/` in the primary worktree,
-//! from the workspace watcher; the `extensions` config key, from its
-//! `config.changed` reactor). The cache itself still needs no signal.
+//! **Source** (standalone, [`ExtensionCatalog::new`]: the CLI, the SDK's
+//! checks): each root is its own project and its extensions load from
+//! their sources, cached behind a **stat-only fingerprint** of every source
+//! folder and both settings files (paths, sizes, mtimes): a hit walks the
+//! folders with `stat` and parses nothing.
+//!
+//! **The change signal** ([`ExtensionCatalog::changes`]) says what the
+//! project runs may have changed: the `extensions` setting, from its
+//! `config.changed` reactor. A deploy activates directly.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -30,7 +26,7 @@ use std::sync::Arc;
 use oxplow_domain::DomainError;
 use parking_lot::Mutex;
 
-use crate::extensions::{self, Extension, Lens, EXTENSIONS_DIR};
+use crate::extensions::{self, Deployment, Extension, Lens};
 
 /// `(path, len, mtime)` for every file the load depends on, sorted.
 type Fingerprint = Vec<(PathBuf, u64, Option<std::time::SystemTime>)>;
@@ -244,12 +240,32 @@ impl Failed {
     }
 }
 
+/// A change to the live set a candidate activates: `name → Some(hash)` runs
+/// that deployment, `name → None` runs none (a bundled one as it ships).
+pub type LiveChanges = BTreeMap<String, Option<String>>;
+
+/// Clears an activation's staged changes when it ends.
+pub(crate) struct PendingChanges(Arc<Mutex<LiveChanges>>);
+
+impl Drop for PendingChanges {
+    fn drop(&mut self) {
+        self.0.lock().clear();
+    }
+}
+
 pub struct ExtensionCatalog {
-    /// The project whose `.oxplow/project.yaml` governs every load (the
-    /// daemon's main worktree). `None` standalone (the CLI, the SDK's
-    /// checks): each root is its own project.
+    /// The project whose deployments it loads (the daemon's main checkout).
+    /// `None` standalone (the CLI, the SDK's checks): each root is its own
+    /// project, loaded from its sources.
     project: Option<PathBuf>,
     by_root: Mutex<HashMap<PathBuf, Entry>>,
+    /// The deployed load and its key.
+    deployed: Mutex<Option<(String, Arc<CatalogSnapshot>)>>,
+    /// Each extension's active deployment (`name → hash`).
+    live: Mutex<BTreeMap<String, String>>,
+    /// The changes to it an activation is staging: part of what
+    /// [`Self::snapshot`] loads until that activation ends.
+    pending: Arc<Mutex<LiveChanges>>,
     /// Last atomically published primary-project declarations. Raw loads stay
     /// available for authoring and candidate validation.
     active: Mutex<Option<Arc<CatalogSnapshot>>>,
@@ -270,6 +286,9 @@ impl Default for ExtensionCatalog {
         Self {
             project: None,
             by_root: Mutex::default(),
+            deployed: Mutex::default(),
+            live: Mutex::default(),
+            pending: Arc::default(),
             active: Mutex::default(),
             loads: AtomicUsize::default(),
             changes: tokio::sync::broadcast::channel(64).0,
@@ -286,9 +305,8 @@ impl ExtensionCatalog {
         Self::default()
     }
 
-    /// The daemon's: every root it reads — the main worktree, or a stream's
-    /// working copy an authoring tool checks — takes its config
-    /// (`extensions.disabled`) from `project_dir`, the main worktree.
+    /// The daemon's: whatever root it is asked about, it loads
+    /// `project_dir`'s live set.
     pub fn for_project(project_dir: &Path) -> Self {
         Self {
             project: Some(project_dir.to_path_buf()),
@@ -320,6 +338,18 @@ impl ExtensionCatalog {
         self.runtime_changed();
     }
 
+    /// Each extension's active deployment (`name → hash`).
+    pub fn live(&self) -> BTreeMap<String, String> {
+        self.live.lock().clone()
+    }
+
+    /// Set the live set: at startup from the active deployments recorded
+    /// for the project, and after each full publication from what it
+    /// published (a core-only baseline leaves it as it is).
+    pub(crate) fn set_live(&self, live: BTreeMap<String, String>) {
+        *self.live.lock() = live;
+    }
+
     pub(crate) fn runtime_changed(&self) {
         let _ = self.runtime_changes.send(());
     }
@@ -338,8 +368,7 @@ impl ExtensionCatalog {
         self.changes.subscribe()
     }
 
-    /// Say they may have: a file under the primary worktree's
-    /// `oxplow/extensions/` changed, or the `extensions` config key.
+    /// Say they may have: the `extensions` setting changed.
     pub fn changed(&self) {
         let _ = self.changes.send(());
     }
@@ -354,15 +383,58 @@ impl ExtensionCatalog {
     /// Take declarations and their load identity together. Retained
     /// snapshots keep their identity when a later load replaces the cache.
     pub fn snapshot(&self, root: &Path) -> Arc<CatalogSnapshot> {
-        let project = self.project_of(root);
-        let fingerprint = fingerprint(root, project);
+        match &self.project {
+            Some(project) => self.deployed_snapshot(project),
+            None => self.source_snapshot(root),
+        }
+    }
+
+    /// Stage `changes` to the live set: [`Self::snapshot`] loads them until
+    /// the returned guard drops (the activation that stages them ends).
+    pub(crate) fn stage_changes(&self, changes: &LiveChanges) -> PendingChanges {
+        *self.pending.lock() = changes.clone();
+        PendingChanges(self.pending.clone())
+    }
+
+    /// The project's live set with the staged changes applied, loaded.
+    fn deployed_snapshot(&self, project: &Path) -> Arc<CatalogSnapshot> {
+        let settings = oxplow_config::extension_settings(project);
+        let mut live = self.live.lock().clone();
+        for (name, hash) in self.pending.lock().iter() {
+            match hash {
+                Some(hash) => live.insert(name.clone(), hash.clone()),
+                None => live.remove(name),
+            };
+        }
+        let names = extensions::known_names(project, &settings);
+        let mut h = xxhash_rust::xxh3::Xxh3::new();
+        h.update(format!("{settings:?}|{live:?}|{names:?}").as_bytes());
+        let key = format!("{:016x}", h.digest());
+        let mut cache = self.deployed.lock();
+        if let Some((cached, snapshot)) = cache.as_ref() {
+            if *cached == key {
+                return snapshot.clone();
+            }
+        }
+        let snapshot = Arc::new(CatalogSnapshot {
+            extensions: Arc::new(extensions::load_deployed(project, &settings, &live)),
+            generation: key.clone(),
+            source_generation: key.clone(),
+        });
+        self.loads.fetch_add(1, Ordering::Relaxed);
+        *cache = Some((key, snapshot.clone()));
+        snapshot
+    }
+
+    fn source_snapshot(&self, root: &Path) -> Arc<CatalogSnapshot> {
+        let fingerprint = fingerprint(root);
         let mut cache = self.by_root.lock();
         if let Some(entry) = cache.get(root) {
             if entry.fingerprint == fingerprint {
                 return entry.snapshot.clone();
             }
         }
-        let extensions = Arc::new(extensions::load_extensions_in(root, project));
+        let extensions = Arc::new(extensions::load_extensions(root));
         let source_generation = fingerprint_generation(&fingerprint);
         let snapshot = Arc::new(CatalogSnapshot {
             extensions,
@@ -418,44 +490,24 @@ impl ExtensionCatalog {
     /// wait on a publication (which waits on its readers), so it holds no
     /// pin and decides nothing about which generation other maps are at.
     pub fn live_snapshot(&self, root: &Path) -> Arc<CatalogSnapshot> {
-        let Some(project) = self.project.as_deref().filter(|project| *project == root) else {
+        let Some(project) = self.project.as_deref() else {
             return self.snapshot(root);
         };
         let Some(active) = self.active.lock().clone() else {
             return self.snapshot(root);
         };
-        let mut revoked = oxplow_config::disabled_extensions(project)
-            .into_iter()
-            .collect::<std::collections::BTreeSet<_>>();
-        revoked.retain(|name| !crate::bundled_extensions::is_required(name));
-        for extension in active
-            .extensions()
-            .iter()
-            .filter(|extension| extension.enabled && extension.origin == "project")
-        {
-            let path = root.join(&extension.path);
-            let still_present = std::fs::symlink_metadata(path).is_ok_and(|metadata| {
-                let kind = metadata.file_type();
-                kind.is_dir() && !kind.is_symlink()
-            });
-            if !still_present {
-                revoked.insert(extension.name.clone());
-            }
-        }
-
+        let settings = oxplow_config::extension_settings(project);
         if !active
             .extensions()
             .iter()
-            .any(|extension| extension.enabled && revoked.contains(&extension.name))
+            .any(|extension| extension.enabled && extensions::is_off(&settings, &extension.name))
         {
             return active;
         }
-
-        let disabled: Vec<_> = revoked.into_iter().collect();
         Arc::new(CatalogSnapshot {
             extensions: Arc::new(extensions::resolve_catalog(
                 active.extensions().as_ref().clone(),
-                &disabled,
+                &settings,
             )),
             generation: active.generation().to_string(),
             source_generation: active.source_generation().to_string(),
@@ -475,8 +527,10 @@ impl ExtensionCatalog {
     /// config). This observes current files; a retained snapshot names its
     /// own load through `CatalogSnapshot::generation` instead.
     pub fn generation(&self, root: &Path) -> String {
-        let fingerprint = fingerprint(root, self.project_of(root));
-        fingerprint_generation(&fingerprint)
+        match &self.project {
+            Some(_) => self.snapshot(root).generation().to_string(),
+            None => fingerprint_generation(&fingerprint(root)),
+        }
     }
 
     /// One extension by name. A disabled one is an error saying so; an
@@ -530,12 +584,31 @@ fn fingerprint_generation(fingerprint: &Fingerprint) -> String {
     format!("{:016x}", h.digest())
 }
 
-/// What a load of `root` depends on: every file under its extensions
-/// folder, and `project`'s config (which can disable an extension).
-fn fingerprint(root: &Path, project: &Path) -> Fingerprint {
+/// The active deployments of a published load (`name → hash`).
+pub(crate) fn live_of(extensions: &[Extension]) -> BTreeMap<String, String> {
+    extensions
+        .iter()
+        .filter_map(|e| match &e.deployment {
+            Deployment::Deployed { hash } => Some((e.name.clone(), hash.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// What a source load of `root` depends on: every file of every source
+/// folder its settings know, and both settings files.
+fn fingerprint(root: &Path) -> Fingerprint {
+    let settings = oxplow_config::extension_settings(root);
     let mut out = Fingerprint::new();
-    walk(&root.join(EXTENSIONS_DIR), &mut out, true);
-    push_file(&oxplow_config::config_path(project), &mut out);
+    walk(&root.join(extensions::EXTENSIONS_DIR), &mut out, true);
+    for name in extensions::known_names(root, &settings) {
+        let dir = settings.source(root, &name);
+        if !dir.starts_with(root.join(extensions::EXTENSIONS_DIR)) {
+            walk(&dir, &mut out, false);
+        }
+    }
+    push_file(&oxplow_config::config_path(root), &mut out);
+    push_file(&oxplow_config::personal_path(root), &mut out);
     out.sort();
     out
 }
@@ -601,12 +674,12 @@ mod tests {
         };
         write(
             dir.path(),
-            "oxplow/extensions/good/extension.yaml",
+            ".oxplow/extensions/good/extension.yaml",
             &manifest("good", "one"),
         );
         write(
             dir.path(),
-            "oxplow/extensions/edited/extension.yaml",
+            ".oxplow/extensions/edited/extension.yaml",
             &manifest("edited", "one"),
         );
         let catalog = ExtensionCatalog::new();
@@ -617,17 +690,17 @@ mod tests {
         // `edited` breaks, `good` changes, `fresh` arrives broken.
         write(
             dir.path(),
-            "oxplow/extensions/edited/extension.yaml",
+            ".oxplow/extensions/edited/extension.yaml",
             &format!("{}bogus: 1\n", manifest("edited", "two")),
         );
         write(
             dir.path(),
-            "oxplow/extensions/good/extension.yaml",
+            ".oxplow/extensions/good/extension.yaml",
             &manifest("good", "two"),
         );
         write(
             dir.path(),
-            "oxplow/extensions/fresh/extension.yaml",
+            ".oxplow/extensions/fresh/extension.yaml",
             &format!("{}bogus: 1\n", manifest("fresh", "one")),
         );
         let (next, held) = catalog
@@ -657,10 +730,10 @@ mod tests {
     #[test]
     fn a_hit_parses_nothing_and_an_edit_misses() {
         let dir = tempfile::tempdir().unwrap();
-        write(dir.path(), "oxplow/extensions/review/extension.yaml", EXT);
+        write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/tasks.yaml",
+            ".oxplow/extensions/review/lenses/tasks.yaml",
             LENS,
         );
         let catalog = ExtensionCatalog::new();
@@ -681,7 +754,7 @@ mod tests {
         // A lens edit is seen on the very next call.
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/tasks.yaml",
+            ".oxplow/extensions/review/lenses/tasks.yaml",
             "title: Tasks by status\nquery: SELECT ref FROM v_work_item\nviz: table\n",
         );
         assert_eq!(
@@ -692,11 +765,15 @@ mod tests {
         // So is a new lens file and a removed one.
         write(
             dir.path(),
-            "oxplow/extensions/review/lenses/more.yaml",
+            ".oxplow/extensions/review/lenses/more.yaml",
             LENS,
         );
         assert!(catalog.find_lens(dir.path(), "review/more").is_ok());
-        std::fs::remove_file(dir.path().join("oxplow/extensions/review/lenses/more.yaml")).unwrap();
+        std::fs::remove_file(
+            dir.path()
+                .join(".oxplow/extensions/review/lenses/more.yaml"),
+        )
+        .unwrap();
         assert!(matches!(
             catalog.find_lens(dir.path(), "review/more"),
             Err(DomainError::NotFound)
@@ -704,31 +781,34 @@ mod tests {
         assert_eq!(catalog.loads(), 4);
     }
 
-    /// The daemon's catalog reads a stream's working copy for its files but
-    /// the main worktree's `project.yaml` for what's enabled — and a change
-    /// there is seen on the next read of the working copy.
+    /// The daemon's catalog runs what is deployed in the project, whichever
+    /// root is asked about: a stream's working copy isn't read, and the
+    /// main worktree's settings say what is on.
     #[test]
-    fn a_projects_catalog_takes_config_from_the_project_for_every_root() {
+    fn a_projects_catalog_takes_everything_from_the_project_for_every_root() {
         let main = tempfile::tempdir().unwrap();
         let side = tempfile::tempdir().unwrap();
-        write(side.path(), "oxplow/extensions/review/extension.yaml", EXT);
+        write(side.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             side.path(),
-            ".oxplow/project.yaml",
-            "extensions:\n  disabled: [oxplow-bundled]\n",
+            ".oxplow/personal.yaml",
+            "disableExtensions: [oxplow-bundled]\n",
         );
         let catalog = ExtensionCatalog::for_project(main.path());
-        assert!(catalog.named(side.path(), "review").is_ok());
+        assert!(matches!(
+            catalog.named(side.path(), "review"),
+            Err(DomainError::NotFound)
+        ));
         assert!(
             catalog.named(side.path(), "oxplow-bundled").is_ok(),
-            "the working copy's own project.yaml doesn't count"
+            "the working copy's own personal.yaml doesn't count"
         );
         write(
             main.path(),
-            ".oxplow/project.yaml",
-            "extensions:\n  disabled: [review]\n",
+            ".oxplow/personal.yaml",
+            "disableExtensions: [oxplow-bundled]\n",
         );
-        let err = catalog.named(side.path(), "review").unwrap_err();
+        let err = catalog.named(side.path(), "oxplow-bundled").unwrap_err();
         assert!(err.to_string().contains("disabled"), "{err}");
         assert_eq!(catalog.project_of(side.path()), main.path());
     }
@@ -737,10 +817,10 @@ mod tests {
     fn roots_are_cached_separately_and_project_config_counts() {
         let a = tempfile::tempdir().unwrap();
         let b = tempfile::tempdir().unwrap();
-        write(a.path(), "oxplow/extensions/review/extension.yaml", EXT);
+        write(a.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             b.path(),
-            "oxplow/extensions/board/extension.yaml",
+            ".oxplow/extensions/board/extension.yaml",
             EXT.replace("review", "board").as_str(),
         );
         let catalog = ExtensionCatalog::new();
@@ -754,8 +834,8 @@ mod tests {
         // Disabling through project.yaml is a config change: a miss.
         write(
             a.path(),
-            ".oxplow/project.yaml",
-            "extensions:\n  disabled: [review]\n",
+            ".oxplow/personal.yaml",
+            "disableExtensions: [review]\n",
         );
         let err = catalog.named(a.path(), "review").unwrap_err();
         assert!(err.to_string().contains("disabled"), "{err}");

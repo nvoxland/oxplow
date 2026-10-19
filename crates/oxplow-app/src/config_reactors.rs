@@ -124,7 +124,7 @@ pub fn register(state: &Arc<crate::Services>) {
     };
     state.event_pump.register_async(reactor(
         EXTENSIONS,
-        &["extensions"],
+        &["extensions", "enableExtensions", "disableExtensions"],
         Box::new(|svc| Box::pin(async move { svc.extension_catalog.changed() })),
     ));
     state.event_pump.register_async(reactor(
@@ -255,7 +255,7 @@ mod tests {
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
         // The project's own extension defines the metric, off by default.
-        let ext = svc.layout.project_dir.join("oxplow/extensions/project");
+        let ext = svc.layout.project_dir.join(".oxplow/extensions/project");
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
@@ -305,7 +305,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 "oxplow.config.set",
-                json!({ "key": "extensions", "value": { "disabled": ["oxplow-bundled"] } }),
+                json!({ "key": "extensions", "value": [] }),
                 true,
             )
             .await

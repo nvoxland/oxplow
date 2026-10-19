@@ -136,7 +136,7 @@ const MANIFEST: &str = "manifest: 2\nname: acme\nintent:\n  purpose: Pull.\ncoll
 #[tokio::test]
 async fn collector_approval_and_credentials_are_read_live() {
     let fx = services_with_effort().await;
-    let dir = fx.svc.layout.project_dir.join("oxplow/extensions/acme");
+    let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("extension.yaml"), MANIFEST).unwrap();
     std::fs::write(dir.join("sync.sh"), "#!/bin/sh\necho '[]'\n").unwrap();

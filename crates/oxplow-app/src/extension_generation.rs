@@ -276,13 +276,23 @@ fn extension_row(
         origin: extension.origin.clone(),
         version: extension.version.clone(),
         enabled: extension.enabled,
-        sharing: variant_name(&extension.sharing),
         purpose: extension
             .intent
             .as_ref()
             .map(|intent| intent.purpose.clone()),
-        source_git: extension.source.as_ref().map(|source| source.git.clone()),
-        source_sha: extension.source.as_ref().map(|source| source.sha.clone()),
+        deployment: match &extension.deployment {
+            crate::extensions::Deployment::Source => "source",
+            crate::extensions::Deployment::Shipped { .. } => "shipped",
+            crate::extensions::Deployment::Deployed { .. } => "deployed",
+            crate::extensions::Deployment::Undeployed => "undeployed",
+            crate::extensions::Deployment::NotHere => "not_here",
+        }
+        .to_string(),
+        hash: match &extension.deployment {
+            crate::extensions::Deployment::Shipped { hash }
+            | crate::extensions::Deployment::Deployed { hash } => Some(hash.clone()),
+            _ => None,
+        },
         errors_json: json_text(&extension.errors),
         warnings_json: json_text(&extension.warnings),
     }

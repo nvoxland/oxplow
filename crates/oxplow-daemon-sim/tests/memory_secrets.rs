@@ -116,11 +116,18 @@ async fn an_approval_lives_and_dies_with_the_memory_secrets() {
             .success());
     }
     // A program a person approves: the project's own effort policy, a script.
-    let ext = project.join("oxplow/extensions/project");
+    // On for the project, so the daemon deploys it when it starts.
+    std::fs::create_dir_all(project.join(".oxplow")).unwrap();
+    std::fs::write(
+        project.join(".oxplow/project.yaml"),
+        "extensions: [oxplow-bundled, project]\n",
+    )
+    .unwrap();
+    let ext = project.join(".oxplow/extensions/project");
     std::fs::create_dir_all(ext.join("policies")).unwrap();
     std::fs::write(
         ext.join("extension.yaml"),
-        "manifest: 2\nname: project\nsharing: private\nintent:\n  purpose: a policy\n  examples: [{ name: a }]\nimplementations:\n  - { capability: effort_policy, id: mine, entry: policies/mine.star, needs: [sql.read] }\n",
+        "manifest: 2\nname: project\nintent:\n  purpose: a policy\n  examples: [{ name: a }]\nimplementations:\n  - { capability: effort_policy, id: mine, entry: policies/mine.star, needs: [sql.read] }\n",
     )
     .unwrap();
     std::fs::write(

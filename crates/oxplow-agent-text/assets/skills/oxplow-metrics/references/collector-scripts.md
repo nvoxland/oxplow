@@ -47,7 +47,7 @@ the return (an old `samples` / `findings` shape) is refused.
   collectors, which in turn get no `files()`).
 
 ```python
-# oxplow/extensions/project/collectors/todo.star — one per-file fact on repo.todo_count
+# .oxplow/extensions/project/collectors/todo.star — one per-file fact on repo.todo_count
 def transform(input):
     facts = []
     for f in files("**/*.rs"):
@@ -68,9 +68,9 @@ The `metrics:` spec `aggregation: sum` re-adds the per-file facts into the headl
 the parsed report is `input.report`.
 
 **C) exec (escape hatch)** — a program that prints the fact JSON to stdout:
-`runtime: exec`, `entry: collectors/bundle-size.sh` (in `oxplow/extensions/project/`). Lower trust (it does
-I/O) — tagged `exec:<id>`. Only an own extension's collectors (no `source.yaml`, e.g. the project's
-`oxplow/extensions/project/`) may be `exec` (any other extension's fact
+`runtime: exec`, `entry: collectors/bundle-size.sh` (in `.oxplow/extensions/project/`). Lower trust (it does
+I/O) — tagged `exec:<id>`. Only a non-bundled extension's collectors (e.g. the project's
+`.oxplow/extensions/project/`) may be `exec` (a bundled extension's fact
 collector is starlark or jaq), and it gets no
 `env` / `credentials` / `network`. Use it only when no in-process tier can
 compute it: **it won't run until the user approves it** in Settings → Data →

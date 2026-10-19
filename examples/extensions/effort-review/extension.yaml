@@ -1,7 +1,6 @@
 manifest: 2
 name: effort-review
 description: A model reviews each finished effort from its evidence — tests, coverage, what changed, findings — and comments the review on its work item.
-sharing: shared
 engine: ">=0.7"
 version: 0.1.0
 intent:

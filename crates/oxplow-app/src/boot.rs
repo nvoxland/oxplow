@@ -293,7 +293,6 @@ pub async fn run_boot_orchestration(
         let watch_vcs = state.vcs.clone();
         let watch_bus = event_bus.clone();
         let watch_moves = state.ref_moves.clone();
-        let watch_catalog = state.extension_catalog.clone();
         let watch_project_dir = state.layout.project_dir.clone();
         let watch_filter = {
             let cfg = crate::config_service::read_config(&state.config);
@@ -316,7 +315,6 @@ pub async fn run_boot_orchestration(
                 watch_vcs,
                 watch_bus,
                 watch_moves,
-                watch_catalog,
                 watch_project_dir,
                 watch_filter,
             )

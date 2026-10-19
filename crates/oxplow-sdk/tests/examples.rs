@@ -6,6 +6,8 @@
 
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
 use std::path::Path;
 
 use oxplow_app::extension_catalog::ExtensionCatalog;
@@ -33,7 +35,7 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
         .await
         .unwrap();
     let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/github");
-    copy_dir(&example, &root.join("oxplow/extensions/github"));
+    copy_dir(&example, &root.join(".oxplow/extensions/github"));
 
     let report = check(root, "github", &ExtensionCatalog::new(), None, None, None)
         .await
@@ -49,7 +51,7 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
 
     // A real oxplow over the project, one pull request collected.
     // Its entity is created empty at activation, as before a first run.
-    let svc = oxplow_app::Services::in_memory(root).await.unwrap();
+    let svc = common::booted(root).await;
     svc.db
         .transaction(|tx| {
             tx.execute(
@@ -217,7 +219,7 @@ async fn the_prompt_efforts_example_checks_and_passes_the_policy_suite() {
         .unwrap();
     let example =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/prompt-efforts");
-    copy_dir(&example, &root.join("oxplow/extensions/prompt-efforts"));
+    copy_dir(&example, &root.join(".oxplow/extensions/prompt-efforts"));
 
     let report = check(
         root,
@@ -260,7 +262,7 @@ async fn the_prompt_efforts_example_tests_clean() {
         .unwrap();
     let example =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/prompt-efforts");
-    copy_dir(&example, &root.join("oxplow/extensions/prompt-efforts"));
+    copy_dir(&example, &root.join(".oxplow/extensions/prompt-efforts"));
     let tested = test_extension(root, "prompt-efforts", false).await.unwrap();
     assert_eq!(tested.errors, Vec::<String>::new());
     for ran in [
@@ -294,7 +296,7 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
         .await
         .unwrap();
     let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/triage");
-    copy_dir(&example, &root.join("oxplow/extensions/triage"));
+    copy_dir(&example, &root.join(".oxplow/extensions/triage"));
 
     let report = check(root, "triage", &ExtensionCatalog::new(), None, None, None)
         .await
@@ -369,7 +371,7 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
         "// TODO: the cache never expires\nfn a() {}\n",
     )
     .unwrap();
-    let svc = oxplow_app::Services::in_memory(root).await.unwrap();
+    let svc = common::booted(root).await;
     // The preview's generation contributes what a real one over the same
     // project does.
     let mut real: Vec<String> = svc
@@ -536,7 +538,7 @@ async fn the_task_views_example_checks_and_its_fixtures_pass() {
         .unwrap();
     let example =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/task-views");
-    copy_dir(&example, &root.join("oxplow/extensions/task-views"));
+    copy_dir(&example, &root.join(".oxplow/extensions/task-views"));
 
     let report = check(
         root,
@@ -616,12 +618,12 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
         .unwrap();
     let example =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/effort-review");
-    copy_dir(&example, &root.join("oxplow/extensions/effort-review"));
+    copy_dir(&example, &root.join(".oxplow/extensions/effort-review"));
 
     let tested = test_extension(root, "effort-review", false).await.unwrap();
     assert_eq!(tested.errors, Vec::<String>::new());
 
-    let svc = oxplow_app::Services::in_memory(root).await.unwrap();
+    let svc = common::booted(root).await;
     // The model: a call to the evidence tool, the review, then a slow one
     // to cancel.
     let replies: Vec<oxplow_ai::fixture::FixtureReply> = serde_json::from_value(json!([
@@ -851,7 +853,7 @@ async fn inferred_reasoning_run(
         .init_repository(root)
         .await
         .unwrap();
-    let svc = oxplow_app::Services::in_memory(root).await.unwrap();
+    let svc = common::booted(root).await;
     let model = std::sync::Arc::new(oxplow_ai::fixture::FixtureModel::new(
         serde_json::from_value::<Vec<oxplow_ai::fixture::FixtureReply>>(serde_json::json!([
             "```json\n{\"decisions\": [{\"question\": \"Which CSV library?\", \"choice\": \"csv crate\", \"alternatives\": [\"hand-rolled\"], \"confidence\": \"medium\"}], \"claims\": [{\"statement\": \"The export tests pass.\", \"kind\": \"tests_pass\", \"evidence_ref\": \"run:12\"}]}\n```"
@@ -1054,7 +1056,7 @@ async fn the_session_notes_example_adds_a_section_to_the_new_session_page() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions");
     copy_dir(
         &examples.join("session-notes"),
-        &root.join("oxplow/extensions/session-notes"),
+        &root.join(".oxplow/extensions/session-notes"),
     );
     let report = check(
         root,
@@ -1099,12 +1101,12 @@ async fn review_project(with_producer: bool) -> tempfile::TempDir {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions");
     copy_dir(
         &examples.join("review-badges"),
-        &root.join("oxplow/extensions/review-badges"),
+        &root.join(".oxplow/extensions/review-badges"),
     );
     if with_producer {
         copy_dir(
             &examples.join("effort-review"),
-            &root.join("oxplow/extensions/effort-review"),
+            &root.join(".oxplow/extensions/effort-review"),
         );
     }
     dir
@@ -1159,8 +1161,8 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
     let root = dir.path();
     std::fs::create_dir_all(root.join(".oxplow")).unwrap();
     std::fs::write(
-        root.join(".oxplow/project.yaml"),
-        "extensions:\n  disabled: [effort-review]\n",
+        root.join(".oxplow/personal.yaml"),
+        "disableExtensions: [effort-review]\n",
     )
     .unwrap();
     let tested = test_extension(root, "review-badges", false).await.unwrap();
@@ -1215,14 +1217,14 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
             tested.warnings
         );
     }
-    let svc = oxplow_app::Services::in_memory(root).await.unwrap();
+    let svc = common::booted(root).await;
     let consumer = svc.extension_catalog.named(root, "review-badges").unwrap();
     assert!(consumer.ui.slots.is_empty(), "{:?}", consumer.ui.slots);
 
     // The producer exports another version.
     let dir = review_project(true).await;
     let root = dir.path();
-    let manifest = root.join("oxplow/extensions/effort-review/extension.yaml");
+    let manifest = root.join(".oxplow/extensions/effort-review/extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
     let bumped = text
         .replace(
@@ -1264,7 +1266,7 @@ async fn a_review_effort_review_wrote_shows_in_review_badges() {
 
     let dir = review_project(true).await;
     let root = dir.path();
-    let svc = oxplow_app::Services::in_memory(root).await.unwrap();
+    let svc = common::booted(root).await;
     let replies: Vec<oxplow_ai::fixture::FixtureReply> = serde_json::from_value(json!([
         "The tests pass and coverage is fine; one untested branch remains in the parser.",
     ]))
@@ -1400,7 +1402,7 @@ async fn the_schema_review_example_joins_its_facts_with_core_evidence() {
         .unwrap();
     let example =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/schema-review");
-    copy_dir(&example, &root.join("oxplow/extensions/schema-review"));
+    copy_dir(&example, &root.join(".oxplow/extensions/schema-review"));
     let report = check(
         root,
         "schema-review",
@@ -1421,7 +1423,7 @@ async fn the_schema_review_example_joins_its_facts_with_core_evidence() {
     );
 
     // A real oxplow: an effort that adds a migration and a function.
-    let svc = oxplow_app::Services::in_memory(root).await.unwrap();
+    let svc = common::booted(root).await;
     // Both review policies offer an effort's verdict; the person chooses.
     let offering: Vec<String> = svc
         .extension_catalog

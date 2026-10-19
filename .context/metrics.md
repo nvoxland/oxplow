@@ -1366,7 +1366,7 @@ name its own.
 
 Custom fact types and slice axes are **pluggable**, namespaced exactly like
 metrics (`oxplow.*` reserved to oxplow-foundation). They are declared in an
-extension's `extension.yaml` (the project's own: `oxplow/extensions/project/`)
+extension's `extension.yaml` (the project's own: `.oxplow/extensions/project/`)
 or the person's global files; `.oxplow/project.yaml` refuses `measures:` and
 `dimensions:`. `crates/oxplow-config/src/lib.rs`:
 
@@ -1816,7 +1816,7 @@ The mechanics behind those controls (unchanged by tsk117):
   (toggleable); (3) the built-in always-on producers
   (`builtin_producer_metrics()` — tokens, tests, coverage, analysis, effort
   lifecycle, nudges — listed regardless of recorded data so the user sees they
-  exist, tsk286); (4) every other seeded `metric_definition` — installed extension
+  exist, tsk286); (4) every other seeded `metric_definition` — extension
   metrics and legacy rows. **Every entry is `toggleable: true` (tsk31)** — the
   "always on" class is retired: producers/extensions can be enabled/disabled just
   like code metrics. `catalog()` reads each row's `enabled` from config
@@ -1863,7 +1863,7 @@ The mechanics behind those controls (unchanged by tsk117):
   `resolve_one` reads it from the definition (like `compute`) and a `use:`
   entry can't override it (tsk290).
 - **`oxplow.metric.scaffold` (a command since P4.8; a template since tsk391; now the
-  metric extension)** returns the files of a private extension (see
+  metric extension)** returns the files of an extension (see
   "Authoring surface"): `MetricsService::metric_scaffold` → `MetricScaffold {
   name, dir, files: [{ path, content }] }`, the same
   `metric_scaffold::extension_files` the SDK's `Kind::Metric` writes, and
@@ -1905,8 +1905,8 @@ Token and page analytics are oxplow-bundled lenses (`usage`) over
 **A code metric is an extension (current).** `oxplow extension new metric
 <name> [--language rust] [--glob '**/*.rs']` (or the `oxplow.metric.scaffold`
 command, which returns the same files for the agent to write — one template,
-`metric_scaffold::extension_files`) makes a private extension under
-`oxplow/extensions/<name>/` with all four blocks, namespaced `<ns>.*` (the
+`metric_scaffold::extension_files`) makes an extension source under
+`.oxplow/extensions/<name>/` with all four blocks, namespaced `<ns>.*` (the
 name with `_` for `-`):
 
 - `measures:` one per-path (`captureScope: per-path`), semi-additive measure on
@@ -1940,7 +1940,7 @@ metrics in YAML — no Rust per metric. The project's `.oxplow/project.yaml` onl
 turns them on (`use:`, with optional `target` / `warnAt` / `failAt`) or off
 (`enabled: false`); its `collectors:`, `measures:`, `dimensions:` and `key:`
 metrics are refused with an error naming
-`oxplow/extensions/project/extension.yaml`. The substrate is dimensional, so authoring splits into **four orthogonal
+`.oxplow/extensions/project/extension.yaml`. The substrate is dimensional, so authoring splits into **four orthogonal
 blocks** (matching the real cardinality): `measures:` (fact TYPEs) ← `collectors:`
 (fact PRODUCERs — a collector with `facts:`) → facts → `metrics:` (read SPECs),
 sliced by `dimensions:`. Metrics/measures/dimensions are parsed, validated and
@@ -1954,7 +1954,7 @@ resolved in `crates/oxplow-config/src/lib.rs` (`MetricEntry`→`ResolvedSpec` +
 `gauges:`; it is now an unknown key, tsk865.)
 
 ```yaml
-# oxplow/extensions/project/extension.yaml
+# .oxplow/extensions/project/extension.yaml
 measures:                             # the fact TYPE the collector records
   - key: repo.todo_count
     subjectKind: file
@@ -2073,7 +2073,7 @@ metrics:                              # the read SPEC (the chartable metric)
   - **extension** — an enabled extension's `extension.yaml` `measures:` /
     `metrics:` / `collectors:` (its fact collectors sandboxed: starlark or jaq;
     `exec` only for the project's own extension,
-    `oxplow/extensions/project/` by convention, with collector scripts under
+    `.oxplow/extensions/project/` by convention, with collector scripts under
     its `collectors/`).
 
   `use:` references a catalog metric key and layers threshold overrides; `key:`
@@ -2098,7 +2098,7 @@ The skill's fast path is the **`oxplow.metric.scaffold` command** (P4.8) →
 as a template the agent writes and adapts; `oxplow extension check` and
 `extension test` verify it before `oxplow.collector.sync` runs it. A metric
 that is the project's own (a report-derived or `exec` collector) is
-hand-authored in the four blocks of `oxplow/extensions/project/extension.yaml`.
+hand-authored in the four blocks of `.oxplow/extensions/project/extension.yaml`.
 
 ## Targets & feedback (advise-only, P5/tsk220)
 

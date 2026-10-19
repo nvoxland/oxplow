@@ -249,7 +249,7 @@ Every tool foundation declares is named below
 | Common questions, typed | foundation lenses with `tool:`: `oxplow_thread_work`, `oxplow_work_next`, `oxplow_effort_files`, `oxplow_effort_summary`, `oxplow_file_history`, `oxplow_recent_commits`, `oxplow_snapshots`, `oxplow_thread_notes`, `oxplow_thread_sessions` (a thread's sessions with their subagents beneath), `oxplow_session_transcript` (a session's turns and notes oldest first, 50 a page, optionally from a turn) — each returns what its lens shows, for a model that shouldn't have to write SQL for them |
 | What the person has | `oxplow_list_tabs` (the tabs each of their windows shows, per thread, stream or project: selected, on screen, stale), `oxplow_get_open_page` (the page open in a thread in the window they were in last, the others' beside it, or one listed tab; a lens re-run with their params), `oxplow_list_comments` (their anchored comments, hydrated) |
 | Wiki | `oxplow_wiki_ref_drift` (one stale ref's diff against its pin) |
-| Extension authoring | `oxplow_validate_extension`, `oxplow_preview_extension`, `oxplow_preview_collector`, `oxplow_review_extension` |
+| Extension authoring | `oxplow_validate_extension`, `oxplow_preview_extension`, `oxplow_preview_collector` |
 | oxplow's guidance | `oxplow_get_skill { name, reference? }` |
 
 A tool's `read_only_hint` (so a client can auto-approve) is its
@@ -1813,7 +1813,7 @@ The `configure` command (`crates/oxplow-agent-text/assets/configure.md`;
 project's test tooling to write standard-format reports at stable paths,
 then records the `testing:` block in `.oxplow/project.yaml` and one report
 collector per report in the project's extension
-(`oxplow/extensions/project/extension.yaml`). The `oxplow-collection`
+(`.oxplow/extensions/project/extension.yaml`). The `oxplow-collection`
 skill loads when running tests, on questions about coverage, and on
 `configure`; it tells the agent never to parse or report coverage itself,
 because oxplow parses the report. The ingestion side is

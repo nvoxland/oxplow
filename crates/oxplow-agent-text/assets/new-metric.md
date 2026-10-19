@@ -1,5 +1,5 @@
 ---
-description: Author an oxplow metric — a durable, chartable number tracked over time (count of X, complexity, bundle size, …). Scaffolds a private extension (measure + collector + dimension + metric + lens) and verifies it.
+description: Author an oxplow metric — a durable, chartable number tracked over time (count of X, complexity, bundle size, …). Scaffolds an extension (measure + collector + dimension + metric + lens) and verifies it.
 ---
 
 Author a metric so oxplow tracks a number over time and charts it on the
@@ -24,8 +24,8 @@ count, high-complexity functions, `any` usage, …), just turn it on with the
 
 ## 3. Otherwise scaffold a metric extension
 
-A metric you author is a private **extension** under
-`oxplow/extensions/<name>/`: it declares the measure, the collector, the
+A metric you author is an **extension** under
+`.oxplow/extensions/<name>/`: it declares the measure, the collector, the
 dimension its facts carry, the metric and a lens that links to the files,
 and it has a fixture that proves the collector. Scaffold it with the
 **`oxplow.metric.scaffold` command** (`run_command`), which writes nothing and
@@ -33,8 +33,8 @@ returns the files:
 
 ```
 oxplow.metric.scaffold { name: "complex-fns", language: "rust", glob: "src/**/*.rs", origin: "<your effort ref>" }
-→ { "name": "complex-fns", "dir": "oxplow/extensions/complex-fns",
-    "files": [ { "path": "oxplow/extensions/complex-fns/extension.yaml", "content": "…" }, … ] }
+→ { "name": "complex-fns", "dir": ".oxplow/extensions/complex-fns",
+    "files": [ { "path": ".oxplow/extensions/complex-fns/extension.yaml", "content": "…" }, … ] }
 ```
 
 (From a terminal, `oxplow extension new metric complex-fns --language rust
@@ -94,7 +94,7 @@ copy-paste templates.
    `oxplow_validate_extension`). It dry-runs the lens, so a bad query shows here.
 2. `oxplow extension test <name>` — the collector runs over the fixture's
    files and must return the facts the example expects.
-3. Once the extension loads, `oxplow.collector.sync { collector:
+3. Deploy it: `oxplow.extension.deploy { name: "<name>" }` (`run_command`). It returns once the extension is live. Then `oxplow.collector.sync { collector:
    "collector:<name>/<ns>.scan" }` (`run_command`) runs the collector now and returns the
    `facts` count.
 4. `oxplow_query_sql`: `SELECT bucket, MEASURE('<ns>.complex_functions') FROM
@@ -103,4 +103,4 @@ copy-paste templates.
 5. It appears on the Metrics page automatically, and the lens in the launcher
    (Code).
 
-Leave the new extension folder for the user to review (committed files).
+Leave the new extension folder for the user to review. It stays personal until they share it (`oxplow.extension.share { name }`).

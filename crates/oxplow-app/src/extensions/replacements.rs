@@ -170,52 +170,52 @@ mod tests {
 
     const BOARD: &str = "title: Board\nparams: [{ name: scope }, { name: thread_id }]\nquery: SELECT ref, title, state FROM v_work_item\n";
 
-    /// Extension `tracker` (`sharing`), with `providers` (YAML, or none),
+    /// Extension `tracker`, with `providers` (YAML, or none),
     /// a `board` lens taking the Board's whole contract, a `partial` one
     /// taking only `scope`, and `replacements`.
-    fn load(sharing: &str, providers: &str, replacements: &str) -> Extension {
+    fn load(providers: &str, replacements: &str) -> Extension {
         let d = tempfile::tempdir().unwrap();
         write(
             d.path(),
-            "oxplow/extensions/tracker/extension.yaml",
+            ".oxplow/extensions/tracker/extension.yaml",
             &format!(
-                "manifest: 2\nname: tracker\nsharing: {sharing}\nengine: \">=0.1\"\nintent:\n  purpose: p\n  examples: [{{ name: a }}]\n{providers}ui:\n  replacements:\n{replacements}"
+                "manifest: 2\nname: tracker\nengine: \">=0.1\"\nintent:\n  purpose: p\n  examples: [{{ name: a }}]\n{providers}ui:\n  replacements:\n{replacements}"
             ),
         );
         // The provider's own files, so it loads (the fake's declarations).
         write(
             d.path(),
-            "oxplow/extensions/tracker/provider.json",
+            ".oxplow/extensions/tracker/provider.json",
             &serde_json::to_string_pretty(&oxplow_provider_fake::declarations()).unwrap(),
         );
         write(
             d.path(),
-            "oxplow/extensions/tracker/bin/provider",
+            ".oxplow/extensions/tracker/bin/provider",
             "#!/bin/sh\nexit 1\n",
         );
         write(
             d.path(),
-            "oxplow/extensions/tracker/lenses/board.yaml",
+            ".oxplow/extensions/tracker/lenses/board.yaml",
             BOARD,
         );
         write(
             d.path(),
-            "oxplow/extensions/tracker/lenses/partial.yaml",
+            ".oxplow/extensions/tracker/lenses/partial.yaml",
             "title: Partial\nparams: [{ name: scope }]\nquery: SELECT 1 AS n\n",
         );
         write(
             d.path(),
-            "oxplow/extensions/tracker/lenses/state.yaml",
+            ".oxplow/extensions/tracker/lenses/state.yaml",
             "title: State\nparams: [{ name: ref }]\nquery: SELECT :ref AS ref\n",
         );
         write(
             d.path(),
-            "oxplow/extensions/tracker/lenses/graph.yaml",
+            ".oxplow/extensions/tracker/lenses/graph.yaml",
             "title: Graph\nparams: [{ name: head_sha }, { name: reveal_sha }, { name: limit }]\nquery: SELECT :head_sha AS sha\n",
         );
         write(
             d.path(),
-            "oxplow/extensions/tracker/lenses/verdict.yaml",
+            ".oxplow/extensions/tracker/lenses/verdict.yaml",
             "title: Verdict\nparams: [{ name: effort_id }]\nquery: SELECT :effort_id AS effort_id\n",
         );
         load_extensions(d.path())
@@ -239,11 +239,7 @@ mod tests {
 
     #[test]
     fn a_replacement_names_a_known_target_and_a_lens_taking_its_whole_contract() {
-        let ext = load(
-            "private",
-            PROVIDER,
-            "    - { target: work_item.board, lens: board }\n",
-        );
+        let ext = load(PROVIDER, "    - { target: work_item.board, lens: board }\n");
         assert_eq!(said(&ext), "");
         assert_eq!(
             ext.ui.replacements,
@@ -280,7 +276,7 @@ mod tests {
                 "unknown field",
             ),
         ] {
-            let ext = load("private", PROVIDER, &format!("    - {entry}\n"));
+            let ext = load(PROVIDER, &format!("    - {entry}\n"));
             let errs = said(&ext);
             assert!(
                 errs.contains(says) && errs.contains("extension.yaml:"),
@@ -295,7 +291,6 @@ mod tests {
     #[test]
     fn a_detail_state_replacement_takes_ref() {
         let ext = load(
-            "private",
             PROVIDER,
             "    - { target: work_item.detail.state, lens: state }\n",
         );
@@ -309,7 +304,6 @@ mod tests {
             vec![("work_item.detail.state", "tracker/state")]
         );
         let ext = load(
-            "private",
             PROVIDER,
             "    - { target: work_item.detail.state, lens: board }\n",
         );
@@ -320,11 +314,7 @@ mod tests {
     /// one, with no provider, and its lens takes the effort's `effort_id`.
     #[test]
     fn an_effort_verdict_replacement_takes_effort_id_and_needs_no_provider() {
-        let ext = load(
-            "shared",
-            "",
-            "    - { target: effort.verdict, lens: verdict }\n",
-        );
+        let ext = load("", "    - { target: effort.verdict, lens: verdict }\n");
         assert_eq!(said(&ext), "");
         assert_eq!(
             ext.ui
@@ -338,11 +328,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![("effort.verdict", "effort_policy", false)]
         );
-        let ext = load(
-            "shared",
-            "",
-            "    - { target: effort.verdict, lens: state }\n",
-        );
+        let ext = load("", "    - { target: effort.verdict, lens: state }\n");
         assert!(
             said(&ext).contains("must declare `effort_id`"),
             "{}",
@@ -372,7 +358,6 @@ mod tests {
     #[test]
     fn only_a_bound_target_needs_the_extension_to_bring_its_provider() {
         let ext = load(
-            "private",
             "",
             "    - { target: work_item.detail.state, lens: state }\n",
         );
@@ -382,9 +367,7 @@ mod tests {
             "{errs}"
         );
         assert!(ext.ui.replacements.is_empty());
-        let ext = load(
-            "private",
-            "",
+        let ext = load("",
             "    - { target: work_item.board, lens: board, version: 1 }\n    - { target: work_item.list, lens: board }\n    - { target: work_item.detail, lens: state }\n",
         );
         assert_eq!(said(&ext), "");
@@ -404,9 +387,7 @@ mod tests {
 
     #[test]
     fn a_target_is_replaced_once_per_extension() {
-        let ext = load(
-            "private",
-            PROVIDER,
+        let ext = load(PROVIDER,
             "    - { target: work_item.board, lens: board }\n    - { target: work_item.board, lens: board }\n",
         );
         assert!(said(&ext).contains("already replaced"), "{:?}", ext.errors);
@@ -419,11 +400,7 @@ mod tests {
     /// several (`replacements:`).
     #[test]
     fn an_unbound_target_needs_no_provider_and_a_shared_extension_may_replace_it() {
-        let ext = load(
-            "shared",
-            "",
-            "    - { target: vcs.history.graph, lens: graph }\n",
-        );
+        let ext = load("", "    - { target: vcs.history.graph, lens: graph }\n");
         assert_eq!(said(&ext), "");
         assert_eq!(
             ext.ui
@@ -467,11 +444,7 @@ mod tests {
     /// bound target still needs its provider.
     #[test]
     fn a_shared_extension_may_declare_replacements() {
-        let ext = load(
-            "shared",
-            PROVIDER,
-            "    - { target: work_item.board, lens: board }\n",
-        );
+        let ext = load(PROVIDER, "    - { target: work_item.board, lens: board }\n");
         assert_eq!(said(&ext), "");
         assert_eq!(ext.ui.replacements.len(), 1);
     }

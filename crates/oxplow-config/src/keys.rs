@@ -42,6 +42,7 @@ pub const HUMAN_ONLY_KEYS: &[&str] = &[
     "lsp",
     "testing",
     "extensions",
+    "extensionSources",
     "agentPromptAppend",
 ];
 

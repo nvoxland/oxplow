@@ -71,12 +71,12 @@ async fn a_collector_reads_the_tree_it_declares() {
     let root = svc.layout.project_dir.clone();
     write(
         &root,
-        "oxplow/extensions/acme/extension.yaml",
-        "manifest: 2\nname: acme\nsharing: private\nintent: { purpose: Reads., origin: null, examples: [] }\n\
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2\nname: acme\nintent: { purpose: Reads., origin: null, examples: [] }\n\
          collectors:\n\
          \x20 - id: paths\n    runtime: starlark\n    entry: paths.star\n    needs: [tree.read]\n    entities:\n      - { name: seen, key: k, columns: { k: text } }\n",
     );
-    write(&root, "oxplow/extensions/acme/paths.star", PATHS);
+    write(&root, ".oxplow/extensions/acme/paths.star", PATHS);
     crate::test_fixtures::activate(svc).await;
     let trees = Arc::new(Trees::default());
     let mut collectors = Collectors::of(svc, &root);
@@ -97,22 +97,13 @@ async fn a_collector_reads_the_tree_it_declares() {
     // edit is held back and the working version stays.
     write(
         &root,
-        "oxplow/extensions/acme/extension.yaml",
-        "manifest: 2\nname: acme\nsharing: private\nintent: { purpose: Reads., origin: null, examples: [] }\n\
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2\nname: acme\nintent: { purpose: Reads., origin: null, examples: [] }\n\
          collectors:\n\
          \x20 - id: paths\n    runtime: starlark\n    entry: paths.star\n    needs: [tree.read]\n    entities:\n      - { name: seen, key: k, columns: { k: text } }\n\
          \x20 - id: peek\n    runtime: starlark\n    entry: paths.star\n    entities:\n      - { name: peeked, key: k, columns: { k: text } }\n",
     );
-    let held = crate::test_fixtures::activate_with_problems(svc).await;
-    assert!(held.contains_key("acme"), "{held:?}");
-    let errors = svc
-        .extension_catalog
-        .snapshot(&root)
-        .extensions()
-        .iter()
-        .find(|e| e.name == "acme")
-        .map(|e| e.errors.join("\n"))
-        .unwrap();
+    let errors = crate::test_fixtures::load_errors(svc, "acme").await;
     assert!(
         errors.contains("uses `files()` without `tree.read` in its `needs`"),
         "{errors}"
@@ -135,34 +126,28 @@ async fn a_commands_script_cant_ask_a_model_or_read_the_tree() {
     let errors_with = |needs: &str, body: &str| {
         write(
             &root,
-            "oxplow/extensions/acme/extension.yaml",
+            ".oxplow/extensions/acme/extension.yaml",
             &format!(
-                "manifest: 2\nname: acme\nsharing: private\nintent: {{ purpose: Asks., origin: null, examples: [] }}\n\
+                "manifest: 2\nname: acme\nintent: {{ purpose: Asks., origin: null, examples: [] }}\n\
                  commands:\n\
                  \x20 - name: note.sum\n    summary: Sum.\n    input_schema: {{ type: object }}\n    entry: sum.star\n    needs: [{needs}]\n    invokers: {{ human: true, agent: true, lens: true }}\n"
             ),
         );
         write(
             &root,
-            "oxplow/extensions/acme/sum.star",
+            ".oxplow/extensions/acme/sum.star",
             &format!("def transform(x):\n    return {{\"commands\": [], \"result\": {body}}}\n"),
         );
-        svc.extension_catalog
-            .snapshot(&root)
-            .extensions()
-            .iter()
-            .find(|e| e.name == "acme")
-            .map(|e| e.errors.join("\n"))
-            .unwrap()
+        crate::test_fixtures::load_errors(svc, "acme")
     };
-    let errors = errors_with("sql.read", "ai_summarize(\"t\")");
+    let errors = errors_with("sql.read", "ai_summarize(\"t\")").await;
     assert!(
         errors.contains(
             "uses `ai_summarize()`: `needs`: `ai.compute` (ask a model) can't be used here"
         ),
         "{errors}"
     );
-    let errors = errors_with("tree.read", "len(files(\"**\"))");
+    let errors = errors_with("tree.read", "len(files(\"**\"))").await;
     assert!(
         errors.contains("a command's script decides what runs"),
         "{errors}"
@@ -181,20 +166,20 @@ async fn a_fact_collector_reads_the_layer_it_declares() {
     let root = svc.layout.project_dir.clone();
     write(
         &root,
-        "oxplow/extensions/acme/extension.yaml",
-        "manifest: 2\nname: acme\nsharing: private\nintent: { purpose: Counts., origin: null, examples: [] }\n\
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2\nname: acme\nintent: { purpose: Counts., origin: null, examples: [] }\n\
          collectors:\n\
          \x20 - id: items\n    runtime: starlark\n    entry: items.star\n    needs: [sql.read]\n    facts: [acme.items]\n\
          \x20 - id: asks\n    runtime: starlark\n    entry: asks.star\n    needs: [ai.compute]\n    facts: [acme.items]\n",
     );
     write(
         &root,
-        "oxplow/extensions/acme/items.star",
+        ".oxplow/extensions/acme/items.star",
         "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT count(*) AS n FROM v_work_item\"})\n    return {\"facts\": [{\"measure\": \"acme.items\", \"value\": rows[0][\"n\"] + len(files(\"**\"))}]}\n",
     );
     write(
         &root,
-        "oxplow/extensions/acme/asks.star",
+        ".oxplow/extensions/acme/asks.star",
         "def transform(x):\n    return {\"facts\": [{\"measure\": \"acme.items\", \"value\": len(ai_summarize(\"t\"))}]}\n",
     );
     crate::test_fixtures::activate(svc).await;

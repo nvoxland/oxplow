@@ -29,18 +29,19 @@ export const LOG_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", ".out
 
 /** The project's `.oxplow/project.yaml`: its threads run the fake terminal
  *  harness (the test extension's `terminal` provider, enabled here), so no
- *  spec ever starts a real agent CLI. */
+ *  spec ever starts a real agent CLI. The suite's extensions are on, so the
+ *  daemon deploys them from their sources when it starts. */
 function projectYaml(): string {
-  return `agents: [terminal]\nextensionInstances:\n  e2e/terminal: { enabled: true, config: { team: core } }\n`;
+  return `agents: [terminal]\nextensions: [oxplow-bundled, e2e, github]\nextensionInstances:\n  e2e/terminal: { enabled: true, config: { team: core } }\n`;
 }
 
-/** Put the suite's test extension (`tests-e2e/fixtures/extension`) into
- *  `project`, with the wrapper that runs the fake provider this checkout
+/** Put the suite's test extension's source (`tests-e2e/fixtures/extension`)
+ *  into `project`, with the wrapper that runs the fake provider this checkout
  *  built: its service's state in the project's `.oxplow/`, one file per
  *  instance, as the provider tests keep it. */
 function installTestExtension(project: string, providerFake: string): void {
   const fixture = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "extension");
-  const dir = join(project, "oxplow", "extensions", "e2e");
+  const dir = join(project, ".oxplow", "extensions", "e2e");
   cpSync(fixture, dir, { recursive: true });
   mkdirSync(join(dir, "bin"), { recursive: true });
   const state = join(project, ".oxplow");
@@ -60,7 +61,7 @@ function installTestExtension(project: string, providerFake: string): void {
  *  requests (`fixtures/github-prs.json`) — no GitHub, the same entity. */
 function installGithubExample(project: string): void {
   const here = dirname(fileURLToPath(import.meta.url));
-  const dir = join(project, "oxplow", "extensions", "github");
+  const dir = join(project, ".oxplow", "extensions", "github");
   cpSync(join(here, "..", "..", "examples", "extensions", "github"), dir, { recursive: true });
   cpSync(join(here, "..", "fixtures", "github-prs.json"), join(dir, "prs.json"));
   writeFileSync(join(dir, "sync.sh"), `#!/bin/sh\nexec cat "$(dirname "$0")/prs.json"\n`);
@@ -198,6 +199,24 @@ export async function ipc<T = unknown>(daemon: Daemon, name: string, args: Recor
 /** Run a bus command as the person, confirmed. */
 export function run<T = unknown>(daemon: Daemon, name: string, input: Record<string, unknown>): Promise<T> {
   return ipc<T>(daemon, "run_command", { id: name, input, confirmed: true });
+}
+
+/** Where extension `name`'s source goes in `daemon`'s project. */
+export function extensionSource(daemon: Daemon, name: string): string {
+  return join(daemon.project, ".oxplow", "extensions", name);
+}
+
+/** Deploy extension `name` from its source: it runs once this returns. */
+export async function deploy(daemon: Daemon, name: string): Promise<void> {
+  await run(daemon, "oxplow.extension.deploy", { name });
+}
+
+/** Copy the documented example `name` (`examples/extensions/<name>`) into
+ *  `daemon`'s project and deploy it. */
+export async function installExample(daemon: Daemon, name: string): Promise<void> {
+  const here = dirname(fileURLToPath(import.meta.url));
+  cpSync(join(here, "..", "..", "examples", "extensions", name), extensionSource(daemon, name), { recursive: true });
+  await deploy(daemon, name);
 }
 
 /** Poll `check` every 200 ms until it holds; throw `what` after `ms`. A

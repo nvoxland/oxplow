@@ -1370,7 +1370,7 @@ pub(crate) fn test_providers() -> ModelProviders {
     // The shipped providers, each a script oxplow-foundation declares —
     // open here: a test of the service isn't one of consent.
     let providers = ModelProviders::default();
-    let bundled = crate::extensions::load_extensions(std::path::Path::new("/nonexistent"));
+    let bundled = crate::test_fixtures::shipped_extensions();
     let built = crate::capabilities::declared_by(&bundled)
         .into_iter()
         .filter(|i| i.capability == "ai_provider")
@@ -1818,10 +1818,7 @@ mod tests {
         svc.ai
             .set_role(&Role::SUMMARIZE, Some(RoleBinding::new("fixture", "m")))
             .unwrap();
-        svc.extension_activation
-            .activate(svc.clone())
-            .await
-            .unwrap();
+        crate::test_fixtures::activate_with_problems(&svc).await;
         let out = svc
             .ai
             .complete(&Role::SUMMARIZE, "t", None, "hi", false)
@@ -1862,7 +1859,7 @@ mod tests {
     async fn a_scripted_provider_calls_once_a_person_approves_it() {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
-        let ext = dir.path().join("oxplow/extensions/acme");
+        let ext = dir.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(ext.join("providers")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
@@ -1880,6 +1877,7 @@ mod tests {
         )
         .unwrap();
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+        crate::test_fixtures::activate(&svc).await;
         let (base, seen) = mock("/chat/completions", 200, chat_reply()).await;
         svc.ai
             .save_provider(
@@ -1920,6 +1918,7 @@ mod tests {
         assert_eq!(seen.lock().unwrap()[0].1["authorization"], "Bearer sk-1");
 
         std::fs::write(ext.join("providers/acme.star"), script("\"changed\"")).unwrap();
+        crate::test_fixtures::activate(&svc).await;
         let err = call().await.unwrap_err().to_string();
         assert!(
             err.contains("Settings → Data → Programs"),
@@ -1980,7 +1979,7 @@ mod tests {
     /// none is a built-in, and each loads.
     #[test]
     fn every_shipped_ai_provider_is_a_script() {
-        let bundled = crate::extensions::load_extensions(std::path::Path::new("/nonexistent"));
+        let bundled = crate::test_fixtures::shipped_extensions();
         let providers: Vec<_> = crate::capabilities::declared_by(&bundled)
             .into_iter()
             .filter(|i| i.capability == "ai_provider")

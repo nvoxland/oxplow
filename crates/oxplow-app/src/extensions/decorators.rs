@@ -151,19 +151,19 @@ mod tests {
         std::fs::write(p, body).unwrap();
     }
 
-    /// Extension `flags` (`sharing`) with a `flags` model and `decorators`.
-    fn load(sharing: &str, decorators: &str) -> Extension {
+    /// Extension `flags` with a `flags` model and `decorators`.
+    fn load(decorators: &str) -> Extension {
         let d = tempfile::tempdir().unwrap();
         write(
             d.path(),
-            "oxplow/extensions/flags/extension.yaml",
+            ".oxplow/extensions/flags/extension.yaml",
             &format!(
-                "manifest: 2\nname: flags\nsharing: {sharing}\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: p\n  examples: [{{ name: a }}]\nmodels:\n  - name: flags\n    version: 1\n    description: d\n    columns:\n      - {{ name: ref, type: TEXT, doc: r }}\n      - {{ name: label, type: TEXT, doc: l }}\n      - {{ name: color, type: TEXT, doc: c }}\nui:\n  decorators:\n{decorators}"
+                "manifest: 2\nname: flags\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: p\n  examples: [{{ name: a }}]\nmodels:\n  - name: flags\n    version: 1\n    description: d\n    columns:\n      - {{ name: ref, type: TEXT, doc: r }}\n      - {{ name: label, type: TEXT, doc: l }}\n      - {{ name: color, type: TEXT, doc: c }}\nui:\n  decorators:\n{decorators}"
             ),
         );
         write(
             d.path(),
-            "oxplow/extensions/flags/models/flags.sql",
+            ".oxplow/extensions/flags/models/flags.sql",
             "SELECT 'work_item:oxplow:tsk1' AS ref, 'urgent' AS label, '#f00' AS color\n",
         );
         load_extensions(d.path())
@@ -174,9 +174,7 @@ mod tests {
 
     #[test]
     fn a_decorator_names_one_of_its_models_columns() {
-        let ext = load(
-            "private",
-            "    - { model: flags, kind: work_item, placement: ref-chip, label: label, color: color }\n",
+        let ext = load("    - { model: flags, kind: work_item, placement: ref-chip, label: label, color: color }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         let d = &ext.ui.decorators[0];
@@ -205,7 +203,7 @@ mod tests {
                 "unknown variant",
             ),
         ] {
-            let ext = load("private", &format!("    - {entry}\n"));
+            let ext = load(&format!("    - {entry}\n"));
             let errs = ext.errors.join("\n");
             assert!(
                 errs.contains(says) && errs.contains("extension.yaml:"),
@@ -219,10 +217,8 @@ mod tests {
     /// private one's.
     #[test]
     fn a_shared_extension_may_declare_decorators() {
-        let ext = load(
-            "shared",
-            "    - { model: flags, kind: work_item, placement: ref-chip, label: label }\n",
-        );
+        let ext =
+            load("    - { model: flags, kind: work_item, placement: ref-chip, label: label }\n");
         assert_eq!(ext.errors, Vec::<String>::new());
         assert_eq!(ext.ui.decorators.len(), 1);
     }

@@ -12,8 +12,9 @@ request's title, opens its page, and is found by search.
 
 ## Use it
 
-1. Copy this folder to `oxplow/extensions/github/` in your repo (or publish it
-   as its own repo and install it from Settings → Extensions).
+1. Copy this folder to `.oxplow/extensions/github/` in your repo (or point
+   `extensionSources` at a clone), then deploy it with
+   `oxplow.extension.deploy { name: "github" }`.
 2. Make sure `jq` is installed, and either `gh` is logged in or you set
    `GITHUB_TOKEN` under the `github` extension in Settings → Extensions (it's
    stored in your keychain).

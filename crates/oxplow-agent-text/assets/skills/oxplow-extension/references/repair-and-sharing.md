@@ -1,4 +1,4 @@
-# Health, repair, sharing and installing
+# Health, repair, deploying and sharing
 
 ## Health and repair
 
@@ -27,19 +27,21 @@ in `v_contribution_health` (`extension`, `contribution`, `kind`, `state` = `ok` 
   `v_event_dead_letter` (`state = 'pending'`); the user retries or
   discards them in Settings → Data → Delivery.
 
-## Sharing and installing
+## Deploying and sharing
 
-- **Team:** extensions are ordinary committed files under
-  `oxplow/extensions/`. Commit them and the team has them.
-- **World:** to publish, put an extension in its own git repo with
-  `extension.yaml` at the root. To use someone else's, **only when the
-  user asks**: call `oxplow_review_extension(git_url, git_ref?, stream_id)`, show
-  the user what it declares (the programs its collectors run, the hosts they
-  reach, the credentials they read, advisories) and any `errors` /
-  `problems`, and when they say go, run `oxplow.extension.install { git_url,
-  git_ref?, reviewed_sha: <its sha> }` (`run_command`) — it
-  comes back as a proposal the user approves. It records the source in
-  `source.yaml`. Updating is the same: `oxplow_review_extension(name)`, then
-  `oxplow.extension.update { name, reviewed_sha }`. Never
-  hand-edit an installed extension's files; they're overwritten on update.
-  Copy it into a new extension instead.
+- **Deploy:** nothing runs a source. After an edit is right, run
+  `oxplow.extension.deploy { name }` (`run_command`). It copies the source
+  into `.oxplow/runtime/extensions/<name>/<hash>/`, makes that copy live and
+  returns once it runs. If the extension does not prepare, the deploy fails
+  with the problems and the old deployment keeps running.
+  `oxplow.extension.rollback { name, to? }` makes an earlier deployment live.
+- **Team:** a new extension's source is personal. `.oxplow/.gitignore` keeps
+  it out of git. `oxplow.extension.share { name }` un-ignores it and moves
+  the name to the team list in `.oxplow/project.yaml`; the person then
+  commits. `oxplow.extension.unshare { name }` reverses it.
+- **Use someone else's extension:** only when the user asks. Clone it into
+  `.oxplow/extensions/<name>/` (or point `extensionSources` at the clone),
+  list it in `extensions:` or `enableExtensions`, and deploy it. Read what
+  it declares first (the programs its collectors run, the hosts they reach,
+  the credentials they read). Do not hand-edit a clone you want to update
+  later; copy it into a new extension instead.

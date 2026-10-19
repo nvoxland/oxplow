@@ -50,7 +50,7 @@ section for the column.
   read/IPC shape only — see [metrics.md](./metrics.md) for the substrate.
 - **Report collectors** (tsk863) — reading a report is a **collector**:
   a `collectors:` entry in the project's own extension
-  (`oxplow/extensions/project/extension.yaml`; never `.oxplow/project.yaml`,
+  (`.oxplow/extensions/project/extension.yaml`; never `.oxplow/project.yaml`,
   which refuses `collectors:`) with `records: tests |
   coverage | analysis`, the `report: { path }` it reads (relative to the
   project root, the checkout), a parser in
@@ -59,7 +59,7 @@ section for the column.
   shared with every other collector (`.context/semantic-layer.md`
   "Collectors"). Validation (`crates/oxplow-config/src/collectors.rs`,
   `validate_report_collector`): an own extension's only (`Extension::is_own()`, `Declarer.own`;
-  a bundled or installed extension's is refused);
+  a bundled extension's is refused);
   no `input`, `env`, `credentials`, `network`, `after` or `sync`; the
   trigger is `on_run` or `manual`, and an `on_run` matches what it records
   — `tests` / `coverage` on `test`, `analysis` on `analysis` (tsk892: each
@@ -146,7 +146,7 @@ section for the column.
   the project's test tooling to emit a standard-format report at a stable
   path, and records the `testing:` block in
   `.oxplow/project.yaml` and writes the report collectors into the project's
-  extension (`oxplow/extensions/project/extension.yaml`). The standing skill keeps
+  extension (`.oxplow/extensions/project/extension.yaml`). The standing skill keeps
   coverage flowing after configure (run tests through the report-emitting
   commands — which, and when, is the agent's call; never type the numbers)
   so instrumentation doesn't bit-rot.
@@ -681,7 +681,7 @@ point a collector at a file of the person's. Example: a Clover (XML) coverage
 parser in jaq:
 
 ```yaml
-# oxplow/extensions/project/extension.yaml
+# .oxplow/extensions/project/extension.yaml
 collectors:
   - id: tests.clover
     records: coverage            # tests | coverage | analysis
@@ -692,7 +692,7 @@ collectors:
 ```
 
 ```jq
-# oxplow/extensions/project/collectors/clover.jq — input value (.) → coverage output schema
+# .oxplow/extensions/project/collectors/clover.jq — input value (.) → coverage output schema
 { files: reduce ([.. | select((type=="object") and (.tag=="file"))][]) as $f
     ({}; . + { ($f.attrs.path): {
         instrumented: [ $f | .. | select(.tag?=="line") | (.attrs.num|tonumber?) ],
@@ -722,7 +722,7 @@ The fact engine reads the report, parses it per `format` (`parse_report`) and
 hands it to the jaq/starlark script as `input.report`; the script returns a
 `{facts:[{measure, value, num, den}]}` ratio fact. tsk126 dogfoods this as
 the `repo.scan_type_coverage` collector → `repo.type_coverage`
-(`oxplow/extensions/project/collectors/type_coverage.jq`, `format: text` +
+(`.oxplow/extensions/project/collectors/type_coverage.jq`, `format: text` +
 `[… | try fromjson catch null][0]` so a missing report yields no facts rather
 than failing the collector. **jaq gotcha:** `"" | fromjson` emits *nothing*
 (no error, so `try … catch` never fires) where jq raises; a script whose

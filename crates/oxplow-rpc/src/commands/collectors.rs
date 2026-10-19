@@ -180,11 +180,11 @@ mod tests {
 
     fn seed(root: &std::path::Path) {
         use std::os::unix::fs::PermissionsExt;
-        let ext = root.join("oxplow/extensions/my-gh");
+        let ext = root.join(".oxplow/extensions/my-gh");
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: my-gh\nsharing: private\nintent: { purpose: test, origin: null, examples: [] }\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n",
+            "manifest: 2\nname: my-gh\nintent: { purpose: test, origin: null, examples: [] }\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n",
         )
         .unwrap();
         let script = ext.join("sync.sh");
@@ -201,11 +201,11 @@ mod tests {
     #[tokio::test]
     async fn a_programs_source_dispatches() {
         let (svc, _dir) = crate::test_support::services().await;
-        let ext = svc.layout.project_dir.join("oxplow/extensions/acme");
+        let ext = svc.layout.project_dir.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(ext.join("effects")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nsharing: private\nintent: { purpose: Effects., origin: null, examples: [] }\neffects:\n  - id: look\n    summary: Looks.\n    on: [work_item.created]\n    entry: effects/look.star\n",
+            "manifest: 2\nname: acme\nintent: { purpose: Effects., origin: null, examples: [] }\neffects:\n  - id: look\n    summary: Looks.\n    on: [work_item.created]\n    entry: effects/look.star\n",
         )
         .unwrap();
         std::fs::write(
@@ -306,7 +306,7 @@ mod tests {
     #[tokio::test]
     async fn list_collectors_includes_the_projects_own() {
         let (svc, dir) = crate::test_support::services().await;
-        let ext = dir.path().join("oxplow/extensions/project");
+        let ext = dir.path().join(".oxplow/extensions/project");
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
@@ -418,7 +418,7 @@ mod tests {
         let yaml = svc
             .layout
             .project_dir
-            .join("oxplow/extensions/my-gh/extension.yaml");
+            .join(".oxplow/extensions/my-gh/extension.yaml");
         let text = std::fs::read_to_string(&yaml).unwrap();
         std::fs::write(
             &yaml,

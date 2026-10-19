@@ -1,10 +1,9 @@
-/// "Extensions" section body for SettingsPage: every project extension
-/// (`oxplow/extensions/`) with its origin, lens count and load errors,
-/// its sources' credentials (set here, kept in the keychain); an Update
-/// action for git-installed ones; and an install strip for a git URL.
-/// Install and Update first show what the extension would bring in (its
-/// programs, hosts, credentials, advisories) and install only the commit
-/// the person confirmed (tsk378).
+/// "Extensions" section body for SettingsPage: every extension the project
+/// knows with where its files come from (shipped, deployed, not deployed,
+/// not here), its lens count and load errors, and its sources' credentials
+/// (set here, kept in the keychain). Enable/Disable turn it on or off for
+/// the person (`oxplow.extension.enable` / `disable`); Deploy runs one whose
+/// source was never deployed (`oxplow.extension.deploy`).
 /// Each provider instance's and collector's health shows on its
 /// extension's row: a disabled one with its reason, **Enable Again**
 /// (`oxplow.contribution.enable` as the person) and **Repair with the Agent** (fills
@@ -12,28 +11,24 @@
 /// Running sources is under Data (DataSection.tsx). See
 /// `.context/extensions.md` → "Health, disable and repair".
 ///
-/// Usability contract (.context/usability.md): no modals; Enter submits
-/// the install strip; failures land in opErrorsStore, not alerts.
+/// Usability contract (.context/usability.md): no modals; failures land in
+/// opErrorsStore, not alerts.
 
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useState } from "react";
 
 import {
-  installExtension,
   listExtensions,
   listServices,
   listCollectors,
-  reviewExtension,
-  setExtensionEnabled,
+  runCommand,
   setCredential,
   saveExtensionSecret,
   extensionSecretIsSet,
   revokeExtensionSecret,
   subscribeOxplowEvents,
-  updateExtension,
   validateExtension,
   type Extension,
-  type ExtensionReview,
   type ScriptServices,
   type ServiceListing,
   type CollectorListing,
@@ -42,9 +37,8 @@ import {
 import { NEW_LENS_COMMAND } from "../lens/lensModel.js";
 import { useCommandDraft } from "../commandDraft.js";
 import { disabledCount, enableAgain, enableAllAgain, healthLine, healthOf, repairWithAgent, useContributionHealth, type ContributionHealth } from "../contributionHealth.js";
-import { COLLECTOR_RUNS, extensionCredentials, extensionRowModel, LATEST_RUNS_SQL, lastRuns, type LastRun, type RunRow, reviewModel, secretCredentials, secretRowModel, serviceLines, type SecretCredential } from "./extensionRowModel.js";
+import { COLLECTOR_RUNS, extensionCredentials, extensionRowModel, LATEST_RUNS_SQL, lastRuns, type LastRun, type RunRow, secretCredentials, secretRowModel, serviceLines, type SecretCredential } from "./extensionRowModel.js";
 import { extensionsChanged } from "../lens/lensRerun.js";
-import { ImpactReportView } from "./ImpactReportView.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import type { Reads } from "../tauri-bridge/generated/bindings.js";
 import { InlineConfirm } from "./InlineConfirm.js";
@@ -68,12 +62,7 @@ export function ExtensionsSection() {
   const [runs, setRuns] = useState<Record<string, LastRun>>({});
   const [runReads, setRunReads] = useState<Reads>(NO_READS);
   const health = useContributionHealth();
-  const [url, setUrl] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
-  /** An install or update waiting on the person's go-ahead. */
-  const [pending, setPending] = useState<
-    { kind: "install"; url: string; review: ExtensionReview } | { kind: "update"; name: string; review: ExtensionReview } | null
-  >(null);
 
   // Each part re-reads on the change that touches it, not on any event
   // (tsk1403): the extensions and their checks when the catalog or config
@@ -85,7 +74,7 @@ export function ExtensionsSection() {
       setExts(listed);
       const reports = await Promise.all(
         listed
-          .filter((e) => e.origin !== "bundled" && e.enabled)
+          .filter((e) => e.origin !== "bundled" && e.enabled && e.deployment.kind === "deployed")
           .map(async (e) => {
             try {
               const report = await validateExtension(e.name, null);
@@ -126,8 +115,7 @@ export function ExtensionsSection() {
       setRuns({});
     }
   }, []);
-  /** Everything again: what an install, an update or an enable leaves
-   *  different. */
+  /** Everything again: what a deploy or an enable leaves different. */
   const refresh = useCallback(async () => {
     await Promise.all([loadExtensions(), loadCollectors(), loadRuns()]);
   }, [loadExtensions, loadCollectors, loadRuns]);
@@ -148,60 +136,15 @@ export function ExtensionsSection() {
     });
   }, [refresh, loadExtensions, loadCollectors]);
 
-  async function review() {
-    const gitUrl = url.trim();
-    if (!gitUrl || busy) return;
-    setBusy("install");
+  /** Run `command` for extension `name`, then read everything again. */
+  async function act(name: string, label: string, command: string, done: string) {
+    setBusy(name);
     try {
-      setPending({ kind: "install", url: gitUrl, review: await reviewExtension({ gitUrl }, null) });
-    } catch (e) {
-      recordOpError({ label: `Review extension ${gitUrl}`, message: String(e) });
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function confirm() {
-    if (!pending || busy) return;
-    const { review } = pending;
-    setBusy(pending.kind === "install" ? "install" : pending.name);
-    try {
-      if (pending.kind === "install") {
-        const ext = await installExtension(pending.url, null, review.sha, null);
-        setUrl("");
-        showToast({ message: `Installed ${ext.name}. Commit oxplow/extensions/${ext.name} to share it with your team.` });
-      } else {
-        await updateExtension(pending.name, review.sha, null);
-        showToast({ message: `Updated ${pending.name}.` });
-      }
-      setPending(null);
+      await runCommand(command, { name });
       await refresh();
+      showToast({ message: done });
     } catch (e) {
-      recordOpError({ label: `${pending.kind === "install" ? "Install" : "Update"} extension ${review.extension.name}`, message: String(e) });
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function toggle(name: string, enabled: boolean) {
-    setBusy(name);
-    try {
-      setExts(await setExtensionEnabled(name, enabled));
-      setCollectors(await listCollectors());
-      showToast({ message: enabled ? `Enabled ${name}.` : `Disabled ${name} for this project.` });
-    } catch (e) {
-      recordOpError({ label: `${enabled ? "Enable" : "Disable"} extension ${name}`, message: String(e) });
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function update(name: string) {
-    setBusy(name);
-    try {
-      setPending({ kind: "update", name, review: await reviewExtension({ name }, null) });
-    } catch (e) {
-      recordOpError({ label: `Review update of ${name}`, message: String(e) });
+      recordOpError({ label: `${label} extension ${name}`, message: String(e) });
     } finally {
       setBusy(null);
     }
@@ -215,7 +158,7 @@ export function ExtensionsSection() {
         <EmptyState
           testId="extensions-empty"
           title="No extensions yet"
-          text="An extension adds lenses, data and checks. Have the agent build one, or install one below."
+          text="An extension adds lenses, data and checks. Have the agent build one."
           prompts={newLensPrompt ? [newLensPrompt] : []}
         />
       ) : (
@@ -238,18 +181,22 @@ export function ExtensionsSection() {
                     type="button"
                     data-testid={`extension-toggle-${m.name}`}
                     disabled={busy !== null}
-                    onClick={() => void toggle(m.name, !m.enabled)}
+                    onClick={() =>
+                      void (m.enabled
+                        ? act(m.name, "Disable", "oxplow.extension.disable", `Disabled ${m.name} for you.`)
+                        : act(m.name, "Enable", "oxplow.extension.enable", `Enabled ${m.name}.`))
+                    }
                   >
                     {m.toggleLabel}
                   </button>
-                  {m.canUpdate ? (
+                  {m.canDeploy ? (
                     <button
                       type="button"
-                      data-testid={`extension-update-${m.name}`}
+                      data-testid={`extension-deploy-${m.name}`}
                       disabled={busy !== null}
-                      onClick={() => void update(m.name)}
+                      onClick={() => void act(m.name, "Deploy", "oxplow.extension.deploy", `Deployed ${m.name}.`)}
                     >
-                      {busy === m.name ? "Checking…" : "Update…"}
+                      {busy === m.name ? "Deploying…" : "Deploy"}
                     </button>
                   ) : null}
                 </div>
@@ -311,37 +258,6 @@ export function ExtensionsSection() {
         </ul>
         </>
       )}
-      <div style={{ display: "flex", gap: 8 }}>
-        <input
-          data-testid="extension-install-url"
-          value={url}
-          placeholder="Git URL of an extension, e.g. https://github.com/acme/oxplow-lenses"
-          onChange={(e) => setUrl(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void review();
-            if (e.key === "Escape") setUrl("");
-          }}
-          style={{ flex: 1 }}
-        />
-        <button
-          type="button"
-          data-testid="extension-install"
-          disabled={!url.trim() || busy !== null || pending !== null}
-          onClick={() => void review()}
-        >
-          {busy === "install" && !pending ? "Checking…" : "Install…"}
-        </button>
-      </div>
-      {pending ? (
-        <ReviewPanel
-          review={pending.review}
-          serviceListing={serviceListing}
-          action={pending.kind === "install" ? "Install" : "Update"}
-          busy={busy !== null}
-          onConfirm={() => void confirm()}
-          onCancel={() => setPending(null)}
-        />
-      ) : null}
     </div>
   );
 }
@@ -406,83 +322,6 @@ export function HealthRow({ health }: { health: ContributionHealth }) {
           {enabling ? "Enabling…" : "Enable Again"}
         </button>
       ) : null}
-    </div>
-  );
-}
-
-/// What an install or update would bring in, with the go-ahead. Inline,
-/// not a modal: the confirm button takes focus, Escape cancels.
-export function ReviewPanel({
-  review,
-  serviceListing = [],
-  action,
-  busy,
-  onConfirm,
-  onCancel,
-}: {
-  review: ExtensionReview;
-  /** The titles that name services (`list_services`). */
-  serviceListing?: ServiceListing[];
-  action: "Install" | "Update";
-  busy: boolean;
-  onConfirm(): void;
-  onCancel(): void;
-}) {
-  const m = reviewModel(review, serviceListing);
-  return (
-    <div
-      data-testid="extension-review"
-      style={{ ...rowStyle, marginTop: 8 }}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onCancel();
-      }}
-    >
-      <div>
-        <strong>{m.name}</strong> <span style={mutedStyle}>from {m.from}</span>
-      </div>
-      {m.description ? <div style={mutedStyle}>{m.description}</div> : null}
-      <ul data-testid="extension-review-declares" style={{ margin: "6px 0", paddingLeft: 18 }}>
-        {m.declares.length === 0 ? <li style={mutedStyle}>Nothing but its manifest.</li> : null}
-        {m.declares.map((line, i) => (
-          <li key={i}>{line}</li>
-        ))}
-      </ul>
-      {m.services.length > 0 ? (
-        <ul data-testid="extension-review-services" style={{ margin: "6px 0", paddingLeft: 18 }}>
-          {m.services.map((line) => (
-            <li key={line.script}>
-              {line.script} — {line.text}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {/* No report when the candidate doesn't load; its errors say why. */}
-      {review.impact ? <ImpactReportView report={review.impact} testId="extension-review-impact" /> : null}
-      {m.errors.map((err, i) => (
-        <div key={`e${i}`} style={errorStyle}>
-          {err}
-        </div>
-      ))}
-      {m.problems.map((p, i) => (
-        <div key={`p${i}`} style={mutedStyle}>
-          {p}
-        </div>
-      ))}
-      <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-        <button
-          type="button"
-          data-testid="extension-review-confirm"
-          autoFocus
-          disabled={!m.canInstall || busy}
-          onClick={onConfirm}
-        >
-          {busy ? `${action === "Install" ? "Installing" : "Updating"}…` : action}
-        </button>
-        <button type="button" data-testid="extension-review-cancel" onClick={onCancel}>
-          Cancel
-        </button>
-        {!m.canInstall ? <span style={errorStyle}>Fix its errors before installing.</span> : null}
-      </div>
     </div>
   );
 }

@@ -201,11 +201,11 @@ async fn the_fake_harness_session_is_recorded_canonically() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_provider_launched_session_is_recorded_canonically() {
     let (cp, svc, root, _dir) = boot().await;
-    let ext_dir = root.join("oxplow/extensions/relay");
+    let ext_dir = root.join(".oxplow/extensions/relay");
     std::fs::create_dir_all(ext_dir.join("bin")).unwrap();
     std::fs::write(
         ext_dir.join("extension.yaml"),
-        "manifest: 2\nname: relay\nsharing: private\nintent:\n  purpose: a harness over the protocol\n  examples: [{ name: a }]\nproviders:\n  - id: relay\n    capability: agent_harness\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: relay\nintent:\n  purpose: a harness over the protocol\n  examples: [{ name: a }]\nproviders:\n  - id: relay\n    capability: agent_harness\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = ext_dir.join("bin/provider");
@@ -247,6 +247,11 @@ async fn a_provider_launched_session_is_recorded_canonically() {
         program.version.as_deref().unwrap(),
     )
     .unwrap();
+    // Deployed (which turns it on, reloading the config), then its
+    // instance enabled as a person would, then activated.
+    oxplow_app::extension_deploy::deploy(&svc, "relay", &root, None)
+        .await
+        .expect("the extension deploys");
     svc.config.write().unwrap().extension_instances.insert(
         "relay/relay".into(),
         oxplow_config::ExtensionInstanceConfig {
@@ -259,7 +264,7 @@ async fn a_provider_launched_session_is_recorded_canonically() {
     svc.extension_activation
         .activate(svc.clone())
         .await
-        .expect("the extension and its provider activate");
+        .expect("its provider activates");
     assert!(
         svc.harnesses.get(oxplow_harness_fake::ID).is_err(),
         "only the provider's instance stands for the fake"

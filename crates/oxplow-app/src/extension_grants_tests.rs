@@ -79,33 +79,29 @@ async fn a_qualified_read_reaches_only_its_model_and_what_derives_from_it() {
         .collect();
     write(
         &root,
-        "oxplow/extensions/acme/extension.yaml",
+        ".oxplow/extensions/acme/extension.yaml",
         &format!(
             "manifest: 2\nname: acme\nintent:\n  purpose: p\nmodels:\n  - name: efforts\n    version: 1\n    description: Efforts.\n    columns:\n      - {{ name: id, type: INTEGER, doc: Id. }}\n  - name: mine\n    version: 1\n    description: Items.\n    columns:\n      - {{ name: ref, type: TEXT, doc: Ref. }}\ncommands:\n{block}"
         ),
     );
     write(
         &root,
-        "oxplow/extensions/acme/models/efforts.sql",
+        ".oxplow/extensions/acme/models/efforts.sql",
         "SELECT id FROM ref('effort')",
     );
     write(
         &root,
-        "oxplow/extensions/acme/models/mine.sql",
+        ".oxplow/extensions/acme/models/mine.sql",
         "SELECT ref FROM ref('work_item')",
     );
     for (name, _, sql) in commands {
         write(
             &root,
-            &format!("oxplow/extensions/acme/{name}.star"),
+            &format!(".oxplow/extensions/acme/{name}.star"),
             &script(sql),
         );
     }
-    fx.svc
-        .extension_activation
-        .activate(fx.svc.clone())
-        .await
-        .expect("the project activates");
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
     crate::test_fixtures::activate(&fx.svc).await;
     let errors = fx
         .svc
@@ -174,15 +170,7 @@ async fn a_qualified_read_reaches_only_its_model_and_what_derives_from_it() {
 }
 
 async fn errors_of(fx: &TaskEffortFixture, extension: &str) -> String {
-    let root = fx.svc.layout.project_dir.clone();
-    fx.svc
-        .extension_catalog
-        .snapshot(&root)
-        .extensions()
-        .iter()
-        .find(|e| e.name == extension)
-        .map(|e| e.errors.join("\n"))
-        .unwrap_or_default()
+    crate::test_fixtures::load_errors(&fx.svc, extension).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -191,7 +179,7 @@ async fn a_service_the_script_did_not_declare_is_refused() {
     let root = fx.svc.layout.project_dir.clone();
     write(
         &root,
-        "oxplow/extensions/acme/extension.yaml",
+        ".oxplow/extensions/acme/extension.yaml",
         &format!(
             "manifest: 2\nname: acme\nintent:\n  purpose: p\ncommands:\n{}{}",
             reader("peek", "sql.read"),
@@ -201,12 +189,12 @@ async fn a_service_the_script_did_not_declare_is_refused() {
     // Declares `sql.read` and calls `state.read`: the run refuses it.
     write(
         &root,
-        "oxplow/extensions/acme/peek.star",
+        ".oxplow/extensions/acme/peek.star",
         "def transform(x):\n    return {\"commands\": [], \"result\": scope(\"state.read\", {\"scope\": \"project\", \"area\": \"state\"})}\n",
     );
     write(
         &root,
-        "oxplow/extensions/acme/sneak.star",
+        ".oxplow/extensions/acme/sneak.star",
         &script("SELECT 1 AS n"),
     );
     crate::test_fixtures::activate(&fx.svc).await;
@@ -225,7 +213,7 @@ async fn a_service_the_script_did_not_declare_is_refused() {
     // Fact collectors reaching for a model or the tree without declaring it.
     write(
         &root,
-        "oxplow/extensions/facts/extension.yaml",
+        ".oxplow/extensions/facts/extension.yaml",
         "manifest: 2\nname: facts\nintent:\n  purpose: p\ncollectors:
   - id: asks
     runtime: starlark
@@ -236,7 +224,7 @@ async fn a_service_the_script_did_not_declare_is_refused() {
     );
     write(
         &root,
-        "oxplow/extensions/facts/asks.star",
+        ".oxplow/extensions/facts/asks.star",
         "def transform(x):\n    return {\"facts\": [{\"measure\": \"facts.tally\", \"value\": len(ai_summarize(\"t\"))}]}\n",
     );
     let errors = errors_of(&fx, "facts").await;
@@ -265,7 +253,7 @@ mod approved_code {
 ";
 
     fn script(root: &Path, rel: &str, body: &str) {
-        let path = root.join("oxplow/extensions/acme").join(rel);
+        let path = root.join(".oxplow/extensions/acme").join(rel);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, body).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -292,7 +280,9 @@ mod approved_code {
         .await
     }
 
-    fn approve_current(fx: &TaskEffortFixture) {
+    async fn approve_current(fx: &TaskEffortFixture) {
+        // The approval is of what is deployed.
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         let root = fx.svc.layout.project_dir.clone();
         let ext = fx
             .svc
@@ -312,7 +302,7 @@ mod approved_code {
     async fn a_program_runs_only_once_approved_and_asks_again_when_edited() {
         let fx = services_with_task_effort().await;
         let root = fx.svc.layout.project_dir.clone();
-        write(&root, "oxplow/extensions/acme/extension.yaml", MANIFEST);
+        write(&root, ".oxplow/extensions/acme/extension.yaml", MANIFEST);
         let marker = root.join("ran");
         let program = |entities: &str| {
             format!(
@@ -329,7 +319,7 @@ mod approved_code {
         );
         assert!(!marker.exists(), "an unapproved program never starts");
 
-        approve_current(&fx);
+        approve_current(&fx).await;
         go(&fx).await.unwrap();
         assert!(marker.exists());
 
@@ -347,7 +337,7 @@ mod approved_code {
         );
 
         // So does a helper added beside it, which the approval covers.
-        approve_current(&fx);
+        approve_current(&fx).await;
         go(&fx).await.unwrap();
         script(&root, "helper.txt", "added later");
         let refused = go(&fx).await.unwrap_err();
@@ -365,12 +355,12 @@ mod approved_code {
         let root = fx.svc.layout.project_dir.clone();
         write(
             &root,
-            "oxplow/extensions/acme/extension.yaml",
+            ".oxplow/extensions/acme/extension.yaml",
             &format!("{MANIFEST}commands:\n{}", super::reader("all", "sql.read")),
         );
         write(
             &root,
-            "oxplow/extensions/acme/all.star",
+            ".oxplow/extensions/acme/all.star",
             &super::script("SELECT 1 AS n"),
         );
         script(
@@ -378,26 +368,16 @@ mod approved_code {
             "sync.sh",
             "#!/bin/sh\necho '{\"entities\":{\"seen\":[]}}'\n",
         );
-        fx.svc
-            .extension_activation
-            .activate(fx.svc.clone())
-            .await
-            .unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
-        approve_current(&fx);
+        approve_current(&fx).await;
         assert!(super::run(&fx, "acme.read.all").await.is_ok());
         go(&fx).await.unwrap();
 
         write(
             &root,
-            ".oxplow/project.yaml",
-            "extensions:\n  disabled: [acme]\n",
+            ".oxplow/personal.yaml",
+            "disableExtensions: [acme]\n",
         );
-        fx.svc
-            .extension_activation
-            .activate(fx.svc.clone())
-            .await
-            .unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
         assert!(
             super::run(&fx, "acme.read.all").await.is_err(),
@@ -413,12 +393,7 @@ mod approved_code {
         );
 
         // Enabling it again restores both; the approval was kept.
-        std::fs::remove_file(root.join(".oxplow/project.yaml")).unwrap();
-        fx.svc
-            .extension_activation
-            .activate(fx.svc.clone())
-            .await
-            .unwrap();
+        std::fs::remove_file(root.join(".oxplow/personal.yaml")).unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
         assert!(super::run(&fx, "acme.read.all").await.is_ok());
         go(&fx).await.unwrap();
@@ -458,7 +433,7 @@ mod approved_code {
     /// once the test released it.
     async fn waiting_program(fx: &TaskEffortFixture) -> (std::path::PathBuf, std::path::PathBuf) {
         let root = fx.svc.layout.project_dir.clone();
-        write(&root, "oxplow/extensions/acme/extension.yaml", MANIFEST);
+        write(&root, ".oxplow/extensions/acme/extension.yaml", MANIFEST);
         script(&root, "helper.txt", "approved");
         let started = root.join("started");
         let release = root.join("release");
@@ -471,12 +446,8 @@ mod approved_code {
                 release = release.display()
             ),
         );
-        fx.svc
-            .extension_activation
-            .activate(fx.svc.clone())
-            .await
-            .expect("the project activates");
-        approve_current(fx);
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
+        approve_current(fx).await;
         (started, release)
     }
 
@@ -511,7 +482,7 @@ mod approved_code {
     #[tokio::test(flavor = "multi_thread")]
     async fn the_program_runs_from_a_private_copy_removed_afterwards() {
         let fx = services_with_task_effort().await;
-        let original = fx.svc.layout.project_dir.join("oxplow/extensions/acme");
+        let original = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
         let (started, release) = waiting_program(&fx).await;
         let run = start(&fx, &started).await;
         std::fs::write(&release, "").unwrap();
@@ -535,10 +506,12 @@ mod approved_code {
     #[tokio::test(flavor = "multi_thread")]
     async fn an_edit_during_the_run_stops_it_and_publishes_nothing() {
         let fx = services_with_task_effort().await;
-        let original = fx.svc.layout.project_dir.join("oxplow/extensions/acme");
         let (started, release) = waiting_program(&fx).await;
         let run = start(&fx, &started).await;
-        std::fs::write(original.join("helper.txt"), "EDITED").unwrap();
+        // The program is approved as deployed: tampering with the deployed
+        // folder while it runs is what stops it.
+        let (deployed, _) = spec_of(&fx).await;
+        std::fs::write(deployed.join("helper.txt"), "EDITED").unwrap();
         std::fs::write(&release, "").unwrap();
         let error = run
             .await
@@ -551,9 +524,10 @@ mod approved_code {
         assert!(seen(&fx).await.is_empty(), "nothing it produced was kept");
     }
 
-    fn spec_of(
+    async fn spec_of(
         fx: &TaskEffortFixture,
     ) -> (std::path::PathBuf, oxplow_config::collectors::CollectorSpec) {
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
         let root = fx.svc.layout.project_dir.clone();
         let ext = fx
             .svc
@@ -568,10 +542,9 @@ mod approved_code {
     }
 
     fn exec(
-        fx: &TaskEffortFixture,
+        (dir, spec): (std::path::PathBuf, oxplow_config::collectors::CollectorSpec),
         timeout: std::time::Duration,
     ) -> Result<crate::collector_runner::ScriptOutput, String> {
-        let (dir, spec) = spec_of(fx);
         let host_env = |name: &str| match name {
             "PATH" | "HOME" => std::env::var(name).ok(),
             "KEPT" => Some("declared".to_string()),
@@ -595,7 +568,7 @@ mod approved_code {
         let root = fx.svc.layout.project_dir.clone();
         write(
             &root,
-            "oxplow/extensions/acme/extension.yaml",
+            ".oxplow/extensions/acme/extension.yaml",
             &MANIFEST.replace(
                 "    entry: sync.sh\n",
                 "    entry: sync.sh\n    env: [KEPT]\n",
@@ -610,7 +583,8 @@ mod approved_code {
                 dump.display()
             ),
         );
-        tokio::task::block_in_place(|| exec(&fx, std::time::Duration::from_secs(10))).unwrap();
+        let spec = spec_of(&fx).await;
+        tokio::task::block_in_place(|| exec(spec, std::time::Duration::from_secs(10))).unwrap();
         let seen = std::fs::read_to_string(&dump).unwrap();
         let names: std::collections::BTreeSet<_> = seen
             .lines()
@@ -656,7 +630,7 @@ mod approved_code {
     async fn a_timeout_reaps_the_program_and_what_it_started() {
         let fx = services_with_task_effort().await;
         let root = fx.svc.layout.project_dir.clone();
-        write(&root, "oxplow/extensions/acme/extension.yaml", MANIFEST);
+        write(&root, ".oxplow/extensions/acme/extension.yaml", MANIFEST);
         let pidfile = root.join("child.pid");
         script(
             &root,
@@ -666,8 +640,9 @@ mod approved_code {
                 pidfile.display()
             ),
         );
+        let spec = spec_of(&fx).await;
         let error =
-            tokio::task::block_in_place(|| exec(&fx, std::time::Duration::from_millis(600)))
+            tokio::task::block_in_place(|| exec(spec, std::time::Duration::from_millis(600)))
                 .expect_err("it never finishes");
         assert!(error.contains("timed out"), "{error}");
 

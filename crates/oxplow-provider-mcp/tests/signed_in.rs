@@ -35,8 +35,14 @@ fn copy_dir(from: &Path, to: &Path) {
 /// bearer `NOTES_TOKEN` a credential the person signs in for there.
 fn write_extension(project: &Path, sim: &OAuthSim) {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/notes");
-    let ext = project.join("oxplow/extensions/notes");
+    let ext = project.join(".oxplow/extensions/notes");
     copy_dir(&fixture, &ext);
+    // On for the project, so boot deploys it.
+    std::fs::write(
+        project.join(".oxplow/project.yaml"),
+        "extensions: [oxplow-bundled, notes]\n",
+    )
+    .unwrap();
     let manifest = std::fs::read_to_string(ext.join("extension.yaml")).unwrap();
     let by_command = "      mcp: { command: [bin/notes-server] }\n";
     assert!(manifest.contains(by_command));

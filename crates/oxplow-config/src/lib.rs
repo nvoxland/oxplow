@@ -31,13 +31,22 @@ pub const OXPLOW_CONFIG_FILE: &str = "project.yaml";
 
 /// A person's own layer over the project's config, inside
 /// [`OXPLOW_STATE_DIR`] (`<project>/.oxplow/personal.yaml`): their choice of
-/// implementations (`activeProviders`) and what a new thread starts with
-/// (`newThreadSession`), which git ignores (`.oxplow` ignores everything
+/// implementations (`activeProviders`), what a new thread starts with
+/// (`newThreadSession`), the extensions they turn on or off over the
+/// team's list (`enableExtensions`, `disableExtensions`) and where their
+/// extensions' sources are
+/// (`extensionSources`), which git ignores (`.oxplow` ignores everything
 /// but `project.yaml`).
 pub const PERSONAL_CONFIG_FILE: &str = "personal.yaml";
 
 /// The keys a person's layer may set.
-pub const PERSONAL_KEYS: &[&str] = &["activeProviders", "newThreadSession"];
+pub const PERSONAL_KEYS: &[&str] = &[
+    "activeProviders",
+    "newThreadSession",
+    "enableExtensions",
+    "disableExtensions",
+    "extensionSources",
+];
 
 /// What a personal key is, for Settings.
 pub fn personal_key_doc(key: &str) -> &'static str {
@@ -47,6 +56,18 @@ pub fn personal_key_doc(key: &str) -> &'static str {
         }
         "newThreadSession" => {
             "What a new thread starts with: `ask` (the session picker), `none`, or an agent \
+             (.oxplow/personal.yaml, which git ignores)."
+        }
+        "enableExtensions" => {
+            "Extensions you turn on beside the project's list \
+             (.oxplow/personal.yaml, which git ignores)."
+        }
+        "disableExtensions" => {
+            "Extensions you turn off, whoever listed them \
+             (.oxplow/personal.yaml, which git ignores)."
+        }
+        "extensionSources" => {
+            "Where your extensions' sources are, over the project's `extensionSources` \
              (.oxplow/personal.yaml, which git ignores)."
         }
         _ => "",
@@ -733,35 +754,150 @@ pub struct OxplowConfig {
     /// [`AI_ROLE_NAMES`]). Provider ids refer to each person's `ai.yaml`.
     #[serde(rename = "aiRoles")]
     pub ai_roles: std::collections::BTreeMap<String, AiRoleOverride>,
-    /// Extensions turned off for this project (`extensions: { disabled:
-    /// [...] }`), bundled ones included. Committed, so it's team-wide.
-    #[serde(rename = "extensionsDisabled")]
-    pub extensions_disabled: Vec<String>,
+    /// The extensions on for the whole team (`extensions: [...]`;
+    /// [`DEFAULT_EXTENSIONS`] when absent). Committed. oxplow-foundation is
+    /// always on and never listed.
+    #[serde(rename = "extensions")]
+    pub extensions: Vec<String>,
+    /// Where an extension's source is when it isn't
+    /// `.oxplow/extensions/<name>/` (`extensionSources: { <name>: <folder> }`),
+    /// relative to the checkout or absolute.
+    #[serde(rename = "extensionSources")]
+    pub extension_sources: std::collections::BTreeMap<String, String>,
+    /// A person's own turning on and off over the team's list
+    /// (`enableExtensions`, `disableExtensions` in `.oxplow/personal.yaml`).
+    #[serde(rename = "personalExtensions")]
+    pub personal_extensions: PersonalExtensions,
+    /// A person's own sources (`extensionSources` in
+    /// `.oxplow/personal.yaml`), over the team's.
+    #[serde(rename = "personalExtensionSources")]
+    pub personal_extension_sources: std::collections::BTreeMap<String, String>,
 }
 
-#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct RawExtensionsBlock {
-    #[serde(default)]
-    disabled: Vec<String>,
+/// A person's `enableExtensions` and `disableExtensions`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type)]
+pub struct PersonalExtensions {
+    /// Turned on for this person, beside the team's list.
+    pub enable: Vec<String>,
+    /// Turned off for this person, whoever listed them.
+    pub disable: Vec<String>,
 }
 
-/// Just the `extensions.disabled` list of `project_dir/.oxplow/project.yaml`,
-/// without loading (or failing on) the rest of the file. The extension
-/// loader calls this on every load, for the project the load answers to
-/// (the main worktree's, in the daemon).
-pub fn disabled_extensions(project_dir: impl AsRef<Path>) -> Vec<String> {
-    #[derive(Deserialize)]
+/// Which layer turned an extension on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum EnabledBy {
+    /// `.oxplow/project.yaml`'s `extensions`.
+    Team,
+    /// `.oxplow/personal.yaml`'s `enableExtensions`.
+    Personal,
+}
+
+/// What decides which extensions are on and where their sources are: the
+/// team's list and sources in `.oxplow/project.yaml`, and a person's
+/// overrides in `.oxplow/personal.yaml`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ExtensionSettings {
+    pub team: Vec<String>,
+    pub team_sources: std::collections::BTreeMap<String, String>,
+    pub personal: PersonalExtensions,
+    pub personal_sources: std::collections::BTreeMap<String, String>,
+}
+
+/// The folder that holds extension sources by default, under a checkout.
+pub const EXTENSION_SOURCES_DIR: &str = ".oxplow/extensions";
+
+/// The team's list when `.oxplow/project.yaml` has no `extensions` key.
+pub const DEFAULT_EXTENSIONS: &[&str] = &["oxplow-bundled"];
+
+fn default_extensions() -> Vec<String> {
+    DEFAULT_EXTENSIONS.iter().map(|s| s.to_string()).collect()
+}
+
+impl ExtensionSettings {
+    pub fn of(config: &OxplowConfig) -> Self {
+        Self {
+            team: config.extensions.clone(),
+            team_sources: config.extension_sources.clone(),
+            personal: config.personal_extensions.clone(),
+            personal_sources: config.personal_extension_sources.clone(),
+        }
+    }
+
+    /// The extensions on: (team ∪ personal enable) − personal disable, in
+    /// that order, each with the layer that turned it on.
+    pub fn enabled(&self) -> Vec<(String, EnabledBy)> {
+        let mut out: Vec<(String, EnabledBy)> = Vec::new();
+        let layers = self.team.iter().map(|n| (n, EnabledBy::Team)).chain(
+            self.personal
+                .enable
+                .iter()
+                .map(|n| (n, EnabledBy::Personal)),
+        );
+        for (name, layer) in layers {
+            if !self.personal.disable.contains(name) && !out.iter().any(|(n, _)| n == name) {
+                out.push((name.clone(), layer));
+            }
+        }
+        out
+    }
+
+    pub fn is_enabled(&self, name: &str) -> bool {
+        self.enabled().iter().any(|(n, _)| n == name)
+    }
+
+    /// Where `name`'s source is, in the checkout at `worktree`: the
+    /// person's `extensionSources` entry, then the team's, then
+    /// `.oxplow/extensions/<name>/`. A relative entry is the checkout's; `~/`
+    /// is the home folder.
+    pub fn source(&self, worktree: &Path, name: &str) -> std::path::PathBuf {
+        let entry = self
+            .personal_sources
+            .get(name)
+            .or_else(|| self.team_sources.get(name));
+        match entry {
+            Some(raw) => match raw.strip_prefix("~/") {
+                Some(rest) => dirs::home_dir().unwrap_or_default().join(rest),
+                None => worktree.join(raw),
+            },
+            None => worktree.join(EXTENSION_SOURCES_DIR).join(name),
+        }
+    }
+}
+
+/// [`ExtensionSettings`] for `project_dir`, without loading (or failing on)
+/// the rest of either file: an unreadable or invalid block reads as empty.
+/// The extension loader calls this on every load.
+pub fn extension_settings(project_dir: impl AsRef<Path>) -> ExtensionSettings {
+    #[derive(Deserialize, Default)]
     struct OnlyExtensions {
         #[serde(default)]
-        extensions: Option<RawExtensionsBlock>,
+        extensions: Option<Vec<String>>,
+        #[serde(default, rename = "enableExtensions")]
+        enable: Vec<String>,
+        #[serde(default, rename = "disableExtensions")]
+        disable: Vec<String>,
+        #[serde(default, rename = "extensionSources")]
+        extension_sources: std::collections::BTreeMap<String, String>,
     }
-    std::fs::read_to_string(config_path(project_dir.as_ref()))
-        .ok()
-        .and_then(|raw| serde_yaml::from_str::<OnlyExtensions>(&raw).ok())
-        .and_then(|c| c.extensions)
-        .map(|b| b.disabled)
-        .unwrap_or_default()
+    fn read(path: &Path) -> OnlyExtensions {
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|raw| serde_yaml::from_str(&raw).ok())
+            .unwrap_or_default()
+    }
+    let dir = project_dir.as_ref();
+    let team = read(&config_path(dir));
+    let personal = read(&personal_path(dir));
+    ExtensionSettings {
+        team: team.extensions.unwrap_or_else(default_extensions),
+        team_sources: team.extension_sources,
+        personal: PersonalExtensions {
+            enable: personal.enable,
+            disable: personal.disable,
+        },
+        personal_sources: personal.extension_sources,
+    }
 }
 
 /// The built-in role names `ai.roles` accepts beside extension AI
@@ -955,9 +1091,12 @@ struct RawConfig {
     /// AI role assignments `{ roles: { <role>: { provider, model } } }`, layered over the user's ai.yaml.
     #[serde(default)]
     ai: Option<RawAiBlock>,
-    /// Extensions turned off for this project: `{ disabled: [names] }`.
+    /// The extensions on for the whole team: `[names]`; absent, `[oxplow-bundled]`. Enables code. oxplow-foundation is always on and never listed; a person turns others on or off for themselves in `.oxplow/personal.yaml` (`enableExtensions`, `disableExtensions`).
     #[serde(default)]
-    extensions: Option<RawExtensionsBlock>,
+    extensions: Option<Vec<String>>,
+    /// Where an extension's source is when it isn't `.oxplow/extensions/<name>/`: `{ <name>: <folder> }`, relative to the checkout or absolute (`~/` is the home folder). Enables code.
+    #[serde(rename = "extensionSources", default)]
+    extension_sources: Option<std::collections::BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
@@ -1018,20 +1157,12 @@ pub fn load_project_config(project_dir: impl AsRef<Path>) -> Result<OxplowConfig
             config_path = %config_path.display(),
             "project config not found; using defaults"
         );
-        return Ok(OxplowConfig {
-            personal_active_providers: personal.active_providers,
-            personal_new_thread_session: personal.new_thread_session,
-            ..default_config(fallback_name)
-        });
+        return Ok(personal.onto(default_config(fallback_name)));
     }
 
     let raw = std::fs::read_to_string(&config_path)?;
     let doc: serde_yaml::Value = serde_yaml::from_str(&raw)?;
-    let config = OxplowConfig {
-        personal_active_providers: personal.active_providers,
-        personal_new_thread_session: personal.new_thread_session,
-        ..parse_project_config(doc, &fallback_name)?
-    };
+    let config = personal.onto(parse_project_config(doc, &fallback_name)?);
     info!(
         config_path = %config_path.display(),
         agents = ?config.agents,
@@ -1047,6 +1178,8 @@ pub fn load_project_config(project_dir: impl AsRef<Path>) -> Result<OxplowConfig
 struct PersonalLayer {
     active_providers: std::collections::BTreeMap<String, String>,
     new_thread_session: Option<String>,
+    extensions: PersonalExtensions,
+    extension_sources: std::collections::BTreeMap<String, String>,
 }
 
 impl PersonalLayer {
@@ -1054,6 +1187,19 @@ impl PersonalLayer {
         Self {
             active_providers: config.personal_active_providers.clone(),
             new_thread_session: config.personal_new_thread_session.clone(),
+            extensions: config.personal_extensions.clone(),
+            extension_sources: config.personal_extension_sources.clone(),
+        }
+    }
+
+    /// `config` with this layer in it.
+    fn onto(self, config: OxplowConfig) -> OxplowConfig {
+        OxplowConfig {
+            personal_active_providers: self.active_providers,
+            personal_new_thread_session: self.new_thread_session,
+            personal_extensions: self.extensions,
+            personal_extension_sources: self.extension_sources,
+            ..config
         }
     }
 
@@ -1068,6 +1214,24 @@ impl PersonalLayer {
         }
         if let Some(choice) = &self.new_thread_session {
             map.insert("newThreadSession".into(), choice.as_str().into());
+        }
+        if !self.extensions.enable.is_empty() {
+            map.insert(
+                "enableExtensions".into(),
+                serde_yaml::to_value(&self.extensions.enable).expect("a list serializes"),
+            );
+        }
+        if !self.extensions.disable.is_empty() {
+            map.insert(
+                "disableExtensions".into(),
+                serde_yaml::to_value(&self.extensions.disable).expect("a list serializes"),
+            );
+        }
+        if !self.extension_sources.is_empty() {
+            map.insert(
+                "extensionSources".into(),
+                serde_yaml::to_value(&self.extension_sources).expect("a map serializes"),
+            );
         }
         map
     }
@@ -1117,6 +1281,21 @@ fn parse_personal(doc: serde_yaml::Value) -> Result<PersonalLayer, ConfigError> 
                 }
                 layer.new_thread_session = Some(choice.to_string());
             }
+            Some(key @ ("enableExtensions" | "disableExtensions")) => {
+                let names: Vec<String> = serde_yaml::from_value(value).map_err(|e| {
+                    ConfigError::Invalid(format!(".oxplow/personal.yaml: {key}: {e}"))
+                })?;
+                if key == "enableExtensions" {
+                    layer.extensions.enable = names;
+                } else {
+                    layer.extensions.disable = names;
+                }
+            }
+            Some("extensionSources") => {
+                layer.extension_sources = serde_yaml::from_value(value).map_err(|e| {
+                    ConfigError::Invalid(format!(".oxplow/personal.yaml: extensionSources: {e}"))
+                })?;
+            }
             other => {
                 return Err(ConfigError::Invalid(format!(
                     ".oxplow/personal.yaml may set only {} (found `{}`)",
@@ -1140,6 +1319,15 @@ pub fn personal_value(config: &OxplowConfig, key: &str) -> Option<serde_json::Va
             .personal_new_thread_session
             .as_ref()
             .map(|c| serde_json::Value::String(c.clone())),
+        "enableExtensions" if !config.personal_extensions.enable.is_empty() => {
+            serde_json::to_value(&config.personal_extensions.enable).ok()
+        }
+        "disableExtensions" if !config.personal_extensions.disable.is_empty() => {
+            serde_json::to_value(&config.personal_extensions.disable).ok()
+        }
+        "extensionSources" if !config.personal_extension_sources.is_empty() => {
+            serde_json::to_value(&config.personal_extension_sources).ok()
+        }
         _ => None,
     }
 }
@@ -1180,11 +1368,7 @@ pub fn with_personal_key(
 ) -> Result<OxplowConfig, ConfigError> {
     let map = personal_with(PersonalLayer::of(config).to_mapping(), key, value)?;
     let layer = parse_personal(serde_yaml::Value::Mapping(map))?;
-    Ok(OxplowConfig {
-        personal_active_providers: layer.active_providers,
-        personal_new_thread_session: layer.new_thread_session,
-        ..config.clone()
-    })
+    Ok(layer.onto(config.clone()))
 }
 
 /// Set (`Some`) or remove (`None`) `key` in a person's layer
@@ -1545,15 +1729,16 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
         to_yaml(&config.event_retention),
         !config.event_retention.is_empty(),
     );
-    {
-        let mut ext = serde_yaml::Mapping::new();
-        ext.insert("disabled".into(), to_yaml(&config.extensions_disabled));
-        put(
-            "extensions",
-            serde_yaml::Value::Mapping(ext),
-            !config.extensions_disabled.is_empty(),
-        );
-    }
+    put(
+        "extensions",
+        to_yaml(&config.extensions),
+        config.extensions != default_extensions(),
+    );
+    put(
+        "extensionSources",
+        to_yaml(&config.extension_sources),
+        !config.extension_sources.is_empty(),
+    );
     {
         let mut ai = serde_yaml::Mapping::new();
         // A role restricted from nothing is written without `restrict`.
@@ -1649,7 +1834,10 @@ fn default_config(project_name: String) -> OxplowConfig {
         replacements: std::collections::BTreeMap::new(),
         event_retention: std::collections::BTreeMap::new(),
         ai_roles: Default::default(),
-        extensions_disabled: Vec::new(),
+        extensions: default_extensions(),
+        extension_sources: Default::default(),
+        personal_extensions: Default::default(),
+        personal_extension_sources: Default::default(),
     }
 }
 
@@ -2100,7 +2288,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         if moved {
             return Err(ConfigError::Invalid(format!(
                 "`{key}:` is an extension's: declare the project's in its own extension \
-                 (`oxplow/extensions/project/extension.yaml`)"
+                 (`.oxplow/extensions/project/extension.yaml`)"
             )));
         }
     }
@@ -2185,7 +2373,10 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         replacements,
         event_retention,
         ai_roles: validate_ai_roles(raw.ai)?,
-        extensions_disabled: raw.extensions.map(|b| b.disabled).unwrap_or_default(),
+        extensions: raw.extensions.unwrap_or_else(default_extensions),
+        extension_sources: raw.extension_sources.unwrap_or_default(),
+        personal_extensions: Default::default(),
+        personal_extension_sources: Default::default(),
     })
 }
 
@@ -2468,7 +2659,7 @@ pub fn validate_metrics(
         if is_define && layer == CatalogLayer::Project {
             return Err(ConfigError::Invalid(format!(
                 "metrics[{i}] defines `{the_key}`: the project's metrics are defined in its own \
-                 extension (`oxplow/extensions/project/extension.yaml`); `.oxplow/project.yaml` \
+                 extension (`.oxplow/extensions/project/extension.yaml`); `.oxplow/project.yaml` \
                  turns metrics on (`use:`) and off"
             )));
         }
@@ -4408,18 +4599,82 @@ lsp:
     }
 
     #[test]
-    fn disabled_extensions_round_trip_and_read_cheaply() {
+    fn the_team_list_and_the_personal_layer_decide_which_extensions_are_on() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            cfg_path(dir.path()),
+            "extensions: [oxplow-bundled, triage]\nextensionSources:\n  triage: tools/triage\n",
+        )
+        .unwrap();
+        std::fs::write(
+            personal_path(dir.path()),
+            "enableExtensions: [mine, triage]\ndisableExtensions: [oxplow-bundled]\n\
+             extensionSources:\n  mine: /abs/mine\n  triage: /abs/triage\n",
+        )
+        .unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(cfg.extensions, vec!["oxplow-bundled", "triage"]);
+        assert_eq!(cfg.personal_extensions.enable, vec!["mine", "triage"]);
+        write_rendered(dir.path(), &cfg);
+
+        let settings = extension_settings(dir.path());
+        assert_eq!(
+            settings.enabled(),
+            vec![
+                ("triage".to_string(), EnabledBy::Team),
+                ("mine".to_string(), EnabledBy::Personal),
+            ]
+        );
+        let wt = Path::new("/wt");
+        // The person's source wins over the team's; a relative one is the checkout's.
+        assert_eq!(settings.source(wt, "triage"), Path::new("/abs/triage"));
+        assert_eq!(settings.source(wt, "mine"), Path::new("/abs/mine"));
+        assert_eq!(
+            settings.source(wt, "other"),
+            Path::new("/wt/.oxplow/extensions/other")
+        );
+        let team_only = ExtensionSettings {
+            personal_sources: Default::default(),
+            ..settings.clone()
+        };
+        assert_eq!(
+            team_only.source(wt, "triage"),
+            Path::new("/wt/tools/triage")
+        );
+        // No list: the bundled extension is on; an empty one turns it off.
+        assert_eq!(
+            extension_settings(tempdir().unwrap().path()).enabled(),
+            vec![("oxplow-bundled".to_string(), EnabledBy::Team)]
+        );
+        let none = tempdir().unwrap();
+        std::fs::write(cfg_path(none.path()), "extensions: []\n").unwrap();
+        let cfg = load_project_config(none.path()).unwrap();
+        assert!(cfg.extensions.is_empty());
+        write_rendered(none.path(), &cfg);
+        assert!(extension_settings(none.path()).enabled().is_empty());
+    }
+
+    #[test]
+    fn a_home_relative_source_expands() {
+        let settings = ExtensionSettings {
+            personal_sources: [("mine".to_string(), "~/exts/mine".to_string())].into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            settings.source(Path::new("/wt"), "mine"),
+            dirs::home_dir().unwrap().join("exts/mine")
+        );
+    }
+
+    #[test]
+    fn the_old_disabled_block_is_refused() {
         let dir = tempdir().unwrap();
         std::fs::write(
             cfg_path(dir.path()),
             "extensions:\n  disabled: [oxplow-bundled]\n",
         )
         .unwrap();
-        let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.extensions_disabled, vec!["oxplow-bundled"]);
-        write_rendered(dir.path(), &cfg);
-        assert_eq!(disabled_extensions(dir.path()), vec!["oxplow-bundled"]);
-        assert!(disabled_extensions(tempdir().unwrap().path()).is_empty());
+        assert!(load_project_config(dir.path()).is_err());
     }
 
     #[test]
@@ -4875,7 +5130,7 @@ testing:
             let err = load_from_yaml(yaml).unwrap_err().to_string();
             assert!(
                 err.contains(&format!("`{key}:` is an extension's"))
-                    && err.contains("oxplow/extensions/project/extension.yaml"),
+                    && err.contains(".oxplow/extensions/project/extension.yaml"),
                 "{key}: {err}"
             );
         }

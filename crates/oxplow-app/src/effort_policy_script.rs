@@ -118,14 +118,17 @@ def transform(x):
     /// `script` as the private extension `acme`'s effort policy `tidy`,
     /// chosen as the project's, the fixture's own effort closed.
     async fn install(fx: &EffortFixture, script: &str) {
-        let dir = fx.svc.layout.project_dir.join("oxplow/extensions/acme");
+        let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(dir.join("policies")).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),
-            "manifest: 2\nname: acme\nsharing: private\nintent:\n  purpose: a policy\n  examples: [{ name: a }]\nimplementations:\n  - { capability: effort_policy, id: tidy, title: Tidy, entry: policies/tidy.star, needs: [sql.read] }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: a policy\n  examples: [{ name: a }]\nimplementations:\n  - { capability: effort_policy, id: tidy, title: Tidy, entry: policies/tidy.star, needs: [sql.read] }\n",
         )
         .unwrap();
         std::fs::write(dir.join("policies/tidy.star"), script).unwrap();
+        // Deploying turns it on in the person's file and reloads the config,
+        // so the choice is made after.
+        crate::test_fixtures::activate(&fx.svc).await;
         fx.svc
             .config
             .write()
@@ -310,7 +313,7 @@ def transform(x):
             fx.svc
                 .layout
                 .project_dir
-                .join("oxplow/extensions/acme/README.md"),
+                .join(".oxplow/extensions/acme/README.md"),
             "# Acme\n",
         )
         .unwrap();

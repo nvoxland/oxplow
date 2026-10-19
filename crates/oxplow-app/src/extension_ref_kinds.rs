@@ -578,7 +578,6 @@ pub(crate) mod tests {
 
     pub(crate) const MANIFEST: &str = "manifest: 2
 name: acme
-sharing: private
 intent: { purpose: PRs., origin: null, examples: [] }
 models:
   - name: prs
@@ -600,7 +599,7 @@ ref_kinds:
 ";
 
     pub(crate) fn write_acme(root: &std::path::Path, manifest: &str) {
-        let dir = root.join("oxplow/extensions/acme");
+        let dir = root.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(dir.join("models")).unwrap();
         std::fs::create_dir_all(dir.join("lenses")).unwrap();
         std::fs::write(dir.join("extension.yaml"), manifest).unwrap();
@@ -656,7 +655,7 @@ ref_kinds:
             (k.kind.as_str(), k.resolve.as_str(), k.page.as_str()),
             ("acme_pr", "v_acme_prs", "page:acme/pr")
         );
-        assert_eq!(k.declared_at, "oxplow/extensions/acme/extension.yaml:15");
+        assert_eq!(k.declared_at, ".oxplow/extensions/acme/extension.yaml:14");
     }
 
     #[test]
@@ -703,7 +702,7 @@ ref_kinds:
             assert!(ext.ref_kinds.is_empty(), "{to}");
             let errors = ext.errors.join("\n");
             assert!(
-                errors.contains("extension.yaml:15:") && errors.contains(says),
+                errors.contains("extension.yaml:14:") && errors.contains(says),
                 "{to}: {errors}"
             );
         }
@@ -821,7 +820,7 @@ pages:";
             let dir = tempfile::tempdir().unwrap();
             write_acme(dir.path(), manifest);
             std::fs::write(
-                dir.path().join("oxplow/extensions/acme/models/found.sql"),
+                dir.path().join(".oxplow/extensions/acme/models/found.sql"),
                 "SELECT 'acme_pr:1' AS ref, 'One' AS title, 'The first.' AS body",
             )
             .unwrap();

@@ -3958,7 +3958,7 @@ enum ParserProblem {
 #[derive(Debug, Clone)]
 struct ReportCollector {
     owner: String,
-    /// Its extension's folder, project-relative (`oxplow/extensions/project`).
+    /// Its extension's folder, project-relative (`.oxplow/extensions/project`).
     dir: String,
     spec: CollectorSpec,
 }
@@ -4172,10 +4172,10 @@ pub(crate) mod test_support {
     }
 
     /// Declare `entries` (from [`report_collector`]) as the collectors of the
-    /// project extension under `root` (`oxplow/extensions/project/`),
+    /// project extension under `root` (`.oxplow/extensions/project/`),
     /// replacing what it declared.
     pub(crate) fn write_project_extension(root: &std::path::Path, entries: &[String]) {
-        let dir = root.join("oxplow/extensions/project");
+        let dir = root.join(".oxplow/extensions/project");
         std::fs::create_dir_all(&dir).unwrap();
         let mut manifest =
             String::from("manifest: 2\nname: project\nintent:\n  purpose: test\ncollectors:\n");
@@ -7411,7 +7411,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             let h = build(None).await;
             let dir = h.tmp.path();
-            let ext_dir = dir.join("oxplow/extensions/project");
+            let ext_dir = dir.join(".oxplow/extensions/project");
             std::fs::create_dir_all(ext_dir.join("tools")).unwrap();
             let program = ext_dir.join("tools/parse.sh");
             std::fs::write(
@@ -7473,7 +7473,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             let h = build(None).await;
             let dir = h.tmp.path();
-            let ext_dir = dir.join("oxplow/extensions/project");
+            let ext_dir = dir.join(".oxplow/extensions/project");
             std::fs::create_dir_all(ext_dir.join("tools")).unwrap();
             let program = ext_dir.join("tools/parse.sh");
             let script = |extra: &str| {
@@ -8468,7 +8468,7 @@ mod tests {
             .unwrap();
             std::fs::write(h.tmp.path().join("reports/ok.json"), ESLINT_JSON).unwrap();
             // The parser's entry is the project extension's own file.
-            let ext_dir = h.tmp.path().join("oxplow/extensions/project");
+            let ext_dir = h.tmp.path().join(".oxplow/extensions/project");
             std::fs::create_dir_all(&ext_dir).unwrap();
             std::os::unix::fs::symlink(outside.path().join("p.jq"), ext_dir.join("p.jq")).unwrap();
             declare(

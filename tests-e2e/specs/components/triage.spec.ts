@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import type { Page } from "@playwright/test";
 
-import { approveCollector, approveProgram, ipc, run, until, type Daemon } from "../../support/daemon.js";
+import { approveCollector, approveProgram, installExample, ipc, run, until, type Daemon } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
@@ -32,16 +32,9 @@ async function echo(): Promise<{ url: string; close(): Promise<void> }> {
   return { url: `http://127.0.0.1:${port}`, close: () => new Promise((r) => server.close(() => r())) };
 }
 
-/** Put the example into `daemon`'s project and wait until it's loaded. */
+/** Put the example into `daemon`'s project and deploy it. */
 async function install(daemon: Daemon) {
-  const here = dirname(fileURLToPath(import.meta.url));
-  cpSync(join(here, "..", "..", "..", "examples", "extensions", "triage"), join(daemon.project, "oxplow", "extensions", "triage"), {
-    recursive: true,
-  });
-  await until("triage to load", 60_000, async () => {
-    const ext = await ipc<Array<{ name: string }>>(daemon, "list_extensions");
-    return ext.some((e) => e.name === "triage");
-  });
+  await installExample(daemon, "triage");
 }
 
 async function facts(daemon: Daemon): Promise<unknown[][]> {

@@ -417,7 +417,7 @@ mod tests {
         std::fs::write(p, body).unwrap();
     }
 
-    const MANIFEST: &str = "manifest: 2\nname: acme-pr\nsharing: private\nintent: { purpose: PRs., origin: null, examples: [] }\nevent_types:\n  types:\n    - type: acme_pr.merged\n      v: 1\n      schema: merged.json\n      summary: A pull request merged.\n";
+    const MANIFEST: &str = "manifest: 2\nname: acme-pr\nintent: { purpose: PRs., origin: null, examples: [] }\nevent_types:\n  types:\n    - type: acme_pr.merged\n      v: 1\n      schema: merged.json\n      summary: A pull request merged.\n";
 
     fn merged(number: i64) -> Envelope {
         Envelope::new("acme_pr.merged", 1, "test", json!({ "number": number })).unwrap()
@@ -441,10 +441,10 @@ mod tests {
         let log = SqliteEventLogStore::new(svc.db.clone(), svc.vocabulary.clone());
         assert!(log.append(merged(1)).await.is_err());
 
-        write(&root, "oxplow/extensions/acme-pr/extension.yaml", MANIFEST);
+        write(&root, ".oxplow/extensions/acme-pr/extension.yaml", MANIFEST);
         write(
             &root,
-            "oxplow/extensions/acme-pr/merged.json",
+            ".oxplow/extensions/acme-pr/merged.json",
             &schema("number"),
         );
         crate::test_fixtures::activate_with_problems(svc).await;
@@ -472,7 +472,7 @@ mod tests {
         // The same version, a new shape: refused (named in the errors).
         write(
             &root,
-            "oxplow/extensions/acme-pr/merged.json",
+            ".oxplow/extensions/acme-pr/merged.json",
             &schema("pr"),
         );
         crate::test_fixtures::activate_with_problems(svc).await;
@@ -484,7 +484,7 @@ mod tests {
             .unwrap()
             .errors;
         assert!(
-            errors.iter().any(|e| e.contains("extension.yaml:7")
+            errors.iter().any(|e| e.contains("extension.yaml:6")
                 && e.contains("changed since that version was recorded")),
             "{errors:?}"
         );
@@ -498,8 +498,10 @@ mod tests {
 
         // Removed: no appends, the logged row still reads, the type stays
         // listed unregistered.
-        std::fs::remove_dir_all(root.join("oxplow/extensions/acme-pr")).unwrap();
-        crate::test_fixtures::activate_with_problems(svc).await;
+        std::fs::remove_dir_all(root.join(".oxplow/extensions/acme-pr")).unwrap();
+        crate::extension_deploy::remove(svc, "acme-pr")
+            .await
+            .unwrap();
         assert!(log.append(merged(14)).await.is_err());
         let rows = log.read_after(0, 10_000).await.unwrap();
         assert!(rows.iter().any(
@@ -526,7 +528,7 @@ mod tests {
         let root = svc.layout.project_dir.clone();
         write(
             &root,
-            "oxplow/extensions/acme-pr/extension.yaml",
+            ".oxplow/extensions/acme-pr/extension.yaml",
             &MANIFEST.replace(
                 "event_types:\n",
                 "event_types:\n  retention: { payload_days: 7, content_days: 3 }\n",
@@ -534,7 +536,7 @@ mod tests {
         );
         write(
             &root,
-            "oxplow/extensions/acme-pr/merged.json",
+            ".oxplow/extensions/acme-pr/merged.json",
             &schema("number"),
         );
         let window = || async {
@@ -553,8 +555,10 @@ mod tests {
         };
         crate::test_fixtures::activate_with_problems(svc).await;
         assert_eq!(window().await, (7, 3));
-        std::fs::remove_dir_all(root.join("oxplow/extensions/acme-pr")).unwrap();
-        crate::test_fixtures::activate_with_problems(svc).await;
+        std::fs::remove_dir_all(root.join(".oxplow/extensions/acme-pr")).unwrap();
+        crate::extension_deploy::remove(svc, "acme-pr")
+            .await
+            .unwrap();
         assert_eq!(window().await, (7, 3));
     }
 
@@ -656,8 +660,8 @@ mod tests {
                 SqlCell::Text("git-pull-request".into())
             ]]
         );
-        std::fs::remove_dir_all(root.join("oxplow/extensions/acme")).unwrap();
-        crate::test_fixtures::activate_with_problems(svc).await;
+        std::fs::remove_dir_all(root.join(".oxplow/extensions/acme")).unwrap();
+        crate::extension_deploy::remove(svc, "acme").await.unwrap();
         assert_eq!(link(), None);
     }
 
@@ -680,8 +684,8 @@ mod tests {
                 .replace("kind: acme_pr", "kind: beta_pr"),
         );
         std::fs::rename(
-            beta.path().join("oxplow/extensions/acme"),
-            root.join("oxplow/extensions/beta"),
+            beta.path().join(".oxplow/extensions/acme"),
+            root.join(".oxplow/extensions/beta"),
         )
         .unwrap();
         crate::test_fixtures::activate_with_problems(svc).await;
@@ -735,8 +739,8 @@ mod tests {
                 .replace("wikilink: pr", "wikilink: px"),
         );
         std::fs::rename(
-            other.path().join("oxplow/extensions/acme"),
-            root.join("oxplow/extensions/acme-pr"),
+            other.path().join(".oxplow/extensions/acme"),
+            root.join(".oxplow/extensions/acme-pr"),
         )
         .unwrap();
         crate::test_fixtures::activate_with_problems(svc).await;
@@ -776,7 +780,7 @@ mod tests {
         let root = svc.layout.project_dir.clone();
         write(
             &root,
-            "oxplow/extensions/acme-pr/extension.yaml",
+            ".oxplow/extensions/acme-pr/extension.yaml",
             &MANIFEST.replace(
                 "event_types:\n",
                 "event_types:\n  retention: { payload_days: 7, content_days: 3 }\n",
@@ -784,13 +788,13 @@ mod tests {
         );
         write(
             &root,
-            "oxplow/extensions/acme-pr/merged.json",
+            ".oxplow/extensions/acme-pr/merged.json",
             &schema("number"),
         );
         write(
             &root,
-            "oxplow/extensions/acme_pr/extension.yaml",
-            "manifest: 2\nname: acme_pr\nsharing: private\nintent: { purpose: Other., origin: null, examples: [] }\n",
+            ".oxplow/extensions/acme_pr/extension.yaml",
+            "manifest: 2\nname: acme_pr\nintent: { purpose: Other., origin: null, examples: [] }\n",
         );
         crate::test_fixtures::activate_with_problems(svc).await;
         let window = svc
@@ -821,17 +825,17 @@ mod tests {
         };
         write(
             dir.path(),
-            "oxplow/extensions/acme-pr/merged.json",
+            ".oxplow/extensions/acme-pr/merged.json",
             &schema("number"),
         );
         write(
             dir.path(),
-            "oxplow/extensions/acme-pr/tally.star",
+            ".oxplow/extensions/acme-pr/tally.star",
             "def transform(x):\n    return []\n",
         );
         write(
             dir.path(),
-            "oxplow/extensions/acme-pr/extension.yaml",
+            ".oxplow/extensions/acme-pr/extension.yaml",
             &collector("acme_pr.merged"),
         );
         let loaded = crate::extensions::load_extensions(dir.path());
@@ -841,7 +845,7 @@ mod tests {
         // One in its own namespace that it doesn't declare is no type.
         write(
             dir.path(),
-            "oxplow/extensions/acme-pr/extension.yaml",
+            ".oxplow/extensions/acme-pr/extension.yaml",
             &collector("acme_pr.closed"),
         );
         let loaded = crate::extensions::load_extensions(dir.path());
@@ -856,7 +860,7 @@ mod tests {
         // Another extension's is a subscription (P9.D1): a warning here.
         write(
             dir.path(),
-            "oxplow/extensions/acme-pr/extension.yaml",
+            ".oxplow/extensions/acme-pr/extension.yaml",
             &collector("other_ext.thing"),
         );
         let loaded = crate::extensions::load_extensions(dir.path());
@@ -880,15 +884,15 @@ mod tests {
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
-        write(&root, "oxplow/extensions/acme-pr/extension.yaml", MANIFEST);
+        write(&root, ".oxplow/extensions/acme-pr/extension.yaml", MANIFEST);
         write(
             &root,
-            "oxplow/extensions/acme-pr/merged.json",
+            ".oxplow/extensions/acme-pr/merged.json",
             &schema("number"),
         );
         write(
             &root,
-            "oxplow/extensions/acme_pr/extension.yaml",
+            ".oxplow/extensions/acme_pr/extension.yaml",
             &MANIFEST
                 .replace("name: acme-pr", "name: acme_pr")
                 .replace("acme_pr.merged", "acme_pr.closed")
@@ -896,7 +900,7 @@ mod tests {
         );
         write(
             &root,
-            "oxplow/extensions/acme_pr/closed.json",
+            ".oxplow/extensions/acme_pr/closed.json",
             &schema("number"),
         );
         crate::test_fixtures::activate_with_problems(svc).await;
@@ -923,7 +927,7 @@ mod tests {
 
     /// `beta`: an effect and a collector that react to `acme_pr.merged`,
     /// a type of another extension's.
-    const SUBSCRIBER: &str = "manifest: 2\nname: beta\nsharing: private\nintent: { purpose: Follows merges., origin: null, examples: [] }\neffects:\n  - id: note\n    summary: Note a merge.\n    on: [acme_pr.merged]\n    entry: note.star\ncollectors:\n  - id: pull\n    runtime: exec\n    entry: pull.sh\n    trigger: { on: [acme_pr.merged] }\n    entities:\n      - { name: pr, key: n, columns: { n: int } }\n";
+    const SUBSCRIBER: &str = "manifest: 2\nname: beta\nintent: { purpose: Follows merges., origin: null, examples: [] }\neffects:\n  - id: note\n    summary: Note a merge.\n    on: [acme_pr.merged]\n    entry: note.star\ncollectors:\n  - id: pull\n    runtime: exec\n    entry: pull.sh\n    trigger: { on: [acme_pr.merged] }\n    entities:\n      - { name: pr, key: n, columns: { n: int } }\n";
 
     async fn listed(svc: &crate::Services, name: &str) -> Extension {
         svc.listed_extensions(&svc.layout.project_dir)
@@ -943,13 +947,13 @@ mod tests {
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
-        write(&root, "oxplow/extensions/beta/extension.yaml", SUBSCRIBER);
+        write(&root, ".oxplow/extensions/beta/extension.yaml", SUBSCRIBER);
         write(
             &root,
-            "oxplow/extensions/beta/note.star",
+            ".oxplow/extensions/beta/note.star",
             "def transform(x):\n    return {\"skip\": \"nothing to do\"}\n",
         );
-        write(&root, "oxplow/extensions/beta/pull.sh", "#!/bin/sh\n");
+        write(&root, ".oxplow/extensions/beta/pull.sh", "#!/bin/sh\n");
 
         // Loading alone (what `oxplow extension check` sees): no error, and a
         // warning for each subscription.
@@ -992,10 +996,10 @@ mod tests {
         );
 
         // Its owner arrives: resolved.
-        write(&root, "oxplow/extensions/acme-pr/extension.yaml", MANIFEST);
+        write(&root, ".oxplow/extensions/acme-pr/extension.yaml", MANIFEST);
         write(
             &root,
-            "oxplow/extensions/acme-pr/merged.json",
+            ".oxplow/extensions/acme-pr/merged.json",
             &schema("number"),
         );
         crate::test_fixtures::activate_with_problems(svc).await;
@@ -1005,15 +1009,17 @@ mod tests {
         // version): the type isn't registered, and the subscriber says so.
         write(
             &root,
-            "oxplow/extensions/acme-pr/merged.json",
+            ".oxplow/extensions/acme-pr/merged.json",
             &schema("pr"),
         );
         crate::test_fixtures::activate_with_problems(svc).await;
         assert_eq!(unresolved(&listed(svc, "beta").await.errors), 2);
 
         // The owner goes: unresolved again.
-        std::fs::remove_dir_all(root.join("oxplow/extensions/acme-pr")).unwrap();
-        crate::test_fixtures::activate_with_problems(svc).await;
+        std::fs::remove_dir_all(root.join(".oxplow/extensions/acme-pr")).unwrap();
+        crate::extension_deploy::remove(svc, "acme-pr")
+            .await
+            .unwrap();
         assert_eq!(unresolved(&listed(svc, "beta").await.errors), 2);
     }
 
@@ -1027,15 +1033,15 @@ mod tests {
         for bad in ["work_item.nope", "beta.nope", "nope"] {
             write(
                 d.path(),
-                "oxplow/extensions/beta/extension.yaml",
+                ".oxplow/extensions/beta/extension.yaml",
                 &SUBSCRIBER.replace("acme_pr.merged", bad),
             );
             write(
                 d.path(),
-                "oxplow/extensions/beta/note.star",
+                ".oxplow/extensions/beta/note.star",
                 "def transform(x):\n    return {\"skip\": \"no\"}\n",
             );
-            write(d.path(), "oxplow/extensions/beta/pull.sh", "#!/bin/sh\n");
+            write(d.path(), ".oxplow/extensions/beta/pull.sh", "#!/bin/sh\n");
             let loaded = crate::extensions::load_extensions(d.path())
                 .into_iter()
                 .find(|e| e.name == "beta")

@@ -245,7 +245,6 @@ pub const MANIFEST: &[Capability] = &[
         "a custom component's bridged command, from its sandboxed frame through the host (P6b.D2)",
     ),
     both_named("validate_extension", "validate_extension", "oxplow_validate_extension"),
-    both_named("review_extension", "review_extension", "oxplow_review_extension"),
     ui(
         "list_native_conversations",
         "a harness's saved conversations, for the person choosing one to resume or fork (their selection)",
@@ -257,10 +256,6 @@ pub const MANIFEST: &[Capability] = &[
     ui(
         "report_tabs",
         "the tabs a window shows, which an agent reads with `list_tabs` and `get_open_page`",
-    ),
-    ui(
-        "set_extension_enabled",
-        "turning extensions on or off is a person's call",
     ),
     model(
         "list_collectors",
