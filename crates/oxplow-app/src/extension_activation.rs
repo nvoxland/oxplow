@@ -279,9 +279,15 @@ impl ExtensionActivation {
             };
             if let Err(error) = retried {
                 self.record_failure(&svc, error);
-                return Err(DomainError::Invalid(
-                    "required extension baseline could not activate".into(),
-                ));
+                let why: Vec<String> = self
+                    .problems()
+                    .into_iter()
+                    .flat_map(|(owner, why)| why.into_iter().map(move |w| format!("{owner}: {w}")))
+                    .collect();
+                return Err(DomainError::Invalid(format!(
+                    "required extension baseline could not activate: {}",
+                    why.join("; ")
+                )));
             }
         }
         // A candidate overtaken by a change made while it was staged is

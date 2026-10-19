@@ -58,7 +58,7 @@ import { Facts } from "../kit/Facts.js";
 import { Stat } from "../kit/Stat.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 import { showToast } from "../components/toastStore.js";
-import { addLensToContext, copyLens, openAfterAction, performLensAction, rowRecord } from "./lensActions.js";
+import { actionOffered, addLensToContext, copyLens, openAfterAction, performLensAction, rowRecord } from "./lensActions.js";
 import { LensIcon, lensIcon, toneColor } from "./lensIcons.js";
 import { useExtensions } from "../extensionsStore.js";
 import { setContextRefDrag } from "../agent-context-dnd.js";
@@ -343,7 +343,9 @@ function RowsBody({
       enabled: true,
       run: () => insertIntoAgent(rowAsk(lens, result.columns, row)),
     },
-    ...rowActions.map((a) => ({
+    ...rowActions
+      .filter((a) => actionOffered(a, rowRecord(result.columns, row)))
+      .map((a) => ({
       id: `lens-action-${a.id}`,
       label: a.label,
       enabled: actions !== undefined,

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { IpcCallError } from "../ipc-error.js";
 import type { LensAction, LensRun } from "../tauri-bridge/generated/bindings.js";
-import { addLensToContext, copyLens, openAfterAction, performLensAction, rowRecord, type LensActionDeps } from "./lensActions.js";
+import { actionOffered, addLensToContext, copyLens, openAfterAction, performLensAction, rowRecord, type LensActionDeps } from "./lensActions.js";
 
 const run = { lens: { id: "acme/prs" }, params: { repo: "x" } } as unknown as LensRun;
 const action: LensAction = { id: "finish", label: "Finish", command: "oxplow.work_item.transition", input: {}, row: false };
@@ -102,4 +102,14 @@ test("add to context hands the lens and its params to the agent", () => {
 
 test("rowRecord maps columns to the row's values", () => {
   expect(rowRecord(["id", "title"], [7, "x"])).toEqual({ id: 7, title: "x" });
+});
+
+test("a row action with `when` is offered only on rows where that column is truthy", () => {
+  const enable = { ...action, row: true, when: "can_enable" } as LensAction;
+  expect(actionOffered(enable, { can_enable: 1 })).toBe(true);
+  expect(actionOffered(enable, { can_enable: 0 })).toBe(false);
+  expect(actionOffered(enable, { can_enable: null })).toBe(false);
+  expect(actionOffered(enable, { can_enable: "" })).toBe(false);
+  expect(actionOffered(enable, {})).toBe(false);
+  expect(actionOffered({ ...action, row: true } as LensAction, {})).toBe(true);
 });

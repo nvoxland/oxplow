@@ -98,6 +98,21 @@ async fn run_lens_action_unpinned(
         }
         _ => {}
     }
+    if let (Some(when), Some(row)) = (&action.when, &row) {
+        let truthy = match row.get(when) {
+            None | Some(SqlCell::Null(())) => false,
+            Some(SqlCell::Int(n)) => *n != 0,
+            Some(SqlCell::Real(n)) => *n != 0.0,
+            Some(SqlCell::Bool(b)) => *b,
+            Some(SqlCell::Text(t)) => !t.is_empty(),
+        };
+        if !truthy {
+            return Err(invalid(
+                "/row",
+                format!("`{action_id}` isn't offered on this row (`when: {when}`)"),
+            ));
+        }
+    }
     let params = extensions::resolve_params(&lens, &params, ctx).map_err(CommandError::from)?;
     let bound = bind_input(&action.input, &params, row)?;
     let input = match given {
@@ -713,6 +728,7 @@ params: [{ name: item, default: "" }]
 actions:
   - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { ref: "{{param.item}}", to: done } }
   - { id: finish-row, label: Finish, command: oxplow.work_item.transition, row: true, input: { ref: "{{row.ref}}", to: done } }
+  - { id: finish-open, label: Finish, command: oxplow.work_item.transition, row: true, when: open, input: { ref: "{{row.ref}}", to: done } }
   - { id: commit, label: Commit, command: oxplow.vcs.commit, input: { stream: str1, message: "x" } }
   - { id: prompt, label: Prompt, command: oxplow.config.set, input: { key: agentPromptAppend, value: be brief } }
   - { id: retitle, label: Retitle…, command: oxplow.work_item.update, row: true, form: true, fixed: [ref], input: { ref: "{{row.ref}}", title: "{{row.title}}" } }
@@ -814,6 +830,54 @@ actions:
         assert!(run("finish-row", None).await.is_err());
         assert!(run("finish", Some(row.clone())).await.is_err());
         run("finish-row", Some(row)).await.unwrap();
+        assert_eq!(state(&fx.svc, fx.task).await, "done");
+    }
+
+    /// A row action with `when` is offered only on rows whose column is
+    /// truthy, and refused on any other.
+    #[tokio::test]
+    async fn a_row_action_with_when_is_offered_only_on_truthy_rows() {
+        let (fx, root) = fixture().await;
+        let row = |open: SqlCell| {
+            BTreeMap::from([
+                (
+                    "ref".to_string(),
+                    SqlCell::Text(oxplow_tasks::work_item_ref(fx.task)),
+                ),
+                ("open".to_string(), open),
+            ])
+        };
+        let run = |row: BTreeMap<String, SqlCell>| {
+            let (svc, root) = (fx.svc.clone(), root.clone());
+            async move {
+                run_lens_action(
+                    &svc,
+                    &root,
+                    call(
+                        "finish-open",
+                        BTreeMap::new(),
+                        Some(row),
+                        Actor::Human,
+                        false,
+                    ),
+                    &extensions::LensContext::default(),
+                )
+                .await
+            }
+        };
+        for closed in [
+            SqlCell::Int(0),
+            SqlCell::Null(()),
+            SqlCell::Text(String::new()),
+        ] {
+            let err = run(row(closed)).await.unwrap_err();
+            assert!(
+                format!("{err:?}").contains("isn't offered on this row"),
+                "{err:?}"
+            );
+        }
+        assert_ne!(state(&fx.svc, fx.task).await, "done");
+        run(row(SqlCell::Int(1))).await.unwrap();
         assert_eq!(state(&fx.svc, fx.task).await, "done");
     }
 

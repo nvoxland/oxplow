@@ -1,5 +1,6 @@
 SELECT CAST('extension:' || name AS TEXT) AS ref, name, namespace, description, path, origin,
        version, enabled, purpose, deployment, hash,
        errors_json AS errors, warnings_json AS warnings,
-       permissions_json AS permissions, pending_json AS pending
+       permissions_json AS permissions, pending_json AS pending,
+       shared
 FROM source('extension_listing')

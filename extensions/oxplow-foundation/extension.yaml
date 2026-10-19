@@ -168,6 +168,7 @@ pages:
   - { id: settings, title: Settings, icon: settings, category: System, keywords: every setting config preferences, params: [area], component: "oxplow:settings" }
   - { id: catalog, title: Catalog, icon: book-open, category: System, keywords: ask prompts questions what can i help data config, lens: catalog-overview }
   - { id: closed-threads, title: Closed Threads, icon: archive, category: System, lens: closed-threads }
+  - { id: extensions, title: Extensions, icon: package, category: System, keywords: deploy rollback permissions enable disable share, lens: extensions }
   # Opened from elsewhere
   - { id: alerts, title: Alerts, icon: bell, component: "oxplow:alerts" }
   - { id: local-history-full, title: All Snapshots, icon: history, component: "oxplow:local-history-full" }
@@ -184,6 +185,10 @@ pages:
   - { id: duplicate-block, title: Duplicate Block, icon: copy, params: [left, left_lines, left_at, right, right_lines, right_at], component: "oxplow:duplicate-block" }
 ui:
   slots:
+    # Settings → Extensions: the Extensions page's list and deployments,
+    # ahead of core's health and credentials.
+    - { slot: settings.extensions.sections, lens: extensions-list, at: { before: health } }
+    - { slot: settings.extensions.sections, lens: extensions-deployments, at: { before: health } }
     - { slot: thread.plan.header, lens: thread-handoffs-in }
     - { slot: thread.plan.header, lens: thread-handoffs-out }
 commands:

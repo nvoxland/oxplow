@@ -297,6 +297,7 @@ fn extension_row(
         warnings_json: json_text(&extension.warnings),
         permissions_json: json_text(&extension.permissions),
         pending_json: json_text(&extension.pending),
+        shared: extension.shared,
     }
 }
 

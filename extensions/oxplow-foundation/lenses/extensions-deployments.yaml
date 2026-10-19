@@ -1,0 +1,21 @@
+title: Deployments
+description: "Each deployment in the store (v_extension_deployment), newest first: the copy of a source a deploy made, what it was approved to reach, and which one runs. Roll back makes an earlier one run again (asking first when it reaches further)."
+query: |
+  SELECT d.name, substr(d.hash, 1, 7) AS deployment, d.hash, d.deployed_at,
+         CASE WHEN d.active THEN 'runs' ELSE '' END AS running,
+         NOT d.active AS inactive,
+         CASE WHEN d.permissions = '{}' THEN '' ELSE d.permissions END AS permissions,
+         d.source
+  FROM v_extension_deployment d
+  ORDER BY d.deployed_at DESC
+columns:
+  - { key: name, label: Extension }
+  - { key: deployment, label: Deployment, width: 90 }
+  - { key: deployed_at, label: Deployed, format: relative, width: 120 }
+  - { key: running, label: Runs, width: 60 }
+  - { key: permissions, label: Permissions }
+  - { key: source, label: From }
+actions:
+  - { id: rollback, label: Roll Back to This, command: oxplow.extension.rollback, input: { name: "{{row.name}}", to: "{{row.hash}}" }, row: true, when: inactive }
+empty: No deployments yet. A deploy copies an extension's source here.
+hidden: true

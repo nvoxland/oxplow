@@ -651,6 +651,11 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       needs `row: true`; `oxplow_validate_extension` checks `{{row.x}}` against
       the result's columns; the command name must be well-formed. Any
       other shape is a field error.
+    - **`when: <column>`** (row actions only): the action is offered only on
+      rows where that column is truthy (not null, 0, `""` or false) — the
+      row menu leaves it out elsewhere (`actionOffered`), and a run on such
+      a row is refused. `oxplow_validate_extension` checks the column is in
+      the result. The query computes the condition (`can_enable`).
     - **A lens grants no power.** `lens_actions::run_lens_action` runs the
       command through the bus as `Actor::Lens { lens_id, on_behalf_of }`
       — `Human` from the UI (`run_lens_action` RPC), the calling agent from
@@ -1219,6 +1224,19 @@ Keep This (`oxplow.lens.keep`) never asks: it fails, saying why, when the
 extension's source gained a permission since it was last deployed. A
 fresh machine has nothing running, so a teammate's extension that
 declares permissions waits for its first deploy here (Startup).
+
+**The Extensions page** (foundation's `extensions` page, also mounted in
+Settings → Extensions through `settings.extensions.sections`, ahead of
+core's health-and-credentials section): `extensions-list` is every
+extension from `v_extension` joined to `v_extension_source` — the live
+model of each source as it is now, so an edit shows at once ("out of date"
+when its hash isn't the running deployment's) — with its permissions and
+what it waits on, and the row actions Deploy (offered only when undeployed
+or out of date), Roll Back, Enable, Disable, Share with the Team, Stop
+Sharing and Remove, each offered by a `when:` column the query computes;
+`extensions-deployments` is `v_extension_deployment`, newest first, with
+Roll Back to This. A row action that adds permissions asks inline like any
+deploy.
 
 `v_extension.permissions` is the declaration as JSON (`{}`: baseline);
 `v_extension.pending` is what an undeployed extension waits on a person

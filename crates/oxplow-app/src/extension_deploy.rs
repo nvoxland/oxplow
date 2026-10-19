@@ -1053,6 +1053,83 @@ mod tests {
         );
     }
 
+    /// `v_extension_source` is each source as it is now, so a source that
+    /// moved on from what runs shows; `v_extension.shared` says whether the
+    /// extension is the team's.
+    #[tokio::test]
+    async fn v_extension_marks_a_source_that_moved_on_and_a_shared_one() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        let row = || async {
+            svc.sql
+                .query_sql(
+                    "SELECT s.hash IS NOT e.hash, e.shared, s.path FROM v_extension e \
+                     JOIN v_extension_source s USING (name) WHERE e.name = 'acme'",
+                    vec![],
+                    None,
+                )
+                .await
+                .unwrap()
+                .rows
+        };
+        let int = |n| oxplow_db::SqlCell::Int(n);
+        let path = oxplow_db::SqlCell::Text(".oxplow/extensions/acme".into());
+        source(svc, "One");
+        deploy(svc, "acme", &root, None, true).await.unwrap();
+        assert_eq!(row().await, vec![vec![int(0), int(0), path.clone()]]);
+        // An edit changes nothing that runs; the source is read as it is.
+        source(svc, "Two");
+        assert_eq!(row().await, vec![vec![int(1), int(0), path]]);
+        share(svc, "acme").unwrap();
+        svc.extension_activation
+            .activate(svc.clone())
+            .await
+            .unwrap();
+        assert_eq!(row().await[0][1], int(1));
+    }
+
+    /// The Extensions page lists each extension and offers Deploy only
+    /// where it would change something: a source that moved on.
+    #[tokio::test]
+    async fn the_extensions_page_offers_deploy_only_when_the_source_moved_on() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        source(svc, "One");
+        deploy(svc, "acme", &root, None, true).await.unwrap();
+        let acme = || async {
+            let run = crate::extensions::run_lens(
+                &svc.sql,
+                &svc.extension_catalog,
+                &root,
+                "oxplow-foundation/extensions-list",
+                Default::default(),
+                &crate::extensions::LensContext::default(),
+            )
+            .await
+            .unwrap();
+            let col = |name: &str| run.result.columns.iter().position(|c| c == name).unwrap();
+            let row = run
+                .result
+                .rows
+                .iter()
+                .find(|r| r[col("name")] == oxplow_db::SqlCell::Text("acme".into()))
+                .unwrap()
+                .clone();
+            (
+                row[col("source_state")].clone(),
+                row[col("can_deploy")].clone(),
+                row[col("can_disable")].clone(),
+            )
+        };
+        let text = |t: &str| oxplow_db::SqlCell::Text(t.into());
+        let int = |n| oxplow_db::SqlCell::Int(n);
+        assert_eq!(acme().await, (text(""), int(0), int(1)));
+        source(svc, "Two");
+        assert_eq!(acme().await, (text("out of date"), int(1), int(1)));
+    }
+
     /// A source runs nothing until it is deployed; a deploy runs it, turns
     /// it on for the person and records the deployment; the same source
     /// again changes nothing.

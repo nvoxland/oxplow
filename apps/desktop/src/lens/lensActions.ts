@@ -41,6 +41,15 @@ export function rowRecord(columns: string[], row: SqlCell[]): Record<string, Sql
   return out;
 }
 
+/** Whether row action `action` is offered on `row`: always, unless its
+ *  `when` names a column, which must then be truthy there (not null, 0,
+ *  `""` or false). The server refuses it on any other row too. */
+export function actionOffered(action: LensAction, row: Record<string, SqlCell>): boolean {
+  if (!action.when) return true;
+  const v = row[action.when];
+  return v !== null && v !== undefined && v !== 0 && v !== "" && v !== false;
+}
+
 export async function performLensAction(
   action: LensAction,
   run: LensRun,

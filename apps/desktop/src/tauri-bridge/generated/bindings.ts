@@ -3032,6 +3032,11 @@ export type Extension_Deserialize = {
 	 *  for nothing.
 	 */
 	pending?: string[],
+	/**
+	 *  It is the team's: the project's own list names it
+	 *  (`oxplow.extension.share`).
+	 */
+	shared?: boolean,
 };
 
 /**  A loaded extension and anything wrong with it. */
@@ -3170,6 +3175,11 @@ export type Extension_Serialize = {
 	 *  for nothing.
 	 */
 	pending: string[],
+	/**
+	 *  It is the team's: the project's own list names it
+	 *  (`oxplow.extension.share`).
+	 */
+	shared: boolean,
 };
 
 /**
@@ -3854,6 +3864,11 @@ export type LensAction = {
 	 *  names a page.
 	 */
 	then: ActionThen,
+	/**
+	 *  A row action offered only on rows whose column of this name is
+	 *  truthy (not null, 0, `""` or false): an Enable on rows that are off.
+	 */
+	when: string | null,
 };
 
 /**

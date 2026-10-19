@@ -843,6 +843,9 @@ pub struct LensAction {
     /// What becomes of the lens's page when the command's `ui.open_after`
     /// names a page.
     pub then: ActionThen,
+    /// A row action offered only on rows whose column of this name is
+    /// truthy (not null, 0, `""` or false): an Enable on rows that are off.
+    pub when: Option<String>,
 }
 
 /// The `{{param.x}}` / `{{row.x}}` placeholders in `input`, as
@@ -889,6 +892,9 @@ struct ActionFile {
     /// `open` (default), `replace` or `stay`.
     #[serde(default)]
     then: ActionThen,
+    /// A row action's column: offered only on rows where it is truthy.
+    #[serde(default)]
+    when: Option<String>,
 }
 
 /// Parse a lens's `actions:`: each `{ id, label, command, input?, row? }`.
@@ -935,6 +941,12 @@ fn parse_actions(
         if !f.fixed.is_empty() && !f.form {
             return Err(format!(
                 "actions: `{}`: `fixed` is for a form action (`form: true`)",
+                f.id
+            ));
+        }
+        if f.when.is_some() && !f.row {
+            return Err(format!(
+                "actions: `{}`: `when` is for a row action (`row: true`)",
                 f.id
             ));
         }
@@ -986,6 +998,7 @@ fn parse_actions(
             fixed: f.fixed,
             choices: f.choices,
             then: f.then,
+            when: f.when,
         });
     }
     Ok(out)
@@ -1135,7 +1148,7 @@ pub const SLOTS: &[SlotSpec] = &[
         &["agents", "new-threads", "prompt"],
     ),
     SlotSpec::sections("settings.lsp.sections", &[], &["servers"]),
-    SlotSpec::sections("settings.extensions.sections", &[], &["installed"]),
+    SlotSpec::sections("settings.extensions.sections", &[], &["health"]),
     SlotSpec::sections("settings.data.sections", &[], &["data"]),
     SlotSpec::sections(
         "settings.integrations.sections",
@@ -1689,6 +1702,10 @@ pub struct Extension {
     /// for nothing.
     #[serde(default)]
     pub pending: Vec<String>,
+    /// It is the team's: the project's own list names it
+    /// (`oxplow.extension.share`).
+    #[serde(default)]
+    pub shared: bool,
 }
 
 impl Extension {
@@ -1790,7 +1807,7 @@ pub(crate) fn sources_on(
 }
 
 /// How a folder is shown: relative to `root` when inside it, else whole.
-fn shown(root: &Path, dir: &Path) -> String {
+pub(crate) fn shown(root: &Path, dir: &Path) -> String {
     dir.strip_prefix(root)
         .map(|rel| rel.to_string_lossy().into_owned())
         .unwrap_or_else(|_| dir.to_string_lossy().into_owned())
@@ -1942,6 +1959,9 @@ pub fn load_deployed(
             }
         })
         .collect();
+    for ext in &mut out {
+        ext.shared = settings.team.contains(&ext.name);
+    }
     out.sort_by(|a, b| a.name.cmp(&b.name).then(a.origin.cmp(&b.origin)));
     resolve_catalog(out, settings)
 }
@@ -2680,6 +2700,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         deployment: Deployment::Source,
         permissions: Permissions::default(),
         pending: Vec::new(),
+        shared: false,
     }
 }
 
@@ -4846,6 +4867,14 @@ async fn prepare(
                     }
                 }
                 for a in &run.lens.actions {
+                    if let Some(when) = a.when.as_ref().filter(|w| !cols.contains(w)) {
+                        ext.errors.push(format!(
+                            "lens {id}: action `{}` is offered `when: {when}`, which isn't in the \
+                             query result (columns: {})",
+                            a.id,
+                            cols.join(", ")
+                        ));
+                    }
                     for (scope, name) in action_templates(&a.input) {
                         if scope == "row" && !cols.contains(&name) {
                             ext.errors.push(format!(
@@ -5366,6 +5395,17 @@ mod tests {
         let p = root.join(rel);
         fs::create_dir_all(p.parent().unwrap()).unwrap();
         fs::write(p, body).unwrap();
+    }
+
+    /// `when` names a column a row action is offered on; it means nothing
+    /// without `row: true`.
+    #[test]
+    fn when_needs_a_row_action() {
+        let parse =
+            |action: &str| parse_actions(vec![serde_yaml::from_str(action).unwrap()], &[], false);
+        assert!(parse("{ id: a, label: A, command: x.y.z, row: true, when: open }").is_ok());
+        let err = parse("{ id: a, label: A, command: x.y.z, when: open }").unwrap_err();
+        assert!(err.contains("`when` is for a row action"), "{err}");
     }
 
     /// `acme` at `dir` with `manifest` (and the files it names): loaded as

@@ -39,6 +39,7 @@ pub const NAMES: &[&str] = &[
     "lsp_server",
     "collector_state",
     "collector_credential",
+    "extension_source",
     "zone",
     "zone_unmatched",
     "scope",
@@ -81,6 +82,7 @@ pub fn columns(name: &str) -> &'static [&'static str] {
         ],
         "collector_state" => &["ref", "owner", "id", "network_enforced", "disabled"],
         "collector_credential" => &["collector", "name", "is_set"],
+        "extension_source" => &["name", "path", "hash"],
         "zone" => &["position", "zone", "patterns", "color", "files"],
         "zone_unmatched" => &["path"],
         "scope" => &["id", "access", "host", "spends", "summary"],
@@ -137,6 +139,11 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
             "zone" | "zone_unmatched" => {
                 matches!(event, E::ConfigChanged | E::WorkspaceChanged { .. })
             }
+            // A source is files in the checkout, and where it lives is config.
+            "extension_source" => matches!(
+                event,
+                E::WorkspaceChanged { .. } | E::ConfigChanged | E::ExtensionsChanged
+            ),
             "config_value" => matches!(event, E::ConfigChanged | E::ExtensionsChanged),
             "vcs_workspace" => matches!(event, E::VcsRefsChanged { .. }),
             "workspace_file" => matches!(
@@ -295,6 +302,7 @@ impl LiveModels {
             "lsp_server" => Ok(sources.lsp_servers().await),
             "collector_state" => sources.collector_state().await,
             "collector_credential" => sources.collector_credentials().await,
+            "extension_source" => sources.extension_sources().await,
             "zone" => Ok(sources.zones().await?.0),
             "zone_unmatched" => Ok(sources.zones().await?.1),
             "config_value" => sources.config_values().await,
@@ -454,6 +462,33 @@ impl LiveSources {
                     .map(move |c| vec![text(collector.clone()), text(c.name.clone()), flag(c.set)])
             })
             .collect())
+    }
+
+    /// Each extension source in the main checkout as it is now: its name,
+    /// where it is and its hash (`extension_store::source_hash`, the hash a
+    /// deploy of it would have).
+    async fn extension_sources(&self) -> Result<Vec<Vec<SqlCell>>, DomainError> {
+        let project = self.worktrees.project_dir().to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            let settings = oxplow_config::extension_settings(&project);
+            crate::extensions::known_names(&project, &settings)
+                .into_iter()
+                .filter_map(|name| {
+                    let dir = settings.source(&project, &name);
+                    if !dir.join("extension.yaml").is_file() {
+                        return None;
+                    }
+                    let hash = crate::extension_store::source_hash(&dir).ok()?;
+                    Some(vec![
+                        text(name),
+                        text(crate::extensions::shown(&project, &dir)),
+                        text(hash),
+                    ])
+                })
+                .collect()
+        })
+        .await
+        .map_err(|e| DomainError::Invariant(format!("reading extension sources: {e}")))
     }
 
     /// The zone table's rows and the unmatched sample, from one pass over

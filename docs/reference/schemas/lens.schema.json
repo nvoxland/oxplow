@@ -1004,6 +1004,14 @@
               "$ref": "#/definitions/ActionThen"
             }
           ]
+        },
+        "when": {
+          "description": "A row action's column: offered only on rows where it is truthy.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,
