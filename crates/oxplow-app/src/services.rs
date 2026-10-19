@@ -300,8 +300,6 @@ pub struct ServiceUse {
     pub declared: Declared,
     /// Its script names one of the service's builtins.
     pub used: bool,
-    /// A person approves a script that uses it.
-    pub approval: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
@@ -352,7 +350,6 @@ pub fn of_extension(
                         Declared::Undeclared
                     },
                     used: used.contains(s.scope),
-                    approval: s.approval,
                 })
                 .collect();
             out.push(ScriptServices {
@@ -562,7 +559,7 @@ mod tests {
     #[test]
     fn the_reference_lists_every_service() {
         let mut table = String::from(
-            "| `needs` | What it gives | Builtins | Approval | In a script that composes |\n|---|---|---|---|---|\n",
+            "| `needs` | What it gives | Builtins | In a script that composes |\n|---|---|---|---|\n",
         );
         for s in oxplow_domain::service::SERVICES {
             let builtins = s
@@ -576,9 +573,8 @@ mod tests {
             } else {
                 "no"
             };
-            let approval = if s.approval { "yours" } else { "none" };
             table.push_str(&format!(
-                "| `{}` | {} | {builtins} | {approval} | {who} |\n",
+                "| `{}` | {} | {builtins} | {who} |\n",
                 s.scope,
                 s.summary.split_whitespace().collect::<Vec<_>>().join(" ")
             ));

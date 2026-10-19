@@ -1,7 +1,7 @@
 //! The host services a script may use (`.context/extensions.md`
 //! "Services"): each one a scope a script declares in its `needs`, the
-//! builtins it provides, whether a person approves it, and which runs may
-//! use it. One table: the router that builds a run's hosts, `oxplow
+//! builtins it provides, and which runs may use it. Whether a script may
+//! use one is its extension's `permissions:` (`ai.compute` is `ai`). One table: the router that builds a run's hosts, `oxplow
 //! extension check`, and the reference all read it.
 
 use serde::Serialize;
@@ -18,8 +18,6 @@ pub struct ServiceSpec {
     pub summary: &'static str,
     /// The Starlark builtins it provides (`scope` for `sql.read`).
     pub builtins: &'static [&'static str],
-    /// A person approves a script that uses it (it spends their key).
-    pub approval: bool,
     /// The runs that may use it: a pure run (a command's composer, an
     /// effect's or policy's script) may not call out.
     pub modes: &'static [Mode],
@@ -44,7 +42,6 @@ pub const SERVICES: &[ServiceSpec] = &[
         title: "Read recorded job results",
         summary: "Read this extension's durable job status and result: scope(\"jobs.read\", {id}).",
         builtins: &[],
-        approval: false,
         modes: ALL,
     },
     ServiceSpec {
@@ -53,7 +50,6 @@ pub const SERVICES: &[ServiceSpec] = &[
         summary: "Read the resolved defaults, project and personal settings with their provenance: \
                   `scope(\"extension_config.read\", {})`.",
         builtins: &[],
-        approval: false,
         modes: ALL,
     },
     ServiceSpec {
@@ -62,7 +58,6 @@ pub const SERVICES: &[ServiceSpec] = &[
         summary: "Read this extension's workflow state or cache: \
                   `scope(\"state.read\", {scope, area})` returns a snapshot or null.",
         builtins: &[],
-        approval: false,
         modes: ALL,
     },
     ServiceSpec {
@@ -71,7 +66,6 @@ pub const SERVICES: &[ServiceSpec] = &[
         summary: "Read-only SQL over the published models (`v_*`): \
                   `scope(\"sql.read\", {sql, params?, page?})` returns every row, or one page.",
         builtins: &["scope"],
-        approval: false,
         modes: ALL,
     },
     ServiceSpec {
@@ -80,7 +74,6 @@ pub const SERVICES: &[ServiceSpec] = &[
         summary: "The files of the snapshot the run is anchored to, with their syntax, \
                   metrics and duplicate blocks.",
         builtins: &["files", "source_files", "duplicate_blocks"],
-        approval: false,
         modes: ALL,
     },
     ServiceSpec {
@@ -96,7 +89,6 @@ pub const SERVICES: &[ServiceSpec] = &[
             "ai_extract",
             "ai_complete",
         ],
-        approval: true,
         modes: &[Mode::External],
     },
     ServiceSpec {
@@ -104,7 +96,6 @@ pub const SERVICES: &[ServiceSpec] = &[
         title: "Discover model capabilities",
         summary: "Declared model identities, features and limits; no credentials or paid probes.",
         builtins: &["ai_capabilities", "ai_models"],
-        approval: false,
         modes: ALL,
     },
 ];
@@ -213,11 +204,10 @@ mod tests {
     }
 
     /// Calling a model is the one service a pure run may not use, and
-    /// the one a person approves.
+    /// the one that spends the person's key (`permissions.ai`).
     #[test]
     fn only_a_run_that_may_call_out_asks_a_model() {
         let ai = service("ai.compute").unwrap();
-        assert!(ai.approval);
         assert_eq!(ai.modes, &[Mode::External]);
         assert!(service("tree.read").unwrap().modes.contains(&Mode::Pure));
         assert_eq!(

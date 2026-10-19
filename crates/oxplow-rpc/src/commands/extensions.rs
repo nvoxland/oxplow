@@ -90,8 +90,6 @@ pub struct ServiceListing {
     /// "Read the captured tree".
     pub title: String,
     pub summary: String,
-    /// A person approves a script that uses it.
-    pub approval: bool,
 }
 
 /// Every service, for the lines that say what an extension's scripts reach.
@@ -102,7 +100,6 @@ pub async fn list_services(_svc: &Services) -> Result<Vec<ServiceListing>, IpcEr
             scope: s.scope.to_string(),
             title: s.title.to_string(),
             summary: s.summary.to_string(),
-            approval: s.approval,
         })
         .collect())
 }

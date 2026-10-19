@@ -704,9 +704,6 @@ pub struct ProviderImpact {
     /// differ — what a person reads when no grant, command or feature
     /// line shows the change.
     pub first_difference: Option<String>,
-    /// What approving it would change, as sentences ([`approval_lines`]):
-    /// what Settings → Data shows before a person approves.
-    pub lines: Vec<String>,
 }
 
 /// A contribution of a kind with no impact detail of its own, by its
@@ -956,26 +953,6 @@ pub fn provider_phrases(e: &ProviderImpact) -> Vec<String> {
             }
             out
         }
-    }
-}
-
-/// What approving a provider would change, as sentences: against what was
-/// approved last, or everything it declares at a first approval.
-pub fn approval_lines(e: &ProviderImpact) -> Vec<String> {
-    let lines: Vec<String> = provider_phrases(e)
-        .into_iter()
-        .map(|l| {
-            let mut chars = l.chars();
-            match chars.next() {
-                Some(first) => first.to_uppercase().chain(chars).collect(),
-                None => l,
-            }
-        })
-        .collect();
-    if lines.is_empty() {
-        vec!["Nothing changed since it was last approved.".into()]
-    } else {
-        lines
     }
 }
 
@@ -1567,7 +1544,7 @@ pub fn providers_diff(
                 (Some(x), Some(y)) => described_difference(x, y),
                 _ => None,
             };
-            let mut impact = ProviderImpact {
+            ProviderImpact {
                 id,
                 capability: a
                     .or(b)
@@ -1581,10 +1558,7 @@ pub fn providers_diff(
                 tools: named_changes(tools(b), tools(a)),
                 features_before: b.and_then(features_of),
                 features_after: a.and_then(features_of),
-                lines: Vec::new(),
-            };
-            impact.lines = approval_lines(&impact);
-            impact
+            }
         })
         .collect()
 }
@@ -3105,7 +3079,6 @@ mod tests {
             features_before: None,
             features_after: None,
             first_difference: None,
-            lines: vec![],
         }
     }
 
@@ -3153,14 +3126,6 @@ mod tests {
                 "now reaches api.example.com (was none)",
                 "command `archive` added (destructive)"
             ]
-        );
-        assert_eq!(
-            approval_lines(&changed)[0],
-            "Now reaches api.example.com (was none)"
-        );
-        assert_eq!(
-            approval_lines(&provider_impact(Change::Unchanged)),
-            vec!["Nothing changed since it was last approved."]
         );
     }
 

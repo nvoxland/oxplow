@@ -275,7 +275,6 @@ pub struct MetricsService {
     vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
     config: Arc<RwLock<OxplowConfig>>,
     project_dir: PathBuf,
-    /// This machine's program approvals (`exec_consent`).
     /// Override for the global config dir (the parent of `metrics/`). `None` →
     /// the platform `global_config_dir()`. A field (not the free fn) so tests
     /// can point it at a tempdir without racing on a process-global env var.

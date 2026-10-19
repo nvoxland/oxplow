@@ -265,15 +265,15 @@ collectors:
 ```
 
 <!-- services:begin (generated from oxplow_domain::service::SERVICES; bless with OXPLOW_BLESS=1) -->
-| `needs` | What it gives | Builtins | Approval | In a script that composes |
-|---|---|---|---|---|
-| `jobs.read` | Read this extension's durable job status and result: scope("jobs.read", {id}). |  | none | yes |
-| `extension_config.read` | Read the resolved defaults, project and personal settings with their provenance: `scope("extension_config.read", {})`. |  | none | yes |
-| `state.read` | Read this extension's workflow state or cache: `scope("state.read", {scope, area})` returns a snapshot or null. |  | none | yes |
-| `sql.read` | Read-only SQL over the published models (`v_*`): `scope("sql.read", {sql, params?, page?})` returns every row, or one page. | `scope` | none | yes |
-| `tree.read` | The files of the snapshot the run is anchored to, with their syntax, metrics and duplicate blocks. | `files`, `source_files`, `duplicate_blocks` | none | yes |
-| `ai.compute` | Model calls on your AI provider: classify, score, summarize, extract, typed completion. Each answer is recorded, so the same question on the same text costs one call. | `ai_classify`, `ai_score`, `ai_summarize`, `ai_extract`, `ai_complete` | yours | no |
-| `ai.discover` | Declared model identities, features and limits; no credentials or paid probes. | `ai_capabilities`, `ai_models` | none | yes |
+| `needs` | What it gives | Builtins | In a script that composes |
+|---|---|---|---|
+| `jobs.read` | Read this extension's durable job status and result: scope("jobs.read", {id}). |  | yes |
+| `extension_config.read` | Read the resolved defaults, project and personal settings with their provenance: `scope("extension_config.read", {})`. |  | yes |
+| `state.read` | Read this extension's workflow state or cache: `scope("state.read", {scope, area})` returns a snapshot or null. |  | yes |
+| `sql.read` | Read-only SQL over the published models (`v_*`): `scope("sql.read", {sql, params?, page?})` returns every row, or one page. | `scope` | yes |
+| `tree.read` | The files of the snapshot the run is anchored to, with their syntax, metrics and duplicate blocks. | `files`, `source_files`, `duplicate_blocks` | yes |
+| `ai.compute` | Model calls on your AI provider: classify, score, summarize, extract, typed completion. Each answer is recorded, so the same question on the same text costs one call. | `ai_classify`, `ai_score`, `ai_summarize`, `ai_extract`, `ai_complete` | no |
+| `ai.discover` | Declared model identities, features and limits; no credentials or paid probes. | `ai_capabilities`, `ai_models` | yes |
 <!-- services:end -->
 
 - A fact collector reads the tree without declaring it, and a

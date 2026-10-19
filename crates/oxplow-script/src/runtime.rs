@@ -609,7 +609,7 @@ pub fn run_exec_authorized(
     run_exec_authorized_at(budget, argv, content, check, None)
 }
 
-/// Host-owned code location. The caller keeps its approved copy alive through
+/// Host-owned code location. The caller keeps the deployment's copy alive through
 /// its authority guard; project data lives at a separate, explicit path.
 #[derive(Debug, Clone)]
 pub struct ExecLocation {

@@ -4413,7 +4413,6 @@ dependencies = [
  "git2",
  "globset",
  "hex",
- "hmac",
  "indexmap 2.14.2",
  "jsonschema",
  "libc",

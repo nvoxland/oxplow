@@ -51,8 +51,6 @@ schemars = { workspace = true }
 jsonschema = { version = "0.58", default-features = false }
 serde_yaml = { workspace = true }
 sha2 = { workspace = true }
-# HMAC over each approval, keyed from the OS keychain (exec_consent).
-hmac = "0.13"
 hex = { workspace = true }
 specta = { workspace = true }
 # `Unknown` types raw agent JSON as TS `unknown` (chat::model).
