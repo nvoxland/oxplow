@@ -2596,7 +2596,7 @@ export async function listLspServers(): Promise<LspServerListing[]> {
 }
 
 export async function restartLspServer(streamId: string, languageId: string): Promise<void> {
-  unwrap(await commands.restartLspServer(streamId, languageId));
+  await runCommand("oxplow.lsp.restart_server", { stream: streamRef(streamId), language: languageId });
 }
 
 export async function removeLspPackage(packageName: string): Promise<void> {
@@ -2644,16 +2644,18 @@ export async function listBacklinks(
 // discards here.
 // ----------------------------------------------------------------------
 
-export type DeadLetter = import("./tauri-bridge/generated/bindings.js").DeadLetter;
-
-/** Run the parked event through its consumer again; returns the letter's new state. */
-export async function retryDeadLetter(id: number): Promise<DeadLetter> {
-  return unwrap(await commands.retryDeadLetter(id));
+/** Run the parked event through its consumer again (`oxplow.delivery.retry`);
+ *  returns the letter's new state. */
+export async function retryDeadLetter(id: number): Promise<{ state: string; attempts: number; error: string }> {
+  const out = await runCommand("oxplow.delivery.retry", { id });
+  return out.result as { state: string; attempts: number; error: string };
 }
 
-/** Give up on the parked event (stays visible as `discarded`). */
-export async function discardDeadLetter(id: number): Promise<DeadLetter> {
-  return unwrap(await commands.discardDeadLetter(id));
+/** Give up on the parked event (`oxplow.delivery.discard`; stays visible as
+ *  `discarded`). The caller has asked the person. */
+export async function discardDeadLetter(id: number): Promise<{ state: string }> {
+  const out = await runCommand("oxplow.delivery.discard", { id }, true);
+  return out.result as { state: string };
 }
 
 /** Pages this source points AT. Inverse of `listBacklinks`. */

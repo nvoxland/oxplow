@@ -1682,11 +1682,11 @@ lands on the effort a close just before it closed and a batch's opens
 pin before its closes; the consumer holds
 `EffortService::without_event_pump()` so there's no reference cycle.
 Letters are `pending | retried | discarded`; the
-person's moves are `retry_dead_letter(id)` (re-runs the consumer now;
+person's moves are `oxplow.delivery.retry { id }` (re-runs the consumer now;
 `retried` on success, else `pending` with the new error; refused unless
-the letter is `pending`) and `discard_dead_letter(id)` — **RPC only**
-(parity `ui`): a person decides a letter's fate. `list_dead_letters(all?)`
-is RPC; an agent reads `v_event_dead_letter`. Also
+the letter is `pending`) and `oxplow.delivery.discard { id }` — commands
+of a person or a lens for one, never an agent's (`commands/delivery.rs`);
+the list is `v_event_dead_letter`. Also
 `v_event`, `v_event_dead_letter`, `v_event_checkpoint` in the semantic
 layer (V94). Nothing is skipped silently.
 

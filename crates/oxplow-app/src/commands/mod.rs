@@ -21,6 +21,7 @@ pub mod comment;
 pub mod compose;
 pub mod config_commands;
 pub mod dashboard;
+pub mod delivery;
 pub mod effect;
 pub mod effort;
 pub mod effort_report;

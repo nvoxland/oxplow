@@ -177,4 +177,7 @@ pub trait CodeIntelligence: Send + Sync {
     ) -> Result<Vec<Diagnostic>, CodeIntelError>;
     /// The edits renaming the symbol at `at` would make.
     async fn rename(&self, at: &Position, new_name: &str) -> Result<WorkspaceEdit, CodeIntelError>;
+    /// Tear down the provider for `language` in `stream`'s workspace and
+    /// start it again, replaying the open documents.
+    async fn restart(&self, stream: StreamId, language: &str) -> Result<(), CodeIntelError>;
 }

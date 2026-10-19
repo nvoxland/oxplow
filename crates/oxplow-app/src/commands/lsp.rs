@@ -5,7 +5,7 @@
 //! proposal. Each pushes `LspServersChanged` so the settings list
 //! refreshes (the server list isn't a model).
 
-use oxplow_domain::Confirm;
+use oxplow_domain::{Confirm, Invokers};
 use std::sync::Arc;
 
 use schemars::JsonSchema;
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::ops::Op;
-use super::util::{failed, parse, schema};
+use super::util::{failed, parse, ref_id, schema, ServicesSlot};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::background_task::{BackgroundTaskKind, BackgroundTaskStore, StartInput};
 use crate::events::{EventBus, OxplowEvent};
@@ -112,6 +112,48 @@ fn servers_changed(deps: &LspDeps) -> Box<dyn FnOnce() + Send + Sync> {
     Box::new(move || events.emit(OxplowEvent::LspServersChanged))
 }
 
+/// `lsp.restart_server { stream, language }`: tear down the stream's session
+/// for a language and start it again, replaying the open documents. A
+/// person's (or a lens for one): a server is a program on this machine.
+pub fn restart_op(services: ServicesSlot) -> Op {
+    Op::new(
+        "lsp.control",
+        "restart_server",
+        schema::<RestartInput>(),
+        false,
+        Handler::External(Arc::new(move |_: Invocation, input| {
+            let services = services.clone();
+            Box::pin(async move {
+                let input = parse::<RestartInput>(input)?;
+                let stream: oxplow_domain::StreamId = ref_id(&input.stream, "stream", "/stream")?;
+                let svc = services.get()?;
+                svc.code_intel
+                    .restart(stream, &input.language)
+                    .await
+                    .map_err(failed)?;
+                Ok(HandlerOutput {
+                    result: json!({ "stream": input.stream, "language": input.language }),
+                    after_commit: Some({
+                        let events = svc.events.clone();
+                        Box::new(move || events.emit(OxplowEvent::LspServersChanged))
+                    }),
+                    ..HandlerOutput::default()
+                })
+            })
+        })),
+    )
+    .open_to(Invokers::NO_AGENT)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RestartInput {
+    /// The stream whose server it is (`stream:str2`).
+    pub stream: String,
+    /// The language (`rust`, `typescript`).
+    pub language: String,
+}
+
 pub fn ops(deps: LspDeps) -> Vec<Op> {
     vec![install_op(deps.clone()), remove_op(deps)]
 }
@@ -143,6 +185,42 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
+    }
+
+    /// Restarting is a person's (or a lens's); an agent is refused, and a
+    /// language with no server can't start one.
+    #[tokio::test]
+    async fn restarting_a_server_is_a_persons() {
+        let fx = services_with_effort().await;
+        let stream = oxplow_domain::refs::build::stream_ref(
+            fx.svc.streams.list_streams().await.unwrap()[0].id,
+        );
+        let input = json!({ "stream": stream, "language": "no-such-language" });
+        let agent = Actor::Agent {
+            session_id: None,
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let err = fx
+            .svc
+            .commands
+            .run(&agent, "oxplow.lsp.restart_server", input.clone(), true)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CommandError::Denied { .. } | CommandError::Unknown { .. }
+            ),
+            "{err:?}"
+        );
+        let err = fx
+            .svc
+            .commands
+            .run(&Actor::Human, "oxplow.lsp.restart_server", input, false)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Failed { .. }), "{err:?}");
     }
 
     /// Removing a server that isn't installed is a no-op, not an error.

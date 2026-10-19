@@ -364,6 +364,19 @@ commands:
     op: add_item
     invokers: { human: true, agent: true, lens: true }
     example: {"dashboard": "dsh3", "kind": "query", "sql": "SELECT count(*) AS open FROM v_work_item WHERE state = 'todo'", "display": "number"}
+  - name: delivery.retry
+    summary: "Run an event a consumer couldn't take through that consumer again, now. A person's, or a lens for one. The letter is `retried`, or stays `pending` with the new error."
+    scope: deliveries.write
+    op: retry
+    invokers: { human: true, agent: false, lens: true }
+    example: {"id": 3}
+  - name: delivery.discard
+    summary: "Give up on an event a consumer couldn't take; it stays visible as `discarded`. A person's, confirmed."
+    scope: deliveries.write
+    op: discard
+    invokers: { human: true, agent: false, lens: true }
+    confirm: destructive
+    example: {"id": 3}
   - name: dashboard.create
     summary: "Create an empty dashboard (a grid of tiles); fill it with `oxplow.dashboard.add_item`."
     scope: dashboards.write
@@ -782,6 +795,12 @@ commands:
     tool: run_lens_action
     example: {"id": "review/waiting", "action": "finish", "params": {"item": "work_item:oxplow:tsk12"}}
   # lsp.install
+  - name: lsp.restart_server
+    summary: "Restart a stream's language server for a language: the session is torn down and started again with the open documents replayed. A person's, or a lens for one."
+    scope: lsp.control
+    op: restart_server
+    invokers: { human: true, agent: false, lens: true }
+    example: {"stream": "stream:str1", "language": "rust"}
   - name: lsp.install_server
     summary: "Download and install a language server (a Mason package) and register its binary. A person's decision: an agent's run becomes a proposal."
     scope: lsp.install

@@ -235,9 +235,6 @@ macro_rules! oxplow_command_table {
                 get_agent_turn => $crate::commands::hooks::get_agent_turn { turn_id: ::oxplow_domain::AgentTurnId } -> Option<::oxplow_domain::AgentTurn>,
                 // wiki
                 // events (the log's dead-letter queue)
-                list_dead_letters => $crate::commands::events::list_dead_letters { all: Option<bool> } -> Vec<::oxplow_db::DeadLetter>,
-                retry_dead_letter => $crate::commands::events::retry_dead_letter { id: ::oxplow_domain::DeadLetterId } -> ::oxplow_db::DeadLetter,
-                discard_dead_letter => $crate::commands::events::discard_dead_letter { id: ::oxplow_domain::DeadLetterId } -> ::oxplow_db::DeadLetter,
                 // page_refs
                 list_backlinks => $crate::commands::page_refs::list_backlinks { target_kind: String, target_id: String, limit: Option<u32> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,
                 list_outbound => $crate::commands::page_refs::list_outbound { source_kind: String, source_id: String, limit: Option<u32> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,
@@ -334,7 +331,6 @@ macro_rules! oxplow_command_table {
                 lsp_request => $crate::commands::lsp::lsp_request { stream_id: String, language_id: String, method: String, params_json: String } -> String,
                 lsp_notify => $crate::commands::lsp::lsp_notify { stream_id: String, language_id: String, method: String, params_json: String } -> (),
                 list_lsp_servers => $crate::commands::lsp::list_lsp_servers {} -> Vec<::oxplow_app::lsp_sessions::LspServerListing>,
-                restart_lsp_server => $crate::commands::lsp::restart_lsp_server { stream_id: String, language_id: String } -> (),
                 respond_lsp_apply_edit => $crate::commands::lsp::respond_lsp_apply_edit { token: u32, applied: bool, failure_reason: Option<String> } -> (),
                 // terminal (open_terminal_session stays Tauri-only: PluginRuntimeState)
                 forward_terminal_input => $crate::commands::terminal::forward_terminal_input { session_id: String, message: String } -> (),

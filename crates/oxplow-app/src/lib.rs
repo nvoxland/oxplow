@@ -1788,6 +1788,8 @@ impl Services {
                 ),
             ))
             .chain(commands::effect::ops(services_slot.clone()))
+            .chain(commands::delivery::ops(services_slot.clone()))
+            .chain([commands::lsp::restart_op(services_slot.clone())])
             .chain(commands::extension_deploy::ops(services_slot.clone()))
             .chain(commands::agent_reads::ops(services_slot.clone()))
             .chain(client_host::ops(&client_host))
@@ -2267,6 +2269,10 @@ mod tests {
                 // A provider's process restarts (P7.C1; was provider.enable).
                 "oxplow.contribution.enable",
                 "oxplow.contribution.enable_all",
+                // A consumer's handler runs again (the event pump owns the
+                // letter; the handler may reach outside oxplow).
+                "oxplow.delivery.discard",
+                "oxplow.delivery.retry",
                 // The worktree and the snapshot diff a report is checked
                 // against (P8.A7).
                 "oxplow.effect.backfill",
@@ -2309,6 +2315,8 @@ mod tests {
                 // A download into .oxplow/lsp/, a person's call (P8.A9).
                 "oxplow.lsp.install_server",
                 "oxplow.lsp.remove_server",
+                // The language server is a process on this machine.
+                "oxplow.lsp.restart_server",
                 "oxplow.metric.rebuild",
                 // The agent's reads of live state are read-scope operations
                 // (`commands/agent_reads`): they change no record.

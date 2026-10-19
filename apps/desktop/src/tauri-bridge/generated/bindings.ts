@@ -417,21 +417,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listDeadLetters: (all: boolean | null) => typedError<DeadLetter[], IpcError_Serialize>(__TAURI_INVOKE("list_dead_letters", { all })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	retryDeadLetter: (id: DeadLetterId) => typedError<DeadLetter, IpcError_Serialize>(__TAURI_INVOKE("retry_dead_letter", { id })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	discardDeadLetter: (id: DeadLetterId) => typedError<DeadLetter, IpcError_Serialize>(__TAURI_INVOKE("discard_dead_letter", { id })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listBacklinks: (targetKind: string, targetId: string, limit: number | null) => typedError<BacklinkEdge[], IpcError_Serialize>(__TAURI_INVOKE("list_backlinks", { targetKind, targetId, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -944,11 +929,6 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	listLspServers: () => typedError<LspServerListing[], IpcError_Serialize>(__TAURI_INVOKE("list_lsp_servers")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	restartLspServer: (streamId: string, languageId: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("restart_lsp_server", { streamId, languageId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -2270,22 +2250,6 @@ export type DataEntity = {
 	kind: string,
 	description: string,
 };
-
-/**  A parked event: the consumer that failed on it, why, and how often. */
-export type DeadLetter = {
-	id: number,
-	consumer: string,
-	event_seq: number,
-	error: string,
-	attempts: number,
-	first_failed_at: Timestamp,
-	last_failed_at: Timestamp,
-	/**  `pending` | `retried` | `discarded`. */
-	state: string,
-};
-
-/**  A parked event's `dead_letter` row. */
-export type DeadLetterId = number;
 
 export type Declared = "declared" | "implied" | "undeclared";
 

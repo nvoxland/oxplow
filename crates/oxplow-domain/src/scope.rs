@@ -180,6 +180,13 @@ pub const SCOPES: &[Scope] = &[
         summary: "Create, rename, delete and arrange dashboards and their tiles.",
     },
     Scope {
+        id: "deliveries.write",
+        access: Access::Write,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Settle an event a consumer couldn't take: retry it, or give up on it.",
+    },
+    Scope {
         id: "diagnostics.write",
         access: Access::Record,
         host: Host::Daemon,
@@ -325,6 +332,13 @@ pub const SCOPES: &[Scope] = &[
         host: Host::Daemon,
         spends: false,
         summary: "Keep or share a lens as a file in the project.",
+    },
+    Scope {
+        id: "lsp.control",
+        access: Access::Write,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Restart a stream's language server session.",
     },
     Scope {
         id: "lsp.install",
