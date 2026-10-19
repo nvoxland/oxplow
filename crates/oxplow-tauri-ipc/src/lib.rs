@@ -264,11 +264,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::vcs_revisions_between,
             commands::generated::vcs_file_history,
             commands::generated::vcs_list_adoptable_workspaces,
-            commands::generated::write_workspace_file,
-            commands::generated::create_workspace_file,
-            commands::generated::create_workspace_directory,
-            commands::generated::rename_workspace_path,
-            commands::generated::delete_workspace_path,
             // background tasks
             commands::generated::list_background_tasks,
             commands::generated::get_background_task,

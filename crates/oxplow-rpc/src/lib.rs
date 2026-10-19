@@ -331,11 +331,6 @@ macro_rules! oxplow_command_table {
                 list_workspace_entries => $crate::commands::workspace::list_workspace_entries { stream_id: Option<String>, relative_path: String } -> Vec<::oxplow_app::workspace_files::WorkspaceEntry>,
                 list_workspace_files => $crate::commands::workspace::list_workspace_files { stream_id: Option<String> } -> Vec<::oxplow_app::workspace_files::WorkspaceIndexedFile>,
                 read_workspace_file => $crate::commands::workspace::read_workspace_file { stream_id: Option<String>, relative_path: String } -> ::oxplow_app::workspace_files::WorkspaceFile,
-                write_workspace_file => $crate::commands::workspace::write_workspace_file { stream_id: Option<String>, relative_path: String, content: String } -> ::oxplow_app::workspace_files::WorkspaceFile,
-                create_workspace_file => $crate::commands::workspace::create_workspace_file { stream_id: Option<String>, relative_path: String, content: String } -> ::oxplow_app::workspace_files::WorkspaceFile,
-                create_workspace_directory => $crate::commands::workspace::create_workspace_directory { stream_id: Option<String>, relative_path: String } -> String,
-                rename_workspace_path => $crate::commands::workspace::rename_workspace_path { stream_id: Option<String>, from_path: String, to_path: String } -> (String, String),
-                delete_workspace_path => $crate::commands::workspace::delete_workspace_path { stream_id: Option<String>, relative_path: String } -> String,
                 // code_quality (duplication only — the metrics scan was retired in tsk229)
                 // config
                 get_config => $crate::commands::config::get_config {} -> ::oxplow_config::OxplowConfig,

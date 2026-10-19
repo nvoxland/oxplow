@@ -2273,45 +2273,54 @@ export async function readAt(
   return unwrap(await commands.readAt(streamId || null, path, revision));
 }
 
+/** Save a file of the stream's worktree: `oxplow.file.save`. */
 export async function writeWorkspaceFile(
   streamId: string,
   path: string,
   content: string,
-): Promise<WorkspaceFile> {
-  return unwrap(await commands.writeWorkspaceFile(streamId || null, path, content));
+): Promise<{ path: string; bytes: number }> {
+  const out = await runCommand("oxplow.file.save", { stream: streamRef(streamId), path, content });
+  return out.result as { path: string; bytes: number };
 }
 
+/** Make a file: `oxplow.file.create`. */
 export async function createWorkspaceFile(
   streamId: string,
   path: string,
   content = "",
-): Promise<WorkspaceFile> {
-  return unwrap(await commands.createWorkspaceFile(streamId || null, path, content));
+): Promise<WorkspacePathChange> {
+  const out = await runCommand("oxplow.file.create", { stream: streamRef(streamId), path, content });
+  return out.result as WorkspacePathChange;
 }
 
+/** Make a directory: `oxplow.file.create_directory`. */
 export async function createWorkspaceDirectory(
   streamId: string,
   path: string,
 ): Promise<WorkspacePathChange> {
-  unwrap(await commands.createWorkspaceDirectory(streamId || null, path));
-  return { path };
+  const out = await runCommand("oxplow.file.create_directory", { stream: streamRef(streamId), path });
+  return out.result as WorkspacePathChange;
 }
 
+/** Move a file or directory: `oxplow.file.rename`. */
 export async function renameWorkspacePath(
   streamId: string,
   fromPath: string,
   toPath: string,
 ): Promise<WorkspaceRenameResult> {
-  unwrap(await commands.renameWorkspacePath(streamId || null, fromPath, toPath));
-  return { fromPath, toPath };
+  const out = await runCommand("oxplow.file.rename", { stream: streamRef(streamId), from: fromPath, to: toPath });
+  const { from, to } = out.result as { from: string; to: string };
+  return { fromPath: from, toPath: to };
 }
 
+/** Remove a file or directory: `oxplow.file.delete`. The caller has
+ *  asked the person (the file tree's inline confirm). */
 export async function deleteWorkspacePath(
   streamId: string,
   path: string,
 ): Promise<WorkspacePathChange> {
-  unwrap(await commands.deleteWorkspacePath(streamId || null, path));
-  return { path };
+  const out = await runCommand("oxplow.file.delete", { stream: streamRef(streamId), path }, true);
+  return out.result as WorkspacePathChange;
 }
 
 export function subscribeOxplowEvents(

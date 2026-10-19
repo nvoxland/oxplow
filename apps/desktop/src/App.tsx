@@ -101,6 +101,8 @@ import { removeBookmark, setBookmark, useBookmarks } from "./tabs/bookmarks.js";
 import type { BookmarkScope } from "./tabs/bookmarks.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 import { settingsArea } from "./pages/settingsAreas.js";
+import { isUnder, movedPath } from "./fileEvents.js";
+import { useFileEvents } from "./useFileEvents.js";
 import { LocalHistoryDashboardPage } from "./pages/LocalHistoryDashboardPage.js";
 import { DiffViewPage } from "./pages/DiffViewPage.js";
 import { GitHistoryPage } from "./pages/GitHistoryPage.js";
@@ -792,42 +794,35 @@ export function App() {
 
   async function handleRenamePath(fromPath: string, toPath: string) {
     if (!stream) return;
-    const renamed = await renameWorkspacePath(stream.id, fromPath, toPath);
+    // The open buffers follow from the `file.renamed` event it logs
+    // (`useFileEvents`), whoever renamed.
+    await renameWorkspacePath(stream.id, fromPath, toPath);
     setError(null);
-    mutateFileSession(stream.id, (s) =>
-      renameOpenFilePaths(s, (path) => {
-        if (path === renamed.fromPath) return renamed.toPath;
-        if (path.startsWith(renamed.fromPath + "/")) {
-          return `${renamed.toPath}${path.slice(renamed.fromPath.length)}`;
-        }
-        return path;
-      }),
-    );
-    setEditorNavigationTarget((current) => {
-      if (!current) return current;
-      if (current.path === renamed.fromPath) {
-        return { ...current, path: renamed.toPath };
-      }
-      if (current.path.startsWith(renamed.fromPath + "/")) {
-        return { ...current, path: `${renamed.toPath}${current.path.slice(renamed.fromPath.length)}` };
-      }
-      return current;
-    });
   }
 
   async function handleDeletePath(path: string) {
     if (!stream) return;
+    // The open buffers close from the `file.deleted` event it logs.
     await deleteWorkspacePath(stream.id, path);
     setError(null);
-    mutateFileSession(stream.id, (current) => {
-      const toRemove = current.openOrder.filter((candidate) => candidate === path || candidate.startsWith(path + "/"));
-      return removeOpenFiles(current, toRemove);
-    });
-    setEditorNavigationTarget((current) => {
-      if (!current) return current;
-      return current.path === path || current.path.startsWith(path + "/") ? null : current;
-    });
   }
+
+  // Open buffers follow the worktree's renames and deletes, whoever made them.
+  useFileEvents(stream?.id ?? null, (streamId, event) => {
+    if (event.kind === "renamed") {
+      mutateFileSession(streamId, (s) => renameOpenFilePaths(s, (path) => movedPath(path, event.from, event.to)));
+      setEditorNavigationTarget((current) =>
+        current && isUnder(current.path, event.from)
+          ? { ...current, path: movedPath(current.path, event.from, event.to) }
+          : current,
+      );
+    } else {
+      mutateFileSession(streamId, (current) =>
+        removeOpenFiles(current, current.openOrder.filter((candidate) => isUnder(candidate, event.path))),
+      );
+      setEditorNavigationTarget((current) => (current && isUnder(current.path, event.path) ? null : current));
+    }
+  });
 
   async function handleSelectThread(streamId: string, threadId: string) {
     try {

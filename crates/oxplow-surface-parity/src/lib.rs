@@ -587,26 +587,6 @@ pub const MANIFEST: &[Capability] = &[
         "vcs_merge_base",
         "an ancestry walk the VCS answers; an agent runs git in its worktree",
     ),
-    ui(
-        "write_workspace_file",
-        "workspace file I/O: an agent uses its own Read/Write tools",
-    ),
-    ui(
-        "create_workspace_file",
-        "workspace file I/O: an agent uses its own Read/Write tools",
-    ),
-    ui(
-        "create_workspace_directory",
-        "workspace file I/O: an agent uses its own Read/Write tools",
-    ),
-    ui(
-        "rename_workspace_path",
-        "workspace file I/O: an agent uses its own Read/Write tools",
-    ),
-    ui(
-        "delete_workspace_path",
-        "workspace file I/O: an agent uses its own Read/Write tools",
-    ),
     // ---- background tasks ----
     ui(
         "list_background_tasks",
