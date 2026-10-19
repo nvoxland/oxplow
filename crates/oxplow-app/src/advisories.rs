@@ -647,7 +647,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),
-            "manifest: 2\nname: guide\nintent:\n  purpose: test\nadvisories:\n  - id: hello\n    on: post-tool-use\n    query: SELECT 'effort ' || :effort_id AS message\n",
+            "manifest: 2\nname: guide\nintent:\n  purpose: test\npermissions: { agent: true }\nadvisories:\n  - id: hello\n    on: post-tool-use\n    query: SELECT 'effort ' || :effort_id AS message\n",
         )
         .unwrap();
         crate::test_fixtures::activate(&f.svc).await;
@@ -745,7 +745,7 @@ mod tests {
         std::fs::write(
             dir.join("extension.yaml"),
             format!(
-                "manifest: 2\nname: {name}\nintent:\n  purpose: test\nadvisories:\n{advisories}"
+                "manifest: 2\nname: {name}\nintent:\n  purpose: test\npermissions: {{ agent: true }}\nadvisories:\n{advisories}"
             ),
         )
         .unwrap();

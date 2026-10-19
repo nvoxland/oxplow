@@ -41,6 +41,9 @@ intent:
 # The model the review asks for: a person binds `effort-review/review` in
 # Settings → AI; until then it uses their Summarize model. The review calls
 # a tool, so the bound model must support tool calling.
+permissions:
+  sql: read
+  ai: true
 ai_profiles:
   - id: review
     description: Reviews one finished effort from the evidence oxplow collected about it.

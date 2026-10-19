@@ -14,7 +14,7 @@ use crate::test_fixtures::{services_with_task_effort, TaskEffortFixture};
 
 const SECRET: &str = "s3cr3t-token-value";
 
-const MANIFEST: &str = "manifest: 2\nname: acme\nversion: 2.1.0\nintent:\n  purpose: p\ncollectors:
+const MANIFEST: &str = "manifest: 2\nname: acme\nversion: 2.1.0\nintent:\n  purpose: p\npermissions: { process: true, secrets: [GH_TOKEN] }\ncollectors:
   - id: sync
     runtime: exec
     entry: sync.sh

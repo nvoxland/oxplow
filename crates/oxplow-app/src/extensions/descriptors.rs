@@ -631,6 +631,7 @@ mod tests {
             dir.path(),
             ".oxplow/extensions/acme/extension.yaml",
             "manifest: 2\nname: acme\nintent: { purpose: p, origin: null, examples: [] }\n\
+             permissions: { ai: true }\n\
              implementations:\n\
              \x20 - { capability: effort_policy, id: tidy, entry: policies/tidy.star }\n\
              \x20 - { capability: ai_provider, id: tidy, entry: providers/tidy.star }\n",
@@ -908,7 +909,8 @@ mod catalog_tests {
     #[test]
     fn a_skill_name_is_one_extensions() {
         let dir = tempfile::tempdir().unwrap();
-        let skill = "skills:\n  - { name: deploy, file: skills/deploy.md }\n";
+        let skill =
+            "permissions: { agent: true }\nskills:\n  - { name: deploy, file: skills/deploy.md }\n";
         write(dir.path(), "alpha", skill);
         write(dir.path(), "beta", skill);
         let exts = crate::extensions::load_extensions(dir.path());
@@ -941,7 +943,7 @@ mod catalog_tests {
         write(
             dir.path(),
             "acme",
-            "skills:\n  - { name: deploy, file: skills/deploy.md }\nmeasures:\n  - { key: acme.loc, title: Lines, unit: lines, subjectKind: file }\n",
+            "permissions: { agent: true }\nskills:\n  - { name: deploy, file: skills/deploy.md }\nmeasures:\n  - { key: acme.loc, title: Lines, unit: lines, subjectKind: file }\n",
         );
         let exts = crate::extensions::load_extensions(dir.path());
         let acme = exts.iter().find(|e| e.name == "acme").unwrap();

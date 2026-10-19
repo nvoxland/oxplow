@@ -1980,7 +1980,7 @@ mod contribution_tests {
         std::fs::create_dir_all(dir.join("skills")).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),
-            "manifest: 2\nname: acme\nversion: 1.2.0\nintent:\n  purpose: p\n  examples: [{ name: a }]\nskills:\n  - { name: deploy, file: skills/deploy.md }\n",
+            "manifest: 2\nname: acme\nversion: 1.2.0\nintent:\n  purpose: p\n  examples: [{ name: a }]\npermissions: { agent: true }\nskills:\n  - { name: deploy, file: skills/deploy.md }\n",
         )
         .unwrap();
         std::fs::write(

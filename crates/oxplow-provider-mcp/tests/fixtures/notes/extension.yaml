@@ -12,6 +12,8 @@ intent:
     - name: create
       input: { command: create, input: { title: First note } }
       expect: the new note's ref (work_item:notes:N-<n>)
+permissions:
+  process: true
 providers:
   - id: notes
     capability: work_items

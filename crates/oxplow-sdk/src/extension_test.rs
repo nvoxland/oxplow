@@ -2708,6 +2708,7 @@ intent:
     - {{ name: labelled, input: {{ lens: labelled }}, expect: no labelled things yet }}
     - {{ name: things, input: {{ collector: things }}, expect: one thing per input row }}
     - {{ name: shell, input: {{ collector: shell }}, expect: whatever the shell says }}
+permissions: {{ sql: read, ai: true, process: true }}
 collectors:
   - id: things
     runtime: starlark
@@ -3152,6 +3153,7 @@ intent:
     - { name: basic, expect: nothing to do }
     - { name: start, expect: its effort opens }
     - { name: finish, expect: its effort closes }
+permissions: { sql: read }
 implementations:
   - { capability: effort_policy, id: tidy, title: Tidy, entry: policies/tidy.star, needs: [sql.read] }
 ",

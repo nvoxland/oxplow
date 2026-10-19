@@ -35,6 +35,9 @@ intent:
     - name: todos-and-open-work
       input: { collector: todos }
       expect: one open-items fact and one TODO fact for src/lib.rs line 1, classified
+permissions:
+  sql: read
+  ai: true
 measures:
   - key: triage.todos
     title: TODO comments

@@ -11,6 +11,7 @@ const MANIFEST: &str = "manifest: 2
 name: triage
 intent:
   purpose: p
+permissions: { sql: read, ai: true }
 ai_profiles:
   - { id: sort, description: Sorts items., fallback: summarize }
 jobs:

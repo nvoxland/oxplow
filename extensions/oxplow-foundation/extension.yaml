@@ -4,6 +4,9 @@ name: oxplow-foundation
 namespace: oxplow
 description: oxplow's own commands, declared like any extension's — each backed by an operation of a scope. Required; it can't be disabled.
 engine: ">=0.7"
+# What it reaches beyond the baseline: its AI providers call models.
+permissions:
+  ai: true
 intent:
   purpose: >-
     Declare oxplow's own commands — what a person, an agent and a lens can

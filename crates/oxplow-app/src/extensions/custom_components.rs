@@ -590,11 +590,16 @@ mod tests {
     /// Extension `x` declaring `components` (the block's
     /// entries), with a `burndown` bundle and the `burn` lens.
     fn load(root: &Path, components: &str) -> Extension {
+        load_permitted(root, "", components)
+    }
+
+    /// [`load`] with a `permissions:` block (one line, or none).
+    fn load_permitted(root: &Path, permissions: &str, components: &str) -> Extension {
         write(
             root,
             ".oxplow/extensions/x/extension.yaml",
             &format!(
-                "manifest: 2\nname: x\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: p\n  examples: [{{ name: a }}]\ncustom_components:\n{components}"
+                "manifest: 2\nname: x\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: p\n  examples: [{{ name: a }}]\n{permissions}custom_components:\n{components}"
             ),
         );
         write(
@@ -841,8 +846,9 @@ mod tests {
     #[test]
     fn a_private_extension_loads_a_component_and_its_lens() {
         let d = tempfile::tempdir().unwrap();
-        let ext = load(
+        let ext = load_permitted(
             d.path(),
+            "permissions: { commands: [oxplow.work_item.transition] }\n",
             "  - { id: burndown, title: Burndown, assets: [open-tasks, oxplow-bundled/visits], commands: [oxplow.work_item.transition] }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
@@ -1002,8 +1008,9 @@ mod tests {
     #[tokio::test]
     async fn validation_checks_its_commands_reads_as_a_table_and_nudges_a_lookalike() {
         let d = tempfile::tempdir().unwrap();
-        load(
+        load_permitted(
             d.path(),
+            "permissions: { commands: [nope.no.cmd, oxplow.work_item.transition] }\n",
             "  - { id: burndown, commands: [nope.no.cmd, oxplow.work_item.transition] }\n",
         );
         write(

@@ -264,6 +264,7 @@ async fn a_run_records_what_its_grant_decided() {
         &root,
         ".oxplow/extensions/acme/extension.yaml",
         "manifest: 2\nname: acme\nintent: { purpose: Runs., origin: null, examples: [] }\n\
+         permissions: { process: true, secrets: [GH_TOKEN], network: [api.github.com], sql: read }\n\
          collectors:\n\
          \x20 - id: gh\n    runtime: exec\n    entry: sync.sh\n    credentials: [GH_TOKEN]\n    network: [api.github.com]\n    entities:\n      - { name: pr, key: n, columns: { n: int } }\n\
          commands:\n\

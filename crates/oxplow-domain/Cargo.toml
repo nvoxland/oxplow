@@ -24,4 +24,5 @@ jsonschema = { version = "0.58", default-features = false }
 workspace = true
 
 [dev-dependencies]
+serde_yaml = { workspace = true }
 tempfile = { workspace = true }

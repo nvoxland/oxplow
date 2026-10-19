@@ -48,10 +48,16 @@ fn write_extension(project: &Path, sim: &OAuthSim) {
     assert!(manifest.contains(by_command));
     std::fs::write(
         ext.join("extension.yaml"),
-        manifest.replace(
-            by_command,
-            &format!("      mcp: {{ url: \"{}\", auth: NOTES_TOKEN }}\n", sim.mcp_url),
-        ) + &format!(
+        manifest
+            .replace(
+                "  process: true\n",
+                "  network: [127.0.0.1]\n  secrets: [NOTES_TOKEN]\n",
+            )
+            .replace(
+                by_command,
+                &format!("      mcp: {{ url: \"{}\", auth: NOTES_TOKEN }}\n", sim.mcp_url),
+            )
+            + &format!(
             "    credentials:\n      - name: NOTES_TOKEN\n        oauth:\n          authorize_url: {}\n          token_url: {}\n          client_id: oxplow-test\n    network: [127.0.0.1]\n",
             sim.authorize_url, sim.token_url
         ),

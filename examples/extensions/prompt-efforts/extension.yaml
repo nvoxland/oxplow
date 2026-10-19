@@ -26,6 +26,8 @@ intent:
     - name: an-item-finished
       input: { implementation: prompt_efforts, event: { type: work_item.state_changed } }
       expect: the item's open effort closes
+permissions:
+  sql: read
 implementations:
   # The project's effort policy once chosen in Settings → Capabilities. It
   # runs once a person approves it (Settings → Data → Programs) and reads

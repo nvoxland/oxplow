@@ -170,6 +170,14 @@ pub struct ManifestV2 {
         skip_serializing_if = "Option::is_none"
     )]
     pub configuration: Option<Value>,
+    /// What it may reach beyond the baseline (`.context/extensions.md`
+    /// "Permissions"): checked against what it contains when it loads,
+    /// approved when it is deployed.
+    #[serde(
+        default,
+        skip_serializing_if = "oxplow_domain::permissions::Permissions::is_empty"
+    )]
+    pub permissions: oxplow_domain::permissions::Permissions,
 
     // ---- kinds ----
     /// SQL models: each with `models/<name>.sql`, published as
@@ -628,6 +636,19 @@ mod tests {
             "{}",
             warnings[0]
         );
+    }
+
+    /// `permissions:` is checked as it parses: a misspelled or unknown
+    /// grant is an error, never silently nothing.
+    #[test]
+    fn permissions_parse_and_an_unknown_grant_is_an_error() {
+        let text = "manifest: 2\nname: acme\npermissions:\n  process: true\n  network: [api.github.com]\nintent:\n  purpose: x\n";
+        let m = parse(text);
+        assert!(m.permissions.process);
+        assert_eq!(m.permissions.network, vec!["api.github.com".to_string()]);
+        assert!(parse(OK).permissions.is_empty());
+        let text = "manifest: 2\nname: acme\npermissions:\n  proces: true\nintent:\n  purpose: x\n";
+        assert!(serde_yaml::from_str::<ManifestV2>(text).is_err());
     }
 
     #[test]

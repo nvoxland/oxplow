@@ -1151,6 +1151,57 @@ takes the lens file back out.
 A malformed extension shows an error for that extension only; it never
 breaks the others or core.
 
+## Permissions
+
+An extension declares what it may reach beyond the **baseline** in its
+manifest's `permissions:` (`oxplow_domain::permissions::Permissions`); a
+person approves it when the extension is deployed. The baseline needs no
+declaration: lenses, pages, panels, slots, decorators, replacements; its
+own models; a collector's `input:` query (declared and reviewable); its
+own commands and the effects, jobs and commands whose scripts compose them;
+components that query their own lenses; Starlark and jaq collectors that
+don't ask a model; `state.read`, `extension_config.read`, `jobs.read`.
+
+```yaml
+permissions:                    # every key optional; absent = baseline only
+  sql: read                     # ad-hoc read-only SQL (a script's `needs: [sql.read]`)
+  commands: [oxplow.work_item.*] # commands outside its own namespace (`*` one segment, `**` the rest)
+  files: read                   # or `write` (includes read): `needs: [tree.read]`
+  ai: true                      # models, with the person's key
+  network: [api.github.com]     # hosts its programs reach (`*.example.com` covers the names under it)
+  process: true                 # runs programs: providers, `runtime: exec` collectors
+  secrets: [GITHUB_TOKEN]       # secrets it reads, by name
+  agent: true                   # advisories and skills: text that reaches the agent
+```
+
+`process` is declared, **not confined**: a program runs with the person's
+file, network and process authority (`.context/providers.md` "External
+execution authority"), and what a deploy asks says so plainly.
+
+**The loader checks the declaration against the contents**
+(`extensions::check_permissions`, at the end of `load_one`): each
+contribution that needs something the manifest doesn't declare is an error
+at the contribution's line, naming what to add —
+``provider `github` needs `permissions.process`, `permissions.network: [api.github.com]` ``.
+What needs what (`needed_permissions`): a provider with an `entry` or an
+MCP `command` → `process`, its `network` and its credentials' names →
+`network`, `secrets` (a URL adapter runs oxplow's own adapter: only its
+hosts and credentials); an `exec` collector that isn't a bundled parser →
+`process`, `network`, `secrets`; any declared `needs` of `ai.compute` /
+`ai.discover` → `ai`, `sql.read` → `sql: read`, `tree.read` → `files:
+read` (the *declared* needs: a collector's `input:` is baseline); a
+Starlark collector whose script calls an `ai_*` builtin → `ai`; an
+`ai_provider` implementation → `ai`; advisories, skills and
+implementations with skills → `agent`; a custom component's `commands`
+outside its namespace → `commands`. A script's composed commands can't be
+known before it runs, so they are checked when it runs. `intent.prompts`
+are suggestions a person picks, not agent text, and need nothing.
+
+`v_extension.permissions` is the declaration as JSON (`{}`: baseline).
+The shipped extensions declare theirs like any other: `oxplow-foundation`
+`{ ai: true }` (its AI providers), `oxplow-bundled` `{ sql: read, ai: true,
+agent: true }`.
+
 ## `extension.yaml`
 
 Manifest **version 2** (P1.11, tsk413; `crates/oxplow-app/src/extensions/manifest_v2.rs`).
@@ -1163,6 +1214,7 @@ name: oxplow-bundled   # must equal the folder name
 namespace: oxplow      # its command ids' namespace (default: the name, `-` → `_`); `oxplow` only for oxplow's own
 description: …
 engine: ">=0.7"          # optional: the oxplow it targets
+permissions: { ai: true } # optional: what it reaches beyond the baseline ("Permissions")
 intent:                  # required
   purpose: What question it answers, or what job it does
   origin: effort:eff42   # the thread/effort ref that created it, or null

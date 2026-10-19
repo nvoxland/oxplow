@@ -25,6 +25,8 @@ intent:
     - name: edit-item
       input: { form: edit-item, params: { ref: "work_item:oxplow:1" } }
       expect: a form for the item's title and body, its ref fixed
+permissions:
+  commands: [oxplow.work_item.transition, oxplow.work_item.reorder, oxplow.work_item.update]
 custom_components:
   - id: swimlanes
     title: Swimlanes

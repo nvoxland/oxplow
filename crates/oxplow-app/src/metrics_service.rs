@@ -6084,7 +6084,9 @@ def transform(input):
         let entry = "- { id: repo.count, runtime: exec, entry: tools/count.sh, facts: [repo.n] }";
         write_project_extension(
             dir.path(),
-            &format!("measures:\n  - {{ key: repo.n, title: N }}\ncollectors:\n  {entry}\n"),
+            &format!(
+                "permissions: {{ process: true }}\nmeasures:\n  - {{ key: repo.n, title: N }}\ncollectors:\n  {entry}\n"
+            ),
         );
         crate::test_fixtures::activate_with_problems(&svc).await;
         let err = svc

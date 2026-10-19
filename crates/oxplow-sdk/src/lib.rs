@@ -294,10 +294,20 @@ pub fn scaffold_with(
         .join(", ");
     match kind {
         Kind::Provider { capability } => {
+            let starter = provider_starter(capability);
+            manifest.push_str(
+                "# A provider runs its program (bin/provider) with your authority:\n\
+                 # oxplow doesn't confine it. Deploying it asks you first.\n\
+                 permissions:\n\
+                 \x20 process: true\n",
+            );
+            if starter.needs.is_some_and(|needs| needs.contains("sql.read")) {
+                manifest.push_str("  sql: read\n");
+            }
             manifest.push_str(&format!(
                 "providers:\n  - id: {provider_id}\n    capability: {capability}\n    entry: bin/provider\n    declarations: provider.json\n"
             ));
-            if let Some(needs) = provider_starter(capability).needs {
+            if let Some(needs) = starter.needs {
                 manifest.push_str(needs);
             }
         }
@@ -364,7 +374,9 @@ pub fn scaffold_with(
              \x20   commands: []\n"
         )),
         Kind::Policy => manifest.push_str(&format!(
-            "implementations:\n\
+            "# Its script reads oxplow with its own SQL (`needs: [sql.read]`).\n\
+             permissions: {{ sql: read }}\n\
+             implementations:\n\
              \x20 # The project's effort policy, once chosen in Settings → Capabilities: its\n\
              \x20 # script hears core's events and composes the commands that open, close\n\
              \x20 # and link efforts. It runs once a person approves it (Settings → Data →\n\
@@ -377,7 +389,9 @@ pub fn scaffold_with(
             title = title_case(name)
         )),
         Kind::Advisory => manifest.push_str(&format!(
-            "advisories:\n\
+            "# What an advisory says reaches the agent.\n\
+             permissions: {{ agent: true }}\n\
+             advisories:\n\
              \x20 # A {advisory}: a query run at a moment (`on`: post-tool-use, prompt or\n\
              \x20 # turn-end) whose rows reach the agent (`audience: person` raises them in\n\
              \x20 # Alerts instead). Each row's `message` is what it hears; `once_per` says how\n\
@@ -395,7 +409,9 @@ pub fn scaffold_with(
             advisory = ContributionKind::Advisory.spec().title.to_lowercase()
         )),
         Kind::Skill => manifest.push_str(&format!(
-            "skills:\n\
+            "# A skill is text the agent reads.\n\
+             permissions: {{ agent: true }}\n\
+             skills:\n\
              \x20 # A {skill} the coding agent loads when it's relevant; `kind: command`\n\
              \x20 # makes it a slash command a person runs. `needs: [work_items]` offers it only\n\
              \x20 # while that capability is active.\n\

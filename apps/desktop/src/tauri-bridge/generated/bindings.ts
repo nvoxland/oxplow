@@ -3066,6 +3066,11 @@ export type Extension_Deserialize = {
 	publicContracts?: PublicContracts,
 	/**  Where its files came from. */
 	deployment?: Deployment,
+	/**
+	 *  What its manifest declares it may reach beyond the baseline
+	 *  (`permissions:`).
+	 */
+	permissions?: Permissions_Deserialize,
 };
 
 /**  A loaded extension and anything wrong with it. */
@@ -3192,6 +3197,11 @@ export type Extension_Serialize = {
 	publicContracts: PublicContracts,
 	/**  Where its files came from. */
 	deployment: Deployment,
+	/**
+	 *  What its manifest declares it may reach beyond the baseline
+	 *  (`permissions:`).
+	 */
+	permissions: Permissions_Serialize,
 };
 
 /**
@@ -3279,6 +3289,12 @@ export type FileSource =
 
 /**  How a path differs from the head, or how a revision changed it. */
 export type FileStatus = "added" | "modified" | "deleted" | "renamed" | "untracked" | "conflicted";
+
+/**
+ *  `files: read | write`: the project's files outside the bus. `write`
+ *  includes `read`.
+ */
+export type FilesAccess = "read" | "write";
 
 /**
  *  A fact predicate on a `metrics:` spec (the `filter:` block) — the config
@@ -5283,6 +5299,70 @@ export type PastSession = {
 	last_prompt: string | null,
 };
 
+/**
+ *  What an extension may do beyond the baseline. Absent fields grant
+ *  nothing.
+ */
+export type Permissions = Permissions_Serialize | Permissions_Deserialize;
+
+/**
+ *  What an extension may do beyond the baseline. Absent fields grant
+ *  nothing.
+ */
+export type Permissions_Deserialize = {
+	/**  Ad-hoc SQL: a script's `scope("sql.read")`, a component's own query. */
+	sql?: SqlAccess | null,
+	/**
+	 *  Commands outside its own namespace it may run, as patterns:
+	 *  `oxplow.work_item.*` (`*` is one segment, `**` the rest).
+	 */
+	commands?: string[],
+	/**  The project's files outside the bus. */
+	files?: FilesAccess | null,
+	/**  Calling AI models, with the person's key. */
+	ai?: boolean,
+	/**  The hosts its programs may reach (`api.github.com`, `*.example.com`). */
+	network?: string[],
+	/**
+	 *  Running programs (providers, `exec` collectors). They run with the
+	 *  person's authority; oxplow doesn't confine them.
+	 */
+	process?: boolean,
+	/**  The secrets it may read, by name. */
+	secrets?: string[],
+	/**  Contributing to the agent's context: skills, advisories, prompts. */
+	agent?: boolean,
+};
+
+/**
+ *  What an extension may do beyond the baseline. Absent fields grant
+ *  nothing.
+ */
+export type Permissions_Serialize = {
+	/**  Ad-hoc SQL: a script's `scope("sql.read")`, a component's own query. */
+	sql?: SqlAccess | null,
+	/**
+	 *  Commands outside its own namespace it may run, as patterns:
+	 *  `oxplow.work_item.*` (`*` is one segment, `**` the rest).
+	 */
+	commands?: string[],
+	/**  The project's files outside the bus. */
+	files?: FilesAccess | null,
+	/**  Calling AI models, with the person's key. */
+	ai?: boolean,
+	/**  The hosts its programs may reach (`api.github.com`, `*.example.com`). */
+	network?: string[],
+	/**
+	 *  Running programs (providers, `exec` collectors). They run with the
+	 *  person's authority; oxplow doesn't confine them.
+	 */
+	process?: boolean,
+	/**  The secrets it may read, by name. */
+	secrets?: string[],
+	/**  Contributing to the agent's context: skills, advisories, prompts. */
+	agent?: boolean,
+};
+
 /**  A person's `enableExtensions` and `disableExtensions`. */
 export type PersonalExtensions = {
 	/**  Turned on for this person, beside the team's list. */
@@ -6109,6 +6189,9 @@ export type SourceCoverage = {
 	/**  Why it failed or was disabled. */
 	error: string | null,
 };
+
+/**  `sql: read`: ad-hoc read-only SQL over the `v_*` models. */
+export type SqlAccess = "read";
 
 /**
  *  One SQL value, serialized as a plain JSON scalar (`null`, boolean,

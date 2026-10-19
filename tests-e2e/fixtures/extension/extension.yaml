@@ -7,6 +7,12 @@ intent:
     provider that sorts text by its words.
   origin: null
   examples: []
+# Its providers run programs, its model provider asks models, its effect
+# reads with its own SQL.
+permissions:
+  process: true
+  ai: true
+  sql: read
 # `bin/provider` and `bin/terminal` are written when a suite daemon starts:
 # they run the oxplow-provider-fake binary this checkout built, the second in
 # harness mode.

@@ -12,7 +12,7 @@ use crate::test_fixtures::{services_with_task_effort, TaskEffortFixture};
 
 fn manifest(version: &str) -> String {
     format!(
-        "manifest: 2\nname: acme\nversion: {version}\nintent:\n  purpose: p\ncollectors:
+        "manifest: 2\nname: acme\nversion: {version}\nintent:\n  purpose: p\npermissions: {{ process: true }}\ncollectors:
   - id: sync
     runtime: exec
     entry: sync.sh

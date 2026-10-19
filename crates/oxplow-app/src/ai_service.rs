@@ -1863,7 +1863,7 @@ mod tests {
         std::fs::create_dir_all(ext.join("providers")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: p\nimplementations:\n  - { capability: ai_provider, id: acme, title: Acme, entry: providers/acme.star }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: { ai: true }\nimplementations:\n  - { capability: ai_provider, id: acme, title: Acme, entry: providers/acme.star }\n",
         )
         .unwrap();
         let script = |reply: &str| {

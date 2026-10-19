@@ -416,6 +416,7 @@ mod tests {
         std::fs::write(
             folder.join("extension.yaml"),
             "manifest: 2\nname: svc\nintent:\n  purpose: Reads.\n  examples: [{ name: a }]\n\
+             permissions: { sql: read, files: read, ai: true }\n\
              collectors:\n\
              \x20 - id: paths\n    runtime: starlark\n    entry: paths.star\n    needs: [tree.read, sql.read]\n    entities:\n      - { name: seen, key: k, columns: { k: text } }\n\
              \x20 - id: kinds\n    runtime: starlark\n    entry: kinds.star\n    entities:\n      - { name: kind, key: k, columns: { k: text } }\n",
@@ -633,6 +634,7 @@ mod tests {
              intent:\n  purpose: Open and close efforts as items start and finish.\n  examples:\n\
              \x20   - name: basic\n      input: { command: react, input: { event: { id: e1, type: thread.checkpoint, v: 1, seq: 1, source: system, subject: [], payload: {}, anchors: {} } } }\n\
              \x20     expect: nothing to do\n\
+             permissions: { process: true, sql: read }\n\
              providers:\n  - id: steward\n    capability: effort_policy\n    entry: bin/provider\n    declarations: provider.json\n    needs: [sql.read]\n",
         )
         .unwrap();

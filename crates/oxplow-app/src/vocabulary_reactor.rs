@@ -927,7 +927,7 @@ mod tests {
 
     /// `beta`: an effect and a collector that react to `acme_pr.merged`,
     /// a type of another extension's.
-    const SUBSCRIBER: &str = "manifest: 2\nname: beta\nintent: { purpose: Follows merges., origin: null, examples: [] }\neffects:\n  - id: note\n    summary: Note a merge.\n    on: [acme_pr.merged]\n    entry: note.star\ncollectors:\n  - id: pull\n    runtime: exec\n    entry: pull.sh\n    trigger: { on: [acme_pr.merged] }\n    entities:\n      - { name: pr, key: n, columns: { n: int } }\n";
+    const SUBSCRIBER: &str = "manifest: 2\nname: beta\nintent: { purpose: Follows merges., origin: null, examples: [] }\neffects:\n  - id: note\n    summary: Note a merge.\n    on: [acme_pr.merged]\n    entry: note.star\npermissions: { process: true }\ncollectors:\n  - id: pull\n    runtime: exec\n    entry: pull.sh\n    trigger: { on: [acme_pr.merged] }\n    entities:\n      - { name: pr, key: n, columns: { n: int } }\n";
 
     async fn listed(svc: &crate::Services, name: &str) -> Extension {
         svc.listed_extensions(&svc.layout.project_dir)

@@ -37,12 +37,24 @@ fn fake_bin() -> PathBuf {
 
 /// A private extension declaring the fake as its work-items provider,
 /// its entry a script running the fake with `hooks`.
+/// The manifest `text` with `secrets` declared beside its `process` permission.
+fn permit_secrets(text: &str, secrets: &[&str]) -> String {
+    text.replacen(
+        "permissions: { process: true }",
+        &format!(
+            "permissions: {{ process: true, secrets: [{}] }}",
+            secrets.join(", ")
+        ),
+        1,
+    )
+}
+
 fn write_extension(project: &Path, hooks: &str) {
     let dir = project.join(".oxplow/extensions").join(EXT);
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: tracker\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a work item's points.\n    provider: fake\n    op: estimate\n    invokers: { human: true, agent: true, lens: true }\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: work_item, input: { ref: \"{{ref}}\", points: 3 } }\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: tracker\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a work item's points.\n    provider: fake\n    op: estimate\n    invokers: { human: true, agent: true, lens: true }\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: work_item, input: { ref: \"{{ref}}\", points: 3 } }\npermissions: { process: true }\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -1185,7 +1197,7 @@ async fn a_provider_command_is_declared_over_an_operation_it_lists() {
     ] {
         std::fs::write(
             &manifest,
-            base.replacen("providers:\n", &format!("{entry}providers:\n"), 1),
+            base.replacen("permissions:", &format!("{entry}permissions:"), 1),
         )
         .unwrap();
         let loaded = crate::extensions::load_extensions(&root)
@@ -1256,6 +1268,10 @@ async fn declaration_impact_compare_against_the_last_approved_copy() {
         text.replace(
             "    entry: bin/provider\n",
             "    entry: bin/provider\n    network: [api.example.com]\n",
+        )
+        .replace(
+            "permissions: { process: true }",
+            "permissions: { process: true, network: [api.example.com] }",
         ),
     )
     .unwrap();
@@ -1374,7 +1390,7 @@ async fn provider_args_stay_inside_the_approved_folder() {
     assert!(!program(&fx, &ext).approved);
 }
 
-const ADAPTER_MANIFEST: &str = "manifest: 2\nname: tracker\nintent:\n  purpose: notes over MCP\n  examples: [{ name: a }]\nproviders:\n  - id: notes\n    capability: work_items\n    adapter:\n      mcp: { command: [bin/server, --stdio] }\n      mapping: mcp/x.star\n      tools: mcp/tools.json\n    declarations: provider.json\n";
+const ADAPTER_MANIFEST: &str = "manifest: 2\nname: tracker\nintent:\n  purpose: notes over MCP\n  examples: [{ name: a }]\npermissions: { process: true }\nproviders:\n  - id: notes\n    capability: work_items\n    adapter:\n      mcp: { command: [bin/server, --stdio] }\n      mapping: mcp/x.star\n      tools: mcp/tools.json\n    declarations: provider.json\n";
 
 /// A private extension whose provider is an MCP server behind oxplow's
 /// adapter: the server, its mapping and its pinned tools.
@@ -2717,7 +2733,14 @@ async fn removing_an_instance_leaves_nothing_behind() {
         .join(EXT)
         .join("extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, format!("{text}    credentials: [FAKE_TOKEN]\n")).unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            "{}    credentials: [FAKE_TOKEN]\n",
+            permit_secrets(&text, &["FAKE_TOKEN"])
+        ),
+    )
+    .unwrap();
     approve(&fx, &extension(&project)).await;
     let providers = &fx.svc.providers;
     providers
@@ -3031,7 +3054,14 @@ async fn an_instance_credential_is_its_own() {
         .join(EXT)
         .join("extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, format!("{text}    credentials: [FAKE_TOKEN]\n")).unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            "{}    credentials: [FAKE_TOKEN]\n",
+            permit_secrets(&text, &["FAKE_TOKEN"])
+        ),
+    )
+    .unwrap();
     let ext = extension(&project);
     approve(&fx, &ext).await;
     fx.svc
@@ -3208,7 +3238,14 @@ fn declare_token(root: &Path) {
         .join(EXT)
         .join("extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, format!("{text}    credentials: [FAKE_TOKEN]\n")).unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            "{}    credentials: [FAKE_TOKEN]\n",
+            permit_secrets(&text, &["FAKE_TOKEN"])
+        ),
+    )
+    .unwrap();
 }
 
 /// tsk842: a global instance's credential is the person's in every
@@ -3466,7 +3503,14 @@ async fn a_project_instance_keeps_its_credentials_beside_a_global_one() {
         .join(EXT)
         .join("extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, format!("{text}    credentials: [FAKE_TOKEN]\n")).unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            "{}    credentials: [FAKE_TOKEN]\n",
+            permit_secrets(&text, &["FAKE_TOKEN"])
+        ),
+    )
+    .unwrap();
     let ext = extension(&project);
     approve(&fx, &ext).await;
     let providers = &fx.svc.providers;
@@ -3545,7 +3589,14 @@ async fn a_global_instances_credential_is_shared_across_projects() {
             .join(EXT)
             .join("extension.yaml");
         let text = std::fs::read_to_string(&manifest).unwrap();
-        std::fs::write(&manifest, format!("{text}    credentials: [FAKE_TOKEN]\n")).unwrap();
+        std::fs::write(
+            &manifest,
+            format!(
+                "{}    credentials: [FAKE_TOKEN]\n",
+                permit_secrets(&text, &["FAKE_TOKEN"])
+            ),
+        )
+        .unwrap();
     };
     write_extension(&project, "needs:FAKE_TOKEN");
     credentialed(&project);
@@ -3782,6 +3833,16 @@ fn write_oauth_extension(project: &Path, hooks: &str, authorize: &str, token: &s
         .join(EXT)
         .join("extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
+    let mut names = vec!["FAKE_TOKEN".to_string()];
+    for line in more.lines() {
+        let line = line.trim().trim_start_matches("- ");
+        if let Some(name) = line.strip_prefix("name: ") {
+            names.push(name.to_string());
+        } else if !line.is_empty() && !line.contains(':') {
+            names.push(line.to_string());
+        }
+    }
+    let text = permit_secrets(&text, &names.iter().map(String::as_str).collect::<Vec<_>>());
     std::fs::write(
         &manifest,
         format!(
@@ -4844,10 +4905,16 @@ async fn an_unfinished_sign_in_ends_after_its_wait() {
 /// The adapter manifest with its server reached by url, authenticated by
 /// the credential `NOTES_TOKEN`.
 fn url_manifest() -> String {
-    ADAPTER_MANIFEST.replace(
-        "      mcp: { command: [bin/server, --stdio] }\n",
-        "      mcp: { url: \"https://mcp.example.com/mcp\", auth: NOTES_TOKEN }\n",
-    ) + "    credentials: [NOTES_TOKEN]\n    network: [mcp.example.com]\n"
+    ADAPTER_MANIFEST
+        .replace(
+            "permissions: { process: true }",
+            "permissions: { network: [mcp.example.com], secrets: [NOTES_TOKEN] }",
+        )
+        .replace(
+            "      mcp: { command: [bin/server, --stdio] }\n",
+            "      mcp: { url: \"https://mcp.example.com/mcp\", auth: NOTES_TOKEN }\n",
+        )
+        + "    credentials: [NOTES_TOKEN]\n    network: [mcp.example.com]\n"
 }
 
 /// P9.B4: an adapter's MCP server may be one reached by `url` instead of
@@ -4984,7 +5051,16 @@ async fn a_url_servers_approval_covers_the_url_its_pins_mapping_and_credentials(
     ] {
         approved_now(&fx);
         assert!(manifest.contains(from), "{from}");
-        std::fs::write(dir.join("extension.yaml"), manifest.replace(from, to)).unwrap();
+        // A credential added here is declared in `permissions` too.
+        let changed = manifest.replace(from, to).replace(
+            "secrets: [NOTES_TOKEN] }",
+            if to.contains("MORE") {
+                "secrets: [NOTES_TOKEN, MORE] }"
+            } else {
+                "secrets: [NOTES_TOKEN] }"
+            },
+        );
+        std::fs::write(dir.join("extension.yaml"), changed).unwrap();
         assert!(!program(&fx, &extension(&project)).approved, "{to}");
     }
     for file in ["mcp/x.star", "mcp/tools.json"] {
@@ -5192,8 +5268,11 @@ async fn with_effect(hooks: &str, script: &str) -> TaskEffortFixture {
     let manifest = std::fs::read_to_string(dir.join("extension.yaml")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        manifest
-            + "effects:\n  - id: file\n    summary: File an item on the tracker.\n    on: [work_item.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: file.star\n",
+        manifest.replacen(
+            "permissions: { process: true",
+            "permissions: { sql: read, process: true",
+            1,
+        ) + "effects:\n  - id: file\n    summary: File an item on the tracker.\n    on: [work_item.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: file.star\n",
     )
     .unwrap();
     std::fs::write(dir.join("file.star"), script).unwrap();
@@ -6296,7 +6375,7 @@ fn write_policy_extension(project: &Path, hooks: &str) {
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: steward\nintent:\n  purpose: the fake effort policy\n  examples: [{ name: a }]\nproviders:\n  - id: fake\n    capability: effort_policy\n    entry: bin/provider\n    declarations: provider.json\n    needs: [sql.read]\n",
+        "manifest: 2\nname: steward\nintent:\n  purpose: the fake effort policy\n  examples: [{ name: a }]\npermissions: { process: true, sql: read }\nproviders:\n  - id: fake\n    capability: effort_policy\n    entry: bin/provider\n    declarations: provider.json\n    needs: [sql.read]\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -6597,7 +6676,7 @@ fn write_harness_extension(project: &Path, hooks: &str) {
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: conductor\nintent:\n  purpose: the fake agent harness\n  examples: [{ name: a }]\nproviders:\n  - id: fake\n    capability: agent_harness\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: conductor\nintent:\n  purpose: the fake agent harness\n  examples: [{ name: a }]\npermissions: { process: true }\nproviders:\n  - id: fake\n    capability: agent_harness\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -6803,7 +6882,7 @@ fn write_snapshots_extension(project: &Path, contents: bool) {
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: shutter\nintent:\n  purpose: the fake snapshots provider\n  examples: [{ name: a }]\nproviders:\n  - id: shutter\n    capability: snapshots\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: shutter\nintent:\n  purpose: the fake snapshots provider\n  examples: [{ name: a }]\npermissions: { process: true }\nproviders:\n  - id: shutter\n    capability: snapshots\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -7010,7 +7089,7 @@ fn write_knowledge_extension(project: &Path, state: &Path) {
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: shelf\nintent:\n  purpose: the fake knowledge store\n  examples: [{ name: a }]\nproviders:\n  - id: shelf\n    capability: knowledge\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: shelf\nintent:\n  purpose: the fake knowledge store\n  examples: [{ name: a }]\npermissions: { process: true }\nproviders:\n  - id: shelf\n    capability: knowledge\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");

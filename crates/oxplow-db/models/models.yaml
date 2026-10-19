@@ -1339,7 +1339,7 @@
     - { not_null: ref }
     - { unique: ref }
 - name: extension
-  version: 2
+  version: 3
   key: [ref]
   description: "Every extension the project knows — its own (sources in `.oxplow/extensions/`, or where `extensionSources` says) and the ones that ship with oxplow — enabled or not, with where its files come from (`deployment`) and why it loaded badly if it did. One listed as on that has nothing to run here is a row too (`undeployed`, `not_here`). What an extension contributes is in `v_contribution` (count it by `extension` and `kind`); its lenses are `v_lens`. Restated with each extension generation; an extension that fails to load holds its generation back, so it is not a row — `oxplow_validate_extension` says why. `errors` and `warnings` are what a loaded one reports."
   columns:
@@ -1356,6 +1356,7 @@
     - { name: "hash", type: "TEXT", doc: "The hash of the deployment it runs; NULL when it runs none. (v2)" }
     - { name: "errors", type: "TEXT", doc: "Problems reported while loading it that did not hold it back, as a JSON array of strings; `[]` when healthy." }
     - { name: "warnings", type: "TEXT", doc: "Things worth fixing that don't stop it loading, as a JSON array of strings." }
+    - { name: "permissions", type: "TEXT", doc: "What its manifest declares it may reach beyond the baseline (`permissions:`: `sql`, `commands`, `files`, `ai`, `network`, `process`, `secrets`, `agent`), as a JSON object; `{}` is the baseline. Approved when it is deployed. (v3)" }
   tests:
     - { not_null: ref }
     - { unique: ref }

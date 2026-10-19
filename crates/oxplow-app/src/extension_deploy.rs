@@ -705,6 +705,40 @@ mod tests {
             .collect()
     }
 
+    /// `v_extension` says what each extension declares it may reach:
+    /// `{}` for the baseline.
+    #[tokio::test]
+    async fn v_extension_lists_each_extensions_permissions() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        source(svc, "One");
+        deploy(svc, "acme", &root, None).await.unwrap();
+        let listed = svc
+            .sql
+            .query_sql(
+                "SELECT name, permissions FROM v_extension \
+                 WHERE name IN ('acme', 'oxplow-foundation') ORDER BY name",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            listed.rows,
+            vec![
+                vec![
+                    oxplow_db::SqlCell::Text("acme".into()),
+                    oxplow_db::SqlCell::Text("{}".into())
+                ],
+                vec![
+                    oxplow_db::SqlCell::Text("oxplow-foundation".into()),
+                    oxplow_db::SqlCell::Text("{\"ai\":true}".into())
+                ],
+            ]
+        );
+    }
+
     /// A source runs nothing until it is deployed; a deploy runs it, turns
     /// it on for the person and records the deployment; the same source
     /// again changes nothing.

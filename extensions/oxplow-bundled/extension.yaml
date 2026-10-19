@@ -4,6 +4,13 @@ name: oxplow-bundled
 namespace: oxplow
 description: What comes with oxplow, built as an ordinary extension. The effort review packet and its verdicts, metric and coverage guidance for the agent, and the usage, quality and change analysis lenses.
 engine: ">=0.7"
+# What it reaches beyond the baseline: its effects and commands read with
+# their own SQL, its jobs and effects ask models, and its advisories and
+# skills speak to the agent.
+permissions:
+  sql: read
+  ai: true
+  agent: true
 intent:
   purpose: >-
     Show what a reviewer must check before accepting an agent's work — the

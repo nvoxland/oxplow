@@ -12,6 +12,7 @@ pub(super) const MANIFEST: &str = r#"manifest: 2
 name: triage
 intent:
   purpose: p
+permissions: { sql: read, ai: true }
 jobs:
   - id: review
     description: Review the TODOs.

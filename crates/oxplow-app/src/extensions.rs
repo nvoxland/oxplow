@@ -33,6 +33,7 @@ pub mod schema;
 pub mod skills;
 use manifest_v2::{at, entry_line, item_lines, key_line, line_under, ManifestV2};
 pub use manifest_v2::{Intent, IntentExample, IntentPrompt};
+pub use oxplow_domain::permissions::Permissions;
 
 /// Where an extension's source is by default, relative to a checkout
 /// (`extensionSources` may point a name elsewhere).
@@ -1678,6 +1679,10 @@ pub struct Extension {
     /// Where its files came from.
     #[serde(default)]
     pub deployment: Deployment,
+    /// What its manifest declares it may reach beyond the baseline
+    /// (`permissions:`).
+    #[serde(default)]
+    pub permissions: Permissions,
 }
 
 impl Extension {
@@ -2664,6 +2669,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         config_scripts: Default::default(),
         public_contracts: Default::default(),
         deployment: Deployment::Source,
+        permissions: Permissions::default(),
     }
 }
 
@@ -3380,10 +3386,163 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         }));
     }
     check_config_reads(&mut ext);
+    ext.permissions = m.permissions.clone();
+    check_permissions(&mut ext, files, &file, &manifest);
     ext.contributions = descriptors::describe(&ext);
     descriptors::check_ids(&mut ext);
     public_contracts::prepare(&mut ext);
     ext
+}
+
+/// What a contribution's declared `needs` ask beyond the baseline: a
+/// model (`ai.compute`, `ai.discover`), its own SQL (`sql.read`), the
+/// project's files (`tree.read`).
+fn needs_permissions(needs: &[String]) -> Permissions {
+    let mut p = Permissions::default();
+    for need in needs {
+        match oxplow_domain::service::need_scope(need) {
+            "ai.compute" | "ai.discover" => p.ai = true,
+            "sql.read" => p.sql = Some(oxplow_domain::permissions::SqlAccess::Read),
+            "tree.read" => p.files = Some(oxplow_domain::permissions::FilesAccess::Read),
+            _ => {}
+        }
+    }
+    p
+}
+
+/// Each of `ext`'s contributions that needs a permission, with the
+/// manifest line it is declared at and what it is.
+fn needed_permissions(
+    ext: &Extension,
+    files: &dyn ExtensionFiles,
+    manifest: &str,
+) -> Vec<(Option<usize>, String, Permissions)> {
+    let mut out = Vec::new();
+    let line = |kind: &str, i: usize| item_lines(manifest, kind).get(i).copied();
+    for (i, p) in ext.providers.iter().enumerate() {
+        let runs = p.entry.is_some()
+            || matches!(
+                p.adapter.as_ref().map(|a| &a.mcp),
+                Some(crate::providers::spec::McpServer::Command { .. })
+            );
+        let needed = Permissions {
+            process: runs,
+            network: p.network.clone(),
+            secrets: p.credentials.iter().map(|c| c.name.clone()).collect(),
+            ..Permissions::default()
+        };
+        out.push((line("providers", i), format!("provider `{}`", p.id), needed));
+    }
+    for (i, c) in ext.collectors.iter().enumerate() {
+        let mut needed = needs_permissions(&c.needs);
+        if c.runtime == oxplow_config::collectors::CollectorRuntime::Exec
+            && c.bundled_parser().is_none()
+        {
+            needed.process = true;
+            needed.network = c.network.clone();
+            needed.secrets = c.credentials.clone();
+        }
+        if c.runtime == oxplow_config::collectors::CollectorRuntime::Starlark
+            && c.entry
+                .as_deref()
+                .and_then(|entry| files.read(entry))
+                .is_some_and(|script| oxplow_script::ai::calls_ai(&script))
+        {
+            needed.ai = true;
+        }
+        out.push((
+            line("collectors", i),
+            format!("collector `{}`", c.id),
+            needed,
+        ));
+    }
+    for (i, e) in ext.effects.iter().enumerate() {
+        out.push((
+            line("effects", i),
+            format!("effect `{}`", e.id),
+            needs_permissions(&e.needs),
+        ));
+    }
+    for (i, j) in ext.jobs.iter().enumerate() {
+        out.push((
+            line("jobs", i),
+            format!("job `{}`", j.id),
+            needs_permissions(&j.needs),
+        ));
+    }
+    for (i, c) in ext.commands.iter().enumerate() {
+        out.push((
+            line("commands", i),
+            format!("command `{}`", c.name),
+            needs_permissions(&c.needs),
+        ));
+    }
+    for (i, imp) in ext.implementations.iter().enumerate() {
+        let mut needed = needs_permissions(&imp.needs);
+        needed.ai |= imp.capability == "ai_provider";
+        needed.agent |= !imp.skills.is_empty();
+        out.push((
+            line("implementations", i),
+            format!("implementation `{}`", imp.id),
+            needed,
+        ));
+    }
+    for (i, a) in ext.advisories.iter().enumerate() {
+        let needed = Permissions {
+            agent: true,
+            ..needs_permissions(&a.needs)
+        };
+        out.push((
+            line("advisories", i),
+            format!("advisory `{}`", a.id),
+            needed,
+        ));
+    }
+    for (i, skill) in ext.skills.iter().enumerate() {
+        let needed = Permissions {
+            agent: true,
+            ..needs_permissions(&skill.needs)
+        };
+        out.push((line("skills", i), format!("skill `{}`", skill.name), needed));
+    }
+    for (i, c) in ext.custom_components.iter().enumerate() {
+        let needed = Permissions {
+            commands: c
+                .commands
+                .iter()
+                .filter(|cmd| !Permissions::default().command_allowed(&ext.namespace, cmd))
+                .cloned()
+                .collect(),
+            ..Permissions::default()
+        };
+        out.push((
+            line("custom_components", i),
+            format!("component `{}`", c.id),
+            needed,
+        ));
+    }
+    out
+}
+
+/// Each contribution that needs a permission `ext` doesn't declare is an
+/// error at its line, naming what to declare: the extension doesn't load
+/// until its manifest says what it reaches.
+fn check_permissions(ext: &mut Extension, files: &dyn ExtensionFiles, file: &str, manifest: &str) {
+    let fallback = key_line(manifest, "permissions").or(Some(1));
+    let errors: Vec<String> = needed_permissions(ext, files, manifest)
+        .into_iter()
+        .filter_map(|(line, what, needed)| {
+            let missing = ext.permissions.missing(&needed);
+            (!missing.is_empty()).then(|| {
+                at(
+                    file,
+                    line.or(fallback),
+                    format!("{what} needs {}", missing.join(", ")),
+                )
+            })
+        })
+        .collect();
+    ext.errors.extend(errors);
 }
 
 /// The SQL of `ext` that may read its own configuration — a model, a lens, an
@@ -5197,6 +5356,118 @@ mod tests {
         fs::write(p, body).unwrap();
     }
 
+    /// `acme` at `dir` with `manifest` (and the files it names): loaded as
+    /// a deployment is, its permission errors alone.
+    fn permission_errors(dir: &Path, manifest: &str) -> Vec<String> {
+        write(dir, "extension.yaml", manifest);
+        load_extension_at(dir, "acme")
+            .errors
+            .into_iter()
+            .filter(|e| e.contains("permissions."))
+            .collect()
+    }
+
+    /// A provider runs a program with the person's authority and reaches
+    /// its hosts: without `process` and those hosts declared, the
+    /// extension doesn't load, and the error is at the provider's line.
+    #[test]
+    fn a_provider_without_process_permission_is_a_load_error_at_its_line() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "provider.json",
+            &serde_json::to_string(&oxplow_provider_fake::declarations()).unwrap(),
+        );
+        let body = "providers:\n  - id: tracker\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n    network: [api.example.com]\n";
+        let errors = permission_errors(
+            dir.path(),
+            &format!("manifest: 2\nname: acme\nintent:\n  purpose: x\n{body}"),
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].contains("extension.yaml:6:")
+                && errors[0].contains("`permissions.process`")
+                && errors[0].contains("`permissions.network: [api.example.com]`")
+                && errors[0].contains("provider `tracker`"),
+            "{errors:?}"
+        );
+        let errors = permission_errors(
+            dir.path(),
+            &format!("manifest: 2\nname: acme\npermissions: {{ process: true, network: [api.example.com] }}\nintent:\n  purpose: x\n{body}"),
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    /// A component may invoke its own extension's commands; any other
+    /// command a `permissions.commands` pattern must name.
+    #[test]
+    fn a_component_may_invoke_only_its_own_or_a_declared_command() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "components/board/index.html", "<!doctype html>");
+        let body = "custom_components:\n  - { id: board, commands: [oxplow.work_item.transition, acme.item.tidy] }\n";
+        let errors = permission_errors(
+            dir.path(),
+            &format!("manifest: 2\nname: acme\nintent:\n  purpose: x\n{body}"),
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].contains("`permissions.commands: [oxplow.work_item.transition]`")
+                && errors[0].contains("component `board`"),
+            "{errors:?}"
+        );
+        let errors = permission_errors(
+            dir.path(),
+            &format!("manifest: 2\nname: acme\npermissions: {{ commands: [oxplow.work_item.*] }}\nintent:\n  purpose: x\n{body}"),
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    /// A Starlark collector that asks a model spends the person's key.
+    #[test]
+    fn an_ai_calling_starlark_collector_needs_ai() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "sum.star",
+            "def transform(x):\n    return {\"notes\": [{\"n\": 1, \"s\": ai_summarize(\"x\")}]}\n",
+        );
+        let body = "collectors:\n  - id: sum\n    runtime: starlark\n    entry: sum.star\n    needs: [ai.compute]\n    entities:\n      - { name: notes, key: n, columns: { n: int, s: text } }\n";
+        let errors = permission_errors(
+            dir.path(),
+            &format!("manifest: 2\nname: acme\nintent:\n  purpose: x\n{body}"),
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].contains("`permissions.ai`") && errors[0].contains("collector `sum`"),
+            "{errors:?}"
+        );
+        let errors = permission_errors(
+            dir.path(),
+            &format!("manifest: 2\nname: acme\npermissions: {{ ai: true }}\nintent:\n  purpose: x\n{body}"),
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    /// A collector's `input:` query is declared and reviewable: baseline.
+    /// A script's own SQL (`needs: [sql.read]`) is `sql: read`.
+    #[test]
+    fn a_collector_input_query_is_baseline_but_needs_sql_read_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "sum.star",
+            "def transform(x):\n    return {\"notes\": []}\n",
+        );
+        let collector = |needs: &str| {
+            format!("manifest: 2\nname: acme\nintent:\n  purpose: x\ncollectors:\n  - id: sum\n    runtime: starlark\n    entry: sum.star\n    input: SELECT 1 AS n\n{needs}    entities:\n      - {{ name: notes, key: n, columns: {{ n: int }} }}\n")
+        };
+        let errors = permission_errors(dir.path(), &collector(""));
+        assert!(errors.is_empty(), "{errors:?}");
+        let errors = permission_errors(dir.path(), &collector("    needs: [sql.read]\n"));
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("`permissions.sql: read`"), "{errors:?}");
+    }
+
     const EXT: &str =
         "manifest: 2\nname: review\nintent:\n  purpose: test\ndescription: Review helpers\n";
     const LENS: &str = r#"
@@ -5793,7 +6064,7 @@ empty: No items.
         write(
             dir.path(),
             ".oxplow/extensions/review/extension.yaml",
-            "manifest: 2\nname: review\nintent:\n  purpose: test\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: bin/sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n  - id: bad\n    runtime: python\n    entry: x\n    entities: []\n",
+            "manifest: 2\nname: review\nintent:\n  purpose: test\npermissions: { process: true }\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: bin/sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n  - id: bad\n    runtime: python\n    entry: x\n    entities: []\n",
         );
         write(
             dir.path(),
@@ -5823,7 +6094,7 @@ empty: No items.
         write(
             dir.path(),
             ".oxplow/extensions/gh/extension.yaml",
-            "manifest: 2\nname: gh\nintent:\n  purpose: test\ncollectors:\n  - id: prs\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
+            "manifest: 2\nname: gh\nintent:\n  purpose: test\npermissions: { process: true }\ncollectors:\n  - id: prs\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
         );
         write(dir.path(), ".oxplow/extensions/gh/sync.sh", "#!/bin/sh\n");
         write(
@@ -6186,7 +6457,7 @@ commands:
         std::fs::create_dir_all(dir.join("commands")).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),
-            "manifest: 2\nname: x\nintent:\n  purpose: p\neffects:\n  - { id: e, summary: s, on: [effort.finished], entry: effects/e.star, needs: [ai.discover] }\ncommands:\n  - { name: c.go, summary: s, entry: commands/c.star, needs: [ai.discover], invokers: { human: true, agent: false, lens: true }, input_schema: { type: object, additionalProperties: false } }\n",
+            "manifest: 2\nname: x\nintent:\n  purpose: p\npermissions: { ai: true }\neffects:\n  - { id: e, summary: s, on: [effort.finished], entry: effects/e.star, needs: [ai.discover] }\ncommands:\n  - { name: c.go, summary: s, entry: commands/c.star, needs: [ai.discover], invokers: { human: true, agent: false, lens: true }, input_schema: { type: object, additionalProperties: false } }\n",
         )
         .unwrap();
         let script = "def transform(x):\n    r = scope(\"ai.discover\", {\"role\": \"summarize\"})\n    if not r[\"model\"]:\n        return {\"skip\": r[\"problem\"]}\n    return {\"commands\": []}\n";
@@ -7807,7 +8078,7 @@ commands:
     async fn advisories_parse_and_validate_their_columns() {
         let (d, ext) = load_x(
             &[],
-            "advisories:\n  - id: low-coverage\n    on: post-tool-use\n    once_per: effort\n    query: SELECT 'add tests' AS message WHERE :effort_id IS NOT NULL\n  - id: crossings\n    on: prompt\n    once_per: row\n    heading: '# Metric thresholds'\n    query: SELECT 'x' AS message, 'k' AS key\n  - id: nokey\n    on: prompt\n    once_per: row\n    query: SELECT 'x' AS message\n  - id: Bad Id\n    on: prompt\n    query: SELECT 1\n",
+            "permissions: { agent: true }\nadvisories:\n  - id: low-coverage\n    on: post-tool-use\n    once_per: effort\n    query: SELECT 'add tests' AS message WHERE :effort_id IS NOT NULL\n  - id: crossings\n    on: prompt\n    once_per: row\n    heading: '# Metric thresholds'\n    query: SELECT 'x' AS message, 'k' AS key\n  - id: nokey\n    on: prompt\n    once_per: row\n    query: SELECT 'x' AS message\n  - id: Bad Id\n    on: prompt\n    query: SELECT 1\n",
         );
         let ids: Vec<&str> = ext.advisories.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(ids, vec!["low-coverage", "crossings", "nokey"]);

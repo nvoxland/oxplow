@@ -81,7 +81,7 @@ async fn a_qualified_read_reaches_only_its_model_and_what_derives_from_it() {
         &root,
         ".oxplow/extensions/acme/extension.yaml",
         &format!(
-            "manifest: 2\nname: acme\nintent:\n  purpose: p\nmodels:\n  - name: efforts\n    version: 1\n    description: Efforts.\n    columns:\n      - {{ name: id, type: INTEGER, doc: Id. }}\n  - name: mine\n    version: 1\n    description: Items.\n    columns:\n      - {{ name: ref, type: TEXT, doc: Ref. }}\ncommands:\n{block}"
+            "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: {{ sql: read }}\nmodels:\n  - name: efforts\n    version: 1\n    description: Efforts.\n    columns:\n      - {{ name: id, type: INTEGER, doc: Id. }}\n  - name: mine\n    version: 1\n    description: Items.\n    columns:\n      - {{ name: ref, type: TEXT, doc: Ref. }}\ncommands:\n{block}"
         ),
     );
     write(
@@ -181,7 +181,7 @@ async fn a_service_the_script_did_not_declare_is_refused() {
         &root,
         ".oxplow/extensions/acme/extension.yaml",
         &format!(
-            "manifest: 2\nname: acme\nintent:\n  purpose: p\ncommands:\n{}{}",
+            "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: {{ sql: read }}\ncommands:\n{}{}",
             reader("peek", "sql.read"),
             reader("sneak", "sql.read"),
         ),
@@ -214,7 +214,7 @@ async fn a_service_the_script_did_not_declare_is_refused() {
     write(
         &root,
         ".oxplow/extensions/facts/extension.yaml",
-        "manifest: 2\nname: facts\nintent:\n  purpose: p\ncollectors:
+        "manifest: 2\nname: facts\nintent:\n  purpose: p\npermissions: { sql: read, ai: true }\ncollectors:
   - id: asks
     runtime: starlark
     entry: asks.star
@@ -244,7 +244,7 @@ mod approved_code {
         approval_hash, approve, run_collector, Collectors, RunCollectorError, RunTrigger,
     };
 
-    const MANIFEST: &str = "manifest: 2\nname: acme\nintent:\n  purpose: p\ncollectors:
+    const MANIFEST: &str = "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: { process: true }\ncollectors:
   - id: sync
     runtime: exec
     entry: sync.sh
@@ -356,7 +356,11 @@ mod approved_code {
         write(
             &root,
             ".oxplow/extensions/acme/extension.yaml",
-            &format!("{MANIFEST}commands:\n{}", super::reader("all", "sql.read")),
+            &format!(
+                "{}commands:\n{}",
+                MANIFEST.replace("{ process: true }", "{ process: true, sql: read }"),
+                super::reader("all", "sql.read")
+            ),
         );
         write(
             &root,

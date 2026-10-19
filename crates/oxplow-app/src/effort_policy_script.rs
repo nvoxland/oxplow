@@ -122,7 +122,7 @@ def transform(x):
         std::fs::create_dir_all(dir.join("policies")).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: a policy\n  examples: [{ name: a }]\nimplementations:\n  - { capability: effort_policy, id: tidy, title: Tidy, entry: policies/tidy.star, needs: [sql.read] }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: a policy\n  examples: [{ name: a }]\npermissions: { sql: read }\nimplementations:\n  - { capability: effort_policy, id: tidy, title: Tidy, entry: policies/tidy.star, needs: [sql.read] }\n",
         )
         .unwrap();
         std::fs::write(dir.join("policies/tidy.star"), script).unwrap();

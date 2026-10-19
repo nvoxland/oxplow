@@ -27,6 +27,7 @@ pub mod ids;
 pub mod json;
 pub mod knowledge;
 pub mod ordering;
+pub mod permissions;
 pub mod refs;
 pub mod replaceable;
 pub mod row_ids;

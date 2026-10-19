@@ -607,7 +607,7 @@ async fn extension_test_runs_the_harness_suite_over_a_harness_provider() {
     std::fs::create_dir_all(ext.join("fixtures")).unwrap();
     std::fs::write(
         ext.join("extension.yaml"),
-        "manifest: 2\nname: relay\nintent:\n  purpose: A harness over the protocol.\n  examples:\n    - { name: basic, input: { command: render, input: { answer: { kind: ack } } }, expect: its acknowledgement }\nproviders:\n  - id: relay\n    capability: agent_harness\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: relay\nintent:\n  purpose: A harness over the protocol.\n  examples:\n    - { name: basic, input: { command: render, input: { answer: { kind: ack } } }, expect: its acknowledgement }\npermissions: { process: true }\nproviders:\n  - id: relay\n    capability: agent_harness\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     std::fs::write(
@@ -669,7 +669,7 @@ async fn extension_test_runs_the_knowledge_suite_over_a_knowledge_provider() {
     let write = "{ command: write_page, input: { slug: example, body: '# Example', verified_refs: [], removed_refs: [] } }";
     std::fs::write(
         ext.join("extension.yaml"),
-        format!("manifest: 2\nname: shelf\nintent:\n  purpose: Knowledge over the protocol.\n  examples:\n    - {{ name: basic, input: {write}, expect: the page }}\nproviders:\n  - id: shelf\n    capability: knowledge\n    entry: bin/provider\n    declarations: provider.json\n"),
+        format!("manifest: 2\nname: shelf\nintent:\n  purpose: Knowledge over the protocol.\n  examples:\n    - {{ name: basic, input: {write}, expect: the page }}\npermissions: {{ process: true }}\nproviders:\n  - id: shelf\n    capability: knowledge\n    entry: bin/provider\n    declarations: provider.json\n"),
     )
     .unwrap();
     std::fs::write(
@@ -732,7 +732,7 @@ async fn extension_test_runs_the_snapshot_suite_over_a_snapshots_provider() {
     );
     std::fs::write(
         ext.join("extension.yaml"),
-        format!("manifest: 2\nname: shutter\nintent:\n  purpose: Snapshots over the protocol.\n  examples:\n    - {{ name: basic, input: {mark}, expect: a handle }}\nproviders:\n  - id: shutter\n    capability: snapshots\n    entry: bin/provider\n    declarations: provider.json\n"),
+        format!("manifest: 2\nname: shutter\nintent:\n  purpose: Snapshots over the protocol.\n  examples:\n    - {{ name: basic, input: {mark}, expect: a handle }}\npermissions: {{ process: true }}\nproviders:\n  - id: shutter\n    capability: snapshots\n    entry: bin/provider\n    declarations: provider.json\n"),
     )
     .unwrap();
     std::fs::write(

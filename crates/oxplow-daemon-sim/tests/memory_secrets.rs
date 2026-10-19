@@ -127,7 +127,7 @@ async fn an_approval_lives_and_dies_with_the_memory_secrets() {
     std::fs::create_dir_all(ext.join("policies")).unwrap();
     std::fs::write(
         ext.join("extension.yaml"),
-        "manifest: 2\nname: project\nintent:\n  purpose: a policy\n  examples: [{ name: a }]\nimplementations:\n  - { capability: effort_policy, id: mine, entry: policies/mine.star, needs: [sql.read] }\n",
+        "manifest: 2\nname: project\nintent:\n  purpose: a policy\n  examples: [{ name: a }]\npermissions: { sql: read }\nimplementations:\n  - { capability: effort_policy, id: mine, entry: policies/mine.star, needs: [sql.read] }\n",
     )
     .unwrap();
     std::fs::write(

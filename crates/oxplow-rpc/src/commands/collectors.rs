@@ -184,7 +184,7 @@ mod tests {
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: my-gh\nintent: { purpose: test, origin: null, examples: [] }\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n",
+            "manifest: 2\nname: my-gh\nintent: { purpose: test, origin: null, examples: [] }\npermissions: { process: true }\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n",
         )
         .unwrap();
         let script = ext.join("sync.sh");
@@ -425,6 +425,10 @@ mod tests {
             text.replace(
                 "entry: sync.sh\n",
                 "entry: sync.sh\n    credentials: [GH_PAT]\n",
+            )
+            .replace(
+                "permissions: { process: true }",
+                "permissions: { process: true, secrets: [GH_PAT] }",
             ),
         )
         .unwrap();
