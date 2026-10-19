@@ -11,8 +11,8 @@ provides the shared data and action contracts; an extension adds its own
 analysis, presentation, integration, or workflow.
 
 Repository code is untrusted regardless of who authored or shared it.
-Access declarations, version-bound approval, command gates, and component
-isolation provide guardrails. Current in-process script timeouts stop
+Declared permissions that a person approves at deploy, immutable deployments,
+command gates, and component isolation provide guardrails. Current in-process script timeouts stop
 waiting for a result but may leave computation running: they are not yet
 CPU/memory containment. External-program isolation also depends on the
 platform; see [collector limits](../guide/lenses.md#collectors-bringing-in-outside-data).
@@ -216,7 +216,7 @@ extension or project does not copy access.
 The first supported consumer is a remote MCP HTTP provider. Declare
 `auth: OXPLOW_MCP_BEARER` in `adapter.mcp`, and a credential with
 `name: OXPLOW_MCP_BEARER` and `secretRef: <the reference object>`. A person must
-approve that exact provider declaration. The shipped HTTP transport sends the
+approve the extension's permissions when it is deployed. The shipped HTTP transport sends the
 bearer; extension scripts cannot read its value. References are refused for
 package programs, stdio servers and OAuth credentials. A human settings form
 for managing references is not implemented yet.
@@ -329,11 +329,11 @@ A Starlark or jaq collector runs sandboxed: no files, network,
 environment or credentials beyond the services it declares. Every Starlark and jaq script — collectors,
 commands, effects, policies — runs in its own worker process, which is
 stopped when it runs past its time budget or its memory cap (`scripts:`
-in Settings reference). It needs no approval, with one exception:
+in Settings reference). It needs no permission, with one exception:
 a Starlark script that calls a model (`ai_classify`, `ai_score`,
 `ai_summarize`, `ai_extract`) spends your AI provider's key every run,
-so you approve it in Settings → Data first, like an `exec` collector.
-Any change to its files needs approving again.
+so the extension must declare `permissions: { ai: true }`. The loader
+refuses it otherwise.
 
 A collector that records facts declares `facts:` (the measures it writes)
 instead of `entities:`. Add `whole_tree: true` when it must read every file
@@ -359,8 +359,8 @@ The project's own measures, collectors and metrics are an extension too:
 `.oxplow/extensions/project/extension.yaml`. Every extension that does not
 ship with oxplow is the project's own. Only a non-bundled extension may
 declare an `exec` fact collector, a `records:` report collector (test,
-coverage and analysis reports) or `promote:`, and its programs are approved
-like any extension's. `.oxplow/project.yaml` takes only `use:` entries and
+coverage and analysis reports) or `promote:`, and it declares the permissions
+those need, like any extension. `.oxplow/project.yaml` takes only `use:` entries and
 `enabled: false` markers for them.
 
 ### Commands
@@ -445,9 +445,9 @@ is private and limited to 1 MiB and 64 nesting levels. `cancel` and
 per key: asking again with it returns the same job. Put the subject in it
 (`review:effort:eff12`), and read it back as the snapshot's `intentKey` or
 `v_job_run.intent_key`. The host records intent before a worker starts, and
-a person approves each job declaration in Settings -> Data -> Programs
-before it can spend an AI provider key; changing the declaration asks
-again.
+the extension must declare `permissions: { ai: true }` before a job can
+spend an AI provider key, and a person approves that when the extension is
+deployed.
 
 - **Tools.** Each is one of your commands that says `invokers: { job:
   true }`, only reads (`access: read`) and has an `input_schema`. The
@@ -547,9 +547,10 @@ effects:
     entry: effects/announce.star    # transform({ event }) → { commands } | { skip: "why" }
 ```
 
-An effect runs as a program you approve in Settings → Data, and only
-on events logged after the approval. Any edit to the extension's files
-stops it until it's approved again.
+An effect reacts only to events logged after it started. It starts when
+the deployment that first runs it goes live. **Backfill** reaches earlier
+events. A changed file needs a redeploy, which asks you only if it adds a
+permission.
 
 ### Ordering
 
@@ -652,8 +653,10 @@ def response(x):    # { op, model, body } — a 2xx reply
   `{ op: "decide", model, state, questions }` and returns `None` to ask a
   given model as a chat instead; `response` returns
   `{ answers: { <name>: { type: noul, probability } | { type: choice, choice, probabilities } | { type: score, score, probabilities } } }`.
-- A provider runs only once a person approves its script in Settings →
-  Data → Programs, and any change to the script asks again.
+- A provider runs under its extension's permissions (`process`, and
+  `network` and `secrets` for what it reaches). A person approves them when
+  the extension is deployed. A changed script needs a redeploy, which asks
+  only if it adds a permission.
 
 ### Effort policies
 
@@ -679,9 +682,9 @@ implementations:
   returns the commands to run, or a skip. It can't append events.
 - It reads oxplow only through `scope("sql.read", { sql, params })`,
   and only when it `needs` it.
-- It runs once a person approves it in Settings → Data → Programs, and
-  any change to the extension's files asks again. Until then, every
-  event it hears fails, visibly.
+- It runs from the extension's deployment, under its declared
+  permissions. A changed file needs a redeploy, which asks only if it adds
+  a permission.
 - An intent example dry-runs it: `input: { implementation: acme,
   event: { type, payload, anchors? }, answers? }`, `expect: { commands:
   [names] }` or `{ skip: $any }`.

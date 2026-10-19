@@ -273,9 +273,9 @@ command's UI path, a testid — and add or extend a spec under
   helpers (`until`, `settle`, `searchable`, `waitForModels`) — never a
   sleep: global setup refuses a spec that calls `waitForTimeout`;
 - seed through `run()` (the bus, as the person) or files written before
-  boot, never through a backdoor; approve as a person does
-  (`approveProgram`, `approveCollector`);
-- a spec whose state no other may touch first (nothing approved, a
+  boot, never through a backdoor; deploy and approve as a person does
+  (`oxplow.extension.deploy`, confirmed inline);
+- a spec whose state no other may touch first (nothing deployed, a
   provider configured) takes the `fresh` fixture, its own daemon.
 - every thread runs the fake terminal harness (the test extension's
   `terminal` provider, `agents: [terminal]`); a spec that needs an agent

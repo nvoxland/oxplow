@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`file.deleted@1`: a file or directory of a stream's worktree was\nremoved (`oxplow.file.delete`). What holds it — an open editor buffer\nunder the path — closes.",
+  "properties": {
+    "path": {
+      "description": "The path that is gone.",
+      "type": "string"
+    },
+    "stream": {
+      "description": "The stream (`str2`).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "stream",
+    "path"
+  ],
+  "title": "FileDeletedV1",
+  "type": "object"
+}

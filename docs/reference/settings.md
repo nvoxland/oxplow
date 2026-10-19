@@ -322,17 +322,16 @@ simplest for XML/JSON; `starlark` covers logic jq can't express; `exec`
 runs an external program — `entry` is the executable — (raw report on
 stdin, JSON on stdout) as a last resort. jaq and starlark run in-process
 and sandboxed, so their output is trusted as measured; an `exec` parser
-runs only once you approve it on your machine (Settings → Data →
-Programs), and its output is flagged lower-trust in the UI.
+needs the extension to declare `permissions: { process: true }`, and its
+output is flagged lower-trust in the UI.
 
-Approving a program grants what it declares and nothing more: the
-program it runs, the hosts it may reach, the credentials and environment
-it reads, the scopes it calls, whether it calls a model. Its row says
-what oxplow can't hold it to on this machine — a program reads and
-writes files as you, and its network is confined only on macOS. You can
-revoke an approval there too: from the next thing it does, it runs
-nothing until you approve it again. Every run it makes is recorded in
-`v_extension_run`, with what each grant decided.
+An extension's permissions are what it may reach: programs (`process`),
+hosts (`network`), credentials (`secrets`), models (`ai`), and so on. You
+approve them when you deploy the extension (Settings → Extensions), and a
+deploy that adds a permission asks again. `process` is declared, not
+confined: a program reads and writes files as you, and its network is
+confined only on macOS. Every run is recorded in `v_extension_run`, with
+what each permission decided.
 
 The full authoring reference — host helpers, the exact output schemas,
 a worked example — lives in `.context/collection.md` in the oxplow

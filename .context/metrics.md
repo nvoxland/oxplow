@@ -1073,23 +1073,23 @@ Durations are `30s` / `5m` / `2h` (`parse_duration`). Checked at load
   (`list_span_files`) — what running on each snapshot between would have
   scanned — so pacing never loses a file.
 
-### Exec fact collectors need consent
+### Exec fact collectors need `permissions.process`
 
 Only an own extension's (the project's) fact collectors may be `runtime: exec`
 (any other extension's is starlark or jaq, and a fact collector gets no `env` /
-`credentials` / `network`). One runs only once a person approved it on this
-machine, like any extension collector (`collector_runner::approval_hash` over
-the extension's files plus the declaration, keyed `<ext>/<id>`, checked in
-`MetricsService::fact_runner`), at its current content.
+`credentials` / `network`). One loads only when its extension declares
+`permissions.process` (and the `network` / `secrets` it uses), which a person
+approved when they deployed it on this machine, like any exec collector; it
+runs from the extension's immutable deployment, so the content that runs is
+the content that was approved (checked in `MetricsService::fact_runner`).
 
-Own-extension exec fact collectors require the explicit broader execution tier and
-run from `approved_code`'s verified private copy, with owned process cleanup and
-live consent checks. Relative code and helpers are read from the copy;
-`OXPLOW_PROJECT_DIR` names the checkout for their explicitly approved broader
-file access. See [collection.md](./collection.md) for copy limits and lifetime.
+Own-extension exec fact collectors run with owned process cleanup and live-owner
+checks. Relative code and helpers are read from the deployment;
+`OXPLOW_PROJECT_DIR` names the checkout for their data access. See
+[collection.md](./collection.md) "Authority for external report parsers".
 
 Contained fact scripts also pin the loaded text to the current entry for each
-run, including previews. A new approval cannot authorize older cached code;
+run, including previews. A new deploy cannot authorize older cached code;
 service calls and final results recheck the pin. Previews use the collector's
 ordinary declaration and grant in pure mode, so a fixture cannot bypass model
 or tree bounds or spend a model key.
@@ -1098,10 +1098,10 @@ or tree bounds or spend a model key.
   and record a failed run (`collector_run` + `collector.synced`).
 - **Explicit runs** (`run_collector_by_key`, the `oxplow.collector.sync` command)
   return the reason as the command's error.
-- **Approving.** Settings → Data → Collectors, on the collector's row (UI-only;
-  Programs doesn't list collectors). The run is from a private approved copy
-  (`approved_code::extension_collector`). See
-  architecture.md → "A repo's config never runs a program without consent".
+- **Approving.** Deploying the extension on the Extensions page; the deploy
+  asks a person when it adds `process`. See
+  architecture.md → "A repo's config never runs a program without a deployed
+  permission".
 
 ### Producers — facts on the capture spine (the ONLY write since T-E2)
 
@@ -1963,7 +1963,7 @@ measures:                             # the fact TYPE the collector records
 collectors:                           # the PRODUCER (runs a script, records facts)
   - id: repo.todo
     doc: TODO comment scan
-    runtime: starlark                 # starlark | jaq | exec (own extension only, approved)
+    runtime: starlark                 # starlark | jaq | exec (own extension only, needs permissions.process)
     entry: collectors/todo.star       # relative to the extension folder
     trigger: { on: [snapshot.taken] } # manual | { every: 15m } | { on: [<types>], where?: {...}, settle?, at_most?, idle?, force? }
     facts: [repo.todo_count]          # declare-to-collect allow-list
@@ -1995,8 +1995,8 @@ metrics:                              # the read SPEC (the chartable metric)
   [collection.md](./collection.md)) — `tree.read`, which a fact collector
   implies. It may also read the semantic layer (`scope("sql.read", …)`)
   or ask a model (`ai_*`) when it declares `needs: [sql.read]` /
-  `[ai.compute]` — the latter only once a person approved it
-  (`MetricsService::approved_to_ask`); `MetricsService::given` builds them
+  `[ai.compute]` — the latter only when its extension declares
+  `permissions.ai`; `MetricsService::given` builds them
   (extensions.md "Services"). It returns `{ "facts": [
   {measure, value, subject?, path?, line?, rule?, num?, den?, dims?} ] }` —
   one atomic fact per subject (never a baked total). `facts_of` refuses any

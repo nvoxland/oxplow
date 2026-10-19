@@ -28,8 +28,9 @@ that run through public commands and the SDK only:
   the partial review is kept; an effect comments it on the work item.
   Test: `the_effort_review_example_reviews_evidence_and_can_be_cancelled`.
 - **A durable workflow with its own UI** (triage). A decision survives a
-  restart, a revoked and re-approved board, and an edited bundle that
-  asks for approval again; a stale compare-exchange is refused.
+  restart, a board whose extension is disabled and enabled again, and an
+  edited bundle that has to be redeployed; a stale compare-exchange is
+  refused.
   Tests: `crates/oxplow-sdk/tests/trials.rs`; the browser spec
   `tests-e2e/specs/components/triage.spec.ts` drives the board and the
   lens form.
@@ -96,7 +97,7 @@ Still open:
 
 - **No job starts on an event by itself.** An effect composes the
   extension's own enqueue command (which must admit `agent`), and the
-  job still needs its own approval; until then it waits `queued`.
+  job runs under the extension's `permissions` once it is deployed.
 - **Event order matters and isn't obvious.** `effort.closed` comes before
   the effort's evidence is refreshed; a reviewer must listen for
   `effort.finished`.

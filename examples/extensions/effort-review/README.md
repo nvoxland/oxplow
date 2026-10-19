@@ -48,13 +48,14 @@ yours.
 1. Copy this folder to `.oxplow/extensions/effort-review/`.
 2. Settings → AI: bind **effort-review/review** to a model (it needs tool
    calling), or give the **Summarize** role one and it is used instead.
-3. Settings → Data → Programs: approve **Job effort-review/review** and
-   the two effects. Until the job is approved, a review waits as
-   `queued` on the Jobs page and nothing is sent to a model.
+3. Deploy it (`oxplow.extension.deploy { name: "effort-review" }`, or
+   Deploy on Settings → Extensions) and approve what it asks for: models
+   (`ai`), the agent's text and its own commands. Until it is deployed
+   no review starts and nothing is sent to a model.
 4. Finish an effort that has a work item, or press **Review** on
    **Finished Efforts**.
 
-Changing `extension.yaml` asks for the job's approval again.
+Changing `extension.yaml` takes a redeploy; it asks again only if it adds a permission.
 
 ## Build on it
 

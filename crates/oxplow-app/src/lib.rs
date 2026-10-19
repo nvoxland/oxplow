@@ -1788,10 +1788,18 @@ impl Services {
                 ),
             ))
             .chain(commands::effect::ops(services_slot.clone()))
+            .chain(commands::delivery::ops(services_slot.clone()))
+            .chain([commands::lsp::restart_op(services_slot.clone())])
             .chain(commands::extension_deploy::ops(services_slot.clone()))
             .chain(commands::agent_reads::ops(services_slot.clone()))
             .chain(client_host::ops(&client_host))
-            .chain([commands::file::save_op(workspace_files.clone())])
+            .chain([
+                commands::file::save_op(workspace_files.clone()),
+                commands::file::create_op(workspace_files.clone()),
+                commands::file::create_directory_op(workspace_files.clone()),
+                commands::file::rename_op(workspace_files.clone()),
+                commands::file::delete_op(workspace_files.clone()),
+            ])
         {
             commands.add_op(op).expect("core ops register");
         }
@@ -2261,6 +2269,10 @@ mod tests {
                 // A provider's process restarts (P7.C1; was provider.enable).
                 "oxplow.contribution.enable",
                 "oxplow.contribution.enable_all",
+                // A consumer's handler runs again (the event pump owns the
+                // letter; the handler may reach outside oxplow).
+                "oxplow.delivery.discard",
+                "oxplow.delivery.retry",
                 // The worktree and the snapshot diff a report is checked
                 // against (P8.A7).
                 "oxplow.effect.backfill",
@@ -2276,6 +2288,10 @@ mod tests {
                 "oxplow.extension.share",
                 "oxplow.extension.unshare",
                 "oxplow.extension.validate",
+                "oxplow.file.create",
+                "oxplow.file.create_directory",
+                "oxplow.file.delete",
+                "oxplow.file.rename",
                 "oxplow.file.save",
                 "oxplow.git.cherry_pick",
                 "oxplow.git.ignore",
@@ -2299,6 +2315,8 @@ mod tests {
                 // A download into .oxplow/lsp/, a person's call (P8.A9).
                 "oxplow.lsp.install_server",
                 "oxplow.lsp.remove_server",
+                // The language server is a process on this machine.
+                "oxplow.lsp.restart_server",
                 "oxplow.metric.rebuild",
                 // The agent's reads of live state are read-scope operations
                 // (`commands/agent_reads`): they change no record.
@@ -2406,6 +2424,9 @@ mod tests {
                 // a program does still waits for a person's approval.
                 "extensions.deploy/deploy",
                 "extensions.deploy/rollback",
+                "files.write/create",
+                "files.write/create_directory",
+                "files.write/rename",
                 "files.write/save",
                 // Each side settles only its own side of a handoff
                 // (`may_settle`), checked before a take composes its move.

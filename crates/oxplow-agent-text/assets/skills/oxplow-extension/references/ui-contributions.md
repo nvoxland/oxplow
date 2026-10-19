@@ -62,8 +62,8 @@ ui:
   commands (`oxplow.work_item.update`, `transition`, `reorder` — when
   the active list's `features` in `v_capability_provider` include
   `ordering` — and `move`), so the view works with whichever list is
-  active. A component declares the commands it runs (`commands:`), and a
-  person approves it before it can run them.
+  active. A component declares the commands it runs (`commands:`); one outside
+  the extension's namespace also needs `permissions.commands`, approved at deploy.
 - **An effort's verdict** (`effort.verdict`, props `effort_id`) is the
   first line of an effort's review page, and core has none of its own:
   when a person wants their own review rules ("block on a dropped table",

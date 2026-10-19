@@ -186,16 +186,6 @@ pub const MANIFEST: &[Capability] = &[
         "decide_proposal",
         "approving or declining an agent's proposal is a person's (P6b)",
     ),
-    // ---- the event log's dead-letter queue ----
-    model("list_dead_letters", &["v_event_dead_letter"]),
-    ui(
-        "retry_dead_letter",
-        "a dead letter's fate is a person's (V93); an agent lists them",
-    ),
-    ui(
-        "discard_dead_letter",
-        "a dead letter's fate is a person's (V93); an agent lists them",
-    ),
     both_named("search", "search", "oxplow_search"),
     both_named("query_sql", "query_sql", "oxplow_query_sql"),
     // Settings → Data: the models, and entities not yet synced.
@@ -550,26 +540,6 @@ pub const MANIFEST: &[Capability] = &[
         "vcs_merge_base",
         "an ancestry walk the VCS answers; an agent runs git in its worktree",
     ),
-    ui(
-        "write_workspace_file",
-        "workspace file I/O: an agent uses its own Read/Write tools",
-    ),
-    ui(
-        "create_workspace_file",
-        "workspace file I/O: an agent uses its own Read/Write tools",
-    ),
-    ui(
-        "create_workspace_directory",
-        "workspace file I/O: an agent uses its own Read/Write tools",
-    ),
-    ui(
-        "rename_workspace_path",
-        "workspace file I/O: an agent uses its own Read/Write tools",
-    ),
-    ui(
-        "delete_workspace_path",
-        "workspace file I/O: an agent uses its own Read/Write tools",
-    ),
     // ---- background tasks ----
     ui(
         "list_background_tasks",
@@ -618,10 +588,6 @@ pub const MANIFEST: &[Capability] = &[
         "the editor's language-server client; an agent has the `code_*` tools",
     ),
     model("list_lsp_servers", &["v_lsp_server"]),
-    ui(
-        "restart_lsp_server",
-        "Settings' language servers: restarting one is the person's",
-    ),
     ui(
         "respond_lsp_apply_edit",
         "the editor answers a server's edit request",

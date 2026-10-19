@@ -484,7 +484,7 @@ A few published models hold state that has **no change hook** to restate it
 from: whether a key is in the keychain (`v_ai_provider.key_set`,
 `v_ai_role.key_set`), `ai.yaml` and `project.yaml` (a person edits them by
 hand), which language servers run and whose binary is on disk
-(`v_lsp_server`), and a machine's collector approvals and credentials
+(`v_lsp_server`), and a machine's collector standing and credentials
 (`v_collector_state`, `v_collector_credential`; per machine, outside the
 repo), what the zone table does to the worktree (`v_zone`,
 `v_zone_unmatched`: `project.yaml` edited by hand, and the files on disk),
@@ -526,7 +526,7 @@ rows are read when a query names the model.
 - **Changed, as any model is:** `live_models::follows` says what changes
   each one — the events about the state it reads (`ConfigChanged`,
   `WorkspaceChanged`, `VcsRefsChanged`, `LspServersChanged`,
-  `ApprovalsChanged`, `CredentialChanged`, `ExtensionsChanged`) and the
+  `CredentialChanged`, `ExtensionsChanged`) and the
   models it reads through (`v_agent_conversation` follows `v_agent_session`
   and `v_agent_turn`; `v_vcs_workspace` follows `v_stream`). The bus, as
   it posts such an event, posts the `ModelsChanged` naming the live models
@@ -692,10 +692,10 @@ and `v_model_test` are the catalog of all of them:
 | `v_extension_run` | one row per finished run of extension code (V48; [data-model.md](./data-model.md) "extension_run"): `run_id`, `parent_run_id`, `extension`, `contribution`, `kind`, `version`, `generation`, `actor_kind`, `actor`, the anchors, `cause_event_id`, `mode`, `started_at`, `finished_at`, `outcome`, `error`, `wall_ms`, `cpu_ms`, `peak_bytes`, `ai_calls`, `scopes`, `decisions`, `latest` (1 on a contribution's most recent run). `v_effect_run`, `v_collector_run` and `v_ai_call` name theirs in `run_id`. Kept 90 days |
 | `v_job_run` | each job run — one execution of a job an extension declares (V56; [extensions.md](./extensions.md) "Jobs"): `id`, `job` (`job:<ext>/<id>`), `ref` (`job_run:<id>`), `extension`, `version`, `contract_version`, `operation`, `state`, `attempt`, `cancellation_requested`, `invoker`, `run_id`, `created_at`, `updated_at`, and its current attempt's `ai_calls`, `tool_calls`, `input_tokens`, `output_tokens`. Never its request or result |
 | `v_job_run_output` | what a job produced as it ran, in order (`job_id`, `attempt`, `seq`): `kind` (`text`, `tool_call`, `tool_result`, `usage`), `at`, `text` (a text row's), `data` (the row as JSON). Written as it streams, so a lens over it follows a job live |
-| `v_job_run_observation` | what a job's worker said after its attempt was fenced (a lease recovered, an approval revoked, a declaration changed): one row per late result (`id`, `job_id`, `attempt`, `fence`, `at`, `outcome`, `evidence`). Evidence only; it never changes the job |
+| `v_job_run_observation` | what a job's worker said after its attempt was fenced (a lease recovered, a permission removed, a declaration changed): one row per late result (`id`, `job_id`, `attempt`, `fence`, `at`, `outcome`, `evidence`). Evidence only; it never changes the job |
 | `v_op_error` | operations that failed in front of the person in the app, one row per `ui.op_failed@1` event (`oxplow.ui.report_error`, tsk1072): `event_id`, `at`, `stream_id`, `thread`, `label`, `command`, `message`, `exit_code`, `signal`, `duration_ms`, `output_size`. The stderr / stdout are the event's `output` body (`oxplow_read` `event:<id>#output`). Kept 30 days, the output 14; an expired event keeps its row with its details NULL and `payload_expired_at` set |
 | `v_event_content` | large event bodies (tool input/output, prompts) by content hash, without the bytes (V102) |
-| `v_event_dead_letter` | events a consumer failed on, parked with the error; `pending` ones need `retry_dead_letter` / `discard_dead_letter` (V94) |
+| `v_event_dead_letter` | events a consumer failed on, parked with the error; `pending` ones need `oxplow.delivery.retry` / `oxplow.delivery.discard` (V94) |
 | `v_event_checkpoint` | how far each event consumer has read (V94) |
 | `v_decision` | forks the agent resolved (question, choice, alternatives, confidence, why). `provenance`: `recorded` via the `oxplow.effort.record_decision` command (V76; P8.A7), or `inferred` when the effort closed (V79) — a recorded `extract` computation on the `main` role (`AiCompute`, so an unchanged effort doesn't call again) — and a reviewer's verdict on an inferred one: `confirmed` or `dismissed` (V132, `oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`; a re-inference replaces only the still-`inferred` ones) |
 | `v_claim` | claims the agent made in its answers ("tests pass"), as a model read them when the effort finished (`oxplow.effort.replace_inferred_claims`), what each cites (`evidence_ref`; `reviewer` when a person verified it by looking) and a reviewer's verdict (`review`: `verified` or `dismissed`, V75). Whether anything else backs a claim is a review policy's: oxplow-bundled's `v_oxplow_bundled_claim_status` counts a `tests_pass` claim backed when its effort's **latest** `v_test_run` has `failed = 0 AND total > 0` |
@@ -845,7 +845,7 @@ The result keeps the two apart.
   `{ model, source: "collector:<owner>/<id>", status, at, error }`, the
   status read at query time from `collector_run` and
   `contribution_health` — `never` (no run), `failed` (the last run's
-  error), `needs_approval`, `disabled` (health says so, with its
+  error), `disabled` (health says so, with its
   reason), `stale` (its schedule's `next_due_at` passed) or `current`.
   Core's own models carry no entry: core keeps them current. Nothing is
   inferred from timestamps alone. The lens view lists each entry that
@@ -905,14 +905,14 @@ extension's own declared event types, logged with the run (P9.D2;
 
 - An **entity collector** (`entities:`) writes rows published as
   `v_<owner>_<entity>`; `collector_runner` runs it. It may be `exec`
-  (approved), `starlark` / `jaq` (derived, below; a Starlark one may call
-  `ai_*` once approved, and read the tree when it declares `tree.read`)
+  (needs `permissions.process`), `starlark` / `jaq` (derived, below; a Starlark one may call
+  `ai_*` with `permissions.ai`, and read the tree when it declares `tree.read`)
   or `read`.
 - A **fact collector** (`facts: [<measure>, …]`) is what a *gauge* was
   until P7.B3. It runs in the fact engine (`MetricsService`,
   [metrics.md](./metrics.md)): its Starlark gets the snapshot tree
   (`files()` / `source_files()` / `ast_query()`, `tree.read`) and, when
-  it declares them, the semantic layer and a model (approved); its input is `{report?, rows?, event?}` (`report: { path,
+  it declares them, the semantic layer and a model (`permissions.ai`); its input is `{report?, rows?, event?}` (`report: { path,
   format }` parsed — text | json | xml | lcov | lines; the `input:`
   query's rows; the trigger event); it returns `{"facts": [{measure,
   value, subject?, path?, line?, rule?, num?, den?, dims?}]}` and nothing
@@ -930,9 +930,9 @@ extension's own declared event types, logged with the run (P9.D2;
   analysis }` — when the `collection` reactor detects that kind of run and
   the run wrote the report — or by hand (`oxplow.collector.sync`, which records
   in a thread). The collection service runs it and merges its output into
-  the run (`.context/collection.md`); its run, health and consent are any
-  collector's (`collector_run`, `collector.synced@1`, `contribution_health`, the
-  extension collector approval).
+  the run (`.context/collection.md`); its run and health are any
+  collector's (`collector_run`, `collector.synced@1`, `contribution_health`), and
+  its extension's permissions apply (`process` for an exec script).
 
 **Owners.** An extension (its name), always: the project's own collectors
 belong to its own extension, `project` by convention
@@ -945,9 +945,9 @@ that metrics name runs only while one of them is on.
   folder).
 - **An extension's fact collector is sandboxed** (starlark or jaq). Only a
   non-bundled extension (the project's own) may declare an `exec` fact collector or
-  report collectors, and those need a person's approval like any extension
-  collector (Settings → Data → Collectors; `collector_runner::approval_hash`,
-  key `<ext>/<id>`, run from `approved_code::extension_collector`).
+  report collectors, and those need the extension to declare `permissions.process` like any
+  exec collector (the loader refuses it otherwise), approved when the
+  extension is deployed.
 - **A fact collector gets no `env` / `credentials` / `network`**, and
   `report` is for fact collectors only.
 
@@ -984,7 +984,7 @@ the last good counts and checkpoint kept). The event's subject is
 `manual` (`oxplow.collector.sync` by an actor), `every` (the scheduler, as the
 system) or `on`. `collector_run` (V133, `v_collector_run`; it replaced
 V75 `ext_source_state`) keeps `owner, id, status (ok | error |
-needs_approval), last_run_at, error, row_counts_json, cursor_json,
+skipped), last_run_at, error, row_counts_json, cursor_json,
 last_event_id`. The UI refreshes when `v_collector_run` changes
 (`collectorRan`); the in-memory `SourceSynced` is gone.
 
@@ -1017,8 +1017,8 @@ type without a `trigger` field:
   and no run lands without its record.
 - **Failure.** A failing collector is recorded and announced like any run
   and doesn't dead-letter the event: one broken collector never holds up
-  the rest. An exec collector nobody approved records `needs_approval`
-  (no event) and runs nothing.
+  the rest. An exec collector whose extension doesn't declare `permissions.process`
+  doesn't load, so it never runs.
 - **Order.** A collector's `after:` names effects, collectors or core
   consumers (extensions.md "Ordering"); collectors of one event run level
   by level. An event waits on the core consumers named by the collectors
@@ -1055,16 +1055,15 @@ entities from data already in the semantic layer:
   A model call spends the person's key — on an `every:` trigger, every few
   minutes, run as nobody — so a Starlark script that names an `ai_*`
   builtin (`oxplow_script::ai::calls_ai`: any identifier, so an alias
-  counts; Starlark reaches a global only by name) is a program a person
-  approves, exactly as an exec one (`collector_runner::needs_approval`;
-  the same `approval_hash`, Settings → Data → Approve & Run). Until then
-  `produce` refuses it (a scheduled run records `needs_approval`),
-  `v_collector_state` lists it unapproved with its `version`, `extension
-  test` skips its examples with a warning, and only an approved script is
+  counts; Starlark reaches a global only by name) needs `permissions.ai`
+  in its extension's manifest, approved when the extension is deployed: the
+  loader refuses the extension without it, and the run's `ai.compute`
+  decision is denied (`RunCollectorError::Denied`, recorded as the run's
+  `error`) when the extension lacks it. Only a permitted script is
   handed a model at all (the services router builds no model for any
   other run, extensions.md "Services").
-  Any other derived collector needs **no approval**: `v_collector_state`
-  reports it approved and the scheduler runs it on its `every:` trigger.
+  Any other derived collector needs **no permission**: the scheduler runs
+  it on its `every:` trigger.
 - **Refused at parse:** `env` / `credentials` on a derived collector,
   `input` on an exec collector, and an `input` that names one of the
   collector's own views (a collector can't feed on itself). Reading other extensions' views
@@ -1092,12 +1091,12 @@ entities from data already in the semantic layer:
 | Parse/validate declarations (`CollectorSpec`, `Trigger`) | `crates/oxplow-config/src/collectors.rs` |
 | Fact collectors: `FactCollector`, `fact_collectors()`, `run_collector_by_key`, `run_snapshot_collectors` / `run_effort_collectors` / `run_event_collectors` | `crates/oxplow-app/src/metrics_service.rs` |
 | Script services (`runtime::Hosts`, `TreeHost`), `facts_of`, `parse_report` | `crates/oxplow-script/src/lib.rs`, `runtime.rs` |
-| Consent (`approve_reviewed`), exec, coercion, `run_collector` / `run_for_event`, `CollectorRunner` + the `oxplow.collector.sync` command, scheduler | `crates/oxplow-app/src/collector_runner.rs` |
+| Exec, coercion, `run_collector` / `run_for_event`, `CollectorRunner` + the `oxplow.collector.sync` command, scheduler | `crates/oxplow-app/src/collector_runner.rs` |
 | The `collector.triggers` consumer (`on:` / `where` / `after`) | `crates/oxplow-app/src/collector_triggers.rs` |
 | Entity tables + views, run state (V133 `collector_run`) | `crates/oxplow-db/src/collector_store.rs` |
 | Settings → Data read model (`data_entities`) | `crates/oxplow-app/src/semantic_catalog.rs` |
-| IPC `list_collectors` / `approve_collector` / `set_credential` (UI only); running is `run_command oxplow.collector.sync` | `crates/oxplow-rpc/src/commands/collectors.rs` |
-| MCP `oxplow_preview_collector`; an agent syncs with `run_command oxplow.collector.sync`; approval and credentials read `v_collector_state` / `v_collector_credential` (the `oxplow.collector.sync` command as the agent; never approves) | `crates/oxplow-mcp/src/lib.rs` |
+| IPC `list_collectors` / `set_credential` (UI only); running is `run_command oxplow.collector.sync` | `crates/oxplow-rpc/src/commands/collectors.rs` |
+| MCP `oxplow_preview_collector`; an agent syncs with `run_command oxplow.collector.sync`; standing and credentials read `v_collector_state` / `v_collector_credential` (the `oxplow.collector.sync` command as the agent) | `crates/oxplow-mcp/src/lib.rs` |
 | UI: Settings → Data (entities + counts, collector rows, Run) | `apps/desktop/src/components/DataSection.tsx` |
 | UI: credentials per extension | `apps/desktop/src/components/ExtensionsSection.tsx` |
 | IPC `list_data_entities` (models + counts, unsynced entities) | `crates/oxplow-rpc/src/commands/semantic.rs` |
@@ -1118,19 +1117,19 @@ entities from data already in the semantic layer:
     one from another extension. Extension `work` plus entity `item` can't
     shadow `v_work_item`.
   - `drop_extension` removes an extension's tables, views and state.
-- **Consent.** An exec collector runs code, so it runs only after a
-  person approves it.
-  - Approval is bound to the entry script's SHA-256 and stored per
-    machine outside the repo, MACed under a keychain key (see
-    [architecture.md](./architecture.md) → "A repo's config never runs a
-    program without consent").
-  - A teammate who pulls the repo approves it themselves, and a changed
-    script needs re-approval.
-  - Approving is its own UI-only step (`approve_collector`, the version
-    the person reviewed); running is the `oxplow.collector.sync { collector }`
-    command, which never approves — from the UI, a lens action, the
-    scheduler or the `oxplow.collector.sync` command alike — so an agent can't consent on
-    a person's behalf. The approval key stays `<owner>/<id>`.
+- **Permission.** An exec collector runs code, so its extension must
+  declare `permissions.process` (and the `network` hosts and `secrets` it
+  uses); the loader refuses it otherwise.
+  - A person approved it when the extension was deployed, and a deployment
+    is immutable, so the script that runs is the script that was approved
+    (see [architecture.md](./architecture.md) → "A repo's config never runs
+    a program without a deployed permission").
+  - A teammate who pulls the repo deploys the extension themselves, and a
+    changed script needs a new deploy.
+  - Running is the `oxplow.collector.sync { collector }` command — from the
+    UI, a lens action, the scheduler or an agent alike. It never approves
+    anything: a deploy that adds a permission asks a person, and an
+    agent's becomes a proposal.
 - **Environment.** The entry gets `PATH`, `HOME`, its declared `env`
   names, its declared `credentials`, `OXPLOW_EXTENSION_DIR` and
   `OXPLOW_COLLECTOR_ID`. Its stdin is `{ "event": … }` (the event
@@ -1142,9 +1141,9 @@ entities from data already in the semantic layer:
   "*.githubusercontent.com"]` lists the hosts an exec collector may reach:
   - **Pattern syntax.** Lowercase names; `*.` means subdomains only, not
     the bare domain.
-  - **Part of the approval.** `approval_hash` is the entry hash plus the
-    sorted host list, so widening the list needs re-approving. With no
-    `network`, it is just the entry hash, so older approvals stay valid.
+  - **Part of the permission.** The hosts must sit under the extension's
+    `permissions.network`; widening the list needs the permission, so a
+    deploy that adds a host asks.
   - **macOS enforcement** (`net_sandbox::enforced()`: `/usr/bin/sandbox-exec`
     exists). The entry runs as
     `sandbox-exec -p PROFILE <entry>`, where PROFILE is `(allow default)`
@@ -1159,7 +1158,7 @@ entities from data already in the semantic layer:
     way out. No `network` means no egress.
   - **Gaps.** Other localhost ports stay reachable. Tools that ignore
     proxy variables simply can't connect. Other OSes run unsandboxed, and
-    the listing's `network_enforced` is false, so the approval text says
+    the listing's `network_enforced` is false, so the deploy prompt says
     "not enforced on this OS". Linux would need unshare/seccomp or a
     network namespace.
   - **Verified** (2026-09-27, macOS 27): `gh api` and `curl` in the GitHub
@@ -1183,29 +1182,28 @@ entities from data already in the semantic layer:
     GitHub example falls back to `gh`). A keychain error fails the run.
   - A name can't be in both `env` and `credentials`, or be `PATH`, `HOME`
     or `OXPLOW_*`.
-  - Changing `credentials` doesn't need re-approval: approval is bound to
-    the entry script, and a secret reaches it only after the person sets
-    that extension's value.
-  - `collector_runner::Collectors` bundles root, approvals, store, the
+  - A secret reaches the script only if its extension declares the name
+    in `permissions.secrets` and the person has set the value.
+  - `collector_runner::Collectors` bundles root, store, the
     database and event schemas, secrets and the gateway — the context
     every list/run/set call takes (`Collectors::of(svc, root)`).
 - **Where it runs.** Collectors run from the **primary** stream's worktree,
   and their data is project-global, like dashboards.
 - **Errors.**
-  - `RunCollectorError` distinguishes `NotFound`, `NeedsApproval`
-    (nothing ran, nothing recorded), `Failed` (it ran; recorded with its
+  - `RunCollectorError` distinguishes `NotFound`, `Denied` (its extension
+    lacks a permission; nothing ran), `Disabled`, `Failed` (it ran; recorded with its
     event, keeping the last good row counts) and `Storage`.
   - A lens reading an uncollected entity gets "reads `v_x`, which hasn't
     been collected yet. Run collector `ext/id`…" in place of SQLite's
     bare "no such table".
 - **Scheduling.** A background loop (`spawn_scheduler`, started from boot
   on `Services::spawn_every`, so `Services::shutdown` stops it)
-  calls `run_due_collectors` once a minute: every approved collector with
+  calls `run_due_collectors` once a minute: every collector with
   an `every:` trigger that's due (`due_collectors`, which is pure and
   tested) runs as the `oxplow.collector.sync` command with `Actor::System` — so
   a scheduled run is audited and logs `command.executed` like one from
   the UI (tested: `the_scheduler_runs_collector_sync_through_the_bus`).
-  Unapproved collectors never run unattended: the command refuses them.
+  A disabled collector never runs unattended: the command refuses it.
 - **Schema.** A synced entity is a model its extension owns: its
   description is its doc plus the joins it documents (`relations`), and
   its contract is its declared columns with their docs, refreshed when the

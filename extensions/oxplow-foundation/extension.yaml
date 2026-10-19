@@ -364,6 +364,19 @@ commands:
     op: add_item
     invokers: { human: true, agent: true, lens: true }
     example: {"dashboard": "dsh3", "kind": "query", "sql": "SELECT count(*) AS open FROM v_work_item WHERE state = 'todo'", "display": "number"}
+  - name: delivery.retry
+    summary: "Run an event a consumer couldn't take through that consumer again, now. A person's, or a lens for one. The letter is `retried`, or stays `pending` with the new error."
+    scope: deliveries.write
+    op: retry
+    invokers: { human: true, agent: false, lens: true }
+    example: {"id": 3}
+  - name: delivery.discard
+    summary: "Give up on an event a consumer couldn't take; it stays visible as `discarded`. A person's, confirmed."
+    scope: deliveries.write
+    op: discard
+    invokers: { human: true, agent: false, lens: true }
+    confirm: destructive
+    example: {"id": 3}
   - name: dashboard.create
     summary: "Create an empty dashboard (a grid of tiles); fill it with `oxplow.dashboard.add_item`."
     scope: dashboards.write
@@ -605,6 +618,31 @@ commands:
     invokers: { human: true, agent: true, lens: true }
     confirm: destructive
     example: {"file_snapshot": 42}
+  - name: file.create
+    summary: "Make a file in a stream's worktree. The folders above it are made too; it is refused when the file exists. Logs `file.created`."
+    scope: files.write
+    op: create
+    invokers: { human: true, agent: true, lens: true }
+    example: {"stream": "stream:str1", "path": "docs/notes.md", "content": "# Notes\n"}
+  - name: file.create_directory
+    summary: "Make a directory in a stream's worktree. Those above it are made too. Logs `file.directory_created`."
+    scope: files.write
+    op: create_directory
+    invokers: { human: true, agent: true, lens: true }
+    example: {"stream": "stream:str1", "path": "docs/guide"}
+  - name: file.rename
+    summary: "Move a file or directory of a stream's worktree. It is refused when the target exists. Logs `file.renamed`, which the window follows with its open editors."
+    scope: files.write
+    op: rename
+    invokers: { human: true, agent: true, lens: true }
+    example: {"stream": "stream:str1", "from": "src/old.rs", "to": "src/new.rs"}
+  - name: file.delete
+    summary: "Remove a file, or a directory with all it holds, from a stream's worktree. A person's, confirmed. Logs `file.deleted`, which the window follows by closing its editors."
+    scope: files.write
+    op: delete
+    invokers: { human: true, agent: true, lens: true }
+    confirm: destructive
+    example: {"stream": "stream:str1", "path": "docs/obsolete.md"}
   - name: file.save
     summary: "Write a file of a stream's worktree with the content saved (what the editor's Save writes); logs `file.saved`. Its content isn't kept in the record, its size is."
     scope: files.write
@@ -757,6 +795,12 @@ commands:
     tool: run_lens_action
     example: {"id": "review/waiting", "action": "finish", "params": {"item": "work_item:oxplow:tsk12"}}
   # lsp.install
+  - name: lsp.restart_server
+    summary: "Restart a stream's language server for a language: the session is torn down and started again with the open documents replayed. A person's, or a lens for one."
+    scope: lsp.control
+    op: restart_server
+    invokers: { human: true, agent: false, lens: true }
+    example: {"stream": "stream:str1", "language": "rust"}
   - name: lsp.install_server
     summary: "Download and install a language server (a Mason package) and register its binary. A person's decision: an agent's run becomes a proposal."
     scope: lsp.install

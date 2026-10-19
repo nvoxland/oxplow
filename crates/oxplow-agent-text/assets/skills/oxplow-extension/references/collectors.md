@@ -32,13 +32,14 @@ Rules:
   (the script goes through a proxy; `curl`, `gh` and most HTTP clients
   pick it up from `HTTPS_PROXY`). A missing host shows up as a `403` from
   the proxy or a connection failure.
-- **You can't approve a collector.** Tell the user to approve it in
-  Settings → Data → Approve & Run. After that, `run_command`
-  `oxplow.collector.sync { collector: "collector:<extension>/<id>" }` re-runs it.
+- **A collector that runs a program needs `permissions.process`** (and the
+  `network` hosts and `secrets` it uses), which a person approves when the
+  extension is deployed; you can't approve. Once it is deployed,
+  `run_command` `oxplow.collector.sync { collector: "collector:<extension>/<id>" }`
+  re-runs it.
 - `v_collector_run` shows each collector's last run and error, and
-  `v_collector_state` whether this machine approved it (`approved`; 0 means
-  `oxplow.collector.sync` is refused until a person approves it) and why it is
-  disabled, if it is.
+  `v_collector_state` whether this OS enforces its `network` list
+  (`network_enforced`) and why failures disabled it, if they did.
 - **Check a collector before you deploy it** with
   `oxplow_preview_collector(owner, id, stream_id)`: it runs your worktree's
   version and returns the rows it would store, storing nothing. For a
@@ -46,8 +47,7 @@ Rules:
   (`{ owner, id, facts }`), computed over the stream's latest snapshot.
   `oxplow.collector.sync` always runs the primary's copy (collected data is
   shared by the whole project), so in a worktree stream it won't see your
-  changes. An exec collector still needs a person's approval for the
-  preview.
+  changes. An exec collector's preview needs the same `permissions.process`.
 - A declared entity's view exists once its collector first runs.
 
 **Deriving data you already have (starlark / jaq collectors).** When the
@@ -63,12 +63,11 @@ to a read-only SQL query:
   — because a fresh project, a `extension test` throwaway and a filter that
   matches nothing all give it none; with `sync: replace` an entity it
   leaves out is emptied.
-- **Approval.** It runs sandboxed (no network, files, env or credentials),
-  so it needs no approval and you can run `oxplow.collector.sync` on it yourself —
+- **Permissions.** It runs sandboxed (no network, files, env or credentials),
+  so it needs none and you can run `oxplow.collector.sync` on it yourself —
   unless it calls a model (`ai_*`, "Asking a model" below): that spends the user's key on
-  every run, so the user approves it first (Settings → Data → Approve &
-  Run), and each changed version again. Until then a run or a preview is
-  refused, and `extension test` skips its examples.
+  every run, so the extension declares `permissions.ai` and the user approves
+  it when it is deployed. Without it the loader refuses the extension.
 - **Input limits.** `input` can't read the collector's own views, and more
   than 10,000 input rows fails the run.
 - **Asking a model.** A starlark collector can call `ai_classify(text,
@@ -116,7 +115,7 @@ and summary):
   over the `v_*` models.
 - `tree.read`: `files()`, `source_files()`, `duplicate_blocks()`, the
   snapshot's files. A fact collector has it without declaring it.
-- `ai.compute`: the `ai_*` builtins. A person approves the script. An
+- `ai.compute`: the `ai_*` builtins. The extension declares `permissions.ai`. An
   entity collector that calls one has it without declaring it.
 - `ai.discover`: `scope("ai.discover", {role})` says whether a model
   serves a role (a built-in or your extension's `ai_profiles` id) —

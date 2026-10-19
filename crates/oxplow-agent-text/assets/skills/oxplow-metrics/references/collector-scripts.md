@@ -73,9 +73,10 @@ I/O) — tagged `exec:<id>`. Only a non-bundled extension's collectors (e.g. the
 `.oxplow/extensions/project/`) may be `exec` (a bundled extension's fact
 collector is starlark or jaq), and it gets no
 `env` / `credentials` / `network`. Use it only when no in-process tier can
-compute it: **it won't run until the user approves it** in Settings → Data →
-Programs (you can't approve it; `oxplow.collector.sync` tells you when it's waiting),
-and any change to the program needs approving again.
+compute it: the extension must declare `permissions: { process: true }`
+(plus the `network` hosts and `secrets` it uses), and **the user approves that
+when the extension is deployed** (you can't; your deploy that adds a permission
+becomes a proposal). A change to the program is a redeploy.
 
 The bundled collector scripts in
 `extensions/oxplow-foundation/collectors/<lang>/*.star` are the canonical

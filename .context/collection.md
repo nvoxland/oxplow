@@ -55,7 +55,7 @@ section for the column.
   coverage | analysis`, the `report: { path }` it reads (relative to the
   project root, the checkout), a parser in
   `entry`, and `trigger: { on_run: test | analysis }` (or none: by hand).
-  One declaration, runtime, consent and run log for "read a report file",
+  One declaration, runtime, permissions and run log for "read a report file",
   shared with every other collector (`.context/semantic-layer.md`
   "Collectors"). Validation (`crates/oxplow-config/src/collectors.rs`,
   `validate_report_collector`): an own extension's only (`Extension::is_own()`, `Declarer.own`;
@@ -76,13 +76,11 @@ section for the column.
   extension's): each with its trigger ("after a test run"), last run
   (`collector_run`), why failures turned it off with **Enable Again**, and **Sync
   Now** (`oxplow.collector.sync { collector: "collector:project/<id>" }`). A report collector with a
-  bundled parser needs no approval (`collector_runner::needs_approval`; the
-  loader doesn't look for an `oxplow:` entry file). An own extension's `exec`
-  program or its own jaq/starlark parser is approved in its Collectors row
-  like any extension collector (`collector_runner::approval_hash`, key
-  `<ext>/<id>`), and runs from a private approved copy
-  (`approved_code::extension_collector`); revoking it there revokes that
-  approval. `CollectionService` reads report collectors from the extension
+  bundled parser needs no permission (the loader doesn't look for an
+  `oxplow:` entry file). An own extension's `exec` program needs
+  `permissions.process` (the loader refuses it otherwise) and runs from
+  the extension's deployment; its own jaq/starlark parser needs nothing.
+  `CollectionService` reads report collectors from the extension
   catalog (`with_extensions`, `report_collectors(root)`,
   `is_report_collector(owner, id)`).
 - **Parsers — `oxplow-script`** (`crates/oxplow-script/`).
@@ -109,8 +107,8 @@ section for the column.
   (`CollectorOutput::relative_to`, `oxplow_coverage::repo_relative`; tsk884)
   and drops files outside it, so diffs and facts always name repo files.
   That checkout is the **thread's own worktree** (`WorktreeRouter`, tsk890):
-  a worktree stream's report paths, parser entries (and their approval
-  hashes), branch and commits are read there, never in the primary
+  a worktree stream's report paths, parser entries,
+  branch and commits are read there, never in the primary
   checkout.
   The UI builds the test tree from `classname`+`name`.
 - **`testing:` block** (`TestingConfig`, `crates/oxplow-config/src/lib.rs`):
@@ -163,13 +161,13 @@ hook + MCP wiring):
   the open effort. It then runs **every** report collector whose `on_run`
   is that kind of run and whose report the run wrote (its mtime inside the
   run's freshness window) — `read_run_reports` in `collection.rs`, each
-  through `read_report`: a disabled collector, an unapproved program or a
+  through `read_report`: a disabled collector or a
   report that isn't there runs nothing; anything that ran is the
   collector's run (`collector_run` + `collector.synced`, through the
   collector runner's `RunLog`, deduped per detected run) and counts toward
   its health — the third failed parse in a row disables it (P7.C2,
-  `contribution_health`); an `exec` parser nobody approved records
-  `needs_approval` and doesn't run. A test run only reads `on_run: test`
+  `contribution_health`); an `exec` parser whose extension lacks
+  `permissions.process` doesn't load, so it doesn't run. A test run only reads `on_run: test`
   collectors, an analyzer run only `on_run: analysis` ones. What they
   parsed merges by kind (`RunReports`): JUnit reports into one
   suite/case tree embedded in the `test-run` payload (`suites`) — the
@@ -401,7 +399,7 @@ collectors read when there are some but no `command`, or routes to
 repeats the agent's command back (the agent just wrote it; heredoc edit
 scripts made that kilobytes).
 When a collector **should** have read a report but didn't count — its
-parse failed, it is disabled, or its program awaits approval — the nudge
+parse failed, or it is disabled — the nudge
 says that instead, collector by collector (`RunReports::unread`,
 `unread_reports_message`; tsk893): running the tests again wouldn't help,
 and the reasons name what a person must do. A coverage collector that
@@ -511,12 +509,10 @@ collector + a small script, never a Rust change (`crates/oxplow-script/`):
 JSON→JSON reshaping), `starlark` (general/imperative; note: standard Starlark
 forbids recursion + `while`, so deep tree-walks are impractical — jaq suits XML
 better), `exec` (external process, JSON stdin→stdout — the escape hatch; can do
-I/O, so it's tagged lower-trust, and **runs only once a person approved it on
-this machine** — an own extension's exec program,
-approved in Settings → Data → Collectors like any extension collector
-(`<ext>/<id>`); until then its run is
-recorded `needs_approval` and nothing is read (see architecture.md → "A
-repo's config never runs a program without consent").
+I/O, so it's tagged lower-trust, and **loads only when its extension declares
+`permissions.process`**, which a person approved when they deployed it on
+this machine (see architecture.md → "A repo's config never runs a program
+without a deployed permission").
 
 **Containing scripts.** Every Starlark and jaq run — a report parser, an
 entity or fact collector, a command or effect script, an effort policy,
@@ -741,10 +737,10 @@ by hand) is how this fact collector runs.
 
 ## Authority for external report parsers
 
-Project `exec` parsers need a Programs approval; they run with the
-person's file, network and process authority, which oxplow doesn't confine
-(there is no execution tier). The parser carries a host-owned live consent
-guard, checked at launch, every 10 ms and before returning output. Execution
+Project `exec` parsers need their extension's `permissions.process`; they
+run with the person's file, network and process authority, which oxplow
+doesn't confine (there is no execution tier). The parser carries a
+host-owned live authority guard, checked at launch, every 10 ms and before returning output. Execution
 clears inherited environment, drains capped output and kills ordinary process
 children on exit, cancellation or deadline (Unix owned process groups; other
 platforms just run it). Contained/bundled parsers retain their existing
@@ -753,14 +749,9 @@ Project fact programs use the same controlled runtime. External
 extension fact programs lack a credential/environment host and are refused
 explicitly; use contained scripts or project programs.
 
-Project parsers and fact programs execute from a private code copy checked
-against the exact approved program hash. An entry in a subdirectory copies
-that directory and its helpers; a root-level entry copies only its approved
-file. The private root is the process working directory, preserving the
-project-relative layout of copied code. `OXPLOW_PROJECT_DIR` identifies the
-original checkout for approved data access;
-`OXPLOW_CODE_DIR` identifies the private code root. Live guards recheck consent,
-the original code and the private copy; the copy lives through the guard and
-is removed when its last owner is released. Copying is limited to 500 files
-and 16 MiB. Normal permission bits are kept, with set-user/group-ID bits
-removed.
+Project parsers and fact programs execute from the extension's immutable
+deployment, so the code that runs is the code a person approved when they
+deployed it; a working-tree edit changes nothing until it is deployed.
+`OXPLOW_PROJECT_DIR` identifies the original checkout for data access;
+`OXPLOW_CODE_DIR` identifies the code root. Live guards recheck the live
+owner before launch, while it runs and before output returns.

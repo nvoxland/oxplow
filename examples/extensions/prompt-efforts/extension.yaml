@@ -31,8 +31,8 @@ permissions:
   commands: [oxplow.effort.open, oxplow.effort.close, oxplow.effort.link]
 implementations:
   # The project's effort policy once chosen in Settings → Capabilities. It
-  # runs once a person approves it (Settings → Data → Programs) and reads
-  # oxplow only through `sql.read`.
+  # runs under the permissions above, approved when it was deployed, and
+  # reads oxplow only through `sql.read`.
   - capability: effort_policy
     id: prompt_efforts
     title: One effort per prompt

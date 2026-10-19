@@ -1,4 +1,4 @@
-# The finished review's event reaches publish-review (approved here),
+# The finished review's event reaches publish-review (running in the throwaway host),
 # which reads the job back and looks for its effort — the throwaway has
 # none, so it comments nothing.
 input:

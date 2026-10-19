@@ -61,7 +61,7 @@ pub enum Kind {
     /// Commands menu.
     Command,
     /// An effect: a script reacting to a logged
-    /// event by composing commands, run once a person approves it.
+    /// event by composing commands, run under the extension's permissions.
     Effect,
     /// A custom component: a web bundle a
     /// `viz: custom` lens renders in a sandboxed frame, talking to oxplow
@@ -69,7 +69,7 @@ pub enum Kind {
     Component,
     /// An effort policy written as a script: an `implementations:` entry
     /// whose script opens an item's effort when it starts on a thread and
-    /// closes it when it ends, run once a person approves it.
+    /// closes it when it ends, run under the extension's permissions.
     Policy,
     /// Guidance for the coding agent: a query run at a moment, whose rows
     /// reach the agent.
@@ -363,8 +363,8 @@ pub fn scaffold_with(
              permissions: { commands: [oxplow.work_item.comment] }\n\
              effects:\n\
              \x20 # Reacts to a logged event by composing commands, run with an agent's\n\
-             \x20 # rights only once a person approves it (Settings → Data), and only on\n\
-             \x20 # events logged after; a command that asks becomes a proposal.\n\
+             \x20 # rights under this extension's permissions, and only on events logged\n\
+             \x20 # after it started; a command that asks becomes a proposal.\n\
              \x20 - id: on-done\n\
              \x20   summary: \"TODO: what it does. Here: comment on a work item when it's done.\"\n\
              \x20   on: [work_item.state_changed]\n\
@@ -388,8 +388,8 @@ pub fn scaffold_with(
              implementations:\n\
              \x20 # The project's effort policy, once chosen in Settings → Capabilities: its\n\
              \x20 # script hears core's events and composes the commands that open, close\n\
-             \x20 # and link efforts. It runs once a person approves it (Settings → Data →\n\
-             \x20 # Programs), and reads oxplow only through the scopes it `needs`.\n\
+             \x20 # and link efforts. It runs under this extension's permissions, and\n\
+             \x20 # reads oxplow only through the scopes it `needs`.\n\
              \x20 - capability: effort_policy\n\
              \x20   id: {provider_id}\n\
              \x20   title: {title}\n\

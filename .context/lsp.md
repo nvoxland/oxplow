@@ -73,9 +73,9 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
 - **RPCs** (`crates/oxplow-rpc/src/commands/lsp.rs`): `lsp_request`,
   `lsp_notify` (LSP payloads cross as **JSON strings** — specta emits a
   broken `Value` reference into bindings.ts otherwise), `list_lsp_servers`,
-  `restart_lsp_server`, `list_installed_lsp_packages`,
-  `respond_lsp_apply_edit`. Installing and removing a server are the
-  `oxplow.lsp.install_server` / `oxplow.lsp.remove_server` commands (`commands/lsp.rs`,
+  `list_installed_lsp_packages`, `respond_lsp_apply_edit`. Installing,
+  removing and restarting a server are the `oxplow.lsp.install_server` /
+  `oxplow.lsp.remove_server` / `oxplow.lsp.restart_server` commands (`commands/lsp.rs`,
   P8.A9: `External`, `Confirm::Always` — a person's call; each pushes
   `LspServersChanged`).
 - **Events**: `lsp:event` carries `LspSessionEvent` (camelCase, tagged

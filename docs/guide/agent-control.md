@@ -55,8 +55,8 @@ non-writer threads too; it needs an active knowledge store to retain it.
 - Which sessions a thread uses; a thread can have none or several.
 - Which thread is the stream's writer.
 - Optional work-item, effort-policy, and knowledge implementations.
-- Which repository-supplied programs and privileged contributions you
-  approve, on your machine and for the version reviewed.
+- Which permissions a repository-supplied extension gets: you approve them
+  when you deploy it, and a deploy that adds one asks again.
 
 See [Agents](agents.md) and [Extensions](../reference/extensions.md).
 Commits remain user-driven. Commit/wait queue markers and automatic

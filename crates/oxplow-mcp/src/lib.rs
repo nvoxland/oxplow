@@ -1453,7 +1453,7 @@ mod tests {
         }
         let size = serde_json::to_string(&index).unwrap().len();
         // Fetched on demand, not every turn: ~4K tokens (every full spec was 164 KB).
-        assert!(size < 17_000, "the index is {size} bytes");
+        assert!(size < 17_500, "the index is {size} bytes");
         // A summary is cut at its first sentence; the command shows it whole.
         assert_eq!(
             first_sentence("Open a slot (`thread:thr1`). It starts nothing, e.g. no process."),

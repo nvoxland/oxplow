@@ -27,8 +27,9 @@ An extension with an **external provider** (`providers:` — a program that
    token from the env var of that name — answer `Auth` (-32002) when the
    service refuses it and oxplow renews it and calls again). You can't
    sign in or set a credential yourself.
-   A person approves the provider in Settings → Data → Programs and
-   enables it in Settings → Integrations; you can't do either.
+   The extension declares `permissions.process` (and its `network`
+   hosts and `secrets`), which a person approves when it is deployed, and
+   enables the provider in Settings → Integrations; you can't do either.
    A work-items provider is a **backend for the project's own work**,
    with the visibility the person wants (a local tracker like beads), not
    a team's tracker: when it's the active one, every new item goes there.

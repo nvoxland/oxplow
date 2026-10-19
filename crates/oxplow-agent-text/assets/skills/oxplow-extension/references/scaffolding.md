@@ -25,7 +25,7 @@ failure after your edit is yours:
   (red until you write the program); `--capability <cap>` picks what it
   implements: `work_items` (the default), `effort_policy`,
   `snapshots`, `knowledge` or `agent_harness` (a harness launching agent sessions: its command runs in
-  the person's terminal, so a person approves it knowing that; if it can
+  the person's terminal, so the deploy that admits it (`process`) says that; if it can
   tell its subagents apart it declares the `subagents` feature and answers
   the `prompt` and `subagent` verbs).
   A `snapshots` provider answers `mark { stream, worktree,
@@ -40,21 +40,21 @@ failure after your edit is yours:
   body, refs, updated_at, deleted? } }` (`refs`: the body's links as `file:…` /
   `wiki:…`), and a `knowledge_pages` collector of the same rows;
 - `effect` — a script reacting to a logged event by composing commands
-  (private; runs only once a person approves it);
+  (private; runs under the extension's permissions);
 - `job` — model work that runs on its own, outside any transaction: its
   reply streams into `v_job_run_output`, its model may call tools you
   declare, a person can cancel it, and an effect on its
   `contribution.job.completed` writes what it found (runs once a person
-  approves it; `references/jobs-and-ai.md`);
+  under its permissions; `references/jobs-and-ai.md`);
 - `component` — a custom component (private): its `viz: custom` lens and
   a web bundle on oxplow's client library;
 - `policy` — an effort policy written as a script (`implementations:`,
   `needs: [sql.read]`) that opens an item's effort when it starts on a
   thread and closes it when it ends; it passes the effort-policy suite
-  as written, and runs once a person approves it;
+  as written, and runs under the extension's permissions;
 - `advisory` — guidance for you: a query run at a turn's end whose rows
   reach the agent (`audience: person` raises them in Alerts instead); a
-  shared extension's advisories run once a person approves them;
+  an extension's advisories need `permissions.agent`;
 - `skill` — a skill (`SKILL.md` with `name:` and `description:`
   frontmatter) you load when it's relevant; `kind: command` makes it a
   slash command;
@@ -69,6 +69,7 @@ one thing it declares (a lens, collector, command, effect, provider …); a
 one (a built-in, a script, or a provider's instance); a **provider** is
 the process implementing a capability (an *external provider* speaks the
 provider protocol). A **need** is what a contribution says it requires (a
-capability, a feature, a scope); a **grant** is what a person approved. A
-need is never a grant: declaring `needs: [sql.read]` doesn't give a
-program that scope; it runs only once a person approves it.
+capability, a feature, a scope); a **grant** is what the extension's
+`permissions:` allow, approved when it was deployed. A need is never a
+grant: declaring `needs: [sql.read]` doesn't give a program that scope
+unless `permissions` has `sql: read`; the loader refuses the extension.

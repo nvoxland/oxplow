@@ -30,8 +30,9 @@ ui:
   puts it back) that runs `oxplow.work_item.update`. A refusal naming a
   field shows under the input.
 - Click a card to open the item; Cmd/Ctrl-click opens it in a new tab.
-- Until you approve the board in Settings → Data → Programs, changing an
-  item is refused; the board says so in one line above the cards.
+- If the board's commands are refused (the extension isn't deployed or is
+  disabled), changing an item fails; the board says so in one line above
+  the cards.
 
 ## What a view may and may not do
 
@@ -48,7 +49,8 @@ May not:
 - reach the network, the files or another page's state: a component runs
   in a sandboxed frame and talks to oxplow only through the client
   library;
-- run a command it didn't declare, or any command before you approve it;
+- run a command it didn't declare (`custom_components[].commands`) or one
+  outside the extension's `permissions.commands`;
 - replace the page chrome around it (the scope picker, the rail, the
   backlog drawer stay oxplow's), or the work list itself.
 
@@ -57,8 +59,9 @@ May not:
 1. Copy this folder to `.oxplow/extensions/task-views/`.
 2. Settings → Integrations: choose **task-views** for the board, list and
    editor (it's the only candidate, so it is the default).
-3. Settings → Data → Programs: approve the **swimlanes** component to let
-   cards change items.
+3. Deploy it (`oxplow.extension.deploy { name: "task-views" }`, or Deploy on
+   Settings → Extensions) and approve the work-item commands it asks for,
+   so cards can change items.
 
 `oxplow extension check task-views` lints it and `oxplow extension test
 task-views` runs `fixtures/`: the list over some rows, the board's queries

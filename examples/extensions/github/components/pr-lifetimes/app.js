@@ -4,7 +4,7 @@
 //
 // It re-runs its own lens with another `state` (the filter buttons), opens a
 // pull request's page when its bar is clicked, and runs the `prs` sync —
-// which oxplow refuses until you approve this component on Programs.
+// which oxplow refuses unless the extension is deployed and enabled.
 (function () {
   "use strict";
 

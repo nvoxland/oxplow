@@ -20,7 +20,7 @@
   const say = (e) => {
     const text = e && e.message ? e.message : String(e);
     note.textContent =
-      e && e.code === "DENIED" ? "Approve this view in Settings → Data → Programs to change items. (" + text + ")" : text;
+      e && e.code === "DENIED" ? "This view can't change items: deploy the extension in Settings → Extensions. (" + text + ")" : text;
     note.hidden = false;
   };
   const clearNote = () => {

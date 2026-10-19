@@ -42,7 +42,7 @@ The host must provide the common infrastructure and enforce authority.
    guarantees should not be reinvented independently.
 2. **Require services; grant authority separately.** Declaring network,
    file, credential, model or command access is a request, not permission.
-   Bind authority to the approved version and enforce it at the host or
+   Bind authority to the deployed version and enforce it at the host or
    OS boundary. Record safe usage evidence for inspection and custom
    policy. A restricted external process needs real confinement; a
    broader opt-in tier must say exactly what authority it has.
@@ -144,7 +144,7 @@ appears next in this table.
 Each implementation task must update its subsystem documentation and
 public examples as applicable. Validation should target its behavior and
 failure modes using the repository's report-emitting test commands. The
-roadmap is not permission to bypass the normal command bus, approvals or
+roadmap is not permission to bypass the normal command bus, deploy approval or
 write guards.
 
 ## Scope and completion
@@ -199,7 +199,7 @@ change, `list_extensions` counting every kind, change review's impact
 listing every kind, SDK scaffolds for advisories, skills, pages and
 panels, and the reference's kinds table generated.
 
-Scope: Inventory every extension surface and normalize its metadata: stable identity, owner, contract version/stability, input/output schema, trigger, required services, ordering and lifetime. Keep contribution kinds useful, without independent copies of host rules. Distinguish a project capability, its implementation/provider, a contribution, a required service and an approved grant.
+Scope: Inventory every extension surface and normalize its metadata: stable identity, owner, contract version/stability, input/output schema, trigger, required services, ordering and lifetime. Keep contribution kinds useful, without independent copies of host rules. Distinguish a project capability, its implementation/provider, a contribution, a required service and a granted permission.
 
 Acceptance: One authoritative descriptor/registry drives loader validation, discovery, generated reference/SDK descriptions and permission requirements. Existing manifests migrate through adapters; stable contribution IDs and semantic references remain usable. Stable versus experimental contracts are visible and documented. This task defines metadata, not a full new manifest language.
 
@@ -269,7 +269,7 @@ overruns stop and reap it. Measured on realistic collectors
 
 Scope: The existing timeout returns to the caller while a worker continues. Evaluate interpreter instruction/allocation limits versus a killable worker process, then implement enforceable containment for Starlark and jaq across execution hosts. Measure cold/warm overhead with realistic collectors before selecting the implementation.
 
-Acceptance: Timeout/cancellation actually stops execution; repeated overruns do not grow worker/thread counts. Pathological CPU and allocation inputs cannot exhaust the daemon. Limits and concurrency are bounded, diagnosed, and configurable within host policy. Trusted escape paths, if needed, require explicit consent and accurate labeling; accepting detached workers is not completion.
+Acceptance: Timeout/cancellation actually stops execution; repeated overruns do not grow worker/thread counts. Pathological CPU and allocation inputs cannot exhaust the daemon. Limits and concurrency are bounded, diagnosed, and configurable within host policy. Trusted escape paths, if needed, require an explicit permission and accurate labeling; accepting detached workers is not completion.
 
 Validation: Run bounded regressions for repeated infinite/pathological scripts, allocation exhaustion, cancellation and concurrency. Check worker/process cleanup and host responsiveness. Benchmark a realistic AST/fact collector to document the cost.
 
@@ -280,43 +280,44 @@ Prerequisites: none; can start independently.
 #### Define scoped extension grants and usage audit contracts
 
 Status: done. `oxplow_domain::grant` defines the request (derived from a
-contribution's declaration by `grants.rs`), the grant (a person's
-approval of exactly that request; narrowing asks nothing new), and each
+contribution's declaration by `grants.rs`), the grant (the extension's declared `permissions`,
+approved when it was deployed; narrowing asks nothing new), and each
 run's decisions (`allowed`, `denied`, `unenforced`), recorded on
 `v_extension_run` — the usage record, with actor, cause, anchors, cost,
-scopes and model calls, never values or contents. A collector's approval
-covers its whole declaration; approvals can be revoked. Per-model reads,
+scopes and model calls, never values or contents. A deployment's
+permissions cover its whole declaration, and a deployment is immutable.
+Per-model reads,
 file confinement and a model-call limit are left to the enforcement
 item.
 
-Scope: Extend the existing approval work into one grant model: extension/version identity, granted services, semantic model/entity scopes, path scopes/read-write, destinations, program execution, named credential use, AI invocation and resource budgets. Separate declared requirements from user-granted authority, and simple program approval from actual enforcement.
+Scope: Extend the permissions work into one grant model: extension/version identity, granted services, semantic model/entity scopes, path scopes/read-write, destinations, program execution, named credential use, AI invocation and resource budgets. Separate declared requirements from user-granted authority, and a declared permission from actual enforcement.
 
-Acceptance: Authority defaults to denied for sensitive services, is derived per call, and changes requiring more authority need renewed approval. Grants can be revoked. The review UI explains requested access and enforcement limitations. Usage records expose actor/cause, scope, result and budget in the semantic layer, without credential values or unnecessary prompt/file contents. Existing permissions have explicit migration behavior.
+Acceptance: Authority defaults to denied for sensitive services, is derived per call, and changes requiring more authority ask a person at deploy. Grants can be removed by deploying without them. The review UI explains requested access and enforcement limitations. Usage records expose actor/cause, scope, result and budget in the semantic layer, without credential values or unnecessary prompt/file contents. Existing permissions have explicit migration behavior.
 
 Validation: Test grant matching, version changes, revocation, scope narrowing, redaction and unsupported enforcement states. Review a pure script, AI collector, external program and component action against the same model.
 
-Starting points: `crates/oxplow-app/src/exec_consent.rs`, `crates/oxplow-app/src/extensions/manifest_v2.rs`, `crates/oxplow-app/src/ai_service.rs`, `.context/ai-providers.md`.
+Starting points: `crates/oxplow-app/src/grants.rs`, `crates/oxplow-app/src/extensions/manifest_v2.rs`, `crates/oxplow-app/src/ai_service.rs`, `.context/ai-providers.md`.
 
 Prerequisites: Normalize contribution descriptors and public extension terminology.
 
 #### Enforce scoped grants across hosts and external execution
 
-Status: in progress. Model/path bounds, live consent and pinned component
+Status: in progress. Model/path bounds, live-owner checks and pinned component
 authority are implemented; adversarial runtime validation and remaining host
 integration are still required. External-process confinement is shelved by
 the owner: a plan for later, not pursued now. Today every external program
-runs with the person's authority, the approval says so, and oxplow only cleans
-up its processes (Unix process groups, approved-code copies, revocation
+runs with the person's authority, the deploy's `process` line says so, and
+oxplow only cleans up its processes (Unix process groups, live-owner
 watches). The plan text below stays as the design for when real OS
 confinement is taken up.
 
-Scope: Apply approved authority at host-service calls and semantic reads, external process launch, AI-provider network/credential access and component command bridges. Raw external processes need OS confinement or an explicitly consented broader-authority tier; a declaration alone cannot constrain them. Keep supported-platform enforcement explicit.
+Scope: Apply permitted authority at host-service calls and semantic reads, external process launch, AI-provider network/credential access and component command bridges. Raw external processes need OS confinement or an explicitly permitted broader-authority tier; a declaration alone cannot constrain them. Keep supported-platform enforcement explicit.
 
-Acceptance: Path traversal/symlinks, redirects, subprocesses, stale component authority and changed scripts do not silently widen grants. Unsupported confinement fails closed for a restricted tier; an opt-in alternative honestly declares its broader access. Revocation stops new sensitive calls and handles in-flight work by a defined policy. Secret references are resolved by the host and not returned as extension-readable values.
+Acceptance: Path traversal/symlinks, redirects, subprocesses, stale component authority and changed scripts do not silently widen grants. Unsupported confinement fails closed for a restricted tier; an opt-in alternative honestly declares its broader access. Disabling an extension or deploying without a permission stops new sensitive calls and handles in-flight work by a defined policy. Secret references are resolved by the host and not returned as extension-readable values.
 
-Validation: Use adversarial fixtures for unauthorized semantic reads (including derived models), paths, destinations, redirects, credentials, child processes and bridge messages. Test the supported OS enforcement matrix and reapproval/revocation during execution.
+Validation: Use adversarial fixtures for unauthorized semantic reads (including derived models), paths, destinations, redirects, credentials, child processes and bridge messages. Test the supported OS enforcement matrix and a redeploy or disable during execution.
 
-Starting points: `crates/oxplow-app/src/exec_consent.rs`, `crates/oxplow-app/src/collector_runner.rs`, `crates/oxplow-ai-providers/src/scripted.rs`, `apps/desktop/src/lens/CustomComponentViz.tsx`.
+Starting points: `crates/oxplow-app/src/grants.rs`, `crates/oxplow-app/src/collector_runner.rs`, `crates/oxplow-ai-providers/src/scripted.rs`, `apps/desktop/src/lens/CustomComponentViz.tsx`.
 
 Prerequisites: Define scoped extension grants and usage audit contracts.
 
@@ -379,7 +380,7 @@ extension check --services` and the generated reference table.
 
 Scope: Replace kind-exclusive Host access with a service router governed by RunContext, grants and execution mode. Expose read-only semantic queries, captured trees/AST/metrics, recorded AI, references and audited commands where allowed. Reuse implementations rather than adding a separate built-in API per extension point.
 
-Acceptance: An extension can combine SQL, captured code analysis and recorded AI through supported composition. Pure/transactional code cannot perform blocking external I/O or raw writes; state-changing commands still pass the command bus and its policy. Semantic reads respect the approved data scope; declaring a cross-extension import does not itself grant access. Unsupported services fail with actionable diagnostics. SDK discovery lists availability, authority and input/output contracts.
+Acceptance: An extension can combine SQL, captured code analysis and recorded AI through supported composition. Pure/transactional code cannot perform blocking external I/O or raw writes; state-changing commands still pass the command bus and its policy. Semantic reads respect the permitted data scope; declaring a cross-extension import does not itself grant access. Unsupported services fail with actionable diagnostics. SDK discovery lists availability, authority and input/output contracts.
 
 Validation: Author a non-bundled contribution that combines services; compare behavior across hosts, test denied and unavailable services, and verify command auditing and transaction boundaries.
 
@@ -442,7 +443,7 @@ step holds the extension back with its layers untouched), layers report
 `needs_migration`, and a stale layer's read error is distinct from a stamp
 conflict. Host-owned versioned secret references
 now have human keychain ingress and a trusted remote MCP transport consumer;
-references convey identity only and imported configuration cannot approve them.
+references convey identity only and imported configuration cannot grant them.
 Generation reader coordination is integrated. Configuration migration, restart,
 isolation, race and host-denial behaviour is covered by `extension_config_tests.rs`;
 state schema migration and secret-revocation runtime validation remain pending.
@@ -686,11 +687,11 @@ Make personal and shared extensions practical to author, validate, preview, and 
 
 Status: planned.
 
-Scope: Allow bundled component files to use the same sandboxed component bridge as project files. Resolve assets from their actual origin and bind immutable content, commands and approved grants to an activation generation. Avoid bundling-only privileges.
+Scope: Allow bundled component files to use the same sandboxed component bridge as project files. Resolve assets from their actual origin and bind immutable content, commands and permissions to an activation generation. Avoid bundling-only privileges.
 
-Acceptance: The same component can run bundled or from a project with equivalent props/query/command behavior and authority. Modified code cannot keep an approval tied to another version. UI-token, storage/network and message-origin restrictions hold for both origins.
+Acceptance: The same component can run bundled or from a project with equivalent props/query/command behavior and authority. Modified code cannot keep a permission tied to another version. UI-token, storage/network and message-origin restrictions hold for both origins.
 
-Validation: Run the same component fixture in both origins, hot update and revoke it, and test rejected bridge messages and undeclared commands.
+Validation: Run the same component fixture in both origins, hot update and disable it, and test rejected bridge messages and undeclared commands.
 
 Starting points: `crates/oxplow-app/src/extensions/custom_components.rs`, `crates/oxplow-app/src/bundled_extensions.rs`, `apps/desktop/src/lens/CustomComponentViz.tsx`.
 
@@ -727,7 +728,7 @@ Status: planned.
 
 Scope: Unify validation, fixture execution and preview against an isolated throwaway host with the same staged generation and service contracts as production. Include events, models, providers, effects, jobs and custom UI; show requirements and diagnostics before any external action.
 
-Acceptance: An agent can validate and preview a whole extension without publishing/installing it or touching production data. External/paid access remains consented or mocked; no copied credentials or accidental agent-terminal authority. Preview exposes the generation, contributed APIs and unsupported surfaces. Runtime/fixture schemas agree.
+Acceptance: An agent can validate and preview a whole extension without publishing/installing it or touching production data. External/paid access remains permitted or mocked; no copied credentials or accidental agent-terminal authority. Preview exposes the generation, contributed APIs and unsupported surfaces. Runtime/fixture schemas agree.
 
 Validation: Preview an extension combining a model, event, effect, job and component; compare with a temporary production host, inject invalid changes, and assert isolation and cleanup.
 
@@ -770,8 +771,8 @@ only (`examples/extensions/README.md` lists them, the tests and the
 friction found): effort-review (a job started by an effect on
 `effort.finished`, its tool reading an effort's evidence, streamed,
 cancelled through `oxplow.job.cancel`, commented on the work item and
-exported as a model); triage's workflow state surviving restart,
-revocation and re-approval (`crates/oxplow-sdk/tests/trials.rs`, the
+exported as a model); triage's workflow state surviving restart
+and an edited bundle (`crates/oxplow-sdk/tests/trials.rs`, the
 browser spec); review-badges importing effort-review's model and
 degrading when it is disabled, missing or exports another version.
 Shared services added for them: a job's intent key as its subject

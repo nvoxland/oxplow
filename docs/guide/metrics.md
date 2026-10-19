@@ -103,7 +103,7 @@ from the fixture. A real run fails, and says why, when a fact is on a
 measure the extension doesn't define or doesn't list for that collector,
 or carries a dimension key without the extension's namespace. The script
 is Starlark and reads only the snapshot, so an extension's collector
-doesn't need your approval.
+doesn't need a permission.
 
 Files over `snapshotMaxFileBytes` (5 MiB by default) and binary files
 aren't given to collectors. A rebuild reports which ones were left out.
@@ -113,8 +113,8 @@ looks low.
 The `/oxplow:new-metric` skill walks the same path with more structure.
 A metric that has to run an external program, or parse a report a tool
 writes, goes in the project's own extension,
-`.oxplow/extensions/project/extension.yaml` (below); the external program
-needs your approval first.
+`.oxplow/extensions/project/extension.yaml` (below); the extension must
+declare the `process` permission, which you approve at deploy.
 
 ## Where the numbers come from
 
@@ -133,9 +133,9 @@ A metric extension, including the project's own
 - `collectors` -- the script that produces the raw numbers, and when it
   runs (after each snapshot, when an effort finishes, on a schedule, or
   by hand). Starlark, jq, or an external program. An external program
-  from the project's own extension runs only after you approve it in Settings →
-  Data → Programs, so pulling a repo can't run something behind your
-  back. A changed program needs approving again.
+  from the project's own extension needs the `process` permission. You approve
+  it when you deploy the extension, so pulling a repo can't run something
+  behind your back. A deploy that adds a permission asks again.
 - `metrics` -- a chartable view over a measure: aggregation, filters,
   target, direction.
 - `dimensions` -- the axes you can slice by (package, language,

@@ -73,9 +73,13 @@ providers:
   credentials, `OXPLOW_EXTENSION_DIR` and `OXPLOW_PROVIDER_ID` (the
   instance it runs as, which is the middle of its refs:
   `work_item:<id>:…`).
-- It runs only once a person approves it in Settings → Data. The
-  approval covers every file in the folder and the grants above, so any
-  change needs approving again.
+- It runs only from a deployment of its extension, and only if the
+  extension declares the permissions it needs (`process`, plus `network`
+  and `secrets` for the hosts and credentials above). A person approves
+  them when the extension is deployed, and a deploy that adds a permission
+  asks again. A deployment is immutable, so what runs is what was
+  deployed. `process` is declared, not confined: the program runs with
+  your authority.
 - `declarations` is the provider's answer to `initialize`, checked in.
   If the running program says anything else, it doesn't start.
 - A server that speaks MCP can be a provider through oxplow's adapter

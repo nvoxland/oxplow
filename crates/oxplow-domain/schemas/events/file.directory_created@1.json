@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`file.directory_created@1`: a directory was made in a stream's worktree\n(`oxplow.file.create_directory`).",
+  "properties": {
+    "path": {
+      "description": "Its path in the worktree.",
+      "type": "string"
+    },
+    "stream": {
+      "description": "The stream (`str2`).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "stream",
+    "path"
+  ],
+  "title": "FileDirectoryCreatedV1",
+  "type": "object"
+}

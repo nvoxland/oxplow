@@ -478,45 +478,22 @@ async fn workspace_reads_and_file_round_trip() {
         .expect("a primary stream")
         .id
         .to_string();
-    let refused = commands::generated::write_workspace_file(
-        app.state(),
-        None,
-        "scratch.txt".into(),
-        "hello".into(),
-    )
-    .await
-    .unwrap_err();
-    assert_eq!(refused.code, "INVALID", "{}", refused.message);
-    commands::generated::write_workspace_file(
-        app.state(),
-        Some(primary.clone()),
-        "scratch.txt".into(),
-        "hello".into(),
-    )
-    .await
-    .unwrap();
+    // The file commands write it (the bus); the read sees it.
+    app.state()
+        .commands
+        .run(
+            &oxplow_domain::Actor::Human,
+            "oxplow.file.save",
+            serde_json::json!({ "stream": oxplow_domain::refs::build::stream_ref(
+                primary.parse().unwrap()), "path": "scratch.txt", "content": "hello" }),
+            false,
+        )
+        .await
+        .unwrap();
     let f = commands::generated::read_workspace_file(app.state(), None, "scratch.txt".into())
         .await
         .unwrap();
     assert!(f.content.contains("hello"));
-    commands::generated::create_workspace_directory(
-        app.state(),
-        Some(primary.clone()),
-        "subdir".into(),
-    )
-    .await
-    .unwrap();
-    commands::generated::rename_workspace_path(
-        app.state(),
-        Some(primary.clone()),
-        "scratch.txt".into(),
-        "scratch2.txt".into(),
-    )
-    .await
-    .unwrap();
-    commands::generated::delete_workspace_path(app.state(), Some(primary), "scratch2.txt".into())
-        .await
-        .unwrap();
 }
 
 // ---- lsp list reads ----

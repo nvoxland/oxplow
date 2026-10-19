@@ -45,7 +45,7 @@ for a kind whose names are already global (`ContributionKind::global_name`:
 command, measure, metric, dimension, event type, ref kind),
 `<kind>:<name>` — `command:oxplow.review.accept`, `metric:acme.todos`.
 Storage (`v_contribution.ref`, `v_extension_run.contribution`,
-`v_job_run.job`), events, manifests (imports, exports, `where:`), approval
+`v_job_run.job`), events, manifests (imports, exports, `where:`), grant
 keys and the desktop carry that string; every contribution kind registers
 its ref kind from `KINDS` (`refs::kind::core_kinds`), so a new kind is
 linkable with no other change. Text names a contribution as a
@@ -322,7 +322,7 @@ shown in Settings → Extensions. Fixing the step and activating again migrates.
 
 Reset uses an empty override object at a newer revision, retaining stale-token
 rejection. Disable/uninstall retain local rows for explicit recovery/reinstall;
-access is refused while the owner is disabled, missing, stale or revoked.
+access is refused while the owner is disabled, missing or stale.
 Both scopes live in the local project's database, with no global identity lookup.
 Raw secrets do not belong in defaults, schema or overrides. Secrets are host-owned
 references ("Host-owned secret references"); this service resolves non-secret
@@ -383,7 +383,7 @@ project path, SQL, run identity or grants. The host requires a valid contributio
 an explicit `state.read` or `state.write` declaration, allowed live authority,
 the current catalog generation/package version and an enabled descriptor. Core's
 unrestricted context without a declaration is refused. Imports do not select
-another namespace. Revoked, disabled, removed, stale or undeclared owners fail
+another namespace. Disabled, removed, stale or undeclared owners fail
 with fixed diagnostics before payload access.
 
 Native commands may declare `scope: state.read`, `op: snapshot` to read their own
@@ -409,9 +409,9 @@ and a concurrent change refuses the second rather than losing it.
 
 Provider `host/call` serves the same state read using the provider contribution
 identity captured from an exact enabled catalog declaration at instance creation,
-with the catalog generation unchanged across approved-copy preparation,
+with the catalog generation unchanged across the instance's start,
 not the invoking command's extension or a protocol-supplied owner. Calls require
-a registered in-flight invocation and recheck its live consent gate. Candidate
+a registered in-flight invocation and recheck its live authority. Candidate
 checks without an exact active declaration acquire no state reader. Successful
 state reads contribute to the invoking run's scope trace. An unchanged provider
 instance with an old catalog generation is conservatively refused; active
@@ -676,10 +676,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       toolbar.
     - Running a collector is the command **`oxplow.collector.sync { collector }`**
       (External, `Invokers::ALL`; `collector_runner::CollectorRunner::sync`,
-      which the scheduler uses too). It **never approves**: approving is
-      `collector_runner::approve_reviewed` behind the UI-only
-      `approve_collector` RPC (Settings → Data's Approve & Run approves,
-      then runs the command). An agent's `run_command oxplow.collector.sync` runs it as the
+      which the scheduler uses too). It **never grants**: what a collector
+      may reach is its extension's `permissions:`, approved at deploy
+      ("Permissions"). An agent's `run_command oxplow.collector.sync` runs it as the
       agent.
     - UI: `LensToolbar` and the row menu in `LensResultView.tsx`; logic in
       `lens/lensActions.ts` (`performLensAction`, `copyLens`,
@@ -720,14 +719,13 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - **Someone else's.** The interim way: clone it into
     `.oxplow/extensions/<name>/` (or point `extensionSources` at it), list
     it, deploy it.
-  - Deploying runs nothing by itself. An exec source, a Starlark one that
-    calls a model (`ai_*`) and a non-bundled extension's
-    advisories run only after a person approves them in Settings →
-    Data. Approvals are stored per machine outside the repo, MACed under
-    a keychain key, and bound to a hash of that version of the program,
-    so a changed script needs approving again (`exec_consent.rs`,
-    `collector_runner.rs`; see [architecture.md](./architecture.md) → "A
-    repo's config never runs a program without consent").
+  - A teammate's extension runs nothing until a person deploys it here.
+    An exec source, a Starlark one that calls a model (`ai_*`) and
+    advisories need `permissions:` the manifest declares, and a deploy
+    that adds a permission asks a person first ("Permissions"); a
+    deployment is immutable, so what runs is what was deployed (see
+    [architecture.md](./architecture.md) → "A repo's config never runs a
+    program without consent").
 - **Core explorer (stays in core, deliberately simple).**
   - **Explore Data** (`explore-data` page, `ExploreDataPage.tsx`):
     - Lists every model from `v_model`, with its columns from
@@ -828,7 +826,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
 - **Sources (collectors).** Declared under `collectors:` in `extension.yaml` (v1: `sources:`) and parsed
   into `Extension.sources`. A bad source is reported in `errors` without
   hiding the extension's lenses. Settings → Data shows each source
-  (runtime, schedule, row counts or failure, Approve & Run / Sync Now);
+  (runtime, schedule, row counts or failure, Sync Now);
   Settings → Extensions keeps each extension's source credentials.
 - **Settings shows what `extension check` finds** (tsk1039). Loading can't
   catch a lens whose SQL fails (it never runs the SQL), so Settings →
@@ -1006,7 +1004,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   (stable since P10) — and `custom_components:` (stable since P11)
   rendered sandboxed by
   `viz: custom` lenses ("Custom components"). Installs, updates and
-  provider approvals are reviewed by what they change ("Reviewing by
+  deploys are reviewed by what they change ("Reviewing by
   effect"). An agent's run that needs a person waits as a proposal
   ([commands.md](./commands.md), "Proposals").
 - **P8 (2026-10-02).** The experimental kinds run, in a private
@@ -1503,20 +1501,19 @@ and one calling MCP read identical `file:line: what — fix` lines.
   a lens (`{ lens, params?, rows? }` — `rows` seeds the extension's
   entities, `collector_runner::publish_declared_rows`), an event (`{ event
   }`: appended to the throwaway's log and delivered; the extension's
-  effects, approved there, react for real — `expect: { effects: [{ id,
+  effects react for real — `expect: { effects: [{ id,
   state }], commands }`, read from `v_effect_run` and `command.executed`),
   a job (`{ job, intentKey, request, cancel?, setup?, rows? }`: `setup`
   runs oxplow's own commands first, in order, each as a person or `as:
   agent` (thread 1, after `ensure_primary`), so its tools read real data;
   `rows` as a lens's; then through the extension's
-  commands over `jobs.write/enqueue` and `jobs.read/snapshot`, approved
-  there; `cancel: true` cancels it through `jobs.write/cancel` once it
+  commands over `jobs.write/enqueue` and `jobs.read/snapshot`; `cancel: true` cancels it through `jobs.write/cancel` once it
   has written — `expect: { state, result?, text?, toolCalls?, output? }`,
   `output` its rows `[{ kind, … }]` ("Jobs"); a model reply is a string
   or `{ text?, toolCalls?: [{ name, arguments }], chunkDelayMs?, when? }`
   (`when`: answers the request whose last message carries that text);
   naming `effects`, `commands` or `pages`
-  also approves its effects and delivers the `contribution.job.completed`
+  also delivers the `contribution.job.completed`
   the job logs, asked in a thread: the effects that reacted, the commands
   they ran and which of the named wiki refs now exist), a component (`{ component, queries?,
   invokes? }`: `load_component`, `run_component_query`,
@@ -1608,11 +1605,11 @@ job and component forms are in "The SDK"):
   its `input` query, `oxplow_preview_collector(…, event, rows)`) and `event`
   (the event an `on:` collector reacts to, as the envelope), storing nothing, its
   rows typed against the declaration; a collector that calls a model
-  (`ai.compute`) is approved in the throwaway and runs against the fixture
+  (`ai.compute`) runs in the throwaway against the fixture
   model (`model: { replies }`, in the form the role expects, e.g. `{ answers:
   { label: { type: choice, choice } } }` for `ai_classify`); an exec or
-  provider-reading collector's example is a warning, not run (it needs a
-  person's approval);
+  provider-reading collector's example is a warning, not run (it runs a
+  program);
 - `input: { collector: <id>, files: { <path>: <text> } }`, `expect: {
   facts: [...] }` — a **fact** collector (one with `facts:`) runs over
   `files` as its tree (`MetricsService::preview_fact_collector`, its other
@@ -1651,7 +1648,7 @@ fixtures to it.
   error naming the id. For each such script `test` also runs the
   effort-policy suite (`policy_suite`): a throwaway host over a copy of
   the extension (`suite_host`, shared with a provider's suite), the
-  program approved there (`effort_policy_program`), the script chosen as `activeProviders.effort_policy`, then
+  script chosen as `activeProviders.effort_policy`, then
   `effort_policy_conformance::suite`; a finding is an error at the
   manifest, `ran` shows `effort_policy suite`;
 - `input: { event_type, v?, payload }`, `expect: { valid: true | false,
@@ -2103,12 +2100,12 @@ values first differ" walk (the provider host's `first_difference` uses
 it too). A provider's changes are worded once, in Rust
 (`extension_impact::provider_phrases`): the review's `summary`
 prefixes each phrase with `Provider <id>:`, and `approval_lines` — sent
-as `ProviderImpact.lines` — capitalizes them for the Data section's
-approval row.
+as `ProviderImpact.lines` — capitalizes them for the review's provider
+rows.
 
 The report is built from the two loaded versions: **it never runs a
-program, an exec collector or an external provider** — consent forbids running a
-version nobody approved. What it does run is read-only or sandboxed:
+program, an exec collector or an external provider** — a version not yet
+deployed has no permissions approved. What it does run is read-only or sandboxed:
 lens and model queries on each version's overlay, and derived
 collectors' and effects' scripts (below).
 
@@ -2179,7 +2176,7 @@ is refused before it runs (a review never spends or sends) — under the command
 scripts' `COMMAND_SCRIPT_BUDGET` (5 s, not a live collector's 120 s:
 someone waits on a review). `CollectorImpact.outputs`
 holds each input's `Ran { counts, rows (20 per entity), error? }` before
-and after. An exec or read collector is never run — approved or not —
+and after. An exec or read collector is never run
 and says so in `not_run`. A collector whose entry's text changed though
 its declaration didn't is `changed` with `script_changed`, and says "its
 script changed" even when there's nothing to run it on.
@@ -2282,28 +2279,27 @@ daemon over a tunnel isn't on loopback) — and the host ends the
 component on its second `load`. So it reaches only the lenses it may
 query (`assets`) and the commands it may invoke (`commands`).
 
-**A component that acts is a program a person approves** (P11,
-tsk960). `invoke` runs a command with the viewer's rights, so a
-component that declares `commands` is listed on Settings → Data →
-Programs (`ProgramKind::Component`, key `component:<ext>/<id>`,
-`exec_consent::component_program`): the approval covers every file of
-its bundle and the commands it may run, and either changing asks
-again. Unapproved, it still renders and queries; its `invoke` is
-`Denied` with the approval message, and the host shows that reason
-under the frame (`custom-component-refused`, `componentRefusal`) — the
-component's own code may not. A component that declares no commands
-only shows and reads, and isn't a program.
+**A component that acts runs under its extension's permissions** (P11,
+tsk960). `invoke` runs a command with the viewer's rights, so the
+commands a component declares are the only ones it can run, and a command
+outside its extension's namespace needs `permissions.commands` in the
+manifest ("Permissions"; the loader refuses the extension otherwise). A
+person approved those permissions when the extension was deployed. An
+`invoke` of a command the loaded bundle doesn't declare is `Invalid`, one
+from a version that isn't the current one is `Denied` ("reload its lens"),
+and the host shows a refusal's reason under the frame
+(`custom-component-refused`, `componentRefusal`) — the component's own
+code may not. A component that declares no commands only shows and reads.
 
-**What runs is what was approved.** Before it shows a frame the host
+**What runs is what was deployed.** Before it shows a frame the host
 loads the component's bundle (`load_component`, from the deployed
 catalog, the same whatever the stream) into `Services::component_bundles`
 (`component_bundles.rs`): the bundle's folder in its deployment and its
-file names, keyed by its **version** — the component's approval hash over
-those files and its commands (`ProjectProgram::component_hash`, the same
-function Programs lists the version with). No bytes are held: the daemon
+file names, keyed by its **version** — a hash over those files, its
+assets and its commands (`bundle_version`). No bytes are held: the daemon
 serves the frame (`/components/v/<version>/…`) by reading the named file
 from that folder, which never changes, and the frame's `invoke` names the
-version it loaded: it runs only when that version is approved and
+version it loaded: it runs only when that version is the current one and
 declares the command. So an edit to the source changes nothing that runs
 until it is deployed. The folder is read as served — the extension's path
 joined with the manifest's `bundle` — so a spelling that differs from the
@@ -2319,17 +2315,17 @@ whose snapshot belongs to a generation that is no longer active has its
 `query` and `invoke` refused with "reload its lens". The host loads the
 bundle again on every `extensionsChanged` (sent after an activation
 publishes, `CustomComponentViz`): the same version keeps the frame it
-has, a new one mounts a new frame — and that version acts only once a
-person approves its code; the old approval doesn't carry over
-(`an_activated_edit_needs_a_reload_and_its_own_approval`).
+has, a new one mounts a new frame, and the old version's `invoke` is
+refused.
 
 **Bundled and project components share one runtime.** A bundled
 extension runs from its shipped deployment on disk (`Sources and
 deployments`), so its component's bundle is staged, hashed, served at
 `/components/v/<version>/` under the same CSP and — when it declares
-`commands` — listed on Programs and approved exactly like a project's.
+`commands` — held to its extension's permissions exactly like a project's.
 What still differs by origin, none of it about components: a bundled
-advisory needs no approval, the `oxplow` command namespace is reserved
+extension with no deployment of its own runs what ships
+(`shipped_permissions`), the `oxplow` command namespace is reserved
 for bundled extensions, and a bundled extension's name wins a clash with
 a project one's.
 
@@ -2375,8 +2371,8 @@ component's extension — when it's one of the component's `assets`
 (`Invalid` naming them otherwise), through `oxplow_run_lens`: the lens's own
 read-only, parameterised query, never SQL from the frame.
 `invoke_component_command { id, command, input, stream_id, confirmed }`
-runs `command` when it's one of the component's `commands` and a person
-approved the component as it is now, as
+runs `command` when it's one of the component's `commands` at the version
+loaded now, as
 `Actor::Lens { lens_id: id, on_behalf_of: Human }`, so every policy
 applies as if the person ran it; the input is literal (no placeholders);
 a command that asks comes back `NEEDS_CONFIRMATION` and the **host**
@@ -2425,7 +2421,7 @@ and named in every bundle's CSP `script-src` beside the bundle's own
 folder (`bundle_csp(source, lib)`). There is no `'self'` in that CSP
 (tsk983): even in a sandboxed frame it matches the daemon's whole origin
 — the response URL's, checked in Chromium and WebKit — so it would let
-an approved component load another bundle's code; and the check lint
+a component load another bundle's code; and the check lint
 reports a page path that leaves the bundle (`..` past its folder, an
 absolute path other than `/component-lib/`, a `data:` script or sheet).
 It is a **classic script that defines the
@@ -2453,8 +2449,8 @@ Lifetimes** (`lenses/pr-lifetimes.yaml`, `components/pr-lifetimes/`)
 draws each pull request as a bar from opened to merged — a range the
 kit's charts don't draw; its filters re-run its own lens (`query`), a
 bar opens `github_pr:<n>` (`navigate`), and Sync runs `oxplow.collector.sync`
-(`invoke`) — refused until a person approves the component on
-Programs. The host's own re-run (`onUpdate`, at the lens's params) is
+(`invoke`) — a command outside the extension's namespace, so the
+manifest declares `permissions.commands` for it. The host's own re-run (`onUpdate`, at the lens's params) is
 asked again with a selected filter rather than drawn over it; a pull
 request whose dates can't be read is left out and counted in a note,
 never blanking the rest; a rejected `connect()` is said in the status
@@ -2462,7 +2458,7 @@ never blanking the rest; a rejected `connect()` is said in the status
 browser suite's `specs/components/pr-lifetimes.spec.ts` runs it in
 Chromium **and WebKit** (the engines of browser mode and the macOS
 window; the suite's one WebKit project): the frame loads, the filters
-and navigation work, approval gates `invoke`, and a self-navigation off
+and navigation work, `invoke` is held to the declared commands, and a self-navigation off
 this machine sends no request in either engine — the blocked page's
 load then ends the component and its table shows.
 
@@ -2636,8 +2632,8 @@ its scope trace.
 - **Failure, retry and freshness are the same everywhere it matters.** A run
   that ends `failed` counts toward the contribution's failure policy (three in
   a row disable it; `v_contribution_health`); one that ends `cancelled` — a
-  person's cancel, or its extension changing or being revoked mid-run — does
-  not (an effect's script is checked once more when it returns, so a revocation
+  person's cancel, or its extension changing or being disabled mid-run — does
+  not (an effect's script is checked once more when it returns, so a disable
   during it is a `cancelled` run and a `failed` attempt that doesn't count,
   `Reacted::Stopped`). What a *refused* run is: `denied` (a caller or grant the contract
   rejects) is never retried; a *failed* effect attempt is sent again by itself
@@ -2664,11 +2660,11 @@ A script reaches oxplow through **services**, each a scope it names in
 its `needs` (`oxplow_domain::service::SERVICES`, one table every reader
 uses):
 
-| Service | Builtins | Approval | Modes |
+| Service | Builtins | Needs permission | Modes |
 |---|---|---|---|
 | `sql.read` | `scope("sql.read", …)` | no | any |
 | `tree.read` | `files`, `source_files`, `duplicate_blocks` | no | any |
-| `ai.compute` | `ai_classify`, `ai_score`, `ai_summarize`, `ai_extract`, `ai_complete` | a person's | external only |
+| `ai.compute` | `ai_classify`, `ai_score`, `ai_summarize`, `ai_extract`, `ai_complete` | `ai` | external only |
 | `ai.discover` | `ai_capabilities`, `ai_models`; `scope("ai.discover", { role })` | no | any, when the host supplies AI metadata |
 
 - **Who may declare what** (checked at load): a Starlark collector's
@@ -2708,7 +2704,7 @@ uses):
   error at the script, "uses `files()` without `tree.read` in its
   `needs` — fix: …". The router's refusals are the run-time backstop.
 - **Discovery.** `services::of_extension` lists each script's services
-  (declared / implied / undeclared, used or not, approval) —
+  (declared / implied / undeclared, used or not, permission) —
   `CheckReport.services`, `oxplow extension check --services`; the live model `v_scope`
   lists every scope (id, access, host, summary) for an agent; `docs/reference/extensions.md`
   "Services" is generated from it (`the_reference_lists_every_service`,
@@ -2745,16 +2741,16 @@ uses):
   (`Calls::serve`), not twice. A caller with nothing to give (a command;
   a dry run, which is pure) says the service isn't available there. The
   worker gets the result as its host set (`Given::onto`).
-- **Approval** stays the host's: a script that names a model-calling builtin
-  runs only once a person approved it — an entity collector
-  (`check_approved`), a fact collector (`MetricsService::approved_to_ask`:
-  an extension's in Settings → Data, the project's under Programs).
-  Metadata-only discovery does not spend a key or require that approval;
+- **Permission** stays the host's: a script that names a model-calling
+  builtin needs the extension's `permissions.ai` (the loader refuses it
+  otherwise, "Permissions"), for an entity collector and a fact collector
+  alike.
+  Metadata-only discovery does not spend a key or require that permission;
   it still checks the declaration and live run authority. It never accesses
   credentials or probes a model. See [ai-providers.md](./ai-providers.md).
   Contained entity and fact collectors also pin their loaded script text to
-  the current entry; an approval for changed code cannot authorize older
-  cached text at a subsequent service call or final result.
+  the current entry; text loaded for an older deployment cannot answer a
+  subsequent service call or final result.
 
 ## Grants
 
@@ -2974,16 +2970,16 @@ can't say: which of those are still unverified or inferred now, and its
 own earlier reactions. It is empty when
 the effect already filed (or proposed) a follow-up for an earlier
 acceptance of the same effort (its `v_effect_run` reaction to that event
-is `ok` or `proposed`, tsk991; an earlier acceptance from before its
-approval, or whose reaction skipped or failed, doesn't count). With
+is `ok` or `proposed`, tsk991; an earlier acceptance from before it
+started, or whose reaction skipped or failed, doesn't count). With
 nothing unchecked it skips; otherwise it files **one** item on the
 active tracker, like every new item (tsk1058) — "Verify what the review of <effort> accepted
 unchecked", a checklist naming each claim and decision. Each line is
 text, not markdown (`md_text`: whitespace becomes one space, markdown's
 punctuation is escaped and a long one is cut at 300 characters), and the list stops
 at 50 items, saying how many more the review has. A bundled effect
-is approved like any (K1, tsk953: its embedded files are hashed alike),
-so it runs only once a person approves it. A task an effect (or oxplow
+starts like any (K1), when the generation that first runs it publishes.
+A task an effect (or oxplow
 itself) files has no `author` — it isn't the person's; its
 `work_item.created` and the run's audit name the effect (its `native`
 `author` is null). The loader limits effects to no kind of extension.
@@ -3057,10 +3053,10 @@ a review's dry run counts them per type ("2 pr; emits 2 acme_pr.merged").
 
 **The boundary.** A collector **ingests**: it turns the outside (or
 existing state) into rows, and its events say *what it saw* — "a pull
-request merged". It has no rights to act, needs no approval beyond its
-program's, and may run again and again over the same input. An effect
-**reacts**: it composes commands with an agent's rights, is approved by a
-person, and runs at most once per event. So "when a PR merges, close its
+request merged". It has no rights to act, needs nothing beyond its
+extension's permissions, and may run again and again over the same input. An effect
+**reacts**: it composes commands with an agent's rights, runs under its extension's
+permissions, and runs at most once per event. So "when a PR merges, close its
 work item" is a collector that emits `acme_pr.merged` and an effect that
 reacts to it — never an effect with no commands whose only job is to emit
 from data, and never a collector that acts.
@@ -3294,7 +3290,7 @@ to a logged event by composing commands, run as
 stream — an agent's rights and gates there (the open-thread gate, its own
 stream's VCS; an event with no thread, like a contribution's health, is
 an anchorless effect: no thread gate, since it writes into no worktree —
-its approval and each command's own invokers still apply), never a confirmation (commands.md "Only a person
+its extension's permissions and each command's own invokers still apply), never a confirmation (commands.md "Only a person
 confirms"):
 
 ```yaml
@@ -3313,40 +3309,26 @@ effects:
 extension's own `event_types`, and needs the script in the folder,
 defining `transform`; what's wrong is `extension.yaml:<line>`.
 
-**Consent and start position** (P8.D9). An effect is a project program
-(`exec_consent::ProgramKind::Effect`, key `effect:<extension>/<id>`,
-listed in Settings → Data with what approving means): its approval hash
-covers the script and **every file of its extension's folder** — the
-manifest decides when and with what it runs — so any edit stops it until
-a person approves it again. Approving (the RPC, a person's only) also
-sets `effect_state.start_after_seq` (V148) to the log's head
-(`effects::approved`): an effect never reacts to an event logged before
-its latest approval — not the backlog, not what happened while it waited
-to be re-approved. In the same transaction it drops the effect's scheduled
-automatic retries (`drop_retries_of_tx`, tsk990): what they would send
-was composed by the script as it was, and the approval is of the script
-as it is; those reactions stay failed, for a person's Retry, which
-composes afresh. `effects::gate(approved, start_after, seq)` is the one
-check: `Unapproved`, `BeforeApproval` or `Runs`. The consumer hashes an
-extension's folder once per catalog load (`FolderHashes`, keyed by the
-catalog's `Arc`), not per event: an edit reloads the catalog, so it's
-hashed again and stops the effect (tsk798). The approvals file is read
-on each check, so revoking one (Settings → Data → Programs) takes effect
-at its next event.
+**Permissions and start position** (P8.D9). An effect runs under its
+extension's `permissions:` ("Permissions"); the commands its script
+composes are checked when it runs, and the effect itself needs nothing
+declared. What runs is what was deployed, so an edit takes effect with the
+next deploy. An effect starts when the generation that first runs it
+publishes: that publication sets `effect_state.start_after_seq` (V148) to
+the log's head (`effect_state_store::start_if_new_tx`, in
+`extension_activation.rs`, for each enabled extension's effect not yet
+started). An effect never reacts to an event logged before it started —
+not the backlog, not what happened while its extension was disabled or
+undeployed; a later deploy keeps the position it has. A person's backfill
+reaches what came before. `effects::gate(start_after, seq)` is the one
+check: `NotStarted`, `BeforeStart` or `Runs`; only the live consumer
+applies it. The consumer hashes nothing: an edit reloads the catalog, and
+the effect that runs is the deployed one.
 
-**A bundled extension's effect is approved the same way** (P11, tsk953).
-What an approval covers is read through one resolver,
-`extensions::files_at(project_dir, path)`: a bundled extension's
-embedded files for `bundled:<name>`, else the folder on disk. The digest
-(`exec_consent::files_hash`, over `ExtensionFiles::paths` / `bytes`) is
-the same for a folder and its embedded copy, and stays byte-identical
-for folders (path order component by component; pinned by
-`a_folders_digest_is_pinned`). So a bundled effect has a version to
-approve, there is no bundled branch in the gate, and a new oxplow that
-changes the extension's files asks again. Settings → Data says the
-effect comes with oxplow and offers **Read the script** — the
-`program_source` RPC (UI only) returns any program's entry from where it
-lives.
+**A bundled extension's effect starts the same way.** It has no deployment
+of its own and runs what ships, under `shipped_permissions`; its start
+position is set when the generation that first runs it publishes, and
+there is no bundled branch in the gate.
 
 **Running** (P8.D10, `effect_triggers.rs`): one async pump consumer,
 `effect.triggers` (registered at boot beside `collector.triggers`). It
@@ -3375,7 +3357,7 @@ once**, keyed by `effect_run (effect, event_id)` (V149, `v_effect_run`):
    `effect.result` saying what started it — Delivery lists it, and a
    person may retry it (tsk845) — and counted toward the effect's health
    as the pump counts one it finds (tsk999);
-2. `effects::gate` isn't `Runs`: nothing;
+2. `effects::gate` isn't `Runs` (a live reaction only): nothing;
 3. the loop guard (`lineage`, walking the event's `cause` chain): an
    event its own run caused (source `effect:<extension>/<id>`) never
    triggers it; one that `MAX_CHAIN` (4) effect runs already led to is
@@ -3426,7 +3408,7 @@ attempt:
 - the reaction's latest attempt must be `failed` (`Invalid` otherwise: one
   that ran, was skipped or left a proposal isn't retried; one never made
   has nothing to retry);
-- the effect must be enabled and **approved as it is now** — a retry runs
+- the effect must be enabled and in the running catalog — a retry runs
   today's script, composing afresh from the event, not what the failed
   attempt composed;
 - when the event was logged doesn't matter (`start_after_seq` is the live
@@ -3475,7 +3457,7 @@ going on, tsk932) runs what is
 due as the next attempt, `origin: auto` (`effect.result@4`), on the event
 at its newest version (`at_latest`, as every runner hands it over; one that
 no longer upcasts drops the retry — tsk911), when the effect is still
-there, enabled and approved as it is now and the retry is at most an hour
+there, enabled and running as deployed now and the retry is at most an hour
 overdue (`MAX_RETRY_LATENESS`: one due longer ago — oxplow was closed — is
 a person's, its failure counted; tsk915; a due time that can't be read
 counts as late, tsk999) — otherwise the
@@ -3491,7 +3473,7 @@ says "sent again by itself shortly" on a reaction awaiting its retry; a
 person may still retry it first.
 
 **Backfill** (P9.D5). The live consumer never reacts to what was logged
-before an effect's approval. A person has it react to that past with
+before an effect started. A person has it react to that past with
 `oxplow.effect.backfill { effect, from_seq? | since?, to_seq? }` (human-only,
 `Confirm::Always`, `External`): the events in the range that match its
 `on` and `where` — each read at its type's newest version, as the pump
@@ -3501,10 +3483,10 @@ delivers it — and that it **never reacted to** (`unreacted_tx`: no
 isn't planned — an effect that changes what it reacts to would otherwise
 meet its own changes on every backfill and never get past them, tsk846),
 oldest first, **up to the effect's `start_after_seq`** — what was logged
-after its approval is the live consumer's, so the two never attempt one
+after it started is the live consumer's, so the two never attempt one
 event at once; a range past it is capped (tsk847) — each through
 `run_reaction(…, ReactionOrigin::Backfill)`: attempt 1 with `origin:
-backfill`, the same dedupe, loop guard, approval and health as a live
+backfill`, the same dedupe, loop guard, permissions and health as a live
 reaction. So a second backfill finds nothing, the live consumer never
 reacts to a backfilled event again, and three failures in a row disable
 the effect and stop the run (`stopped`) — three of the run's own in a row
@@ -3513,7 +3495,7 @@ health waits for the retry; tsk932), so a backfill doesn't press on into
 an outage. A run makes at most
 `BACKFILL_BATCH` (200) reactions; the result `{ planned, ran, skipped,
 proposed, failed, remaining, stopped? }` says what is left for another
-run. The effect must be enabled and approved as it is now.
+run. The effect must be enabled and in the running catalog.
 
 `oxplow.effect.backfill_plan` (a read, anyone's) answers `{ planned, from_seq,
 to_seq, batch }` for the same input: what a backfill would react to. Both read
@@ -3522,8 +3504,8 @@ of the range, applying `where` to every one — never to a first window of
 them, which a selective `where` over a busy type would leave empty for
 good (tsk848) — counting all and keeping the batch's first. The bus's
 confirmation shows a command's summary and input, not a count, so the
-count is the plan's: an approved effect's row in Settings → Data →
-Programs has **Backfill…**, which reads the plan, says how many events
+count is the plan's: an effect's row in Settings → Data
+has **Backfill…**, which reads the plan, says how many events
 the effect never reacted to and that it may call outside oxplow for each
 (`backfillAsk`), and runs only on the second click — on the range it
 showed (`to_seq` from the plan, so what was logged in between isn't in
@@ -3532,7 +3514,7 @@ when the plan is more than a `batch` (`backfillRunLabel`, tsk849).
 
 **There is no consumer-level replay.** Core's consumers are re-derivable
 (a projection is rebuilt, not replayed); replaying the log through every
-consumer would re-fire collectors noisily and effects without consent.
+consumer would re-fire collectors noisily and effects nobody asked for.
 Reacting to the past exists only as `oxplow.effect.backfill`.
 
 ## Commands
@@ -3724,9 +3706,8 @@ is written elsewhere), and fact collectors (a `collectors:` entry with
     don't reference dimension rows, so nothing else is lost.
 - Fact collectors run `starlark` / `jaq` only, with no `env` /
   `credentials` / `network`. `exec` is refused unless the extension is the project's own: an own
-  extension's exec program is approved like any extension collector
-  (`collector_runner::approval_hash`, key `<ext>/<id>`) and runs from a
-  private approved copy (`approved_code::extension_collector`).
+  extension's exec program needs `permissions.process` like any extension
+  collector and runs from its deployment.
   `entry` must exist in the extension.
 - Precedence is global (the person's) < each extension, and the project's
   `use:` layers thresholds
@@ -3764,7 +3745,7 @@ Every contribution that runs — an external provider instance, a collector, an 
 `v_contribution_health`):
 
 - **Counting.** A failed run or call counts; a good one starts the count
-  over. A refused input, a missing approval, or a cancel isn't a failure.
+  over. A refused input, a denied permission, or a cancel isn't a failure.
 - **Disabling.** The third failure in a row disables it on this machine
   and logs `contribution.disabled@1` (the row and the event commit together). A
   provider instance stops. A disabled collector doesn't run: the
@@ -3797,9 +3778,8 @@ Every contribution that runs — an external provider instance, a collector, an 
   `v_contribution_health.repair_item` is that same open item (the table
   keeps no `repair_item`). With no running work list
   (`none`, or the chosen tracker down) the effect skips; it is a bundled
-  effect like `verify-unchecked`, so **repair items appear once a person
-  approves it**, and revoking the approval or disabling the effect stops new
-  ones. It runs as an anchorless effect (the event has no thread), so the
+  effect like `verify-unchecked`, so **repair items appear once its
+  extension is enabled**, and disabling the effect stops new ones. It runs as an anchorless effect (the event has no thread), so the
   thread gate doesn't apply. oxplow never sends the item to an agent.
 - **The events** are `contribution.disabled@1 { contribution, reason }` and
   `contribution.enabled@1 { contribution }`, `contribution` the ref
@@ -3883,19 +3863,16 @@ implementations:
   (`implementations::script_decl`, `Source::Script`). Nothing else is a
   script.
   - An AI provider's takes `config: { baseUrl?, ops? }` (the contract,
-    consent and the shipped scripts are [ai-providers.md](./ai-providers.md)
-    "Scripted providers"); it runs once a person approves it
-    (`ProgramKind::AiProvider`).
+    permissions and the shipped scripts are [ai-providers.md](./ai-providers.md)
+    "Scripted providers"); it needs `permissions.ai`
+    ("Permissions").
   - An effort policy's is effects-shaped — `transform({event})` →
     `{ commands: [{ name, input }] } | { skip: "why" }` — takes no config,
     and names the scopes it calls in the entry's `needs:` (only what a
     script can, `scope_calls::CALLABLE`; checked at load, with the script
-    defining `transform`). `needs` is refused anywhere else. It is a
-    program a person approves (`ProgramKind::EffortPolicy`, key
-    `effort_policy:<ext>/<id>`, `exec_consent::effort_policy_program`):
-    the hash covers the script and every file of its extension, as an
-    effect's does, and Settings → Data → Programs lists it with what it
-    reads and offers the script to read.
+    defining `transform`). `needs` is refused anywhere else. It runs
+    under its extension's permissions, as an effect's does; what runs is
+    what was deployed.
 - `oxplow-foundation` declares the agent harnesses (`oxplow:claude-code`,
   `oxplow:codex-cli`, `oxplow:opencode`) and the AI
   providers, as scripts (`providers/anthropic.star`,
@@ -3953,8 +3930,8 @@ implementations:
   frontmatter `name:` is its `name` and it has a `description:`, a
   command's frontmatter has a `description:`. `kind` is `skill` (the
   default: `<name>/SKILL.md`) or `command` (`/oxplow:<name>`).
-- **Offered** (`capabilities::agent_text`): from consented, enabled
-  extensions, when its `needs:` are met and, if an implementation lists
+- **Offered** (`capabilities::agent_text`): from enabled
+  extensions (one with skills declares `agent`), when its `needs:` are met and, if an implementation lists
   it in its `skills:`, while that implementation is the active one. A name
   another extension already took is left out (logged).
 - **Installed.** Each spawn writes what's offered into the runtime
@@ -4022,14 +3999,11 @@ advisories:
   extensions' advisories for one trigger and scope and applies
   `once_per`. Marks are recorded only after every query ran. A failing
   query is logged and skipped.
-- **Consent.** A non-bundled extension's advisories (the project's,
-  possibly from a teammate) speak into the agent's context, so they
-  run only once a person approved them. `exec_consent::advisory_program`
-  turns an extension's advisories into a program (kind `advisories`), with
-  one arg per advisory: its id, trigger, repeat rule, heading and query.
-  Settings → Data → Programs lists them, and any change needs approving
-  again. `advisories::consented` filters before running; bundled
-  extensions aren't gated.
+- **Permission.** An extension's advisories speak into the agent's
+  context, so the manifest must declare `permissions.agent`
+  ("Permissions"; the loader refuses it otherwise), approved when the
+  extension is deployed. A bundled extension's ship under
+  `shipped_permissions`.
 - `for_thread(svc, thread, on, cause)` runs them for a thread, reading
   the live extensions (whatever the thread's stream) and
   binding the thread's stream into the scope.
@@ -4241,8 +4215,8 @@ tool: open_work              # offered as <namespace>_open_work
   the agent to write itself.
 - `oxplow_validate_extension(name)` returns load errors, schema errors and a dry
   run of every lens query, so the agent can check its work without the UI.
-- `v_extension`, `v_collector_state` (approval), `v_collector_credential`
-  (set or not, never the value), the `oxplow.collector.sync` command (never approves).
+- `v_extension`, `v_collector_state`, `v_collector_credential`
+  (set or not, never the value), the `oxplow.collector.sync` command (never grants).
 - **Worktree streams: preview, don't run (tsk377).** Collected data is
   project-wide (one `ext__<ext>__<entity>` table), so a run (the
   `oxplow.collector.sync` command over `CollectorRunner::sync`, from any caller)
@@ -4250,9 +4224,9 @@ tool: open_work              # offered as <namespace>_open_work
   writing a collector checks it with MCP
   `oxplow_preview_collector(owner, id, stream_id)`: `collector_runner::
   preview_collector` runs that worktree's version through the same
-  `produce` step (same consent: an exec collector needs a person's
-  approval of that exact hash, and so does a Starlark one that calls a
-  model; other derived collectors don't) and returns the coerced
+  `produce` step (same permissions: an exec collector needs
+  `permissions.process`, and so does a Starlark one that calls a
+  model need `ai`; other derived collectors need neither) and returns the coerced
   rows per entity (first 50, plus totals), storing nothing and recording
   no run. A **fact collector** (`facts:` declared) previews through the fact
   engine instead (`MetricsService::preview_fact_collector_in`, the same
@@ -4416,7 +4390,7 @@ Extension disk readers refuse absolute/traversing paths and symlinked folders
 or path segments for source, bytes, directory listings and component bundle
 metadata. Project fact inputs resolve under their checkout; symlinks outside
 that checkout are refused before reading content. These host checks do not
-provide OS confinement for an approved external program.
+provide OS confinement for an external program a deploy approved.
 
 ## Command candidate publication
 
@@ -4692,11 +4666,13 @@ commands:
   rows). Core's commands admit no job, so a model reads oxplow through
   `query_sql` and never writes: a job's writes come from an effect on
   its end.
-- **Approval.** A job is a program (Settings → Data → Programs: "Job
-  `<ext>/<id>`", the tools its model may call). Its hash covers
-  `extension.yaml`, so a changed declaration — a new tool — asks again.
-  Until approved its intent waits, queued; nothing is sent. Every model
-  call also needs its AI provider's approval.
+- **Permissions.** A job runs under its extension's `permissions:`
+  ("Permissions"): the commands its tools name outside the extension's
+  namespace need `permissions.commands`, and its model calls need `ai`;
+  the loader refuses the extension otherwise. A person approved them when
+  the extension was deployed, and a deployment is immutable, so a job
+  runs the declaration that was deployed — a new tool arrives with a new
+  deploy. Every model call also needs its AI provider's approval.
 - **Enqueue** (`jobs.write/enqueue`): `{ job, intentKey, request }`,
   `request` `{ schemaVersion: 1, role, messages, tools? }` — never a
   model, endpoint or credential: the role's model is bound when it runs.
@@ -4706,7 +4682,7 @@ commands:
   in the audit or any model).
 - **Running.** The scheduler (four at a time, polling each second)
   claims a queued job, resolves its authority afresh — the declaration
-  and approval as they are now, the thread's open-thread gate (a Write-scope need must be bound to an open thread: `JobExecution.needs_thread`) — and runs it
+  and permissions as they are now, the thread's open-thread gate (a Write-scope need must be bound to an open thread: `JobExecution.needs_thread`) — and runs it
   as `Actor::Job` (`job:<id>:<attempt>:<fence>`) on a run of its own,
   linked to the run that asked. Each model round streams on the role
   (`AiCompute::stream_typed`, a recorded computation: the same request
@@ -4744,8 +4720,8 @@ commands:
   model's connection is dropped within 100 ms
   (`oxplow_ai::client::unless_cancelled`), the attempt closes
   `cancelled` with what had come, and the call's `v_ai_call` row is
-  `error: cancelled` with that partial reply. Revoking the job (its
-  approval, its extension disabled) stops it the same way.
+  `error: cancelled` with that partial reply. Disabling its
+  extension stops it the same way.
 - **Limits.** Past its `timeout` a job fails (`timed out after Ns`),
   keeping its output; the dispatcher stops a worker still running 15 s
   later. The lease is 30 s, renewed every 10 s: an attempt whose lease
@@ -4762,7 +4738,7 @@ commands:
   effect in flight. A queued job survives a restart and runs after it;
   one that was running is fenced once its lease is out, then replayed or
   ended as above. A running job whose
-  declaration changes or whose approval is revoked is cancelled with
+  declaration changes or whose extension is disabled is cancelled with
   what it had, never completed under the new declaration.
 - **A job belongs to its extension's version, not to a catalog
   generation.** Its owner is the extension, its package version and the
@@ -4772,8 +4748,8 @@ commands:
   can run for minutes, and an activation would wait on it): authorizing
   its claim, each tool call (the bus pins per command) and its
   publication each pin briefly, and each checks through the job's `live`
-  gate that its own extension is still that version, enabled and
-  approved. Its run's `ContributionRef.generation` is `None`. The model
+  gate that its own extension is still that version, enabled
+  and running as deployed. Its run's `ContributionRef.generation` is `None`. The model
   call holds none either: `AiService::bind` resolves the role under a
   pin and returns a `Bound` (provider, model, the declaring profile), the
   `*_on` calls stream on it unpinned, and a recorded computation is keyed
@@ -4816,7 +4792,7 @@ commands:
   unwritten). A worker that returns after recovery fenced its attempt
   changes nothing: its result is kept once as an observation
   (`v_job_run_observation`: `attempt`, `fence`, `outcome`, `evidence`).
-  Approval revoked, or the declaration changed, between the worker
+  Extension disabled, or the declaration changed, between the worker
   returning and the publish transaction cancels the job at once, with the
   result it had as a `stopped: cancelled` one and the same late
   observation: the worker has returned, so there is no lease to wait out.
@@ -4840,8 +4816,8 @@ commands:
   source the run's ref (`job_run:<id>`); attempt and fence are on the row.
 - **What a job can't do**: drive an agent session, ask a person (a
   command that needs confirmation is refused, never proposed), write
-  (its tools read), run core's commands, or call a model its approval
-  and the AI provider's don't allow.
+  (its tools read), run core's commands, or call a model its extension's
+  permissions and the AI provider's don't allow.
 
 ### AI profiles (`ai_profiles:`)
 
@@ -4893,8 +4869,8 @@ adapter. Its bearer credential must be named `OXPLOW_MCP_BEARER` and carry
 `secretRef`; references are refused for package executables, stdio servers,
 OAuth credentials and other environment variable names. The fixed name avoids
 process environment control variables. The reference identity, endpoint and
-declaration participate in program approval. The host checks exact current
-owner/consent before and after keychain resolution and gives bytes only to the
+declaration are part of the deployment. The host checks exact current
+owner and permissions before and after keychain resolution and gives bytes only to the
 shipped HTTP transport; mapping scripts get no secret reader. Redirects are
 disabled in that transport. References remain project-local even for globally
 configured provider instances.

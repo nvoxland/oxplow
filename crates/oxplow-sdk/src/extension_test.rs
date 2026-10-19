@@ -6,7 +6,7 @@
 //! examples dry-run), then each intent example whose fixture names a lens
 //! (`input: { lens, params? }`, `expect: { columns?, rows }`), a derived
 //! collector (`input: { collector, rows? }`, `expect: { entities: { <name>:
-//! n }, events?: [{ type, payload? }] }`; one that calls a model runs against the fixture model, approved in the throwaway; an exec collector's isn't run — it needs a person's approval),
+//! n }, events?: [{ type, payload? }] }`; one that calls a model runs against the fixture model in the throwaway; an exec collector's isn't run — it is a program under the extension's `permissions.process`),
 //! a fact collector (`input: { collector, files: { <path>: <text> } }`,
 //! `expect: { facts: [{ measure, value?, path?, … }] }`, tsk1047),
 //! or one of its own commands (`input: { command, input, rows? }`,
@@ -419,7 +419,7 @@ fn unsupported(ext: &Extension) -> Vec<String> {
 
 /// Log the fixture's event (`input: { event: { type, payload, subject?,
 /// anchors? }, model? }`) in the throwaway and deliver it: the extension's
-/// effects — approved here, as a person would — react for real, their
+/// effects — running in the throwaway host — react for real, their
 /// commands run through the bus. What happened against `expect`:
 /// `{ effects: [{ id, state? }], commands: [names] }` (`$any` matches).
 async fn event_example(host: &Host, ext: &Extension, ex: &Example<'_>, report: &mut TestReport) {
@@ -530,7 +530,7 @@ async fn start_effects(host: &Host, ext: &Extension) -> Result<(), String> {
 /// Record intent for job `id` through the extension's own command over
 /// `jobs.write/enqueue` (`input: { job, intentKey, request, model?,
 /// setup?, rows? }`: `setup` and `rows` first make what its tools read), the
-/// job approved here as a person would, and read its outcome through its
+/// job running in the throwaway host, and read its outcome through its
 /// `jobs.read/snapshot` command once it ends: against `expect` — `{ state,
 /// result?, text?, toolCalls?, output?, effects?, commands?, pages? }`
 /// (`$any` matches): its streamed `text`, how many tools its model called
@@ -539,7 +539,7 @@ async fn start_effects(host: &Host, ext: &Extension) -> Result<(), String> {
 /// input, the job is cancelled through the extension's `jobs.write/cancel`
 /// command once its first output is written. An expectation of `effects`,
 /// `commands` or `pages` delivers the `contribution.job.completed` the job
-/// logs to the extension's effects, approved here as a person would: the
+/// logs to the extension's effects, running there too: the
 /// effects that reacted (`[{ id, state? }]`), the commands they ran
 /// (`[names]`) and which of the named wiki pages (`[ref]`) now exist.
 async fn job_example(
@@ -875,10 +875,10 @@ async fn run_setup(host: &Host, ex: &Example<'_>, report: &mut TestReport) -> bo
 
 /// Load component `id` as its frame would, then ask what the fixture asks
 /// (`input: { component, lens?, items?: [title], queries?: [{ asset,
-/// params? }], invokes?: [{ command, input?, approved? }] }`): `items` are
+/// params? }], invokes?: [{ command, input? }] }`): `items` are
 /// work items filed first (`work_item:oxplow:tsk1`, …); each query's rows and each
-/// invoke's outcome — refused until the component is approved, as for a
-/// person — against `expect: { queries?: [{ rows }], invokes?: [{ ok?,
+/// invoke's outcome — what the command answers when the component calls it —
+/// against `expect: { queries?: [{ rows }], invokes?: [{ ok?,
 /// refused? }] }`. The frame itself isn't drawn here.
 async fn component_example(
     host: &Host,
@@ -2303,9 +2303,8 @@ fn transcript(
 }
 
 /// The capability's conformance suite through a throwaway host: an
-/// in-memory oxplow over a copy of the extension, the provider approved
-/// there (the person running the kit consents) and enabled with the
-/// fixture config.
+/// in-memory oxplow over a copy of the extension, the provider enabled
+/// with the fixture config.
 /// Where a harness's launch looks for programs under the kit: `env`'s
 /// PATH, then the well-known install dirs under its HOME — what
 /// `agent_path::search_path` is for the app's own environment.
@@ -2369,8 +2368,7 @@ async fn suite_host(
 }
 
 /// The effort-policy suite over the extension's policy script `decl`, in a
-/// throwaway host: the script approved there and chosen as the project's
-/// policy. A finding is an error at the manifest.
+/// throwaway host: the script chosen as the project's policy. A finding is an error at the manifest.
 /// Publish the generation the throwaway project's config and files ask
 /// for, as the app's owner of generations does on a change.
 async fn publish_generation(svc: &Arc<oxplow_app::Services>) -> Result<(), String> {

@@ -667,7 +667,7 @@ Content text is capped at 64 KiB per block (`MAX_TEXT`).
 **Gotcha: the SDK turns on `serde_json/preserve_order` workspace-wide**
 (features unify). JSON objects serialize in insertion order. Anything that
 needs a stable text form builds it from a `BTreeMap` (`metric_cube::dims_key`
-does), and approval hashes never hash JSON.
+does), and hashes never hash JSON.
 
 **`chat/mapping.rs` (pure)** maps the protocol's tool kinds onto oxplow's
 vocabulary: edit, delete and move → `edit`; read → `read`; search →

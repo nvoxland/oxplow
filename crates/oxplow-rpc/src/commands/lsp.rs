@@ -103,20 +103,6 @@ pub async fn list_lsp_servers(svc: &Services) -> Result<Vec<LspServerListing>, I
     Ok(svc.lsp_sessions.list_servers().await)
 }
 
-/// Tear down and respawn the `(stream, language)` session, replaying
-/// every mirrored open document.
-pub async fn restart_lsp_server(
-    svc: &Services,
-    stream_id: String,
-    language_id: String,
-) -> Result<(), IpcError> {
-    let cwd = stream_cwd(svc, &stream_id).await;
-    svc.lsp_sessions
-        .restart(&stream_id, &language_id, cwd)
-        .await?;
-    Ok(())
-}
-
 /// Answer a server-initiated `workspace/applyEdit` that was forwarded
 /// to the renderer as an `ApplyEditRequest` event. Late answers (the
 /// backend timeout already replied `applied: false`) are no-ops.

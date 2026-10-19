@@ -27,7 +27,7 @@ from individual files.
 Agents make personal tools cheap to build. Extensions should let a
 developer customize that understanding and connect data and functionality,
 then share useful work with a team and eventually more broadly. Core
-owns identity, provenance, permissions, consent, execution, lifecycle,
+owns identity, provenance, permissions, approval, execution, lifecycle,
 state and diagnostics; extensions supply their unique business value.
 This is a design rule, not a claim that every shared service is complete.
 
@@ -77,82 +77,57 @@ which is that oxplow steers and never drives a doing-agent.
   prompt box calls `chatPrompt`). See [agent-model.md](./agent-model.md) →
   "Chat sessions".
 
-## A repo's config never runs a program without consent
+## A repo's config never runs a program without a deployed permission
 
-A cloned or pulled repo is **untrusted** (decided 2026-09-27, tsk331 /
-tsk162). Its committed config can name programs:
+A cloned or pulled repo is **untrusted** (decided 2026-09-27). Its
+committed config can name programs:
 
 - `exec` collectors and report parsers in `.oxplow/extensions/*/extension.yaml`
-  (the project's own are in `.oxplow/extensions/project/`, approved like any
+  (the project's own are in `.oxplow/extensions/project/`, admitted like any
   extension's);
-- advisories in a non-bundled extension: SQL whose
-  results go into the agent's context (tsk352). Approved as a unit per
-  extension, and the listing shows each advisory's query. Bundled
-  extensions' aren't gated;
-None of these run until a person approves that program on their machine.
+- providers (`entry` or an MCP `command`) in a non-bundled extension;
+- advisories in a non-bundled extension: SQL whose results go into the
+  agent's context. Bundled extensions' aren't gated.
 
-- **What an approval covers.** It is bound to a hash of what runs
-  (tsk347):
-  - the program's content;
-  - its args, plus the content of any arg that names a file, read where
-    the program runs (from the stream's worktree), so
-    `node tools/agent.js` covers `agent.js`;
-  - for an extension collector, every file in the extension except
-    `extension.yaml` and `lenses/` (not code it runs, so a lens edit
-    doesn't ask again), plus its whole declaration — `entry`, `env`
-    passthrough, `credentials`, `network`, and its `input` query,
-    trigger and entities (tsk348; a changed `input` asks again);
-  - for an external provider (`ProgramKind::Provider`, key
-    `provider:<ext>/<id>`), the same tree — which holds its checked-in
-    declarations — plus its entry, `args`, `env` names, `credentials`
-    and `network` ([providers.md](./providers.md));
-  - for a custom component that declares `commands`
-    (`ProgramKind::Component`, key `component:<ext>/<id>`, P11), every
-    file of its bundle plus the commands it may run with the viewer's
-    rights; one that declares none only shows and queries, and isn't a
-    program ([extensions.md](./extensions.md) "Custom components").
+The consent is the deploy that admitted `process`: a repo's config alone
+never runs a program. The extension must declare `permissions.process`
+(and the `network` hosts, `secrets`, `ai`, `agent`, … its contents need),
+the loader refuses contents that need an undeclared permission, and a
+person approved the deploy that added it. Nothing runs on a teammate's
+machine until that person deploys it there.
 
-  Any change needs approving again. A directory of more than 500 files
-  or 16 MB can't be approved as a whole: give the program its own
-  directory. The tree hash covers dot-files too (only `.DS_Store` is
-  skipped), and a folder containing a symlink can't be approved at all —
-  its target isn't what the person saw (tsk546). A provider's `args` are
-  hashed where it runs (its extension folder), and an arg naming a path
-  outside the folder is refused when the manifest loads.
-- **Where it lives.** Outside every repo (tsk344): `exec_consent::ApprovalStore`
-  keeps them in `<oxplow home>/approvals/<sha256 of the project path>.json`.
-  Each entry carries an HMAC under a random key kept in the OS keychain
-  (`approvals-mac-key`, created on the first approval). So a repo can't
-  commit an approval, an agent's shell can't forge one, and each teammate
-  consents for themselves. The old in-repo `.oxplow/source-approvals.json`
-  is never read; programs approved there ask once more.
-- **Who approves, and revokes.** Only a person, in Settings → Data.
-  Agents can't, and a lens button never does. A person revokes an
-  approval the same way (`revoke_project_program`, `revoke_collector`,
-  UI-only, through `exec_consent::revoke_program` /
-  `collector_runner::revoke`): the entry leaves the approvals file —
-  so editing the file can't undo a revocation — and when it was revoked
-  is noted beside it for the listing. From the next thing it does,
-  nothing it was granted holds; a running provider is stopped.
-- **What it grants, and what isn't held.** Approving grants the
+- **What the declaration covers.** `Permissions`, in the manifest:
+  `sql`, `commands`, `files`, `ai`, `network`, `process`, `secrets`,
+  `agent` ([extensions.md](./extensions.md) "Permissions"). A contribution
+  that needs more than it declares is a load error naming what to add.
+  A narrower request asks nothing new.
+- **What runs is what was deployed.** A deployment is immutable
+  (`.oxplow/runtime/extensions/<name>/<hash>/`), so a program, its args and
+  every file it reads are the ones a person approved; a source edit
+  changes nothing that runs until it is deployed. There is no approvals
+  store and no hash per program ([providers.md](./providers.md)
+  "What runs is its deployment").
+- **Who approves.** A deploy, rollback or enable that adds a permission
+  asks: a person confirms inline; an agent's call becomes a proposal it
+  can't confirm. One that adds nothing goes live at once. Keep This never
+  asks: it fails when the source gained a permission. Approval lives in
+  the deployment row (`v_extension_deployment.permissions`), on the
+  person's machine, so a repo can't commit an approval and each teammate
+  approves for themselves.
+- **What it grants, and what isn't held.** The permissions grant the
   contribution's request (`oxplow_domain::grant`, derived by `grants.rs`
-  from what it declares) — never more, and a narrower request asks
-  nothing new. Every run decides what it does against it and records
-  the decisions ([extensions.md](./extensions.md) "Grants"). Where oxplow
-  can't hold a grant here — a program's files, network egress off
-  macOS — the decision is `unenforced`, and Programs and a review say so.
-- **What is approved is what they saw** (tsk349). Listings carry each
-  program's and source's `version` (its approval hash as it is now).
-  Approving sends that version back, and a program that changed between
-  the listing and the click is refused, so nothing can swap it in the
-  meantime.
+  from what it declares) — never more. Every run decides what it does
+  against it and records the decisions ([extensions.md](./extensions.md)
+  "Grants"). Where oxplow can't hold a grant here — a program's files,
+  network egress off macOS — the decision is `unenforced`, and the deploy
+  prompt and a review say so.
 - **Not gated:** pure in-process Starlark/jq transforms without privileged
-  host access, and the user's own global-scope config. Model-calling
-  collectors, scripted effort policies, effects, AI-provider scripts and
-  components that invoke commands have their own consent gates. Every
-  script runs in its own worker process, killed and reaped past its time
-  budget or memory cap, or when its run is cancelled
-  ([collection.md](./collection.md) "Containing scripts").
+  host access, and the user's own global-scope config. Everything else
+  runs under its extension's permissions: model-calling collectors,
+  scripted effort policies, effects, AI-provider scripts and components
+  that invoke commands. Every script runs in its own worker process,
+  killed and reaped past its time budget or memory cap, or when its run
+  is cancelled ([collection.md](./collection.md) "Containing scripts").
 
 A new way for config to start a program must go through the same gate.
 

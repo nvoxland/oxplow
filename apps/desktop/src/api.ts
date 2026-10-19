@@ -2162,45 +2162,54 @@ export async function readAt(
   return unwrap(await commands.readAt(streamId || null, path, revision));
 }
 
+/** Save a file of the stream's worktree: `oxplow.file.save`. */
 export async function writeWorkspaceFile(
   streamId: string,
   path: string,
   content: string,
-): Promise<WorkspaceFile> {
-  return unwrap(await commands.writeWorkspaceFile(streamId || null, path, content));
+): Promise<{ path: string; bytes: number }> {
+  const out = await runCommand("oxplow.file.save", { stream: streamRef(streamId), path, content });
+  return out.result as { path: string; bytes: number };
 }
 
+/** Make a file: `oxplow.file.create`. */
 export async function createWorkspaceFile(
   streamId: string,
   path: string,
   content = "",
-): Promise<WorkspaceFile> {
-  return unwrap(await commands.createWorkspaceFile(streamId || null, path, content));
+): Promise<WorkspacePathChange> {
+  const out = await runCommand("oxplow.file.create", { stream: streamRef(streamId), path, content });
+  return out.result as WorkspacePathChange;
 }
 
+/** Make a directory: `oxplow.file.create_directory`. */
 export async function createWorkspaceDirectory(
   streamId: string,
   path: string,
 ): Promise<WorkspacePathChange> {
-  unwrap(await commands.createWorkspaceDirectory(streamId || null, path));
-  return { path };
+  const out = await runCommand("oxplow.file.create_directory", { stream: streamRef(streamId), path });
+  return out.result as WorkspacePathChange;
 }
 
+/** Move a file or directory: `oxplow.file.rename`. */
 export async function renameWorkspacePath(
   streamId: string,
   fromPath: string,
   toPath: string,
 ): Promise<WorkspaceRenameResult> {
-  unwrap(await commands.renameWorkspacePath(streamId || null, fromPath, toPath));
-  return { fromPath, toPath };
+  const out = await runCommand("oxplow.file.rename", { stream: streamRef(streamId), from: fromPath, to: toPath });
+  const { from, to } = out.result as { from: string; to: string };
+  return { fromPath: from, toPath: to };
 }
 
+/** Remove a file or directory: `oxplow.file.delete`. The caller has
+ *  asked the person (the file tree's inline confirm). */
 export async function deleteWorkspacePath(
   streamId: string,
   path: string,
 ): Promise<WorkspacePathChange> {
-  unwrap(await commands.deleteWorkspacePath(streamId || null, path));
-  return { path };
+  const out = await runCommand("oxplow.file.delete", { stream: streamRef(streamId), path }, true);
+  return out.result as WorkspacePathChange;
 }
 
 export function subscribeOxplowEvents(
@@ -2587,7 +2596,7 @@ export async function listLspServers(): Promise<LspServerListing[]> {
 }
 
 export async function restartLspServer(streamId: string, languageId: string): Promise<void> {
-  unwrap(await commands.restartLspServer(streamId, languageId));
+  await runCommand("oxplow.lsp.restart_server", { stream: streamRef(streamId), language: languageId });
 }
 
 export async function removeLspPackage(packageName: string): Promise<void> {
@@ -2635,16 +2644,18 @@ export async function listBacklinks(
 // discards here.
 // ----------------------------------------------------------------------
 
-export type DeadLetter = import("./tauri-bridge/generated/bindings.js").DeadLetter;
-
-/** Run the parked event through its consumer again; returns the letter's new state. */
-export async function retryDeadLetter(id: number): Promise<DeadLetter> {
-  return unwrap(await commands.retryDeadLetter(id));
+/** Run the parked event through its consumer again (`oxplow.delivery.retry`);
+ *  returns the letter's new state. */
+export async function retryDeadLetter(id: number): Promise<{ state: string; attempts: number; error: string }> {
+  const out = await runCommand("oxplow.delivery.retry", { id });
+  return out.result as { state: string; attempts: number; error: string };
 }
 
-/** Give up on the parked event (stays visible as `discarded`). */
-export async function discardDeadLetter(id: number): Promise<DeadLetter> {
-  return unwrap(await commands.discardDeadLetter(id));
+/** Give up on the parked event (`oxplow.delivery.discard`; stays visible as
+ *  `discarded`). The caller has asked the person. */
+export async function discardDeadLetter(id: number): Promise<{ state: string }> {
+  const out = await runCommand("oxplow.delivery.discard", { id }, true);
+  return out.result as { state: string };
 }
 
 /** Pages this source points AT. Inverse of `listBacklinks`. */

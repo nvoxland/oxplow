@@ -1682,11 +1682,11 @@ lands on the effort a close just before it closed and a batch's opens
 pin before its closes; the consumer holds
 `EffortService::without_event_pump()` so there's no reference cycle.
 Letters are `pending | retried | discarded`; the
-person's moves are `retry_dead_letter(id)` (re-runs the consumer now;
+person's moves are `oxplow.delivery.retry { id }` (re-runs the consumer now;
 `retried` on success, else `pending` with the new error; refused unless
-the letter is `pending`) and `discard_dead_letter(id)` — **RPC only**
-(parity `ui`): a person decides a letter's fate. `list_dead_letters(all?)`
-is RPC; an agent reads `v_event_dead_letter`. Also
+the letter is `pending`) and `oxplow.delivery.discard { id }` — commands
+of a person or a lens for one, never an agent's (`commands/delivery.rs`);
+the list is `v_event_dead_letter`. Also
 `v_event`, `v_event_dead_letter`, `v_event_checkpoint` in the semantic
 layer (V94). Nothing is skipped silently.
 
@@ -2113,7 +2113,7 @@ one fails and deleted in the transaction of the next success; `v_asset`
 V133 (P7.B3; replaced V75 `ext_source_state`, its rows copied). Each
 collector's last run: `owner` + `id` (the primary key; the owner is the
 declaring extension, the project's own among them), `status` (`ok` / `error` /
-`needs_approval` / `skipped` — the loop guard refused its run for an
+`skipped` — the loop guard refused its run for an
 event, V154 rebuilt the table for the CHECK), `last_run_at`, `error`, `row_counts_json` (rows per
 entity after the last good run), `cursor_json` (its opaque checkpoint)
 and `last_event_id` (the last trigger event it ran for; it never moves
@@ -2166,7 +2166,7 @@ scripts held), `ai_calls`, `scopes_json`, `decisions_json`. STRICT.
   effect's and a job's run belongs to its extension's `version` (its live
   check rechecks that at each host call and at publication), so only a
   command's run, which pins a generation, records one. A run stopped by a
-  person, or because its extension changed or was revoked, is `cancelled`
+  person, or because its extension changed or was disabled, is `cancelled`
   and says nothing of the contribution's health.
 - **Linked from the records that already existed:** `command_audit`,
   `effect_run`, `collector_run` and `ai_call` each gained `run_id`
@@ -2186,11 +2186,11 @@ the key, since a provider and a collector may share an id (tsk721):
 `last_error`, `mean_ms` (a moving average), `next_due_at`, `updated_at`.
 `next_due_at` is when a scheduled contribution should have run again by
 — written each minute by the schedulers (`run_due_collectors` for an
-approved, enabled `every:` collector; `ProviderRegistry::sync_due` for a
+enabled `every:` collector; `ProviderRegistry::sync_due` for a
 running instance, its earliest collector): the last run (or now, when it
 runs now) plus the interval plus one scheduler tick
 (`contribution_health::next_due_ms`); `NULL` for one off any schedule (manual,
-`on:`, unapproved, disabled, `syncMinutes: 0`). A rate-limited instance
+`on:`, disabled, `syncMinutes: 0`). A rate-limited instance
 keeps its last plan (tsk722). The policy is `oxplow-app/src/contribution_health.rs`:
 three failures in a row disable it, the row and `contribution.disabled@1` in
 one transaction; `oxplow.contribution.enable` clears it (`contribution.enabled@1`).

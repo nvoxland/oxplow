@@ -314,6 +314,14 @@ fn call_item(ws: &Path, v: &Value) -> Option<Symbol> {
 
 #[async_trait]
 impl CodeIntelligence for LspProvider {
+    async fn restart(&self, stream: StreamId, language: &str) -> Result<(), CodeIntelError> {
+        let cwd = self.workspace(stream).await?;
+        self.sessions
+            .restart(&stream.to_string(), language, cwd)
+            .await
+            .map_err(|e| CodeIntelError::Failed(e.to_string()))
+    }
+
     async fn definition(&self, at: &Position) -> Result<Vec<Location>, CodeIntelError> {
         let (v, ws) = self.at(at, "textDocument/definition", json!({})).await?;
         Ok(locations(&ws, &v))

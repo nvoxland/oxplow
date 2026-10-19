@@ -532,8 +532,8 @@ The daemon's catalog (`ExtensionCatalog::for_project`) loads the live set
 once per generation, from the deployments in the store; it reads no source
 and keeps no per-root cache or fingerprint. Source loads
 (`load_extensions`, used by `oxplow_validate_extension` and the CLI) parse on
-every call. Consent hashing (`approval_hash`) always reads the bytes it
-approves. A cache entry owns a `CatalogSnapshot`: declarations and the
+every call. A deploy's hash always reads the bytes it
+deploys. A cache entry owns a `CatalogSnapshot`: declarations and the
 generation hash. No new performance measurement was run.
 
 ## Metric visibility: ancestry in bulk (2026-10-06)

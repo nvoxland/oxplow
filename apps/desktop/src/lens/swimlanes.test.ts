@@ -165,14 +165,14 @@ test("a rejection naming a field shows under the input", async () => {
   expect(card("work_item:a:2").querySelector("form")).toBe(form);
 });
 
-test("a refusal before approval is a one-line note above the board", async () => {
+test("a refusal of the board's commands is a one-line note above the board", async () => {
   await start([]);
-  rejection = { code: "DENIED", message: "not approved" };
+  rejection = { code: "DENIED", message: "not deployed" };
   await drag("work_item:a:1", lane("done"));
   const note = document.getElementById("note")!;
   expect(note.hidden).toBe(false);
-  expect(note.textContent).toContain("not approved");
-  expect(note.textContent).toContain("Approve");
+  expect(note.textContent).toContain("not deployed");
+  expect(note.textContent).toContain("deploy the extension");
 });
 
 test("clicking a card opens it; Cmd/Ctrl-click opens it in a new tab", async () => {

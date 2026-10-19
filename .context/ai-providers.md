@@ -138,9 +138,9 @@ an id, a description, a required `fallback` built-in role and optional
   "AI profile `x/y` needs tool calling, which `m` doesn't support" — and
   Settings shows the same as the row's `problem`. Unknown support passes.
 - **Profiles are capability, tools are authority.** What a model may call
-  stays on the job (`tools:`, approved by the person, enforced per call by
+  stays on the job (`tools:`, admitted by the person when the extension is deployed, enforced per call by
   the bus); a profile only picks the model. Rebinding one never changes
-  what a job may do or re-asks its approval. Declaring a profile
+  what a job may do or asks a person again. Declaring a profile
   authorizes nothing: it's reached only through the person's own provider.
 - **A restriction is the person's side of that line.** A binding (global,
   project or a profile's own) may carry `restrict:` — a set of `tools`
@@ -180,7 +180,7 @@ an id, a description, a required `fallback` built-in role and optional
   (`decide_via_chat`); `test` to a one-word completion. `ModelProviders` is
   the registry (`Services.ai.providers()`), filled from the declarations by
   `ai_service::register_built_ins` at boot and on every capabilities
-  refresh — each declared script behind its approval gate. Shared pieces
+  refresh — each declared script under its extension's `ai` permission. Shared pieces
   stay in `oxplow-ai`: the `Http` POST helper (`post_with` for headers
   named at run time) and its error mapping, `parse_answers`,
   `decide_via_chat`.
@@ -214,7 +214,7 @@ an id, a description, a required `fallback` built-in role and optional
 - **Discovery from extension hosts.** Collectors declare `ai.discover` and
   call `ai_capabilities(role = "main")` for the selected model or
   `ai_models(role = "main")` for its provider's declared catalog. This service
-  needs no paid-call approval and is usable in pure previews. Both resolve
+  needs no paid call and is usable in pure previews. Both resolve
   the role through `AiService` without reading the keychain; providers receive
   an instance with no key. They record no `ai_call` or AI usage. The host
   checks versions and model identities and rechecks run authority while
@@ -228,7 +228,7 @@ an id, a description, a required `fallback` built-in role and optional
   Missing models/features/limits remain unknown. Capability metadata is
   refreshed when the provider registry is refreshed, like its script.
 - **Typed collector completion.** `ai_complete(request, role = "main")`
-  is an `ai.compute` builtin and requires the same approval and live run
+  is an `ai.compute` builtin and requires the same `ai` permission and live run
   checks as the text helpers. Its request is `{schemaVersion: 1, messages,
   tools?}`; the host binds the model from the role and refuses a supplied
   `model`. Unknown fields or versions fail instead of dropping semantics.
@@ -286,7 +286,7 @@ an id, a description, a required `fallback` built-in role and optional
     receives `{op: completeTyped, model, request}` with the complete V1
     envelope; `response` receives `{op: completeTyped, model, body}` and
     returns a full V1 typed response, including usage provenance and finish
-    reason. The same credential substitution, consent and transport rules
+    reason. The same credential substitution and transport rules
     apply. Without that opt-in, typed completion uses the conservative
     text adapter. The shipped Anthropic and OpenAI-compatible mappings opt into
     `completeTyped` alongside text completion. They preserve conversation
@@ -346,20 +346,14 @@ an id, a description, a required `fallback` built-in role and optional
     and its connection `test` asks a yes/no question. A script that
     decides natively but not for every model (OpenRouter: only `jev`
     models, at `/systemone`) returns `None` for the rest.
-  - **Consent** (decided 2026-10-08: shipped ones too, no exemption). An
-    AI provider script is a program a person approves —
-    `exec_consent::ProgramKind::AiProvider`, key
-    `ai_provider:<extension>/<id>`, hashed over the script (read where it
-    lives through `files_at`, a shipped one's embedded) and its default
-    `baseUrl` (`ai_provider_program`). Settings → Data → Programs lists it
-    ("AI provider …", what it sends to, **Read the script**). Every call
-    asks its `Gate` first (`exec_consent::script_gate`, the approvals file
-    read each time, as an effect's is), so approving takes effect at once
-    and an edit stops it: until then a call fails `AiError::Unapproved`
-    naming Settings → Data → Programs, and nothing is sent — it never falls
-    back. **After an upgrade that changes a shipped provider script, AI
-    stops until the person approves it again.** Tests approve with
-    `test_fixtures::approve_ai_providers`.
+  - **Permission** (decided 2026-10-08: shipped ones too, no exemption). An
+    AI provider script is a program, so its extension must declare
+    `permissions.ai` (an `ai_provider` implementation needs it; the loader
+    refuses the extension otherwise), approved when the extension is
+    deployed — oxplow-bundled's too, as shipped. There is no per-call
+    gate: the deployment is immutable, so the script that runs is the
+    script that was approved. **After an upgrade that changes a shipped provider
+    script, the new deployment asks again only if it adds a permission.**
   - The shipped scripts speak:
     - Anthropic Messages: `POST {base}/v1/messages`, `x-api-key`,
       `anthropic-version: 2023-06-01`.
@@ -485,9 +479,9 @@ a synchronous `dyn AiOracle`; the app's is `ai_compute::CollectorOracle`,
 which blocks the script's worker thread on the runtime and asks
 `AiCompute` as caller `collector:<owner>/<id>` — so every answer is a
 recorded computation (the same question on the same text is one call,
-ever). Only a script a person approved gets it: one that names an `ai_*`
-builtin runs only once approved, like an exec program
-([semantic-layer.md](./semantic-layer.md) "Sandbox"). The script runs in a script worker
+ever). Only a script whose extension declares `permissions.ai` gets it: one that
+names an `ai_*` builtin is refused otherwise, like an exec program needing
+`process` ([semantic-layer.md](./semantic-layer.md) "Sandbox"). The script runs in a script worker
 ([collection.md](./collection.md) "Containing scripts"); each `ai_*` call
 crosses to the host, which asks the oracle. The time it waits is left out
 of the run's `timeout` (`RunClock`, the in-flight call included) but not
@@ -499,8 +493,8 @@ what it recorded, so its next run gets further (tsk559). Who gets a model is the
 services router's ([extensions.md](./extensions.md) "Services"): an
 entity collector whose script names an `ai_*` builtin implies
 `ai.compute`; a **fact collector** gets one when it declares
-`needs: [ai.compute]` and a person approved it (otherwise it is refused
-before it runs); a script that composes — a command's, an effect's, a
+`needs: [ai.compute]` and its extension declares `permissions.ai` (otherwise
+it is refused before it runs); a script that composes — a command's, an effect's, a
 policy's, a review's dry run — runs pure and is refused before it runs:
 "`ai_summarize()`: a pure run can't use `ai.compute` (ask a model): only
 a run that may call out can". A run not given a model (a report parser)
@@ -609,7 +603,7 @@ its source; with no model bound, the recorded ones are all there is.
   `v_ai_call`. The review packet shows the decision rows as "Decisions
   Oxplow Noticed", separate from "Decisions Made", and the claim rows in
   "Unverified Claims" with their source (stated or read) and review state.
-- Disabling oxplow-bundled, revoking its programs or replacing them with
+- Disabling oxplow-bundled, removing its permissions or replacing them with
   another extension's (an effect that calls the same commands) needs no
   core change. Pinned end to end in `oxplow-sdk/tests/examples.rs`.
 
@@ -638,7 +632,7 @@ one signal), `test_ai_provider`.
 - Recent Calls: the last 7 days of `v_ai_call` by role and caller, read
   with `query_sql`, the same path lenses use.
 
-## Host transport and live consent
+## Host transport and live authority
 
 The shared `Http` client refuses redirects; a provider request cannot carry
 credentials or content to a redirected destination. Transport errors strip
@@ -646,11 +640,11 @@ URL details, including query values used by key placeholders. Scripted AI
 mappings see placeholders, never the provider key: the host substitutes only
 in transport paths/headers. Routing/proxy header overrides are refused, and
 exact credential echoes in JSON responses/error bodies are redacted before
-mapping scripts see them. A last approval check runs after request mapping
-and immediately before HTTP. Script approval is pinned to the loaded version;
-a changed/reapproved script does not lend its approval to the old mapping.
+mapping scripts see them. A last live-owner check runs after request mapping
+and immediately before HTTP. The check is pinned to the loaded version;
+a redeployed script does not lend its authority to the old mapping.
 Collector AI calls recheck their parent run before each request, poll live
-authority while waiting and discard responses after cancellation/revocation.
+authority while waiting and discard responses after cancellation or when the extension is disabled.
 Dropping a request future cannot retract a request already sent.
 
 ### AI runtime reader ownership
@@ -664,7 +658,7 @@ pinned listing; the synchronous helper remains for standalone callers.
 Each computation captures one key-free effective AI configuration, shared by
 nested calls on that service. A role change while awaiting a provider therefore
 cannot label the returned result with a different model's cache identity.
-Credentials and consent are still fetched/checked by their host and are never
+Credentials and authority are still fetched/checked by their host and are never
 part of the captured configuration. Script worker oracles re-enter with their
 RunContext pin before discovery/computation; this avoids a second fair-lock
 reader deadlocking behind a waiting generation writer. Typed role binding is

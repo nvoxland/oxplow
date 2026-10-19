@@ -174,9 +174,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::list_comments_for_stream,
             // wiki
             // events (dead-letter queue)
-            commands::generated::list_dead_letters,
-            commands::generated::retry_dead_letter,
-            commands::generated::discard_dead_letter,
             // page refs (unified backlinks/outbound)
             commands::generated::list_backlinks,
             commands::generated::list_outbound,
@@ -254,11 +251,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::vcs_revisions_between,
             commands::generated::vcs_file_history,
             commands::generated::vcs_list_adoptable_workspaces,
-            commands::generated::write_workspace_file,
-            commands::generated::create_workspace_file,
-            commands::generated::create_workspace_directory,
-            commands::generated::rename_workspace_path,
-            commands::generated::delete_workspace_path,
             // background tasks
             commands::generated::list_background_tasks,
             commands::generated::get_background_task,
@@ -274,7 +266,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::lsp_request,
             commands::generated::lsp_notify,
             commands::generated::list_lsp_servers,
-            commands::generated::restart_lsp_server,
             commands::generated::respond_lsp_apply_edit,
             // terminal
             commands::terminal::open_terminal_session,

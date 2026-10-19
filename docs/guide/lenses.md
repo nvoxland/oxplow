@@ -137,8 +137,9 @@ An action runs as the lens acting for you, so it can't do anything you
 couldn't. Copy and Add to Agent Context are on every lens; you don't
 declare them.
 
-A lens action never approves a source. The first run of a source that
-executes a program is still approved in Settings → Data.
+A lens action never approves a permission. A source that executes a
+program needs its extension to declare `process`, which you approve at
+deploy.
 
 ### Documents and dashboards
 
@@ -404,12 +405,11 @@ If the component doesn't connect within 3 seconds, or navigates itself
 somewhere else, oxplow shows the lens's table instead. Agents always
 read the table.
 
-A component that declares `commands` runs them with your rights, so you
-approve it first, in Settings → Data → Programs. The approval covers its
-bundle's files and its command list, and a change to either needs
-approving again. Until then it still shows and queries its lenses, but
-`invoke` is refused, and oxplow says why under the frame. A component
-with no `commands` needs no approval.
+A component that declares `commands` outside its extension's namespace
+runs them with your rights, so the extension declares `permissions:
+{ commands: [...] }`, which you approve at deploy. The loader refuses a
+component that needs a command the extension doesn't declare. A component
+with no such `commands` needs no permission.
 
 A command that needs confirmation is confirmed by you in oxplow, not
 inside the frame.
@@ -437,8 +437,8 @@ declare `stream_id`; the editor gets `ref`. Settings → Integrations lists
 each replaced view with a choice of whose to show (Default, oxplow's own, or
 an extension); a small "replaced by" badge says whose it is, and if it can't
 load, oxplow's own shows with a line saying why. A `viz: custom` view that
-changes items needs its commands declared and approved like any component;
-until then it shows a one-line note instead.
+changes items needs its commands declared like any component, and the
+extension must declare the permissions for them.
 
 [`examples/extensions/task-views`](../../examples/extensions/task-views) is a
 working set of all three: swimlanes you drag cards between, a compact list
@@ -486,20 +486,23 @@ The script prints:
 
 Column types are `text`, `int`, `real`, `bool` and `time` (an ISO timestamp).
 
-A collector runs code, so **nothing runs until you approve it** in Settings →
-Data → **Approve & Run**. Approval is per machine and per version of the
-script: a teammate who pulls it approves it themselves, and a changed script
-needs approving again. Agents can run approved collectors but can't approve
-them.
+A collector runs code, so its extension must declare `permissions: { process:
+true }`, plus `network` and `secrets` for what it reaches. You approve them
+when you deploy the extension (Settings → Extensions). A teammate who pulls
+it deploys it themselves. A changed script needs a redeploy, which asks again
+only if it adds a permission. An agent's deploy becomes a proposal you decide.
+The first sync is just **Sync Now** in Settings → Data.
+
+`process` is declared, not confined: the program runs with your authority.
 
 Known limits:
 
 - It only gets the environment variables it declares, plus `PATH` and `HOME`.
 - It can only reach the hosts it lists under `network:` (for example
-  `network: [api.github.com]`). The list is part of what you approve, so a
-  collector that adds a host needs approving again. On macOS this is
-  enforced, and anything else the script tries to reach fails. Other
-  systems don't enforce it yet, and the approval says so.
+  `network: [api.github.com]`). The list is the extension's `network`
+  permission, so a collector that adds a host asks again at deploy. On macOS
+  this is enforced, and anything else the script tries to reach fails. Other
+  systems don't enforce it yet.
 - Secrets go in `credentials:`. Set each one under the collector in Settings →
   Extensions; the value goes to your OS keychain and the script gets it as
   that environment variable. Values are per extension, and agents can't
@@ -529,8 +532,8 @@ def transform(input):
 ```
 
 Pure scripts cannot directly reach the network, files, environment, or
-keychain, so they need no program approval. A collector that calls
-`ai.complete` or `ai.decide` also needs its source approved, an approved
+keychain, so they need no permission. A collector that calls
+`ai.complete` or `ai.decide` also needs `permissions: { ai: true }`, an
 AI provider, and a configured role. Those model calls can send data
 outside the project and use your provider account.
 
