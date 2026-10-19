@@ -56,6 +56,15 @@ test("theme tokens come from the root's custom properties", () => {
   expect(tokens).toEqual({ "--text-primary": "#eee", "--accent": "#08f" });
 });
 
+test("theme tokens carry the root's color-scheme, so the frame paints no opaque canvas", () => {
+  const style = {
+    length: 1,
+    item: () => "--accent",
+    getPropertyValue: (n: string) => ({ "--accent": "#08f", "color-scheme": " dark " })[n] ?? "",
+  };
+  expect(tokensFromStyle(style)).toEqual({ "--accent": "#08f", "color-scheme": "dark" });
+});
+
 // tsk961: `init` carries the theme's tokens; the kit is a stylesheet the
 // bundle links from the daemon. Dropping `kitCss` made the protocol 2;
 // `navigate`'s `newTab` (a Cmd-click in a component) made it 3.

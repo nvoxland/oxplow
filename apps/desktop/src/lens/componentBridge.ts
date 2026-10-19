@@ -71,7 +71,8 @@ export function componentBundleUrl(base: string, version: string): string {
   return `${base}/components/v/${encodeURIComponent(version)}/`;
 }
 
-/** The theme's tokens: the root's custom properties (`--text-primary`). */
+/** The theme's tokens: the root's custom properties (`--text-primary`)
+ *  and its `color-scheme`. */
 export function tokensFromStyle(style: {
   length: number;
   item(i: number): string;
@@ -82,6 +83,10 @@ export function tokensFromStyle(style: {
     const name = style.item(i);
     if (name.startsWith("--")) out[name] = style.getPropertyValue(name).trim();
   }
+  // A frame whose color-scheme differs from its embedder's is painted
+  // opaque white; the component adopts the host's (`applyTheme`).
+  const scheme = style.getPropertyValue("color-scheme")?.trim();
+  if (scheme) out["color-scheme"] = scheme;
   return out;
 }
 

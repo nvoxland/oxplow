@@ -87,7 +87,8 @@
       navigate: (ref, options) =>
         call({ method: "navigate", ref, newTab: !!(options && options.newTab) }),
       // Adopt oxplow's theme: set each token on the document's root, where
-      // the kit's stylesheet (and your own CSS) reads them.
+      // the kit's stylesheet (and your own CSS) reads them. `color-scheme`
+      // is one of them: it keeps the frame's canvas transparent.
       applyTheme(doc) {
         const root = (doc || global.document).documentElement;
         for (const name of Object.keys(tokens)) root.style.setProperty(name, tokens[name]);

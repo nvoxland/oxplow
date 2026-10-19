@@ -42,8 +42,10 @@ export interface OxplowComponent {
   /** Open one of oxplow's pages, in a new tab with `{ newTab: true }`.
    *  Rejects with an {@link OxplowError}. */
   navigate(ref: string, options?: { newTab?: boolean }): Promise<null>;
-  /** Set each theme token on the document's root, where the kit's
-   *  stylesheet (`/component-lib/oxplow-kit.css`) reads them. */
+  /** Set each theme token, and the host's `color-scheme`, on the
+   *  document's root, where the kit's stylesheet
+   *  (`/component-lib/oxplow-kit.css`) reads them. Without the
+   *  `color-scheme` the browser paints the frame opaque white. */
   applyTheme(doc?: Document): void;
 }
 
