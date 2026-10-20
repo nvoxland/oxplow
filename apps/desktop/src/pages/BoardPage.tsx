@@ -23,9 +23,10 @@ export function BoardPage({
   streamId: string | null;
   onOpenPage(ref: TabRef): void;
 }) {
-  // The scope is the page's `scope` view param; left alone it follows the
+  // The scope is the page's `show` view param (not `scope`: the lens that
+  // replaces the board has a param of that name, which would write to this page); left alone it follows the
   // thread the app shows (the default is not stored).
-  const [scopeText, setChoice] = useViewParam<string>("scope", threadId ? "thread" : "all");
+  const [scopeText, setChoice] = useViewParam<string>("show", threadId ? "thread" : "all");
   const choice = scopeText as ScopeChoice;
   const scope: WorkItemScope = choice === "thread" && threadId ? { thread: threadId } : choice === "backlog" ? "backlog" : "all";
   return (

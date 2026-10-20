@@ -835,7 +835,7 @@ visit) and page memory:
   Comments `days`, Settings `q`, Explore Data `model` (a pick, so it
   pushes), `sql` (the query that ran), `viz`, `chart`, `template`, `raw`; the
   SQL being edited and not yet run is history state `sql`; Files `filter`,
-  which files the tree lists, Alerts `open`, a pick, and Board `scope` (it follows
+  which files the tree lists, Alerts `open`, a pick, and Board `show` (it follows
   the thread until picked) — `pages/modeViews.ts`); New Session's agent choice
   is page memory;
   the same table names an **entity kind** whose page has a view: a metric's
