@@ -49,6 +49,24 @@ const QUERIES: Record<string, string> = {
             ORDER BY committed_at DESC`,
 };
 
+/** The many-per-day kinds, counted per `?4` (`day` or `week`, UTC) from
+ *  where each starts in the window: a wide window draws these counts, not
+ *  rows, so no cap leaves gaps. */
+const bucket = (column: string) =>
+  `CASE ?4 WHEN 'day' THEN date(max(${column}, ?1)) ELSE date(max(${column}, ?1), '-6 days', 'weekday 1') END`;
+const COUNTS: Record<string, string> = {
+  effort: `SELECT ${bucket("started_at")} AS bucket, count(*)
+             FROM v_effort
+            WHERE started_at < ?2 AND COALESCE(ended_at, ?2) > ?1 AND (?3 IS NULL OR thread_id = ?3)
+            GROUP BY bucket`,
+  commit: `SELECT ${bucket("committed_at")} AS bucket, count(*)
+             FROM v_commit
+            WHERE committed_at >= ?1 AND committed_at < ?2 AND ?3 IS NULL
+            GROUP BY bucket`,
+};
+/** Above this many in the window, a kind draws as counts. */
+const DETAIL = 300;
+
 const GROUPS = [
   { id: "thread", content: "Threads" },
   { id: "session", content: "Sessions" },
@@ -75,6 +93,7 @@ oxplow.connect().then((component) => {
   const thread = threadParam && /^\d+$/.test(threadParam) ? Number(threadParam) : null;
 
   const items = new DataSet<{ id: string; group: string; content: string; start: Date; end?: Date; type: string; className: string; title: string }>();
+  const buckets = new Map<string, { start: Date; end: Date }>();
   const container = document.getElementById("timeline")!;
   const note = document.getElementById("note")!;
   const timeline = new Timeline(container, items, GROUPS, {
@@ -91,8 +110,11 @@ oxplow.connect().then((component) => {
     cluster: {
       maxItems: 1,
       // Only the many short ones; a thread or session span reads alone.
-      clusterCriteria: (a: { group?: string }, b: { group?: string }) =>
-        a.group === b.group && (a.group === "effort" || a.group === "commit"),
+      clusterCriteria: (a: { group?: string; id?: string }, b: { group?: string; id?: string }) =>
+        a.group === b.group &&
+        (a.group === "effort" || a.group === "commit") &&
+        !buckets.has(String(a.id)) &&
+        !buckets.has(String(b.id)),
       titleTemplate: "{count} items — zoom in to see them",
       fitOnDoubleClick: true,
     },
@@ -103,12 +125,43 @@ oxplow.connect().then((component) => {
   const load = async (from: Date, to: Date) => {
     const mine = ++loading;
     const window = [from.toISOString(), to.toISOString(), thread];
+    const size = to.getTime() - from.getTime() > 45 * DAY ? "week" : "day";
+    // A countable kind's counts first; its rows only when there are few.
     const results = await Promise.all(
-      Object.entries(QUERIES).map(async ([kind, sql]) => ({ kind, rows: await component.querySql(sql, window) })),
+      Object.entries(QUERIES).map(async ([kind, sql]) => {
+        const counts = COUNTS[kind] ? (await component.querySql(COUNTS[kind], [...window, size])).rows : null;
+        const total = counts?.reduce((sum, row) => sum + Number(row[1]), 0) ?? 0;
+        if (counts && total > DETAIL) return { kind, counts, total, rows: null };
+        return { kind, counts: null, total, rows: await component.querySql(sql, window) };
+      }),
     );
     if (mine !== loading) return;
     items.clear();
-    const all = results.flatMap((r) => r.rows.rows);
+    buckets.clear();
+    const length = size === "week" ? 7 * DAY : DAY;
+    const noun = (kind: string) => NOUNS[kind];
+    const counted = results.flatMap((r) =>
+      (r.counts ?? []).map((row) => {
+        const start = new Date(`${row[0]}T00:00:00Z`);
+        const id = `count:${r.kind}:${row[0]}`;
+        buckets.set(id, { start, end: new Date(start.getTime() + length) });
+        const label = `${row[1]} ${noun(r.kind)} that ${size}`;
+        return {
+          id,
+          group: r.kind,
+          content: String(row[1]),
+          title: `${label} — click to zoom in`,
+          start,
+          // A gap to the next count wider than the item margin, so a row of
+          // counts stays one row.
+          end: new Date(start.getTime() + length * 0.8),
+          type: "range",
+          className: `kind-${r.kind} count`,
+        };
+      }),
+    );
+    const all = results.flatMap((r) => r.rows?.rows ?? []);
+    items.add(counted);
     items.add(
       all.map((row) => {
         const kind = String(row[0]);
@@ -133,13 +186,21 @@ oxplow.connect().then((component) => {
     // Laid out against the frame's size now, not the one it had when the
     // timeline was made (it can start before the page has its size).
     timeline.redraw();
-    const capped = results.filter((r) => r.rows.truncated).map((r) => NOUNS[r.kind]);
+    const capped = results.filter((r) => r.rows?.truncated).map((r) => noun(r.kind));
+    const countedKinds = results.filter((r) => r.counts).map((r) => noun(r.kind));
     note.textContent =
-      all.length === 0
+      all.length === 0 && counted.length === 0
         ? "Nothing happened in this range."
-        : capped.length > 0
-          ? `Showing the latest ${results.find((r) => r.rows.truncated)?.rows.rows.length} ${capped.join(" and ")} in this range — zoom in for the earlier ones.`
-          : "";
+        : [
+            countedKinds.length > 0
+              ? `${countedKinds.join(" and ")} are counted per ${size} — zoom in to see each one.`.replace(/^./, (c) => c.toUpperCase())
+              : "",
+            capped.length > 0
+              ? `Showing the latest ${results.find((r) => r.rows?.truncated)?.rows?.rows.length} ${capped.join(" and ")} in this range — zoom in for the earlier ones.`
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
     void component.setTitle(`Timeline: ${shortDate(from)} – ${shortDate(to)}`);
   };
 
@@ -158,6 +219,11 @@ oxplow.connect().then((component) => {
   });
   timeline.on("click", (event: { item: string | null; event: MouseEvent }) => {
     if (!event.item) return;
+    const counted = buckets.get(event.item);
+    if (counted) {
+      timeline.setWindow(counted.start, counted.end);
+      return;
+    }
     void component.navigate(event.item, { newTab: event.event.metaKey || event.event.ctrlKey });
   });
 

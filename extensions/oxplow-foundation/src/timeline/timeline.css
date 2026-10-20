@@ -38,3 +38,6 @@ body { display: flex; flex-direction: column; }
 .vis-timeline .vis-item.vis-cluster-line { border-color: var(--accent); }
 .vis-timeline .vis-current-time { background: var(--accent); }
 .vis-tooltip { background: var(--surface-overlay, var(--surface-card)) !important; color: var(--text-primary) !important; border: 1px solid var(--border-subtle) !important; font-family: var(--font-ui) !important; }
+/* A per-day or per-week count of efforts or commits, in a wide window. */
+.vis-timeline .vis-item.count { background: var(--accent-soft-bg); border: 1px solid var(--accent); color: var(--text-primary); cursor: zoom-in; }
+.vis-timeline .vis-item.count .vis-item-content { width: 100%; text-align: center; padding: 1px 0; }
