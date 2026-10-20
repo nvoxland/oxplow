@@ -1691,6 +1691,48 @@ actions:
         assert!(ask("DELETE FROM v_work_item", version).await.is_err());
     }
 
+    /// The Timeline's own queries, through the component SQL path.
+    #[tokio::test]
+    async fn the_timeline_queries_read_through_component_sql() {
+        let (fx, root) = component_fixture().await;
+        let ext = root.join(".oxplow/extensions/acme");
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { sql: read, commands: [oxplow.work_item.transition] }\ncustom_components:\n  - { id: board, assets: [tasks], commands: [oxplow.work_item.transition], sql: read }\n",
+        )
+        .unwrap();
+        let version = load_board(&fx, &root).await;
+        let window = vec![
+            SqlCell::Text("2000-01-01T00:00:00.000Z".into()),
+            SqlCell::Text("2100-01-01T00:00:00.000Z".into()),
+            SqlCell::Null(()),
+        ];
+        for sql in [
+            "SELECT 'effort', ref, COALESCE(NULLIF(title, ''), ref), started_at, ended_at FROM v_effort WHERE started_at < ?2 AND COALESCE(ended_at, ?2) > ?1 AND (?3 IS NULL OR thread_id = ?3) ORDER BY started_at",
+            "SELECT 'commit', ref, subject, committed_at, NULL FROM v_commit WHERE committed_at >= ?1 AND committed_at < ?2 AND ?3 IS NULL ORDER BY committed_at",
+            "SELECT 'thread', ref, title, created_at, closed_at FROM v_thread WHERE created_at < ?2 AND COALESCE(closed_at, ?2) > ?1 AND (?3 IS NULL OR ref = 'thread:thr' || ?3) ORDER BY created_at",
+        ] {
+            let direct = fx.svc.sql.query_sql(sql, window.clone(), None).await.unwrap();
+            let out = run_component_sql(
+                &fx.svc,
+                &root,
+                ComponentSql {
+                    component: "acme/board".into(),
+                    sql: sql.into(),
+                    params: window.clone(),
+                    stream: None,
+                    limit: None,
+                    on_behalf_of: Actor::Human,
+                    version: version.clone(),
+                },
+            )
+            .await
+            .unwrap();
+            assert_eq!(out.rows.len(), direct.rows.len(), "{sql}");
+            eprintln!("{} rows: {}", &sql[8..16], out.rows.len());
+        }
+    }
+
     /// A component opens the form of one of its own commands in the
     /// host, starting from the values it gives; any other command is
     /// refused.

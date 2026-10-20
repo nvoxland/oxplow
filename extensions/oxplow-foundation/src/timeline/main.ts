@@ -138,10 +138,15 @@ oxplow.connect().then((component) => {
     void component.setTitle(`Timeline: ${shortDate(from)} – ${shortDate(to)}`);
   };
 
+  // A load that fails says so, under the timeline.
+  const show = (from: Date, to: Date) =>
+    load(from, to).catch((e: unknown) => {
+      note.textContent = `Couldn't load this range: ${(e as { message?: string })?.message ?? String(e)}`;
+    });
   let timer: ReturnType<typeof setTimeout> | undefined;
   timeline.on("rangechanged", (event: { start: Date; end: Date; byUser: boolean }) => {
     clearTimeout(timer);
-    timer = setTimeout(() => void load(event.start, event.end), 250);
+    timer = setTimeout(() => void show(event.start, event.end), 250);
   });
   timeline.on("click", (event: { item: string | null; event: MouseEvent }) => {
     if (!event.item) return;
@@ -157,5 +162,5 @@ oxplow.connect().then((component) => {
     if (id === "fit") timeline.fit();
   });
 
-  void load(start, end);
+  void show(start, end);
 });
