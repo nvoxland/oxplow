@@ -34,6 +34,7 @@ test("the search pages' filters are view, so a change re-renders them", () => {
 test("a mode or a pick is view: the Files filter and the open Alerts row", () => {
   expect(pageIdentity(pageTabRef("files", { filter: "branch" }))).toBe("page:files");
   expect(pageIdentity(pageTabRef("alerts", { open: "op-errors" }))).toBe("page:alerts");
+  expect(pageIdentity(pageTabRef("board", { scope: "backlog" }))).toBe("page:board");
 });
 
 test("an entity page is its ref, less the view its kind declares", () => {

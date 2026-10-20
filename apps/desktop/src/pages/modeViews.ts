@@ -5,8 +5,10 @@
  *
  * - Files: `filter`, which files the tree lists (`all`, `uncommitted`,
  *   `branch`, `unpushed`);
- * - Alerts: `open`, the row opened (a pick).
+ * - Alerts: `open`, the row opened (a pick);
+ * - Board: `scope` (`thread`, `backlog`, `all`).
  */
 
 export const isFilesViewParam = (key: string) => key === "filter";
 export const isAlertsViewParam = (key: string) => key === "open";
+export const isBoardViewParam = (key: string) => key === "scope";

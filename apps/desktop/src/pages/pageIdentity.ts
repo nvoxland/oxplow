@@ -16,7 +16,7 @@
 
 import { isTasksViewParam } from "../components/Plan/tasksView.js";
 import { isDashboardViewParam, isMetricsViewParam, isMetricViewParam } from "./metricsView.js";
-import { isAlertsViewParam, isFilesViewParam } from "./modeViews.js";
+import { isAlertsViewParam, isBoardViewParam, isFilesViewParam } from "./modeViews.js";
 import { isCommentsViewParam, isExploreViewParam, isGitHistoryViewParam, isSettingsViewParam } from "./searchViews.js";
 import { identityOf } from "../tabs/session.js";
 import { extPageRef, pagePayload, pageTabRef, viewParamsOf, withViewParams } from "../tabs/pageRefs.js";
@@ -37,6 +37,7 @@ const BUILT_IN_VIEW: Record<string, (key: string) => boolean> = {
   settings: isSettingsViewParam,
   files: isFilesViewParam,
   alerts: isAlertsViewParam,
+  board: isBoardViewParam,
   "explore-data": isExploreViewParam,
 };
 

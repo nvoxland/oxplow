@@ -3,7 +3,7 @@
 /// columns of cards are replaceable (`work_item.board`, P9.A1): the active
 /// work-items provider's extension may put its own lens there, given the
 /// scope; the page and its scope picker stay oxplow's.
-import { useState } from "react";
+import { useViewParam } from "../tabs/useViewParam.js";
 
 import { WorkBoard } from "../components/Board/WorkBoard.js";
 import { Replaceable } from "../components/Replaceable.js";
@@ -23,7 +23,10 @@ export function BoardPage({
   streamId: string | null;
   onOpenPage(ref: TabRef): void;
 }) {
-  const [choice, setChoice] = useState<ScopeChoice>(threadId ? "thread" : "all");
+  // The scope is the page's `scope` view param; left alone it follows the
+  // thread the app shows (the default is not stored).
+  const [scopeText, setChoice] = useViewParam<string>("scope", threadId ? "thread" : "all");
+  const choice = scopeText as ScopeChoice;
   const scope: WorkItemScope = choice === "thread" && threadId ? { thread: threadId } : choice === "backlog" ? "backlog" : "all";
   return (
     <Page testId="page-board" title="Board" kind="board">
