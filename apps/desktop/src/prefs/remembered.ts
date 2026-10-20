@@ -110,6 +110,13 @@ function appStore(): RememberedStore {
 /** The store hooks read; the app's own unless a provider (a test) says. */
 export const RememberedContext = createContext<RememberedStore | null>(null);
 
+/** The store the hooks read, for a component that needs many panels' values at once. */
+export function useRememberedStore(): RememberedStore {
+  const store = useContext(RememberedContext) ?? appStore();
+  useSyncExternalStore(store.subscribe, store.version);
+  return store;
+}
+
 /** The page-memory scope of a page: its own ref without its view params
  *  (`page:tasks`, `page:acme/pulls`, `lens:x/y`), or `kind:<kind>` for an
  *  entity page (every file page shares one). */
@@ -149,5 +156,8 @@ export function useAppPreference<T>(key: string, initial: T): [T, (value: T) => 
 
 /** A left-nav panel's memory: one value it remembers for the person. */
 export function usePanelMemory<T>(panel: string, key: string, initial: T): [T, (value: T) => void] {
-  return useRemembered(refOf("panel", panel), key, initial);
+  return useRemembered(panelScope(panel), key, initial);
 }
+
+/** The scope a panel's memory is kept under. */
+export const panelScope = (panel: string) => refOf("panel", panel);

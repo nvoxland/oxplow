@@ -1,4 +1,5 @@
 import type { CommandEntry } from "./quickOpenResults.js";
+import { useAppPreference } from "../prefs/remembered.js";
 import { pageRef, refOf } from "../refs/ref.js";
 import { SEARCH_TRIGGER_TESTID } from "./TitleBar.js";
 import type { CSSProperties } from "react";
@@ -75,49 +76,8 @@ const MIN_BODY_QUERY_LEN = 2;
 // 50. A larger ceiling leaves headroom after the client-side filter.
 const BODY_SEARCH_LIMIT = 200;
 
-const EXPANDED_CATEGORIES_KEY = "oxplow.launcher.expandedCategories";
-// "Recent" is expanded by default (the section exists to *show* recent
-// pages), tracked by a dedicated collapsed-flag so existing users' static
-// category prefs in EXPANDED_CATEGORIES_KEY are untouched.
-const RECENT_COLLAPSED_KEY = "oxplow.launcher.recentCollapsed";
 // Recent visits to load for the "Recent" section (10 most recent pages).
 const RECENT_LIMIT = 10;
-
-function loadExpandedCategories(): Set<PageCategory> {
-  try {
-    const raw = localStorage.getItem(EXPANDED_CATEGORIES_KEY);
-    if (!raw) return new Set();
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? new Set(parsed as PageCategory[]) : new Set();
-  } catch {
-    return new Set();
-  }
-}
-
-function persistExpandedCategories(set: ReadonlySet<PageCategory>): void {
-  try {
-    localStorage.setItem(EXPANDED_CATEGORIES_KEY, JSON.stringify([...set]));
-  } catch {
-    // localStorage unavailable (private mode / SSR) — expansion just
-    // won't persist across opens; the in-session state still works.
-  }
-}
-
-function loadRecentCollapsed(): boolean {
-  try {
-    return localStorage.getItem(RECENT_COLLAPSED_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function persistRecentCollapsed(collapsed: boolean): void {
-  try {
-    localStorage.setItem(RECENT_COLLAPSED_KEY, collapsed ? "1" : "0");
-  } catch {
-    // localStorage unavailable — collapse state just won't persist.
-  }
-}
 
 /** A row's id and aria state from the list contract. Not its hover: the
  *  launcher scrolls the cursor's row into view, so a cursor that follows
@@ -134,8 +94,9 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
   const [recentEntries, setRecentEntries] = useState<LauncherPageEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [expandedCategories, setExpandedCategories] = useState<Set<PageCategory>>(loadExpandedCategories);
-  const [recentCollapsed, setRecentCollapsed] = useState<boolean>(loadRecentCollapsed);
+  const [expandedList, setExpandedList] = useAppPreference<PageCategory[]>("quickOpen.expandedCategories", []);
+  const expandedCategories = useMemo(() => new Set(expandedList), [expandedList]);
+  const [recentCollapsed, setRecentCollapsed] = useAppPreference<boolean>("quickOpen.recentCollapsed", false);
   const [panelCoords, setPanelCoords] = useState<CSSProperties>(centeredFallbackCoords);
   const inputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -176,24 +137,16 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
   }, [open]);
 
   function toggleCategory(category: PageCategory) {
-    setExpandedCategories((current) => {
-      const next = new Set(current);
-      if (next.has(category)) next.delete(category);
-      else next.add(category);
-      persistExpandedCategories(next);
-      return next;
-    });
+    setExpandedList(
+      expandedCategories.has(category) ? expandedList.filter((c) => c !== category) : [...expandedList, category],
+    );
   }
 
   /** Toggle any launcher section header — the static categories via the
    *  expanded-set, "Recent" via its own default-expanded collapse flag. */
   function toggleSection(section: LauncherSection) {
     if (section === "Recent") {
-      setRecentCollapsed((collapsed) => {
-        const next = !collapsed;
-        persistRecentCollapsed(next);
-        return next;
-      });
+      setRecentCollapsed(!recentCollapsed);
       return;
     }
     toggleCategory(section);

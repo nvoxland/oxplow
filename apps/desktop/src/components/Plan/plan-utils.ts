@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
-import { useState } from "react";
+import { useMemo } from "react";
+import { useHistoryState } from "../../tabs/useHistoryState.js";
 import { STATE_LABEL, type CanonicalState, type WorkItem, type WorkList } from "../../workItems.js";
 
 // Keys for collapsible sections in the Plan pane. Extends
@@ -9,8 +10,8 @@ import { STATE_LABEL, type CanonicalState, type WorkItem, type WorkList } from "
 export type PlanSectionKey = TaskSectionKind | "recentAnswers";
 
 /**
- * Hook: manages a Set of collapsed section keys, persisted to
- * localStorage under `oxplow.plan.collapsed`. Shared by TaskGroupList
+ * Hook: manages a Set of collapsed section keys, kept in the
+ * page's history state. Shared by TaskGroupList
  * (for tasks sections) and RecentAnswersList (for its own pseudo-
  * section) so every collapsible section in the Plan pane uses one
  * source of truth.
@@ -20,21 +21,10 @@ export function useCollapsedSections(): {
   toggle: (kind: PlanSectionKey) => void;
   isCollapsed: (kind: PlanSectionKey) => boolean;
 } {
-  const [collapsed, setCollapsed] = useState<Set<PlanSectionKey>>(() => {
-    try {
-      const raw = typeof window !== "undefined" ? window.localStorage?.getItem("oxplow.plan.collapsed") : null;
-      if (!raw) return new Set();
-      const parsed = JSON.parse(raw);
-      return new Set(Array.isArray(parsed) ? parsed as PlanSectionKey[] : []);
-    } catch { return new Set(); }
-  });
+  const [kept, setKept] = useHistoryState<PlanSectionKey[]>("planCollapsed", []);
+  const collapsed = useMemo(() => new Set(kept), [kept]);
   const toggle = (kind: PlanSectionKey) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(kind)) next.delete(kind); else next.add(kind);
-      try { window.localStorage?.setItem("oxplow.plan.collapsed", JSON.stringify([...next])); } catch { /* noop */ }
-      return next;
-    });
+    setKept(collapsed.has(kind) ? kept.filter((k) => k !== kind) : [...kept, kind]);
   };
   const isCollapsed = (kind: PlanSectionKey) => collapsed.has(kind);
   return { collapsed, toggle, isCollapsed };

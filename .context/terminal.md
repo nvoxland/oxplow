@@ -348,9 +348,9 @@ now passes the hook's `guard`, which suppresses the passive closes
   shell and any comments anchored to it keep working with zero migration.
   Additional terminals get random ids → `shell:<id>` pane target +
   `<streamId>:<id>` comment target.
-- **Persistence** mirrors `App.tsx`'s `oxplow.layout.v1.*` blobs:
-  `oxplow.layout.v1.terminalTabs` is `Record<streamId, {id,title}[]>`,
-  `oxplow.layout.v1.terminalActive` is `Record<streamId, terminalId>`.
+- **Persistence**: the terminals are page memory (`tabs.<streamId>`,
+  `{id,title}[]`), shared by every Terminal tab; the open one is history
+  state (`terminalActive`, `Record<streamId, terminalId>`).
   The backend session registry is in-memory, so after an app restart the
   list (titles/order/active) is restored but the shells re-spawn fresh.
 - **Each pane is keyed `${stream.id}:${id}`** so a stream switch remounts

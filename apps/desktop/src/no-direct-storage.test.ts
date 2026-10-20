@@ -44,16 +44,8 @@ test("the scan finds a store however it is reached, and not one named in a comme
 // Moving to their homes (`.context/pages-and-tabs.md` "Page state"); this
 // list only shrinks.
 const NOT_MOVED_YET = [
-  "components/Answers/AnswersStrip.tsx",
-  "components/Dock/DockShell.tsx",
-  "components/Panels/PanelRunsContext.tsx",
   "components/Plan/TasksFilterBar.tsx",
-  "components/Plan/plan-utils.ts",
   "components/Plan/tasks-scope.ts",
-  "components/QuickOpenOverlay.tsx",
-  "components/RailHud/RailHud.tsx",
-  "pages/GitDashboardPage.tsx",
-  "pages/TerminalPage.tsx",
 ];
 
 test("only shellStorage.ts touches the browser's storage", () => {

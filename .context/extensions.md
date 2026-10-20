@@ -842,8 +842,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       `AgentPage` shows the **Answers strip** above the terminal — the
       thread's answers from `v_thread_answer` (`threadAnswers.ts`,
       `useThreadAnswers`), newest first, hidden while there are none,
-      collapsible (Escape inside it collapses; remembered per thread in
-      `oxplow.answers.collapsed`). Each `ThreadAnswer`
+      collapsible (Escape inside it collapses; remembered in the session tab's
+      history state). Each `ThreadAnswer`
       re-runs through `run_answer` with `useRerunOnChange`, and offers
       **Keep This** (an inline name — empty takes it from the title —
       Enter keeps via `oxplow.lens.keep`, Escape cancels) or, once it is a lens
@@ -1866,7 +1866,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   (the loader refuses the lens otherwise, `param_problem`), and a run
   supplying another value is refused (`resolve_params`). A panel's pick
   binds its body lens only — the other lenses don't declare it — and is
-  the viewer's, remembered in the browser (`oxplow.panelChoices.v1`,
+  the viewer's, remembered as the panel's memory (`choices` under the panel,
   `PanelRunsProvider`); a pick the lens no longer offers falls back to
   the default (`panelChoices`).
 - **Id params are pickers (tsk1043).** On a lens page, a param named

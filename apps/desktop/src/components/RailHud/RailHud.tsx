@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useAppPreference } from "../../prefs/remembered.js";
 import { RAIL_SECTION_DRAG_MIME } from "../../dragMimes.js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { TabRef } from "../../tabs/tabState.js";
@@ -423,20 +424,11 @@ export function RailHud({
 
 const RAIL_MIN_WIDTH = 260;
 const RAIL_MAX_WIDTH = 600;
-const RAIL_WIDTH_KEY = "oxplow.railWidth";
 
 function useRailWidth() {
-  const [value, setValue] = useState<number>(() => {
-    if (typeof window === "undefined") return RAIL_MIN_WIDTH;
-    const raw = window.localStorage.getItem(RAIL_WIDTH_KEY);
-    const parsed = raw ? parseInt(raw, 10) : NaN;
-    return Number.isFinite(parsed) ? clampRailWidth(parsed) : RAIL_MIN_WIDTH;
-  });
+  const [stored, setValue] = useAppPreference<number>("railWidth", RAIL_MIN_WIDTH);
+  const value = Number.isFinite(stored) ? clampRailWidth(stored) : RAIL_MIN_WIDTH;
   const startRef = useRef<{ start: number; base: number } | null>(null);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(RAIL_WIDTH_KEY, String(value));
-  }, [value]);
   const setFromDelta = useCallback((phase: "start" | "move" | "end", clientX: number) => {
     if (phase === "start") {
       startRef.current = { start: clientX, base: value };

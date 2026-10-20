@@ -1,6 +1,7 @@
 import { EmptyState } from "../components/Prompts/EmptyState.js";
 import { SpecConfirm } from "../components/SpecConfirm.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePageMemory } from "../prefs/remembered.js";
 import type { MergeReadiness, OpOutcome, RemoteBranchEntry, RevisionInfo, Stream, StatusCounts } from "../api.js";
 import {
   streamStatusCounts,
@@ -938,29 +939,6 @@ export function MergeReadinessCard({
 
 type MergeRebaseMode = "merge" | "rebase";
 
-const MERGE_MODE_PREFIX = "oxplow.gitDashboard.mergeMode";
-
-function mergeModeKey(streamId: string, branch: string): string {
-  return `${MERGE_MODE_PREFIX}.${streamId}.${branch}`;
-}
-
-function readMergeMode(streamId: string, branch: string): MergeRebaseMode {
-  try {
-    const v = window.localStorage.getItem(mergeModeKey(streamId, branch));
-    return v === "rebase" ? "rebase" : "merge";
-  } catch {
-    return "merge";
-  }
-}
-
-function writeMergeMode(streamId: string, branch: string, mode: MergeRebaseMode): void {
-  try {
-    window.localStorage.setItem(mergeModeKey(streamId, branch), mode);
-  } catch {
-    // ignore storage errors
-  }
-}
-
 function MergeRebaseSplitButton({
   streamId,
   branch,
@@ -980,12 +958,8 @@ function MergeRebaseSplitButton({
    *  there is nothing to merge or rebase, so the button is disabled. */
   ahead: number;
 }) {
-  const [mode, setMode] = useState<MergeRebaseMode>(() => readMergeMode(streamId, branch));
+  const [mode, setMode] = usePageMemory<MergeRebaseMode>(`mergeMode.${streamId}.${branch}`, "merge");
   const [menuOpen, setMenuOpen] = useState(false);
-
-  useEffect(() => {
-    setMode(readMergeMode(streamId, branch));
-  }, [streamId, branch]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -996,7 +970,6 @@ function MergeRebaseSplitButton({
 
   const choose = (next: MergeRebaseMode) => {
     setMode(next);
-    writeMergeMode(streamId, branch, next);
     setMenuOpen(false);
   };
 

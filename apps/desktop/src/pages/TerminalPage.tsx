@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Page } from "../tabs/Page.js";
 import { TerminalPane } from "../components/TerminalPane.js";
 import { TerminalTabStrip } from "../components/Terminal/TerminalTabStrip.js";
@@ -10,10 +10,10 @@ import {
   normalizeTerminalList,
   paneTargetFor,
   renameTerminal,
-  type TerminalTab,
 } from "../components/Terminal/terminalTabs.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
-import { logUi } from "../logger.js";
+import { usePageMemory } from "../prefs/remembered.js";
+import { useHistoryState } from "../tabs/useHistoryState.js";
 import type { Stream } from "../api.js";
 
 interface TerminalPageProps {
@@ -21,50 +21,6 @@ interface TerminalPageProps {
   visible: boolean;
   /** Click-through handler for file paths detected in terminal output. */
   onOpenFile?(absPath: string, line?: number, column?: number): void;
-}
-
-// Per-stream layout, mirroring App.tsx's `oxplow.layout.v1.*` blobs:
-// one `Record<streamId, …>` per key with defensive parse + try/catch.
-const TABS_KEY = "oxplow.layout.v1.terminalTabs";
-const ACTIVE_KEY = "oxplow.layout.v1.terminalActive";
-
-function readTabsByStream(): Record<string, TerminalTab[]> {
-  try {
-    const raw = localStorage.getItem(TABS_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const out: Record<string, TerminalTab[]> = {};
-    for (const [streamId, list] of Object.entries(parsed)) {
-      out[streamId] = normalizeTerminalList(list);
-    }
-    return out;
-  } catch (e) {
-    logUi("warn", "failed to read persisted terminal tabs", { error: String(e) });
-    return {};
-  }
-}
-
-function readActiveByStream(): Record<string, string> {
-  try {
-    const raw = localStorage.getItem(ACTIVE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const out: Record<string, string> = {};
-    for (const [streamId, id] of Object.entries(parsed)) {
-      if (typeof id === "string") out[streamId] = id;
-    }
-    return out;
-  } catch {
-    return {};
-  }
-}
-
-function writeJson(key: string, value: unknown) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // best-effort persistence
-  }
 }
 
 /**
@@ -78,25 +34,23 @@ function writeJson(key: string, value: unknown) {
 export function TerminalPage({ stream, visible, onOpenFile }: TerminalPageProps) {
   usePageTitle("Terminal");
 
-  const [tabsByStream, setTabsByStream] = useState<Record<string, TerminalTab[]>>(readTabsByStream);
-  const [activeByStream, setActiveByStream] = useState<Record<string, string>>(readActiveByStream);
+  const streamId = stream?.id ?? null;
+  // The terminals are this page's memory (every tab of it, each stream its
+  // own); which one is open is this step of this tab's history.
+  const [storedTabs, setStoredTabs] = usePageMemory<unknown>(`tabs.${streamId ?? ""}`, null);
+  const [activeByStream, setActiveByStream] = useHistoryState<Record<string, string>>("terminalActive", {});
   // Ids the user has asked to close. A pane renders with
   // `terminateOnUnmount` while its id is here, so when the effect below
   // removes it from the list the unmount kills the PTY (vs the detach
   // that a stream-switch / page-close unmount performs).
   const [closingIds, setClosingIds] = useState<Set<string>>(() => new Set());
 
-  const streamId = stream?.id ?? null;
-  const tabs = streamId ? (tabsByStream[streamId] ?? defaultTerminalList()) : defaultTerminalList();
+  const tabs = useMemo(
+    () => (streamId && storedTabs ? normalizeTerminalList(storedTabs) : defaultTerminalList()),
+    [streamId, storedTabs],
+  );
   const rawActive = streamId ? activeByStream[streamId] : undefined;
   const activeId = tabs.some((t) => t.id === rawActive) ? (rawActive as string) : tabs[0].id;
-
-  useEffect(() => {
-    writeJson(TABS_KEY, tabsByStream);
-  }, [tabsByStream]);
-  useEffect(() => {
-    writeJson(ACTIVE_KEY, activeByStream);
-  }, [activeByStream]);
 
   // Apply queued closes: run the reducer for each closing id, then clear
   // the queue. Runs after the render in which the closing panes saw
@@ -110,27 +64,27 @@ export function TerminalPage({ stream, visible, onOpenFile }: TerminalPageProps)
       nextTabs = r.list;
       nextActive = r.activeId;
     }
-    setTabsByStream((m) => ({ ...m, [streamId]: nextTabs }));
-    setActiveByStream((m) => ({ ...m, [streamId]: nextActive }));
+    setStoredTabs(nextTabs);
+    setActiveByStream({ ...activeByStream, [streamId]: nextActive });
     setClosingIds(new Set());
-  }, [closingIds, streamId, tabs, activeId]);
+  }, [closingIds, streamId, tabs, activeId, activeByStream, setStoredTabs, setActiveByStream]);
 
   function handleNew() {
     if (!streamId) return;
     const id = `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     const r = addTerminal(tabs, id);
-    setTabsByStream((m) => ({ ...m, [streamId]: r.list }));
-    setActiveByStream((m) => ({ ...m, [streamId]: r.activeId }));
+    setStoredTabs(r.list);
+    setActiveByStream({ ...activeByStream, [streamId]: r.activeId });
   }
 
   function handleActivate(id: string) {
     if (!streamId) return;
-    setActiveByStream((m) => ({ ...m, [streamId]: id }));
+    setActiveByStream({ ...activeByStream, [streamId]: id });
   }
 
   function handleRename(id: string, title: string) {
     if (!streamId) return;
-    setTabsByStream((m) => ({ ...m, [streamId]: renameTerminal(m[streamId] ?? tabs, id, title) }));
+    setStoredTabs(renameTerminal(tabs, id, title));
   }
 
   function handleClose(id: string) {

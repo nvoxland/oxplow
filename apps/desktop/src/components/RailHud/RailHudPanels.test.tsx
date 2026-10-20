@@ -1,4 +1,5 @@
 import { afterEach, expect, mock, test } from "bun:test";
+import { createRememberedStore, panelScope, RememberedContext } from "../../prefs/remembered.js";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { ExtensionPanel, Lens, LensRun, SqlCell } from "../../tauri-bridge/generated/bindings.js";
@@ -72,20 +73,20 @@ test("a collapsed panel shows its collapsed lens; its header counts the count le
 });
 
 test("a body lens's choice param is a header toggle; picking re-runs the body with it", async () => {
-  try {
-    localStorage.removeItem("oxplow.panelChoices.v1");
-  } catch {
-    // no storage in this environment
-  }
   bodyRuns.length = 0;
+  const store = createRememberedStore({ load: async () => [], save: async () => {} });
   const view = render(
-    <PanelRunsProvider streamId="str1" threadId={null}>
-      <RailHud streamId="str1" onOpenPage={() => {}} />
-    </PanelRunsProvider>,
+    <RememberedContext.Provider value={store}>
+      <PanelRunsProvider streamId="str1" threadId={null}>
+        <RailHud streamId="str1" onOpenPage={() => {}} />
+      </PanelRunsProvider>
+    </RememberedContext.Provider>,
   );
   const top = await waitFor(() => view.getByTestId("rail-panel-choice-mode-top"));
   expect(view.getByTestId("rail-panel-choice-mode-recent").getAttribute("aria-pressed")).toBe("true");
   fireEvent.click(top);
   await waitFor(() => expect(bodyRuns.some((p) => p.mode === "top")).toBe(true));
   await waitFor(() => expect(view.getByTestId("rail-panel-choice-mode-top").getAttribute("aria-pressed")).toBe("true"));
+  // The pick is the panel's memory, not the browser's.
+  expect(store.get(panelScope("x/w"), "choices")).toEqual({ mode: "top" });
 });

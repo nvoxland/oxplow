@@ -895,9 +895,7 @@ declaring *what it is* and mounting the generic layer.
   with a unit test whose only job was asserting the copies hadn't drifted
   (tsk271). The module is deliberately import-free so decoders, pure
   helpers, and components can all reach it.
-- **Tabs in the three tabbed sections (left dock rail, center pane, bottom
-  dock rail) are drag-reorderable.** DockShell rail tabs persist their order
-  in the dock's `localStorage` entry (`oxplow.layout.v1.dock.<key>.order`).
+- **Tabs in the center pane are drag-reorderable.**
   CenterTabs reorders **every non-pinned tab freely across the whole
   strip** — there are no per-kind groups. "Pinned" = non-closable (only
   the `agent` tab); it stays at the front and is never a drag source or

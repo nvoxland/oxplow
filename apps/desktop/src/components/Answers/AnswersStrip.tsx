@@ -1,49 +1,22 @@
 /// The Answers strip (P6.C2, target §13.3.1): beside a terminal thread's
 /// agent, the lenses it showed with `oxplow_show_lens`, newest first, each live
 /// with Keep This. Collapsible — Escape inside it collapses it — and
-/// remembered per thread. Above them, what the agent asked for that waits
+/// remembered in the session tab's history state. Above them, what the agent asked for that waits
 /// for the person (P9.A3): its pending proposals, never collapsed. Hidden
 /// while the thread has neither.
 import type { CSSProperties } from "react";
-import { useEffect, useState } from "react";
 
+import { useHistoryState } from "../../tabs/useHistoryState.js";
 import { useThreadProposals } from "../../proposals.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import { ProposalList } from "../../kit/Approvals.js";
 import { ThreadAnswer } from "./ThreadAnswer.js";
 import { useThreadAnswers } from "./useThreadAnswers.js";
 
-const COLLAPSED_KEY = "oxplow.answers.collapsed";
-
-function readCollapsed(threadId: string): boolean {
-  try {
-    const all = JSON.parse(window.localStorage.getItem(COLLAPSED_KEY) ?? "{}") as Record<string, boolean>;
-    return all[threadId] === true;
-  } catch {
-    return false;
-  }
-}
-
-function writeCollapsed(threadId: string, collapsed: boolean): void {
-  try {
-    const all = JSON.parse(window.localStorage.getItem(COLLAPSED_KEY) ?? "{}") as Record<string, boolean>;
-    if (collapsed) all[threadId] = true;
-    else delete all[threadId];
-    window.localStorage.setItem(COLLAPSED_KEY, JSON.stringify(all));
-  } catch {
-    // Storage full or disabled: the toggle still works for this session.
-  }
-}
-
 export function AnswersStrip({ threadId, onOpenPage }: { threadId: string; onOpenPage?(ref: TabRef): void }) {
   const answers = useThreadAnswers(threadId);
   const waiting = useThreadProposals(threadId).filter((p) => p.decision === "pending");
-  const [collapsed, setCollapsedState] = useState(() => readCollapsed(threadId));
-  useEffect(() => setCollapsedState(readCollapsed(threadId)), [threadId]);
-  const setCollapsed = (next: boolean) => {
-    setCollapsedState(next);
-    writeCollapsed(threadId, next);
-  };
+  const [collapsed, setCollapsed] = useHistoryState<boolean>("answersCollapsed", false);
 
   if (answers.length === 0 && waiting.length === 0) return null;
   return (

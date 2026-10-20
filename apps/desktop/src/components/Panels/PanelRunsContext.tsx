@@ -5,7 +5,9 @@
 /// everything that reads it.
 
 import type { ReactNode } from "react";
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useMemo } from "react";
+
+import { panelScope, useRememberedStore } from "../../prefs/remembered.js";
 
 import { useExtensions } from "../../extensionsStore.js";
 import type { ExtensionPanel } from "../../tauri-bridge/generated/bindings.js";
@@ -33,26 +35,9 @@ export interface PanelRunsValue {
 
 const EMPTY: PanelRunsValue = { panels: [], runs: {}, alerts: [], choices: NO_CHOICES, choose: () => {} };
 
-// The picks are a viewer convenience, remembered in this browser only.
-const CHOICES_KEY = "oxplow.panelChoices.v1";
+/** Each panel's picks are its memory, kept under this key. */
+const CHOICES_KEY = "choices";
 
-function loadChoices(): PanelChoices {
-  try {
-    const raw = localStorage.getItem(CHOICES_KEY);
-    const parsed: unknown = raw ? JSON.parse(raw) : null;
-    return parsed && typeof parsed === "object" ? (parsed as PanelChoices) : NO_CHOICES;
-  } catch {
-    return NO_CHOICES;
-  }
-}
-
-function saveChoices(choices: PanelChoices): void {
-  try {
-    localStorage.setItem(CHOICES_KEY, JSON.stringify(choices));
-  } catch {
-    // Unavailable storage: the pick lasts this session.
-  }
-}
 const PanelRunsContext = createContext<PanelRunsValue>(EMPTY);
 
 export function PanelRunsProvider({
@@ -66,14 +51,24 @@ export function PanelRunsProvider({
 }) {
   const exts = useExtensions();
   const panels = useMemo(() => (exts ?? []).filter((e) => e.enabled).flatMap((e) => e.panels), [exts]);
-  const [choices, setChoices] = useState<PanelChoices>(loadChoices);
-  const choose = useCallback((panelId: string, param: string, value: string) => {
-    setChoices((prev) => {
-      const next = { ...prev, [panelId]: { ...(prev[panelId] ?? {}), [param]: value } };
-      saveChoices(next);
-      return next;
-    });
-  }, []);
+  const store = useRememberedStore();
+  const version = store.version();
+  const choices = useMemo(() => {
+    const out: PanelChoices = {};
+    for (const p of panels) {
+      const kept = store.get(panelScope(p.id), CHOICES_KEY);
+      if (kept && typeof kept === "object") out[p.id] = kept as Record<string, string>;
+    }
+    return Object.keys(out).length === 0 ? NO_CHOICES : out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store, panels, version]);
+  const choose = useCallback(
+    (panelId: string, param: string, value: string) => {
+      const kept = store.get(panelScope(panelId), CHOICES_KEY);
+      store.set(panelScope(panelId), CHOICES_KEY, { ...(kept && typeof kept === "object" ? kept : {}), [param]: value });
+    },
+    [store],
+  );
   const runs = useExtensionPanelRuns(panels, streamId, threadId, choices);
   const value = useMemo(
     () => ({ panels, runs, alerts: panelAlerts(panels, runs), choices, choose }),

@@ -550,10 +550,10 @@ The launcher does everything in one box:
     "Recent"`; recent rows are the lighter `LauncherPageEntry` (no static
     category). The section only renders when there are visits, and self-hides
     while searching (recent entries never enter `buildQuickOpenResults`).
-  - **Persistence:** static category expansion persists in `localStorage`
-    (`oxplow.launcher.expandedCategories`); Recent's collapse persists
-    separately (`oxplow.launcher.recentCollapsed`, default un-collapsed) so
-    its default-open state doesn't disturb existing category prefs. The
+  - **Persistence:** static category expansion is an app preference
+    (`quickOpen.expandedCategories`); Recent's collapse is another
+    (`quickOpen.recentCollapsed`, default un-collapsed) so
+    its default-open state doesn't disturb the category choice. The
     effective expanded set is `expandedCategories ∪ {Recent unless
     collapsed}`.
 - **Typing** → ranked results, pages → **commands** → files → body hits.
