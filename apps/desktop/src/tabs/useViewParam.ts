@@ -4,7 +4,8 @@
  *
  * - `useViewParam(key, initial)` — a **view param**, a filter: what the
  *   page shows, in its tab's address. A change replaces the tab's entry; a
- *   value at its default leaves the address.
+ *   value at its default leaves the address. With `{ push: true }` a change
+ *   is a step Back returns from ("View all").
  * - `useViewSelection(key)` — a view param that is a **pick**: setting one
  *   pushes an entry, so Back un-selects; clearing replaces.
  * - `useViewList(key)` — a view param holding several values.
@@ -59,12 +60,17 @@ function useViewValue<T extends SqlCell>(key: string, initial: T, push: (next: T
 }
 
 const never = () => false;
+const always = () => true;
 
 /** A **view param** that filters what the page shows (a range, a search,
- *  a mode): a change replaces the tab's entry. */
-export function useViewParam<T extends SqlCell>(key: string, initial: T): [T, (next: T) => void] {
-  return useViewValue(key, initial, never);
+ *  a mode): a change replaces the tab's entry, or with `push` adds one
+ *  (a step Back returns from: "View all"). */
+export function useViewParam<T extends SqlCell>(key: string, initial: T, opts?: { push?: boolean }): [Widen<T>, (next: Widen<T>) => void] {
+  return useViewValue<Widen<T>>(key, initial as Widen<T>, opts?.push ? always : never);
 }
+
+/** `""` as `string`, `false` as `boolean`: a param's type, not its default's. */
+type Widen<T> = T extends string ? string : T extends number ? number : T extends boolean ? boolean : T;
 
 /** A **view param** that is a pick (a row, a commit, a model): picking
  *  pushes an entry, so Back un-selects; clearing replaces. */
@@ -75,7 +81,7 @@ export function useViewSelection(key: string): [string | null, (next: string | n
 /** A **view param** holding several values (authors, states), comma-joined
  *  in the address. */
 export function useViewList(key: string): [string[], (next: readonly string[]) => void] {
-  const [joined, setJoined] = useViewParam<string>(key, "");
+  const [joined, setJoined] = useViewParam(key, "");
   const values = joined.split(",").filter(Boolean);
   const set = useCallback((next: readonly string[]) => setJoined(next.join(",")), [setJoined]);
   return [values, set];

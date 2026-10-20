@@ -26,4 +26,9 @@ test("a committed change shows its hunk", async ({ page, daemon }) => {
   await expect(page.getByTestId("page-git-commit")).not.toContainText("no such table");
   await page.getByTestId("git-commit-files").getByText("emu.txt").click();
   await expect(page.getByTestId("page-diff")).toContainText("second emu line");
+  // A diff is its address: a reload draws the same diff, its base named.
+  const named = await page.getByTestId("page-diff").getByText(/^vs /).textContent();
+  await page.reload();
+  await expect(page.getByTestId("page-diff")).toContainText("second emu line");
+  await expect(page.getByTestId("page-diff").getByText(/^vs /)).toHaveText(named!);
 });

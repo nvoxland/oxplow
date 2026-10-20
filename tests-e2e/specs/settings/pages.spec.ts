@@ -30,6 +30,24 @@ test("every Settings area renders, reached from the rail", async ({ page }) => {
   await expect(page.locator('[data-testid="data-section"]:visible')).toBeVisible();
 });
 
+// An area is Settings at another view: one page, re-rendered, its area in
+// the tab's address, and a step Back returns from.
+test("a Settings area is the page's view: the same page, and Back returns to the one before", async ({ page }) => {
+  await page.goto("/");
+  await openFromLauncher(page, "Settings");
+  const body = page.locator('[data-testid^="center-tab-body-page:settings"]:visible');
+  await expect(body).toHaveAttribute("data-testid", "center-tab-body-page:settings");
+  await body.getByTestId("settings-areas").evaluate((el) => {
+    el.setAttribute("data-mounted-once", "yes");
+  });
+  await body.getByTestId("settings-area-data").click();
+  await expect(body).toHaveAttribute("data-testid", "center-tab-body-page:settings?area=data");
+  await expect(body.getByTestId("settings-areas")).toHaveAttribute("data-mounted-once", "yes");
+  await page.getByTestId("page-nav-back").filter({ visible: true }).click();
+  await expect(body).toHaveAttribute("data-testid", "center-tab-body-page:settings");
+  await expect(body.getByRole("heading", { level: 1 })).toHaveText("Settings");
+});
+
 test("a config edit is saved to project.yaml and read back", async ({ page, daemon }) => {
   await page.goto("/");
   await openFromLauncher(page, "Settings: Agents");

@@ -7,6 +7,7 @@ import {
   directoryRef,
   diffRef,
   diffSpecOf,
+  settingsRef,
   diskFilePath,
   duplicateBlockRef,
   effortDiffRef,
@@ -65,18 +66,24 @@ describe("pageRefs", () => {
     });
   });
 
-  test("diffRef is keyed by path, both versions and the label", () => {
+  test("a diff is its params: path, both versions, the label, the base's name and the line", () => {
     const spec = { path: "src/a.ts", leftVersion: "git:abc", rightVersion: "working", baseLabel: "abc" };
     const a = diffRef(spec);
+    // A base named as its version reads says nothing more: left out.
     expect(a.id).toBe("page:diff?path=src/a.ts&left=git:abc&right=working");
-    expect(a.kind).toBe("page");
-    // The spec rides along as state; the params rebuild it after a restart.
-    expect(a.payload).toEqual({ extension: null, page: "diff", params: { path: "src/a.ts", left: "git:abc", right: "working" }, state: spec });
-    expect(diffSpecOf((refFromTabId(a.id)!.payload as PagePayload).params)).toEqual({ ...spec, baseLabel: "", labelOverride: undefined });
-    // revealLine does not change the id: re-clicking reuses the tab.
-    expect(diffRef({ ...spec, revealLine: 7 }).id).toBe(a.id);
+    expect(a.payload).toEqual({ extension: null, page: "diff", params: { path: "src/a.ts", left: "git:abc", right: "working" } });
+    expect(diffSpecOf((refFromTabId(a.id)!.payload as PagePayload).params)).toEqual({ ...spec, labelOverride: undefined, revealLine: undefined });
+    const full = { ...spec, baseLabel: "HEAD", labelOverride: "wi 3", revealLine: 7 };
+    const b = diffRef(full);
+    expect(b.id).toBe("page:diff?path=src/a.ts&left=git:abc&right=working&label=wi+3&base=HEAD&line=7");
+    expect(diffSpecOf((refFromTabId(b.id)!.payload as PagePayload).params)).toEqual(full);
     expect(diffRef({ ...spec, rightVersion: "git:xyz" }).id).not.toBe(a.id);
-    expect(diffRef({ ...spec, labelOverride: "wi 3" }).id).toBe("page:diff?path=src/a.ts&left=git:abc&right=working&label=wi+3");
+  });
+
+  test("a Settings area and the section it lands on are its params", () => {
+    expect(settingsRef().id).toBe("page:settings");
+    expect(settingsRef("overview").id).toBe("page:settings");
+    expect(settingsRef("agents", "models").id).toBe("page:settings?area=agents&section=models");
   });
 
   test("wikiPageRef and workItemTabRef encode canonical refs", () => {
@@ -128,9 +135,9 @@ describe("pageRefs", () => {
     expect(parseRef(diffRef({ path: "a@b/c%d.ts", leftVersion: "working", rightVersion: "working", baseLabel: "" }).id)?.kind).toBe("page");
   });
 
-  test("newTaskRef has stable create id", () => {
+  test("a new item's parent is its param", () => {
     expect(newTaskRef().id).toBe("page:new-task");
-    expect(newTaskRef({ parentId: 1 }).id).toBe("page:new-task");
+    expect(newTaskRef({ parentRef: "work_item:tsk3" }).id).toBe("page:new-task?parent=work_item:tsk3");
   });
 
   test("an effort, snapshot or turn page is its canonical ref (P2.11)", () => {
@@ -248,10 +255,10 @@ describe("refFromTabId", () => {
     expect(refFromTabId("page:no-such-page")).toEqual(pageTabRef("no-such-page"));
   });
 
-  test("a diff page rebuilds the spec handleOpenDiff registers, but its base label", () => {
-    const spec = { path: "src/a.ts", leftVersion: "snap:3", rightVersion: "git:HEAD", baseLabel: "x", labelOverride: "eff9" } as const;
+  test("a diff page rebuilds its whole spec from its id", () => {
+    const spec = { path: "src/a.ts", leftVersion: "snap:3", rightVersion: "git:HEAD", baseLabel: "x", labelOverride: "eff9", revealLine: undefined } as const;
     const rebuilt = refFromTabId(diffRef(spec).id)!;
-    expect(diffSpecOf((rebuilt.payload as PagePayload).params)).toEqual({ ...spec, baseLabel: "" });
+    expect(diffSpecOf((rebuilt.payload as PagePayload).params)).toEqual(spec);
   });
 
   test("diskFilePath names the working-tree file a tab id shows, or null", () => {
@@ -365,10 +372,8 @@ describe("view params", () => {
   test("withViewParams writes the view into the page's own kind of ref", () => {
     expect(withViewParams(lensRef("x/y", { range: "7d" }), { q: "a" }).id).toBe(lensRef("x/y", { q: "a" }).id);
     expect(withViewParams(extPageRef("acme", "pulls"), { state: "open" }).id).toBe("page:acme/pulls?state=open");
-    const own = pageTabRef("settings", { area: "agents" }, { section: "x" });
-    const next = withViewParams(own, { area: "data" });
-    expect(next.id).toBe("page:settings?area=data");
-    expect(pagePayload(next)?.state).toEqual({ section: "x" });
+    const own = pageTabRef("settings", { area: "agents", section: "x" });
+    expect(withViewParams(own, { area: "data" }).id).toBe("page:settings?area=data");
     // A page with no view keeps its ref.
     const wiki = wikiPageRef("home");
     expect(withViewParams(wiki, { a: "b" })).toBe(wiki);

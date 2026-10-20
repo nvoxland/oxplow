@@ -25,6 +25,14 @@ import { isBuiltInPage } from "./declaredPages.js";
 const BUILT_IN_VIEW: Record<string, (key: string) => boolean> = {
   tasks: isTasksViewParam,
   backlog: isTasksViewParam,
+  // The line it lands on: the same diff, somewhere else in it.
+  diff: (key) => key === "line",
+  // A pair of endpoints: the same diff view, rescoped.
+  "diff-view": (key) => key === "start" || key === "end",
+  // Its grouping, and every row or only the latest.
+  "local-history": (key) => key === "mode" || key === "all",
+  // One Settings page shows every area.
+  settings: (key) => key === "area" || key === "section",
 };
 
 export function pageIdentity(ref: TabRef): string {

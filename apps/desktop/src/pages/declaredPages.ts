@@ -22,8 +22,6 @@ export const BUILT_IN_PAGES = [
   "git-dashboard",
   "git-history",
   "local-history",
-  "local-history-by-commit-full",
-  "local-history-full",
   "metrics-recorded",
   "new-session",
   "new-stream",

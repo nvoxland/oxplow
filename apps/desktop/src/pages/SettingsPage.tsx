@@ -23,7 +23,8 @@ import { NewThreadSessionSetting } from "../components/NewThreadSessionSetting.j
 import { ProposalList } from "../kit/Approvals.js";
 import { decide, proposalForSetting, useProposals, type Proposal } from "../proposals.js";
 import { useAgentHarnesses } from "../useAgentHarnesses.js";
-import { settingsRef } from "../tabs/pageRefs.js";
+import { settingsRef, viewParamsOf } from "../tabs/pageRefs.js";
+import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { SETTINGS_AREAS, settingsArea, settingsSlot, type SettingsArea, type SettingsAreaId } from "./settingsAreas.js";
 
@@ -55,7 +56,14 @@ export function SettingsPage({ area: areaId, section, onOpenPage }: SettingsPage
     });
     return () => cancelAnimationFrame(frame);
   }, [area.id, section]);
-  const open = (id: SettingsAreaId, anchor: string | null = null) => onOpenPage(settingsRef(id, anchor));
+  // Another area is this page at another view: a step Back returns from,
+  // not a page opened over it. Outside a tab, a link like any other.
+  const nav = useOptionalPageNavigation();
+  const open = (id: SettingsAreaId, anchor: string | null = null) => {
+    const ref = settingsRef(id, anchor);
+    if (nav?.setViewParams) nav.setViewParams(viewParamsOf(ref), { push: true });
+    else onOpenPage(ref);
+  };
   const { sections, actions } = useAreaContent(area, open);
   return (
     <DocumentLayout

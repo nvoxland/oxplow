@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Extension, Lens } from "../tauri-bridge/generated/bindings.js";
 import { markParts, treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./lensModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
-import { duplicateBlockOf, isPage, pagePayload } from "../tabs/pageRefs.js";
+import { diffSpecOf, duplicateBlockOf, isPage, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 
 const lens = (over: Partial<Lens> = {}): Lens => ({
@@ -366,7 +366,7 @@ describe("change links", () => {
       cols,
     )!;
     expect(isPage(ref, "diff")).toBe(true);
-    const spec = (r: TabRef) => pagePayload(r)!.state as { path: string; leftVersion: unknown; rightVersion: unknown; revealLine?: number };
+    const spec = (r: TabRef) => diffSpecOf(pagePayload(r)!.params)!;
     const p = spec(ref);
     expect(p.path).toBe("src/a.rs");
     expect(p.leftVersion).toEqual("git:abc1234");

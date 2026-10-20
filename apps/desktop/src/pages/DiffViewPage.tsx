@@ -33,13 +33,15 @@ import { logUi } from "../logger.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import { Page, pageH1Style } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { usePageTitle } from "../tabs/PageNavigationContext.js";
+import { useOptionalPageNavigation, usePageTitle } from "../tabs/PageNavigationContext.js";
 import {
   effortDiffRef,
   endpointDiffRef,
+  isPage,
   snapshotRef,
   workItemTabRef,
   turnRef,
+  viewParamsOf,
   type DiffViewPayload,
 } from "../tabs/pageRefs.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
@@ -596,10 +598,16 @@ function ResolvedEndpointDiff({
   };
 
   // Rescope the diff in place by re-pointing one endpoint at a chosen
-  // snapshot — navigates the tab to the new endpoint pair (Back returns).
-  const pickStart = (snapshotId: number) =>
-    onOpenPage(endpointDiffRef(snapshotRevision(snapshotId), end));
-  const pickEnd = (snapshotId: number) => onOpenPage(endpointDiffRef(start, snapshotRevision(snapshotId)));
+  // snapshot: an endpoints page at another pair is this page at another
+  // view, a step Back returns from. An effort's, a snapshot's or a turn's
+  // page goes to the endpoints page.
+  const nav = useOptionalPageNavigation();
+  const rescope = (ref: TabRef) => {
+    if (nav?.setViewParams && isPage(nav.ref, "diff-view")) nav.setViewParams(viewParamsOf(ref), { push: true });
+    else onOpenPage(ref);
+  };
+  const pickStart = (snapshotId: number) => rescope(endpointDiffRef(snapshotRevision(snapshotId), end));
+  const pickEnd = (snapshotId: number) => rescope(endpointDiffRef(start, snapshotRevision(snapshotId)));
 
   // The date/commit range lives in the details rail: a date (or date range
   // when the endpoints span days) header above two selectable fields — a
