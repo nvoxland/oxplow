@@ -20,7 +20,7 @@ import { CapabilitiesSection } from "../components/CapabilitiesSection.js";
 import { IntegrationsSection } from "../components/IntegrationsSection.js";
 import { AiSection } from "../components/AiSection.js";
 import { NewThreadSessionSetting } from "../components/NewThreadSessionSetting.js";
-import { ProposalCard } from "../components/Proposals/ProposalCard.js";
+import { ProposalList } from "../kit/Approvals.js";
 import { decide, proposalForSetting, useProposals, type Proposal } from "../proposals.js";
 import { useAgentHarnesses } from "../useAgentHarnesses.js";
 import { settingsRef } from "../tabs/pageRefs.js";
@@ -495,7 +495,7 @@ export function SettingRow({
       {s.doc ? <div className="ox-muted ox-small">{s.doc}</div> : null}
       {proposal ? (
         <div style={{ marginTop: "var(--space-1)" }}>
-          <ProposalCard proposal={proposal} compact onDecide={onDecide} />
+          <ProposalList proposals={[proposal]} compact onDecide={onDecide} />
         </div>
       ) : null}
     </div>

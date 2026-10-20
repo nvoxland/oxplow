@@ -509,6 +509,16 @@ another branch.
 - **A section is a heading over a rule**, no box (`kit/Section`). A card
   is a dashboard tile's, not a page section's.
 
+## Proposals are drawn once
+
+An agent's pending proposals are drawn by the kit's `Approvals`
+(`src/kit/Approvals.tsx`): `ProposalCard` is its card, `ProposalList` draws
+proposals a page already read (Alerts, a Settings row's compact card, the
+thread's Answers strip) and `Approvals` reads them itself, which is what
+`viz: approvals` renders. A page never draws its own Approve / Decline; it
+mounts the kit's, so a page moving to a lens (`viz: approvals`, params
+`thread` / `setting`) changes where the cards sit, not the cards.
+
 ## Collapsible page sections
 
 - **A page with stacked sections gets them from the shared primitive**, not

@@ -1,8 +1,56 @@
 import type { CSSProperties } from "react";
 import { useState } from "react";
 
-import { summarizeProposal, type Proposal } from "../../proposals.js";
-import { InlineConfirm } from "../InlineConfirm.js";
+import { InlineConfirm } from "../components/InlineConfirm.js";
+import { configRef } from "../refs/ref.js";
+import { decide, summarizeProposal, useProposals, type Proposal } from "../proposals.js";
+
+/** The pending proposals an agent raised, read here and decided through
+ *  the person-only path (`decideProposal`): the one place they are drawn.
+ *  `thread` (a `thread:thr3` ref or `thr3`) and `setting` (a config key)
+ *  narrow the list; it draws nothing while none waits. The `approvals`
+ *  lens viz renders this; the built-in pages that read their proposals
+ *  already draw them with [`ProposalList`]. */
+export function Approvals({
+  thread,
+  setting,
+  compact,
+}: {
+  thread?: string | null;
+  setting?: string | null;
+  compact?: boolean;
+}) {
+  const proposals = useProposals();
+  return <ProposalList proposals={narrow(proposals, thread, setting)} compact={compact} />;
+}
+
+/** The proposals of `all` a `thread` and/or `setting` filter leaves. */
+export function narrow(all: Proposal[], thread?: string | null, setting?: string | null): Proposal[] {
+  const row = thread ? Number(thread.replace(/^(thread:)?thr/, "")) : null;
+  return all.filter(
+    (p) => (row === null || p.threadId === row) && (!setting || p.key === configRef(setting)),
+  );
+}
+
+/** `proposals` as cards, each with Approve and Decline. */
+export function ProposalList({
+  proposals,
+  compact,
+  onDecide = decide,
+}: {
+  proposals: Proposal[];
+  compact?: boolean;
+  onDecide?(p: Proposal, approve: boolean): Promise<void>;
+}) {
+  if (proposals.length === 0) return null;
+  return (
+    <div data-testid="approvals" style={{ display: "flex", flexDirection: "column", gap: compact ? 0 : 8 }}>
+      {proposals.map((p) => (
+        <ProposalCard key={p.id} proposal={p} compact={compact} onDecide={onDecide} />
+      ))}
+    </div>
+  );
+}
 
 /** One agent proposal with Approve and Decline (P6b.A4). Approving *is*
  *  the confirmation: it runs the command as the person — except that a

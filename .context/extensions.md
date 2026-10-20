@@ -1799,7 +1799,12 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   binding.
 - `viz`: `table`, `list`, `number`, `markdown`, `bar`, `line`, `treemap`,
   `document`, `dashboard` (both below), `tree`, `timeline`, `detail`,
-  `steps`, `hunks`, `form` (`form: { command, defaults?, fixed?,
+  `steps`, `hunks`, `approvals` (core's consent component: it reads the
+  pending `v_command_proposal` itself and decides through the person-only
+  path, so the lens needs only `query: SELECT 1`; the lens's rows are
+  ignored; params `thread` (a thread ref) and `setting` (a config key)
+  narrow the list; an agent reads it as the pending proposals, and can't
+  decide them), `form` (`form: { command, defaults?, fixed?,
   fields? }`; no `query` needed: one, if given, prefills from its first
   row; `fixed` fields show their `defaults` value and can't be changed —
   it's imposed again on submit, so an item's `ref` stays its own;
