@@ -6,15 +6,15 @@ import type { ItemChange, NewWorkItem, WorkList } from "../workItems.js";
 import type { useAgentHarnesses } from "../useAgentHarnesses.js";
 import type { useWorkListProfile } from "../useWorkListProfile.js";
 import type { EditorNavigationTarget } from "../lsp.js";
-import type { NavSiblings } from "../tabs/PageNavigationContext.js";
+import type { Origin } from "../tabs/session.js";
 
 /** Navigation bound to one tab slot: in-tab navigation mutates the slot. */
 export type SlotNav = {
   /** The slot's current ref id. */
   slotId: string;
-  navOpen: (newRef: TabRef, opts?: { newTab?: boolean; siblings?: NavSiblings }) => void;
+  navOpen: (newRef: TabRef, opts?: { newTab?: boolean; origin?: Origin }) => void;
   navOpenFile: (path: string, opts?: { newTab?: boolean }) => void;
-  navOpenDiff: (spec: DiffSpec, siblings?: NavSiblings) => void;
+  navOpenDiff: (spec: DiffSpec, origin?: Origin) => void;
   navRevealCommit: (sha: string) => void;
 };
 
@@ -56,7 +56,7 @@ export interface AppScope {
   /** Opens a page in a new tab. */
   handleOpenPage: (ref: TabRef) => void;
   /** Navigates the slot with this tab id to `ref`. */
-  handleNavigateInTab: (currentTabId: string, ref: TabRef, siblings?: NavSiblings, replace?: boolean) => void;
+  handleNavigateInTab: (currentTabId: string, ref: TabRef, origin?: Origin, replace?: boolean) => void;
   closePageTab: (id: string) => void;
   handleOpenFile: (path: string) => Promise<void>;
   handleNavigateToLocation: (target: EditorNavigationTarget) => Promise<void>;

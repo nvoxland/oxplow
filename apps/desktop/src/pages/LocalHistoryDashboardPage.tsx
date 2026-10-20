@@ -19,7 +19,7 @@ import { formatShortDateTime } from "../components/format.js";
 import { logUi } from "../logger.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import type { NavSiblingEntry, NavSiblings } from "../tabs/PageNavigationContext.js";
+import type { Origin, OriginItem } from "../tabs/session.js";
 import { gitCommitRef, pageTabRef, snapshotRef } from "../tabs/pageRefs.js";
 import { wikiRef } from "../refs/ref.js";
 import { workItemLabel } from "../workItemRef.js";
@@ -47,7 +47,7 @@ export type LocalHistoryMode = "dashboard" | "full-list" | "full-by-commit";
 
 export interface LocalHistoryDashboardPageProps {
   stream: Stream | null;
-  onOpenPage(ref: TabRef, opts?: { newTab?: boolean; siblings?: NavSiblings }): void;
+  onOpenPage(ref: TabRef, opts?: { newTab?: boolean; origin?: Origin }): void;
   /** Controls layout + fetch limits. Defaults to "dashboard"
    *  (capped, toggle-able). The "full-*" modes are used by the
    *  dedicated index pages reachable via the dashboard's footer
@@ -323,7 +323,7 @@ function DashboardBody({
   mode: LocalHistoryMode;
   data: DashboardData;
   byBranch: Array<{ commit: string; rows: SnapshotRow[] }>;
-  onOpenPage(ref: TabRef, opts?: { newTab?: boolean; siblings?: NavSiblings }): void;
+  onOpenPage(ref: TabRef, opts?: { newTab?: boolean; origin?: Origin }): void;
 }) {
   // Full-history pages lock the layout to a single view (no toggle,
   // no caps, no "view full" link — they ARE the full view). The
@@ -381,7 +381,7 @@ function DashboardBody({
           rows={recentRows}
           overflowCount={recentOverflow}
           showViewAllLink={isDashboard}
-          onSelect={(id, siblings) => onOpenPage(snapshotRef(id), { siblings })}
+          onSelect={(id, origin) => onOpenPage(snapshotRef(id), { origin })}
           onViewAll={() => onOpenPage(pageTabRef("local-history-full"))}
           refLabels={data.refLabels}
         />
@@ -390,7 +390,7 @@ function DashboardBody({
           groups={cappedByBranch}
           overflowCount={commitOverflow}
           showViewAllLink={isDashboard}
-          onSelect={(id, siblings) => onOpenPage(snapshotRef(id), { siblings })}
+          onSelect={(id, origin) => onOpenPage(snapshotRef(id), { origin })}
           onViewAll={() => onOpenPage(pageTabRef("local-history-by-commit-full"))}
           refLabels={data.refLabels}
           onOpenCommit={(sha) => onOpenPage(gitCommitRef(sha))}
@@ -497,7 +497,7 @@ function refLabelsFor<L>(refLabels: Record<string, L[]>, snapshot: Snapshot): L[
   return commit ? (refLabels[commit] ?? []) : [];
 }
 
-function snapshotSiblingEntries(rows: SnapshotRow[]): NavSiblingEntry[] {
+function snapshotOriginItems(rows: SnapshotRow[]): OriginItem[] {
   return rows.map((row) => {
     const hasOtherBadges =
       !!vcsRevOf(row.snapshot.revision) || row.wikiSlugs.length > 0;
@@ -535,11 +535,11 @@ function RecentSnapshotsCard({
   overflowCount: number;
   /** When true, render the "View all snapshots →" footer link. */
   showViewAllLink: boolean;
-  onSelect(id: number, siblings: NavSiblings): void;
+  onSelect(id: number, origin: Origin): void;
   onViewAll(): void;
   refLabels: Record<string, CommitRefLabel[]>;
 }) {
-  const entries = useMemo(() => snapshotSiblingEntries(rows), [rows]);
+  const entries = useMemo(() => snapshotOriginItems(rows), [rows]);
   return (
     <Card testId="local-history-recent" title="Recent Snapshots">
       {rows.length === 0 ? (
@@ -554,7 +554,7 @@ function RecentSnapshotsCard({
             <SnapshotRowItem
               key={row.snapshot.id}
               row={row}
-              onSelect={(id) => onSelect(id, { entries, index: idx, title: "Recent snapshots" })}
+              onSelect={(id) => onSelect(id, { items: entries, index: idx, title: "Recent snapshots" })}
               labels={refLabelsFor(refLabels, row.snapshot)}
             />
           ))}
@@ -670,7 +670,7 @@ function ByBranchCard({
    *  surfaces the count. */
   overflowCount: number;
   showViewAllLink: boolean;
-  onSelect(id: number, siblings: NavSiblings): void;
+  onSelect(id: number, origin: Origin): void;
   onViewAll(): void;
   onOpenCommit(sha: string): void;
   refLabels: Record<string, CommitRefLabel[]>;
@@ -712,11 +712,11 @@ function ByBranchGroup({
   refLabels,
 }: {
   group: { commit: string; rows: SnapshotRow[] };
-  onSelect(id: number, siblings: NavSiblings): void;
+  onSelect(id: number, origin: Origin): void;
   onOpenCommit(sha: string): void;
   refLabels: Record<string, CommitRefLabel[]>;
 }) {
-  const entries = useMemo(() => snapshotSiblingEntries(group.rows), [group.rows]);
+  const entries = useMemo(() => snapshotOriginItems(group.rows), [group.rows]);
   const isUncommitted = group.commit === UNCOMMITTED_GROUP_KEY;
   const groupLabels = isUncommitted ? [] : refLabels[group.commit] ?? [];
   const headerName = isUncommitted
@@ -771,7 +771,7 @@ function ByBranchGroup({
           <SnapshotRowItem
             key={row.snapshot.id}
             row={row}
-            onSelect={(id) => onSelect(id, { entries, index: idx, title })}
+            onSelect={(id) => onSelect(id, { items: entries, index: idx, title })}
             labels={refLabelsFor(refLabels, row.snapshot)}
             hideVersionChip
           />

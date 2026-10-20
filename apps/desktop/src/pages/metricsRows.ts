@@ -88,25 +88,25 @@ export function metricStatusColor(def: StatusSpec, value: number): string | unde
 }
 
 /**
- * The sibling-navigation chain for the page's rows (tsk119): the rendered
+ * The origin for the page's rows (tsk119): the rendered
  * sections flattened in render order, so the nav-bar up/down buttons on a
  * drilled-into metric detail walk the list exactly as the page displays it —
  * continuing across section boundaries. `indexByKey` gives each row its own
- * position for the `NavSiblings.index` it dispatches with.
+ * position for the `Origin.index` it dispatches with.
  */
-export function metricSiblings<T extends { key: string; title: string }>(
+export function metricOrigin<T extends { key: string; title: string }>(
   sections: ReadonlyArray<{ entries: T[] }>,
   makeRef: (key: string) => TabRef,
-): { entries: Array<{ ref: TabRef; label: string }>; indexByKey: Map<string, number> } {
-  const entries: Array<{ ref: TabRef; label: string }> = [];
+): { items: Array<{ ref: TabRef; label: string }>; indexByKey: Map<string, number> } {
+  const items: Array<{ ref: TabRef; label: string }> = [];
   const indexByKey = new Map<string, number>();
   for (const section of sections) {
     for (const row of section.entries) {
-      indexByKey.set(row.key, entries.length);
-      entries.push({ ref: makeRef(row.key), label: row.title });
+      indexByKey.set(row.key, items.length);
+      items.push({ ref: makeRef(row.key), label: row.title });
     }
   }
-  return { entries, indexByKey };
+  return { items, indexByKey };
 }
 
 /** One group of a sliced metric: its newest point and its points, newest

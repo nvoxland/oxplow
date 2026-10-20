@@ -655,16 +655,24 @@ and Forward re-selects. Core decides by the param's role; no page
 chooses. Only the body drawing the tab's current entry gets
 `replaceRef`. `PageNavigation.ref` is the entry's ref the body draws.
 
-**Origins.** A list passes `siblings: NavSiblings` to
-`useRouteDispatch` / `navigate` as before; the host stores it as the
-entry's `from` (`originOf`: the index snapped to the destination's id,
-a diff item rebuilt from its `diffSpec`), and the nav bar's Up/Down and
-"N of M" list read it back. New-tab paths drop it. Back/Forward restore
-each entry's own origin. Adopted lists: `BacklinksList`, `FileTree`
-(file rows of one directory), `CommitList` / `CommitGraphTable`
-(`CommitRowDispatcher`), `MetricsPage` (`metricSiblings`, flattened
-across sections), the Local History dashboard. `WorkGroupList` rows
-open an edit modal, not a page, so they don't adopt.
+**Origins.** A list passes an `origin: Origin` (`{ title?, items:
+[{ ref, label }], index }`) to `useRouteDispatch` / `navigate`; the host
+stores it as the entry's `from` (`originOf`: the index snapped to the
+destination's id), and the nav bar's Up/Down and "N of M" read it back
+through `PageNavigation.origin` and `stepOrigin(index)` (the nav bar's
+test ids stay `page-nav-sibling-*`). A diff item's ref is `diffRef(spec)`,
+which carries its spec. New-tab paths drop it. Back/Forward restore each
+entry's own origin. Adopted lists: `BacklinksList`, `FileTree` (file rows
+of one directory), `CommitList` / `CommitGraphTable`
+(`CommitRowDispatcher`), `MetricsPage` (`metricOrigin`, flattened across
+sections), the Local History dashboard. `WorkGroupList` rows open an edit
+modal, not a page, so they don't adopt.
+
+**Keys.** The global handler in `App.tsx` (`tabs/navigationKeys.ts`):
+Cmd+[ and Cmd+] are Back and Forward of the active tab, Alt+ArrowUp and
+Alt+ArrowDown step its origin (`stepOrigin`, history untouched). None
+fires while focus is in an input, textarea, select, contenteditable or
+Monaco — those keys are the field's.
 
 **What is keyed by what.** Active, MRU and eviction by slot; the strip,
 `center-tab-<id>` / `center-tab-body-<id>` test ids, titles

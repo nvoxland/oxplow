@@ -4,7 +4,7 @@ import { basename, StatusBadge, type ContextMenuTarget } from "./shared.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { useRouteDispatch } from "../../tabs/RouteLink.js";
 import { fileRef } from "../../tabs/pageRefs.js";
-import type { NavSiblings } from "../../tabs/PageNavigationContext.js";
+import type { Origin } from "../../tabs/session.js";
 
 /**
  * Mirror of the Rust `WorkspaceFilter` matching semantics for the
@@ -104,7 +104,7 @@ export function TreeEntries({
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   onOpenMenu(target: ContextMenuTarget | null): void;
 }) {
-  // Siblings for file-row navigation: every file at this directory
+  // The origin of a file row: every file at this directory
   // level. Directories don't participate (they're not destinations).
   const siblingEntries = entries
     .filter((e) => e.kind === "file" && e.status !== "deleted")
@@ -117,9 +117,9 @@ export function TreeEntries({
         const fileSiblingIdx = entry.kind === "file"
           ? siblingEntries.findIndex((s) => s.ref.id === fileRef(entry.path).id)
           : -1;
-        const rowSiblings: NavSiblings | undefined = fileSiblingIdx >= 0
+        const rowOrigin: Origin | undefined = fileSiblingIdx >= 0
           ? {
-              entries: siblingEntries,
+              items: siblingEntries,
               index: fileSiblingIdx,
               title: parentPath ? `Files in ${parentPath}` : "Files at the project root",
             }
@@ -141,7 +141,7 @@ export function TreeEntries({
               insideGenerated={insideGenerated}
               markedSelf={markedSelf}
               selected={selectedFilePath === entry.path}
-              siblings={rowSiblings}
+              origin={rowOrigin}
               onToggleDirectory={onToggleDirectory}
               onOpenFile={onOpenFile}
               onOpenMenu={onOpenMenu}
@@ -186,7 +186,7 @@ function TreeEntryRow({
   insideGenerated,
   markedSelf,
   selected,
-  siblings,
+  origin,
   onToggleDirectory,
   onOpenFile,
   onOpenMenu,
@@ -196,7 +196,7 @@ function TreeEntryRow({
   insideGenerated: boolean;
   markedSelf: boolean;
   selected: boolean;
-  siblings?: NavSiblings;
+  origin?: Origin;
   onToggleDirectory(path: string): void;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   onOpenMenu(target: ContextMenuTarget | null): void;
@@ -205,7 +205,7 @@ function TreeEntryRow({
   // ref is unused. fileRef is cheap to construct.
   const { handlers } = useRouteDispatch(fileRef(entry.path), {
     onNavigate: (_ref, opts) => onOpenFile(entry.path, opts),
-    siblings,
+    origin,
   });
   const isFile = entry.kind === "file";
   const isOpenable = isFile && entry.status !== "deleted";

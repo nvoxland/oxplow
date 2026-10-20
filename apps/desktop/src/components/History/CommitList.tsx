@@ -4,7 +4,7 @@ import type { RevisionInfo } from "../../tauri-bridge/generated/bindings.js";
 import type { History } from "../../vcsHistory.js";
 import { useRouteDispatch } from "../../tabs/RouteLink.js";
 import { gitCommitRef } from "../../tabs/pageRefs.js";
-import type { NavSiblingEntry } from "../../tabs/PageNavigationContext.js";
+import type { OriginItem } from "../../tabs/session.js";
 import { RefBadge } from "../RefBadge.js";
 import { EmptyState } from "../Prompts/EmptyState.js";
 
@@ -52,9 +52,9 @@ export function CommitList({
   onSelect,
   rowRefs,
 }: CommitListProps) {
-  // Sibling-list for prev/next navigation: the destination GitCommitPage
-  // steps through the same list the user clicked from.
-  const siblingEntries: NavSiblingEntry[] = useMemo(
+  // The origin for Up/Down: the destination GitCommitPage steps through
+  // the same list the user clicked from.
+  const siblingEntries: OriginItem[] = useMemo(
     () =>
       commits.map((commit) => ({
         ref: gitCommitRef(commit.id),
@@ -94,7 +94,7 @@ export function CommitList({
               tags={tagsBySha.get(sha) ?? []}
               currentBranch={currentBranch}
               stats={statsBySha?.get(sha) ?? null}
-              siblings={{ entries: siblingEntries, index: idx, title: "Recent commits" }}
+              origin={{ items: siblingEntries, index: idx, title: "Recent commits" }}
               onSelect={onSelect}
             />
           </div>
@@ -118,7 +118,7 @@ function CommitRowDispatcher({
   tags,
   currentBranch,
   stats,
-  siblings,
+  origin,
   onSelect,
 }: {
   sha: string;
@@ -129,11 +129,11 @@ function CommitRowDispatcher({
   tags: string[];
   currentBranch: string | null;
   stats: CommitStats | null;
-  siblings: { entries: NavSiblingEntry[]; index: number; title?: string };
+  origin: { items: OriginItem[]; index: number; title?: string };
   onSelect?(sha: string, opts?: { newTab?: boolean }): void;
 }) {
   const { dispatch } = useRouteDispatch(gitCommitRef(sha), {
-    siblings,
+    origin,
     onNavigate: (_ref, opts) => onSelect?.(sha, opts),
   });
   return (

@@ -77,7 +77,7 @@ export interface DiffViewPageProps {
   stream: Stream | null;
   spec: DiffViewSpec;
   onOpenDiff?(spec: DiffSpec): void;
-  onOpenDiffInTab?(spec: DiffSpec, siblings?: import("../tabs/PageNavigationContext.js").NavSiblings): void;
+  onOpenDiffInTab?(spec: DiffSpec, origin?: import("../tabs/session.js").Origin): void;
   onOpenPage(ref: TabRef, opts?: { newTab?: boolean }): void;
   onOpenFile?(path: string, opts?: { newTab?: boolean }): void;
 }
@@ -300,7 +300,7 @@ function ResolvedEndpointDiff({
   onOpenPage(ref: TabRef, opts?: { newTab?: boolean }): void;
   onOpenFile?(path: string, opts?: { newTab?: boolean }): void;
   onOpenDiff?(spec: DiffSpec): void;
-  onOpenDiffInTab?(spec: DiffSpec, siblings?: import("../tabs/PageNavigationContext.js").NavSiblings): void;
+  onOpenDiffInTab?(spec: DiffSpec, origin?: import("../tabs/session.js").Origin): void;
 }) {
   const { start, end, inProgress, workItem, effortId } = resolved;
   const effortPassed = effortId != null;

@@ -191,17 +191,17 @@ export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, ch
     canForward: ctxNav.canGoForward,
     onBack: ctxNav.goBack,
     onForward: ctxNav.goForward,
-    siblings: ctxNav.siblings
+    siblings: ctxNav.origin
       ? {
-          prevLabel: ctxNav.siblings.entries[ctxNav.siblings.index - 1]?.label,
-          nextLabel: ctxNav.siblings.entries[ctxNav.siblings.index + 1]?.label,
-          onPrev: ctxNav.goPrevSibling,
-          onNext: ctxNav.goNextSibling,
-          indicator: `${ctxNav.siblings.index + 1} of ${ctxNav.siblings.entries.length}`,
-          indicatorTitle: ctxNav.siblings.title,
-          entries: ctxNav.siblings.entries.map((e) => ({ label: e.label })),
-          activeIndex: ctxNav.siblings.index,
-          onSelect: ctxNav.goSibling,
+          prevLabel: ctxNav.origin.items[ctxNav.origin.index - 1]?.label,
+          nextLabel: ctxNav.origin.items[ctxNav.origin.index + 1]?.label,
+          onPrev: ctxNav.origin.index > 0 ? () => ctxNav.stepOrigin?.(ctxNav.origin!.index - 1) : undefined,
+          onNext: ctxNav.origin.index < ctxNav.origin.items.length - 1 ? () => ctxNav.stepOrigin?.(ctxNav.origin!.index + 1) : undefined,
+          indicator: `${ctxNav.origin.index + 1} of ${ctxNav.origin.items.length}`,
+          indicatorTitle: ctxNav.origin.title,
+          entries: ctxNav.origin.items.map((e) => ({ label: e.label })),
+          activeIndex: ctxNav.origin.index,
+          onSelect: ctxNav.stepOrigin,
         }
       : undefined,
     bookmark: ctxNav.bookmark
