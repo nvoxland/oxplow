@@ -119,5 +119,29 @@ export function sliceTemplate(template: MetricTemplate, dimension: string | null
   return metricTemplate(template.metric, dimension);
 }
 
+/** A template as the page's `template` view param: its metric, then its
+ *  dimension after a comma. */
+export function templateParam(template: MetricTemplate): string {
+  return template.dimension ? `${template.metric},${template.dimension}` : template.metric;
+}
+
+/** The template a `template` view param says; none for an empty one. */
+export function parseTemplate(text: string): MetricTemplate | null {
+  if (text === "") return null;
+  const [metric, dimension] = text.split(",");
+  return metricTemplate(metric!, dimension || null);
+}
+
+/** The chart a `chart` view param says (JSON); none for text that isn't one. */
+export function parseChart(text: string): LensChart | null {
+  if (text === "") return null;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as LensChart) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The dimensions a metric can be sliced by (`v_dimension`). */
 export const DIMENSIONS_SQL = "SELECT key, label FROM v_dimension ORDER BY label";

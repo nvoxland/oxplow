@@ -830,7 +830,11 @@ visit) and page memory:
 - an extension's page: all but `ref` (what it was opened for);
 - one of oxplow's own pages: the view params it declares in
   `BUILT_IN_VIEW` (Tasks and Backlog: `isTasksViewParam`; Metrics: range, branch,
-  slice, q, show; a custom dashboard: range, branch — `pages/metricsView.ts`);
+  slice, q, show; a custom dashboard: range, branch — `pages/metricsView.ts`;
+  the searches — `pages/searchViews.ts`: Git History `q`/`author`/`branch`,
+  Comments `days`, Settings `q`, Explore Data `model` (a pick, so it
+  pushes), `sql` (the query that ran), `viz`, `chart`, `template`, `raw`; the
+  SQL being edited and not yet run is history state `sql`);
   the same table names an **entity kind** whose page has a view: a metric's
   page is `metric:<key>?range=…&branch=…&slice=…`, its key the identity (so
   comments, backlinks and visits still anchor on `metric:<key>`). A kind not

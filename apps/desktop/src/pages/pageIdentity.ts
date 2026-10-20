@@ -16,6 +16,7 @@
 
 import { isTasksViewParam } from "../components/Plan/tasksView.js";
 import { isDashboardViewParam, isMetricsViewParam, isMetricViewParam } from "./metricsView.js";
+import { isCommentsViewParam, isExploreViewParam, isGitHistoryViewParam, isSettingsViewParam } from "./searchViews.js";
 import { identityOf } from "../tabs/session.js";
 import { extPageRef, pagePayload, pageTabRef, viewParamsOf, withViewParams } from "../tabs/pageRefs.js";
 import type { SqlCell } from "../tauri-bridge/generated/bindings.js";
@@ -30,6 +31,10 @@ const BUILT_IN_VIEW: Record<string, (key: string) => boolean> = {
   "metrics-recorded": isMetricsViewParam,
   "custom-dashboard": isDashboardViewParam,
   metric: isMetricViewParam,
+  "git-history": isGitHistoryViewParam,
+  comments: isCommentsViewParam,
+  settings: isSettingsViewParam,
+  "explore-data": isExploreViewParam,
 };
 
 export function pageIdentity(ref: TabRef): string {

@@ -24,6 +24,13 @@ test("a built-in page's identity keeps every param but the view params it declar
   expect(pageIdentity(pageTabRef("metrics-recorded", { range: "30d", slice: "oxplow.language", q: "x", show: "all" }))).toBe("page:metrics-recorded");
 });
 
+test("the search pages' filters are view, so a change re-renders them", () => {
+  expect(pageIdentity(pageTabRef("git-history", { q: "fix", author: "a", branch: "main" }))).toBe("page:git-history");
+  expect(pageIdentity(pageTabRef("comments", { days: 7 }))).toBe("page:comments");
+  expect(pageIdentity(pageTabRef("settings", { q: "model" }))).toBe("page:settings");
+  expect(pageIdentity(pageTabRef("explore-data", { model: "v_effort", sql: "SELECT 1", viz: "bar", raw: true }))).toBe("page:explore-data");
+});
+
 test("an entity page is its ref, less the view its kind declares", () => {
   expect(pageIdentity(fileRef("src/a.ts"))).toBe(fileRef("src/a.ts").id);
   expect(pageIdentity(metricRef("oxplow.todos", { range: "30d", branch: "main", slice: "oxplow.language" }))).toBe("metric:oxplow.todos");
