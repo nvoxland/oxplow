@@ -9,6 +9,7 @@ type Cell = string | number | boolean | null;
 interface Rows {
   columns: string[];
   rows: Cell[][];
+  truncated: boolean;
 }
 interface Component {
   page: { params: Record<string, string>; streamId: string | null; threadId: string | null } | null;
@@ -23,24 +24,30 @@ declare const oxplow: { connect(): Promise<Component> };
 
 const DAY = 24 * 60 * 60 * 1000;
 
-/** Everything that started before `?2` and hadn't ended by `?1`: efforts,
- *  sessions and threads as spans, commits as points; `?3` one thread's. */
-const SQL = `
-SELECT kind, ref, label, start_at, end_at FROM (
-  SELECT 'effort' AS kind, ref, COALESCE(NULLIF(title, ''), ref) AS label,
-         started_at AS start_at, ended_at AS end_at, thread_id
-    FROM v_effort WHERE started_at < ?2 AND COALESCE(ended_at, ?2) > ?1
-  UNION ALL
-  SELECT 'session', ref, COALESCE(display_name, title, harness), opened_at, closed_at, thread_id
-    FROM v_agent_session WHERE opened_at < ?2 AND COALESCE(closed_at, ?2) > ?1
-  UNION ALL
-  SELECT 'thread', ref, title, created_at, closed_at, CAST(substr(ref, 11) AS INTEGER)
-    FROM v_thread WHERE created_at < ?2 AND COALESCE(closed_at, ?2) > ?1
-  UNION ALL
-  SELECT 'commit', ref, subject, committed_at, NULL, NULL
-    FROM v_commit WHERE committed_at >= ?1 AND committed_at < ?2 AND ?3 IS NULL
-) WHERE ?3 IS NULL OR thread_id = ?3
-ORDER BY start_at`;
+/** Each kind's rows in the window `?1`..`?2` (`?3`: one thread's), as
+ *  `kind, ref, label, start_at, end_at`: efforts, sessions and threads
+ *  that started before it ends and hadn't ended by its start, commits in
+ *  it. One query a kind, so one busy kind can't crowd out the others
+ *  under the row cap. */
+const QUERIES: Record<string, string> = {
+  effort: `SELECT 'effort', ref, COALESCE(NULLIF(title, ''), ref), started_at, ended_at
+             FROM v_effort
+            WHERE started_at < ?2 AND COALESCE(ended_at, ?2) > ?1 AND (?3 IS NULL OR thread_id = ?3)
+            ORDER BY started_at`,
+  session: `SELECT 'session', ref, COALESCE(display_name, title, harness), opened_at, closed_at
+              FROM v_agent_session
+             WHERE opened_at < ?2 AND COALESCE(closed_at, ?2) > ?1 AND (?3 IS NULL OR thread_id = ?3)
+             ORDER BY opened_at`,
+  thread: `SELECT 'thread', ref, title, created_at, closed_at
+             FROM v_thread
+            WHERE created_at < ?2 AND COALESCE(closed_at, ?2) > ?1
+              AND (?3 IS NULL OR ref = 'thread:thr' || ?3)
+            ORDER BY created_at`,
+  commit: `SELECT 'commit', ref, subject, committed_at, NULL
+             FROM v_commit
+            WHERE committed_at >= ?1 AND committed_at < ?2 AND ?3 IS NULL
+            ORDER BY committed_at`,
+};
 
 const GROUPS = [
   { id: "thread", content: "Threads" },
@@ -48,6 +55,7 @@ const GROUPS = [
   { id: "effort", content: "Efforts" },
   { id: "commit", content: "Commits" },
 ];
+const NOUNS: Record<string, string> = { thread: "threads", session: "sessions", effort: "efforts", commit: "commits" };
 
 const dateOf = (raw: string | undefined, fallback: number) => {
   const t = raw ? Date.parse(raw) : NaN;
@@ -68,30 +76,44 @@ oxplow.connect().then((component) => {
 
   const items = new DataSet<{ id: string; group: string; content: string; start: Date; end?: Date; type: string; className: string; title: string }>();
   const container = document.getElementById("timeline")!;
-  const empty = document.getElementById("empty")!;
+  const note = document.getElementById("note")!;
   const timeline = new Timeline(container, items, GROUPS, {
     start,
     end,
+    height: "100%",
+    verticalScroll: true,
     stack: true,
     zoomMin: 60 * 60 * 1000,
-    orientation: { axis: "top" },
-    margin: { item: 4 },
-  });
+    orientation: { axis: "top", item: "top" },
+    margin: { item: { horizontal: 4, vertical: 4 } },
+    // Items too close to tell apart at this zoom draw as one ("12
+    // efforts"); zooming in takes them apart.
+    cluster: {
+      maxItems: 1,
+      clusterCriteria: (a: { group?: string }, b: { group?: string }) => a.group === b.group,
+      titleTemplate: "{count} items — zoom in to see them",
+      fitOnDoubleClick: true,
+    },
+    tooltip: { followMouse: true, delay: 300 },
+  } as never);
 
   let loading = 0;
   const load = async (from: Date, to: Date) => {
     const mine = ++loading;
-    const rows = await component.querySql(SQL, [from.toISOString(), to.toISOString(), thread]);
+    const window = [from.toISOString(), to.toISOString(), thread];
+    const results = await Promise.all(
+      Object.entries(QUERIES).map(async ([kind, sql]) => ({ kind, rows: await component.querySql(sql, window) })),
+    );
     if (mine !== loading) return;
-    const at = (name: string) => rows.columns.indexOf(name);
     items.clear();
+    const all = results.flatMap((r) => r.rows.rows);
     items.add(
-      rows.rows.map((row) => {
-        const kind = String(row[at("kind")]);
-        const ref = String(row[at("ref")]);
-        const label = String(row[at("label")] ?? ref);
-        const startAt = new Date(String(row[at("start_at")]));
-        const endRaw = row[at("end_at")];
+      all.map((row) => {
+        const kind = String(row[0]);
+        const ref = String(row[1]);
+        const label = String(row[2] ?? ref);
+        const startAt = new Date(String(row[3]));
+        const endRaw = row[4];
         const point = kind === "commit";
         return {
           id: ref,
@@ -106,7 +128,13 @@ oxplow.connect().then((component) => {
         };
       }),
     );
-    empty.hidden = rows.rows.length > 0;
+    const capped = results.filter((r) => r.rows.truncated).map((r) => NOUNS[r.kind]);
+    note.textContent =
+      all.length === 0
+        ? "Nothing happened in this range."
+        : capped.length > 0
+          ? `Showing the first ${results.find((r) => r.rows.truncated)?.rows.rows.length} ${capped.join(" and ")} in this range — zoom in for the rest.`
+          : "";
     void component.setTitle(`Timeline: ${shortDate(from)} – ${shortDate(to)}`);
   };
 

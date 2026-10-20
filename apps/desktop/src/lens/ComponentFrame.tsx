@@ -206,7 +206,9 @@ export function ComponentFrame({
       <iframe
         ref={frameRef}
         data-testid="custom-component-frame"
-        title={title}
+        // Its accessible name, not a `title`: WebKit shows an iframe's
+        // title as a tooltip over everything the component draws.
+        aria-label={title}
         sandbox="allow-scripts allow-forms"
         referrerPolicy="no-referrer"
         src={src}

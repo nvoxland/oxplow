@@ -1,17 +1,40 @@
-/* The timeline fills the page; its colors are the theme's tokens. */
-html, body { height: 100%; }
+/* The timeline fills the page and scrolls inside itself; its colors are
+   the theme's tokens. vis-timeline injects its own stylesheet when it
+   loads, after this one, so each rule here is scoped under
+   `.vis-timeline` to win. */
+html, body { height: 100%; margin: 0; overflow: hidden; }
 body { display: flex; flex-direction: column; }
 #timeline { flex: 1; min-height: 0; }
-#empty { padding: var(--space-3, 12px); }
+#note { padding: var(--space-2, 8px) var(--space-3, 12px); margin: 0; }
+#note:empty { display: none; }
 .vis-timeline { border: none; font-family: var(--font-ui); font-size: var(--text-sm, 12px); color: var(--text-primary); }
-.vis-panel.vis-left, .vis-panel.vis-center, .vis-panel.vis-top, .vis-panel.vis-bottom { border-color: var(--border-subtle); }
-.vis-labelset .vis-label { color: var(--text-secondary); border-color: var(--border-subtle); }
-.vis-time-axis .vis-text { color: var(--text-muted); }
-.vis-time-axis .vis-grid.vis-minor, .vis-time-axis .vis-grid.vis-major { border-color: var(--border-subtle); }
-.vis-item { border-radius: var(--radius-sm, 4px); color: var(--text-primary); background: var(--surface-card); border-color: var(--border-strong, var(--border-subtle)); cursor: pointer; }
-.vis-item.vis-selected { border-color: var(--accent); }
-.vis-item.kind-effort { background: var(--accent-soft-bg); border-color: var(--accent); }
-.vis-item.kind-session { background: var(--surface-card); }
-.vis-item.kind-thread { background: transparent; }
-.vis-item.kind-commit { background: var(--accent); border-color: var(--accent); }
-.vis-current-time { background: var(--accent); }
+.vis-timeline .vis-panel.vis-left,
+.vis-timeline .vis-panel.vis-center,
+.vis-timeline .vis-panel.vis-top,
+.vis-timeline .vis-panel.vis-bottom,
+.vis-timeline .vis-labelset .vis-label,
+.vis-timeline .vis-foreground .vis-group { border-color: var(--border-subtle); }
+.vis-timeline .vis-labelset .vis-label { color: var(--text-secondary); }
+.vis-timeline .vis-time-axis .vis-text { color: var(--text-muted); }
+.vis-timeline .vis-time-axis .vis-grid.vis-minor { border-color: var(--border-subtle); opacity: 0.5; }
+.vis-timeline .vis-time-axis .vis-grid.vis-major { border-color: var(--border-subtle); }
+.vis-timeline .vis-item {
+  color: var(--text-primary);
+  background: var(--surface-card);
+  border-color: var(--border-subtle);
+  border-radius: var(--radius-sm, 4px);
+  font-size: var(--text-xs, 11px);
+  cursor: pointer;
+}
+.vis-timeline .vis-item .vis-item-content { padding: 1px 6px; }
+.vis-timeline .vis-item.vis-selected { border-color: var(--accent); background: var(--accent-soft-bg); }
+.vis-timeline .vis-item.kind-thread { background: var(--surface-card); border-color: var(--border-strong, var(--border-subtle)); }
+.vis-timeline .vis-item.kind-session { background: var(--accent-soft-bg); border-color: var(--accent); }
+.vis-timeline .vis-item.kind-effort { background: var(--surface-card); border-color: var(--accent); }
+.vis-timeline .vis-item.kind-commit .vis-dot { border-color: var(--accent); }
+.vis-timeline .vis-item.kind-commit { background: transparent; border: none; color: var(--text-secondary); }
+/* A cluster: several items too close to tell apart at this zoom. */
+.vis-timeline .vis-item.vis-cluster { background: var(--accent-soft-bg); border-color: var(--accent); color: var(--text-primary); }
+.vis-timeline .vis-item.vis-cluster-line { border-color: var(--accent); }
+.vis-timeline .vis-current-time { background: var(--accent); }
+.vis-tooltip { background: var(--surface-overlay, var(--surface-card)) !important; color: var(--text-primary) !important; border: 1px solid var(--border-subtle) !important; font-family: var(--font-ui) !important; }
