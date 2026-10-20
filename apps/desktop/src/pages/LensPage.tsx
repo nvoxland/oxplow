@@ -99,14 +99,10 @@ export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOp
     },
   ];
 
+  // A param set from the rail or by a row click (a column's `select`).
+  const setParam = (name: string, value: SqlCell) => setOverrides((o) => ({ ...o, [name]: value }));
   const rightRail =
-    lens && lens.params.length > 0 ? (
-      <ParamsForm
-        lens={lens}
-        values={run?.params ?? {}}
-        onApply={(name, value) => setOverrides((o) => ({ ...o, [name]: value }))}
-      />
-    ) : undefined;
+    lens && lens.params.length > 0 ? <ParamsForm lens={lens} values={run?.params ?? {}} onApply={setParam} /> : undefined;
 
   return (
     <Page
@@ -133,7 +129,7 @@ export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOp
           </div>
         </div>
       ) : null}
-      {run ? <LensResultView run={run} onOpenPage={onOpenPage} /> : error ? null : <p>Loading…</p>}
+      {run ? <LensResultView run={run} onOpenPage={onOpenPage} onSetParam={setParam} /> : error ? null : <p>Loading…</p>}
       {lens ? (
         <p style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)", marginTop: 24 }}>
           {lens.path}

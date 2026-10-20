@@ -1,5 +1,5 @@
 import { afterEach, expect, mock, test } from "bun:test";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { Lens, LensPart, LensRun } from "../tauri-bridge/generated/bindings.js";
 
@@ -41,6 +41,21 @@ const base: Lens = {
 const lenses: Record<string, Lens> = {
   "x/open": { ...base, id: "x/open", slug: "open", title: "Open", viz: "number", params: [{ name: "stream_id", label: null, default: null, options: [] }] } as Lens,
   "x/none": { ...base, id: "x/none", slug: "none", title: "Nothing", viz: "table" } as Lens,
+  "x/pick": {
+    ...base,
+    id: "x/pick",
+    slug: "pick",
+    title: "Pick",
+    params: [{ name: "commit", label: null, default: null, options: [], type: "text", place: "rail", presets: [] }],
+    columns: [{ key: "n", label: null, link: null, unit: null, icon: null, tone: null, select: "commit" }],
+  } as unknown as Lens,
+  "x/detail": {
+    ...base,
+    id: "x/detail",
+    slug: "detail",
+    title: "Detail",
+    params: [{ name: "commit", label: null, default: null, options: [], type: "text", place: "rail", presets: [] }],
+  } as Lens,
 };
 const runs: { id: string; params: unknown; stream: string | null }[] = [];
 
@@ -99,4 +114,22 @@ test("a dashboard shows its parts as tiles at their sizes", async () => {
   await waitFor(() => expect(getByTestId("lens-part-open").textContent).toContain("7"));
   expect(getByTestId("lens-part-open").className).toContain("ox-tile-wide");
   expect(getByTestId("lens-part-note").className).toContain("ox-tile-full");
+});
+
+/** A section's row click sets the document's param, and the sections that
+ *  read it run again with the new value: master and detail. */
+test("a click in one section sets the document's param, and the others re-run with it", async () => {
+  const picked: [string, unknown][] = [];
+  const doc = (commit: unknown) =>
+    ({
+      lens: { ...base, viz: "document", parts: [part({ id: "pick", lens: "x/pick" }), part({ id: "detail", lens: "x/detail" })] },
+      params: { commit },
+      result: { columns: [], rows: [], truncated: false },
+    }) as unknown as LensRun;
+  const view = render(<LensResultView run={doc(null)} streamId="str1" onOpenPage={() => {}} onSetParam={(n, v) => picked.push([n, v])} />);
+  await waitFor(() => expect(view.getByTestId("lens-part-pick").textContent).toContain("7"));
+  fireEvent.click(view.getByTestId("lens-part-pick").querySelector("[data-testid=lens-row-0]")!);
+  expect(picked).toEqual([["commit", 7]]);
+  view.rerender(<LensResultView run={doc(7)} streamId="str1" onOpenPage={() => {}} onSetParam={() => {}} />);
+  await waitFor(() => expect(runs.some((r) => r.id === "x/detail" && (r.params as { commit?: unknown }).commit === 7)).toBe(true));
 });

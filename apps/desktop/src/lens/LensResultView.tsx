@@ -129,6 +129,9 @@ interface LensResultViewProps {
   onCustomFailure?(reason: string): void;
   /** For a `viz: custom` lens: its component said `ready`. */
   onCustomReady?(): void;
+  /** Set one of the lens's params (a row click on a column that
+   *  `select`s it); without it, rows are no picks. */
+  onSetParam?(name: string, value: SqlCell): void;
 }
 
 /** Where a command's `ui.open_after` page opens from a lens: in the page
@@ -247,10 +250,10 @@ function LensBody(props: LensResultViewProps & { actions?: LensActionsState }) {
   // own; each is its own component so the row views' hooks always run in
   // the same order.
   if (run.lens.viz === "document") {
-    return <DocumentViz parts={run.lens.parts} params={run.params} streamId={streamId} onOpenPage={onOpenPage} />;
+    return <DocumentViz parts={run.lens.parts} params={run.params} streamId={streamId} onOpenPage={onOpenPage} onSetParam={props.onSetParam} />;
   }
   if (run.lens.viz === "dashboard") {
-    return <DashboardViz parts={run.lens.parts} params={run.params} streamId={streamId} onOpenPage={onOpenPage} />;
+    return <DashboardViz parts={run.lens.parts} params={run.params} streamId={streamId} onOpenPage={onOpenPage} onSetParam={props.onSetParam} />;
   }
   if (run.lens.viz === "form") return <FormViz run={run} streamId={streamId} />;
   return <RowsBody {...props} />;
@@ -265,9 +268,11 @@ function RowsBody({
   actions,
   onCustomFailure,
   onCustomReady,
+  onSetParam,
 }: LensResultViewProps & { actions?: LensActionsState }) {
   const lens = run.lens;
   const result = limitRows(run.result, maxRows);
+  const picks = rowPicks(run, onSetParam);
   const ctxMenu = useContextMenu();
   const refOffersFor = useRefOffers();
   const extensions = useExtensions();
@@ -360,10 +365,28 @@ function RowsBody({
   ];
   // Every row of every row component: focusable, with its menu from a
   // right-click or the keyboard (Menu key / Shift+F10).
+  // A row that picks: a click (not on a link or control in it) or Enter
+  // sets the param its column selects.
   const rowMenu: RowMenu = (row) => ({
     tabIndex: 0,
     onContextMenu: (e) => ctxMenu.open(e, rowItems(row)),
-    onKeyDown: (e) => ctxMenu.openForKey(e, rowItems(row)),
+    onKeyDown: (e) => {
+      if (picks && e.key === "Enter" && e.target === e.currentTarget) {
+        e.preventDefault();
+        picks.pick(row);
+        return;
+      }
+      ctxMenu.openForKey(e, rowItems(row));
+    },
+    ...(picks
+      ? {
+          onClick: (e: React.MouseEvent) => {
+            if ((e.target as Element).closest("a, button, input, select, textarea")) return;
+            picks.pick(row);
+          },
+          "aria-selected": picks.selected(row),
+        }
+      : {}),
   });
   // A list, table or tree row: dragged into the agent's context when it
   // links somewhere, highlighted by `emphasis`, indented by `depth`.
@@ -377,6 +400,8 @@ function RowsBody({
       },
       emphasized,
       indent: rowDepth(lens, result.columns, row) * DEPTH_INDENT,
+      picks: picks !== null,
+      selected: picks?.selected(row) ?? false,
     };
   };
   // A grouped list or table: its headings, each with its group's actions.
@@ -408,6 +433,23 @@ interface RowLookOut {
   emphasized: boolean;
   /** Extra left padding, px. */
   indent: number;
+  /** Clicking it sets a param; `selected`: it holds that param's value. */
+  picks: boolean;
+  selected: boolean;
+}
+
+/** The param a lens's rows set when clicked (its column's `select`), if
+ *  it has one and there's somewhere to set it. */
+function rowPicks(run: LensRun, onSetParam: ((name: string, value: SqlCell) => void) | undefined) {
+  const column = run.lens.columns.find((c) => c.select);
+  const index = column ? run.result.columns.indexOf(column.key) : -1;
+  if (!onSetParam || !column?.select || index === -1) return null;
+  const name = column.select;
+  const current = run.params[name] ?? null;
+  return {
+    pick: (row: SqlCell[]) => onSetParam(name, row[index] ?? null),
+    selected: (row: SqlCell[]) => current !== null && String(row[index] ?? "") === String(current),
+  };
 }
 type RowLook = (row: SqlCell[]) => RowLookOut;
 
@@ -474,6 +516,8 @@ type RowMenu = (row: SqlCell[]) => {
   tabIndex: number;
   onContextMenu(e: React.MouseEvent): void;
   onKeyDown(e: React.KeyboardEvent): void;
+  onClick?(e: React.MouseEvent): void;
+  "aria-selected"?: boolean;
 };
 
 function LensViz({
@@ -1074,7 +1118,7 @@ function sections(rows: SqlCell[][], view: RowsView | undefined): { group: RowGr
   return groups.map((g) => ({ group: g, rows: g.rows.map((r) => [r, index.get(r) ?? 0]) }));
 }
 
-const noLook: RowLookOut = { props: {}, emphasized: false, indent: 0 };
+const noLook: RowLookOut = { props: {}, emphasized: false, indent: 0, picks: false, selected: false };
 
 function ListViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
   const [head, ...rest] = cols;
@@ -1092,7 +1136,8 @@ function ListViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
                   data-testid={`lens-row-${i}`}
                   style={{
                     ...listRowStyle,
-                    ...(look.emphasized ? emphasisStyle : {}),
+                    ...(look.emphasized || look.selected ? emphasisStyle : {}),
+                    ...(look.picks ? { cursor: "pointer" } : {}),
                     ...(look.indent ? { paddingLeft: look.indent } : {}),
                   }}
                   {...rowMenu(row)}
@@ -1143,7 +1188,9 @@ function TableViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
         const look = view?.rowLook(row) ?? noLook;
         return {
           "data-testid": `lens-row-${i}`,
-          className: look.emphasized ? "ox-emphasis" : undefined,
+          className:
+            [look.emphasized ? "ox-emphasis" : "", look.picks ? "ox-clickable" : "", look.selected ? "ox-selected" : ""].filter(Boolean).join(" ") ||
+            undefined,
           ...rowMenu(row),
           ...(look.props as RowProps),
         };

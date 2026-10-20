@@ -23,6 +23,8 @@ interface PartsVizProps {
   params: Record<string, SqlCell>;
   streamId: string | null;
   onOpenPage?(ref: TabRef): void;
+  /** Set one of the page's params, from a part's row click. */
+  onSetParam?(name: string, value: SqlCell): void;
 }
 
 /** The lens parts of `parts`, run. */
@@ -47,11 +49,32 @@ function PartTitle({ part, run, onOpenPage }: { part: LensPart; run: LensRun | n
 }
 
 /** A part's body: its prose, its result, its error, or that it's loading. */
-function PartBody({ part, run, maxRows, streamId, onOpenPage }: { part: LensPart; run: PartRun | undefined; maxRows: number; streamId: string | null; onOpenPage?(ref: TabRef): void }): ReactNode {
+function PartBody({
+  part,
+  run,
+  maxRows,
+  streamId,
+  onOpenPage,
+  params,
+  onSetParam,
+}: {
+  part: LensPart;
+  run: PartRun | undefined;
+  maxRows: number;
+  streamId: string | null;
+  onOpenPage?(ref: TabRef): void;
+  params: Record<string, SqlCell>;
+  onSetParam?(name: string, value: SqlCell): void;
+}): ReactNode {
   if (part.markdown !== null) return <MarkdownView body={part.markdown} />;
   if (!run) return <Loading what={part.title ?? "this part"} />;
   if (run.error) return <p className="ox-error">{run.error}</p>;
-  return run.run ? <LensResultView run={run.run} onOpenPage={onOpenPage} streamId={streamId} maxRows={maxRows} toolbar={false} /> : null;
+  if (!run.run) return null;
+  // Its rows pick only a param the page holds: one another extension's
+  // part selects that the page doesn't declare stays plain.
+  const selects = run.run.lens.columns.find((c) => c.select)?.select;
+  const set = selects && selects in params ? onSetParam : undefined;
+  return <LensResultView run={run.run} onOpenPage={onOpenPage} streamId={streamId} maxRows={maxRows} toolbar={false} onSetParam={set} />;
 }
 
 /**
@@ -62,7 +85,7 @@ function PartBody({ part, run, maxRows, streamId, onOpenPage }: { part: LensPart
  */
 export function DocumentViz(props: PartsVizProps) {
   const runs = usePartRuns(props);
-  const { parts, streamId, onOpenPage } = props;
+  const { parts, streamId, onOpenPage, params, onSetParam } = props;
   const lensParts = parts.filter((p) => p.lens).map((p) => ({ part: p, run: runs?.get(p.id)?.run ?? null, error: runs?.get(p.id)?.error ?? null }));
   const empty = new Set(runs ? foldEmpty(lensParts).empty.map((e) => e.part.id) : []);
   const folded = parts.filter((p) => empty.has(p.id));
@@ -80,7 +103,7 @@ export function DocumentViz(props: PartsVizProps) {
               source={part.from ?? undefined}
               testId={`lens-part-${part.id}`}
             >
-              <PartBody part={part} run={run} maxRows={SECTION_MAX_ROWS} streamId={streamId} onOpenPage={onOpenPage} />
+              <PartBody part={part} run={run} maxRows={SECTION_MAX_ROWS} streamId={streamId} onOpenPage={onOpenPage} params={params} onSetParam={onSetParam} />
             </Section>
           );
         })}
@@ -96,7 +119,7 @@ export function DocumentViz(props: PartsVizProps) {
 /** `dashboard`: its parts as tiles at their sizes, each a titled card. */
 export function DashboardViz(props: PartsVizProps) {
   const runs = usePartRuns(props);
-  const { parts, streamId, onOpenPage } = props;
+  const { parts, streamId, onOpenPage, params, onSetParam } = props;
   return (
     <TileGrid testId="lens-dashboard">
       {parts.map((part) => {
@@ -104,7 +127,7 @@ export function DashboardViz(props: PartsVizProps) {
         return (
           <TileSlot key={part.id} size={part.size ?? (part.markdown !== null ? "full" : "small")} data-testid={`lens-part-${part.id}`}>
             <Tile title={<PartTitle part={part} run={run?.run ?? null} onOpenPage={onOpenPage} />}>
-              <PartBody part={part} run={run} maxRows={TILE_MAX_ROWS} streamId={streamId} onOpenPage={onOpenPage} />
+              <PartBody part={part} run={run} maxRows={TILE_MAX_ROWS} streamId={streamId} onOpenPage={onOpenPage} params={params} onSetParam={onSetParam} />
             </Tile>
           </TileSlot>
         );

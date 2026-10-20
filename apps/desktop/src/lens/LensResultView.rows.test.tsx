@@ -198,3 +198,36 @@ test("a highlighted column marks its param's value in the cell, as elements", ()
   const plain = render(<LensResultView run={{ ...run, params: { filter: "" } } as unknown as LensRun} compact onOpenPage={() => {}} />);
   expect(plain.container.querySelector("mark")).toBeNull();
 });
+
+/** A column's `select` makes a row a pick: clicking it (or Enter) sets
+ *  that param to the row's value; a link inside it still only navigates,
+ *  and the row holding the current value is drawn selected. */
+test("a row click sets the param its column selects; a link in it doesn't", () => {
+  const picked: [string, SqlCell][] = [];
+  const run = {
+    ...runOf({
+      viz: "table",
+      params: [{ name: "pick", label: null, default: null, options: [], type: "text", place: "rail", presets: [] }],
+      columns: [
+        { key: "title", label: null, link: null, unit: null, icon: null, tone: null, select: "pick" },
+        { key: "ref", label: null, link: link("page", "ref"), unit: null, icon: null, tone: null },
+      ] as never,
+    }),
+    params: { pick: "Child" },
+  } as LensRun;
+  const view = render(<LensResultView run={run} onOpenPage={() => {}} onSetParam={(n, v) => picked.push([n, v])} />);
+  fireEvent.click(view.getByTestId("lens-row-0"));
+  fireEvent.keyDown(view.getByTestId("lens-row-2"), { key: "Enter" });
+  const linkCell = view.getByTestId("lens-row-0").querySelectorAll("td")[1]!.firstElementChild as HTMLElement;
+  fireEvent.click(linkCell);
+  expect(picked).toEqual([
+    ["pick", "Epic"],
+    ["pick", "Next"],
+  ]);
+  expect(view.getByTestId("lens-row-1").getAttribute("aria-selected")).toBe("true");
+  expect(view.getByTestId("lens-row-0").getAttribute("aria-selected")).toBe("false");
+  cleanup();
+  // With nowhere to set it, a row is no pick.
+  const plain = render(<LensResultView run={run} onOpenPage={() => {}} />);
+  expect(plain.getByTestId("lens-row-0").getAttribute("aria-selected")).toBeNull();
+});
