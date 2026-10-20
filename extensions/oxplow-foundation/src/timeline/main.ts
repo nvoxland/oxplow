@@ -28,25 +28,25 @@ const DAY = 24 * 60 * 60 * 1000;
  *  `kind, ref, label, start_at, end_at`: efforts, sessions and threads
  *  that started before it ends and hadn't ended by its start, commits in
  *  it. One query a kind, so one busy kind can't crowd out the others
- *  under the row cap. */
+ *  under the row cap, newest first, so a capped kind keeps the latest. */
 const QUERIES: Record<string, string> = {
   effort: `SELECT 'effort', ref, COALESCE(NULLIF(title, ''), ref), started_at, ended_at
              FROM v_effort
             WHERE started_at < ?2 AND COALESCE(ended_at, ?2) > ?1 AND (?3 IS NULL OR thread_id = ?3)
-            ORDER BY started_at`,
+            ORDER BY started_at DESC`,
   session: `SELECT 'session', ref, COALESCE(display_name, title, harness), opened_at, closed_at
               FROM v_agent_session
              WHERE opened_at < ?2 AND COALESCE(closed_at, ?2) > ?1 AND (?3 IS NULL OR thread_id = ?3)
-             ORDER BY opened_at`,
+             ORDER BY opened_at DESC`,
   thread: `SELECT 'thread', ref, title, created_at, closed_at
              FROM v_thread
             WHERE created_at < ?2 AND COALESCE(closed_at, ?2) > ?1
               AND (?3 IS NULL OR ref = 'thread:thr' || ?3)
-            ORDER BY created_at`,
+            ORDER BY created_at DESC`,
   commit: `SELECT 'commit', ref, subject, committed_at, NULL
              FROM v_commit
             WHERE committed_at >= ?1 AND committed_at < ?2 AND ?3 IS NULL
-            ORDER BY committed_at`,
+            ORDER BY committed_at DESC`,
 };
 
 const GROUPS = [
@@ -90,7 +90,9 @@ oxplow.connect().then((component) => {
     // efforts"); zooming in takes them apart.
     cluster: {
       maxItems: 1,
-      clusterCriteria: (a: { group?: string }, b: { group?: string }) => a.group === b.group,
+      // Only the many short ones; a thread or session span reads alone.
+      clusterCriteria: (a: { group?: string }, b: { group?: string }) =>
+        a.group === b.group && (a.group === "effort" || a.group === "commit"),
       titleTemplate: "{count} items — zoom in to see them",
       fitOnDoubleClick: true,
     },
@@ -128,15 +130,21 @@ oxplow.connect().then((component) => {
         };
       }),
     );
+    // Laid out against the frame's size now, not the one it had when the
+    // timeline was made (it can start before the page has its size).
+    timeline.redraw();
     const capped = results.filter((r) => r.rows.truncated).map((r) => NOUNS[r.kind]);
     note.textContent =
       all.length === 0
         ? "Nothing happened in this range."
         : capped.length > 0
-          ? `Showing the first ${results.find((r) => r.rows.truncated)?.rows.rows.length} ${capped.join(" and ")} in this range — zoom in for the rest.`
+          ? `Showing the latest ${results.find((r) => r.rows.truncated)?.rows.rows.length} ${capped.join(" and ")} in this range — zoom in for the earlier ones.`
           : "";
     void component.setTitle(`Timeline: ${shortDate(from)} – ${shortDate(to)}`);
   };
+
+  // The frame's size settles after it loads, and changes with the window.
+  new ResizeObserver(() => timeline.redraw()).observe(container);
 
   // A load that fails says so, under the timeline.
   const show = (from: Date, to: Date) =>
