@@ -5,6 +5,8 @@
  *
  * - Metrics: `range`, `branch`, `slice`, `q` (the name filter) and `show`.
  * - A custom dashboard: `range` and `branch`; its `id` is its identity.
+ * - A metric (`metric:<key>?range=…`, an entity kind): `range`, `branch`
+ *   and `slice`; the key is its identity.
  *
  * `range` is a range value (`kit/rangePresets.ts`); `branch` and `slice`
  * are empty for every branch and no slice, and are then left out.
@@ -12,6 +14,8 @@
 
 const METRICS = ["range", "branch", "slice", "q", "show"];
 const DASHBOARD = ["range", "branch"];
+const METRIC = ["range", "branch", "slice"];
 
 export const isMetricsViewParam = (key: string) => METRICS.includes(key);
+export const isMetricViewParam = (key: string) => METRIC.includes(key);
 export const isDashboardViewParam = (key: string) => DASHBOARD.includes(key);

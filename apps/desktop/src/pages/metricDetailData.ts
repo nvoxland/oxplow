@@ -25,21 +25,6 @@ export function filterByRange(samples: SeriesPoint[], range: TimeRange): SeriesP
   });
 }
 
-/** Epoch ms → a `YYYY-MM-DDTHH:mm` string for a `datetime-local` input (local
- *  time). */
-export function toLocalInput(ms: number): string {
-  const d = new Date(ms);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-/** A `datetime-local` value → epoch ms, or `null` if unparseable/empty. */
-export function fromLocalInput(value: string): number | null {
-  if (!value) return null;
-  const ms = new Date(value).getTime();
-  return Number.isNaN(ms) ? null : ms;
-}
-
 /** Series points (any order) → time-ascending `{t,v}` chart points, dropping
  *  unparseable timestamps. The shared input to every kind's trend chart. */
 export function seriesPoints(samples: SeriesPoint[]): ChartPoint[] {

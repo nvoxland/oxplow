@@ -249,6 +249,13 @@ export function contributionOf(text: string): { kind: string; extension: string 
   return { kind: r.kind, extension: r.id.slice(0, slash), id: r.id.slice(slash + 1) };
 }
 
+/** A metric's page: `metric:<key>[?params]` — its view (range, branch, …)
+ *  as a query, the way a lens's params are. */
+export function metricRef(key: string, params?: Record<string, ParamValue>): string {
+  const head = `metric:${escapeId(key)}`;
+  return params ? withParams(head, params) : head;
+}
+
 /** A lens: `lens:<extension>/<slug>[?params]`; params are the caller's,
  *  in the order given. */
 export function lensRef(lensId: string, params?: Record<string, ParamValue>): string {

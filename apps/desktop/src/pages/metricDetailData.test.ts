@@ -9,7 +9,6 @@ import {
   exclusionReason,
   filterByRange,
   filterByBranch,
-  fromLocalInput,
   inRangeStat,
   specAggregation,
   transformSeries,
@@ -67,12 +66,6 @@ test("filterByRange keeps inclusive in-window samples, drops bad timestamps", ()
     range,
   );
   expect(kept.map((k) => k.capture_id)).toEqual([2, 3]);
-});
-
-test("fromLocalInput parses or returns null", () => {
-  expect(fromLocalInput("")).toBeNull();
-  expect(fromLocalInput("not-a-date")).toBeNull();
-  expect(fromLocalInput("2026-06-25T12:00")).toBe(new Date("2026-06-25T12:00").getTime());
 });
 
 test("transformSeries: value/cumulative/change/avg", () => {

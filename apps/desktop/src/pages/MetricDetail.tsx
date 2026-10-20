@@ -1,18 +1,16 @@
 import { Facts, type Fact } from "../kit/Facts.js";
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from "react";
+
+import { useHistoryState } from "../tabs/useHistoryState.js";
 
 import type { MetricSpec, SeriesPoint } from "../api.js";
 import { formatMetricValue, formatMetricValueExact } from "../components/format.js";
 import { DataTable, type DataColumn } from "../kit/index.js";
-import { matchPresetKey, rangeFromPreset, rangePresetLabel, type TimeRange } from "../kit/rangePresets.js";
-import { METRIC_RANGE_PRESETS } from "../kit/MetricFilters.js";
 import {
   type UncheckedFile,
   exclusionReason,
-  fromLocalInput,
   inRangeStat,
   specAggregation,
-  toLocalInput,
 } from "./metricDetailData.js";
 
 // Composable pieces of the Metric detail page. The page (`MetricDetailPage`)
@@ -30,135 +28,6 @@ function fmt(v: number, unit?: string | null): string {
 }
 
 export { TrendChart } from "../components/charts/TrendChart.js";
-
-/** Time-range + branch controls for the metric detail page. */
-export function MetricControls({
-  range,
-  onRange,
-  branch,
-  branches,
-  onBranch,
-  slice,
-}: {
-  range: TimeRange;
-  onRange: (r: TimeRange) => void;
-  branch: string | null;
-  branches: string[];
-  onBranch: (b: string | null) => void;
-  /** Slice By (P6.F1): the dimensions a metric can be grouped by, the one
-   *  chosen, and the change. */
-  slice?: { dimensions: { key: string; label: string }[]; value: string | null; onChange(key: string | null): void };
-}) {
-  const [customOpen, setCustomOpen] = useState(false);
-  const presetKey = matchPresetKey(range, Date.now());
-  // Custom inputs show when the user picks "Custom range…" or whenever the
-  // active window doesn't match a preset (e.g. after a chart drag).
-  const isCustom = customOpen || presetKey === "custom";
-  // Stacked vertically — these live in the narrow (320px) Details rail.
-  const selStyle = { fontSize: 12, width: "100%" } as const;
-  const rowStyle = { display: "flex", flexDirection: "column", gap: 3 } as const;
-  const labelStyle = { opacity: 0.6, fontSize: 12 } as const;
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }} data-testid="metric-controls">
-      <div style={rowStyle}>
-        <span style={labelStyle}>Range</span>
-        <select
-          value={isCustom ? "custom" : presetKey}
-          onChange={(e) => {
-            if (e.target.value === "custom") {
-              setCustomOpen(true);
-            } else {
-              setCustomOpen(false);
-              onRange(rangeFromPreset(e.target.value, Date.now()));
-            }
-          }}
-          data-testid="range-preset"
-          style={selStyle}
-        >
-          {METRIC_RANGE_PRESETS.map((p) => (
-            <option key={p} value={p}>
-              {rangePresetLabel(p)}
-            </option>
-          ))}
-          <option value="custom">Custom range…</option>
-        </select>
-        {isCustom ? (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              border: "1px solid var(--border, #2a2a2a)",
-              borderRadius: 4,
-              padding: 6,
-            }}
-          >
-            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11 }}>
-              <span style={{ opacity: 0.6 }}>From</span>
-              <input
-                type="datetime-local"
-                value={toLocalInput(range.from)}
-                onChange={(e) => {
-                  const from = fromLocalInput(e.target.value);
-                  if (from != null) onRange({ from, to: range.to });
-                }}
-                data-testid="range-from"
-                style={selStyle}
-              />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11 }}>
-              <span style={{ opacity: 0.6 }}>To</span>
-              <input
-                type="datetime-local"
-                value={toLocalInput(range.to)}
-                onChange={(e) => {
-                  const to = fromLocalInput(e.target.value);
-                  if (to != null) onRange({ from: range.from, to });
-                }}
-                data-testid="range-to"
-                style={selStyle}
-              />
-            </label>
-          </div>
-        ) : null}
-      </div>
-      <div style={rowStyle}>
-        <span style={labelStyle}>Branch</span>
-        <select
-          value={branch ?? ""}
-          onChange={(e) => onBranch(e.target.value || null)}
-          data-testid="branch-filter"
-          style={selStyle}
-        >
-          <option value="">All branches</option>
-          {branches.map((b) => (
-            <option key={b} value={b}>
-              {b}
-            </option>
-          ))}
-        </select>
-      </div>
-      {slice && slice.dimensions.length > 0 ? (
-        <div style={rowStyle}>
-          <span style={labelStyle}>Slice By</span>
-          <select
-            value={slice.value ?? ""}
-            onChange={(e) => slice.onChange(e.target.value || null)}
-            data-testid="metric-slice"
-            style={selStyle}
-          >
-            <option value="">(none)</option>
-            {slice.dimensions.map((d) => (
-              <option key={d.key} value={d.key}>
-                {d.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 const PAGE_SIZE = 25;
 
@@ -179,10 +48,17 @@ function recordingColumns(unit?: string | null): DataColumn<SeriesPoint>[] {
 }
 
 /** The actual recordings — every sample, newest first, paginated. */
-export function RecordingsTable({ samples, unit }: { samples: SeriesPoint[]; unit?: string | null }) {
-  const [page, setPage] = useState(0);
-  // Reset to the first page whenever the (filtered) input set changes.
-  useEffect(() => setPage(0), [samples]);
+export function RecordingsTable({ samples, unit, filterKey }: { samples: SeriesPoint[]; unit?: string | null; filterKey: string }) {
+  // The page is this step's history state: Back and a restart keep it.
+  const [page, setPage] = useHistoryState<number>("recordingsPage", 0);
+  // A different filter starts at the first page again — not the page's own
+  // mount, which keeps the one it came back to.
+  const filtered = useRef(filterKey);
+  useEffect(() => {
+    if (filtered.current === filterKey) return;
+    filtered.current = filterKey;
+    setPage(0);
+  }, [filterKey, setPage]);
 
   if (samples.length === 0) return <div style={{ opacity: 0.6 }}>No recordings in range.</div>;
   const pageCount = Math.max(1, Math.ceil(samples.length / PAGE_SIZE));

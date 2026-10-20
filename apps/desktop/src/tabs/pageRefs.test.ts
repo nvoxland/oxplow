@@ -284,6 +284,7 @@ describe("refFromTabId", () => {
       pageTabRef("tasks"),
       pageTabRef("git-dashboard"),
       metricRef("oxplow.todos"),
+      metricRef("oxplow.todos", { range: "7d", branch: "main" }),
       snapshotRef(112),
       workItemTabRef("work_item:oxplow:tsk42"),
       wikiPageRef("some-slug"),
@@ -340,6 +341,16 @@ describe("refFromTabId", () => {
     expect(r.payload).toEqual({ lensId: "x/effort-tests", params: { effort_id: 12, label: "a b" } });
     expect(refFromTabId(r.id)).toEqual(r);
     expect(lensRef("x/y", {}).id).toBe("lens:x/y");
+  });
+
+  test("a metric's view rides in its ref as a query and round-trips", () => {
+    const r = metricRef("oxplow.todos", { slice: "oxplow.language", range: "2026-06-01..2026-06-03" });
+    expect(r.id).toBe("metric:oxplow.todos?range=2026-06-01..2026-06-03&slice=oxplow.language");
+    expect(parseRef(r.id)).toMatchObject({ kind: "metric", id: "oxplow.todos?range=2026-06-01..2026-06-03&slice=oxplow.language" });
+    expect(refFromTabId(r.id)).toEqual(r);
+    expect(viewParamsOf(r)).toEqual({ slice: "oxplow.language", range: "2026-06-01..2026-06-03" });
+    expect(withViewParams(metricRef("oxplow.todos"), { range: "30d" }).id).toBe("metric:oxplow.todos?range=30d");
+    expect(metricRef("oxplow.todos", {}).id).toBe("metric:oxplow.todos");
   });
 });
 

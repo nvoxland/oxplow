@@ -167,6 +167,12 @@ function text(value: SqlCell): string {
   return value === null || value === undefined ? "" : String(value);
 }
 
+/** One end of a custom range as the row says it: a date as it is, a
+ *  date-time (a chart's brush) to the minute. */
+function rangeEnd(end: string): string {
+  return end === "" ? "…" : end.length > 10 ? end.slice(0, 16).replace("T", " ") : end;
+}
+
 /** What a row says its value is; null when it has none. */
 function summary(param: LensParam, type: ParamType, value: SqlCell, options: ParamOption[]): string | null {
   const t = text(value);
@@ -176,7 +182,7 @@ function summary(param: LensParam, type: ParamType, value: SqlCell, options: Par
       return param.options?.find((o) => o.value === t)?.label ?? t;
     case "date_range": {
       const ends = splitRange(t);
-      return ends ? `${ends[0] || "…"} – ${ends[1] || "…"}` : rangePresetLabel(t);
+      return ends ? `${rangeEnd(ends[0])} – ${rangeEnd(ends[1])}` : rangePresetLabel(t);
     }
     case "text":
       return options.find((o) => o.value === value)?.label ?? t;
@@ -382,7 +388,8 @@ function RangeEditor({ name, label, value, onApply, onDone, presets }: EditorPro
   const ends = splitRange(current);
   const [custom, setCustom] = useState(ends !== null);
   const anchor = useRef<HTMLSelectElement>(null);
-  const [from, to] = ends ?? ["", ""];
+  // A date input holds a date; a brushed end keeps its time until edited.
+  const [from, to] = (ends ?? ["", ""]).map((e) => e.slice(0, 10));
   return (
     <>
       <select

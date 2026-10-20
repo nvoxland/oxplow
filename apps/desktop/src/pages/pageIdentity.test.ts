@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { diffRef, extPageRef, fileRef, lensRef, pageTabRef } from "../tabs/pageRefs.js";
+import { diffRef, extPageRef, fileRef, lensRef, metricRef, pageTabRef } from "../tabs/pageRefs.js";
 import { pageIdentity, withView } from "./pageIdentity.js";
 
 // A page's identity is its ref without its view params: what it is, not
@@ -24,8 +24,11 @@ test("a built-in page's identity keeps every param but the view params it declar
   expect(pageIdentity(pageTabRef("metrics-recorded", { range: "30d", slice: "oxplow.language", q: "x", show: "all" }))).toBe("page:metrics-recorded");
 });
 
-test("an entity page is its ref", () => {
+test("an entity page is its ref, less the view its kind declares", () => {
   expect(pageIdentity(fileRef("src/a.ts"))).toBe(fileRef("src/a.ts").id);
+  expect(pageIdentity(metricRef("oxplow.todos", { range: "30d", branch: "main", slice: "oxplow.language" }))).toBe("metric:oxplow.todos");
+  expect(withView(metricRef("oxplow.todos"), { range: "30d" }).id).toBe("metric:oxplow.todos?range=30d");
+  expect(() => withView(metricRef("oxplow.todos"), { sort: "age" })).toThrow(/`sort` isn't a view param of metric:oxplow.todos/);
 });
 
 // A page changes only its view: writing a param it doesn't declare as view

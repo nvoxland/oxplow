@@ -830,7 +830,13 @@ visit) and page memory:
 - an extension's page: all but `ref` (what it was opened for);
 - one of oxplow's own pages: the view params it declares in
   `BUILT_IN_VIEW` (Tasks and Backlog: `isTasksViewParam`; Metrics: range, branch,
-  slice, q, show; a custom dashboard: range, branch — `pages/metricsView.ts`); a page that
+  slice, q, show; a custom dashboard: range, branch — `pages/metricsView.ts`);
+  the same table names an **entity kind** whose page has a view: a metric's
+  page is `metric:<key>?range=…&branch=…&slice=…`, its key the identity (so
+  comments, backlinks and visits still anchor on `metric:<key>`). A kind not
+  in the table is all identity, and `withView` refuses a view change to it.
+  The ref grammar needs nothing for it: `?` and `=` are legal in an id, and
+  the Rust `metric` kind accepts the query as `lens` and `page` do; a page that
   declares none is all identity — a diff's path and sides, a dashboard's
   id — so two diffs in a tab are two pages.
 

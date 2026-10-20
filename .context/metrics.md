@@ -1756,8 +1756,10 @@ just carries a Help blurb pointing there.
   `metricRef(key)`). The metric name is the H1 and its `description` the
   intro. The main column is the trend chart (drag to select a range; charted
   the way the metric rolls up — `defaultChartMode`: sum → cumulative) and the
-  paginated recordings (`RecordingsTable`, 25/page). The details rail holds
-  Range + Branch (`MetricControls`), the agg-aware in-range stat and the full
+  paginated recordings (`RecordingsTable`, 25/page; the page is history state).
+  Range, branch and slice are the ref's view (`metric:<key>?range=…`, a
+  brushed window is `range=<from>..<to>`), drawn by `MetricFilters`. The
+  details rail holds those filters, the agg-aware in-range stat and the full
   definition metadata (`MetricStatsRail`), **Add to dashboard ▾** and the
   **Enabled** checkbox. **Simplified (tsk309):** chart mode/scale controls,
   the breakdown card and group filter, the per-kind drill-ins (findings

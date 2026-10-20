@@ -9,31 +9,39 @@
  * - a lens's: all of them (its declared params);
  * - an extension's page: all but `ref`, which names the thing it opened
  *   for (`page:<ext>/<page>?ref={ref}`);
- * - one of oxplow's own pages: the ones it declares here
- *   (`BUILT_IN_VIEW`); a page that declares none is all identity (a diff's
- *   path and sides, a dashboard's id).
+ * - one of oxplow's own pages, or an entity's page (a metric's): the ones
+ *   it declares here (`BUILT_IN_VIEW`); one that declares none is all
+ *   identity (a diff's path and sides, a dashboard's id, a file).
  */
 
 import { isTasksViewParam } from "../components/Plan/tasksView.js";
-import { isDashboardViewParam, isMetricsViewParam } from "./metricsView.js";
+import { isDashboardViewParam, isMetricsViewParam, isMetricViewParam } from "./metricsView.js";
 import { identityOf } from "../tabs/session.js";
 import { extPageRef, pagePayload, pageTabRef, viewParamsOf, withViewParams } from "../tabs/pageRefs.js";
 import type { SqlCell } from "../tauri-bridge/generated/bindings.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { isBuiltInPage } from "./declaredPages.js";
 
-/** Each built-in page's view params, by page name. */
+/** The view params of each built-in page (by page name) and of each entity
+ *  kind whose page has a view (by kind). One table, one rule. */
 const BUILT_IN_VIEW: Record<string, (key: string) => boolean> = {
   tasks: isTasksViewParam,
   backlog: isTasksViewParam,
   "metrics-recorded": isMetricsViewParam,
   "custom-dashboard": isDashboardViewParam,
+  metric: isMetricViewParam,
 };
 
 export function pageIdentity(ref: TabRef): string {
   if (ref.kind === "lens") return identityOf(ref.id);
   const page = pagePayload(ref);
-  if (!page) return ref.id;
+  if (!page) {
+    // An entity's page: its ref, less the view its kind declares.
+    const isView = BUILT_IN_VIEW[ref.kind];
+    if (!isView) return ref.id;
+    const identity = Object.fromEntries(Object.entries(viewParamsOf(ref)).filter(([key]) => !isView(key)));
+    return withViewParams(ref, identity).id;
+  }
   if (page.extension !== null) {
     const opened = page.params.ref;
     return opened === undefined ? identityOf(ref.id) : extPageRef(page.extension, page.page, { ref: opened }).id;

@@ -103,6 +103,7 @@ fn the_core_kinds_are_registered_and_validate_ids() {
         "model:effort",
         "event_type:oxplow_bundled.accepted",
         "metric:oxplow.rust.unsafe_blocks",
+        "metric:oxplow.rust.unsafe_blocks?range=7d&branch=main",
         "job_run:01a1369e-b063-76f8-968f-902d392f882d",
     ] {
         assert!(reg.validate(&canon(ok)).is_ok(), "{ok}");

@@ -9,6 +9,7 @@ import {
   extPageRef,
   idOf,
   lensRef,
+  metricRef,
   pageRef,
   proposalRef,
   streamRef,
@@ -39,6 +40,8 @@ test("pages and lenses carry their params as a query", () => {
     "page:acme/board?ref=work_item:oxplow:tsk1",
   );
   expect(lensRef("acme/blocked", { stream_id: 2 })).toBe("lens:acme/blocked?stream_id=2");
+  expect(metricRef("oxplow.todos")).toBe("metric:oxplow.todos");
+  expect(metricRef("oxplow.todos", { range: "7d", branch: "main" })).toBe("metric:oxplow.todos?range=7d&branch=main");
 });
 
 test("idOf reads the id of the one kind", () => {
