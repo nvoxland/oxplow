@@ -93,7 +93,8 @@ import type { AppScope, SlotNav } from "./pages/appScope.js";
 import { FileViewerPage } from "./pages/FileViewerPage.js";
 import { RailHud } from "./components/RailHud/RailHud.js";
 import type { PageKind, TabRef } from "./tabs/tabState.js";
-import { PageNavigationContext, type NavSiblings, type PageNavigation } from "./tabs/PageNavigationContext.js";
+import { navigationKey } from "./tabs/navigationKeys.js";
+import { PageNavigationContext, type PageNavigation } from "./tabs/PageNavigationContext.js";
 import { removeBookmark, setBookmark, useBookmarks } from "./tabs/bookmarks.js";
 import type { BookmarkScope } from "./tabs/bookmarks.js";
 import { isUnder, movedPath } from "./fileEvents.js";
@@ -1279,9 +1280,19 @@ export function App() {
       // runs while typing (Save, Find, Quick Open do — a user mid-way
       // through a description shouldn't lose it to New Task's form).
       const offer = offerForShortcut(offers, event, isEditableTarget(event.target));
-      if (!offer) return;
+      if (offer) {
+        event.preventDefault();
+        offer.run();
+        return;
+      }
+      // Back, Forward, and Up / Down the page's origin, on the active tab.
+      const key = navigationKey(event, event.target);
+      if (!key) return;
+      const keys = navKeysRef.current;
       event.preventDefault();
-      offer.run();
+      if (key === "back") keys.back();
+      else if (key === "forward") keys.forward();
+      else keys.step(key === "up" ? -1 : 1);
     }
 
     window.addEventListener("keydown", handleKeyDown);
@@ -1722,13 +1733,12 @@ export function App() {
   }, [selectedThreadId, stream, updateSession]);
 
   /** The collection a page is opened from, as an entry keeps it. */
-  const originOf = (siblings: NavSiblings | undefined, ref: TabRef): Origin | undefined => {
-    if (!siblings) return undefined;
-    const items = siblings.entries.map((e) => ({ ref: e.diffSpec ? diffRef(e.diffSpec) : e.ref, label: e.label }));
-    const at = items.findIndex((item) => item.ref.id === ref.id);
-    const index = at !== -1 ? at : siblings.index;
-    if (index < 0 || index >= items.length) return undefined;
-    return { title: siblings.title, items, index };
+  const originOf = (origin: Origin | undefined, ref: TabRef): Origin | undefined => {
+    if (!origin) return undefined;
+    const at = origin.items.findIndex((item) => item.ref.id === ref.id);
+    const index = at !== -1 ? at : origin.index;
+    if (index < 0 || index >= origin.items.length) return undefined;
+    return { ...origin, index };
   };
 
   /** What showing `ref` in a tab needs besides the tab: a working-tree
@@ -1752,7 +1762,7 @@ export function App() {
   const handleNavigateInTab = useCallback((
     currentTabId: string,
     ref: TabRef,
-    siblings?: NavSiblings,
+    origin?: Origin,
     replace = false,
   ) => {
     if (!selectedThreadId) return;
@@ -1766,20 +1776,20 @@ export function App() {
     }
     prepareFor(ref);
     updateSession(selectedThreadId, (session) =>
-      sessionNavigate(session, slot, { ref, from: originOf(siblings, ref) }, { replace }),
+      sessionNavigate(session, slot, { ref, from: originOf(origin, ref) }, { replace }),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [closePageTab, handleOpenPage, selectedThreadId, sessions, updateSession]);
 
   /** Open a diff in the tab showing `currentTabId`; Back returns to the
    *  page it came from. */
-  const handleOpenDiffInTab = useCallback((currentTabId: string, spec: DiffSpec, siblings?: NavSiblings) => {
-    handleNavigateInTab(currentTabId, diffRef(spec), siblings);
+  const handleOpenDiffInTab = useCallback((currentTabId: string, spec: DiffSpec, origin?: Origin) => {
+    handleNavigateInTab(currentTabId, diffRef(spec), origin);
   }, [handleNavigateInTab]);
 
   /** Show item `index` of the collection the tab was opened from, in
    *  place: history untouched. */
-  const handleStepSibling = useCallback((slot: string, index: number) => {
+  const handleStepOrigin = useCallback((slot: string, index: number) => {
     if (!selectedThreadId) return;
     const tab = sessions[selectedThreadId]?.tabs.find((t) => t.slot === slot);
     const target = tab ? currentEntry(tab).from?.items[index]?.ref : undefined;
@@ -1795,6 +1805,24 @@ export function App() {
   const handleGoForward = useCallback((slot: string) => {
     if (selectedThreadId) updateSession(selectedThreadId, (session) => sessionForward(session, slot));
   }, [selectedThreadId, updateSession]);
+
+  // What the navigation keys do now: the active tab's Back, Forward and
+  // step through its origin. Read at the key press, so the handler below
+  // needn't rebind as tabs move.
+  const navKeysRef = useRef({ back: () => {}, forward: () => {}, step: (_by: number) => {} });
+  navKeysRef.current = (() => {
+    const session = selectedThreadId ? sessions[selectedThreadId] : undefined;
+    const tab = session?.tabs.find((t) => t.slot === session.active);
+    if (!tab) return { back: () => {}, forward: () => {}, step: () => {} };
+    const origin = currentEntry(tab).from;
+    return {
+      back: () => handleGoBack(tab.slot),
+      forward: () => handleGoForward(tab.slot),
+      step: (by: number) => {
+        if (origin) handleStepOrigin(tab.slot, origin.index + by);
+      },
+    };
+  })();
 
   // The window as a command host (`clientHost.ts`): what only it can do,
   // for a command the daemon runs over it — an agent's `oxplow.tab.*`, in
@@ -2343,14 +2371,14 @@ export function App() {
       const currentId = currentEntry(sessionTab).ref.id;
       const navOpen = (newRef: TabRef, opts?: import("./tabs/PageNavigationContext.js").NavigateOptions) => {
         if (opts?.newTab) handleOpenPage(newRef);
-        else handleNavigateInTab(currentId, newRef, opts?.siblings, opts?.replace);
+        else handleNavigateInTab(currentId, newRef, opts?.origin, opts?.replace);
       };
       const navOpenFile = (path: string, opts?: { newTab?: boolean }) => {
         if (opts?.newTab) handleOpenPage(fileRef(path));
         else handleNavigateInTab(currentId, fileRef(path));
       };
       // A diff in this tab: Back returns to the page it came from.
-      const navOpenDiff = (spec: DiffSpec, siblings?: NavSiblings) => handleOpenDiffInTab(currentId, spec, siblings);
+      const navOpenDiff = (spec: DiffSpec, origin?: Origin) => handleOpenDiffInTab(currentId, spec, origin);
       const navRevealCommit = (sha: string) => navOpen(gitCommitRef(sha));
       const slotNav: SlotNav = { slotId: currentId, navOpen, navOpenFile, navOpenDiff, navRevealCommit };
       for (const body of bodies(sessionTab, livePage)) {
@@ -2372,30 +2400,27 @@ export function App() {
       const slot = sessionTab.slot;
       const tabId = tab.id;
       const currentId = currentEntry(sessionTab).ref.id;
-      const from = isCurrent ? currentEntry(sessionTab).from : undefined;
-      const siblings: NavSiblings | null = from ? { entries: from.items, index: from.index, title: from.title } : null;
+      const origin: Origin | null = isCurrent ? (currentEntry(sessionTab).from ?? null) : null;
       const innerRender = tab.render;
       const bookmarkScope = bookmarks.find((b) => b.ref.id === ref.id)?.scope ?? null;
       const registeredTitle = pageTitles[tabId];
       const navValue: PageNavigation = {
         navigate: (newRef, opts) => {
           if (opts?.newTab) handleOpenPage(newRef);
-          else handleNavigateInTab(currentId, newRef, opts?.siblings, opts?.replace);
+          else handleNavigateInTab(currentId, newRef, opts?.origin, opts?.replace);
         },
         openRef: (target, how) =>
           openRefRef.current(target, how ?? {}, (opened, h) => {
             if (h.newTab) handleOpenPage(opened);
-            else handleNavigateInTab(currentId, opened, h.siblings, h.replace);
+            else handleNavigateInTab(currentId, opened, h.origin, h.replace);
           }),
         goBack: () => handleGoBack(slot),
         goForward: () => handleGoForward(slot),
         canGoBack: sessionTab.at > 0,
         canGoForward: sessionTab.at < sessionTab.entries.length - 1,
         pinned: !!tab.pinned,
-        siblings,
-        goPrevSibling: siblings && siblings.index > 0 ? () => handleStepSibling(slot, siblings.index - 1) : undefined,
-        goNextSibling: siblings && siblings.index < siblings.entries.length - 1 ? () => handleStepSibling(slot, siblings.index + 1) : undefined,
-        goSibling: siblings ? (index: number) => handleStepSibling(slot, index) : undefined,
+        origin,
+        stepOrigin: origin ? (index: number) => handleStepOrigin(slot, index) : undefined,
         setTitle: (t: string) => setPageTitle(tabId, t),
         title: registeredTitle,
         ask: parseRef(ref.id) ? { ref: ref.id } : undefined,
@@ -2466,7 +2491,7 @@ export function App() {
     handleOpenDiffInTab,
     handleGoBack,
     handleGoForward,
-    handleStepSibling,
+    handleStepOrigin,
     closePageTab,
     pageTitles,
     setPageTitle,

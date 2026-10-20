@@ -24,7 +24,7 @@ import { Page } from "../tabs/Page.js";
 import { routeDispatch, routeHandlers } from "../tabs/RouteLink.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { DataTable, Section, type DataColumn } from "../kit/index.js";
-import type { NavSiblings } from "../tabs/PageNavigationContext.js";
+import type { OriginItem } from "../tabs/session.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { buildMetricSections } from "./metricCategories.js";
 import { DIMENSIONS_SQL } from "./exploreData.js";
@@ -43,7 +43,7 @@ import {
   type ShowMode,
   filterMetricRows,
   metricStatusColor,
-  metricSiblings,
+  metricOrigin,
   sliceGroups,
 } from "./metricsRows.js";
 
@@ -170,12 +170,12 @@ function MetricsTable({
   entries,
   slice,
   onOpenPage,
-  siblings,
+  origin,
 }: {
   entries: Row[];
   slice: string | null;
   onOpenPage?: (ref: TabRef) => void;
-  siblings: { entries: NavSiblings["entries"]; indexByKey: ReadonlyMap<string, number> };
+  origin: { items: OriginItem[]; indexByKey: ReadonlyMap<string, number> };
 }) {
   const ctxNav = useOptionalPageNavigation();
   const lines = useMemo(() => entries.flatMap((row) => metricLines(row, slice)), [entries, slice]);
@@ -190,9 +190,9 @@ function MetricsTable({
           const handlers = routeHandlers(
             routeDispatch(metricRef(l.row.key), ctxNav, {
               onNavigate: onOpenPage,
-              siblings: {
-                entries: siblings.entries,
-                index: siblings.indexByKey.get(l.row.key) ?? 0,
+              origin: {
+                items: origin.items,
+                index: origin.indexByKey.get(l.row.key) ?? 0,
                 title: "Metrics",
               },
             }),
@@ -330,7 +330,7 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
 
   // The up/down sibling chain a drilled-into detail page steps through
   // (tsk119): the rendered sections flattened in visual order.
-  const siblings = useMemo(() => metricSiblings(sections, (key) => metricRef(key)), [sections]);
+  const origin = useMemo(() => metricOrigin(sections, (key) => metricRef(key)), [sections]);
 
   return (
     // The provider wraps the whole Page so its context reaches BOTH the details
@@ -484,7 +484,7 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
                   entries={group.entries}
                   slice={sliceBy ? (dimensions.find((d) => d.key === sliceBy)?.label ?? sliceBy) : null}
                   onOpenPage={onOpenPage}
-                  siblings={siblings}
+                  origin={origin}
                 />
               </Section>
             ))}

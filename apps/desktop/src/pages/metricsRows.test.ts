@@ -5,7 +5,7 @@ import {
   SHOW_MODES,
   filterMetricRows,
   metricStatus,
-  metricSiblings,
+  metricOrigin,
   sliceGroups,
 } from "./metricsRows.js";
 
@@ -82,7 +82,7 @@ describe("filterMetricRows", () => {
   });
 });
 
-describe("metricSiblings", () => {
+describe("metricOrigin", () => {
   const section = (keys: string[]) => ({
     entries: keys.map((key) => ({ key, title: key.toUpperCase() })),
   });
@@ -91,22 +91,22 @@ describe("metricSiblings", () => {
     // The sibling chain must continue ACROSS section boundaries — stepping
     // down from the last Tests row lands on the first TypeScript row, exactly
     // as the eye reads the page.
-    const sibs = metricSiblings(
+    const sibs = metricOrigin(
       [section(["a", "b"]), section(["c"])],
       (key) => ({ id: `metric:${key}`, kind: "metric", payload: null }),
     );
-    expect(sibs.entries.map((e) => e.ref.id)).toEqual([
+    expect(sibs.items.map((e) => e.ref.id)).toEqual([
       "metric:a",
       "metric:b",
       "metric:c",
     ]);
     // Labels are the row titles — they feed the prev/next hover tooltips.
-    expect(sibs.entries.map((e) => e.label)).toEqual(["A", "B", "C"]);
+    expect(sibs.items.map((e) => e.label)).toEqual(["A", "B", "C"]);
     expect(sibs.indexByKey.get("c")).toBe(2);
   });
 
   it("returns an empty chain for no sections", () => {
-    expect(metricSiblings([], () => ({ id: "x", kind: "metric", payload: null })).entries).toEqual([]);
+    expect(metricOrigin([], () => ({ id: "x", kind: "metric", payload: null })).items).toEqual([]);
   });
 });
 

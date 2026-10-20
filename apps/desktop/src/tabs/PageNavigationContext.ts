@@ -1,45 +1,22 @@
 import { createContext, useContext, useEffect } from "react";
 import type { TabRef } from "./tabState.js";
 import type { BookmarkScope } from "./bookmarks.js";
+import type { Origin } from "./session.js";
 
 export interface NavigateOptions {
   /** Force a brand new tab (slot) instead of replacing the current page. */
   newTab?: boolean;
   /**
-   * Sibling list this navigation came from. When supplied, the
-   * destination page renders prev/next sibling buttons in its nav bar
-   * that step through the list without affecting back/forward history.
-   * The destination's index inside the list is auto-detected from the
-   * entries (matched on `ref.id`); pass `siblingsIndex` explicitly to
-   * disambiguate when an id appears more than once.
+   * The collection this navigation came from. The destination keeps it as
+   * its entry's origin: its nav bar steps through the items (Up and Down)
+   * without touching Back and Forward. The destination's position is
+   * found by the item whose `ref.id` is the destination's; `index` is the
+   * fallback.
    */
-  siblings?: NavSiblings;
+  origin?: Origin;
   /** In place of the current page, which leaves history: Back won't
    *  return to it (a submitted form gives way to what it made). */
   replace?: boolean;
-}
-
-export interface NavSiblingEntry {
-  ref: TabRef;
-  /** Human-readable label for hover-tooltips (file path, tasks title, …). */
-  label: string;
-  /** When the entry's `ref.kind === "diff"`, the full DiffSpec is
-   *  carried alongside so the navigation host can pre-register every
-   *  sibling's spec in `diffTabs`. Without this, stepping arrows
-   *  would land on a diff TabRef whose spec the renderer can't find,
-   *  and the tab silently disappears. */
-  diffSpec?: import("../components/Diff/DiffPane.js").DiffSpec;
-}
-
-export interface NavSiblings {
-  entries: NavSiblingEntry[];
-  /** 0-based position of the page being navigated to. */
-  index: number;
-  /** Human-readable label for the originating list — surfaced as a
-   *  hover tooltip on the prev/next indicator so the user can tell
-   *  what they're stepping through ("Recently modified",
-   *  "Backlinks", "Files in apps/desktop/src/components", etc.). */
-  title?: string;
 }
 
 export interface BookmarkBinding {
@@ -74,18 +51,13 @@ export interface PageNavigation {
   /** The tab is pinned (its kind's, `isPinnedKind`): it leads the strip
    *  and is always itself, so its bar has no back or forward. */
   pinned?: boolean;
-  /** Sibling-list state for the current page. Null when this page
-   *  was not opened from a list. Up/down step through `entries`
-   *  without affecting back/forward history. */
-  siblings?: NavSiblings | null;
-  /** Step to the previous sibling (index - 1). No-op when at index 0. */
-  goPrevSibling?(): void;
-  /** Step to the next sibling (index + 1). No-op at the last entry. */
-  goNextSibling?(): void;
-  /** Jump to an arbitrary sibling by 0-based index. Out-of-range or
-   *  same-as-current is a no-op. Used by the indicator dropdown so
-   *  the user can jump straight to a sibling without stepping. */
-  goSibling?(index: number): void;
+  /** The collection the current page was opened from; null when it was
+   *  not opened from one. Up and Down step through its items without
+   *  affecting back/forward history. */
+  origin?: Origin | null;
+  /** Show item `index` of the origin in this page's place. Out-of-range
+   *  or the current item is a no-op. */
+  stepOrigin?(index: number): void;
   /** Bookmark binding for the page currently rendered in this tab. */
   bookmark?: BookmarkBinding;
   /** The page's canonical ref (`commit:<sha>`, `lens:x/y`) and stream,

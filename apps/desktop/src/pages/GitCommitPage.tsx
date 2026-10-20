@@ -27,7 +27,7 @@ export interface GitCommitPageProps {
   threadWork: WorkList | null;
   /** Opens a changed file's diff (parent → this commit). */
   onOpenDiff?(spec: DiffSpec): void;
-  onOpenDiffInTab?(spec: DiffSpec, siblings?: import("../tabs/PageNavigationContext.js").NavSiblings): void;
+  onOpenDiffInTab?(spec: DiffSpec, origin?: import("../tabs/session.js").Origin): void;
   onOpenPage(ref: TabRef, opts?: { newTab?: boolean }): void;
   onOpenFile?(path: string, opts?: { newTab?: boolean }): void;
 }

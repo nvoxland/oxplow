@@ -7,7 +7,7 @@
  * How (in this tab, a new one) is the click's (`RouteLink`).
  */
 import { refTarget, type RefTarget } from "./refOpener.js";
-import type { NavSiblings } from "./PageNavigationContext.js";
+import type { Origin } from "./session.js";
 import type { TabRef } from "./tabState.js";
 
 /** How a click asks a page to open. */
@@ -15,7 +15,7 @@ export interface OpenHow {
   /** A new tab instead of this one. */
   newTab?: boolean;
   /** The list the link sits in, for prev/next on the page it opens. */
-  siblings?: NavSiblings;
+  origin?: Origin;
   /** In place of the current page, which leaves history: Back won't
    *  return to it (a submitted form gives way to what it made). */
   replace?: boolean;

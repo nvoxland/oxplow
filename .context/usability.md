@@ -645,6 +645,11 @@ declaring *what it is* and mounting the generic layer.
   (`.context/commands.md` "Offering a command to a person"), shown on
   its menu item when it has a `ui.menu` place; there's no separate key
   table.
+- **Moving through a tab is the browser's keys, not commands.** Cmd+[ and
+  Cmd+] are Back and Forward; Alt+↑ and Alt+↓ are Up and Down the list the
+  page was opened from (`tabs/navigationKeys.ts`, the global handler in
+  `App.tsx`). They don't fire while focus is in a field, a select, a
+  contenteditable or Monaco.
 - **The native menu is renderer-driven.** `App.tsx` pushes the menu
   snapshot to `set_native_menu` (built in
   `crates/oxplow-tauri-ipc/src/commands/menu.rs`); macOS shows the

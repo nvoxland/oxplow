@@ -2,7 +2,8 @@ import type { CSSProperties, MouseEvent, ReactNode } from "react";
 import { useMemo } from "react";
 import type { TabRef } from "./tabState.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
-import type { NavSiblings, PageNavigation } from "./PageNavigationContext.js";
+import type { PageNavigation } from "./PageNavigationContext.js";
+import type { Origin } from "./session.js";
 import { openRefInWindow } from "./openRef.js";
 
 /**
@@ -24,13 +25,13 @@ export interface RouteDispatchOptions {
   onNavigate?: (ref: TabRef, opts?: { newTab?: boolean }) => void;
   pinnedSlot?: boolean;
   /**
-   * Optional sibling list this row is part of. When the row
-   * dispatches an in-tab navigation, the siblings travel with it
+   * Optional collection this row is part of. When the row
+   * dispatches an in-tab navigation, the origin travels with it
    * and the destination page picks up prev/next buttons in its
    * nav bar. Ignored when the navigation falls back to a new tab
    * or to the rail-side `onNavigate` callback.
    */
-  siblings?: NavSiblings;
+  origin?: Origin;
 }
 
 /**
@@ -43,19 +44,19 @@ export interface RouteDispatchOptions {
 export function routeDispatch(
   ref: TabRef | string,
   ctxNav: PageNavigation | null,
-  { onNavigate, pinnedSlot = false, siblings }: RouteDispatchOptions = {},
+  { onNavigate, pinnedSlot = false, origin }: RouteDispatchOptions = {},
 ): (newTab: boolean) => void {
   return (newTab) => {
     const escape = newTab || pinnedSlot;
     // A ref string opens through the registry, wherever the link sits.
     if (typeof ref === "string") {
-      const how = { newTab: escape, siblings: escape ? undefined : siblings };
+      const how = { newTab: escape, origin: escape ? undefined : origin };
       if (ctxNav?.openRef) ctxNav.openRef(ref, how);
       else openRefInWindow(ref, how);
       return;
     }
     if (ctxNav) {
-      ctxNav.navigate(ref, { newTab: escape, siblings: escape ? undefined : siblings });
+      ctxNav.navigate(ref, { newTab: escape, origin: escape ? undefined : origin });
       return;
     }
     if (onNavigate) {
@@ -90,11 +91,11 @@ export function routeHandlers(dispatch: (newTab: boolean) => void) {
 }
 
 export function useRouteDispatch(ref: TabRef | string, options: RouteDispatchOptions = {}) {
-  const { onNavigate, pinnedSlot = false, siblings } = options;
+  const { onNavigate, pinnedSlot = false, origin } = options;
   const ctxNav = useOptionalPageNavigation();
   const dispatch = useMemo(
-    () => routeDispatch(ref, ctxNav, { onNavigate, pinnedSlot, siblings }),
-    [ref, ctxNav, onNavigate, pinnedSlot, siblings],
+    () => routeDispatch(ref, ctxNav, { onNavigate, pinnedSlot, origin }),
+    [ref, ctxNav, onNavigate, pinnedSlot, origin],
   );
   const handlers = useMemo(() => routeHandlers(dispatch), [dispatch]);
   return { dispatch, handlers };

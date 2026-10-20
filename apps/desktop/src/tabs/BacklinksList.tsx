@@ -12,7 +12,7 @@ import { refTargetNow } from "./refOpener.js";
 import { setContextRefDrag } from "../agent-context-dnd.js";
 import type { ContextRef } from "../agent-context-ref.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
-import type { NavSiblings } from "./PageNavigationContext.js";
+import type { Origin } from "./session.js";
 
 /**
  * A backlink entry that points at a snapshot. Snapshots aren't a Page
@@ -104,13 +104,13 @@ export function BacklinksList({
   const ctxNav = useOptionalPageNavigation();
   const openRef = ctxNav?.openRef ?? openRefInWindow;
   const { open: openMenu, menu } = useContextMenu();
-  // Pre-compute the sibling list (the regular `entries` only — snapshot
+  // Pre-compute the origin (the regular `entries` only — snapshot
   // and commit entries open slideovers and don't participate in tab-
-  // level navigation). The destination page receives this as
-  // `siblings`, picks up prev/next buttons keyed by the row's index.
-  const siblingsList = useMemo<NavSiblings>(
+  // level navigation). The destination page receives this as its
+  // `origin` and steps through it by the row's index.
+  const originList = useMemo<Origin>(
     () => ({
-      entries: entries.flatMap((e) => {
+      items: entries.flatMap((e) => {
         const target = e.open ? refTargetNow(e.open) : null;
         return target && "tab" in target ? [{ ref: target.tab, label: e.label }] : [];
       }),
@@ -218,7 +218,7 @@ export function BacklinksList({
             if ((e.metaKey || e.ctrlKey) || !ctxNav) {
               openRef(page, { newTab: true });
             } else {
-              openRef(page, { siblings: { entries: siblingsList.entries, index: idx, title: "Backlinks" } });
+              openRef(page, { origin: { items: originList.items, index: idx, title: "Backlinks" } });
             }
           }}
           onAuxClick={(e: MouseEvent) => {
