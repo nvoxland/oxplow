@@ -2208,6 +2208,53 @@ mod tests {
         );
     }
 
+    /// A held extension is listed with why: its last working version's
+    /// row, or — when nothing of it runs — its own row, off, with the
+    /// reasons in `errors`.
+    #[tokio::test]
+    async fn a_held_extension_is_listed_with_why() {
+        let (dir, svc) = unbooted();
+        write(dir.path(), ".oxplow/project.yaml", "extensions: [acme]\n");
+        write(
+            dir.path(),
+            ".oxplow/extensions/acme/extension.yaml",
+            "manifest: 2\nname: acme\nnot_a_key: 1\nintent:\n  purpose: test\n",
+        );
+        active_deployment(
+            &svc,
+            "acme",
+            "00000000000000cc",
+            &[(
+                "extension.yaml",
+                "manifest: 2\nname: acme\nnot_a_key: 1\nintent:\n  purpose: test\n".into(),
+            )],
+        )
+        .await;
+        svc.extension_activation
+            .initialize(svc.clone())
+            .await
+            .unwrap();
+        let rows = svc
+            .sql
+            .query_sql(
+                "SELECT enabled, errors FROM v_extension WHERE name = 'acme'",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap()
+            .rows;
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0][0], oxplow_db::SqlCell::Int(0));
+        let oxplow_db::SqlCell::Text(errors) = &rows[0][1] else {
+            panic!("{rows:?}")
+        };
+        assert!(
+            errors.contains("not_a_key") && errors.contains("isn't active until"),
+            "{errors}"
+        );
+    }
+
     /// Everything in an extension's folder is copied into each deployment,
     /// so a big one deploys and says how big it is.
     #[tokio::test]

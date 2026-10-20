@@ -9,6 +9,7 @@ const realApi = await import("../../api.js");
  *  real call — with no Tauri host it throws, and the test would pass only
  *  where another file's mock answered first (tsk1012). */
 const noRows = { columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} };
+let extensionRows: unknown[][] = [];
 const saved: unknown[] = [];
 const ran: [string, unknown][] = [];
 mock.module("../../api.js", () => ({
@@ -26,6 +27,15 @@ mock.module("../../api.js", () => ({
     return { result: null, audit_id: 1, event_id: "e", inverse: null };
   },
   querySql: async (sql: string) => {
+    if (sql.includes("FROM v_extension")) {
+      return {
+        columns: ["name", "enabled", "errors", "deployment"],
+        rows: extensionRows,
+        truncated: false,
+        reads: { models: ["v_extension"], tables: [], measures: [] },
+        freshness: {},
+      };
+    }
     if (sql.includes("FROM v_agent_nudge")) {
       return {
         columns: ["id", "kind", "message", "thread_title"],
@@ -63,7 +73,7 @@ const { AlertsPage } = await import("../../pages/AlertsPage.js");
 const { AlertsIndicator } = await import("./AlertsIndicator.js");
 const { PanelRunsProvider } = await import("../Panels/PanelRunsContext.js");
 const { getOpErrorsStore, recordOpError } = await import("../opErrorsStore.js");
-const { alertsRef } = await import("../../tabs/pageRefs.js");
+const { alertsRef, settingsRef } = await import("../../tabs/pageRefs.js");
 const { getToastStore } = await import("../toastStore.js");
 const { useAlertToasts, SETTLE_MS } = await import("./useAlertToasts.js");
 const { renderHook } = await import("@testing-library/react");
@@ -118,7 +128,7 @@ test("the bell counts everything, red for a problem, and opens Alerts", async ()
 
 test("a toast once per new item, after the start-up settle, offering only Review", () => {
   let clock = 0;
-  const none = { proposals: [], opErrors: [], undelivered: 0, failedReactions: 0, badges: [], hints: [] };
+  const none = { proposals: [], opErrors: [], undelivered: 0, failedReactions: 0, extensionProblems: [], badges: [], hints: [] };
   const reviewed: number[] = [];
   const { rerender } = renderHook(
     ({ items }) => useAlertToasts(items, () => reviewed.push(1), () => clock),
@@ -133,4 +143,15 @@ test("a toast once per new item, after the start-up settle, offering only Review
   expect(toasts.map((t) => [t.message, t.actionLabel])).toEqual([["New one", "Review"]]);
   getToastStore().undo(toasts[0]!.id);
   expect(reviewed).toEqual([1]);
+});
+
+test("an extension with problems is listed under Problems and opens Settings → Extensions", async () => {
+  extensionRows = [["oxplow-foundation", 0, '["held back","other"]', null]];
+  const opened: unknown[] = [];
+  const view = render(withRuns(<AlertsPage onOpenPage={(r) => opened.push(r)} />));
+  const row = await waitFor(() => view.getByTestId("alerts-extension-oxplow-foundation"));
+  expect(row.textContent).toContain("isn't running as it should: held back (+1 more)");
+  fireEvent.click(view.getByTestId("alerts-extension-open-oxplow-foundation"));
+  expect(opened).toEqual([settingsRef("extensions")]);
+  extensionRows = [];
 });

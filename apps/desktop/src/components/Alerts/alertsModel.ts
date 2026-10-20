@@ -11,6 +11,9 @@ export interface AlertItems {
   undelivered: number;
   /** Effect reactions that failed. */
   failedReactions: number;
+  /** Extensions with errors (held back or not running as they should),
+   *  each with the line to show. */
+  extensionProblems: { name: string; message: string }[];
   /** Extension panel badges that fire. */
   badges: { id: string; title: string; message: string }[];
   /** Hints raised to the person, until they dismiss one. */
@@ -22,7 +25,7 @@ export type AlertTone = "none" | "accent" | "danger";
 /** The bell: how many things need the person, red while something failed
  *  (a problem), the accent while only decisions and notices wait. */
 export function alertsSummary(items: AlertItems): { count: number; tone: AlertTone } {
-  const problems = items.opErrors.length + items.undelivered + items.failedReactions;
+  const problems = items.opErrors.length + items.undelivered + items.failedReactions + items.extensionProblems.length;
   const count = items.proposals.length + items.badges.length + items.hints.length + problems;
   return { count, tone: problems > 0 ? "danger" : count > 0 ? "accent" : "none" };
 }
@@ -35,6 +38,7 @@ export function alertKeys(items: AlertItems): Set<string> {
   for (const e of items.opErrors) keys.add(`op:${e.id}`);
   if (items.undelivered > 0) keys.add("delivery");
   if (items.failedReactions > 0) keys.add("reactions");
+  for (const x of items.extensionProblems) keys.add(`ext-problem:${x.name}`);
   for (const b of items.badges) keys.add(`badge:${b.id}`);
   for (const h of items.hints) keys.add(`hint:${h.id}`);
   return keys;
@@ -56,6 +60,7 @@ export function newAlerts(seen: Set<string>, items: AlertItems): { key: string; 
   if (items.failedReactions > 0) {
     add("reactions", items.failedReactions === 1 ? "An effect failed to react" : `${items.failedReactions} effects failed to react`);
   }
+  for (const x of items.extensionProblems) add(`ext-problem:${x.name}`, x.message);
   for (const b of items.badges) add(`badge:${b.id}`, `${b.title}: ${b.message}`);
   for (const h of items.hints) add(`hint:${h.id}`, h.message);
   return out;

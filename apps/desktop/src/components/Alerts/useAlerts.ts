@@ -5,6 +5,7 @@
 import { useMemo, useSyncExternalStore } from "react";
 
 import { useFailedReactions, useUndelivered } from "../../delivery.js";
+import { extensionProblemLine, useExtensionProblems } from "../../extensionProblems.js";
 import { usePersonHints } from "../../hints.js";
 import { useProposals } from "../../proposals.js";
 import { usePanelRuns } from "../Panels/PanelRunsContext.js";
@@ -17,6 +18,7 @@ export function useAlerts() {
   const opErrors = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const undelivered = useUndelivered();
   const failedReactions = useFailedReactions();
+  const extensionProblems = useExtensionProblems();
   const { alerts: badges } = usePanelRuns();
   const hints = usePersonHints();
   const items: AlertItems = useMemo(
@@ -28,10 +30,11 @@ export function useAlerts() {
       opErrors: opErrors.map((e) => ({ id: e.id, label: e.label })),
       undelivered: undelivered.length,
       failedReactions: failedReactions.length,
+      extensionProblems: extensionProblems.map((x) => ({ name: x.name, message: extensionProblemLine(x) })),
       badges: badges.map((b) => ({ id: b.id, title: b.title, message: b.message })),
       hints: hints.map((h) => ({ id: h.id, message: h.message })),
     }),
-    [proposals, opErrors, undelivered, failedReactions, badges, hints],
+    [proposals, opErrors, undelivered, failedReactions, extensionProblems, badges, hints],
   );
   return { items, proposals, opErrors, badges, hints };
 }

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { alertsSummary, alertKeys, newAlerts, type AlertItems } from "./alertsModel.js";
 
-const none: AlertItems = { proposals: [], opErrors: [], undelivered: 0, failedReactions: 0, badges: [], hints: [] };
+const none: AlertItems = { proposals: [], opErrors: [], undelivered: 0, failedReactions: 0, extensionProblems: [], badges: [], hints: [] };
 
 // One bell for everything that needs the person.
 test("the bell counts every item, red for a problem, accent for a decision", () => {
@@ -53,4 +53,13 @@ test("a hint for the person counts and toasts once", () => {
   expect(alertsSummary({ ...none, hints: [hint] })).toEqual({ count: 1, tone: "accent" });
   expect(newAlerts(alertKeys(none), { ...none, hints: [hint] }).map((a) => a.message)).toEqual(["“t” is still in progress"]);
   expect(newAlerts(alertKeys({ ...none, hints: [hint] }), { ...none, hints: [hint] })).toEqual([]);
+});
+
+// An extension held back is a problem: red, counted, toasted once.
+test("an extension with problems counts red and toasts once", () => {
+  const ext = { name: "oxplow-foundation", message: "`oxplow-foundation` isn't running as it should: boom" };
+  expect(alertsSummary({ ...none, extensionProblems: [ext] })).toEqual({ count: 1, tone: "danger" });
+  expect(alertKeys({ ...none, extensionProblems: [ext] }).has("ext-problem:oxplow-foundation")).toBe(true);
+  expect(newAlerts(alertKeys(none), { ...none, extensionProblems: [ext] }).map((a) => a.message)).toEqual([ext.message]);
+  expect(newAlerts(alertKeys({ ...none, extensionProblems: [ext] }), { ...none, extensionProblems: [ext] })).toEqual([]);
 });

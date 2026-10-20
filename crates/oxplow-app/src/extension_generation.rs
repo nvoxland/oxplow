@@ -164,6 +164,36 @@ impl PreparedExtensionDatabase {
         self.vocabulary.generation()
     }
 
+    /// List each extension `held` names with why: the reasons join its row
+    /// (its last working version's), or — when nothing of it runs — its
+    /// entry in `raw` is listed, off, with them.
+    pub(crate) fn list_held(&mut self, held: &VocabularyErrors, raw: &CatalogSnapshot) {
+        let rows = &mut self.listing.extensions;
+        for (name, why) in held {
+            let row = match rows.iter_mut().find(|row| &row.name == name) {
+                Some(row) => row,
+                None => {
+                    let Some(entry) = raw.extensions().iter().find(|e| &e.name == name) else {
+                        continue;
+                    };
+                    rows.push(extension_row(&crate::extensions::Extension {
+                        enabled: false,
+                        ..entry.clone()
+                    }));
+                    rows.last_mut().expect("just pushed")
+                }
+            };
+            let mut errors: Vec<String> =
+                serde_json::from_str(&row.errors_json).unwrap_or_default();
+            for reason in why {
+                if !errors.contains(reason) {
+                    errors.push(reason.clone());
+                }
+            }
+            row.errors_json = json_text(&errors);
+        }
+    }
+
     /// Replace models, vocabulary, contributions and optional capability rows
     /// and switch events as one database candidate.
     /// Any rejection restores the candidate, even if a trusted caller catches

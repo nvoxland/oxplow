@@ -22,14 +22,14 @@ import { dismissHint } from "../hints.js";
 import { decide } from "../proposals.js";
 import { Section } from "../kit/index.js";
 import { Page } from "../tabs/Page.js";
-import { lensRef } from "../tabs/pageRefs.js";
+import { lensRef, settingsRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 
 export function AlertsPage({ onOpenPage }: { onOpenPage(ref: TabRef): void }) {
   const { items, proposals, opErrors, badges, hints } = useAlerts();
   const store = getOpErrorsStore();
   const [open, setOpen] = useState<string | null>(null);
-  const problems = items.opErrors.length + items.undelivered + items.failedReactions;
+  const problems = items.opErrors.length + items.undelivered + items.failedReactions + items.extensionProblems.length;
   const { count } = alertsSummary(items);
   return (
     <Page testId="page-alerts" title="Alerts">
@@ -115,6 +115,20 @@ export function AlertsPage({ onOpenPage }: { onOpenPage(ref: TabRef): void }) {
                 </div>
               );
             })}
+            {items.extensionProblems.map((x) => (
+              <div key={x.name} data-testid={`alerts-extension-${x.name}`} style={{ ...rowStyle, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ flex: 1, color: "var(--severity-critical)" }}>{x.message}</span>
+                <button
+                  type="button"
+                  data-testid={`alerts-extension-open-${x.name}`}
+                  title="Open Settings → Extensions"
+                  onClick={() => onOpenPage(settingsRef("extensions"))}
+                  style={linkButtonStyle}
+                >
+                  Open Extensions
+                </button>
+              </div>
+            ))}
             <DeliveryList />
           </Section>
         ) : null}

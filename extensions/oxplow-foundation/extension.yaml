@@ -346,7 +346,7 @@ commands:
     example: {}
   # config.write
   - name: config.set
-    summary: "Set one .oxplow/project.yaml key — or, with `layer: personal`, a person's own choice in .oxplow/personal.yaml (only `activeProviders`). The value is validated against the key's schema and the file's own rules, written to the file, and logged as config.changed; undo restores the prior value. Human-only keys need a person's confirmation."
+    summary: "Set one .oxplow/project.yaml key — or, with `layer: personal`, a person's own choice in .oxplow/personal.yaml (`activeProviders`, `newThreadSession`, `enableExtensions`, `disableExtensions`, `extensionSources`, `enableBundledExtensions`). The value is validated against the key's schema and the file's own rules, written to the file, and logged as config.changed; undo restores the prior value. Human-only keys need a person's confirmation."
     scope: config.write
     op: set
     invokers: { human: true, agent: true, lens: true }

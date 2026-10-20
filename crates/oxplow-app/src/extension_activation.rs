@@ -621,8 +621,9 @@ impl ExtensionActivation {
                 providers,
                 metrics,
                 capabilities,
-                database,
+                mut database,
             } = prepared;
+            database.list_held(&held, &raw);
             let db = svc.db.clone();
             let published = snapshot.clone();
             // Move the owned writer into the worker closure. Cancelling the async

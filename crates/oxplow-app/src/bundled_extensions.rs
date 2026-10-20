@@ -1,7 +1,9 @@
 //! Extensions that ship inside oxplow, compiled in from the repo's
 //! `extensions/<name>/` folder. They load exactly like project extensions
-//! (same format, same loader) but are read-only, and their names are
-//! reserved. See `.context/extensions.md`.
+//! (same format, same loader) and their names are reserved. Their copies
+//! built in run unless a dev build is asked to run them from their sources
+//! (`enableBundledExtensions: false`, [`shipped`]). See
+//! `.context/extensions.md`.
 
 /// One bundled extension: its name and its files as
 /// `(path inside the extension folder, bytes)` — bytes, so a custom
