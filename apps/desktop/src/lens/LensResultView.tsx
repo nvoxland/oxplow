@@ -564,7 +564,7 @@ function LensViz({
  *  person's input runs; a command that asks is held for them to confirm;
  *  an invalid field's message goes under that field; anything else is a
  *  recorded failure. */
-function useFormSubmit(
+export function useFormSubmit(
   label: string,
   run: (input: Record<string, unknown>, confirmed: boolean) => Promise<CommandOutcome>,
   onDone: (outcome: CommandOutcome) => void,
@@ -703,14 +703,45 @@ function ActionForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run.lens.id, action.id, rowKey, streamId]);
   return (
-    <Slideover open onClose={onClose} title={action.label} testId="lens-action-form">
+    <FormSlideover
+      title={action.label}
+      start={start}
+      form={form}
+      submitLabel={action.label.replace(/…$/, "")}
+      onClose={onClose}
+      testId="lens-action-form"
+    />
+  );
+}
+
+/** A command's form in a slideover: its fields starting from `start`'s
+ *  values (its fixed fields shown, not editable), a command that asks
+ *  confirmed in the host. `form` is the `useFormSubmit` that runs it;
+ *  `testId` prefixes the slideover, its confirm and its fields. */
+export function FormSlideover({
+  title,
+  start,
+  form,
+  submitLabel,
+  onClose,
+  testId,
+}: {
+  title: string;
+  start: FormStart | null;
+  form: ReturnType<typeof useFormSubmit>;
+  submitLabel: string;
+  onClose(): void;
+  testId: string;
+}) {
+  return (
+    <Slideover open onClose={onClose} title={title} testId={testId}>
       {form.pending && start ? (
         <CommandConfirm
-          label={action.label}
+          label={title}
           command={start.command.id}
           onConfirm={() => void form.submit(form.pending!, true)}
           onCancel={form.cancel}
-          testIdPrefix="lens-action-form-confirm"
+          testIdPrefix={`${testId}-confirm`}
         />
       ) : null}
       {start ? (
@@ -720,10 +751,10 @@ function ActionForm({
           fixed={start.fixed}
           choices={start.choices}
           serverErrors={form.serverErrors}
-          submitLabel={action.label.replace(/…$/, "")}
+          submitLabel={submitLabel}
           busy={form.busy}
           onSubmit={(input) => void form.submit(input, false)}
-          testIdPrefix="lens-action-form-fields"
+          testIdPrefix={`${testId}-fields`}
         />
       ) : null}
     </Slideover>

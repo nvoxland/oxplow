@@ -559,6 +559,172 @@ async fn run_component_query_unpinned(
     .map_err(CommandError::from)
 }
 
+/// The form of one of component `key`'s commands, for the host to show
+/// when the frame asks (`openForm`): the command's schema, starting from
+/// `input`. Submitting it runs through [`invoke_component_command`], as
+/// the component.
+pub fn component_form(
+    svc: &crate::Services,
+    lens_root: &Path,
+    key: &str,
+    command: &str,
+    input: Value,
+    version: &str,
+) -> Result<FormStart, CommandError> {
+    let (ext, component) = component_of(svc, lens_root, key)?;
+    let loaded = svc
+        .component_bundles
+        .get(version)
+        .filter(|bundle| {
+            bundle.extension == ext.name
+                && bundle.component == component.id
+                && svc.component_bundles.is_current(lens_root, bundle)
+        })
+        .ok_or_else(|| CommandError::Denied {
+            reason: format!(
+                "component `{}/{}` isn't loaded at that version any more; reload it",
+                ext.name, component.id
+            ),
+        })?;
+    if !loaded.commands.iter().any(|c| c == command) {
+        return Err(CommandError::Invalid {
+            field: Some("/command".into()),
+            message: format!(
+                "`{command}` isn't one of component `{}`'s commands ({})",
+                component.id,
+                loaded.commands.join(", ")
+            ),
+        });
+    }
+    let spec = svc
+        .commands
+        .spec(command)
+        .ok_or_else(|| CommandError::Unknown {
+            name: command.to_string(),
+        })?;
+    Ok(FormStart {
+        command: spec,
+        values: match input {
+            Value::Null => Value::Object(serde_json::Map::new()),
+            other => other,
+        },
+        fixed: Vec::new(),
+        fields: None,
+        choices: BTreeMap::new(),
+    })
+}
+
+/// [`component_form`] under one pinned extension catalog generation.
+pub async fn component_form_pinned(
+    svc: &crate::Services,
+    lens_root: &Path,
+    key: &str,
+    command: &str,
+    input: Value,
+    version: &str,
+) -> Result<FormStart, CommandError> {
+    svc.sql
+        .read_generation(async { component_form(svc, lens_root, key, command, input, version) })
+        .await
+        .map_err(CommandError::from)?
+}
+
+/// A custom component runs its own read-only SQL (`querySql`).
+pub struct ComponentSql {
+    /// The component whose frame asked: `<extension>/<component id>`.
+    pub component: String,
+    pub sql: String,
+    /// Positional (`?1`, `?2`).
+    pub params: Vec<SqlCell>,
+    /// The stream the frame is shown in, for the live models.
+    pub stream: Option<i64>,
+    /// Row cap: 1,000 by default, at most 10,000.
+    pub limit: Option<usize>,
+    /// Who is looking at the frame.
+    pub on_behalf_of: Actor,
+    /// The bundle version the frame was loaded at.
+    pub version: String,
+}
+
+/// Run `call`'s SQL for a component that declares `sql: read`, at the
+/// version loaded now: read-only over the published models, as the
+/// component's run under its extension's permissions (`permissions.sql`),
+/// so the read is decided and recorded like a script's `sql.read`.
+pub async fn run_component_sql(
+    svc: &crate::Services,
+    lens_root: &Path,
+    call: ComponentSql,
+) -> Result<oxplow_db::SqlQueryResult, CommandError> {
+    let (run, query) = svc
+        .sql
+        .read_generation(async { prepare_component_sql(svc, lens_root, call) })
+        .await
+        .map_err(CommandError::from)??;
+    svc.sql
+        .run_in(&run, query)
+        .await
+        .map_err(CommandError::from)
+}
+
+fn prepare_component_sql(
+    svc: &crate::Services,
+    lens_root: &Path,
+    call: ComponentSql,
+) -> Result<(oxplow_domain::run::RunContext, oxplow_db::SqlQuery), CommandError> {
+    let (ext, component) = component_of(svc, lens_root, &call.component)?;
+    let loaded = svc
+        .component_bundles
+        .get(&call.version)
+        .filter(|bundle| {
+            bundle.extension == ext.name
+                && bundle.component == component.id
+                && svc.component_bundles.is_current(lens_root, bundle)
+        })
+        .ok_or_else(|| CommandError::Denied {
+            reason: format!(
+                "component `{}/{}` isn't loaded at that version any more; reload it",
+                ext.name, component.id
+            ),
+        })?;
+    if !loaded.sql {
+        return Err(CommandError::Invalid {
+            field: Some("/sql".into()),
+            message: format!(
+                "component `{}` doesn't declare `sql: read`; add it (and `permissions.sql: read`) \
+                 to run its own SQL",
+                component.id
+            ),
+        });
+    }
+    let run = oxplow_domain::run::RunContext::contribution(
+        crate::run_context::contribution(
+            &svc.extension_catalog,
+            lens_root,
+            &ext,
+            oxplow_domain::contribution::ContributionKind::CustomComponent,
+            &component.id,
+        ),
+        Actor::Component {
+            component: call.component,
+            on_behalf_of: Box::new(call.on_behalf_of),
+        },
+        oxplow_domain::run::Mode::Pure,
+    )
+    .authorized(crate::grants::authority(
+        &ext,
+        crate::grants::script_request(&["sql.read".to_string()]),
+    ));
+    if let oxplow_domain::grant::Decision::Denied(why) = run.decide_service("sql.read") {
+        return Err(CommandError::Denied { reason: why });
+    }
+    let mut query = oxplow_db::SqlQuery::new(call.sql)
+        .positional(call.params)
+        .stream(call.stream)
+        .limit(Some(call.limit.unwrap_or(1_000).min(10_000)));
+    crate::grants::bound_query(&run, &mut query);
+    Ok((run, query))
+}
+
 /// A custom component invokes one of its declared commands.
 pub struct ComponentInvoke {
     /// The component whose frame asked: `<extension>/<component id>`.
@@ -1481,6 +1647,82 @@ actions:
         );
         assert_eq!(audit.actor_id.as_deref(), Some("acme/board"));
         assert_eq!(state(&fx.svc, fx.task).await, "done");
+    }
+
+    /// A component that declares `sql: read` runs its own read-only SQL
+    /// over the models, held to its extension's `permissions.sql`; one that
+    /// doesn't declare it is refused.
+    #[tokio::test]
+    async fn a_component_with_sql_read_queries_the_layer() {
+        let (fx, root) = component_fixture().await;
+        let ext = root.join(".oxplow/extensions/acme");
+        let ask = |sql: &str, version: String| {
+            run_component_sql(
+                &fx.svc,
+                &root,
+                ComponentSql {
+                    component: "acme/board".into(),
+                    sql: sql.into(),
+                    params: vec![SqlCell::Int(2)],
+                    stream: None,
+                    limit: None,
+                    on_behalf_of: Actor::Human,
+                    version,
+                },
+            )
+        };
+        let err = ask("SELECT ?1 AS n", load_board(&fx, &root).await)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("component `board` doesn't declare `sql: read`"),
+            "{err}"
+        );
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { sql: read, commands: [oxplow.work_item.transition] }\ncustom_components:\n  - { id: board, assets: [tasks], commands: [oxplow.work_item.transition], sql: read }\n",
+        )
+        .unwrap();
+        let version = load_board(&fx, &root).await;
+        let out = ask("SELECT ?1 AS n", version.clone()).await.unwrap();
+        assert_eq!(out.rows, vec![vec![SqlCell::Int(2)]]);
+        // Read-only, as any query over the models is.
+        assert!(ask("DELETE FROM v_work_item", version).await.is_err());
+    }
+
+    /// A component opens the form of one of its own commands in the
+    /// host, starting from the values it gives; any other command is
+    /// refused.
+    #[tokio::test]
+    async fn a_component_opens_the_form_of_its_own_commands_only() {
+        let (fx, root) = component_fixture().await;
+        let version = load_board(&fx, &root).await;
+        let start = component_form(
+            &fx.svc,
+            &root,
+            "acme/board",
+            "oxplow.work_item.transition",
+            serde_json::json!({ "to": "done" }),
+            &version,
+        )
+        .unwrap();
+        assert_eq!(start.command.id, "oxplow.work_item.transition");
+        assert_eq!(start.values, serde_json::json!({ "to": "done" }));
+        let err = component_form(
+            &fx.svc,
+            &root,
+            "acme/board",
+            "oxplow.config.set",
+            serde_json::json!({}),
+            &version,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("isn't one of component `board`'s commands"),
+            "{err}"
+        );
     }
 
     /// The frame's input is checked like anyone's: an array or a scalar

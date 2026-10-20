@@ -617,7 +617,12 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     the required bundled extension may use it — a stepping stone for
     oxplow's pages the kit can't draw yet, pinned by
     `fixtures/built_in_pages.json`, which may only shrink. Any other
-    `component` is refused until full-page custom components land. A
+    `component: <id>` names one of the extension's own
+    `custom_components` (`PageBody::Component { component:
+    "<ext>/<id>" }`): a **custom page**, the component filling the page
+    body under core's nav bar (`pages/CustomPageView.tsx`), told the
+    page's params, stream and thread in `init.page`, setting its title
+    and actions as data core draws ("Custom components", protocol 5). A
     page's `icon` is one of the ref-kind icons (`REF_KIND_ICONS`; an
     unknown one is a load error); the tab strip, launcher, Go To lists
     and backlinks draw it (`PageKindIcon` by the page's id), the lens
@@ -2426,6 +2431,7 @@ custom_components:
     bundle: components/burndown        # default components/<id>; holds index.html
     assets: [open-tasks, oxplow-bundled/visits]   # lens ids; a bare slug is this extension's
     commands: [oxplow.work_item.transition]
+    sql: read                          # optional: its own read-only SQL (querySql); needs permissions.sql
 ```
 ```yaml
 # lenses/burn.yaml
@@ -2480,15 +2486,31 @@ referrerPolicy="no-referrer">` at `componentBundleUrl(base, version)`
 a bundle that can't be loaded shows the table and why; with no daemon
 base — `remoteBaseUrl()` null — the lens shows its table), under a
 **custom** badge. On the frame's first
-`load` the host posts `init { protocol, run, props, tokens }`
-(`initMessage`, the one builder) with one end
+`load` the host posts `init { protocol, run, props, page, tokens }`
+(`initMessage`, the one builder: a lens's run and props with `page`
+null, or — a custom page — a null `run` and `page { params, streamId,
+threadId }`) with one end
 of a `MessageChannel` (to `"*"`: the frame's origin is opaque; the port
 goes to that frame alone) and listens on the other end only. Frame
 messages (`parseFrameMessage`): `ready`, `{ id, method: query, asset,
 params }` (params SqlCell values only), `{ id, method: invoke, command,
 input }`, `{ id, method: navigate, ref }` (an oxplow page only:
 `componentMayOpen` refuses an external-url ref with `INVALID`,
-since an outside tab would carry whatever the frame put in its URL out);
+since an outside tab would carry whatever the frame put in its URL out),
+and — protocol 5 — `{ id, method: querySql, sql, params }` (positional
+SqlCells; `run_component_sql`: the component must declare `sql: read`
+and its extension hold `permissions.sql`; it runs as the component's
+`Mode::Pure` run under its extension's grant, `sql.read` decided and
+recorded, read-only over the published models, 1,000 rows by default),
+`{ id, method: openForm, command, input }` (the host shows a declared
+command's form — `component_form` — in a slideover and runs the
+submission through `invoke_component_command`; closing it answers
+`CANCELLED`), `{ id, method: setTitle, title }` and `{ id, method:
+setActions, actions: [{ id, label, primary?, disabled? }] }` (the page's
+title and its nav-bar actions, data core draws; a press posts
+`{ type: action, id }` to the frame). `openForm`, `setTitle` and
+`setActions` are a custom page's: shown by a lens (which owns its page)
+they answer `INVALID`;
 replies `{ id, ok, result |
 error: { code, message, field? } }` (`field`: the input an `INVALID`
 refusal names, so a component's form marks it; protocol 4); a re-run sends `update { run }` — only

@@ -20,9 +20,34 @@ export interface OxplowError {
   field?: string;
 }
 
+/** A result of `querySql`. */
+export interface OxplowRows {
+  columns: string[];
+  rows: OxplowCell[][];
+  truncated: boolean;
+}
+
+/** The page a component is, when it is one (`pages: [{ component }]`). */
+export interface OxplowPage {
+  /** The page's params, from its id (`page:x/timeline?from=…`). */
+  params: Record<string, string>;
+  streamId: string | null;
+  threadId: string | null;
+}
+
+/** An action drawn in the page's bar. */
+export interface OxplowAction {
+  id: string;
+  label: string;
+  primary?: boolean;
+  disabled?: boolean;
+}
+
 export interface OxplowComponent {
-  /** The lens's latest run. */
-  readonly run: OxplowRun;
+  /** The lens's latest run; null for a component that is a page. */
+  readonly run: OxplowRun | null;
+  /** The page it is, or null when a lens shows it. */
+  readonly page: OxplowPage | null;
   /** The lens's `custom.props`, or null. */
   readonly props: unknown;
   /** The theme's CSS variables, by name (`--text-primary`). */
@@ -36,12 +61,26 @@ export interface OxplowComponent {
   /** Run a command this component declares in `commands`, as the person
    *  looking at it; one that asks is confirmed by them, in oxplow.
    *  Rejects with an {@link OxplowError} (`CANCELLED` when they decline;
-   *  `DENIED` until a person approves the component in Settings → Data →
-   *  Programs). */
+   *  `DENIED` when a policy refuses it, or the bundle it was loaded at is
+   *  no longer the deployed one). */
   invoke(command: string, input?: unknown): Promise<unknown>;
   /** Open one of oxplow's pages, in a new tab with `{ newTab: true }`.
    *  Rejects with an {@link OxplowError}. */
   navigate(ref: string, options?: { newTab?: boolean }): Promise<null>;
+  /** Run read-only SQL over oxplow's models (`?1` parameters). Needs
+   *  `sql: read` on the component and `permissions.sql: read` on its
+   *  extension. Rejects with an {@link OxplowError}. */
+  querySql(sql: string, params?: OxplowCell[]): Promise<OxplowRows>;
+  /** Open the form of a command this component declares, in oxplow,
+   *  starting from `input`: resolves with its result once submitted,
+   *  rejects `CANCELLED` when the person closes it. A page only. */
+  openForm(command: string, input?: unknown): Promise<unknown>;
+  /** The page's title, in its tab and bar. A page only. */
+  setTitle(title: string): Promise<null>;
+  /** The page's actions, drawn by oxplow in its bar. A page only. */
+  setActions(actions: OxplowAction[]): Promise<null>;
+  /** Hear each press of a page action, by id; returns how to stop. */
+  onAction(listener: (id: string) => void): () => void;
   /** Set each theme token, and the host's `color-scheme`, on the
    *  document's root, where the kit's stylesheet
    *  (`/component-lib/oxplow-kit.css`) reads them. Without the

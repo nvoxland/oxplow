@@ -236,6 +236,56 @@ pub async fn run_component_query(
     .await?)
 }
 
+/// A custom component's frame runs its own read-only SQL (`querySql`):
+/// `id` declares `sql: read`, its extension `permissions.sql`.
+pub async fn run_component_sql(
+    svc: &Services,
+    id: String,
+    sql: String,
+    params: Option<Vec<SqlCell>>,
+    stream_id: Option<String>,
+    version: String,
+) -> Result<oxplow_db::SqlQueryResult, IpcError> {
+    let stream = stream_id
+        .as_deref()
+        .and_then(oxplow_domain::StreamId::try_from_str)
+        .map(|s| s.value());
+    Ok(oxplow_app::lens_actions::run_component_sql(
+        svc,
+        root(svc),
+        oxplow_app::lens_actions::ComponentSql {
+            component: id,
+            sql,
+            params: params.unwrap_or_default(),
+            stream,
+            limit: None,
+            on_behalf_of: oxplow_domain::Actor::Human,
+            version,
+        },
+    )
+    .await?)
+}
+
+/// The form of one of component `id`'s commands, for the host to show
+/// when its frame asks (`openForm`).
+pub async fn component_form(
+    svc: &Services,
+    id: String,
+    command: String,
+    input: Option<oxplow_domain::Json>,
+    version: String,
+) -> Result<oxplow_app::lens_actions::FormStart, IpcError> {
+    Ok(oxplow_app::lens_actions::component_form_pinned(
+        svc,
+        root(svc),
+        &id,
+        &command,
+        input.map(|i| i.0).unwrap_or(serde_json::Value::Null),
+        &version,
+    )
+    .await?)
+}
+
 /// Load the bundle of component `id` (`<extension>/<component id>`) as it
 /// is now, for its frame (tsk984): the version the daemon serves it at
 /// (`/components/v/<version>/`) and the frame invokes with.

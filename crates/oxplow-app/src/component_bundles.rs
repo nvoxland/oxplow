@@ -36,6 +36,8 @@ pub struct BundleSnapshot {
     /// The commands it may run, as hashed.
     pub commands: Vec<String>,
     pub assets: Vec<String>,
+    /// It may run its own read-only SQL (`sql: read`), as hashed.
+    pub sql: bool,
     /// The bundle's folder (in its deployment).
     dir: PathBuf,
     /// Every file of the folder, by `/`-separated path inside it: all a
@@ -216,13 +218,14 @@ fn build_snapshot(
         generation,
         commands: component.commands.clone(),
         assets: component.assets.clone(),
+        sql: component.sql.is_some(),
         dir: root.join(&folder),
         files,
     }))
 }
 
 /// A bundle's version: a hash over its files, what it may query (its
-/// assets) and what it may run (its commands). Any change is a new version,
+/// assets, its own SQL) and what it may run (its commands). Any change is a new version,
 /// so a mounted frame of the old one reloads.
 pub(crate) fn bundle_version(
     component: &CustomComponent,
@@ -251,6 +254,9 @@ pub(crate) fn bundle_version(
         h.update([8u8]);
         h.update(asset.as_bytes());
     }
+    if component.sql.is_some() {
+        h.update([9u8]);
+    }
     Ok(hex::encode(h.finalize()))
 }
 
@@ -264,6 +270,30 @@ fn add_error(errors: &mut VocabularyErrors, owner: &str, message: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Whether a component may run its own SQL is part of what a person
+    /// approved: declaring it is a new version.
+    #[test]
+    fn declaring_sql_is_a_new_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let catalog = crate::extension_catalog::ExtensionCatalog::new();
+        let snapshot = catalog.snapshot(dir.path());
+        let ext = snapshot
+            .extensions()
+            .iter()
+            .find(|e| e.name == "oxplow-bundled")
+            .expect("bundled")
+            .clone();
+        let component = ext.custom_components[0].clone();
+        let with_sql = CustomComponent {
+            sql: Some(oxplow_domain::permissions::SqlAccess::Read),
+            ..component.clone()
+        };
+        let plain = build_snapshot(dir.path(), &ext, &component, None).unwrap();
+        let reading = build_snapshot(dir.path(), &ext, &with_sql, None).unwrap();
+        assert_ne!(plain.version, reading.version);
+        assert!(reading.sql && !plain.sql);
+    }
 
     /// oxplow-bundled's history graph is a component like a project's:
     /// its bundle is read from its shipped deployment on disk, hashed by

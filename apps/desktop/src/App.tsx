@@ -2713,7 +2713,9 @@ export function App() {
           id: ref.id,
           label: declared?.title ?? page.page,
           closable: true,
-          render: () => <DeclaredPageView page={page} declared={declared} stream={stream} onOpenPage={nav.navOpen} />,
+          render: () => (
+            <DeclaredPageView page={page} declared={declared} stream={stream} threadId={selectedThread?.id ?? null} onOpenPage={nav.navOpen} />
+          ),
         };
       },
     };

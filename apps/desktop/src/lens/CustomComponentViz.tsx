@@ -6,24 +6,12 @@
 /// that never says `ready`, or navigates itself away, is torn down and the
 /// lens's table shows instead — as it does with no daemon to serve the
 /// bundle. Marked "custom" so the person knows it isn't oxplow's own.
-import type { CSSProperties, ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
 
-import { invokeComponentCommand, loadComponent, recordUsage, runComponentQuery, subscribeOxplowEvents } from "../api.js";
-import { CommandConfirm } from "../components/CommandConfirm.js";
-import { openRefInWindow } from "../tabs/openRef.js";
-import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { remoteBaseUrl } from "../tauri-bridge/transport.js";
 import type { LensRun } from "../tauri-bridge/generated/bindings.js";
-import { lensDefinitionChanged } from "./lensRerun.js";
-import {
-  componentBundleUrl,
-  componentMayOpen,
-  componentRefusal,
-  createBridgeHost,
-  initMessage,
-  tokensFromStyle,
-} from "./componentBridge.js";
+import { ComponentFrame, CustomBadge, noteStyle, useComponentBundle } from "./ComponentFrame.js";
 
 export function CustomComponentViz({
   run,
@@ -53,47 +41,14 @@ export function CustomComponentViz({
   // The component itself names every call: it acts as itself wherever
   // it is shown.
   const componentKey = component ? `${run.lens.extension}/${component}` : null;
-  // The bundle its frame runs, loaded for the lens (from the main
-  // worktree, whatever the stream): the daemon serves the frame that
-  // snapshot, by its version, and the frame invokes with it. Loaded again
-  // when the activated extensions change — a hot update: a new version
-  // mounts a new frame, the same one keeps the frame it has.
-  const loadKey = base && componentKey ? componentKey : null;
-  const [loaded, setLoaded] = useState<{ key: string; version?: string; error?: string } | null>(null);
-  const [activations, setActivations] = useState(0);
-  useEffect(() => {
-    if (loadKey === null) return;
-    return subscribeOxplowEvents((event) => {
-      if (lensDefinitionChanged(event as Record<string, unknown>)) setActivations((n) => n + 1);
-    });
-  }, [loadKey]);
-  useEffect(() => {
-    if (loadKey === null) return;
-    let live = true;
-    loadComponent(loadKey).then(
-      (version) => {
-        if (live) setLoaded({ key: loadKey, version });
-      },
-      (e: unknown) => {
-        if (live) setLoaded({ key: loadKey, error: e instanceof Error ? e.message : String(e) });
-      },
-    );
-    return () => {
-      live = false;
-    };
-    // `loadKey` names the lens it loads for; `activations` loads it again.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadKey, activations]);
-  const current = loaded?.key === loadKey ? loaded : null;
-  const version = current?.version ?? null;
-  const src = base && version ? componentBundleUrl(base, version) : null;
+  const { loadKey, version, src, error } = useComponentBundle(componentKey, base);
   // Why the frame at `src` was given up on; a new `src` starts afresh.
   const [failed, setFailed] = useState<{ src: string; reason: string } | null>(null);
   const reason =
     loadKey === null
       ? "Its component can't be shown here."
-      : current?.error
-        ? `Its component couldn't be loaded: ${current.error}.`
+      : error
+        ? `Its component couldn't be loaded: ${error}.`
         : src !== null && failed?.src === src
           ? failed.reason
           : null;
@@ -123,9 +78,7 @@ export function CustomComponentViz({
   }
   return (
     <div data-testid="custom-component" style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minHeight: 0 }}>
-      <span data-testid="custom-component-badge" style={badgeStyle} title={`${run.lens.extension}'s own component, sandboxed`}>
-        custom
-      </span>
+      <CustomBadge extension={run.lens.extension} />
       {/* Keyed by its URL: another version (an edited bundle) mounts a new
           frame, whose first load is its own — never the old frame
           navigating away. */}
@@ -135,6 +88,7 @@ export function CustomComponentViz({
         version={version}
         component={componentKey ?? ""}
         run={run}
+        title={run.lens.title}
         streamId={streamId}
         readyTimeoutMs={readyTimeoutMs}
         onFail={(why) => setFailed({ src, reason: why })}
@@ -144,148 +98,3 @@ export function CustomComponentViz({
   );
 }
 
-/** One frame at one bundle URL and its bridge. */
-function ComponentFrame({
-  src,
-  version,
-  component,
-  run,
-  streamId,
-  readyTimeoutMs,
-  onFail,
-  onReady,
-}: {
-  src: string;
-  /** The bundle version it was loaded at: what it invokes with. */
-  version: string;
-  /** `<extension>/<component id>`: what every call names. */
-  component: string;
-  run: LensRun;
-  streamId: string | null;
-  readyTimeoutMs: number;
-  onFail(reason: string): void;
-  onReady?(): void;
-}) {
-  const nav = useOptionalPageNavigation();
-  const [asking, setAsking] = useState<{ command: string; answer(ok: boolean): void } | null>(null);
-  // Why its last invoke was refused: shown here, not left to the frame.
-  const [refused, setRefused] = useState<string | null>(null);
-  const frameRef = useRef<HTMLIFrameElement | null>(null);
-  const hostRef = useRef<ReturnType<typeof createBridgeHost> | null>(null);
-  const loadsRef = useRef(0);
-  const runRef = useRef(run);
-  runRef.current = run;
-
-  // A re-run reaches a ready component as `update` (the host posts only a
-  // result it hasn't shown).
-  useEffect(() => {
-    hostRef.current?.update(run);
-  }, [run]);
-  useEffect(() => () => hostRef.current?.close(), []);
-
-  const onLoad = () => {
-    loadsRef.current += 1;
-    if (loadsRef.current > 1) {
-      // The frame navigated itself: nothing it shows now is the bundle.
-      hostRef.current?.close();
-      hostRef.current = null;
-      onFail("The component navigated away.");
-      return;
-    }
-    let ready = false;
-    let channel: MessageChannel | null = null;
-    const timer = setTimeout(() => {
-      if (!ready) {
-        channel?.port1.close();
-        onFail("The component didn't start.");
-      }
-    }, readyTimeoutMs);
-    const frame = frameRef.current?.contentWindow;
-    // Unreachable, it can't say `ready`; the timer reports it.
-    if (!frame) return;
-    channel = new MessageChannel();
-    const initial = runRef.current;
-    hostRef.current = createBridgeHost(
-      channel.port1,
-      {
-        query: (asset, params) => runComponentQuery(component, asset, params, streamId, version),
-        invoke: async (command, input, confirmed) => {
-          try {
-            const out = await invokeComponentCommand(component, command, input, confirmed, version);
-            setRefused(null);
-            return out;
-          } catch (e) {
-            const why = componentRefusal(e);
-            if (why !== null) setRefused(why);
-            throw e;
-          }
-        },
-        navigate: (ref, opts) => {
-          if (!componentMayOpen(ref)) return false;
-          (nav?.openRef ?? openRefInWindow)(ref, opts);
-          return true;
-        },
-        confirm: (command) => new Promise<boolean>((answer) => setAsking({ command, answer })),
-        onReady: () => {
-          ready = true;
-          clearTimeout(timer);
-          void recordUsage({ kind: "custom_component", key: component, streamId }).catch(() => {});
-          onReady?.();
-        },
-      },
-      initial,
-    );
-    const tokens = tokensFromStyle(getComputedStyle(document.documentElement));
-    // An opaque-origin frame can only be addressed with "*"; the port goes
-    // to this frame's window alone.
-    frame.postMessage(initMessage(initial, tokens), "*", [channel.port2]);
-  };
-
-  return (
-    <>
-      <iframe
-        ref={frameRef}
-        data-testid="custom-component-frame"
-        title={run.lens.title}
-        sandbox="allow-scripts allow-forms"
-        referrerPolicy="no-referrer"
-        src={src}
-        onLoad={onLoad}
-        style={frameStyle}
-      />
-      {refused ? (
-        <div data-testid="custom-component-refused" style={noteStyle}>
-          {refused}
-        </div>
-      ) : null}
-      {asking ? (
-        <CommandConfirm
-          label={run.lens.title}
-          command={asking.command}
-          testIdPrefix="custom-component-confirm"
-          onConfirm={() => {
-            asking.answer(true);
-            setAsking(null);
-          }}
-          onCancel={() => {
-            asking.answer(false);
-            setAsking(null);
-          }}
-        />
-      ) : null}
-    </>
-  );
-}
-
-const badgeStyle: CSSProperties = {
-  alignSelf: "flex-start",
-  fontSize: 10,
-  padding: "0 6px",
-  borderRadius: 999,
-  border: "1px solid var(--border-subtle)",
-  color: "var(--text-secondary)",
-};
-// It grows to fill a page that gives it room (a replaced history), and is
-// never shorter than a card's worth.
-const frameStyle: CSSProperties = { width: "100%", flex: 1, minHeight: 240, border: "1px solid var(--border-subtle)", borderRadius: 4 };
-const noteStyle: CSSProperties = { color: "var(--text-secondary)", fontSize: "var(--text-xs)", marginBottom: 4 };

@@ -3408,6 +3408,18 @@
             "type": "string"
           },
           "default": []
+        },
+        "sql": {
+          "description": "`read`: it runs its own read-only SQL over the models\n(`querySql`); its extension needs `permissions.sql: read`.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SqlAccess"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,

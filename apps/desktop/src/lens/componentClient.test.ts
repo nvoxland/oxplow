@@ -180,3 +180,62 @@ test("a host speaking another protocol is refused, by number", async () => {
 test("connect gives up when no init arrives", async () => {
   await expect(connect({ target: new EventTarget(), timeoutMs: 20 })).rejects.toThrow(/init/);
 });
+
+/** A component shown as a page: its `init` has the page and no run, and
+ *  the host answers the page's own calls. */
+function pageHarness(deps: Partial<BridgeDeps> = {}) {
+  const channel = new MessageChannel();
+  const titles: string[] = [];
+  const host = createBridgeHost(
+    channel.port1,
+    {
+      query: async () => run(0),
+      invoke: async () => ({ result: null }) as never,
+      navigate: () => true,
+      confirm: async () => true,
+      onReady: () => {},
+      setTitle: (t) => titles.push(t),
+      setActions: () => {},
+      querySql: async (sql, params) => ({ columns: ["sql", "n"], rows: [[sql, params[0] ?? null]], truncated: false }) as never,
+      openForm: async () => ({ result: { made: true } }),
+      ...deps,
+    },
+    null,
+  );
+  const frame = new EventTarget();
+  const page = { params: { from: "2026-10-01" }, streamId: "str1", threadId: null };
+  const init = () =>
+    frame.dispatchEvent(Object.assign(new Event("message"), { data: initMessage(null, {}, page), ports: [channel.port2] }));
+  return { frame, init, host, titles, close: () => channel.port1.close() };
+}
+
+test("a page's component gets its page, runs its own SQL, opens a form and sets its title", async () => {
+  const h = pageHarness();
+  const connecting = connect({ target: h.frame });
+  h.init();
+  const c = await connecting;
+  expect(c.run).toBeNull();
+  expect(c.page).toEqual({ params: { from: "2026-10-01" }, streamId: "str1", threadId: null });
+  expect(await c.querySql("SELECT ?1", [3])).toEqual({ columns: ["sql", "n"], rows: [["SELECT ?1", 3]], truncated: false });
+  expect(await c.openForm("acme.item.create", { title: "x" })).toEqual({ made: true });
+  await c.setTitle("October");
+  await c.setActions([{ id: "fit", label: "Fit" }]);
+  expect(h.titles).toEqual(["October"]);
+  h.close();
+});
+
+test("onAction hears each press of a page action", async () => {
+  const h = pageHarness();
+  const connecting = connect({ target: h.frame });
+  h.init();
+  const c = await connecting;
+  const pressed: string[] = [];
+  const stop = c.onAction((id: string) => pressed.push(id));
+  h.host.action("fit");
+  await settle();
+  stop();
+  h.host.action("today");
+  await settle();
+  expect(pressed).toEqual(["fit"]);
+  h.close();
+});

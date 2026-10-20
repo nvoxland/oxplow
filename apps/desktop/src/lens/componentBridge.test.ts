@@ -67,16 +67,52 @@ test("theme tokens carry the root's color-scheme, so the frame paints no opaque 
 
 // tsk961: `init` carries the theme's tokens; the kit is a stylesheet the
 // bundle links from the daemon. Dropping `kitCss` made the protocol 2;
-// `navigate`'s `newTab` (a Cmd-click in a component) made it 3.
-test("init carries the run, props and tokens, at protocol 3", () => {
+// `navigate`'s `newTab` made it 3; an error's `field`, 4; a component as a
+// page (`page`, a null `run`) and the calls a page makes, 5.
+test("init carries the run, props and tokens, at protocol 5", () => {
   const r = { lens: { id: "x/b", custom: { component: "b", props: { a: 1 } } }, params: {}, result: { columns: [], rows: [], truncated: false } } as unknown as LensRun;
   expect(initMessage(r, { "--accent": "#08f" })).toEqual({
     type: "init",
-    protocol: 4,
+    protocol: 5,
     run: r,
     props: { a: 1 },
+    page: null,
     tokens: { "--accent": "#08f" },
   });
+});
+
+test("a component shown as a page gets its page and no run", () => {
+  const page = { params: { from: "2026-10-01" }, streamId: "str1", threadId: "thr2" };
+  expect(initMessage(null, {}, page)).toEqual({ type: "init", protocol: 5, run: null, props: null, page, tokens: {} });
+});
+
+test("a page's calls parse: setTitle, setActions, openForm and querySql", () => {
+  expect(parseFrameMessage({ id: "1", method: "setTitle", title: "Oct 1 – 7" })).toEqual({
+    type: "request",
+    request: { id: "1", method: "setTitle", title: "Oct 1 – 7" },
+  });
+  expect(
+    parseFrameMessage({ id: "2", method: "setActions", actions: [{ id: "today", label: "Today", primary: true }, { id: "fit", label: "Fit" }] }),
+  ).toEqual({
+    type: "request",
+    request: { id: "2", method: "setActions", actions: [{ id: "today", label: "Today", primary: true, disabled: false }, { id: "fit", label: "Fit", primary: false, disabled: false }] },
+  });
+  expect(parseFrameMessage({ id: "3", method: "openForm", command: "acme.item.create" })).toEqual({
+    type: "request",
+    request: { id: "3", method: "openForm", command: "acme.item.create", input: {} },
+  });
+  expect(parseFrameMessage({ id: "4", method: "querySql", sql: "SELECT ?1", params: [1] })).toEqual({
+    type: "request",
+    request: { id: "4", method: "querySql", sql: "SELECT ?1", params: [1] },
+  });
+  for (const bad of [
+    { id: "5", method: "setTitle", title: 7 },
+    { id: "6", method: "setActions", actions: [{ id: "x" }] },
+    { id: "7", method: "querySql", sql: "SELECT 1", params: [{}] },
+    { id: "8", method: "openForm" },
+  ]) {
+    expect(parseFrameMessage(bad)).toBeNull();
+  }
 });
 
 const run = { lens: { id: "x/burn" }, params: {}, result: { columns: [], rows: [], truncated: false } } as unknown as LensRun;
@@ -87,7 +123,7 @@ function harness(deps: Partial<Parameters<typeof createBridgeHost>[1]> = {}) {
   const received: unknown[] = [];
   channel.port2.onmessage = (e) => received.push(e.data);
   const calls: unknown[][] = [];
-  createBridgeHost(channel.port1, {
+  const host = createBridgeHost(channel.port1, {
     query: async (asset, params) => {
       calls.push(["query", asset, params]);
       return run;
@@ -107,7 +143,7 @@ function harness(deps: Partial<Parameters<typeof createBridgeHost>[1]> = {}) {
   }, run);
   const send = (data: unknown) => channel.port2.postMessage(data);
   const settle = () => new Promise((r) => setTimeout(r, 20));
-  return { received, calls, send, settle, channel };
+  return { received, calls, send, settle, channel, host };
 }
 
 test("a query runs the declared lens through the host and answers ok", async () => {
@@ -151,7 +187,7 @@ test("navigate opens the ref; a malformed request is answered with an error when
   expect(h.received).toEqual([
     { id: "n1", ok: true, result: null },
     { id: "n2", ok: true, result: null },
-    { id: "b1", ok: false, error: { code: "BAD_REQUEST", message: "Not a query, invoke or navigate request." } },
+    { id: "b1", ok: false, error: { code: "BAD_REQUEST", message: "Not a request this host knows." } },
   ]);
   h.channel.port1.close();
 });
@@ -199,6 +235,53 @@ test("a component navigates to app pages only", async () => {
 // tsk960: a refused invoke — a component that is not allowed, or a policy saying
 // no — is shown by the host, beside the frame, whatever the component's
 // own code does with the reply; any other failure is the frame's to show.
+test("a page's title and actions reach the host, and a press reaches the frame", async () => {
+  const titles: string[] = [];
+  const actions: unknown[] = [];
+  const h = harness({ setTitle: (t) => titles.push(t), setActions: (a) => actions.push(a) });
+  h.send({ id: "t", method: "setTitle", title: "Oct" });
+  h.send({ id: "a", method: "setActions", actions: [{ id: "fit", label: "Fit" }] });
+  await h.settle();
+  expect(titles).toEqual(["Oct"]);
+  expect(actions).toEqual([[{ id: "fit", label: "Fit", primary: false, disabled: false }]]);
+  expect(h.received).toEqual([
+    { id: "t", ok: true, result: null },
+    { id: "a", ok: true, result: null },
+  ]);
+  h.host.action("fit");
+  await h.settle();
+  expect(h.received.at(-1)).toEqual({ type: "action", id: "fit" });
+  h.channel.port1.close();
+});
+
+test("shown by a lens, a component sets no page title, actions or form", async () => {
+  const h = harness();
+  h.send({ id: "t", method: "setTitle", title: "Oct" });
+  h.send({ id: "a", method: "setActions", actions: [] });
+  h.send({ id: "f", method: "openForm", command: "x.y.z" });
+  await h.settle();
+  expect(h.received.map((m) => (m as { error?: { code: string } }).error?.code)).toEqual(["INVALID", "INVALID", "INVALID"]);
+  h.channel.port1.close();
+});
+
+test("querySql and openForm answer with the host's result; a closed form is CANCELLED", async () => {
+  const sql = { columns: ["n"], rows: [[1]], truncated: false };
+  const h = harness({
+    querySql: async () => sql as never,
+    openForm: async (command) => (command === "acme.ok" ? { result: { made: 1 } } : null),
+  });
+  h.send({ id: "q", method: "querySql", sql: "SELECT 1", params: [] });
+  h.send({ id: "f", method: "openForm", command: "acme.ok", input: { a: 1 } });
+  h.send({ id: "g", method: "openForm", command: "acme.closed" });
+  await h.settle();
+  expect(h.received).toEqual([
+    { id: "q", ok: true, result: sql },
+    { id: "f", ok: true, result: { made: 1 } },
+    { id: "g", ok: false, error: { code: "CANCELLED", message: "The person closed the form for `acme.closed`." } },
+  ]);
+  h.channel.port1.close();
+});
+
 test("componentRefusal is a refused invoke's reason, and nothing else's", () => {
   const reason = "component `x/burn` runs `…` and is not allowed to call this command.";
   expect(componentRefusal(new IpcCallError(reason, "DENIED"))).toBe(reason);

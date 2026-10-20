@@ -40,6 +40,10 @@ pub struct CustomComponent {
     pub assets: Vec<String>,
     /// Commands the component may invoke.
     pub commands: Vec<String>,
+    /// It runs its own read-only SQL over the models (`querySql`): needs
+    /// `permissions.sql`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sql: Option<oxplow_domain::permissions::SqlAccess>,
 }
 
 /// A `custom_components:` entry as the manifest holds it.
@@ -55,6 +59,10 @@ pub(crate) struct ComponentFile {
     assets: Vec<String>,
     #[serde(default)]
     commands: Vec<String>,
+    /// `read`: it runs its own read-only SQL over the models
+    /// (`querySql`); its extension needs `permissions.sql: read`.
+    #[serde(default)]
+    sql: Option<oxplow_domain::permissions::SqlAccess>,
 }
 
 /// What a bundle folder holds, as far as loading cares.
@@ -536,6 +544,7 @@ pub fn parse_custom_components(
                 bundle,
                 assets,
                 commands: c.commands,
+                sql: c.sql,
             }),
         }
     }

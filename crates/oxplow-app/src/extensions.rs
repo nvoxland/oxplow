@@ -1452,6 +1452,12 @@ pub enum PageBody {
         /// A `BUILT_IN_PAGES` name.
         name: String,
     },
+    /// One of the extension's own custom components, filling the page
+    /// body: a custom page (`.context/extensions.md` "Pages").
+    Component {
+        /// `<extension>/<component id>`.
+        component: String,
+    },
 }
 
 impl ExtensionPage {
@@ -3484,7 +3490,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         ext.errors.extend(errors);
     }
     if let Some(v) = page_files {
-        let (pages, errors) = parse_pages(name, &ext.namespace, &ext.lenses, v);
+        let (pages, errors) =
+            parse_pages(name, &ext.namespace, &ext.lenses, &ext.custom_components, v);
         ext.pages = pages;
         let lines = item_lines(&manifest, "pages");
         ext.errors.extend(errors.into_iter().map(|(i, e)| {
@@ -3644,6 +3651,7 @@ fn needed_permissions(
                 .filter(|cmd| !Permissions::default().command_allowed(&ext.namespace, cmd))
                 .cloned()
                 .collect(),
+            sql: c.sql,
             ..Permissions::default()
         };
         out.push((
@@ -3749,6 +3757,7 @@ fn parse_pages(
     extension: &str,
     namespace: &str,
     lenses: &[Lens],
+    components: &[custom_components::CustomComponent],
     raw: serde_yaml::Value,
 ) -> (Vec<ExtensionPage>, Vec<(Option<usize>, String)>) {
     let mut pages: Vec<ExtensionPage> = Vec::new();
@@ -3796,9 +3805,18 @@ fn parse_pages(
                     }
                 }
             }
-            (None, Some(c)) => Err(format!(
-                "`{c}` isn't a built-in page (`oxplow:<name>`); draw the page with a lens"
-            )),
+            (None, Some(c)) => {
+                if components.iter().any(|k| &k.id == c) {
+                    Ok(PageBody::Component {
+                        component: format!("{extension}/{c}"),
+                    })
+                } else {
+                    Err(format!(
+                        "`{c}` isn't one of its custom_components or a built-in page \
+                         (`oxplow:<name>`)"
+                    ))
+                }
+            }
         };
         if !oxplow_domain::contribution::valid_local(
             oxplow_domain::contribution::ContributionKind::Page,
@@ -5702,6 +5720,30 @@ mod tests {
         let errors = permission_errors(
             dir.path(),
             &format!("manifest: 2\nname: acme\npermissions: {{ commands: [oxplow.work_item.*] }}\nintent:\n  purpose: x\n{body}"),
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    /// A component that runs its own SQL (`sql: read`) needs
+    /// `permissions.sql`, as a script's `sql.read` does.
+    #[test]
+    fn a_component_that_runs_sql_needs_the_sql_permission() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "components/board/index.html", "<!doctype html>");
+        let body = "custom_components:\n  - { id: board, sql: read }\n";
+        let errors = permission_errors(
+            dir.path(),
+            &format!("manifest: 2\nname: acme\nintent:\n  purpose: x\n{body}"),
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].contains("`permissions.sql: read`")
+                && errors[0].contains("component `board`"),
+            "{errors:?}"
+        );
+        let errors = permission_errors(
+            dir.path(),
+            &format!("manifest: 2\nname: acme\npermissions: {{ sql: read }}\nintent:\n  purpose: x\n{body}"),
         );
         assert!(errors.is_empty(), "{errors:?}");
     }
@@ -8516,7 +8558,7 @@ commands:
             ),
             (
                 "{ id: a, title: A, component: nope }",
-                "isn't a built-in page",
+                "isn't one of its custom_components or a built-in page",
             ),
             ("{ id: a, title: A, count: nope, lens: open }", "count lens"),
             (
@@ -8535,6 +8577,49 @@ commands:
             );
             assert!(ext.pages.is_empty(), "{page}");
         }
+    }
+
+    /// A page may be one of its extension's own custom components: the
+    /// component owns the page body (a custom page). A name that isn't
+    /// one of them is refused.
+    #[test]
+    fn a_page_may_be_one_of_its_custom_components() {
+        let page = |pages: &str| {
+            let dir = tempfile::tempdir().unwrap();
+            write(
+                dir.path(),
+                ".oxplow/extensions/x/extension.yaml",
+                &format!(
+                    "manifest: 2\nname: x\nintent:\n  purpose: p\ncustom_components:\n  - {{ id: board }}\npages:\n  - {pages}\n"
+                ),
+            );
+            write(
+                dir.path(),
+                ".oxplow/extensions/x/components/board/index.html",
+                "<!doctype html>",
+            );
+            (
+                dir.path().to_path_buf(),
+                project_extensions(dir.path()).remove(0),
+                dir,
+            )
+        };
+        let (_, ext, _d) =
+            page("{ id: board, title: Board, category: Work, params: [from], component: board }");
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        assert_eq!(
+            ext.pages[0].body,
+            PageBody::Component {
+                component: "x/board".into()
+            }
+        );
+        let (_, ext, _d) = page("{ id: board, title: Board, component: nope }");
+        let errs = ext.errors.join("\n");
+        assert!(
+            errs.contains("`nope` isn't one of its custom_components or a built-in page"),
+            "{errs}"
+        );
+        assert!(ext.pages.is_empty());
     }
 
     /// P8.C1: an extension loads from any revision — at `git:HEAD` of a

@@ -219,6 +219,16 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	runComponentSql: (id: string, sql: string, params: SqlCell[] | null, streamId: string | null, version: string) => typedError<SqlQueryResult, IpcError_Serialize>(__TAURI_INVOKE("run_component_sql", { id, sql, params, streamId, version })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	componentForm: (id: string, command: string, input: unknown | null, version: string) => typedError<FormStart, IpcError_Serialize>(__TAURI_INVOKE("component_form", { id, command, input, version })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listServices: () => typedError<ServiceListing[], IpcError_Serialize>(__TAURI_INVOKE("list_services")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -2198,7 +2208,13 @@ export type CredentialStatus = {
  *  A declared component (valid ones; invalid ones are in the extension's
  *  `errors`).
  */
-export type CustomComponent = {
+export type CustomComponent = CustomComponent_Serialize | CustomComponent_Deserialize;
+
+/**
+ *  A declared component (valid ones; invalid ones are in the extension's
+ *  `errors`).
+ */
+export type CustomComponent_Deserialize = {
 	/**
 	 *  `[a-z0-9-]+`, unique in the extension; a lens names it in
 	 *  `custom.component`.
@@ -2212,6 +2228,36 @@ export type CustomComponent = {
 	assets: string[],
 	/**  Commands the component may invoke. */
 	commands: string[],
+	/**
+	 *  It runs its own read-only SQL over the models (`querySql`): needs
+	 *  `permissions.sql`.
+	 */
+	sql?: SqlAccess | null,
+};
+
+/**
+ *  A declared component (valid ones; invalid ones are in the extension's
+ *  `errors`).
+ */
+export type CustomComponent_Serialize = {
+	/**
+	 *  `[a-z0-9-]+`, unique in the extension; a lens names it in
+	 *  `custom.component`.
+	 */
+	id: string,
+	extension: string,
+	title: string | null,
+	/**  The bundle's folder inside the extension, holding `index.html`. */
+	bundle: string,
+	/**  Lens ids (`<extension>/<slug>`) the component may query. */
+	assets: string[],
+	/**  Commands the component may invoke. */
+	commands: string[],
+	/**
+	 *  It runs its own read-only SQL over the models (`querySql`): needs
+	 *  `permissions.sql`.
+	 */
+	sql?: SqlAccess | null,
 };
 
 /**
@@ -2881,7 +2927,7 @@ export type Extension_Deserialize = {
 	/**  Declared providers (valid ones — invalid ones are in `errors`). */
 	providers: ProviderSpec[],
 	/**  Web components its `custom` lenses render, sandboxed (valid ones). */
-	customComponents: CustomComponent[],
+	customComponents: CustomComponent_Deserialize[],
 	/**
 	 *  Event types it declares (valid ones — the vocabulary registers
 	 *  them, `vocabulary_reactor`).
@@ -3034,7 +3080,7 @@ export type Extension_Serialize = {
 	/**  Declared providers (valid ones — invalid ones are in `errors`). */
 	providers: ProviderSpec[],
 	/**  Web components its `custom` lenses render, sandboxed (valid ones). */
-	customComponents: CustomComponent[],
+	customComponents: CustomComponent_Serialize[],
 	/**
 	 *  Event types it declares (valid ones — the vocabulary registers
 	 *  them, `vocabulary_reactor`).
@@ -5245,7 +5291,14 @@ export type PageBody = { kind: "lens";
 /**  `<extension>/<slug>`. */
 lens: string } | { kind: "builtIn"; 
 /**  A `BUILT_IN_PAGES` name. */
-name: string };
+name: string } | 
+/**
+ *  One of the extension's own custom components, filling the page
+ *  body: a custom page (`.context/extensions.md` "Pages").
+ */
+{ kind: "component"; 
+/**  `<extension>/<component id>`. */
+component: string };
 
 export type PageVisit = {
 	id: string,

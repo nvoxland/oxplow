@@ -258,6 +258,8 @@ macro_rules! oxplow_command_table {
                 run_component_query => $crate::commands::extensions::run_component_query { id: String, asset: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String>, version: String } -> ::oxplow_app::extensions::LensRun,
                 load_component => $crate::commands::extensions::load_component { id: String } -> String,
                 invoke_component_command => $crate::commands::extensions::invoke_component_command { id: String, command: String, input: ::oxplow_domain::Json, confirmed: bool, version: String } -> ::oxplow_domain::CommandOutcome,
+                run_component_sql => $crate::commands::extensions::run_component_sql { id: String, sql: String, params: Option<Vec<::oxplow_db::SqlCell>>, stream_id: Option<String>, version: String } -> ::oxplow_db::SqlQueryResult,
+                component_form => $crate::commands::extensions::component_form { id: String, command: String, input: Option<::oxplow_domain::Json>, version: String } -> ::oxplow_app::lens_actions::FormStart,
                 run_answer => $crate::commands::extensions::run_answer { answer: String } -> ::oxplow_app::extensions::LensRun,
                 lens_text => $crate::commands::extensions::lens_text { id: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> String,
                 list_services => $crate::commands::extensions::list_services {} -> Vec<$crate::commands::extensions::ServiceListing>,

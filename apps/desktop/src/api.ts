@@ -605,8 +605,8 @@ export async function submitLensForm(
   return unwrap(await commands.submitLensForm(id, input, params, streamId, confirmed));
 }
 
-/** A custom component's frame reads one of its declared lenses, while the
- *  person looks at lens `id` (P6b.D2). */
+/** Component `id`'s frame (`<extension>/<component id>`) reads one of its
+ *  declared lenses (P6b.D2). */
 export async function runComponentQuery(
   id: string,
   asset: string,
@@ -617,15 +617,15 @@ export async function runComponentQuery(
   return unwrap(await commands.runComponentQuery(id, asset, params, streamId, version));
 }
 
-/** Load the `custom` lens `id`'s component bundle as it is now, for its
- *  frame (tsk984): the version the daemon serves it at and the frame
- *  invokes with. */
+/** Load component `id`'s bundle (`<extension>/<component id>`) as it is
+ *  now, for its frame (tsk984): the version the daemon serves it at and
+ *  the frame invokes with. */
 export async function loadComponent(id: string): Promise<string> {
   return unwrap(await commands.loadComponent(id));
 }
 
 /** A custom component's frame invokes one of its declared commands, as the
- *  lens acting for the person; `confirmed` only after the host asked;
+ *  component acting for the person; `confirmed` only after the host asked;
  *  `version` is the bundle the frame was loaded at, which must be approved. */
 export async function invokeComponentCommand(
   id: string,
@@ -635,6 +635,24 @@ export async function invokeComponentCommand(
   version: string,
 ): Promise<CommandOutcome> {
   return unwrap(await commands.invokeComponentCommand(id, command, input as never, confirmed, version));
+}
+
+/** A custom component that declares `sql: read` runs its own read-only SQL
+ *  over the models (`querySql`), at the bundle version its frame loaded. */
+export async function runComponentSql(
+  id: string,
+  sql: string,
+  params: SqlCell[],
+  streamId: string | null,
+  version: string,
+): Promise<SqlQueryResult> {
+  return unwrap(await commands.runComponentSql(id, sql, params, streamId, version));
+}
+
+/** The form of one of component `id`'s commands, for the host to show when
+ *  its frame asks (`openForm`). */
+export async function componentForm(id: string, command: string, input: unknown, version: string): Promise<FormStart> {
+  return unwrap(await commands.componentForm(id, command, (input ?? null) as never, version));
 }
 
 /** What the person can ask: every capability's questions and the enabled

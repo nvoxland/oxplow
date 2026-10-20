@@ -234,6 +234,14 @@ pub const MANIFEST: &[Capability] = &[
         "invoke_component_command",
         "a custom component's bridged command, from its sandboxed frame through the host (P6b.D2)",
     ),
+    ui(
+        "run_component_sql",
+        "a custom component's own read-only SQL, from its sandboxed frame through the host; an agent runs oxplow_query_sql",
+    ),
+    ui(
+        "component_form",
+        "the form of a custom component's command, which the host shows the person when its frame asks",
+    ),
     both_named("validate_extension", "validate_extension", "oxplow_validate_extension"),
     ui(
         "list_native_conversations",

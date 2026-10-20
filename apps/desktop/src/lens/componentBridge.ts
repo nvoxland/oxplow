@@ -8,10 +8,19 @@
 ///   frame → host  { type: "ready" }
 ///                 { id, method: "query", asset, params }     a declared lens's run
 ///                 { id, method: "invoke", command, input }   a declared command
-///                 { id, method: "navigate", ref }            open a page
-///   host → frame  { type: "init", protocol, run, props, tokens }
+///                 { id, method: "navigate", ref, newTab }    open a page
+///                 { id, method: "querySql", sql, params }    its own SQL (`sql: read`)
+///                 { id, method: "openForm", command, input } a declared command's form, in the host
+///                 { id, method: "setTitle", title }          a page's title (a page only)
+///                 { id, method: "setActions", actions }      a page's actions (a page only)
+///   host → frame  { type: "init", protocol, run, props, page, tokens }
 ///                 { type: "update", run }                    the lens re-ran
-///                 { id, ok: true, result } | { id, ok: false, error: { code, message } }
+///                 { type: "action", id }                     a page action was pressed
+///                 { id, ok: true, result } | { id, ok: false, error: { code, message, field? } }
+///
+/// Shown by a lens, `init` carries the lens's run and `page` is null; shown
+/// as a page (`pages[].component`), `run` is null and `page` carries the
+/// page's params, stream and thread.
 ///
 /// A command that asks is confirmed by the person in the host, never in
 /// the frame. The daemon serves a client library wrapping this
@@ -19,7 +28,7 @@
 /// `protocol` against the one it speaks.
 import { IpcCallError, needsConfirmation } from "../ipc-error.js";
 import { parseRef } from "../refs/ref.js";
-import type { CommandOutcome, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { CommandOutcome, LensRun, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 
 /// The protocol above, by number: bumped when a message's shape changes,
 /// with the served library (`crates/oxplow-daemon/assets/`). 2: `init`
@@ -27,12 +36,34 @@ import type { CommandOutcome, LensRun, SqlCell } from "../tauri-bridge/generated
 /// 3: `navigate` carries `newTab` (a Cmd-click in a component). 4: a
 /// refused request's error carries the input `field` it names, when it
 /// names one (`INVALID`), so a component's form marks that field.
-export const BRIDGE_PROTOCOL = 4;
+/// 5: a component can be a page — `init.page`, a null `run` — and asks
+/// `querySql`, `openForm`, `setTitle`, `setActions`; the host sends
+/// `action`.
+export const BRIDGE_PROTOCOL = 5;
+
+/** A page action a component declares; core draws it in the nav bar. */
+export interface FrameAction {
+  id: string;
+  label: string;
+  primary: boolean;
+  disabled: boolean;
+}
+
+/** What a component shown as a page is told about it. */
+export interface PageInit {
+  params: Record<string, string>;
+  streamId: string | null;
+  threadId: string | null;
+}
 
 export type BridgeRequest =
   | { id: string; method: "query"; asset: string; params: Record<string, SqlCell> }
   | { id: string; method: "invoke"; command: string; input: unknown }
-  | { id: string; method: "navigate"; ref: string; newTab: boolean };
+  | { id: string; method: "navigate"; ref: string; newTab: boolean }
+  | { id: string; method: "querySql"; sql: string; params: SqlCell[] }
+  | { id: string; method: "openForm"; command: string; input: unknown }
+  | { id: string; method: "setTitle"; title: string }
+  | { id: string; method: "setActions"; actions: FrameAction[] };
 
 export type FrameMessage = { type: "ready" } | { type: "request"; request: BridgeRequest };
 
@@ -59,6 +90,27 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
       if (typeof m.ref !== "string") return null;
       if (m.newTab !== undefined && typeof m.newTab !== "boolean") return null;
       return { type: "request", request: { id: m.id, method: "navigate", ref: m.ref, newTab: m.newTab === true } };
+    case "querySql": {
+      const params = m.params ?? [];
+      if (typeof m.sql !== "string" || !Array.isArray(params) || !params.every(isCell)) return null;
+      return { type: "request", request: { id: m.id, method: "querySql", sql: m.sql, params: params as SqlCell[] } };
+    }
+    case "openForm":
+      if (typeof m.command !== "string") return null;
+      return { type: "request", request: { id: m.id, method: "openForm", command: m.command, input: m.input ?? {} } };
+    case "setTitle":
+      if (typeof m.title !== "string") return null;
+      return { type: "request", request: { id: m.id, method: "setTitle", title: m.title } };
+    case "setActions": {
+      if (!Array.isArray(m.actions)) return null;
+      const actions: FrameAction[] = [];
+      for (const raw of m.actions as unknown[]) {
+        const a = raw as Record<string, unknown> | null;
+        if (!a || typeof a.id !== "string" || !a.id || typeof a.label !== "string") return null;
+        actions.push({ id: a.id, label: a.label, primary: a.primary === true, disabled: a.disabled === true });
+      }
+      return { type: "request", request: { id: m.id, method: "setActions", actions } };
+    }
     default:
       return null;
   }
@@ -91,15 +143,16 @@ export function tokensFromStyle(style: {
 }
 
 /** The `init` the host posts to a component's frame: the protocol it
- *  speaks, the first run, the lens's `custom.props` and the theme's
- *  tokens. One builder, so the library's tests read the message the host
- *  really sends. */
-export function initMessage(run: LensRun, tokens: Record<string, string>) {
+ *  speaks, the first run and the lens's `custom.props` (a lens shows it)
+ *  or the page it is (`page`), and the theme's tokens. One builder, so the
+ *  library's tests read the message the host really sends. */
+export function initMessage(run: LensRun | null, tokens: Record<string, string>, page: PageInit | null = null) {
   return {
     type: "init" as const,
     protocol: BRIDGE_PROTOCOL,
     run,
-    props: run.lens.custom?.props ?? null,
+    props: run?.lens.custom?.props ?? null,
+    page,
     tokens,
   };
 }
@@ -115,6 +168,15 @@ export interface BridgeDeps {
   /** Ask the person, in the host, to confirm `command`. */
   confirm(command: string): Promise<boolean>;
   onReady(): void;
+  /** Run its own read-only SQL (`run_component_sql`). */
+  querySql?(sql: string, params: SqlCell[]): Promise<SqlQueryResult>;
+  /** Show a declared command's form in the host and run it as submitted:
+   *  `{ result }`, or null when the person closed it. A page only. */
+  openForm?(command: string, input: unknown): Promise<{ result: unknown } | null>;
+  /** The page's title, in the tab and the nav bar. A page only. */
+  setTitle?(title: string): void;
+  /** The page's actions, drawn by core in the nav bar. A page only. */
+  setActions?(actions: FrameAction[]): void;
 }
 
 /** Why an invoke was refused (`DENIED`: the component isn't approved, or a
@@ -134,7 +196,10 @@ export function componentMayOpen(ref: string): boolean {
 }
 
 /** What a run shows the frame: an `update` repeats none of it. */
-const shown = (run: LensRun) => JSON.stringify([run.params, run.result]);
+const shown = (run: LensRun | null) => (run ? JSON.stringify([run.params, run.result]) : "");
+
+/** What a component shown by a lens may not do: the lens owns the page. */
+const PAGE_ONLY = "A lens shows this component: only a component shown as a page sets its title, actions or forms.";
 
 /** Answer the frame's requests arriving on `port`. `sent` is the run the
  *  `init` message carried; `update` posts only a run whose params or
@@ -142,8 +207,8 @@ const shown = (run: LensRun) => JSON.stringify([run.params, run.result]);
 export function createBridgeHost(
   port: MessagePort,
   deps: BridgeDeps,
-  sent: LensRun,
-): { update(run: LensRun): void; close(): void } {
+  sent: LensRun | null,
+): { update(run: LensRun): void; action(id: string): void; close(): void } {
   let last = shown(sent);
   let ready = false;
   const reply = (id: string, result: unknown) => port.postMessage({ id, ok: true, result });
@@ -186,6 +251,34 @@ export function createBridgeHost(
       case "navigate":
         if (deps.navigate(r.ref, { newTab: r.newTab })) reply(r.id, null);
         else fail(r.id, "INVALID", "A component may open oxplow's pages only.");
+        return;
+      case "querySql":
+        if (!deps.querySql) return fail(r.id, "INVALID", "This host runs no SQL for a component.");
+        try {
+          reply(r.id, await deps.querySql(r.sql, r.params));
+        } catch (e) {
+          failWith(r.id, e);
+        }
+        return;
+      case "openForm": {
+        if (!deps.openForm) return fail(r.id, "INVALID", PAGE_ONLY);
+        try {
+          const out = await deps.openForm(r.command, r.input);
+          if (out === null) return fail(r.id, "CANCELLED", `The person closed the form for \`${r.command}\`.`);
+          reply(r.id, out.result);
+        } catch (e) {
+          failWith(r.id, e);
+        }
+        return;
+      }
+      case "setTitle":
+        if (!deps.setTitle) return fail(r.id, "INVALID", PAGE_ONLY);
+        deps.setTitle(r.title);
+        return reply(r.id, null);
+      case "setActions":
+        if (!deps.setActions) return fail(r.id, "INVALID", PAGE_ONLY);
+        deps.setActions(r.actions);
+        return reply(r.id, null);
     }
   };
   port.onmessage = (e: MessageEvent) => {
@@ -197,7 +290,7 @@ export function createBridgeHost(
     }
     if (m?.type === "request") return void handle(m.request);
     const id = (e.data as { id?: unknown } | null)?.id;
-    if (typeof id === "string" && id) fail(id, "BAD_REQUEST", "Not a query, invoke or navigate request.");
+    if (typeof id === "string" && id) fail(id, "BAD_REQUEST", "Not a request this host knows.");
   };
   return {
     update: (run) => {
@@ -206,6 +299,7 @@ export function createBridgeHost(
       last = key;
       port.postMessage({ type: "update", run });
     },
+    action: (id) => port.postMessage({ type: "action", id }),
     close: () => port.close(),
   };
 }
