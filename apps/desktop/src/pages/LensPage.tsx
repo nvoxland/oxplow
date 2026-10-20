@@ -13,7 +13,6 @@ import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { useRequestGuard } from "../request-guard.js";
 import { LensResultView } from "../lens/LensResultView.js";
 import { ParamControl } from "../kit/ParamControls.js";
-import { Toolbar } from "../kit/Toolbar.js";
 import type { PageAction } from "../kit/actions.js";
 
 export interface LensPageProps {
@@ -101,9 +100,7 @@ export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOp
   // A param set from the rail or by a row click (a column's `select`).
   const setParam = (name: string, value: SqlCell) => setOverrides((o) => ({ ...o, [name]: value }));
   const rightRail =
-    lens && lens.params.some((p) => p.place !== "toolbar") ? (
-      <ParamsForm lens={lens} values={run?.params ?? {}} onApply={setParam} />
-    ) : undefined;
+    lens && lens.params.length > 0 ? <ParamsForm lens={lens} values={run?.params ?? {}} onApply={setParam} /> : undefined;
 
   return (
     <Page
@@ -120,7 +117,6 @@ export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOp
       <div style={lens?.viz === "dashboard" ? { padding: "var(--space-5)" } : undefined}>
       <h1 className="ox-title">{title}</h1>
       {lens?.description ? <p className="ox-intro">{lens.description}</p> : null}
-      {lens ? <ParamsToolbar lens={lens} values={run?.params ?? {}} onApply={setParam} /> : null}
       {error ? (
         <div data-testid="lens-error" style={errorStyle}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>This lens couldn't run.</div>
@@ -137,34 +133,16 @@ export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOp
   );
 }
 
-/** The lens's params: oxplow's id params as pickers (`lensParams.ts`),
- *  anything else typed. */
-/** The lens's rail params (`place: rail`), one kit control each; nothing
- *  when it has none. */
+/** The lens's params, one kit control each, in the rail; nothing when it
+ *  has none. */
 export function ParamsForm({ lens, values, onApply }: ParamsProps) {
-  const params = lens.params.filter((p) => p.place !== "toolbar");
-  if (params.length === 0) return null;
+  if (lens.params.length === 0) return null;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {params.map((p) => (
+      {lens.params.map((p) => (
         <ParamControl key={p.name} param={p} value={values[p.name] ?? null} onApply={onApply} />
       ))}
     </div>
-  );
-}
-
-/** The lens's toolbar params (`place: toolbar`), above its body; nothing
- *  when it has none. */
-export function ParamsToolbar({ lens, values, onApply }: ParamsProps) {
-  const params = lens.params.filter((p) => p.place === "toolbar");
-  if (params.length === 0) return null;
-  return (
-    <Toolbar
-      testId="lens-params-toolbar"
-      controls={params.map((p) => (
-        <ParamControl key={p.name} param={p} value={values[p.name] ?? null} onApply={onApply} compact />
-      ))}
-    />
   );
 }
 

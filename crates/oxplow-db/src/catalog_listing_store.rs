@@ -23,7 +23,8 @@ pub struct LensRow {
     pub hidden: bool,
     pub launcher_category: Option<String>,
     pub needs_json: String,
-    pub path: String,
+    /// Its source file, the one to edit; none when no source is here.
+    pub source: Option<String>,
 }
 
 /// One extension, as `v_extension` lists it.
@@ -149,7 +150,7 @@ pub fn reset_tx(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result
         .prepare(
             "INSERT OR REPLACE INTO lens
                (id, extension, slug, title, description, viz, params_json, hidden,
-                launcher_category, needs_json, path)
+                launcher_category, needs_json, source)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         )
         .map_err(map_sql_err)?;
@@ -165,7 +166,7 @@ pub fn reset_tx(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result
             l.hidden,
             l.launcher_category,
             l.needs_json,
-            l.path,
+            l.source,
         ])
         .map_err(map_sql_err)?;
     }

@@ -540,7 +540,7 @@ fn keep(target: LensTarget) -> Op {
             if let Err(e) =
                 crate::extension_deploy::deploy(&svc, &extension, &root, None, false).await
             {
-                let _ = std::fs::remove_file(root.join(&lens.path));
+                let _ = std::fs::remove_file(root.join(&lens.origin.running));
                 if let Some(id) = answer {
                     let lens_id = claim.clone();
                     let _ = target
@@ -569,7 +569,7 @@ fn keep(target: LensTarget) -> Op {
             Ok(HandlerOutput {
                 result: json!({
                     "lens": lens.id,
-                    "path": lens.path,
+                    "path": lens.origin.running,
                 }),
                 inverse: None,
                 events: vec![event],

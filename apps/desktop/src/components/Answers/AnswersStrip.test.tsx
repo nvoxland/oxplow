@@ -36,7 +36,7 @@ const lens = (title: string): Lens => ({
   hidden: false,
   actions: [],
   alert: null,
-  path: "",
+  origin: { extension: "", source: null, running: "", deployment: null, bundled: false },
 });
 
 mock.module("../../api.js", () => ({

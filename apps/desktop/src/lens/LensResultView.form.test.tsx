@@ -114,7 +114,7 @@ const lens: Lens = {
     },
   ],
   alert: null,
-  path: "",
+  origin: { extension: "", source: null, running: "", deployment: null, bundled: false },
 } as unknown as Lens;
 const run: LensRun = {
   lens,

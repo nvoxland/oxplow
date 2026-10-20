@@ -75,8 +75,8 @@ A param's `type` decides what it holds and which control the page draws:
 
 ```yaml
 params:
-  - { name: range, type: date_range, place: toolbar, default: 7d, presets: [1d, 7d, 30d, all] }
-  - { name: q, type: search, place: toolbar }
+  - { name: range, type: date_range, default: 7d, presets: [1d, 7d, 30d, all] }
+  - { name: q, type: search }
   - { name: branch, type: branch }
   - { name: merged, type: bool, default: false }
   - { name: state, default: open, options: [{ value: open, label: Open }, { value: done, label: Done }] }
@@ -96,8 +96,8 @@ query: |
   or a custom `from..to`. The query gets `:<name>_from` and
   `:<name>_to` as times, NULL for an open end; a custom range includes
   its last day.
-- `place: toolbar` draws the control above the lens instead of in the
-  side panel.
+
+Every param shows in the page's side panel. You don't choose where.
 
 A column's `select: <param>` makes a row clickable: clicking it sets the
 param to that column's value. In a document, the other sections that

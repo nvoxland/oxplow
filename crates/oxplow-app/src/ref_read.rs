@@ -143,8 +143,11 @@ pub async fn read(
                 .extension_catalog
                 .find_lens(&root, &parsed.id)
                 .map_err(|_| ReadError::NotFound(out.reference.clone()))?;
+            let mut body =
+                serde_json::to_value(&lens).map_err(|e| ReadError::Invalid(e.to_string()))?;
+            body["origin"] = lens.origin.to_json(svc.worktrees.project_dir());
             out.set_content(
-                serde_json::to_string_pretty(&lens)
+                serde_json::to_string_pretty(&body)
                     .map_err(|e| ReadError::Invalid(e.to_string()))?,
             );
         }

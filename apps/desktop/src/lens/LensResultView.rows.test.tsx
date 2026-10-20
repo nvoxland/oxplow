@@ -52,7 +52,7 @@ const base: Lens = {
   actions: [],
   alert: null,
   needs: [],
-  path: "",
+  origin: { extension: "", source: null, running: "", deployment: null, bundled: false },
 };
 const columns = ["bucket", "bucket_ref", "id", "title", "status", "hue", "on", "d", "ref"];
 const rows: SqlCell[][] = [
@@ -207,7 +207,7 @@ test("a row click sets the param its column selects; a link in it doesn't", () =
   const run = {
     ...runOf({
       viz: "table",
-      params: [{ name: "pick", label: null, default: null, options: [], type: "text", place: "rail", presets: [] }],
+      params: [{ name: "pick", label: null, default: null, options: [], type: "text", role: "selection", presets: [] }],
       columns: [
         { key: "title", label: null, link: null, unit: null, icon: null, tone: null, select: "pick" },
         { key: "ref", label: null, link: link("page", "ref"), unit: null, icon: null, tone: null },

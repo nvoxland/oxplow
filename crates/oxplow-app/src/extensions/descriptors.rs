@@ -79,7 +79,7 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         let mut d = new(ContributionKind::Lens, &l.slug, RunsOn::Mount);
         d.needs = l.needs.clone();
         d.source = DeclaredAt {
-            file: l.path.clone(),
+            file: l.origin.running.clone(),
             line: None,
         };
         out.push(d);

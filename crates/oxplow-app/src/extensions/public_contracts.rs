@@ -258,7 +258,7 @@ pub(super) fn prepare(ext: &mut Extension) {
         .chain(ext.lenses.iter().map(|lens| {
             (
                 ContributionId::new(&ext.name, ContributionKind::Lens, &lens.slug),
-                lens.path.clone(),
+                lens.origin.running.clone(),
                 lens.query.clone(),
             )
         }))

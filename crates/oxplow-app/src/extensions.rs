@@ -709,10 +709,13 @@ pub struct LensParam {
     /// says.
     #[serde(default, rename = "type")]
     pub kind: Option<ParamType>,
-    /// Where a page draws it: the rail (the default) or the toolbar above
-    /// the lens's body.
+    /// What it is to the page, which follows from the columns and is
+    /// never written: a `selection` when a column of the lens (or of a
+    /// part of the page) selects it, else a `filter`. A loaded lens
+    /// always says.
     #[serde(default)]
-    pub place: ParamPlace,
+    #[schemars(skip)]
+    pub role: Option<ParamRole>,
     /// A `date_range`'s quick picks, of `1d 2d 3d 7d 30d 90d all`; the
     /// default is `1d 7d 30d all`.
     #[serde(default)]
@@ -744,26 +747,16 @@ pub enum ParamType {
     Search,
 }
 
-/// Where a page draws a lens param.
+/// What a lens param is to its page.
 #[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    specta::Type,
-    schemars::JsonSchema,
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(rename_all = "lowercase")]
-pub enum ParamPlace {
-    /// In the page's rail, under "Parameters".
-    #[default]
-    Rail,
-    /// In the toolbar above the lens's body.
-    Toolbar,
+pub enum ParamRole {
+    /// Narrows what the page shows; a control in the page's rail.
+    Filter,
+    /// The row a click picked; the rail shows that row, never an input.
+    Selection,
 }
 
 /// A `date_range`'s presets and how far back each reaches (`all`: no
@@ -893,7 +886,13 @@ fn range_ends(value: &str, now: time::OffsetDateTime) -> Option<(Option<String>,
 fn param_problem(lens: &Lens) -> Option<String> {
     lens.params.iter().find_map(|p| {
         let kind = p.kind();
-        let problem = if kind == ParamType::Choice && p.options.is_empty() {
+        let problem = if p.role.is_some() {
+            Some(
+                "`role` follows from the columns (a param a column `select`s is a selection); \
+                 leave it out"
+                    .to_string(),
+            )
+        } else if kind == ParamType::Choice && p.options.is_empty() {
             Some("a choice needs `options`".to_string())
         } else if kind != ParamType::Choice && !p.options.is_empty() {
             Some("`options` are only for a choice".to_string())
@@ -1755,6 +1754,27 @@ impl LensSlot {
     }
 }
 
+/// Where a lens comes from. An agent edits `source`, never `running`: a
+/// deployed extension runs a copy in the store that the next deploy
+/// replaces.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LensProvenance {
+    /// The extension it belongs to.
+    pub extension: String,
+    /// Its source file, relative to the project when inside it; none when
+    /// no source is here (an extension that ships with oxplow, or a
+    /// deployment whose source is gone).
+    pub source: Option<String>,
+    /// The file it runs from: `source` when loaded from it, else the
+    /// deployment's copy.
+    pub running: String,
+    /// The deployment it runs, when it runs one (its hash).
+    pub deployment: Option<String>,
+    /// It ships with oxplow.
+    pub bundled: bool,
+}
+
 /// A loaded lens.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -1801,8 +1821,8 @@ pub struct Lens {
     /// The capabilities (or their features) it needs (`needs:
     /// [work_items]`): without them its run says so instead of running.
     pub needs: Vec<String>,
-    /// Repo-relative path of the lens file.
-    pub path: String,
+    /// Where it comes from: the file that runs and the source to edit.
+    pub origin: LensProvenance,
     /// The MCP tool it is also offered as (`tool:`), prefixed with its
     /// extension's namespace (`extension_commands::tool_name`): a call
     /// runs it and returns its text rendering.
@@ -2134,6 +2154,9 @@ pub(super) fn load_sources(
             out.push(listed_only(&name, &shown(root, &dir), Deployment::NotHere));
         }
     }
+    for ext in &mut out {
+        locate(ext, root, settings);
+    }
     out.sort_by(|a, b| a.name.cmp(&b.name).then(a.origin.cmp(&b.origin)));
     out
 }
@@ -2199,9 +2222,26 @@ pub fn load_deployed(
         .collect();
     for ext in &mut out {
         ext.shared = settings.team.contains(&ext.name);
+        locate(ext, project, settings);
     }
     out.sort_by(|a, b| a.name.cmp(&b.name).then(a.origin.cmp(&b.origin)));
     resolve_catalog(out, settings)
+}
+
+/// Fill in where each of `ext`'s lenses comes from: the deployment it
+/// runs, and its source file when the source is here.
+fn locate(ext: &mut Extension, project: &Path, settings: &oxplow_config::ExtensionSettings) {
+    let deployment = match &ext.deployment {
+        Deployment::Shipped { hash } | Deployment::Deployed { hash } => Some(hash.clone()),
+        _ => None,
+    };
+    let dir = settings.source(project, &ext.name);
+    let source = dir.is_dir().then(|| shown(project, &dir));
+    for lens in &mut ext.lenses {
+        let file = lens.origin.running.rsplit('/').next().unwrap_or_default();
+        lens.origin.source = source.as_ref().map(|dir| format!("{dir}/lenses/{file}"));
+        lens.origin.deployment = deployment.clone();
+    }
 }
 
 /// `rel` is `dir` or inside it, by `/` segments.
@@ -2268,7 +2308,7 @@ pub(super) fn resolve_catalog(
                 if !all_ids.iter().any(|id| id == c) {
                     ext.errors.push(format!(
                         "{}: part lens `{c}` isn't in any loaded extension",
-                        l.path
+                        l.origin.running
                     ));
                     bad.push(l.id.clone());
                 }
@@ -3584,7 +3624,13 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 actions,
                 alert,
                 needs: l.needs,
-                path: lens_rel,
+                origin: LensProvenance {
+                    extension: name.to_string(),
+                    source: None,
+                    running: lens_rel,
+                    deployment: None,
+                    bundled: origin == "bundled",
+                },
             }),
             Err(e) => ext.errors.push(format!("{lens_rel}: {e}")),
         }
@@ -3621,7 +3667,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         if let Some(problem) =
             shape_problem(l, &ids, &components).or_else(|| choices_problem(l, &ids))
         {
-            ext.errors.push(format!("{}: {problem}", l.path));
+            ext.errors.push(format!("{}: {problem}", l.origin.running));
             bad.push(l.id.clone());
         }
     }
@@ -3632,7 +3678,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         .filter_map(|l| {
             Some((
                 l.id.clone(),
-                format!("{}: {}", l.path, selects_problem(l, &ext.lenses)?),
+                format!("{}: {}", l.origin.running, selects_problem(l, &ext.lenses)?),
             ))
         })
         .collect();
@@ -3641,6 +3687,20 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     }
     ext.lenses
         .retain(|l| !selects.iter().any(|(id, _)| id == &l.id));
+    let selected: Vec<Vec<String>> = ext
+        .lenses
+        .iter()
+        .map(|l| selected(l, &ext.lenses))
+        .collect();
+    for (lens, names) in ext.lenses.iter_mut().zip(selected) {
+        for p in &mut lens.params {
+            p.role = Some(if names.contains(&p.name) {
+                ParamRole::Selection
+            } else {
+                ParamRole::Filter
+            });
+        }
+    }
 
     for s in slot_files {
         let mount_line = entry_line(&manifest, "ui", "lens", &s.lens);
@@ -3917,7 +3977,7 @@ fn config_sql(ext: &Extension) -> Vec<(String, &str)> {
     let lenses = ext
         .lenses
         .iter()
-        .map(|l| (l.path.clone(), l.query.as_str()));
+        .map(|l| (l.origin.running.clone(), l.query.as_str()));
     let advisories = ext
         .advisories
         .iter()
@@ -4373,6 +4433,42 @@ fn selects_problem(lens: &Lens, lenses: &[Lens]) -> Option<String> {
             .find(|name| !lens.params.iter().any(|p| &p.name == name))
             .map(|name| format!("part `{id}` selects `{name}`, a param this lens doesn't declare"))
     })
+}
+
+impl LensProvenance {
+    /// Whether the source changed after the deployment that runs was made
+    /// from it: an edit an agent made there runs only once it is
+    /// deployed. Read now, from the files; false with no deployment or no
+    /// source.
+    pub fn out_of_date(&self, project: &Path) -> bool {
+        let (Some(source), Some(deployment)) = (&self.source, &self.deployment) else {
+            return false;
+        };
+        let file = project.join(source);
+        let Some(dir) = file.parent().and_then(Path::parent) else {
+            return false;
+        };
+        crate::extension_store::source_hash(dir).is_ok_and(|hash| &hash != deployment)
+    }
+
+    /// As an agent reads it: these fields and `outOfDate`.
+    pub fn to_json(&self, project: &Path) -> serde_json::Value {
+        let mut out = serde_json::to_value(self).unwrap_or_default();
+        out["outOfDate"] = serde_json::Value::Bool(self.out_of_date(project));
+        out
+    }
+}
+
+/// The params a click on `lens`'s rows sets: its own columns' `select`s
+/// and its parts'.
+fn selected(lens: &Lens, lenses: &[Lens]) -> Vec<String> {
+    let parts = lens
+        .part_lenses()
+        .filter_map(|id| lenses.iter().find(|l| l.id == id));
+    std::iter::once(lens)
+        .chain(parts)
+        .flat_map(|l| l.columns.iter().filter_map(|c| c.select.clone()))
+        .collect()
 }
 
 /// Row styling on a viz that doesn't draw rows that way: `group` and
@@ -5006,7 +5102,7 @@ fn check_components(
             ]
             .into_iter()
             .filter(|(_, set)| *set)
-            .map(|(block, _)| (l.path.clone(), block))
+            .map(|(block, _)| (l.origin.running.clone(), block))
         })
         .collect();
     for (path, block) in lookalikes {
@@ -5364,7 +5460,7 @@ impl Lens {
             actions: Vec::new(),
             alert: None,
             needs: Vec::new(),
-            path: String::new(),
+            origin: LensProvenance::default(),
             tool: None,
         }
     }
@@ -6081,7 +6177,10 @@ empty: No items.
         assert_eq!(l.slug, "by-status");
         assert_eq!(l.title, "Items by state");
         assert_eq!(l.viz, LensViz::Table);
-        assert_eq!(l.path, ".oxplow/extensions/review/lenses/by-status.yaml");
+        assert_eq!(
+            l.origin.running,
+            ".oxplow/extensions/review/lenses/by-status.yaml"
+        );
         assert_eq!(
             l.params[0].default,
             Some(SqlCell::Text("in_progress".into()))
@@ -7714,13 +7813,15 @@ commands:
     fn typed_params_are_checked_at_load() {
         let (_d, ext) = load_x(
             &[
-                ("ok", "title: OK\nquery: SELECT 1 AS a\nparams:\n  - { name: range, type: date_range, place: toolbar, presets: [7d, all], default: 7d }\n  - { name: flag, type: bool, default: true }\n  - { name: q, type: search, place: toolbar }\n  - { name: br, type: branch }\n  - { name: mode, default: a, options: [{ value: a, label: A }] }\n  - { name: free }\n"),
+                ("ok", "title: OK\nquery: SELECT 1 AS a\nparams:\n  - { name: range, type: date_range, presets: [7d, all], default: 7d }\n  - { name: flag, type: bool, default: true }\n  - { name: q, type: search }\n  - { name: br, type: branch }\n  - { name: mode, default: a, options: [{ value: a, label: A }] }\n  - { name: free }\n"),
                 ("choice_without_options", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, type: choice }]\n"),
                 ("options_on_text", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, type: text, options: [{ value: a, label: A }] }]\n"),
                 ("presets_on_text", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, presets: [7d] }]\n"),
                 ("unknown_preset", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, type: date_range, presets: [5y] }]\n"),
                 ("bad_range", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, type: date_range, default: soon }]\n"),
                 ("bad_bool", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, type: bool, default: maybe }]\n"),
+                ("placed", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, place: toolbar }]\n"),
+                ("roled", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, role: selection }]\n"),
             ],
             "",
         );
@@ -7729,17 +7830,18 @@ commands:
             .iter()
             .find(|l| l.slug == "ok")
             .expect("ok loads");
-        let kinds: Vec<_> = ok.params.iter().map(|p| (p.kind, p.place)).collect();
+        let kinds: Vec<_> = ok.params.iter().map(|p| p.kind).collect();
         assert_eq!(
             kinds,
-            vec![
-                (Some(ParamType::DateRange), ParamPlace::Toolbar),
-                (Some(ParamType::Bool), ParamPlace::Rail),
-                (Some(ParamType::Search), ParamPlace::Toolbar),
-                (Some(ParamType::Branch), ParamPlace::Rail),
-                (Some(ParamType::Choice), ParamPlace::Rail),
-                (Some(ParamType::Text), ParamPlace::Rail),
+            [
+                ParamType::DateRange,
+                ParamType::Bool,
+                ParamType::Search,
+                ParamType::Branch,
+                ParamType::Choice,
+                ParamType::Text,
             ]
+            .map(Some)
         );
         let errs = ext.errors.join("\n");
         for (slug, says) in [
@@ -7749,6 +7851,10 @@ commands:
             ("unknown_preset", "`5y`"),
             ("bad_range", "`soon`"),
             ("bad_bool", "`maybe`"),
+            // A page draws every param in its rail; where is not the
+            // author's to say, and a role follows from the columns.
+            ("placed", "unknown field `place`"),
+            ("roled", "`role` follows from the columns"),
         ] {
             assert!(ext.lenses.iter().all(|l| l.slug != slug), "{slug} loaded");
             assert!(
@@ -7880,6 +7986,83 @@ commands:
             errs.contains("lacks.yaml") && errs.contains("x/rows") && errs.contains("`commit`"),
             "{errs}"
         );
+    }
+
+    /// A param a column selects is a selection, on the lens whose rows
+    /// set it and on the page that holds it for its parts; every other
+    /// param is a filter.
+    #[test]
+    fn a_param_a_column_selects_is_a_selection() {
+        let (_d, ext) = load_x(
+            &[
+                ("rows", "title: Rows\nquery: SELECT 'a' AS sha\nparams: [{ name: commit }, { name: q, type: search }]\ncolumns: [{ key: sha, select: commit }]\n"),
+                ("page", "title: Page\nviz: document\nparams: [{ name: q, type: search }, { name: commit }]\nsections: [{ lens: rows }]\n"),
+            ],
+            "",
+        );
+        for slug in ["rows", "page"] {
+            let lens = ext.lenses.iter().find(|l| l.slug == slug).expect(slug);
+            let role = |name: &str| lens.params.iter().find(|p| p.name == name).unwrap().role;
+            assert_eq!(role("commit"), Some(ParamRole::Selection), "{slug}");
+            assert_eq!(role("q"), Some(ParamRole::Filter), "{slug}");
+        }
+    }
+
+    /// A lens says where it comes from: the source file to edit, relative
+    /// to the project, and the copy that runs. Loaded from its source,
+    /// they are the same file.
+    #[test]
+    fn a_lens_from_its_source_names_that_file() {
+        let (_d, ext) = load_x(&[("ok", "title: OK\nquery: SELECT 1 AS a\n")], "");
+        let origin = &ext.lenses[0].origin;
+        assert_eq!(origin.extension, "x");
+        assert_eq!(
+            origin.source.as_deref(),
+            Some(".oxplow/extensions/x/lenses/ok.yaml")
+        );
+        assert_eq!(origin.running, ".oxplow/extensions/x/lenses/ok.yaml");
+        assert_eq!(origin.deployment, None);
+        assert!(!origin.bundled);
+    }
+
+    /// A deployed lens runs from its copy in the store, but its origin
+    /// names the source to edit and the deployment it came from.
+    #[test]
+    fn a_deployed_lens_names_its_source_and_its_deployment() {
+        let (d, _) = load_x(&[("ok", "title: OK\nquery: SELECT 1 AS a\n")], "");
+        let source = d.path().join(".oxplow/extensions/x");
+        let hash = crate::extension_store::source_hash(&source).unwrap();
+        crate::extension_store::copy_into_store(d.path(), "x", &source, &hash).unwrap();
+        let mut settings = oxplow_config::extension_settings(d.path());
+        settings.personal.enable.push("x".into());
+        let live = BTreeMap::from([("x".to_string(), hash.clone())]);
+        let ext = load_deployed(d.path(), &settings, &live)
+            .into_iter()
+            .find(|e| e.name == "x")
+            .unwrap();
+        let origin = &ext.lenses[0].origin;
+        assert_eq!(
+            origin.source.as_deref(),
+            Some(".oxplow/extensions/x/lenses/ok.yaml")
+        );
+        assert!(
+            origin
+                .running
+                .ends_with(&format!("x/{hash}/lenses/ok.yaml")),
+            "{}",
+            origin.running
+        );
+        assert_eq!(origin.deployment.as_deref(), Some(hash.as_str()));
+        assert!(!origin.bundled);
+        // An edit to the source shows until it is deployed.
+        assert!(!origin.out_of_date(d.path()));
+        write(
+            d.path(),
+            ".oxplow/extensions/x/lenses/ok.yaml",
+            "title: Edited\nquery: SELECT 1 AS a\n",
+        );
+        assert!(origin.out_of_date(d.path()));
+        assert_eq!(origin.to_json(d.path())["outOfDate"], true);
     }
 
     /// Validation checks every block's columns, not only the chart's.

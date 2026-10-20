@@ -1081,20 +1081,25 @@ async fn the_commit_history_example_narrows_with_typed_params_and_selects_a_comm
         .unwrap();
     assert!(ext.errors.is_empty(), "{:?}", ext.errors);
     let page = ext.lenses.iter().find(|l| l.slug == "history").unwrap();
-    use oxplow_app::extensions::{ParamPlace, ParamType};
+    use oxplow_app::extensions::{ParamRole, ParamType};
     let params: Vec<_> = page
         .params
         .iter()
-        .map(|p| (p.name.as_str(), p.kind, p.place))
+        .map(|p| (p.name.as_str(), p.kind, p.role))
         .collect();
+    // The commit a row click sets is the page's selection; the rest filter.
     assert_eq!(
         params,
         vec![
-            ("range", Some(ParamType::DateRange), ParamPlace::Toolbar),
-            ("q", Some(ParamType::Search), ParamPlace::Toolbar),
-            ("merges", Some(ParamType::Bool), ParamPlace::Toolbar),
-            ("commit", Some(ParamType::Text), ParamPlace::Rail),
+            ("range", Some(ParamType::DateRange), Some(ParamRole::Filter)),
+            ("q", Some(ParamType::Search), Some(ParamRole::Filter)),
+            ("merges", Some(ParamType::Bool), Some(ParamRole::Filter)),
+            ("commit", Some(ParamType::Text), Some(ParamRole::Selection)),
         ]
+    );
+    assert_eq!(
+        page.origin.source.as_deref(),
+        Some(".oxplow/extensions/commit-history/lenses/history.yaml")
     );
     let commits = ext.lenses.iter().find(|l| l.slug == "commits").unwrap();
     assert_eq!(commits.columns[0].select.as_deref(), Some("commit"));

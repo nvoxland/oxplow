@@ -1579,7 +1579,7 @@ mod core_tests {
         change_loop(&svc);
         exec(
             &svc,
-            "INSERT INTO lens (id, extension, slug, title, description, viz, params_json, hidden, needs_json, path)
+            "INSERT INTO lens (id, extension, slug, title, description, viz, params_json, hidden, needs_json, source)
                VALUES ('acme/leaks', 'acme', 'leaks', 'Leak finder', 'Lists the platypus leaks', 'table',
                        '[]', 0, '[]', 'lenses/leaks.yaml');",
         )

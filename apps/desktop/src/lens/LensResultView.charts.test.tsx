@@ -27,7 +27,7 @@ const base: Lens = {
   hidden: false,
   actions: [],
   alert: null,
-  path: "",
+  origin: { extension: "", source: null, running: "", deployment: null, bundled: false },
 };
 const chart = { x: null, y: null, series: null, label: null, size: null, group: null };
 const run = (lens: Partial<Lens>, columns: string[], rows: (string | number)[][]): LensRun => ({

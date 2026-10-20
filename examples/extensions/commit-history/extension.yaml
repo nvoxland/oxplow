@@ -6,7 +6,7 @@ version: 0.1.0
 intent:
   purpose: >-
     Show how typed params and a row that selects make a page without code:
-    a range, a search and a merges-only switch in the toolbar narrow the
+    a range, a search and a merges-only switch in the rail narrow the
     commits, and clicking one fills the section under it with its files.
     It reads oxplow's commits and writes nothing.
   origin: null

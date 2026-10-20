@@ -424,7 +424,7 @@ export function adHocLens(query: string, viz: LensViz, chart: LensChart | null =
     actions: [],
     alert: null,
     needs: [],
-    path: "",
+    origin: { extension: "", source: null, running: "", deployment: null, bundled: false },
     tool: null,
   };
 }

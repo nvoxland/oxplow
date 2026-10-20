@@ -34,7 +34,7 @@ const base: Lens = {
   actions: [],
   alert: null,
   needs: [],
-  path: "",
+  origin: { extension: "", source: null, running: "", deployment: null, bundled: false },
   tool: null,
 } as Lens;
 
@@ -46,7 +46,7 @@ const lenses: Record<string, Lens> = {
     id: "x/pick",
     slug: "pick",
     title: "Pick",
-    params: [{ name: "commit", label: null, default: null, options: [], type: "text", place: "rail", presets: [] }],
+    params: [{ name: "commit", label: null, default: null, options: [], type: "text", role: "selection", presets: [] }],
     columns: [{ key: "n", label: null, link: null, unit: null, icon: null, tone: null, select: "commit" }],
   } as unknown as Lens,
   "x/detail": {
@@ -54,7 +54,7 @@ const lenses: Record<string, Lens> = {
     id: "x/detail",
     slug: "detail",
     title: "Detail",
-    params: [{ name: "commit", label: null, default: null, options: [], type: "text", place: "rail", presets: [] }],
+    params: [{ name: "commit", label: null, default: null, options: [], type: "text", role: "selection", presets: [] }],
   } as Lens,
 };
 const runs: { id: string; params: unknown; stream: string | null }[] = [];

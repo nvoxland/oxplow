@@ -1320,7 +1320,7 @@
   tests:
     - { not_null: ref }
 - name: lens
-  version: 2
+  version: 3
   key: [ref]
   description: "Every lens of every enabled extension: a saved query over the models and how to show it. Each is a page for the person (unless hidden); open one with `oxplow_show_lens`, run one with `oxplow_run_lens`, read its definition with `oxplow_read { ref }`. Restated with each extension generation, so it is what the running catalog holds."
   columns:
@@ -1330,11 +1330,11 @@
     - { name: "title", type: "TEXT", doc: "What the person sees." }
     - { name: "description", type: "TEXT", doc: "What it shows; empty when it says nothing." }
     - { name: "viz", type: "TEXT", doc: "How it is drawn: `table`, `list`, `chart`, `tree`, `grid`, `form`, `custom`, … " }
-    - { name: "params", type: "TEXT", doc: "The params it takes, as a JSON array of `{name, label, default, options, type, place, presets}`: `type` is `text`, `choice`, `bool`, `date_range`, `branch` or `search`; `place` is `rail` or `toolbar`." }
+    - { name: "params", type: "TEXT", doc: "The params it takes, as a JSON array of `{name, label, default, options, type, role, presets}`: `type` is `text`, `choice`, `bool`, `date_range`, `branch` or `search`; `role` is `selection` when a column of its rows (or of a part's) selects it, else `filter`." }
     - { name: "hidden", type: "INTEGER", doc: "1 when the launcher doesn't list it (a drill-down or a grid's child)." }
     - { name: "launcher_category", type: "TEXT", doc: "The launcher section it is listed under (`Work`, `Code`, `Activity`, `Data`, …); NULL for the default `Lenses`." }
     - { name: "needs", type: "TEXT", doc: "The capabilities (or features) it needs, as a JSON array; without them its run says so." }
-    - { name: "path", type: "TEXT", doc: "The lens file, relative to the worktree." }
+    - { name: "source", type: "TEXT", doc: "Its source file, the one to edit, relative to the project; NULL when no source is here (it ships with oxplow). A deployed extension runs a copy of it in the store." }
   tests:
     - { not_null: ref }
     - { unique: ref }

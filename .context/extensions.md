@@ -510,7 +510,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     contribution kinds; see "`extension.yaml`" below).
   - `lenses/<slug>.yaml` contains `title`, `description`, `query`, `viz`
     (`table` | `list` | `number` | `markdown`), `params` (`name`, `label`,
-    `default`, `type`, `place`, …), `columns` (`key`, `label`, `select`, `link: {kind: page | file |
+    `default`, `type`, `presets`, …), `columns` (`key`, `label`, `select`, `link: {kind: page | file |
     wiki | effort-diff | …, from}` — a work item links as `page` by its
     ref) and `empty`.
   - Unknown keys are errors, so typos surface instead of being ignored.
@@ -577,11 +577,10 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     Linked cells go through `RouteLink`, so plain-click navigates in the
     tab.
   - Params draw by their type through the kit's `ParamControl`
-    (usability.md "Lens params are drawn once"): `place: rail` ones in
-    the right rail (`ParamsForm`; no rail when there are none),
-    `place: toolbar` ones in a kit `Toolbar` under the title
-    (`ParamsToolbar`). A control shows what it applied at once, before
-    the run echoes it. A row click on a column that `select`s a param
+    (usability.md "Lens params are drawn once"), every one in the right
+    rail (`ParamsForm`; no rail when there are none): a page has one
+    place for its controls, and where is not the author's to say. A
+    control shows what it applied at once, before the run echoes it. A row click on a column that `select`s a param
     sets it the same way (`onSetParam`, through a document's or
     dashboard's parts when the page holds the param). Param values are
     the page's state; they aren't written back into the tab id yet.
@@ -1806,8 +1805,24 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   runs, never as params. The loader refuses `options` off a choice,
   `presets` off a date_range, an unknown preset and a default its type
   doesn't take (`param_problem`); a run supplying such a value is
-  refused (`resolve_params`). `place: toolbar` draws the control above
-  the lens's body instead of in the rail (`place: rail`, the default).
+  refused (`resolve_params`). There is no `place`: every param draws in
+  the page's rail.
+- **A param's `role`** follows from the columns and is never written
+  (the loader refuses it): `selection` when a column of the lens, or of a
+  part of the document or dashboard, `select`s it — the page shows the
+  picked row, not an input — else `filter`. A loaded lens always says.
+- **Where a lens comes from** (`Lens.origin`, `LensProvenance`): its
+  `extension`, the `running` file (a deployment's copy in the store, or
+  the source when loaded from it), the `deployment` hash, `bundled`, and
+  `source` — the project-relative file to edit, none when no source is
+  here (filled per extension by `locate`). An agent edits `source`,
+  never `running`: the next deploy replaces the copy. `oxplow_read
+  lens:…` and `oxplow_get_open_page` add `outOfDate`
+  (`LensProvenance::out_of_date`, read from the files now: the source
+  changed after the deployment was made), and the open page lists its
+  document or dashboard `parts` with each part's `source`. `v_lens`
+  has `source`, not the running path. A deploy returns the loaded
+  extension's warnings as well as the size warning.
 - **`columns[].select: <param>`** — clicking a row sets that param to the
   column's value, so whatever reads it re-runs: a document's other
   sections, master and detail from existing pieces. It names a declared

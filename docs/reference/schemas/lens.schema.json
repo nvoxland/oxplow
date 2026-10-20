@@ -353,15 +353,6 @@
           ],
           "default": null
         },
-        "place": {
-          "description": "Where a page draws it: the rail (the default) or the toolbar above\nthe lens's body.",
-          "default": "rail",
-          "allOf": [
-            {
-              "$ref": "#/definitions/ParamPlace"
-            }
-          ]
-        },
         "presets": {
           "description": "A `date_range`'s quick picks, of `1d 2d 3d 7d 30d 90d all`; the\ndefault is `1d 7d 30d all`.",
           "type": "array",
@@ -447,21 +438,6 @@
           "description": "Text to look for, trimmed, NULL when empty; a box that applies as\nyou type.",
           "type": "string",
           "const": "search"
-        }
-      ]
-    },
-    "ParamPlace": {
-      "description": "Where a page draws a lens param.",
-      "oneOf": [
-        {
-          "description": "In the page's rail, under \"Parameters\".",
-          "type": "string",
-          "const": "rail"
-        },
-        {
-          "description": "In the toolbar above the lens's body.",
-          "type": "string",
-          "const": "toolbar"
         }
       ]
     },

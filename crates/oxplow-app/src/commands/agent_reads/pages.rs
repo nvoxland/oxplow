@@ -126,10 +126,33 @@ async fn lens_text(
             &ctx,
         )
         .await?;
-        crate::lens_text::text_run(svc, root, &run, &ctx).await
+        let text = crate::lens_text::text_run(svc, root, &run, &ctx).await?;
+        Ok::<_, oxplow_domain::DomainError>((run.lens, text))
     };
     Ok(match read.await {
-        Ok(text) => serde_json::to_value(text).map_err(failed)?,
+        Ok((lens, text)) => {
+            let mut out = serde_json::to_value(text).map_err(failed)?;
+            // Where the page and each of its parts come from: the files an
+            // agent edits to change what the person sees.
+            out["origin"] = lens.origin.to_json(root);
+            out["parts"] = lens
+                .parts
+                .iter()
+                .map(|p| {
+                    let part = p
+                        .lens
+                        .as_deref()
+                        .and_then(|id| svc.extension_catalog.find_lens(root, id).ok());
+                    json!({
+                        "id": p.id,
+                        "lens": p.lens,
+                        "title": p.title.clone().or_else(|| part.as_ref().map(|l| l.title.clone())),
+                        "source": part.and_then(|l| l.origin.source),
+                    })
+                })
+                .collect();
+            out
+        }
         Err(e) => json!({ "error": e.to_string() }),
     })
 }

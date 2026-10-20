@@ -291,7 +291,7 @@ fn lens_row(lens: &crate::extensions::Lens) -> oxplow_db::catalog_listing_store:
         hidden: lens.hidden,
         launcher_category: lens.launcher_category.as_ref().map(variant_name),
         needs_json: json_text(&lens.needs),
-        path: lens.path.clone(),
+        source: lens.origin.source.clone(),
     }
 }
 

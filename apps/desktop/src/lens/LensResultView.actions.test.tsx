@@ -86,7 +86,7 @@ const lens: Lens = {
   hidden: false,
   actions: [{ id: "finish", label: "Finish", command: "oxplow.work_item.transition", input: {}, row: true }],
   alert: null,
-  path: "",
+  origin: { extension: "", source: null, running: "", deployment: null, bundled: false },
 };
 const run: LensRun = {
   lens,

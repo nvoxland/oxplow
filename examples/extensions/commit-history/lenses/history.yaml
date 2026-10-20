@@ -1,11 +1,11 @@
 title: Commit history
-description: Narrow the commits with the toolbar; click one to see its files.
+description: The project's commits; click one to see its files.
 viz: document
 launcher: { category: Git }
 params:
-  - { name: range, label: When, type: date_range, place: toolbar, default: 30d, presets: [7d, 30d, 90d, all] }
-  - { name: q, label: Search subjects, type: search, place: toolbar }
-  - { name: merges, label: Merges only, type: bool, place: toolbar, default: false }
+  - { name: range, label: When, type: date_range, default: 30d, presets: [7d, 30d, 90d, all] }
+  - { name: q, label: Search subjects, type: search }
+  - { name: merges, label: Merges only, type: bool, default: false }
   - { name: commit, label: Commit }
 sections:
   - { lens: commits }

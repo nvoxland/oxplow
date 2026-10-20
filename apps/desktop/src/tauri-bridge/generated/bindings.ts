@@ -4129,10 +4129,12 @@ export type LensParam = {
 	 */
 	type?: ParamType | null,
 	/**
-	 *  Where a page draws it: the rail (the default) or the toolbar above
-	 *  the lens's body.
+	 *  What it is to the page, which follows from the columns and is
+	 *  never written: a `selection` when a column of the lens (or of a
+	 *  part of the page) selects it, else a `filter`. A loaded lens
+	 *  always says.
 	 */
-	place?: ParamPlace,
+	role?: ParamRole | null,
 	/**
 	 *  A `date_range`'s quick picks, of `1d 2d 3d 7d 30d 90d all`; the
 	 *  default is `1d 7d 30d all`.
@@ -4179,6 +4181,31 @@ export type LensPress = {
 	params?: { [key in string]: SqlCell } | null,
 	row?: { [key in string]: SqlCell } | null,
 	input?: unknown | null,
+};
+
+/**
+ *  Where a lens comes from. An agent edits `source`, never `running`: a
+ *  deployed extension runs a copy in the store that the next deploy
+ *  replaces.
+ */
+export type LensProvenance = {
+	/**  The extension it belongs to. */
+	extension: string,
+	/**
+	 *  Its source file, relative to the project when inside it; none when
+	 *  no source is here (an extension that ships with oxplow, or a
+	 *  deployment whose source is gone).
+	 */
+	source: string | null,
+	/**
+	 *  The file it runs from: `source` when loaded from it, else the
+	 *  deployment's copy.
+	 */
+	running: string,
+	/**  The deployment it runs, when it runs one (its hash). */
+	deployment: string | null,
+	/**  It ships with oxplow. */
+	bundled: boolean,
 };
 
 /**  The result of running a lens. */
@@ -4468,8 +4495,8 @@ export type Lens_Deserialize = {
 	 *  [work_items]`): without them its run says so instead of running.
 	 */
 	needs: string[],
-	/**  Repo-relative path of the lens file. */
-	path: string,
+	/**  Where it comes from: the file that runs and the source to edit. */
+	origin: LensProvenance,
 	/**
 	 *  The MCP tool it is also offered as (`tool:`), prefixed with its
 	 *  extension's namespace (`extension_commands::tool_name`): a call
@@ -4530,8 +4557,8 @@ export type Lens_Serialize = {
 	 *  [work_items]`): without them its run says so instead of running.
 	 */
 	needs: string[],
-	/**  Repo-relative path of the lens file. */
-	path: string,
+	/**  Where it comes from: the file that runs and the source to edit. */
+	origin: LensProvenance,
 	/**
 	 *  The MCP tool it is also offered as (`tool:`), prefixed with its
 	 *  extension's namespace (`extension_commands::tool_name`): a call
@@ -5350,12 +5377,12 @@ export type PanelPlacement = {
  */
 export type PanelScope = "project" | "stream" | "thread";
 
-/**  Where a page draws a lens param. */
-export type ParamPlace = 
-/**  In the page's rail, under "Parameters". */
-"rail" | 
-/**  In the toolbar above the lens's body. */
-"toolbar";
+/**  What a lens param is to its page. */
+export type ParamRole = 
+/**  Narrows what the page shows; a control in the page's rail. */
+"filter" | 
+/**  The row a click picked; the rail shows that row, never an input. */
+"selection";
 
 /**  What a lens param holds. */
 export type ParamType = 

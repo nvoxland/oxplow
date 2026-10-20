@@ -777,7 +777,7 @@ mod tests {
                 actions: Vec::new(),
                 alert: None,
                 needs: Vec::new(),
-                path: String::new(),
+                origin: Default::default(),
                 tool: None,
             },
             params: BTreeMap::new(),

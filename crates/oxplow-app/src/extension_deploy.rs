@@ -373,7 +373,7 @@ pub async fn deploy(
             name: name.to_string(),
             hash,
             already: true,
-            warnings: Vec::new(),
+            warnings: loaded.warnings,
         });
     }
     if target.is_some() {
@@ -459,7 +459,7 @@ pub async fn deploy(
         name: name.to_string(),
         hash,
         already: false,
-        warnings: size_warnings(name, size),
+        warnings: [loaded.warnings, size_warnings(name, size)].concat(),
     })
 }
 
@@ -2349,7 +2349,31 @@ mod tests {
         );
         std::fs::remove_file(dir.join("data.bin")).unwrap();
         let small = deploy(svc, "acme", &root, None, true).await.unwrap();
-        assert!(small.warnings.is_empty(), "{:?}", small.warnings);
+        assert!(
+            !small.warnings.iter().any(|w| w.contains("MiB")),
+            "{:?}",
+            small.warnings
+        );
+    }
+
+    /// What a loaded extension reports as worth fixing comes back from its
+    /// deploy, so the agent that deployed it reads it: `acme` has no
+    /// `intent.examples`.
+    #[tokio::test]
+    async fn a_deploy_returns_the_extension_s_warnings() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        source(svc, "One");
+        let deployed = deploy(svc, "acme", &root, None, true).await.unwrap();
+        assert!(
+            deployed
+                .warnings
+                .iter()
+                .any(|w| w.contains("`intent.examples` is empty")),
+            "{:?}",
+            deployed.warnings
+        );
     }
 
     /// A restart starts from the recorded deployments: the core baseline

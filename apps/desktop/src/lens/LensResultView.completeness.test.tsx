@@ -43,7 +43,7 @@ const lens = (viz: Lens["viz"]): Lens => ({
   actions: [],
   alert: null,
   needs: [],
-  path: "",
+  origin: { extension: "", source: null, running: "", deployment: null, bundled: false },
 });
 
 const failed: SourceCoverage = {

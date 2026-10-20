@@ -63,7 +63,7 @@ const lens = {
   parts: [],
   actions: [],
   alert: null,
-  path: "",
+  origin: { extension: "", source: null, running: "", deployment: null, bundled: false },
 } as unknown as Lens;
 const runWith = (params: Record<string, string>): LensRun =>
   ({ lens, params, result: { columns: ["1"], rows: [[1]], truncated: false } }) as unknown as LensRun;
