@@ -557,10 +557,10 @@ mounts the kit's, so a page moving to a lens (`viz: approvals`, params
   (Note this is *not* the `Page` `actions` slot either, which would land the pair
   in the rail's **panel header** rather than in the rail body.)
 - **Sections default to expanded**; only the *collapsed* set is stored
-  (`oxplow.page.sectionsCollapsed.v1`, keyed by `pageKey`), so a newly added
+  (the tab entry's state, `useEntryState`: Back and a restart bring it back), so a newly added
   section appears open with no migration. A section with `defaultCollapsed`
   is the mirror: it starts closed and only the ones the person *opened* are
-  stored (beside the collapsed ids, under `<pageKey>#opened`). Expand all /
+  stored (beside the collapsed ids). Expand all /
   Collapse all handle both kinds.
 - **Don't reconcile stored ids against the rendered ones** — the opposite of what
   the rail does for its section ORDER. A page's own filter (Recorded Metrics'

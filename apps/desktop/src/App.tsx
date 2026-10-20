@@ -94,7 +94,6 @@ import { FileViewerPage } from "./pages/FileViewerPage.js";
 import { RailHud } from "./components/RailHud/RailHud.js";
 import type { PageKind, TabRef } from "./tabs/tabState.js";
 import { PageNavigationContext, type NavSiblings, type PageNavigation } from "./tabs/PageNavigationContext.js";
-import { clearPageSnapshot } from "./tabs/usePageSnapshot.js";
 import { removeBookmark, setBookmark, useBookmarks } from "./tabs/bookmarks.js";
 import type { BookmarkScope } from "./tabs/bookmarks.js";
 import { isUnder, movedPath } from "./fileEvents.js";
@@ -153,10 +152,12 @@ import {
   open as sessionOpen,
   refsOf,
   reorder as sessionReorder,
+  patchState as sessionPatchState,
   replaceRef as sessionReplaceRef,
   setStrip,
   slotShowing,
   stepOrigin,
+  type Entry,
   type Origin,
   type Tab,
 } from "./tabs/session.js";
@@ -1723,8 +1724,6 @@ export function App() {
       const { [id]: _drop, ...rest } = prev;
       return rest;
     });
-    // GC the per-page snapshot so closed tabs don't leak forever.
-    clearPageSnapshot(`${selectedThreadId}::${id}`);
   }, [selectedThreadId, stream, updateSession]);
 
   /** The collection a page is opened from, as an entry keeps it. */
@@ -1954,7 +1953,6 @@ export function App() {
       const { [id]: _drop, ...rest } = prev;
       return rest;
     });
-    clearPageSnapshot(`${selectedThreadId}::${id}`);
   }, [selectedThreadId, sessions, closePageTab, updateSession]);
 
   // Enforce the page-tab cap on the shown thread: past MAX_PAGE_TABS the
@@ -2019,7 +2017,7 @@ export function App() {
     const renderedTabIds = new Set<string>();
     // For each rendered tab: its session tab, its entry's ref, and whether
     // it is that tab's current entry.
-    const placed: { tab: Tab; ref: TabRef; current: boolean }[] = [];
+    const placed: { tab: Tab; ref: TabRef; entry: Entry; current: boolean }[] = [];
     // One renderer per page kind. `Record<PageKind, …>` makes the table
     // exhaustive: a kind without a renderer (or a renderer for a kind that
     // no longer exists) is a compile error, not a blank tab.
@@ -2367,7 +2365,7 @@ export function App() {
         const tab = pageRenderers[ref.kind](ref, slotNav);
         if (!tab) continue;
         tabs.push({ ...tab, key: body.key, ...(body.current ? {} : { hidden: true }) });
-        placed.push({ tab: sessionTab, ref, current: body.current });
+        placed.push({ tab: sessionTab, ref, entry: body.entry, current: body.current });
       }
     }
     // Wrap each page-tab render with PageNavigationContext so descendants
@@ -2375,7 +2373,7 @@ export function App() {
     // in-tab and the Page chrome mounts its nav bar.
     for (let i = pageTabStartIdx; i < tabs.length; i++) {
       const tab = tabs[i]!;
-      const { tab: sessionTab, ref, current: isCurrent } = placed[i - pageTabStartIdx]!;
+      const { tab: sessionTab, ref, entry, current: isCurrent } = placed[i - pageTabStartIdx]!;
       const slot = sessionTab.slot;
       const tabId = tab.id;
       const currentId = currentEntry(sessionTab).ref.id;
@@ -2405,7 +2403,6 @@ export function App() {
         goSibling: siblings ? (index: number) => handleStepSibling(slot, index) : undefined,
         setTitle: (t: string) => setPageTitle(tabId, t),
         title: registeredTitle,
-        pageKey: selectedThreadId ? `${selectedThreadId}::${tabId}` : undefined,
         ask: parseRef(ref.id) ? { ref: ref.id } : undefined,
         bookmark: {
           scope: bookmarkScope,
@@ -2425,6 +2422,13 @@ export function App() {
           ? (next: TabRef, opts?: { push?: boolean }) => {
               const thread = selectedThreadId;
               updateSession(thread, (session) => sessionReplaceRef(session, slot, next, opts));
+            }
+          : undefined,
+        state: entry.state && typeof entry.state === "object" && !Array.isArray(entry.state) ? (entry.state as Record<string, unknown>) : undefined,
+        setEntryState: isCurrent && selectedThreadId
+          ? (patch: Record<string, unknown>) => {
+              const thread = selectedThreadId;
+              updateSession(thread, (session) => sessionPatchState(session, slot, patch));
             }
           : undefined,
       };

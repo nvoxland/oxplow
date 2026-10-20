@@ -13,7 +13,7 @@ import { registerLspProviders } from "./editor-lsp-providers.js";
 import { logUi } from "../logger.js";
 import { useLspClients } from "./useLspClients.js";
 import { BLAME_WIDTH, useBlame } from "./useBlame.js";
-import { usePageSnapshot } from "../tabs/usePageSnapshot.js";
+import { useEntryState } from "../tabs/useEntryState.js";
 import type { MenuItem } from "../menu.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { gitRevision } from "../revision.js";
@@ -117,30 +117,14 @@ export function EditorPane({
   filePathRef.current = filePath;
   openFilesRef.current = { order: openFileOrder, files: openFiles };
 
-  // Persist Monaco view-state (cursor / scroll / folds / selection)
-  // across restart so the user lands at the same line they left.
-  // saveViewState/restoreViewState produce an opaque blob — JSON-
-  // serializing it is what Monaco's own multi-buffer editors do.
-  const pendingViewStateRef = useRef<unknown>(null);
-  usePageSnapshot<{ viewState: unknown } | null>({
-    serialize: () => {
-      const editor = editorRef.current;
-      const vs = editor?.saveViewState?.() ?? null;
-      return vs ? { viewState: vs } : null;
-    },
-    restore: (snap) => {
-      const editor = editorRef.current;
-      if (!editor || !snap || !snap.viewState) {
-        // Editor not ready yet — stash for the post-mount apply.
-        pendingViewStateRef.current = snap?.viewState ?? null;
-        return;
-      }
-      try {
-        editor.restoreViewState(snap.viewState as Parameters<typeof editor.restoreViewState>[0]);
-      } catch { /* ignore */ }
-    },
-    deps: [filePath, value],
-  });
+  // Keep Monaco's view state (cursor / scroll / folds / selection) with the
+  // tab's entry: Back and a restart land on the same line. The state is an
+  // opaque, JSON-safe blob from saveViewState; it is written when the
+  // editor settles after a move, and read once when the editor mounts.
+  const [viewState, setViewState] = useEntryState<unknown>(`viewState:${filePath ?? ""}`, null);
+  const viewStateRef = useRef({ viewState, setViewState });
+  viewStateRef.current = { viewState, setViewState };
+  const saveViewStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -159,12 +143,22 @@ export function EditorPane({
       editorRef.current = editor;
       // Apply any pending view-state that was restored before the
       // editor finished mounting.
-      if (pendingViewStateRef.current) {
+      const saved = viewStateRef.current.viewState;
+      if (saved) {
         try {
-          editor.restoreViewState(pendingViewStateRef.current as Parameters<typeof editor.restoreViewState>[0]);
+          editor.restoreViewState(saved as Parameters<typeof editor.restoreViewState>[0]);
         } catch { /* ignore */ }
-        pendingViewStateRef.current = null;
       }
+      const scheduleViewStateSave = () => {
+        if (saveViewStateTimerRef.current) clearTimeout(saveViewStateTimerRef.current);
+        saveViewStateTimerRef.current = setTimeout(() => {
+          saveViewStateTimerRef.current = null;
+          const vs = editor.saveViewState?.() ?? null;
+          if (vs) viewStateRef.current.setViewState(vs);
+        }, 300);
+      };
+      focusDisposersRef.current.push(editor.onDidChangeCursorPosition(scheduleViewStateSave));
+      focusDisposersRef.current.push(editor.onDidScrollChange(scheduleViewStateSave));
       // Register Cmd/Ctrl+S inside Monaco so the shortcut works when the
       // editor has focus. The native Electron menu also binds this — menu
       // accelerators fire at the OS level BEFORE the keydown reaches the
@@ -228,6 +222,11 @@ export function EditorPane({
       focusDisposersRef.current.forEach((d) => d.dispose());
       focusDisposersRef.current = [];
       if (focusDebounceRef.current) clearTimeout(focusDebounceRef.current);
+      if (saveViewStateTimerRef.current) {
+        clearTimeout(saveViewStateTimerRef.current);
+        const vs = editorRef.current?.saveViewState?.() ?? null;
+        if (vs) viewStateRef.current.setViewState(vs);
+      }
       // LSP client + diagnostics disposal is owned by useLspClients.
       editorRef.current?.dispose();
     };

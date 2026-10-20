@@ -20,6 +20,7 @@ import {
   replaceRef,
   setStrip,
   serializeSession,
+  patchState,
   setState,
   stepOrigin,
   type Entry,
@@ -298,4 +299,13 @@ describe("dropCurrent: the page's record is gone", () => {
     const s = open(emptySession(), e(a));
     expect(dropCurrent(s, s.active!).tabs).toEqual([]);
   });
+});
+
+test("patchState merges keys into the entry's state and ignores an unchanged write", () => {
+  let s = open(emptySession(), e(wikiPageRef("a")));
+  const slot = s.tabs[0]!.slot;
+  s = patchState(s, slot, { scrollY: 40 });
+  s = patchState(s, slot, { collapsed: ["x"] });
+  expect(current(s.tabs[0]!).state).toEqual({ scrollY: 40, collapsed: ["x"] });
+  expect(patchState(s, slot, { scrollY: 40, collapsed: ["x"] })).toBe(s);
 });

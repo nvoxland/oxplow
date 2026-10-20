@@ -1,14 +1,11 @@
 import type { CSSProperties, ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
+import { useEntryState } from "../tabs/useEntryState.js";
 import {
-  OPENED_SUFFIX,
-  SECTIONS_COLLAPSED_KEY,
   allCollapsed,
   allExpanded,
   isExpanded as isExpandedIn,
-  parseCollapsed,
-  serializeCollapsed,
   setAll,
   toggleSection,
 } from "./sectionCollapse.js";
@@ -18,7 +15,8 @@ import {
  * number of kit `<Section collapsible>`s (`kit/Section.tsx`, which reads the
  * provider through `useSectionCollapse`). Each section's heading carries an
  * expand/collapse toggle; `<SectionCollapseControls>` renders the "Expand all" /
- * "Collapse all" pair. The collapsed set persists per page.
+ * "Collapse all" pair. The collapsed set is the tab entry's state
+ * (`useEntryState`): Back and a restart bring it back.
  *
  * **Three parts, because the page owns placement (tsk86).** The provider holds
  * state only and renders `children` bare — no wrapper element — so it can wrap a
@@ -36,7 +34,7 @@ import {
  *
  * Usage — controls in the details rail, sections in the body:
  * ```tsx
- * <CollapsibleSections pageKey="metrics-recorded" testIdPrefix="recorded">
+ * <CollapsibleSections testIdPrefix="recorded">
  *   <Page width="reading" rightRail={<>…filters… <SectionCollapseControls /></>}>
  *     {groups.map((g) => (
  *       <Section key={g.key} id={g.key} title={g.label} collapsible>
@@ -69,30 +67,18 @@ interface SectionsContextValue {
 
 const SectionsContext = createContext<SectionsContextValue | null>(null);
 
-function readStorage(): string | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.localStorage.getItem(SECTIONS_COLLAPSED_KEY);
-  } catch {
-    return null;
-  }
-}
-
 export function CollapsibleSections({
-  pageKey,
   testIdPrefix,
   children,
 }: {
-  /** Storage scope — one entry per page in the shared localStorage blob. */
-  pageKey: string;
   /** Testid prefix: `<prefix>-expand-all`, `<prefix>-section-<id>`, … */
   testIdPrefix: string;
   children: ReactNode;
 }) {
-  const [state, setState] = useState<{ collapsed: ReadonlySet<string>; opened: ReadonlySet<string> }>(() => ({
-    collapsed: parseCollapsed(readStorage(), pageKey),
-    opened: parseCollapsed(readStorage(), pageKey + OPENED_SUFFIX),
-  }));
+  // Only exceptions are kept: collapsed ids of sections that start open,
+  // opened ids of those that start closed.
+  const [stored, setStored] = useEntryState<{ collapsed: string[]; opened: string[] }>("sections", { collapsed: [], opened: [] });
+  const state = useMemo(() => ({ collapsed: new Set(stored.collapsed), opened: new Set(stored.opened) }), [stored]);
   const { collapsed, opened } = state;
   // The rendered section ids (and whether each starts closed) — only
   // membership matters (it decides whether Expand all / Collapse all have
@@ -100,22 +86,9 @@ export function CollapsibleSections({
   const [ids, setIds] = useState<ReadonlyMap<string, boolean>>(() => new Map());
 
   const persist = useCallback(
-    (next: { collapsed: ReadonlySet<string>; opened: ReadonlySet<string> }) => {
-      setState(next);
-      if (typeof window === "undefined") return;
-      try {
-        // Only exceptions are stored: collapsed ids of sections that start
-        // open, opened ids of those that start closed.
-        const withCollapsed = serializeCollapsed(readStorage(), pageKey, next.collapsed);
-        window.localStorage.setItem(
-          SECTIONS_COLLAPSED_KEY,
-          serializeCollapsed(withCollapsed, pageKey + OPENED_SUFFIX, next.opened),
-        );
-      } catch {
-        // Storage full / disabled — the toggle still works for this session.
-      }
-    },
-    [pageKey],
+    (next: { collapsed: ReadonlySet<string>; opened: ReadonlySet<string> }) =>
+      setStored({ collapsed: [...next.collapsed], opened: [...next.opened] }),
+    [setStored],
   );
 
   const register = useCallback((id: string, startsClosed: boolean) => {

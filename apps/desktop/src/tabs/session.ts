@@ -151,6 +151,21 @@ export function setState(s: Session, slot: string, state: unknown): Session {
   });
 }
 
+/** Merge `patch` into the current entry's state when it is an object of
+ *  keys (what pages keep through `useEntryState`). A patch that changes
+ *  no value returns `s` itself, so a repeated write costs no render. */
+export function patchState(s: Session, slot: string, patch: Record<string, unknown>): Session {
+  return withTab(s, slot, (t) => {
+    const now = current(t);
+    const had = now.state && typeof now.state === "object" && !Array.isArray(now.state) ? (now.state as Record<string, unknown>) : {};
+    const same = Object.entries(patch).every(([k, v]) => JSON.stringify(had[k]) === JSON.stringify(v));
+    if (same) return t;
+    const entries = [...t.entries];
+    entries[t.at] = { ...now, state: { ...had, ...patch } };
+    return { ...t, entries };
+  });
+}
+
 export function back(s: Session, slot: string): Session {
   return withTab(s, slot, (t) => (t.at > 0 ? { ...t, at: t.at - 1 } : t));
 }
