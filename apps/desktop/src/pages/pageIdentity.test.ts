@@ -31,6 +31,11 @@ test("the search pages' filters are view, so a change re-renders them", () => {
   expect(pageIdentity(pageTabRef("explore-data", { model: "v_effort", sql: "SELECT 1", viz: "bar", raw: true }))).toBe("page:explore-data");
 });
 
+test("a mode or a pick is view: the Files filter and the open Alerts row", () => {
+  expect(pageIdentity(pageTabRef("files", { filter: "branch" }))).toBe("page:files");
+  expect(pageIdentity(pageTabRef("alerts", { open: "op-errors" }))).toBe("page:alerts");
+});
+
 test("an entity page is its ref, less the view its kind declares", () => {
   expect(pageIdentity(fileRef("src/a.ts"))).toBe(fileRef("src/a.ts").id);
   expect(pageIdentity(metricRef("oxplow.todos", { range: "30d", branch: "main", slice: "oxplow.language" }))).toBe("metric:oxplow.todos");

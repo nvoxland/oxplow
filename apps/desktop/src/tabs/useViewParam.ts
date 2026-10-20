@@ -83,14 +83,26 @@ export function useViewList(key: string): [string[], (next: readonly string[]) =
 
 /** Which ids (groups, tree nodes, rows) are in a set — open or closed, as
  *  the caller means it — kept in this step's **history state**. */
-export function useCollapsedSet(key: string): { has(id: string): boolean; toggle(id: string): void; set(ids: readonly string[]): void } {
-  const [ids, setIds] = useHistoryState<string[]>(key, []);
+export interface CollapsedSet {
+  ids: readonly string[];
+  has(id: string): boolean;
+  toggle(id: string): void;
+  set(ids: readonly string[]): void;
+}
+
+/** `initial` is what the set holds before it is ever changed. */
+export function useCollapsedSet(key: string, initial: readonly string[] = NONE): CollapsedSet {
+  const [ids, setIds] = useHistoryState<readonly string[]>(key, initial);
+  const set = useCallback((next: readonly string[]) => setIds([...next]), [setIds]);
   return {
+    ids,
     has: (id) => ids.includes(id),
-    toggle: (id) => setIds(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]),
-    set: (next) => setIds([...next]),
+    toggle: (id) => set(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]),
+    set,
   };
 }
+
+const NONE: readonly string[] = [];
 
 /** An unsaved form's values, kept in this step's **history state**: Back
  *  and a restart bring them back; `clear` (on submit) starts afresh. */

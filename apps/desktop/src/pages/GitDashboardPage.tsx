@@ -2,6 +2,7 @@ import { EmptyState } from "../components/Prompts/EmptyState.js";
 import { SpecConfirm } from "../components/SpecConfirm.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePageMemory } from "../prefs/remembered.js";
+import { useCollapsedSet } from "../tabs/useViewParam.js";
 import type { MergeReadiness, OpOutcome, RemoteBranchEntry, RevisionInfo, Stream, StatusCounts } from "../api.js";
 import {
   streamStatusCounts,
@@ -677,7 +678,7 @@ function StreamsCard({
   isPending(label: string): boolean;
   workingByStreamId: Record<string, boolean>;
 }) {
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const openStreams = useCollapsedSet("openStreams");
   return (
     <Card testId="git-dashboard-streams" title="Streams">
       {rows.length === 0 ? (
@@ -688,7 +689,7 @@ function StreamsCard({
             const branchLabel = row.branch ?? "(detached)";
             const mergeLabel = `Merge ${branchLabel} into current`;
             const rebaseLabel = `Rebase current onto ${branchLabel}`;
-            const isOpen = expanded === row.stream.id;
+            const isOpen = openStreams.has(row.stream.id);
             return (
               <div
                 key={row.stream.id}
@@ -705,7 +706,7 @@ function StreamsCard({
                 >
                   <button
                     type="button"
-                    onClick={() => setExpanded(isOpen ? null : row.stream.id)}
+                    onClick={() => openStreams.toggle(row.stream.id)}
                     style={{
                       ...linkButton,
                       width: 16,

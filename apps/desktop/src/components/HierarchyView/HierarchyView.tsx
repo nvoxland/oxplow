@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useCollapsedSet } from "../../tabs/useViewParam.js";
 import type { ReactNode } from "react";
 
 export type HierarchyStatus = "added" | "modified" | "deleted";
@@ -93,7 +94,10 @@ export function HierarchyView({
   // overrides — rather than the absolute collapsed set — means that
   // when the data refreshes with new ids, those new ids automatically
   // pick up the default state instead of leaking into "expanded".
-  const [overrides, setOverrides] = useState<Map<string, boolean>>(new Map());
+  // They are kept as two sets in this step's history state: the rows the
+  // person closed and the rows they opened.
+  const closed = useCollapsedSet(`${testIdPrefix}.closed`);
+  const opened = useCollapsedSet(`${testIdPrefix}.opened`);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return nodes;
@@ -114,33 +118,31 @@ export function HierarchyView({
   const effectivelyCollapsed = useMemo(() => {
     if (search.trim()) return new Set<string>(); // search forces all expanded
     const out = new Set<string>(defaultCollapsed);
-    for (const [id, userCollapsed] of overrides) {
-      if (userCollapsed) out.add(id);
-      else out.delete(id);
-    }
+    for (const id of opened.ids) out.delete(id);
+    for (const id of closed.ids) out.add(id);
     return out;
-  }, [defaultCollapsed, overrides, search]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultCollapsed, opened.ids, closed.ids, search]);
 
   const toggle = (id: string) => {
-    setOverrides((prev) => {
-      const currentlyCollapsed = effectivelyCollapsed.has(id);
-      const next = new Map(prev);
-      next.set(id, !currentlyCollapsed);
-      return next;
-    });
+    if (effectivelyCollapsed.has(id)) {
+      closed.set(closed.ids.filter((x) => x !== id));
+      opened.set([...opened.ids, id]);
+    } else {
+      opened.set(opened.ids.filter((x) => x !== id));
+      closed.set([...closed.ids, id]);
+    }
   };
 
   const expandAll = () => {
     // Mark every branch as user-expanded so they override any default-
     // collapsed entries.
-    const next = new Map<string, boolean>();
-    for (const id of allIds) next.set(id, false);
-    setOverrides(next);
+    closed.set([]);
+    opened.set([...allIds]);
   };
   const collapseAll = () => {
-    const next = new Map<string, boolean>();
-    for (const id of allIds) next.set(id, true);
-    setOverrides(next);
+    opened.set([]);
+    closed.set([...allIds]);
   };
 
   return (

@@ -1,4 +1,5 @@
 import { idOf } from "../../refs/ref.js";
+import { useCollapsedSet } from "../../tabs/useViewParam.js";
 import type { CSSProperties } from "react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { AgentStatus, OpenAgentTurn } from "../../api.js";
@@ -128,7 +129,8 @@ export function TaskGroupList({
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
   const [overSection, setOverSection] = useState<TaskSectionKind | null>(null);
-  const [expandedEpicIds, setExpandedEpicIds] = useState<Set<string>>(() => new Set());
+  // Which epics show their children: this step's history state.
+  const openEpics = useCollapsedSet("epicsOpen");
 
   const { sections, allRows } = useMemo(() => {
     const work: QueueRow[] = group.items.map((item) => ({ kind: "work" as const, id: item.ref, item }));
@@ -382,7 +384,7 @@ export function TaskGroupList({
       },
     };
     if ((group.epicChildren.get(row.item.ref) ?? []).length > 0) {
-      const isExpanded = expandedEpicIds.has(row.item.ref);
+      const isExpanded = openEpics.has(row.item.ref);
       const children = epicChildrenMap.get(row.item.ref) ?? [];
       // Surface stale-epic-children: when the epic is closed but
       // children are still ready/in_progress the rollup pulls the
@@ -399,14 +401,7 @@ export function TaskGroupList({
             rowKey={key}
             item={row.item}
             isExpanded={isExpanded}
-            onToggleExpand={() => {
-              setExpandedEpicIds((prev) => {
-                const next = new Set(prev);
-                if (next.has(row.item.ref)) next.delete(row.item.ref);
-                else next.add(row.item.ref);
-                return next;
-              });
-            }}
+            onToggleExpand={() => openEpics.toggle(row.item.ref)}
             isSelected={selectedId === row.item.ref}
             isMarked={isMarked}
             isOver={isOver}

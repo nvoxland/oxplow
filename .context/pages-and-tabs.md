@@ -834,7 +834,8 @@ visit) and page memory:
   the searches — `pages/searchViews.ts`: Git History `q`/`author`/`branch`,
   Comments `days`, Settings `q`, Explore Data `model` (a pick, so it
   pushes), `sql` (the query that ran), `viz`, `chart`, `template`, `raw`; the
-  SQL being edited and not yet run is history state `sql`);
+  SQL being edited and not yet run is history state `sql`; Files `filter`,
+  which files the tree lists, and Alerts `open`, a pick — `pages/modeViews.ts`);
   the same table names an **entity kind** whose page has a view: a metric's
   page is `metric:<key>?range=…&branch=…&slice=…`, its key the identity (so
   comments, backlinks and visits still anchor on `metric:<key>`). A kind not
@@ -877,7 +878,7 @@ outside a tab each is the component's own state:
 | `useViewParam(key, initial)` | a filter (a range, a search, a mode) | replaces the entry; typed back by `initial`'s type; dropped at `initial` |
 | `useViewSelection(key)` | a pick (a row, a commit) | pushes when set (Back un-selects), replaces when cleared |
 | `useViewList(key)` | several values (authors, states) | comma-joined, as a filter |
-| `useCollapsedSet(key)` | open/closed groups | history state |
+| `useCollapsedSet(key, initial?)` | open/closed groups (`ids`, `has`, `toggle`, `set`) | history state |
 | `useDraft(key, initial)` | an unsaved form | history state; `clear` on submit |
 
 They write through `nav.patchViewParams(patch, { push })`, which merges

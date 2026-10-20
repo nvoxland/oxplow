@@ -16,6 +16,7 @@
 
 import { isTasksViewParam } from "../components/Plan/tasksView.js";
 import { isDashboardViewParam, isMetricsViewParam, isMetricViewParam } from "./metricsView.js";
+import { isAlertsViewParam, isFilesViewParam } from "./modeViews.js";
 import { isCommentsViewParam, isExploreViewParam, isGitHistoryViewParam, isSettingsViewParam } from "./searchViews.js";
 import { identityOf } from "../tabs/session.js";
 import { extPageRef, pagePayload, pageTabRef, viewParamsOf, withViewParams } from "../tabs/pageRefs.js";
@@ -34,6 +35,8 @@ const BUILT_IN_VIEW: Record<string, (key: string) => boolean> = {
   "git-history": isGitHistoryViewParam,
   comments: isCommentsViewParam,
   settings: isSettingsViewParam,
+  files: isFilesViewParam,
+  alerts: isAlertsViewParam,
   "explore-data": isExploreViewParam,
 };
 
