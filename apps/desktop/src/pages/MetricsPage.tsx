@@ -23,12 +23,13 @@ import { metricRef } from "../tabs/pageRefs.js";
 import { Page } from "../tabs/Page.js";
 import { routeDispatch, routeHandlers } from "../tabs/RouteLink.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
-import { DataTable, METRIC_RANGE_PRESETS, Section, type DataColumn } from "../kit/index.js";
+import { DataTable, MetricFilters, Section, type DataColumn } from "../kit/index.js";
 import type { OriginItem } from "../tabs/session.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { buildMetricSections } from "./metricCategories.js";
 import { DIMENSIONS_SQL } from "./exploreData.js";
-import { DEFAULT_RANGE_KEY, rangeFromPreset, rangePresetLabel } from "../kit/rangePresets.js";
+import { DEFAULT_RANGE_KEY, resolveRange } from "../kit/rangePresets.js";
+import { useViewParam } from "../tabs/useViewParam.js";
 import {
   branchOptions,
   filterByBranch,
@@ -232,12 +233,16 @@ const sel = { fontSize: 12, width: "100%" } as const;
 export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void } = {}) {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
-  const [rangeKey, setRangeKey] = useState<string>(DEFAULT_RANGE_KEY);
-  const [branch, setBranch] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [showMode, setShowMode] = useState<ShowMode>(DEFAULT_SHOW_MODE);
+  // The page's filters are its view params (`metricsView.ts`): in its tab's
+  // address, so Back and a restart bring them back.
+  const [rangeKey, setRangeKey] = useViewParam<string>("range", DEFAULT_RANGE_KEY);
+  const [branchName, setBranch] = useViewParam<string>("branch", "");
+  const branch = branchName || null;
+  const [query, setQuery] = useViewParam<string>("q", "");
+  const [showMode, setShowMode] = useViewParam<ShowMode>("show", DEFAULT_SHOW_MODE);
   // Slice By (tsk594): a dimension splits every metric that has it into groups.
-  const [sliceBy, setSliceBy] = useState<string | null>(null);
+  const [sliceKey, setSlice] = useViewParam<string>("slice", "");
+  const sliceBy = sliceKey || null;
   const [dimensions, setDimensions] = useState<{ key: string; label: string }[]>([]);
   useEffect(() => {
     void querySql(DIMENSIONS_SQL, [], null)
@@ -307,10 +312,11 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
   // branch — an in-scope metric with no recording in the window stays listed
   // and just shows "—".
   const viewRows = useMemo(() => {
-    const range = rangeFromPreset(rangeKey, Date.now());
+    const range = resolveRange(rangeKey, Date.now());
+    const within = (s: SeriesPoint[]) => filterByBranch(range ? filterByRange(s, range) : s, branch);
     return filterMetricRows(rows, showMode, query).map((r) => {
-      const samples = filterByBranch(filterByRange(r.samples, range), branch);
-      const grouped = filterByBranch(filterByRange(r.grouped, range), branch);
+      const samples = within(r.samples);
+      const grouped = within(r.grouped);
       return { ...r, latest: samples[0] ?? null, samples, grouped };
     });
   }, [rows, rangeKey, branch, query, showMode]);
@@ -370,54 +376,14 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
               ))}
             </select>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ opacity: 0.6, fontSize: 12 }}>Range</span>
-            <select
-              value={rangeKey}
-              onChange={(e) => setRangeKey(e.target.value)}
-              data-testid="recorded-range"
-              style={sel}
-            >
-              {METRIC_RANGE_PRESETS.map((p) => (
-                <option key={p} value={p}>
-                  {rangePresetLabel(p)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ opacity: 0.6, fontSize: 12 }}>Branch</span>
-            <select
-              value={branch ?? ""}
-              onChange={(e) => setBranch(e.target.value || null)}
-              data-testid="recorded-branch-filter"
-              style={sel}
-            >
-              <option value="">All branches</option>
-              {branches.map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ opacity: 0.6, fontSize: 12 }}>Slice by</span>
-            <select
-              value={sliceBy ?? ""}
-              onChange={(e) => setSliceBy(e.target.value || null)}
-              data-testid="recorded-slice-by"
-              title="Splits each metric that has the dimension into its groups, the top few beneath it."
-              style={sel}
-            >
-              <option value="">No slice</option>
-              {dimensions.map((d) => (
-                <option key={d.key} value={d.key}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          <MetricFilters
+            range={rangeKey}
+            branch={branchName}
+            branches={branches}
+            slice={sliceKey}
+            dimensions={dimensions}
+            onApply={(name, value) => ({ range: setRangeKey, branch: setBranch, slice: setSlice })[name](value)}
+          />
           {/* Not a filter, but this rail is the page's control panel — the
               controls self-hide while there are no sections to act on. */}
           <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>

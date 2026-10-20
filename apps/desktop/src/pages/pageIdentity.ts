@@ -15,6 +15,7 @@
  */
 
 import { isTasksViewParam } from "../components/Plan/tasksView.js";
+import { isDashboardViewParam, isMetricsViewParam } from "./metricsView.js";
 import { identityOf } from "../tabs/session.js";
 import { extPageRef, pagePayload, pageTabRef, viewParamsOf, withViewParams } from "../tabs/pageRefs.js";
 import type { SqlCell } from "../tauri-bridge/generated/bindings.js";
@@ -25,6 +26,8 @@ import { isBuiltInPage } from "./declaredPages.js";
 const BUILT_IN_VIEW: Record<string, (key: string) => boolean> = {
   tasks: isTasksViewParam,
   backlog: isTasksViewParam,
+  "metrics-recorded": isMetricsViewParam,
+  "custom-dashboard": isDashboardViewParam,
 };
 
 export function pageIdentity(ref: TabRef): string {

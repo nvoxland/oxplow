@@ -829,7 +829,8 @@ visit) and page memory:
 - a lens: all its params are view;
 - an extension's page: all but `ref` (what it was opened for);
 - one of oxplow's own pages: the view params it declares in
-  `BUILT_IN_VIEW` (Tasks and Backlog: `isTasksViewParam`); a page that
+  `BUILT_IN_VIEW` (Tasks and Backlog: `isTasksViewParam`; Metrics: range, branch,
+  slice, q, show; a custom dashboard: range, branch — `pages/metricsView.ts`); a page that
   declares none is all identity — a diff's path and sides, a dashboard's
   id — so two diffs in a tab are two pages.
 

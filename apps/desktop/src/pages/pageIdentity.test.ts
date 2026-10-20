@@ -19,6 +19,9 @@ test("a built-in page's identity keeps every param but the view params it declar
   const b = diffRef({ path: "b.ts", leftVersion: { kind: "disk" }, rightVersion: { kind: "disk" } } as never);
   expect(pageIdentity(a)).not.toBe(pageIdentity(b));
   expect(pageIdentity(pageTabRef("custom-dashboard", { id: "7" }))).toBe("page:custom-dashboard?id=7");
+  // A dashboard's range and branch are its view; its id is not.
+  expect(pageIdentity(pageTabRef("custom-dashboard", { id: "7", range: "7d", branch: "main" }))).toBe("page:custom-dashboard?id=7");
+  expect(pageIdentity(pageTabRef("metrics-recorded", { range: "30d", slice: "oxplow.language", q: "x", show: "all" }))).toBe("page:metrics-recorded");
 });
 
 test("an entity page is its ref", () => {
@@ -31,5 +34,5 @@ test("withView writes a page's view params and refuses one that would change wha
   expect(withView(pageTabRef("tasks"), { scope: "all" }).id).toBe("page:tasks?scope=all");
   expect(withView(lensRef("x/y"), { range: "7d" }).id).toBe(lensRef("x/y", { range: "7d" }).id);
   expect(() => withView(pageTabRef("tasks"), { sort: "age" })).toThrow(/`sort`.*page:tasks.*BUILT_IN_VIEW/);
-  expect(() => withView(pageTabRef("custom-dashboard", { id: "7" }), { id: "7", range: "7d" })).toThrow(/^`range` isn't/);
+  expect(() => withView(pageTabRef("custom-dashboard", { id: "7" }), { id: "7", sort: "age" })).toThrow(/^`sort` isn't/);
 });

@@ -11,6 +11,8 @@ export interface MetricFiltersProps {
   range?: string;
   /** The quick picks of `range`; the metric ones by default. */
   presets?: string[];
+  /** The range the page starts at (`7d`). */
+  defaultRange?: string;
   /** A branch name; "" is every branch. */
   branch?: string;
   /** The branches the metric was recorded on. */
@@ -31,6 +33,7 @@ export interface MetricFiltersProps {
 export function MetricFilters({
   range,
   presets = METRIC_RANGE_PRESETS,
+  defaultRange = "7d",
   branch,
   branches = [],
   slice,
@@ -38,7 +41,7 @@ export function MetricFilters({
   onApply,
 }: MetricFiltersProps) {
   const rows: { param: LensParam; value: SqlCell }[] = [];
-  if (range !== undefined) rows.push({ param: { name: "range", type: "date_range", default: "7d", presets }, value: range });
+  if (range !== undefined) rows.push({ param: { name: "range", type: "date_range", default: defaultRange, presets }, value: range });
   if (branch !== undefined) {
     rows.push({
       param: {
