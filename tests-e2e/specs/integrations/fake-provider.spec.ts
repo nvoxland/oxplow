@@ -62,7 +62,8 @@ test("a person configures, checks and enables the fake tracker, and an item reac
   await page.keyboard.press("Enter");
   await expect.poll(() => fakeState(daemon.project)).toContain("Kiwi from the page");
   await run(daemon, "oxplow.provider.sync", { instance: "e2e/fake", collector: "work_items" });
+  // The Board at its default view is another page beside the filtered one.
   await openFromLauncher(page, "Board");
-  await page.getByTestId("board-scope").selectOption("thread");
-  await expect(page.getByTestId("work-board")).toContainText("Kiwi from the page");
+  await page.getByTestId("board-scope").filter({ visible: true }).selectOption("thread");
+  await expect(page.getByTestId("work-board").filter({ visible: true })).toContainText("Kiwi from the page");
 });
