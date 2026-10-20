@@ -577,6 +577,31 @@ impl ExtensionActivation {
         }
     }
 
+    /// Restate the listing rows that follow a source on disk (an
+    /// undeployed extension, one named but not here) from the sources as
+    /// they are now, without an activation: nothing that runs changes. The
+    /// file watcher calls it when the extensions folder changes, so a
+    /// deleted or added source shows at once. It waits for an activation in
+    /// progress, so a publication's listing is never overwritten by an
+    /// older one.
+    pub async fn restate_sources(
+        &self,
+        svc: Arc<Services>,
+    ) -> Result<(), oxplow_domain::DomainError> {
+        let _one = self.activating.lock().await;
+        let snapshot = svc.extension_catalog.snapshot(&svc.layout.project_dir);
+        let rows: Vec<_> = snapshot
+            .extensions()
+            .iter()
+            .map(crate::extension_generation::extension_row)
+            .collect();
+        svc.db
+            .transaction(move |tx| {
+                oxplow_db::catalog_listing_store::restate_source_backed_tx(tx, &rows)
+            })
+            .await
+    }
+
     /// Publish only required bundled declarations so the host can repair a
     /// failed first extension candidate without exposing a partial activation.
     pub async fn activate_core(

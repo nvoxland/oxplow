@@ -94,6 +94,19 @@ restates the `contribution` table (V47, `oxplow_db::contribution_store`)
 from every enabled extension's descriptors, read as `v_contribution`.
 The same transaction restates `lens` and `extension_listing` (V74,
 `oxplow_db::catalog_listing_store`), read as `v_lens` and `v_extension`.
+Two kinds of listing row follow something other than a generation: those
+for an extension with no deployment running (`undeployed`, `not_here`) follow
+its *source on disk*. The config watcher (`config_watch.rs`) watches
+`.oxplow/extensions/` and, on a change there, calls
+`ExtensionActivation::restate_sources`, which rewrites only those rows
+(`catalog_listing_store::restate_source_backed_tx`) from the current
+sources, under the activation lock and with no activation: nothing that runs
+changes. So `rm -rf` of an undeployed source drops its row at once, and a new
+source is listed at once. We restate rather than read live (as
+`v_extension_source` is) because a live model is materialized by name in the
+query, and `v_extension` is a stored table other views and lenses join.
+Sources that `extensionSources` points outside the folder are not watched;
+they show at the next activation.
 The reference's "What it can declare" table is generated from
 `contribution::KINDS` (each kind's `summary`) between markers in
 `docs/reference/extensions.md`;

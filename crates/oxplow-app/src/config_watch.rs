@@ -9,6 +9,12 @@
 //! the in-memory config directly; this watcher covers every *other* way
 //! the file changes.
 //!
+//! It also watches the default extension sources folder
+//! (`.oxplow/extensions/`): a source added or deleted there restates the
+//! listing rows that follow a source (`ExtensionActivation::restate_sources`),
+//! without an activation. Sources `extensionSources` points elsewhere are
+//! not watched; they show at the next activation.
+//!
 //! Spawned once at boot from the host binary; the returned handle holds
 //! the `FsWatcher` for the process lifetime (drop cancels the watch).
 
@@ -42,6 +48,15 @@ impl ConfigWatcher {
         // (`<global_config_dir>/metrics/`) so an edit there hot-reloads the
         // three-scope catalog (epic tsk213, P3). Only when it already exists —
         // watching a missing dir errors on some platforms.
+        let sources_dir = services
+            .layout
+            .project_dir
+            .join(oxplow_config::EXTENSION_SOURCES_DIR);
+        // A folder to watch from the first write: a missing one errors on
+        // some platforms, and an empty folder is not committed.
+        if std::fs::create_dir_all(&sources_dir).is_ok() {
+            watch.push((sources_dir.clone(), RecursiveMode::Recursive));
+        }
         let global_metrics_dir = oxplow_config::global_config_dir().map(|d| d.join("metrics"));
         if let Some(dir) = global_metrics_dir.as_ref().filter(|d| d.is_dir()) {
             watch.push((dir.clone(), RecursiveMode::Recursive));
@@ -60,6 +75,16 @@ impl ConfigWatcher {
             loop {
                 match rx.recv().await {
                     Ok(WatchEvent { path, .. }) => {
+                        if path.starts_with(&sources_dir) {
+                            if let Err(e) = services
+                                .extension_activation
+                                .restate_sources(services.clone())
+                                .await
+                            {
+                                warn!(error = %e, "failed to restate the extension listing");
+                            }
+                            continue;
+                        }
                         let is_config = path
                             .file_name()
                             .map(|n| n == OXPLOW_CONFIG_FILE || n == PERSONAL_CONFIG_FILE)

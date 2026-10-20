@@ -1380,6 +1380,47 @@ mod tests {
         );
     }
 
+    /// An undeployed extension is listed for its source: when the source
+    /// goes, the listing drops it without an activation (a running
+    /// extension is not touched: it runs from its deployment).
+    #[tokio::test]
+    async fn an_undeployed_extension_leaves_the_listing_when_its_source_is_deleted() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        source_with(svc, "One", AI);
+        svc.extension_activation
+            .initialize(svc.clone())
+            .await
+            .unwrap();
+        let listed = || async {
+            svc.sql
+                .query_sql(
+                    "SELECT name FROM v_extension WHERE name = 'acme'",
+                    vec![],
+                    None,
+                )
+                .await
+                .unwrap()
+                .rows
+                .len()
+        };
+        assert_eq!(listed().await, 1);
+        std::fs::remove_dir_all(root.join(".oxplow/extensions/acme")).unwrap();
+        svc.extension_activation
+            .restate_sources(svc.clone())
+            .await
+            .unwrap();
+        assert_eq!(listed().await, 0);
+        // A source that comes back is listed again.
+        source_with(svc, "One", AI);
+        svc.extension_activation
+            .restate_sources(svc.clone())
+            .await
+            .unwrap();
+        assert_eq!(listed().await, 1);
+    }
+
     /// An agent can't approve: its deploy that adds a permission becomes a
     /// proposal naming what it adds, and a person's approval deploys it.
     #[tokio::test]

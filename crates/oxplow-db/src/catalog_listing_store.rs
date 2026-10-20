@@ -79,6 +79,66 @@ pub struct CatalogListing {
     pub config_keys: Vec<ConfigKeyRow>,
 }
 
+/// The extensions with no deployment running: listed for their source
+/// (`undeployed`) or for the setting that names them (`not_here`).
+const SOURCE_BACKED: &str = "deployment IN ('undeployed', 'not_here')";
+
+/// Restate the rows that follow a source on disk, and no others: those
+/// are the only rows a source change can move, so a restate between
+/// generations leaves what runs (and every other table) as it was.
+pub fn restate_source_backed_tx(
+    conn: &rusqlite::Connection,
+    extensions: &[ExtensionRow],
+) -> Result<(), DomainError> {
+    conn.execute(
+        &format!("DELETE FROM extension_listing WHERE {SOURCE_BACKED}"),
+        [],
+    )
+    .map_err(map_sql_err)?;
+    let backed: Vec<ExtensionRow> = extensions
+        .iter()
+        .filter(|e| matches!(e.deployment.as_str(), "undeployed" | "not_here"))
+        .cloned()
+        .collect();
+    insert_extensions(conn, &backed)
+}
+
+fn insert_extensions(
+    conn: &rusqlite::Connection,
+    extensions: &[ExtensionRow],
+) -> Result<(), DomainError> {
+    let mut ext = conn
+        .prepare(
+            "INSERT OR REPLACE INTO extension_listing
+               (name, namespace, description, path, origin, version, enabled,
+                purpose, deployment, hash, errors_json, warnings_json, permissions_json,
+                pending_json, shared)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+        )
+        .map_err(map_sql_err)?;
+    for e in extensions {
+        ext.execute(params![
+            e.name,
+            e.namespace,
+            e.description,
+            e.path,
+            e.origin,
+            e.version,
+            e.enabled,
+            e.purpose,
+            e.deployment,
+            e.hash,
+            e.errors_json,
+            e.warnings_json,
+            e.permissions_json,
+            e.pending_json,
+            e.shared,
+        ])
+        .map_err(map_sql_err)?;
+    }
+    Ok(())
+}
+
 /// Replace every lens, extension, prompt and config key row.
 pub fn reset_tx(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result<(), DomainError> {
     let (lenses, extensions) = (&listing.lenses, &listing.extensions);
@@ -109,35 +169,7 @@ pub fn reset_tx(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result
         ])
         .map_err(map_sql_err)?;
     }
-    let mut ext = conn
-        .prepare(
-            "INSERT OR REPLACE INTO extension_listing
-               (name, namespace, description, path, origin, version, enabled,
-                purpose, deployment, hash, errors_json, warnings_json, permissions_json,
-                pending_json, shared)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-        )
-        .map_err(map_sql_err)?;
-    for e in extensions {
-        ext.execute(params![
-            e.name,
-            e.namespace,
-            e.description,
-            e.path,
-            e.origin,
-            e.version,
-            e.enabled,
-            e.purpose,
-            e.deployment,
-            e.hash,
-            e.errors_json,
-            e.warnings_json,
-            e.permissions_json,
-            e.pending_json,
-            e.shared,
-        ])
-        .map_err(map_sql_err)?;
-    }
+    insert_extensions(conn, extensions)?;
     conn.execute("DELETE FROM catalog_prompt", [])
         .map_err(map_sql_err)?;
     let mut prompt = conn

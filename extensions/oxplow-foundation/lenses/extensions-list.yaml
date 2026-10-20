@@ -5,8 +5,12 @@ query: |
          substr(e.hash, 1, 7) AS running,
          CASE WHEN s.hash IS NOT NULL AND e.hash IS NOT NULL AND s.hash != e.hash
               THEN 'out of date' ELSE '' END AS source_state,
-         CASE WHEN e.permissions = '{}' THEN '' ELSE e.permissions END AS permissions,
-         CASE WHEN e.pending = '[]' THEN '' ELSE e.pending END AS waiting_on,
+         COALESCE((SELECT group_concat(CASE p.type
+                      WHEN 'text' THEN p.key || ': ' || p.value
+                      WHEN 'true' THEN p.key
+                      ELSE p.key || ': ' || (SELECT group_concat(v.value, ' ') FROM json_each(p.value) v) END, ', ')
+            FROM json_each(e.permissions) p WHERE p.type != 'false'), '') AS permissions,
+         COALESCE((SELECT group_concat(w.value, '; ') FROM json_each(e.pending) w), '') AS waiting_on,
          json_array_length(e.errors) AS problems,
          (s.hash IS NOT NULL AND (e.deployment = 'undeployed'
             OR (e.hash IS NOT NULL AND s.hash != e.hash))) AS can_deploy,

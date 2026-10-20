@@ -265,7 +265,7 @@ fn lens_row(lens: &crate::extensions::Lens) -> oxplow_db::catalog_listing_store:
     }
 }
 
-fn extension_row(
+pub(crate) fn extension_row(
     extension: &crate::extensions::Extension,
 ) -> oxplow_db::catalog_listing_store::ExtensionRow {
     oxplow_db::catalog_listing_store::ExtensionRow {

@@ -4,7 +4,11 @@ query: |
   SELECT d.name, substr(d.hash, 1, 7) AS deployment, d.hash, d.deployed_at,
          CASE WHEN d.active THEN 'runs' ELSE '' END AS running,
          NOT d.active AS inactive,
-         CASE WHEN d.permissions = '{}' THEN '' ELSE d.permissions END AS permissions,
+         COALESCE((SELECT group_concat(CASE p.type
+                      WHEN 'text' THEN p.key || ': ' || p.value
+                      WHEN 'true' THEN p.key
+                      ELSE p.key || ': ' || (SELECT group_concat(v.value, ' ') FROM json_each(p.value) v) END, ', ')
+            FROM json_each(d.permissions) p WHERE p.type != 'false'), '') AS permissions,
          d.source
   FROM v_extension_deployment d
   ORDER BY d.deployed_at DESC
