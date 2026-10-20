@@ -6,7 +6,7 @@
  * (`.context/pages-and-tabs.md` "new-session").
  */
 import type { EarlierAction, EarlierSession, EarlierSessions } from "../tauri-bridge/generated/bindings.js";
-import { formatSize, formatWhen } from "./format.js";
+import { formatRelative, formatSize, formatWhen } from "./format.js";
 
 export type EarlierStatus = "open_here" | "closed_here" | "elsewhere" | "outside" | "open_elsewhere";
 
@@ -22,8 +22,10 @@ export interface EarlierRow {
   /** The same in words (the icon's tooltip): closed here, from another
    *  thread, outside oxplow. */
   note: string;
-  /** When it was last active (`YYYY-MM-DD HH:MM`, local), when known. */
+  /** When it was last active, short (`3 h ago`, then the date), when known. */
   when: string | null;
+  /** The same exactly (`YYYY-MM-DD HH:MM`, local), for its hover. */
+  whenExact: string | null;
   /** How many turns oxplow saw it run, when it ran in oxplow. */
   turns: string | null;
   /** Its saved conversation's size, when its harness says. */
@@ -80,19 +82,23 @@ function noteOf(row: EarlierSession): string {
   }
 }
 
-export function earlierSessionRows(listing: EarlierSessions): EarlierRow[] {
-  return listing.rows.map((row) => {
+/** The listing's rows, those that can't be taken (open in another thread)
+ *  last, the rest in the backend's order. */
+export function earlierSessionRows(listing: EarlierSessions, now: number = Date.now()): EarlierRow[] {
+  const rows = listing.rows.map((row): EarlierRow => {
     const c = row.conversation;
     const s = row.session;
     const label = labelOf(row);
     const note = noteOf(row);
+    const at = c?.updated_at ?? s?.closed_at ?? null;
     return {
       key: s?.session ?? `${row.harness}:${c?.id ?? ""}`,
       harness: row.harness,
       label,
       status: statusOf(row),
       note,
-      when: formatWhen(c?.updated_at ?? s?.closed_at ?? null),
+      when: at && formatWhen(at) ? formatRelative(at, now) : null,
+      whenExact: formatWhen(at),
       turns: s && s.turns > 0 ? String(s.turns) : null,
       size: formatSize(c?.size_bytes ?? null),
       action: row.action,
@@ -106,6 +112,7 @@ export function earlierSessionRows(listing: EarlierSessions): EarlierRow[] {
         .toLowerCase(),
     };
   });
+  return [...rows.filter(takeable), ...rows.filter((r) => !takeable(r))];
 }
 
 /** The rows whose title, prompts, thread or harness contain every word of `query`. */

@@ -120,9 +120,9 @@ export function NewSessionPage({
     },
     { key: "status", label: <span className="ox-sr-only">Status</span>, width: 24, render: (r) => <StatusIcon status={r.status} note={r.note} /> },
     { key: "session", label: "Session", truncate: true, render: (r) => r.label, title: (r) => r.label },
-    { key: "when", label: "Last active", width: 128, render: (r) => <span className="ox-faint oxplow-tabular">{r.when ?? ""}</span> },
-    { key: "turns", label: "Turns", width: 52, numeric: true, render: (r) => <span className="ox-faint">{r.turns ?? ""}</span> },
-    { key: "size", label: "Size", width: 68, numeric: true, render: (r) => <span className="ox-faint">{r.size ?? ""}</span> },
+    { key: "when", label: "Last active", width: 96, truncate: true, render: (r) => <Faint value={r.when} />, title: (r) => r.whenExact ?? undefined },
+    { key: "turns", label: "Turns", width: 52, numeric: true, render: (r) => <Faint value={r.turns} /> },
+    { key: "size", label: "Size", width: 72, numeric: true, truncate: true, render: (r) => <Faint value={r.size} /> },
   ];
 
   const start = (
@@ -212,6 +212,7 @@ export function NewSessionPage({
           Nothing matches the filter.
         </p>
       ) : null}
+      {allRows?.length ? <StatusKey statuses={allRows.map((r) => r.status)} /> : null}
       {rows?.length ? (
         <DataTable<EarlierRow>
           testId="new-session-earlier-rows"
@@ -235,7 +236,7 @@ export function NewSessionPage({
   return (
     <DocumentLayout
       testId="page-new-session"
-      title="Agent sessions"
+      title="New session"
       slot="new-session.sections"
       slotParams={{ thread_id: threadId ? numericRowId(threadId) : null }}
       streamId={streamId}
@@ -255,6 +256,38 @@ const STATUS_ICONS: Record<EarlierStatus, LucideIcon> = {
   outside: ExternalLink,
   open_elsewhere: Lock,
 };
+
+/** What each status icon means, in the key under the filter. */
+const STATUS_WORDS: Record<EarlierStatus, string> = {
+  open_here: "open in this thread",
+  closed_here: "closed here",
+  elsewhere: "from another thread",
+  outside: "not started in oxplow",
+  open_elsewhere: "open in another thread (can't be opened here)",
+};
+
+/** A cell's value, or a dash when there's none to show. */
+function Faint({ value }: { value: string | null }) {
+  return <span className="ox-faint oxplow-tabular">{value ?? "—"}</span>;
+}
+
+/** The key to the status icons the list uses, in the order of `STATUS_ICONS`. */
+function StatusKey({ statuses }: { statuses: EarlierStatus[] }) {
+  const shown = (Object.keys(STATUS_ICONS) as EarlierStatus[]).filter((s) => statuses.includes(s));
+  return (
+    <p data-testid="new-session-earlier-legend" className="ox-faint ox-small" style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-1) var(--space-4)", margin: 0 }}>
+      {shown.map((s) => {
+        const Icon = STATUS_ICONS[s];
+        return (
+          <span key={s} style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-1)" }}>
+            <Icon size={12} aria-hidden />
+            {STATUS_WORDS[s]}
+          </span>
+        );
+      })}
+    </p>
+  );
+}
 
 /** Where a row stands, as an icon; its words on hover. */
 function StatusIcon({ status, note }: { status: EarlierStatus; note: string }) {

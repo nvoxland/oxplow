@@ -36,7 +36,11 @@ pages are THE shell.
   closing a thread's last session leaves its other tabs (or home), not
   the picker. It also lists the thread's **earlier sessions** (closed
   ones and every agent's saved conversations for the worktree), one
-  column each for agent, session, status, last active, turns and size.
+  column each for agent, session, status, last active, turns and size,
+  each on one line (last active is relative, the exact time on hover; a
+  value it doesn't have is a dash). A key under the filter names the
+  status icons in use, and the rows that can't be taken (open in another
+  thread) come last. The page is headed **New session**, as its tab is.
   Taking one open in the thread shows its tab and keeps the picker;
   reopening or resuming one, like **New Session**, closes the picker and
   activates that session's tab. A closed session's ref (a search hit)

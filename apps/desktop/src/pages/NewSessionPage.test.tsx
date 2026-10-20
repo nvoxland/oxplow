@@ -157,3 +157,37 @@ test("with no earlier sessions the list says so", async () => {
   const { findByTestId } = renderEarlier({ rows: [], unavailable: [] });
   expect((await findByTestId("new-session-earlier-empty")).textContent).toContain("No earlier sessions");
 });
+
+/** One name everywhere: the heading says what the tab and launcher say. */
+test("the page is headed New session", () => {
+  const { container } = renderPicker();
+  expect(container.querySelector("h1")?.textContent).toBe("New session");
+});
+
+const twoRows: EarlierSessions = {
+  rows: [
+    { harness: "claude", session: null, conversation: { id: "a", title: "Outside", first_prompt: null, started_at: null, updated_at: null, size_bytes: null, parent: null }, action: "resume" },
+    {
+      harness: "claude",
+      session: { session: "agent_session:ses2", name: "Busy", conversation: null, display_name: "Busy", thread: "thread:thr2", thread_title: "Other", here: false, open: true, closed_at: null, turns: 0, last_prompt: null },
+      conversation: null,
+      action: "none",
+    },
+  ],
+  unavailable: [],
+} as unknown as EarlierSessions;
+
+/** A cell with nothing to say shows a dash, so a blank never reads as a
+ *  value that failed to load; the icons in use are explained once. */
+test("empty cells show a dash, and the icons shown have a key", async () => {
+  const { getByTestId } = render(
+    <NewSessionPage thread={thread} harnesses={harnesses} onStart={async () => {}} loadEarlier={async () => twoRows} />,
+  );
+  const table = await waitFor(() => getByTestId("new-session-earlier-rows"));
+  const outside = within(table).getByTestId("earlier-row-claude:a");
+  expect(outside.textContent).toContain("—");
+  const legend = getByTestId("new-session-earlier-legend");
+  expect(legend.textContent).toContain("not started in oxplow");
+  expect(legend.textContent).toContain("open in another thread");
+  expect(legend.textContent).not.toContain("closed here");
+});

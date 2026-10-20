@@ -72,10 +72,25 @@ test("a row shows its turns, its size and when it was last active, each on its o
       { harness: "claude", session: past({ turns: 3 }), conversation: conversation({ size_bytes: 2048 }), action: "reopen" },
       { harness: "claude", session: null, conversation: conversation({ id: "s", size_bytes: 2048 }), action: "resume" },
     ),
+    Date.parse("2026-10-10T12:05:00Z"),
   );
   expect([a!.turns, a!.size]).toEqual(["3", "2 KB"]);
   expect([b!.turns, b!.size]).toEqual([null, "2 KB"]);
-  expect(a!.when).toMatch(/^2026-10-10 \d\d:\d\d$/);
+  // Short enough for one line; the exact time on hover.
+  expect(a!.when).toBe("2 h ago");
+  expect(a!.whenExact).toMatch(/^2026-10-10 \d\d:\d\d$/);
+});
+
+test("the rows that can't be taken come last, the rest in the order they came", () => {
+  const rows = earlierSessionRows(
+    listing(
+      { harness: "claude", session: past({ session: "agent_session:ses1", open: true, here: false }), conversation: null, action: "none" },
+      { harness: "claude", session: null, conversation: conversation({ id: "a" }), action: "resume" },
+      { harness: "claude", session: past({ session: "agent_session:ses2", open: true, here: false }), conversation: null, action: "none" },
+      { harness: "claude", session: null, conversation: conversation({ id: "b" }), action: "resume" },
+    ),
+  );
+  expect(rows.map((r) => r.key)).toEqual(["claude:a", "claude:b", "agent_session:ses1", "agent_session:ses2"]);
 });
 
 test("the filter matches every word against title, prompts, thread and harness", () => {

@@ -6,7 +6,15 @@ import {
   formatDurationMs,
   formatRelative,
   formatRelativeSeconds,
+  formatSize,
 } from "./format.js";
+
+describe("formatSize", () => {
+  test("a gigabyte and up reads in GB", () => {
+    expect(formatSize(1282.8 * 1024 * 1024)).toBe("1.3 GB");
+    expect(formatSize(2.1 * 1024 * 1024)).toBe("2.1 MB");
+  });
+});
 
 describe("formatDateOnly", () => {
   test("returns a non-empty date label for a valid timestamp", () => {
