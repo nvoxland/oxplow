@@ -3,18 +3,17 @@ import { Page } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Stream } from "../tauri-bridge/index.js";
-import type { LensParamOption } from "../tauri-bridge/generated/bindings.js";
-import { querySql, runLens, type LensRun, type SqlCell } from "../api.js";
+import { runLens, type LensRun, type SqlCell } from "../api.js";
 import { lensRef } from "../tabs/pageRefs.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { formatContextMention } from "../agent-context-ref.js";
-import { changedParams, parseParamInput } from "../lens/lensModel.js";
+import { changedParams } from "../lens/lensModel.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
-import { paramKind, paramOptions, paramOptionsSql, type ParamKind, type ParamOption } from "../lens/lensParams.js";
-import { recordOpError } from "../components/opErrorsStore.js";
 import { useRequestGuard } from "../request-guard.js";
 import { LensResultView } from "../lens/LensResultView.js";
+import { ParamControl } from "../kit/ParamControls.js";
+import { Toolbar } from "../kit/Toolbar.js";
 import type { PageAction } from "../kit/actions.js";
 
 export interface LensPageProps {
@@ -102,7 +101,9 @@ export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOp
   // A param set from the rail or by a row click (a column's `select`).
   const setParam = (name: string, value: SqlCell) => setOverrides((o) => ({ ...o, [name]: value }));
   const rightRail =
-    lens && lens.params.length > 0 ? <ParamsForm lens={lens} values={run?.params ?? {}} onApply={setParam} /> : undefined;
+    lens && lens.params.some((p) => p.place !== "toolbar") ? (
+      <ParamsForm lens={lens} values={run?.params ?? {}} onApply={setParam} />
+    ) : undefined;
 
   return (
     <Page
@@ -119,6 +120,7 @@ export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOp
       <div style={lens?.viz === "dashboard" ? { padding: "var(--space-5)" } : undefined}>
       <h1 className="ox-title">{title}</h1>
       {lens?.description ? <p className="ox-intro">{lens.description}</p> : null}
+      {lens ? <ParamsToolbar lens={lens} values={run?.params ?? {}} onApply={setParam} /> : null}
       {error ? (
         <div data-testid="lens-error" style={errorStyle}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>This lens couldn't run.</div>
@@ -142,152 +144,39 @@ export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOp
 
 /** The lens's params: oxplow's id params as pickers (`lensParams.ts`),
  *  anything else typed. */
-export function ParamsForm({
-  lens,
-  values,
-  onApply,
-}: {
-  lens: LensRun["lens"];
-  values: Record<string, SqlCell>;
-  onApply(name: string, value: SqlCell): void;
-}) {
+/** The lens's rail params (`place: rail`), one kit control each; nothing
+ *  when it has none. */
+export function ParamsForm({ lens, values, onApply }: ParamsProps) {
+  const params = lens.params.filter((p) => p.place !== "toolbar");
+  if (params.length === 0) return null;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {lens.params.map((p) => (
-        <ParamInput key={p.name} name={p.name} label={p.label ?? p.name} options={p.options} value={values[p.name] ?? null} onApply={onApply} />
+      {params.map((p) => (
+        <ParamControl key={p.name} param={p} value={values[p.name] ?? null} onApply={onApply} />
       ))}
-      <div style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)" }}>Enter applies; Escape reverts.</div>
     </div>
   );
 }
 
-function ParamInput({
-  name,
-  label,
-  options,
-  value,
-  onApply,
-}: {
-  name: string;
-  label: string;
-  options: LensParamOption[];
-  value: SqlCell;
-  onApply(name: string, value: SqlCell): void;
-}) {
-  if (options.length > 0) return <ParamChoice name={name} label={label} options={options} value={value} onApply={onApply} />;
-  const kind = paramKind(name);
-  if (kind) return <ParamPicker name={name} label={label} kind={kind} value={value} onApply={onApply} />;
-  return <ParamText name={name} label={label} value={value} onApply={onApply} />;
-}
-
-/** A choice param: one of the values its lens declares. */
-function ParamChoice({
-  name,
-  label,
-  options,
-  value,
-  onApply,
-}: {
-  name: string;
-  label: string;
-  options: LensParamOption[];
-  value: SqlCell;
-  onApply(name: string, value: SqlCell): void;
-}) {
+/** The lens's toolbar params (`place: toolbar`), above its body; nothing
+ *  when it has none. */
+export function ParamsToolbar({ lens, values, onApply }: ParamsProps) {
+  const params = lens.params.filter((p) => p.place === "toolbar");
+  if (params.length === 0) return null;
   return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "var(--text-sm)" }}>
-      {label}
-      <select data-testid={`lens-param-${name}`} value={value == null ? "" : String(value)} onChange={(e) => onApply(name, e.target.value)}>
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
+    <Toolbar
+      testId="lens-params-toolbar"
+      controls={params.map((p) => (
+        <ParamControl key={p.name} param={p} value={values[p.name] ?? null} onApply={onApply} compact />
+      ))}
+    />
   );
 }
 
-/** One of oxplow's id params: pick what it names, by title (tsk1043). */
-function ParamPicker({
-  name,
-  label,
-  kind,
-  value,
-  onApply,
-}: {
-  name: string;
-  label: string;
-  kind: ParamKind;
-  value: SqlCell;
+interface ParamsProps {
+  lens: LensRun["lens"];
+  values: Record<string, SqlCell>;
   onApply(name: string, value: SqlCell): void;
-}) {
-  const [options, setOptions] = useState<ParamOption[]>([]);
-  useEffect(() => {
-    let live = true;
-    querySql(paramOptionsSql(kind))
-      .then((r) => {
-        if (live) setOptions(paramOptions(r));
-      })
-      .catch((e: unknown) => recordOpError({ label: `List ${kind}s`, message: e instanceof Error ? e.message : String(e) }));
-    return () => {
-      live = false;
-    };
-  }, [kind]);
-  const at = options.findIndex((o) => o.value === value);
-  return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "var(--text-sm)" }}>
-      {label}
-      <select
-        data-testid={`lens-param-${name}`}
-        value={at === -1 ? "" : String(at)}
-        onChange={(e) => {
-          const picked = options[Number(e.target.value)];
-          if (picked) onApply(name, picked.value);
-        }}
-      >
-        {at === -1 ? <option value="">{value === null ? "—" : String(value)}</option> : null}
-        {options.map((o, i) => (
-          <option key={i} value={String(i)}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function ParamText({
-  name,
-  label,
-  value,
-  onApply,
-}: {
-  name: string;
-  label: string;
-  value: SqlCell;
-  onApply(name: string, value: SqlCell): void;
-}) {
-  const shown = value === null ? "" : String(value);
-  const [text, setText] = useState(shown);
-  useEffect(() => setText(shown), [shown]);
-  return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "var(--text-sm)" }}>
-      {label}
-      <input
-        data-testid={`lens-param-${name}`}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") onApply(name, parseParamInput(text));
-          if (e.key === "Escape") setText(shown);
-        }}
-        onBlur={() => {
-          if (text !== shown) onApply(name, parseParamInput(text));
-        }}
-      />
-    </label>
-  );
 }
 
 const errorStyle: CSSProperties = {
