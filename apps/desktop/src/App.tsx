@@ -115,6 +115,7 @@ import { LensPage } from "./pages/LensPage.js";
 import { insertIntoAgent } from "./agent-input-bus.js";
 import { getPageDetailStore } from "./tabs/openPageDetail.js";
 import { DeclaredPageView } from "./pages/DeclaredPageView.js";
+import { pageIdentity } from "./pages/pageIdentity.js";
 import { kindForTabId } from "./pageKinds.js";
 import { declaredPage, isBuiltInPage } from "./pages/declaredPages.js";
 import { useExtensions } from "./extensionsStore.js";
@@ -147,7 +148,6 @@ import {
   dropCurrent,
   evictions,
   forward as sessionForward,
-  identityOf,
   MAX_PAGE_TABS,
   navigate as sessionNavigate,
   open as sessionOpen,
@@ -1394,7 +1394,8 @@ export function App() {
   // picked) is the same visit, so Recents lists the page once.
   const lastVisitRef = useRef<string | null>(null);
   useEffect(() => {
-    const visit = `${selectedThreadId}|${identityOf(effectiveCenterActive)}`;
+    const shownRef = visitContextRef.current.pageTabs.find((t) => t.id === effectiveCenterActive);
+    const visit = `${selectedThreadId}|${shownRef ? pageIdentity(shownRef) : effectiveCenterActive}`;
     const same = lastVisitRef.current === visit;
     lastVisitRef.current = visit;
     if (!hydratedHistoryRef.current) {
@@ -2355,16 +2356,6 @@ export function App() {
         };
       },
     };
-    // A page that redraws from its ref's params keeps one body across them
-    // (`bodies`): a lens, and an extension's page drawn by a lens or a
-    // component. Oxplow's built-in pages mount per entry.
-    const livePage = (ref: TabRef) => {
-      if (ref.kind === "lens") return true;
-      if (ref.kind !== "page") return false;
-      const page = pagePayload(ref);
-      const declared = page ? declaredPage(extensions, page) : null;
-      return !!declared && declared.body.kind !== "builtIn";
-    };
     for (const sessionTab of threadSession?.tabs ?? []) {
       // Navigation from any of the tab's bodies (a hidden back page too)
       // moves the tab.
@@ -2381,7 +2372,7 @@ export function App() {
       const navOpenDiff = (spec: DiffSpec, origin?: Origin) => handleOpenDiffInTab(currentId, spec, origin);
       const navRevealCommit = (sha: string) => navOpen(gitCommitRef(sha));
       const slotNav: SlotNav = { slotId: currentId, navOpen, navOpenFile, navOpenDiff, navRevealCommit };
-      for (const body of bodies(sessionTab, livePage)) {
+      for (const body of bodies(sessionTab, pageIdentity)) {
         const ref = body.entry.ref;
         if (renderedTabIds.has(ref.id)) continue;
         renderedTabIds.add(ref.id);

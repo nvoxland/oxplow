@@ -181,27 +181,27 @@ describe("origin: the collection a page was opened from", () => {
 });
 
 describe("bodies: what stays mounted", () => {
-  const live = (ref: Entry["ref"]) => ref.kind === "lens";
-
-  test("entries of one page whose view is live share one body, which shows the current one", () => {
+  // Every page is a function of its entry: one body per page, whatever its
+  // view params, so a filter or a pick re-renders it and never remounts it.
+  test("entries of one page share one body, which shows the current one", () => {
     let s = open(emptySession(), e(lensRef("x/y")));
     const slot = s.active!;
     s = setView(s, slot, lensRef("x/y", { commit: "abc" }), { push: true });
     s = navigate(s, slot, e(a));
-    const out = bodies(s.tabs[0]!, live);
+    const out = bodies(s.tabs[0]!);
     expect(out.map((x) => x.key)).toEqual([`${slot}/lens:x/y`, `${slot}/wiki:a`]);
     // The lens body shows its nearest entry: the one with the commit.
     expect(out[0]!.entry.ref.id).toBe("lens:x/y?commit=abc");
     expect(out.map((x) => x.current)).toEqual([false, true]);
     s = back(s, slot);
-    expect(bodies(s.tabs[0]!, live)[0]!).toMatchObject({ current: true, entry: { ref: { id: "lens:x/y?commit=abc" } } });
+    expect(bodies(s.tabs[0]!)[0]!).toMatchObject({ current: true, entry: { ref: { id: "lens:x/y?commit=abc" } } });
   });
 
-  test("a page whose view isn't live gets a body per entry, as before", () => {
+  test("a built-in page is one body across its view params too", () => {
     let s = open(emptySession(), e(pageTabRef("settings", { area: "agents" })));
     const slot = s.active!;
     s = navigate(s, slot, e(pageTabRef("settings", { area: "data" })));
-    expect(bodies(s.tabs[0]!, live).map((x) => x.key)).toEqual([`${slot}/page:settings?area=agents`, `${slot}/page:settings?area=data`]);
+    expect(bodies(s.tabs[0]!)).toMatchObject([{ key: `${slot}/page:settings`, current: true, entry: { ref: { id: "page:settings?area=data" } } }]);
   });
 
   test("identityOf is the ref without its view", () => {

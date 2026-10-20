@@ -26,6 +26,11 @@ export interface TasksView {
 const FILTER = "f.";
 const SCOPE_KEYS = ["scope", "stream", "thread"];
 
+/** Whether `key` is one of the Tasks page's view params. */
+export function isTasksViewParam(key: string): boolean {
+  return SCOPE_KEYS.includes(key) || key.startsWith(FILTER);
+}
+
 const text = (v: SqlCell | undefined) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
 
 /** The view `params` say; its defaults for what they don't. */

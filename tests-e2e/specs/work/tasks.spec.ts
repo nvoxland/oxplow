@@ -28,15 +28,21 @@ test("a task made elsewhere appears without a reload", async ({ fresh }) => {
 // The Tasks page's scope is its view params: in its tab's id, so Back
 // undoes a change, a reload keeps it, and opening Tasks again while one
 // tab shows another scope opens a second tab beside it.
-test("the Tasks page's scope is its tab's, kept by a reload and undone by nothing but a change", async ({ fresh }) => {
+test("the Tasks page's scope is its tab's: it re-renders the page, a reload keeps it", async ({ fresh }) => {
   const { page } = fresh;
   await page.goto("/");
   await openFromLauncher(page, "Tasks");
   const body = () => page.locator('[data-testid^="center-tab-body-page:tasks"]:visible');
   await expect(body()).toHaveAttribute("data-testid", "center-tab-body-page:tasks");
+  // A mark on the page's element: a change of view re-renders the page,
+  // it doesn't mount it again.
+  await body().getByTestId("tasks-scope-picker").evaluate((el) => {
+    el.setAttribute("data-mounted-once", "yes");
+  });
   await body().getByTestId("tasks-scope-button").click();
   await body().getByTestId("tasks-scope-all").click();
   await expect(body()).toHaveAttribute("data-testid", "center-tab-body-page:tasks?scope=all");
+  await expect(body().getByTestId("tasks-scope-picker")).toHaveAttribute("data-mounted-once", "yes");
   // A scope is a filter: it replaced the entry, so there's no Back to it.
   await expect(page.getByTestId("page-nav-back").filter({ visible: true })).toBeDisabled();
   await page.reload();

@@ -632,8 +632,8 @@ the bodies, Back/Forward, Up/Down, the star, Ask, what agents read.
 | `history.state` | `Entry.historyState` (persisted when it is JSON) |
 | the page you came from a list of | `Entry.from: Origin { title, items: [{ ref, label }], index }` |
 | pushState / replaceState | `navigate(slot, entry, { replace })`, `setView(slot, ref, { push })` |
-| back-forward cache | `bodies(tab, live)`: hidden bodies stay mounted |
-| a SPA re-rendering on popstate | a **live** page (a lens; an extension page drawn by a lens or a component) has **one body per identity**, keyed `slot/identity`, so entries that differ only in params re-render it — no remount, no Loading |
+| back-forward cache | `bodies(tab, pageIdentity)`: hidden bodies stay mounted |
+| a SPA re-rendering on popstate | **every page is live**: one body per page identity, keyed `slot/identity`, so entries that differ only in view params re-render it — no remount, no Loading |
 
 **Operations** (pure, tested in `session.test.ts`): `open` (the tab
 showing the page — its ref refreshed, as a re-clicked diff's line to
@@ -811,6 +811,25 @@ If you're adding a new index/list page and find yourself threading an
 `onOpenPage` / `onOpenFile` / `onOpenNote` callback all the way down
 to a row's `onClick`, **stop and use the hook instead**. The callback
 should only survive as the rail-side fallback.
+
+## Live by default: a page is a function of its entry
+
+A tab keeps **one mounted body per page identity** (`bodies(tab,
+pageIdentity)`), so a change of view params — a filter, a pick, Back or
+Forward between them — re-renders the page and never mounts it again: its
+state, its scroll and its loaded data stay. A page therefore reads its
+view from its props or `PageNavigation.viewParams` on every render; a
+`useState(fromProp)` seeded once is a bug.
+
+**A page's identity is its ref without its view params**
+(`pages/pageIdentity.ts`), which also keys visits (a filter isn't a new
+visit) and page memory:
+- a lens: all its params are view;
+- an extension's page: all but `ref` (what it was opened for);
+- one of oxplow's own pages: the view params it declares in
+  `BUILT_IN_VIEW` (Tasks and Backlog: `isTasksViewParam`); a page that
+  declares none is all identity — a diff's path and sides, a dashboard's
+  id — so two diffs in a tab are two pages.
 
 ## Page state: four homes, one name each
 

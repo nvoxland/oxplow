@@ -279,13 +279,16 @@ export interface Body {
 }
 
 /**
- * The pages a tab keeps mounted: one per entry, except that a page whose
- * view is `live` (it redraws from its ref's params) has one body for all
- * its entries — the current one when it is current, else the nearest —
- * so a filter or a selection never remounts it.
+ * The pages a tab keeps mounted: one per page identity among its entries
+ * (`identity`: a ref without its view params, `pages/pageIdentity.ts`),
+ * drawing the current entry when it is that page's, else the nearest.
+ * Every page is a function of its entry, so a change of view params (a
+ * filter, a pick, Back between them) re-renders the page and never
+ * remounts it; other pages stay mounted hidden, so Back shows them as they
+ * were.
  */
-export function bodies(tab: Tab, live: (ref: TabRef) => boolean): Body[] {
-  const keyOf = (entry: Entry) => `${tab.slot}/${live(entry.ref) ? identityOf(entry.ref.id) : entry.ref.id}`;
+export function bodies(tab: Tab, identity: (ref: TabRef) => string = (ref) => identityOf(ref.id)): Body[] {
+  const keyOf = (entry: Entry) => `${tab.slot}/${identity(entry.ref)}`;
   const nearest = new Map<string, number>();
   tab.entries.forEach((entry, i) => {
     const key = keyOf(entry);
