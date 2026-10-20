@@ -23,18 +23,16 @@ import { metricRef } from "../tabs/pageRefs.js";
 import { Page } from "../tabs/Page.js";
 import { routeDispatch, routeHandlers } from "../tabs/RouteLink.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
-import { DataTable, Section, type DataColumn } from "../kit/index.js";
+import { DataTable, METRIC_RANGE_PRESETS, Section, type DataColumn } from "../kit/index.js";
 import type { OriginItem } from "../tabs/session.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { buildMetricSections } from "./metricCategories.js";
 import { DIMENSIONS_SQL } from "./exploreData.js";
+import { DEFAULT_RANGE_KEY, rangeFromPreset, rangePresetLabel } from "../kit/rangePresets.js";
 import {
-  DEFAULT_RANGE_KEY,
-  RANGE_PRESETS,
   branchOptions,
   filterByBranch,
   filterByRange,
-  rangeFromPreset,
   widestPresetWindow,
 } from "./metricDetailData.js";
 import {
@@ -380,9 +378,9 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
               data-testid="recorded-range"
               style={sel}
             >
-              {RANGE_PRESETS.map((p) => (
-                <option key={p.key} value={p.key}>
-                  {p.label}
+              {METRIC_RANGE_PRESETS.map((p) => (
+                <option key={p} value={p}>
+                  {rangePresetLabel(p)}
                 </option>
               ))}
             </select>

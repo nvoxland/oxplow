@@ -8,8 +8,8 @@ import { formatMetricValue } from "../format.js";
 import { metricRef } from "../../tabs/pageRefs.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import { TrendChart } from "../../pages/MetricDetail.js";
+import type { TimeRange } from "../../kit/rangePresets.js";
 import {
-  type TimeRange,
   branchOptions,
   defaultChartMode,
   deltaVsFirst,

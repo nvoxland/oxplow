@@ -4,16 +4,14 @@ import { useEffect, useState } from "react";
 import type { MetricSpec, SeriesPoint } from "../api.js";
 import { formatMetricValue, formatMetricValueExact } from "../components/format.js";
 import { DataTable, type DataColumn } from "../kit/index.js";
+import { matchPresetKey, rangeFromPreset, rangePresetLabel, type TimeRange } from "../kit/rangePresets.js";
+import { METRIC_RANGE_PRESETS } from "../kit/MetricFilters.js";
 import {
-  RANGE_PRESETS,
-  type TimeRange,
   type UncheckedFile,
   exclusionReason,
   fromLocalInput,
   inRangeStat,
   specAggregation,
-  matchPresetKey,
-  rangeFromPreset,
   toLocalInput,
 } from "./metricDetailData.js";
 
@@ -77,9 +75,9 @@ export function MetricControls({
           data-testid="range-preset"
           style={selStyle}
         >
-          {RANGE_PRESETS.map((p) => (
-            <option key={p.key} value={p.key}>
-              {p.label}
+          {METRIC_RANGE_PRESETS.map((p) => (
+            <option key={p} value={p}>
+              {rangePresetLabel(p)}
             </option>
           ))}
           <option value="custom">Custom range…</option>

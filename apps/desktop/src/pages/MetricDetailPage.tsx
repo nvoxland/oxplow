@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { DEFAULT_RANGE_KEY, rangeFromPreset, type TimeRange } from "../kit/rangePresets.js";
 import {
   type Dashboard,
   type MetricCatalogEntry,
@@ -31,13 +32,10 @@ import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { MetricControls, MetricStatsRail, RecordingsTable, TrendChart, UncheckedFiles } from "./MetricDetail.js";
 import {
-  DEFAULT_RANGE_KEY,
-  type TimeRange,
   branchOptions,
   defaultChartMode,
   filterByBranch,
   filterByRange,
-  rangeFromPreset,
   UNCHECKED_FILES_SQL,
   type UncheckedFile,
   widestPresetWindow,

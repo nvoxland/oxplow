@@ -1,4 +1,5 @@
 import type { SeriesPoint } from "../api.js";
+import { rangeFromPreset, type TimeRange } from "../kit/rangePresets.js";
 
 // Pure helpers behind the per-kind Metric detail view (tsk232). Kept out of the
 // component so they're unit-testable without a DOM — same split as
@@ -8,44 +9,12 @@ import type { SeriesPoint } from "../api.js";
 
 export type ChartPoint = { t: number; v: number };
 
-/** An inclusive epoch-ms time window the detail page is scoped to. */
-export type TimeRange = { from: number; to: number };
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/** The preset windows offered in the range dropdown (label + lookback span). */
-export const RANGE_PRESETS: Array<{ key: string; label: string; ms: number }> = [
-  { key: "1d", label: "Last day", ms: DAY_MS },
-  { key: "2d", label: "Last 2 days", ms: 2 * DAY_MS },
-  { key: "3d", label: "Last 3 days", ms: 3 * DAY_MS },
-  { key: "7d", label: "Last 7 days", ms: 7 * DAY_MS },
-  { key: "30d", label: "Last month", ms: 30 * DAY_MS },
-];
-
-export const DEFAULT_RANGE_KEY = "7d";
-
-/** Build a `[now - preset.ms, now]` window. */
-export function rangeFromPreset(key: string, now: number): TimeRange {
-  const preset = RANGE_PRESETS.find((p) => p.key === key) ?? RANGE_PRESETS[3]!;
-  return { from: now - preset.ms, to: now };
-}
-
 /** The widest bounded preset window ending at `now` (tsk202). Passing this to
- *  `listMetricSamples` bounds the backend read to the largest span the UI can
- *  show, while the client still switches between narrower presets INSTANTLY via
- *  `filterByRange` (no re-fetch) — every preset is a subset of this window. */
+ *  `listMetricSamples` bounds the backend read to the widest span the pages
+ *  offer (30 days), while the client still switches between narrower ranges
+ *  INSTANTLY via `filterByRange` (no re-fetch). */
 export function widestPresetWindow(now: number): TimeRange {
-  const ms = Math.max(...RANGE_PRESETS.map((p) => p.ms));
-  return { from: now - ms, to: now };
-}
-
-/** Which preset (if any) a range corresponds to: its `to` is ~now (within a
- *  minute) and its span matches a preset. Otherwise `"custom"`. */
-export function matchPresetKey(range: TimeRange, now: number): string {
-  if (Math.abs(range.to - now) > 60_000) return "custom";
-  const span = range.to - range.from;
-  const hit = RANGE_PRESETS.find((p) => Math.abs(p.ms - span) < 60_000);
-  return hit?.key ?? "custom";
+  return rangeFromPreset("30d", now);
 }
 
 /** Series points whose `captured_at` falls inside the window (inclusive). */

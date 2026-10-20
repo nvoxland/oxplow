@@ -2,7 +2,8 @@ import type { LensChart } from "../tauri-bridge/generated/bindings.js";
 import type { Dashboard, SeriesPoint } from "../api.js";
 import { metricSeriesSql } from "../metricsSql.js";
 import type { MenuItem } from "../menu.js";
-import { type TimeRange, rangeFromPreset, seriesPoints } from "./metricDetailData.js";
+import { type TimeRange, rangeFromPreset } from "../kit/rangePresets.js";
+import { seriesPoints } from "./metricDetailData.js";
 
 // Pure helpers behind the custom-dashboard page + tiles (tsk141, epic tsk138).
 // Kept React-free so the tile-option parsing and the add-metric menu assembly

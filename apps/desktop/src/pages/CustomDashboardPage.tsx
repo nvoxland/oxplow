@@ -32,7 +32,8 @@ import { dashboardsRef } from "../tabs/pageRefs.js";
 import { Page, pageH1Style } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { RANGE_PRESETS, rangeFromPreset } from "./metricDetailData.js";
+import { METRIC_RANGE_PRESETS } from "../kit/MetricFilters.js";
+import { rangeFromPreset, rangePresetLabel } from "../kit/rangePresets.js";
 import { type TileOptions, metricTile, parseTileOptions } from "./customDashboardData.js";
 import { TileGrid, TileSlot } from "../kit/Tiles.js";
 
@@ -324,9 +325,9 @@ export function CustomDashboardPage({
               style={selectStyle}
             >
               <option value="all">All time</option>
-              {RANGE_PRESETS.map((p) => (
-                <option key={p.key} value={p.key}>
-                  {p.label}
+              {METRIC_RANGE_PRESETS.map((p) => (
+                <option key={p} value={p}>
+                  {rangePresetLabel(p)}
                 </option>
               ))}
             </select>

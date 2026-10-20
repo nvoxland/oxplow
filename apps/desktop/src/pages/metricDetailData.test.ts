@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { SeriesPoint } from "../api.js";
+import { rangeFromPreset } from "../kit/rangePresets.js";
 import {
   branchOptions,
   defaultChartMode,
@@ -12,8 +13,6 @@ import {
   inRangeStat,
   specAggregation,
   transformSeries,
-  matchPresetKey,
-  rangeFromPreset,
   seriesPoints,
   widestPresetWindow,
   yDomain,
@@ -40,20 +39,11 @@ test("deltaVsFirst is last-minus-first, null under two points", () => {
   expect(deltaVsFirst([s({ captured_at: "2026-06-01T00:00:00Z", value: 5 })])).toBeNull();
 });
 
-test("rangeFromPreset builds a [now-span, now] window", () => {
-  const now = Date.parse("2026-06-25T12:00:00Z");
-  const r = rangeFromPreset("7d", now);
-  expect(r.to).toBe(now);
-  expect(r.from).toBe(now - 7 * 24 * 60 * 60 * 1000);
-  // Unknown key falls back to the 7d preset.
-  expect(rangeFromPreset("nope", now)).toEqual(r);
-});
-
 test("widestPresetWindow spans the largest preset and contains every preset", () => {
   const now = Date.parse("2026-06-25T12:00:00Z");
   const widest = widestPresetWindow(now);
   expect(widest.to).toBe(now);
-  // 30d is the widest preset today.
+  // 30d is the widest range the pages offer.
   expect(widest.from).toBe(now - 30 * 24 * 60 * 60 * 1000);
   // Every preset the UI can select is a subset — so a client-side filterByRange
   // within the fetched widest window never needs a re-fetch (tsk202).
@@ -64,14 +54,6 @@ test("widestPresetWindow spans the largest preset and contains every preset", ()
   }
 });
 
-test("matchPresetKey recognizes presets and flags custom", () => {
-  const now = Date.parse("2026-06-25T12:00:00Z");
-  expect(matchPresetKey(rangeFromPreset("3d", now), now)).toBe("3d");
-  // `to` not near now → custom.
-  expect(matchPresetKey({ from: now - 99, to: now - 10 * 60 * 1000 }, now)).toBe("custom");
-  // odd span → custom.
-  expect(matchPresetKey({ from: now - 99_999_999, to: now }, now)).toBe("custom");
-});
 
 test("filterByRange keeps inclusive in-window samples, drops bad timestamps", () => {
   const range = { from: Date.parse("2026-06-10T00:00:00Z"), to: Date.parse("2026-06-20T00:00:00Z") };
