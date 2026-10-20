@@ -19,19 +19,12 @@ impl MetricsService {
         &self,
         snapshot: &Arc<crate::extension_catalog::CatalogSnapshot>,
         config: &OxplowConfig,
-        core_only: bool,
     ) -> Result<PreparedMetricCatalog, VocabularyErrors> {
         let mut frozen = self.clone();
-        let mut config = config.clone();
-        if core_only {
-            config.metrics.clear();
-        }
+        let config = config.clone();
         frozen.config = Arc::new(RwLock::new(config.clone()));
         frozen.published_inputs = Arc::default();
         frozen.global_catalog = Arc::new(std::sync::Mutex::new(None));
-        if core_only {
-            frozen.global_catalog = Arc::new(std::sync::Mutex::new(Some(GlobalCatalog::default())));
-        }
         frozen.extensions_cache = Arc::new(crate::extension_catalog::ExtensionCatalog::staged(
             &self.project_dir,
             snapshot.clone(),

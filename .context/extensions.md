@@ -1208,11 +1208,20 @@ isn't: it stays `undeployed` and `v_extension.pending` says what it asks
 for, until a person deploys it ("Permissions"). A source with a `build:`
 waits the same way, its pending line naming the build: nothing has
 approved its command on this machine.
-Foundation can't be held: a deployment of it that doesn't load or whose
-core baseline doesn't activate gives way to the shipped one
-(`ExtensionActivation::initialize`), which the next publication records
-as the live set, and its problems say "the shipped version runs until it
-is deployed again". Boot never runs without foundation.
+Every extension is held the same way, foundation included
+(`CatalogSnapshot::admitted`, `extension_catalog::Failed`). Boot is one
+activation (`ExtensionActivation::initialize`: `start`, then the first
+generation). A deployment of an extension that ships with oxplow that is
+held with nothing of it running — it doesn't load or doesn't prepare —
+**gives way** to the copy that ships (`activate_kind`: out of the live set
+and the staged changes, admitted again), which the publication records as
+the live set; its problems say "the shipped version runs until it is
+deployed again". While developing oxplow nothing ships, so a broken
+foundation is held like any extension: the rest activates, its problem
+says why, and fixing and deploying (or restarting) brings it back. A
+required extension `start` can't stage (no source, a `build:`) is a
+problem too. Boot stops only when a generation can't publish at all (the
+host, the database).
 
 **Sharing is one explicit act.** `.oxplow/.gitignore` ignores everything
 but `project.yaml`, so a new extension's source is personal.
@@ -4587,10 +4596,10 @@ doesn't compile (checked inside the publication transaction, which rolls
 back), a provider or capability that can't stage — holds that extension the
 same way (`extension_catalog::Failed`) and the candidate is staged again; if
 its last working version fails too, it is left out. A failure that names no
-held-able extension (the host, a required bundled one) rejects the candidate.
-The active catalog is separate from raw candidate loads. Its
-`source_generation` preserves the raw fingerprint, while the core baseline has a
-distinct `core:<source_generation>` runtime identity. Runtime catalog reads use
+held-able extension (the host) rejects the candidate. A command namespace
+collision names only the source refused and the one it collided with
+(`commands::NamespaceRefusal`). The active catalog is separate from raw
+candidate loads; its `source_generation` preserves the raw fingerprint. Runtime catalog reads use
 the committed snapshot and apply immediate explicit-disable and missing-folder
 revocation without loading edited declarations.
 

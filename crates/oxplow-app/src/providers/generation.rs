@@ -193,23 +193,6 @@ impl ProviderRegistry {
         &self,
         snapshot: &CatalogSnapshot,
     ) -> Result<PreparedProviderGeneration, VocabularyErrors> {
-        self.prepare_generation_inner(snapshot, true).await
-    }
-
-    /// A repairable startup baseline captures config/running fences but starts
-    /// no external instances and publishes no external capability authority.
-    pub(crate) async fn prepare_core_generation(
-        &self,
-        snapshot: &CatalogSnapshot,
-    ) -> Result<PreparedProviderGeneration, VocabularyErrors> {
-        self.prepare_generation_inner(snapshot, false).await
-    }
-
-    async fn prepare_generation_inner(
-        &self,
-        snapshot: &CatalogSnapshot,
-        start_instances: bool,
-    ) -> Result<PreparedProviderGeneration, VocabularyErrors> {
         let reconciling = self.reconciling.clone().lock_owned().await;
         let configured = self.scoped_instances();
         let global_mtime = self.global_mtime();
@@ -223,9 +206,6 @@ impl ProviderRegistry {
         // `health` reads it), so the generation activates without it.
         let mut states: Vec<(String, InstanceState)> = Vec::new();
         for (name, (scope, config)) in &configured {
-            if !start_instances {
-                continue;
-            }
             let resolved = match Self::resolve_in(
                 snapshot.extensions(),
                 name,

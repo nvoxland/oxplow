@@ -64,8 +64,8 @@ impl CatalogSnapshot {
     /// import of one that isn't there) replaced by its version in
     /// `published`, the generation active now, or left out when it has
     /// none. The rest activate together, so one broken extension never holds
-    /// back the others. Required bundled extensions are never replaced:
-    /// their errors still block. Returns the held extensions and why.
+    /// back the others; oxplow's own required one too. Returns the held
+    /// extensions and why.
     ///
     /// `failed` names extensions whose preparation failed in an earlier
     /// attempt at this candidate: each is held the same way, and one whose
@@ -88,10 +88,7 @@ impl CatalogSnapshot {
         for extension in self.extensions.iter() {
             // A contract-blocked extension is cleared to `enabled: false` by
             // the load, so it is told apart from a configured-off one here.
-            if (!extension.enabled && !extension.public_contracts.blocked)
-                || crate::bundled_extensions::is_required(&extension.name)
-                || can_load(extension)
-            {
+            if (!extension.enabled && !extension.public_contracts.blocked) || can_load(extension) {
                 admitted.push(extension.clone());
                 continue;
             }
@@ -121,11 +118,9 @@ impl CatalogSnapshot {
                 .filter(|e| e.enabled)
                 .map(|e| e.name.clone())
                 .collect();
-            let absent =
-                |r: &String| !present.contains(r) && !crate::bundled_extensions::is_required(r);
+            let absent = |r: &String| !present.contains(r);
             let missing = admitted.iter().position(|e| {
                 e.enabled
-                    && !crate::bundled_extensions::is_required(&e.name)
                     && (e.public_contracts.imports.iter().any(|import| {
                         !import.optional && !present.contains(&import.contribution.extension)
                     }) || e.requires.iter().any(absent))
@@ -176,26 +171,6 @@ impl CatalogSnapshot {
             held,
         )
     }
-
-    /// A safe initial active generation while extension candidates are
-    /// prepared. It contains only required bundled declarations; project and
-    /// non-required bundled extensions remain available through raw snapshots.
-    pub(crate) fn core_baseline(&self) -> Arc<CatalogSnapshot> {
-        let extensions = self
-            .extensions()
-            .iter()
-            .filter(|extension| {
-                extension.origin == "bundled"
-                    && crate::bundled_extensions::is_required(&extension.name)
-            })
-            .cloned()
-            .collect();
-        Arc::new(CatalogSnapshot {
-            extensions: Arc::new(extensions),
-            generation: format!("core:{}", self.source_generation()),
-            source_generation: self.source_generation().to_string(),
-        })
-    }
 }
 
 /// Extensions whose preparation failed while one candidate was staged
@@ -215,8 +190,14 @@ impl Failed {
         Self::default()
     }
 
-    /// Hold the extensions `problems` names, if each is an enabled,
-    /// non-required extension of `snapshot` that can still be held (a
+    /// Forget `name`'s failures: it runs something else now (the copy
+    /// that ships, after its deployment gave way).
+    pub(crate) fn forget(&mut self, name: &str) {
+        self.0.remove(name);
+    }
+
+    /// Hold the extensions `problems` names, if each is an enabled
+    /// extension of `snapshot` that can still be held (a
     /// second failure takes its last working version out too). False when
     /// the problems aren't one extension's to hold: the candidate fails.
     pub(crate) fn hold(
@@ -225,11 +206,10 @@ impl Failed {
         problems: &BTreeMap<String, Vec<String>>,
     ) -> bool {
         let holdable = |name: &String| {
-            !crate::bundled_extensions::is_required(name)
-                && snapshot
-                    .extensions()
-                    .iter()
-                    .any(|e| &e.name == name && e.enabled)
+            snapshot
+                .extensions()
+                .iter()
+                .any(|e| &e.name == name && e.enabled)
                 && self.0.get(name).is_none_or(|f| f.keep_last)
         };
         if problems.is_empty() || !problems.keys().all(holdable) {
@@ -379,6 +359,13 @@ impl ExtensionCatalog {
     /// published (a core-only baseline leaves it as it is).
     pub(crate) fn set_live(&self, live: BTreeMap<String, String>) {
         *self.live.lock() = live;
+    }
+
+    /// Run `name` as it ships rather than as deployed: out of the live set
+    /// and out of the changes being staged.
+    pub(crate) fn give_way(&self, name: &str) {
+        self.live.lock().remove(name);
+        self.pending.lock().remove(name);
     }
 
     pub(crate) fn runtime_changed(&self) {
@@ -756,6 +743,51 @@ mod tests {
             "{held:?}"
         );
         assert_ne!(next.generation(), catalog.snapshot(dir.path()).generation());
+    }
+
+    /// oxplow's own required extension is held like any other: a broken
+    /// one keeps its last working version, or is out when it has none.
+    #[test]
+    fn a_required_extension_that_cant_load_is_held_like_any_other() {
+        let dir = tempfile::tempdir().unwrap();
+        let foundation = crate::bundled_extensions::find("oxplow-foundation").unwrap();
+        let to = dir.path().join(".oxplow/extensions/oxplow-foundation");
+        for (rel, bytes) in foundation.files {
+            let file = to.join(rel);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, bytes).unwrap();
+        }
+        let catalog = ExtensionCatalog::new();
+        let (good, held) = catalog.snapshot(dir.path()).admitted(None, &Failed::new());
+        assert!(held.is_empty(), "{held:?}");
+        let manifest = std::fs::read_to_string(to.join("extension.yaml")).unwrap();
+        std::fs::write(to.join("extension.yaml"), format!("{manifest}bogus: 1\n")).unwrap();
+        let broken = catalog.snapshot(dir.path());
+        let (kept, held) = broken.admitted(Some(&good), &Failed::new());
+        assert!(
+            held["oxplow-foundation"]
+                .iter()
+                .any(|e| e.contains("last working version stays active")),
+            "{held:?}"
+        );
+        let running = kept
+            .extensions()
+            .iter()
+            .find(|e| e.name == "oxplow-foundation")
+            .unwrap();
+        assert!(running.errors.is_empty());
+        let (out, held) = broken.admitted(None, &Failed::new());
+        assert!(held.contains_key("oxplow-foundation"));
+        assert!(!out
+            .extensions()
+            .iter()
+            .any(|e| e.name == "oxplow-foundation"));
+        // A preparation failure holds it too.
+        let mut failed = Failed::new();
+        assert!(failed.hold(
+            &good,
+            &BTreeMap::from([("oxplow-foundation".to_string(), vec!["no".to_string()])])
+        ));
     }
 
     /// An extension whose requirement isn't active is held with it, and
