@@ -113,6 +113,16 @@ export interface PageNavigation {
    * Null for surfaces with no per-thread identity (rail, palette).
    */
   pageKey?: string;
+  /** The page this body draws: its entry's ref (`tabs/session.ts`). A
+   *  page whose view is live reads its params from here. */
+  ref?: TabRef;
+  /**
+   * The page now shows `ref` — its own view changed (a filter, a row
+   * picked). A filter replaces the tab's entry; a selection (`push`) adds
+   * one, so Back undoes it. Absent on a body that isn't the tab's current
+   * page.
+   */
+  replaceRef?(ref: TabRef, opts?: { push?: boolean }): void;
 }
 
 export const PageNavigationContext = createContext<PageNavigation | null>(null);

@@ -189,6 +189,20 @@ describe("changedParams", () => {
     expect(changedParams(l, { a: 1, b: "y" })).toEqual({ b: "y" });
     expect(changedParams(l, {})).toEqual({});
   });
+
+  // What a page writes into its ref: a value is its default by its type,
+  // so a bool's echo (0) is its default false, and a key that isn't a
+  // lens param (a page's own `ref`) is kept as it is.
+  test("compares by type and keeps keys that aren't lens params", () => {
+    const l = lens({
+      params: [
+        { name: "merges", label: null, default: false, type: "bool" },
+        { name: "range", label: null, default: "30d", type: "date_range" },
+      ],
+    });
+    expect(changedParams(l, { merges: 0, range: "30d", ref: "work_item:oxplow:tsk1" })).toEqual({ ref: "work_item:oxplow:tsk1" });
+    expect(changedParams(l, { merges: true, range: "7d" })).toEqual({ merges: true, range: "7d" });
+  });
 });
 
 

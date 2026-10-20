@@ -5,7 +5,8 @@
 /// (the main worktree's), so a restored tab (its id alone) opens too.
 import { EmptyState } from "../components/Prompts/EmptyState.js";
 import { Page } from "../tabs/Page.js";
-import type { PagePayload } from "../tabs/pageRefs.js";
+import { extPageRef, pageTabRef, type PagePayload } from "../tabs/pageRefs.js";
+import type { ParamValue } from "../refs/ref.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { ExtensionPage, Stream } from "../tauri-bridge/generated/bindings.js";
 import { LensPage } from "./LensPage.js";
@@ -41,6 +42,16 @@ export function DeclaredPageView({
     );
   }
   return (
-    <LensPage lensId={declared.body.lens} title={declared.title} initialParams={page.params} stream={stream} onOpenPage={onOpenPage} />
+    <LensPage
+      lensId={declared.body.lens}
+      title={declared.title}
+      params={page.params}
+      // Its view goes back into its own kind of ref.
+      pageRef={(params) =>
+        page.extension === null ? pageTabRef(page.page, params as Record<string, ParamValue>, page.state) : extPageRef(page.extension, page.page, params as Record<string, ParamValue>)
+      }
+      stream={stream}
+      onOpenPage={onOpenPage}
+    />
   );
 }

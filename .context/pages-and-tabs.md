@@ -618,97 +618,70 @@ Named ref helpers — `tasksRef()`, `doneWorkRef()`,
 `backlogRef()`, `archivedRef()` — mirror the GitDashboard pattern
 (`gitDashboardRef`, `uncommittedChangesRef`).
 
-## Browser-style tab navigation
+## Navigation model: a tab is a session of entries
 
-Page tabs now carry **per-tab back/forward history**. `App.tsx` keeps
-a parallel `threadPageHistory: Record<threadId, Record<tabId, { back; forward }>>`
-state alongside `threadPageTabs`. When a page-tab descendant calls
-`navigate(ref)` via `PageNavigationContext`, the active tab's current
-ref is replaced with `ref` and the prior ref is pushed onto its back
-stack — the tab id changes to `ref.id`, `centerActive` follows, and
-the history entry is migrated. `goBack` / `goForward` swap the
-current ref with the top of the back / forward stack.
+A thread's center tabs are one pure model, `tabs/session.ts`, as a
+browser keeps its session history. App holds a `Session` per thread
+(`useTabSessions`) and draws everything tab-shaped from it: the strip,
+the bodies, Back/Forward, Up/Down, the star, Ask, what agents read.
 
-`navigate(ref, { newTab: true })`, Cmd/Ctrl-click on a `BacklinksList`
-entry, middle-click, and right-click all bypass in-tab navigation and
-fall through to `handleOpenPage` (the legacy "open as new page tab"
-path). Notes participate in tab-level history (they live in
-`threadPageTabs` like every other page kind); diffs and files have
-their own list state but still get the shared chrome wrap, so back/
-forward is no-op for them but the title row + nav bar UI is the same
-as everywhere else.
+| Browser | oxplow |
+|---|---|
+| a tab's session history | `Tab { slot, entries, at, pinned? }` — `slot` a stable name (`t3`), never an id |
+| URL = path + query | an entry's `ref`: identity (kind + id) and view (its payload's `params`; `kind:id?k=v` as a string) |
+| `history.state` | `Entry.state` (persisted when it is JSON) |
+| the page you came from a list of | `Entry.from: Origin { title, items: [{ ref, label }], index }` |
+| pushState / replaceState | `navigate(slot, entry, { replace })`, `replaceRef(slot, ref, { push })` |
+| back-forward cache | `bodies(tab, live)`: hidden bodies stay mounted |
+| a SPA re-rendering on popstate | a **live** page (a lens; an extension page drawn by a lens or a component) has **one body per identity**, keyed `slot/identity`, so entries that differ only in params re-render it — no remount, no Loading |
 
-The bookmark toggle and backlinks dropdown affordances on
-`PageNavBar` are scaffolded but currently inert; Phases 2 and 3 wire
-them.
+**Operations** (pure, tested in `session.test.ts`): `open` (the tab
+showing the page — its ref refreshed, as a re-clicked diff's line to
+reveal — else a new tab; active), `navigate` (push; clears forward;
+`replace` takes the current entry's place; a page shown in another tab
+closes there), `replaceRef` (a page changes its own view), `setState`,
+`back`, `forward`, `stepOrigin` (Up/Down in place, history untouched),
+`close` (the most recent other tab becomes active, as a browser does),
+`dropCurrent` (the page's record was deleted: back, dropping the entry,
+else close), `setStrip` (the strip as a list of refs: agent-session
+reconcile, a new thread's tabs, an agent's `oxplow.tab.*` in another
+thread), `reorder`, `activate`, `evictions` (`MAX_PAGE_TABS` = 15;
+never the active, a pinned or a dirty file's tab).
 
-## Sibling navigation (list → page prev/next)
+**A page changes its own view through `PageNavigation.replaceRef`.**
+A filter replaces the entry (typing a search adds nothing to Back); a
+selection — a param a column `select`s — pushes one, so Back un-selects
+and Forward re-selects. Core decides by the param's role; no page
+chooses. Only the body drawing the tab's current entry gets
+`replaceRef`. `PageNavigation.ref` is the entry's ref the body draws.
 
-When a page is opened from a list (notes index, file tree, backlinks,
-task list, …), `PageNavBar` renders **up/down sibling buttons**
-next to back/forward. They step through the originating list without
-touching back/forward — Back still goes to the page that listed the
-items, never to the previously-viewed sibling.
+**Origins.** A list passes `siblings: NavSiblings` to
+`useRouteDispatch` / `navigate` as before; the host stores it as the
+entry's `from` (`originOf`: the index snapped to the destination's id,
+a diff item rebuilt from its `diffSpec`), and the nav bar's Up/Down and
+"N of M" list read it back. New-tab paths drop it. Back/Forward restore
+each entry's own origin. Adopted lists: `BacklinksList`, `FileTree`
+(file rows of one directory), `CommitList` / `CommitGraphTable`
+(`CommitRowDispatcher`), `MetricsPage` (`metricSiblings`, flattened
+across sections), the Local History dashboard. `WorkGroupList` rows
+open an edit modal, not a page, so they don't adopt.
 
-Mechanics:
+**What is keyed by what.** Active, MRU and eviction by slot; the strip,
+`center-tab-<id>` / `center-tab-body-<id>` test ids, titles
+(`pageTitles`), bookmarks and the tab report by the current ref id;
+visits by the page's **identity** (`identityOf`: the id without its
+`?…`) — a filter or a pick isn't a new visit, so Recents lists the page
+once. A bookmark is of the values: change a filter and the star goes
+off; set it back and it's on.
 
-- A list registers its rows by passing `siblings: NavSiblings` into
-  `useRouteDispatch(ref, { siblings })`. `NavSiblings` is
-  `{ entries: Array<{ ref, label }>; index: number }`. The `label`
-  shows up in the prev/next button hover tooltip.
-- The dispatcher forwards `siblings` to `PageNavigationContext.navigate`
-  on in-tab navigation only (new-tab escape paths drop it — sibling
-  context is in-tab only).
-- Per-tab history entries (`threadPageHistory`) gained a `siblings`
-  field. `handleNavigateInTab` builds the entry with `navigatedHistory`
-  (`tabs/tabHistory.ts`), whose `resolveSiblings` snaps the
-  destination's index against `ref.id`, so a stale list still lands on
-  the right row.
-- `handleStepSibling` swaps the active tab to a sibling at the target
-  index, mutating only `siblings.index` — back/forward stacks are
-  preserved.
-- Back/forward navigation **clears** siblings on the destination
-  entry: the back target predates the list-originated chain.
-- `Page` reads `ctxNav.siblings` and constructs the nav-bar config
-  (`prevLabel` / `nextLabel` from `entries[index ± 1]`, callbacks from
-  `goPrevSibling` / `goNextSibling` which are only set when not at the
-  edge). The `1 of N` indicator renders between the buttons.
-- The indicator is itself a toggle (`page-nav-sibling-indicator`) —
-  clicking it opens a popover (`page-nav-sibling-list`) listing every
-  sibling entry numbered 1..N with the active row highlighted, so the
-  user can jump straight to any sibling instead of stepping through
-  them. Mirrors the CenterTabs overflow ▾ dropdown pattern. Wired via
-  `goSibling(index)` on `PageNavigation`, which delegates to the same
-  `handleStepSibling` used by the up/down buttons. Escape and
-  outside-click close the popover.
-
-Adopted lists:
-
-- `tabs/BacklinksList.tsx` — every backlink entry passes its index in
-  the merged list (snapshot/commit slideover entries are excluded).
-- `components/LeftPanel/FileTree.tsx` — `TreeEntries` exposes file-row
-  siblings within each directory level (excluding directories and
-  deleted files).
-- `components/History/CommitGraphTable.tsx` — each row dispatches via
-  `useRouteDispatch(gitCommitRef(sha), { siblings, onNavigate: onSelect })`
-  through a `CommitRowDispatcher` adapter, so the legacy `onSelect`
-  callback survives as the rail-side fallback while the in-page path
-  picks up siblings.
-- `pages/RecordedMetricsPage.tsx` — each metric row passes the whole
-  page's rows flattened in visual order (`metricSiblings` in
-  `recordedMetricsRows.ts` — the chain continues across section
-  boundaries), so a drilled-into metric detail steps through the
-  metrics exactly as the page lists them (tsk119).
-
-`WorkGroupList` rows (Plan / Tasks / Backlog pages) intentionally do
-NOT adopt: clicking opens the edit modal, not a page. Sibling nav
-applies only to lists whose rows navigate to a page.
-
-Future lists adopt by passing `siblings` to `useRouteDispatch` /
-`RouteLink`. Lists that wrap their own click callback can either
-migrate to `useRouteDispatch` directly (preferred) or use the
-adapter-component pattern from `CommitGraphTable`'s
-`CommitRowDispatcher`.
+**Persistence.** One key, `oxplow.layout.v4.sessions` (`{ [thread]:
+Session }`, written on every change, read on start; corrupt text reads
+as none). It holds every tab's history and the active tab, so a restart
+comes back to the same pages at the same params. A diff's spec rides in
+its ref (`diffRef`'s state), so diffs survive too. The open files'
+paths per stream stay in `oxplow.layout.v2.fileSessions`
+(`fileSessionPersistence.ts`): fileSessions is the editor's document
+model (content, drafts), not navigation.
 
 ## What agents see of the tabs
 
@@ -816,278 +789,44 @@ If you're adding a new index/list page and find yourself threading an
 to a row's `onClick`, **stop and use the hook instead**. The callback
 should only survive as the rail-side fallback.
 
-## Per-thread active tab (today)
+## Every tab holds a Page
 
-`App.tsx` holds a `Record<threadId, string> threadCenterActive` map and
-derives `centerActive` from it. `setCenterActive` writes to the map for
-the currently selected thread. Switching threads automatically restores
-each thread's last active tab.
+Every tab is a session tab, whatever its kind (`wiki`, `file`, a
+`page:diff`, `work_item`, `lens`, `commit`, an agent session, …). The
+builder in `App.tsx` (`centerTabs`) takes each tab's `bodies`, draws
+each with **`pageRenderers: Record<PageKind, (ref, nav) => CenterTab |
+null>`** — one entry per kind, so a kind without a renderer is a
+compile error — and wraps it in a `PageNavigationContext`. `nav` is the
+slot's (`navOpen`, `navOpenFile`, `navOpenDiff`, `navRevealCommit`), so
+a hidden back page that navigates moves its tab as the visible one
+would. `handleOpenPage` special-cases `agent_session` (activate its tab,
+else its transcript), `symbol` (its file at its line), the working
+tree's `file` (its buffer) and a `page:diff` carrying a spec; every
+other kind is `open`.
 
-## Unified tab list — every tab holds a Page
+- `fileSessions[stream.id]` is the editor's content and dirty-state
+  cache, shared by a stream's threads; the tab is the session's.
+  `closePageTab` drops the buffer with the tab (not refcounted across
+  threads of a stream — a known gap).
+- Agent sessions' tabs are **pinned** session tabs (`TabRef.pinned`):
+  they lead the strip, are never dragged or dropped on, the bulk closes
+  skip them, and the cap never counts or evicts them; `reconcileSessionTabs`
+  keeps them in step with the open `agent_session` rows (`setStrip`).
+  Their nav bar has no Back/Forward. Their × runs
+  `oxplow.agent_session.close` with an Undo toast; the right-click menu
+  adds Rename…. When no tab is active, a thread shows its home tab — its
+  first session's, else the picker (`homeTabOf`, `HOME_TAB`).
+- `closeOrGoBackPageTab` (a deleted wiki page or task) is `dropCurrent`.
 
-Every per-thread tab lives in `threadPageTabs[threadId]` as a
-`TabRef`, regardless of kind (`wiki`, `file`, `diff`, `work_item`,
-`lens`, `commit`, etc.). The page-tab loop in `centerTabs` looks the
-renderer up in **`pageRenderers: Record<PageKind, (ref, nav) => CenterTab
-| null>`** — one entry per kind, so a kind without a renderer (or a
-renderer for a kind that no longer exists) is a compile error rather
-than a blank tab — and wraps each tab in a `PageNavigationContext` so
-in-tab navigation, back/forward, sibling navigation, and
-bookmark/backlinks all work the same way. `nav` is the slot's
-navigation (`navOpen`, `navOpenFile`, `navOpenDiff`, `navRevealCommit`,
-`slotId`): closures bind to the *slot's* current ref, so a back-stack
-page (still mounted, hidden) that navigates mutates the slot exactly as
-the visible page would. `handleOpenPage` special-cases only `agent_session`
-(activate its tab — it exists while the session is open),
-`file` and `diff`; every other kind is "push the ref, activate it".
+The rule for new pages: a page is a `pages:` declaration (see "Adding a
+page"); a new entity kind adds a `PageKind`, a `pageRefs.ts`
+constructor with its `refFromTabId` inverse, and its `pageRenderers`
+entry. **Don't** add a parallel tab track or keep tab state outside the
+session.
 
-- `fileSessions[stream.id]` is now a **content + dirty-state cache**
-  only. Tab membership / order is driven by `threadPageTabs`.
-  `handleOpenFile` populates fileSessions and pushes a `kind: "file"`
-  ref into `threadPageTabs` for the selected thread.
-- `diffTabs` is now a **spec registry indexed by id**. `handleOpenDiff`
-  registers the spec and pushes a `kind: "diff"` ref into
-  `threadPageTabs`. The page-tab renderer's `ref.kind === "diff"`
-  branch looks up the spec from `diffTabs` to render `DiffPage`.
-- `closePageTab` is the unified close path; it removes the ref from
-  `threadPageTabs`, drops history + page-title state, and (for
-  file tabs) closes the entry in `fileSessions`.
-- Agent sessions' tabs are ordinary page tabs in `threadPageTabs`
-  (`pageRenderers.agent_session` → `AgentSessionPage`, which wraps
-  `TerminalPane` in `Page` chrome: its nav bar names the session beside
-  its harness's logo (`titleIcon`) and offers the session's actions —
-  the same list as the tab's right-click menu, `sessionMenu` in
-  `App.tsx`). They are **pinned**
-  (`TabRef.pinned`, `CenterTab.pinned`): they lead the strip, are never
-  dragged or dropped on, the bulk closes skip them, and the tab cap never
-  counts or evicts them. Their × runs `oxplow.agent_session.close` at
-  once, its toast offering Undo (`oxplow.agent_session.reopen`: the tab
-  returns and the saved conversation resumes); the tab goes when the row
-  closes. The
-  right-click menu adds Rename…, an `InlinePromptStrip` in the strip's
-  header. Each tab carries its own status dot and question (the
-  session's status); the thread glyph and stream dot roll them up.
-  When nothing is chosen (`HOME_TAB`), a thread shows its home tab —
-  its first session's, else the picker (`homeTabOf`).
-
-This is the architectural rule for new pages: a page is a `pages:`
-declaration (see "Adding a page"); a new entity kind adds a `PageKind`,
-a `pageRefs.ts` constructor with its `refFromTabId` inverse, and the
-`pageRenderers` entry in `App.tsx`. **Don't** add a parallel tab track.
-
-Files were stream-scoped historically; lifting them into the
-per-thread list means each thread has its own open-file list within
-a stream. The file content + dirty state continues to be shared
-across threads via fileSessions, so closing a file in one thread
-doesn't lose unsaved edits if it's still open in another.
-
-## Inventory: where each piece of state lives
-
-The unified tab store lives in `App.tsx`. Each slot has a single
-owner; this list captures who reads / writes what so future tab
-kinds slot in without re-discovering the layout.
-
-### Tab membership + order
-- **`threadPageTabs: Record<string, TabRef[]>`** — per-thread tab
-  list, keyed by `threadId`. The single source of truth for "what
-  tabs exist in this thread, in what order." Every tab kind
-  (`file`, `diff`, `wiki`, `work_item`, `uncommitted-changes`,
-  `commit`, `tasks`, `git-history`, …) lives here. Mutated by
-  `handleOpenPage`, `handleOpenFile`, `handleOpenDiff`,
-  `handleNavigateInTab`, `handleStepSibling`, `closePageTab`. Read
-  by the `centerTabs` builder + the `effectiveCenterActive`
-  derivation.
-- **`threadCenterActive: Record<string, string>`** — per-thread
-  active tab id. Switching threads restores each thread's last
-  active tab. Mutated by `setCenterActive` (which writes into the
-  per-thread map for the current thread). `HOME_TAB` (nothing chosen)
-  falls back to the thread's home tab: its first agent session's, else
-  the session picker if it's open, else its first tab.
-- **`threadPageMru: Record<string, string[]>`** — per-thread tab
-  recency, most-recently-used first. In-memory (like
-  `threadCenterActive`); rebuilt as tabs are activated. A `centerActive`
-  effect `touchMru`s the active tab to the front; `closePageTab`
-  `dropFromMru`s a closed tab. **Drives the page-tab cap:** a second
-  effect enforces `MAX_PAGE_TABS` (15) on the selected thread — when
-  `threadPageTabs[thread]` exceeds it, `selectLruEvictions` (in
-  `apps/desktop/src/tabs/tabLru.ts`, unit-tested) picks the
-  least-recently-used victims and `closePageTab`s them. The **active
-  tab and any dirty file tab are protected** (a soft cap never discards
-  unsaved work — best-effort, so if every non-active tab is dirty the
-  count can sit above 15). Pinned tabs (agent sessions') are never
-  counted or evicted (`selectLruEvictions`' `pinned`). Eviction routes
-  through `closePageTab` (not the dirty-file undo-toast path) — protected
-  dirty files never reach it, so evictions are silent and toast-free.
-
-### Per-tab navigation history
-- **`threadPageHistory: Record<string, Record<string, { back: TabRef[], forward: TabRef[], siblings: NavSiblings | null }>>`**
-  — keyed by `threadId` then by the tab's current id. `back` is
-  pushed when `handleNavigateInTab` swaps the tab's ref — unless the
-  navigation is a **replace** (`NavigateOptions.replace`, a lens
-  action's `then: replace`), when the page it left goes out of history
-  and Back skips it; `forward`
-  is populated by `handleGoBack`. `siblings` carries the list-
-  originated prev/next list (cleared on back/forward; preserved on
-  sibling-step). New tab kinds participate automatically — the
-  history entry is created the first time the tab is navigated.
-
-### Spec / content registries (look-aside)
-- **`fileSessions: Record<string, FileSessionState>`** —
-  **stream-scoped** (`streamId → session`) content + dirty-state
-  cache for open files. Each `FileSessionState` carries
-  `files: Record<path, { savedContent, draftContent, isLoading,
-  loadError }>` plus `selectedPath` and a legacy `openOrder`. After
-  the unification:
-  - **Tab membership** is driven by `threadPageTabs` (each open
-    file is a `kind: "file"` ref there). `openOrder` is no longer
-    consulted by the renderer.
-  - **Content** stays in `fileSessions` because the same buffer
-    needs to survive thread switches within a stream — closing a
-    file in thread A while it's open + dirty in thread B must not
-    drop the draft.
-  - `closePageTab` clears the file from `fileSessions[stream.id]`
-    only when the file isn't open in any other tab in the same
-    stream. (Today closePageTab unconditionally closes — see the
-    "known follow-ups" below.)
-- **`diffTabs: Array<{ id, spec: DiffSpec }>`** — a spec registry
-  indexed by id. `handleOpenDiff` and `handleCompareWithClipboard`
-  register specs here; the page-tab renderer's `ref.kind === "diff"`
-  branch looks up the spec by id to render `DiffPage`. Specs persist
-  across tab close/reopen (cheap; the array is small) so navigating
-  back to a previously-closed diff via history works without
-  re-registering.
-
-### Per-tab metadata
-- **`pageTitles: Record<string, string>`** — per-tab title
-  registered via `usePageTitle(...)` from the page body. Drives
-  both the chrome header and the tab strip label.
-- **Bookmarks** — `v_bookmark` (thread / stream / project), keyed
-  by `ref`; set and cleared via the tab nav-bar star button.
-
-### Renderers
-- **`AgentSessionPage`** — `apps/desktop/src/pages/AgentSessionPage.tsx`.
-  Wraps `TerminalPane` inside `Page`, under the nav bar (no back or
-  forward: its tab is pinned). One per open session, in `threadPageTabs`.
-- **Page-tab loop** (`for (const ref of pageTabsForThread)`) —
-  switches on `ref.kind` to render the appropriate `*Page`
-  component. Wraps each tab in `PageNavigationContext.Provider`
-  with `navigate` / `goBack` / `goForward` / `siblings` / `setTitle`
-  bindings keyed to the tab's id.
-
-## Data flow: opening, navigating, closing
-
-For every tab kind the path is:
-
-**Open from a list / palette / rail / menu:**
-```
-caller
-  └→ handleOpenPage(ref) | handleOpenFile(path) | handleOpenDiff(spec)
-       ├→ register payload (fileSessions / diffTabs) if needed
-       ├→ push ref into threadPageTabs[selectedThreadId]
-       └→ setCenterActive(ref.id)
-```
-
-**Navigate in-tab (browser-tab semantic):**
-```
-in-page row click
-  └→ useRouteDispatch / ctxNav.navigate(ref, { newTab: false, siblings?, replace? })
-       └→ handleNavigateInTab(currentTabId, ref, siblings?, replace?)
-            ├→ a ref that can't live in a tab (agent session, symbol):
-            │   close this tab first when replacing, then open it
-            ├→ register payload if needed (file: handleOpenFile;
-            │   diff: handleOpenDiffInTab — both register before
-            │   calling handleNavigateInTab)
-            ├→ push prior ref onto back stack (not when replacing)
-            ├→ replace tab's current ref
-            └→ setCenterActive(ref.id)
-```
-
-**Sibling step (no history mutation):**
-```
-nav bar ↑/↓ click
-  └→ ctxNav.goPrevSibling() | goNextSibling()
-       └→ handleStepSibling(currentTabId, targetIndex)
-            ├→ swap tab ref to siblings[targetIndex]
-            └→ update siblings.index in place; back/forward untouched
-```
-
-**Close:**
-```
-tab × / right-click menu close
-  └→ closePageTab(id)
-       ├→ if id starts with "file:": close in fileSessions
-       ├→ remove from threadPageTabs
-       ├→ drop threadPageHistory entry
-       ├→ drop pageTitles entry
-       └→ snap centerActive to HOME_TAB (the thread's home tab) if it was the closed tab
-```
-
-## Persistence across restart
-
-`threadPageTabs`, `threadPageHistory`, `diffTabs` (the spec registry)
-and the per-thread active-tab pointer are owned by the
-`useThreadPageTabs` hook (`apps/desktop/src/tabs/useThreadPageTabs.ts`),
-which persists them to `localStorage` on change and restores them in
-the `useState` initializers on boot. The read/write functions —
-including the corrupt-JSON fallbacks and the legacy-blob coercions
-(bare-TabRef history stacks, pre-versioning diff specs) — live in
-`apps/desktop/src/tabs/pageTabsPersistence.ts` and are unit-tested in
-`pageTabsPersistence.test.ts`. Storage keys:
-`oxplow.layout.v2.threadPageTabs`, `oxplow.layout.v2.threadPageHistory`,
-`oxplow.layout.v2.diffSpecs`.
-
-What persists:
-- The full per-thread tab list (every TabRef).
-- The per-tab back/forward history + siblings record.
-- Diff specs (the registry indexed by id) — except clipboard /
-  selection-vs-clipboard diffs that carry inline `leftContent` /
-  `rightContent`. Those are session-only.
-- The active center tab id (`oxplow.layout.v2.centerActive`,
-  unchanged from before).
-- The per-stream open file paths (existing
-  `oxplow.layout.v2.fileSessions` blob; loads file content on first
-  stream activation).
-
-Per-page state via `usePageSnapshot`:
-
-Pages opt in via `usePageSnapshot<T>({ serialize, restore, deps })`
-(see `apps/desktop/src/tabs/usePageSnapshot.ts`). On mount the hook
-reads any saved blob keyed by the page's `pageKey` from
-`PageNavigationContext` (`${threadId}::${tabId}`) and calls
-`restore`. On each `deps` change it serializes and writes.
-`closePageTab` clears the snapshot row so closed tabs don't leak.
-
-Adopted pages (Phase 3):
-- `WikiPageTab` — body scroll position. Reapplied when the body
-  re-renders so brief layout shifts during markdown load don't
-  reset the scroll.
-- `EditorPane` — Monaco view-state (cursor, scroll, folds,
-  selection) via `editor.saveViewState()` / `restoreViewState()`.
-  If a snapshot arrives before the editor mounts, the hook stashes
-  it in a ref and the post-mount block applies it.
-
-Other pages mount fresh after restart. The `display:none`
-mounted-stack approach used for in-session back/forward (perfect
-fidelity, free) cannot survive a restart — no DOM, no React state.
-Snapshots are the only path for cross-restart fidelity.
-
-## Known follow-ups + invariants
-
-- **fileSessions close on closePageTab is not refcounted.** If the
-  same file is open in two threads of the same stream and one
-  thread closes its tab, the buffer is dropped for both. Should be
-  a refcount or a stream-scoped check that another thread still
-  holds the path.
-- **Diff specs are not GC'd.** `diffTabs` grows monotonically per
-  session. Cleanup hook on closePageTab could prune.
-- **Stream switch consequences.** When the user changes streams,
-  the rendered page tabs come from the new stream's selected
-  thread. `fileSessions` is per-stream, so file content is correct;
-  `threadPageTabs` is per-thread, so the *list* is correct. Diff
-  specs are per-session (single global registry) — works because
-  diff ids embed the spec details, but theoretically a bug if two
-  streams produced colliding ids; today this doesn't happen because
-  diff ids include the leftRef which is stream-specific in practice.
+Per-page state across a restart is still `usePageSnapshot` (keyed
+`${threadId}::${tabId}`; the editor's view state, a wiki page's scroll)
+until it moves onto `Entry.state`.
 
 ## Adding a page
 
@@ -1122,10 +861,10 @@ A new **entity** kind (a thing in the graph whose tab id is its ref):
 6. If the page exposes data that other pages should backlink to,
    register a provider in `appPageBacklinks.ts`.
 
-Do **not** introduce a parallel state slot for the new kind's tab
-list (no new `fooTabs` array). Look-aside registries are fine if
-the kind needs runtime data the ref payload can't carry (like
-diff specs), but tab membership goes in `threadPageTabs`.
+Do **not** introduce a parallel state slot for the new kind's tabs
+(no `fooTabs` array, no look-aside registry): what a page needs rides
+in its ref (its payload) or its entry's `state`, and its tab is a
+session tab (`tabs/session.ts`).
 
 ## When to update this doc
 

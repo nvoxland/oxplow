@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { querySql, type SqlCell, type SqlQueryResult } from "../api.js";
 import { recordOpError } from "../components/opErrorsStore.js";
-import { parseParamInput } from "../lens/lensModel.js";
+import { isDefaultValue, parseParamInput } from "../lens/lensModel.js";
 import { paramKind, paramOptions, paramOptionsSql, type ParamKind, type ParamOption } from "../lens/lensParams.js";
 import type { LensParam, ParamType } from "../tauri-bridge/generated/bindings.js";
 import { humanize } from "./humanize.js";
@@ -149,15 +149,13 @@ function paramType(param: LensParam): ParamType {
   return param.type ?? ((param.options?.length ?? 0) > 0 ? "choice" : "text");
 }
 
-/** Whether a value is the param's default: a bool by truth (its echo is
- *  0/1), the rest by text. */
+/** Whether a value is the param's default (`isDefaultValue`). */
 export function isDefault(param: LensParam, value: SqlCell): boolean {
-  return sameValue(paramType(param), value, param.default ?? null);
+  return isDefaultValue(param, value);
 }
 
 function sameValue(type: ParamType, a: SqlCell, b: SqlCell): boolean {
-  if (type === "bool") return truthy(a) === truthy(b);
-  return text(a) === text(b);
+  return isDefaultValue({ type, options: [], default: b }, a);
 }
 
 function truthy(value: SqlCell): boolean {

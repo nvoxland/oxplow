@@ -42,8 +42,6 @@ export interface AppScope {
   /** Registers the callback that opens the task list's create row. */
   planOpenCreateRef: MutableRefObject<(() => void) | null>;
   harnesses: ReturnType<typeof useAgentHarnesses>;
-  /** The diff-spec registry, indexed by tab id. */
-  diffTabs: Array<{ id: string; spec: DiffSpec }>;
   /** The tab shown in the center now (a page uses it to know it's visible). */
   effectiveCenterActive: string;
   setCenterActive: (next: string | ((prev: string) => string)) => void;

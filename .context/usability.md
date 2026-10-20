@@ -887,10 +887,10 @@ declaring *what it is* and mounting the generic layer.
   CenterTabs reorders **every non-pinned tab freely across the whole
   strip** — there are no per-kind groups. "Pinned" = non-closable (only
   the `agent` tab); it stays at the front and is never a drag source or
-  drop target, so nothing lands before it. Reorders persist by rewriting
-  the unified `threadPageTabs` order (the strip renders
-  `[agent, ...threadPageTabs]`); `App.tsx`'s `handleReorderCenterTabs`
-  reorders that whole list, not a per-kind subset. Clicking a tab in the
+  drop target, so nothing lands before it. Reorders persist in the
+  thread's tab session (`reorder`, `tabs/session.ts`);
+  `App.tsx`'s `handleReorderCenterTabs` reorders the whole strip, not a
+  per-kind subset. Clicking a tab in the
   overflow `▾` panel (or any activation of an overflowed tab) promotes it
   to **right after `agent`** via `promoteHiddenIntoStrip` (inserts after
   the leading run of pinned tabs), so it surfaces in the most prominent

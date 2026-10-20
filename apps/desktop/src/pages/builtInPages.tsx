@@ -1,5 +1,6 @@
 import { agentSessionRef, diffSpecOf, duplicateBlockOf, endpointsOf, fileRef, isPage, newTaskRef, workItemTabRef, type DiffViewPayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
+import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import { idOf } from "../refs/ref.js";
 import type { Stream } from "../api.js";
 import { openAgentSession, openExternalUrl } from "../api.js";
@@ -156,12 +157,10 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
       />
     ),
   }),
-  diff: ({ ref, params, nav, scope }) => {
-    // Diff that arrived via in-tab navigation. Look up the
-    // registered spec; skip if missing (the registration path is
-    // handleOpenDiffInTab — a stale ref without a spec would be
-    // a bug).
-    const spec = scope.diffTabs.find((t) => t.id === ref.id)?.spec ?? diffSpecOf(params);
+  diff: ({ ref, params, state, nav, scope }) => {
+    // Its spec rides in its ref; a bare id (a link, a bookmark) rebuilds
+    // what its params say.
+    const spec = (state as DiffSpec | undefined) ?? diffSpecOf(params);
     if (!spec) return null;
     const label = spec.path.split("/").pop() ?? spec.path;
     const suffix = spec.labelOverride ?? "diff";

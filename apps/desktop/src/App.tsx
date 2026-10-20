@@ -93,9 +93,8 @@ import type { AppScope, SlotNav } from "./pages/appScope.js";
 import { FileViewerPage } from "./pages/FileViewerPage.js";
 import { RailHud } from "./components/RailHud/RailHud.js";
 import type { PageKind, TabRef } from "./tabs/tabState.js";
-import { PageNavigationContext } from "./tabs/PageNavigationContext.js";
+import { PageNavigationContext, type NavSiblings, type PageNavigation } from "./tabs/PageNavigationContext.js";
 import { clearPageSnapshot } from "./tabs/usePageSnapshot.js";
-import { planCloseOrGoBack } from "./tabs/closeOrGoBack.js";
 import { removeBookmark, setBookmark, useBookmarks } from "./tabs/bookmarks.js";
 import type { BookmarkScope } from "./tabs/bookmarks.js";
 import { isUnder, movedPath } from "./fileEvents.js";
@@ -116,7 +115,6 @@ import { LensPage } from "./pages/LensPage.js";
 import { insertIntoAgent } from "./agent-input-bus.js";
 import { getPageDetailStore } from "./tabs/openPageDetail.js";
 import { DeclaredPageView } from "./pages/DeclaredPageView.js";
-import { navigatedHistory } from "./tabs/tabHistory.js";
 import { kindForTabId } from "./pageKinds.js";
 import { declaredPage, isBuiltInPage } from "./pages/declaredPages.js";
 import { useExtensions } from "./extensionsStore.js";
@@ -127,7 +125,7 @@ import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { agentSessionRef, computeDiffId, diskFilePath, lensRef, pageKindOf, refFromTabId, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, pageTabRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, type DiffViewPayload } from "./tabs/pageRefs.js";
+import { agentSessionRef, diskFilePath, lensRef, pageKindOf, refFromTabId, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, pageTabRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, type DiffViewPayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
@@ -136,17 +134,36 @@ import { FilePage } from "./pages/FilePage.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
 import { settingsAreaEntries } from "./components/RailHud/sections.js";
 import { NON_TRACKED_KINDS } from "./components/RailHud/history.js";
-import { resolveActiveTabRef } from "./tabs/resolveActiveTabRef.js";
 import { buildTabReport } from "./tabs/tabReport.js";
 import type { PickerMode } from "./components/conversationRows.js";
-import { useThreadPageTabs } from "./tabs/useThreadPageTabs.js";
-import { dropFromMru, MAX_PAGE_TABS, selectLruEvictions, touchMru } from "./tabs/tabLru.js";
+import { useTabSessions } from "./tabs/useTabSessions.js";
 import {
-  readPersistedCenterActive,
+  activate,
+  activeRef,
+  back as sessionBack,
+  bodies,
+  close as sessionClose,
+  current as currentEntry,
+  dropCurrent,
+  evictions,
+  forward as sessionForward,
+  identityOf,
+  MAX_PAGE_TABS,
+  navigate as sessionNavigate,
+  open as sessionOpen,
+  refsOf,
+  reorder as sessionReorder,
+  replaceRef as sessionReplaceRef,
+  setStrip,
+  slotShowing,
+  stepOrigin,
+  type Origin,
+  type Tab,
+} from "./tabs/session.js";
+import {
   readPersistedFileSessionPaths,
-  writePersistedCenterActive,
   writePersistedFileSessionPaths,
-} from "./tabs/pageTabsPersistence.js";
+} from "./tabs/fileSessionPersistence.js";
 import { generatedPaths, recordPageVisit, reportTabs, resolveSymbol } from "./api.js";
 import { openProject, createProject, listRecentProjects, shellAvailable } from "./api.js";
 import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
@@ -159,7 +176,7 @@ import { commandOffers, type OfferDeps } from "./commandOffers.js";
 import { setRefOfferHost } from "./components/refCommands.js";
 import type { WhenContext } from "./when.js";
 import { runLocally, startClientHost, type ClientCallContext, type ClientCallRef, type ClientHandlers } from "./clientHost.js";
-import { streamOfThread, withTab, withoutTab } from "./tabs/threadTabOps.js";
+import { streamOfThread } from "./tabs/threadTabOps.js";
 import { planNavigation } from "./tabs/navigation.js";
 import { openRef as openRefAt, setWindowRefOpener } from "./tabs/openRef.js";
 import { usePersonCommands } from "./personCommandsStore.js";
@@ -264,26 +281,11 @@ export function App() {
     [sessionStatuses],
   );
   const [stream, setStream] = useState<Stream | null>(null);
-  // Per-thread active center tab. The map is the source of truth; `centerActive`
-  // and `setCenterActive` below are derived helpers so existing handler code
-  // keeps working unchanged. Each thread remembers its last active tab so
-  // switching threads restores it. A thread with none yet takes the
-  // last-active tab persisted across restarts (`readPersistedCenterActive`).
-  // …and the rest of the tab layout (per-thread tab lists, per-tab
-  // back/forward history, diff-spec registry) lives in the
-  // useThreadPageTabs hook below, which also owns its persistence.
-  const {
-    threadCenterActive,
-    setThreadCenterActive,
-    threadPageMru,
-    setThreadPageMru,
-    threadPageTabs,
-    setThreadPageTabs,
-    threadPageHistory,
-    setThreadPageHistory,
-    diffTabs,
-    setDiffTabs,
-  } = useThreadPageTabs();
+  // Every thread's center tabs: a session of entries per thread
+  // (`tabs/session.ts`), restored on start and stored on every change.
+  // The strip, the bodies, history, origins and the active tab all come
+  // from it (`.context/pages-and-tabs.md` "Navigation model").
+  const { sessions, update: updateSession } = useTabSessions();
   // Per-tab page titles, keyed by tab id. Pages register their title via
   // PageNavigationContext.setTitle (the usePageTitle helper). Drives both
   // the tab strip label and the shared chrome header so the title lives in
@@ -303,7 +305,6 @@ export function App() {
   const [daemonUnavailable, setDaemonUnavailable] = useState(false);
   const { fileSessions, setFileSessions, getFileSession, mutateFileSession } = useFileSessions();
   const restoredStreamsRef = useRef<Set<string>>(new Set());
-  const centerActiveValidatedRef = useRef(false);
   const [workspaceContext, setWorkspaceContext] = useState<WorkspaceContext>({ vcsEnabled: false });
   const [quickOpenVisible, setQuickOpenVisible] = useState(false);
   const [editorFindRequest, setEditorFindRequest] = useState(0);
@@ -442,17 +443,6 @@ export function App() {
       }
       setThreadStates((prev) => ({ ...prev, [next.id]: nextThreadState }));
       setStream(next);
-      const nextSession = getFileSession(next.id);
-      // Seed the new thread's center-active only if we don't already have a
-      // remembered value for it. Per-thread persistence means returning to a
-      // thread restores its prior tab; only initial entry uses the file-session
-      // selected path as a heuristic.
-      if (nextThread) {
-        const seeded = nextSession.selectedPath ? fileRef(nextSession.selectedPath).id : HOME_TAB;
-        setThreadCenterActive((prev) => (
-          prev[nextThread.id] !== undefined ? prev : { ...prev, [nextThread.id]: seeded }
-        ));
-      }
       setError(null);
       setDaemonUnavailable(false);
       logUi("info", "switched stream", { streamId: next.id, title: next.title });
@@ -508,10 +498,6 @@ export function App() {
       setThreadStates((prev) => ({ ...prev, [next.id]: state }));
       const thread = state.threads.find((candidate) => candidate.id === state.selectedThreadId);
       if (thread) {
-        const seeded = HOME_TAB;
-        setThreadCenterActive((prev) => (
-          prev[thread.id] !== undefined ? prev : { ...prev, [thread.id]: seeded }
-        ));
         void readWorkList(thread.id).then((work) => {
           setThreadWorkStates((prev) => ({ ...prev, [thread.id]: work }));
         });
@@ -539,15 +525,7 @@ export function App() {
     // page kind; fileSessions owns content + dirty state, threadPageTabs owns
     // membership.
     const activateFileTab = () => {
-      if (selectedThreadId) {
-        const ref = fileRef(path);
-        setThreadPageTabs((prev) => {
-          const existing = prev[selectedThreadId] ?? [];
-          if (existing.some((t) => t.id === ref.id)) return prev;
-          return { ...prev, [selectedThreadId]: [...existing, ref] };
-        });
-      }
-      setCenterActive(fileRef(path).id);
+      openTab(fileRef(path));
       setError(null);
       void recordUsage({
         kind: "editor-file",
@@ -912,22 +890,38 @@ export function App() {
   // The selected thread's open agent sessions: its session tabs follow them.
   const selectedThreadSessions = useThreadSessions(selectedThread?.id ?? null);
   const selectedThreadId = selectedThread?.id ?? null;
-  // Derived from the per-thread map; `HOME_TAB` when nothing was chosen
-  // (the thread's home tab shows — `effectiveCenterActive`).
-  const centerActive = selectedThreadId
-    ? threadCenterActive[selectedThreadId] ?? readPersistedCenterActive() ?? HOME_TAB
-    : HOME_TAB;
+  // Each thread's tabs as the pages they show now, in strip order.
+  const threadPageTabs = useMemo(
+    () => Object.fromEntries(Object.entries(sessions).map(([thread, session]) => [thread, refsOf(session)])),
+    [sessions],
+  );
+  // The shown thread's active tab's page id; `HOME_TAB` when none is
+  // chosen (the thread's home tab shows — `effectiveCenterActive`).
+  const centerActive = (selectedThreadId ? activeRef(sessions[selectedThreadId])?.id : null) ?? HOME_TAB;
+  /** Make the tab showing `id` active in the shown thread (`HOME_TAB`:
+   *  none). An id no tab shows changes nothing. */
   const setCenterActive = useCallback(
     (next: string | ((prev: string) => string)) => {
       if (!selectedThreadId) return;
-      setThreadCenterActive((prev) => {
-        const current = prev[selectedThreadId] ?? readPersistedCenterActive() ?? HOME_TAB;
-        const value = typeof next === "function" ? next(current) : next;
-        if (value === current) return prev;
-        return { ...prev, [selectedThreadId]: value };
+      updateSession(selectedThreadId, (session) => {
+        const now = activeRef(session)?.id ?? HOME_TAB;
+        const id = typeof next === "function" ? next(now) : next;
+        if (id === now) return session;
+        if (id === HOME_TAB) return activate(session, null);
+        const slot = slotShowing(session, id);
+        return slot ? activate(session, slot) : session;
       });
     },
-    [selectedThreadId],
+    [selectedThreadId, updateSession],
+  );
+  /** Show `ref` in the shown thread: the tab showing it (its ref
+   *  refreshed), else a new one; it becomes active. */
+  const openTab = useCallback(
+    (ref: TabRef) => {
+      if (!selectedThreadId) return;
+      updateSession(selectedThreadId, (session) => sessionOpen(session, { ref }, { pinned: !!ref.pinned }));
+    },
+    [selectedThreadId, updateSession],
   );
 
   const selectedThreadWork = selectedThread ? threadWorkStates[selectedThread.id] ?? null : null;
@@ -962,49 +956,6 @@ export function App() {
   useEffect(() => {
     writePersistedFileSessionPaths(fileSessions);
   }, [fileSessions]);
-
-  // Persist the active center tab id so the user lands on the same tab next
-  // restart. Diff tabs don't persist (their id includes ephemeral data), so
-  // restoration validates the id against available tabs and falls back.
-  useEffect(() => {
-    writePersistedCenterActive(centerActive);
-  }, [centerActive]);
-
-  // After the first stream has had its file sessions rebuilt, verify the
-  // initial (localStorage-seeded) centerActive is still resolvable. If it
-  // points to a file that didn't come back, a diff tab (which never
-  // persist), or a page tab that wasn't restored, snap back to the agent tab.
-  // Runs once per mount — subsequent stream switches have their own
-  // centerActive logic in handleSwitch. The page-tab case matters
-  // because the user's first click after startup often opens a page tab
-  // (tasks, plan-work, git-history, …); the previous fall-through
-  // reset for unknown id shapes would clobber that click and snap focus
-  // back to the agent. Now we trust `effectiveCenterActive`'s fallback
-  // gate by checking membership in the same available set.
-  useEffect(() => {
-    if (centerActiveValidatedRef.current) return;
-    if (!stream) return;
-    if (!restoredStreamsRef.current.has(stream.id)) return;
-    centerActiveValidatedRef.current = true;
-    if (centerActive === HOME_TAB) return;
-    const session = fileSessions[stream.id];
-    const activeFile = diskFilePath(centerActive);
-    if (activeFile !== null) {
-      if (!session || !session.files[activeFile]) setCenterActive(HOME_TAB);
-      return;
-    }
-    if (isPage(refFromTabId(centerActive), "diff")) {
-      if (!diffTabs.some((tab) => tab.id === centerActive)) setCenterActive(HOME_TAB);
-      return;
-    }
-    // Page tabs (tasks, plan-work, git-history, …) — validate
-    // against the per-thread page-tab list. Reset to the home tab only
-    // when the page wasn't restored. The previous unknown-id fall-through
-    // unconditionally reset every page id, clobbering the user's
-    // first click after startup.
-    const pageTabs = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
-    if (!pageTabs.some((ref) => ref.id === centerActive)) setCenterActive(HOME_TAB);
-  }, [stream, fileSessions, centerActive, diffTabs, selectedThreadId, threadPageTabs]);
 
   // Restore previously-open file tabs the first time each stream becomes
   // active. We add the paths to the session in openOrder, mark each as
@@ -1381,10 +1332,9 @@ export function App() {
   const availableCenterIds = useMemo(() => {
     const ids = new Set<string>();
     for (const path of currentSession.openOrder) ids.add(fileRef(path).id);
-    for (const tab of diffTabs) ids.add(tab.id);
     for (const ref of pageTabsForActiveThread) ids.add(ref.id);
     return ids;
-  }, [currentSession.openOrder, diffTabs, pageTabsForActiveThread]);
+  }, [currentSession.openOrder, pageTabsForActiveThread]);
   const effectiveCenterActive = availableCenterIds.has(centerActive)
     ? centerActive
     : homeTabOf(pageTabsForActiveThread);
@@ -1428,14 +1378,20 @@ export function App() {
     streamId: stream?.id ?? null,
   };
   const hydratedHistoryRef = useRef(false);
+  // What was last recorded: a page whose view changed (a filter, a row
+  // picked) is the same visit, so Recents lists the page once.
+  const lastVisitRef = useRef<string | null>(null);
   useEffect(() => {
+    const visit = `${selectedThreadId}|${identityOf(effectiveCenterActive)}`;
+    const same = lastVisitRef.current === visit;
+    lastVisitRef.current = visit;
     if (!hydratedHistoryRef.current) {
       hydratedHistoryRef.current = true;
       return;
     }
-    if (!selectedThreadId) return;
+    if (!selectedThreadId || same) return;
     const ctx = visitContextRef.current;
-    const ref = resolveActiveTabRef(effectiveCenterActive, ctx.pageTabs, ctx.openOrder);
+    const ref = ctx.pageTabs.find((t) => t.id === effectiveCenterActive) ?? null;
     if (!ref || NON_TRACKED_KINDS.has(ref.kind)) return;
     // Defer briefly so the freshly-activated page's `usePageTitle`
     // effect fires and the centerTabs memo applies it before we
@@ -1482,8 +1438,10 @@ export function App() {
   useEffect(() => {
     const timer = setTimeout(() => {
       const ctx = visitContextRef.current;
-      const shown = resolveActiveTabRef(effectiveCenterActive, ctx.pageTabs, ctx.openOrder);
-      const activeByThread: Record<string, string | undefined> = { ...threadCenterActive };
+      const shown = ctx.pageTabs.find((t) => t.id === effectiveCenterActive) ?? null;
+      const activeByThread: Record<string, string | undefined> = Object.fromEntries(
+        Object.entries(sessions).map(([thread, session]) => [thread, activeRef(session)?.id]),
+      );
       if (selectedThreadId) activeByThread[selectedThreadId] = shown?.id;
       const report = buildTabReport({
         client: getUiClientId(),
@@ -1498,33 +1456,12 @@ export function App() {
       void reportTabs(report).catch(() => {});
     }, 300);
     return () => clearTimeout(timer);
-  }, [effectiveCenterActive, selectedThreadId, threadPageTabs, threadCenterActive, pageTitles, pageDetailTick, windowFocused, windowVisible]);
+  }, [effectiveCenterActive, selectedThreadId, threadPageTabs, sessions, pageTitles, pageDetailTick, windowFocused, windowVisible]);
 
-  const handleOpenDiff = (request: DiffSpec) => {
-    const id = computeDiffId(request);
-    // Always (re)write the spec so per-click metadata that doesn't
-    // affect the id (e.g. revealLine pointing at a specific function)
-    // is honored on subsequent clicks of the same diff.
-    setDiffTabs((prev) => {
-      if (prev.some((tab) => tab.id === id)) {
-        return prev.map((tab) => (tab.id === id ? { id, spec: request } : tab));
-      }
-      return [...prev, { id, spec: request }];
-    });
-    // Diff tabs live in threadPageTabs as the primary track now —
-    // they participate in per-tab back/forward and share the same
-    // chrome as every other page kind. `diffTabs` is only a spec
-    // registry indexed by id.
-    if (selectedThreadId) {
-      const ref = diffRef(request);
-      setThreadPageTabs((prev) => {
-        const existing = prev[selectedThreadId] ?? [];
-        if (existing.some((t) => t.id === id)) return prev;
-        return { ...prev, [selectedThreadId]: [...existing, ref] };
-      });
-    }
-    setCenterActive(id);
-  };
+  // A diff's spec rides in its ref (`diffRef`'s state), so opening the
+  // same diff again refreshes it: per-click metadata that doesn't change
+  // the id (a line to reveal) is honored.
+  const handleOpenDiff = (request: DiffSpec) => openTab(diffRef(request));
 
   const handleCompareWithClipboard = async (selection: string, path: string) => {
     let clipboard = "";
@@ -1535,9 +1472,7 @@ export function App() {
       return;
     }
     // Use a deterministic id with a timestamp so each compare-with-
-    // clipboard session is its own tab; route through handleOpenDiff
-    // so the spec lands in both the diffTabs registry and the
-    // unified page-tab list.
+    // clipboard session is its own tab.
     const ts = Date.now();
     const spec: DiffSpec = {
       path,
@@ -1560,24 +1495,13 @@ export function App() {
     handleOpenPage(gitCommitRef(sha));
   };
 
-  const closeDiffTab = (id: string) => {
-    setDiffTabs((prev) => prev.filter((tab) => tab.id !== id));
-    // Diffs live in threadPageTabs now — close from the unified list
-    // too. closePageTab handles centerActive snap-back.
-    closePageTab(id);
-  };
+  const closeDiffTab = (id: string) => closePageTab(id);
 
 
   const handleOpenWiki = useCallback((slug: string) => {
     const tid = selectedThread?.id ?? null;
     if (!tid) return;
-    const ref = wikiPageRef(slug);
-    setThreadPageTabs((prev) => {
-      const existing = prev[tid] ?? [];
-      if (existing.some((t) => t.id === ref.id)) return prev;
-      return { ...prev, [tid]: [...existing, ref] };
-    });
-    setCenterActive(ref.id);
+    openTab(wikiPageRef(slug));
     const sid = stream?.id ?? null;
     if (sid) {
       void recordUsage({
@@ -1588,7 +1512,7 @@ export function App() {
         threadId: tid,
       }).catch(() => {});
     }
-  }, [stream?.id, selectedThread?.id]);
+  }, [stream?.id, selectedThread?.id, openTab]);
 
   /**
    * Open an http(s) URL as an in-app sandboxed external-url tab.
@@ -1620,52 +1544,20 @@ export function App() {
 
   const handleReorderCenterTabs = useCallback((orderedIds: string[]) => {
     if (!stream) return;
-    const orderedFiles: string[] = [];
-    const orderedDiffIds: string[] = [];
-    for (const id of orderedIds) {
+    const orderedFiles = orderedIds.flatMap((id) => {
       const path = diskFilePath(id);
-      if (path !== null) orderedFiles.push(path);
-      else if (isPage(refFromTabId(id), "diff")) orderedDiffIds.push(id);
-    }
-    mutateFileSession(stream.id, (base) => reorderOpenFiles(base, orderedFiles));
-    setDiffTabs((prev) => {
-      if (orderedDiffIds.length !== prev.length) return prev;
-      const byId = new Map(prev.map((d) => [d.id, d] as const));
-      const next = orderedDiffIds.map((id) => byId.get(id)).filter((d): d is { id: string; spec: DiffSpec } => !!d);
-      if (next.length !== prev.length) return prev;
-      return next;
+      return path === null ? [] : [path];
     });
-    // `threadPageTabs` is the unified source of truth for the order of
-    // EVERY tab (agent sessions, files, diffs, dashboards, snapshots,
-    // wiki, tasks, …) — the strip renders `threadPageTabs`. So reorder it
-    // with the full ordered id list, not just the non-file/diff subset;
-    // splitting file/diff out here would shove them to the end on every
-    // drag/promote. The fileSessions/diffTabs reorders above are just
-    // bookkeeping for their own registries. Pinned tabs never move (the
-    // strip won't drag them), and `reconcileSessionTabs` keeps them first.
+    mutateFileSession(stream.id, (base) => reorderOpenFiles(base, orderedFiles));
+    // The session's tabs are the strip's order for every kind; pinned tabs
+    // never move (the strip won't drag them), and `reconcileSessionTabs`
+    // keeps them first.
     if (selectedThread?.id) {
-      const threadId = selectedThread.id;
-      const ordered = orderedIds;
-      setThreadPageTabs((prev) => {
-        const current = prev[threadId] ?? [];
-        if (current.length === 0) return prev;
-        const byId = new Map(current.map((ref) => [ref.id, ref] as const));
-        const next: TabRef[] = [];
-        for (const id of ordered) {
-          const ref = byId.get(id);
-          if (ref) next.push(ref);
-        }
-        // Append any current refs missing from the ordered list so we
-        // never drop a tab (defense in depth — the caller passes the
-        // full id list, but hidden back-stack entries aren't in it).
-        for (const ref of current) {
-          if (!next.find((r) => r.id === ref.id)) next.push(ref);
-        }
-        if (next.every((r, idx) => r.id === current[idx]?.id)) return prev;
-        return { ...prev, [threadId]: next };
-      });
+      updateSession(selectedThread.id, (session) =>
+        sessionReorder(session, orderedIds.flatMap((id) => slotShowing(session, id) ?? [])),
+      );
     }
-  }, [stream, selectedThread?.id]);
+  }, [stream, selectedThread?.id, updateSession]);
 
   const agentThreadStatus: AgentStatus = selectedThread ? agentStatuses[selectedThread.id] ?? "waiting" : "waiting";
 
@@ -1676,41 +1568,34 @@ export function App() {
   // session, or that agent's session.
   useEffect(() => {
     if (!selectedThreadId || selectedThreadSessions === null) return;
-    if (threadPageTabs[selectedThreadId] === undefined && selectedThreadSessions.length === 0) {
+    if (sessions[selectedThreadId] === undefined && selectedThreadSessions.length === 0) {
       const threadId = selectedThreadId;
-      setThreadPageTabs((prev) => (prev[threadId] ? prev : { ...prev, [threadId]: [] }));
+      updateSession(threadId, (session) => session);
       void openNewThread(threadId);
       return;
     }
-    setThreadPageTabs((prev) => {
-      const current = prev[selectedThreadId] ?? [];
-      const next = reconcileSessionTabs(current, selectedThreadSessions);
-      return next === current ? prev : { ...prev, [selectedThreadId]: next };
-    });
-  }, [selectedThreadId, selectedThreadSessions, threadPageTabs]);
+    updateSession(selectedThreadId, (session) => setStrip(session, reconcileSessionTabs(refsOf(session), selectedThreadSessions)));
+  }, [selectedThreadId, selectedThreadSessions, sessions, updateSession]);
 
   async function openNewThread(threadId: string) {
     try {
       const opening = await newThreadOpening();
       if (opening.tabs.length > 0) {
-        setThreadPageTabs((prev) => {
-          const current = prev[threadId] ?? [];
-          if (current.some((t) => isPage(t, "new-session"))) return prev;
-          return { ...prev, [threadId]: [...opening.tabs, ...current] };
-        });
+        updateSession(threadId, (session) =>
+          refsOf(session).some((t) => isPage(t, "new-session")) ? session : setStrip(session, [...opening.tabs, ...refsOf(session)]),
+        );
       }
       if (opening.start) {
         const opened = await openAgentSession(threadId, opening.start.harness);
-        setThreadCenterActive((prev) => ({ ...prev, [threadId]: agentSessionRef(opened.id).id }));
+        const ref = agentSessionRef(opened.id);
+        updateSession(threadId, (session) => sessionOpen(session, { ref }, { pinned: true }));
       }
     } catch (error) {
       // Couldn't read the choice or start the agent: ask instead.
       logUi("warn", "opening a new thread failed; showing the session picker", { error: String(error) });
-      setThreadPageTabs((prev) => {
-        const current = prev[threadId] ?? [];
-        if (current.some((t) => isPage(t, "new-session"))) return prev;
-        return { ...prev, [threadId]: [newSessionRef(), ...current] };
-      });
+      updateSession(threadId, (session) =>
+        refsOf(session).some((t) => isPage(t, "new-session")) ? session : setStrip(session, [newSessionRef(), ...refsOf(session)]),
+      );
     }
   }
 
@@ -1718,15 +1603,7 @@ export function App() {
 
   const handleOpenPage = useCallback((ref: TabRef) => {
     // Every kind not handled below opens as a per-thread page tab.
-    const openAsPageTab = () => {
-      if (!selectedThreadId) return;
-      setThreadPageTabs((prev) => {
-        const existing = prev[selectedThreadId] ?? [];
-        if (existing.some((t) => t.id === ref.id)) return prev;
-        return { ...prev, [selectedThreadId]: [...existing, ref] };
-      });
-      setCenterActive(ref.id);
-    };
+    const openAsPageTab = () => openTab(ref);
     // Page-visit recording lives in the central activation effect
     // below — it fires whenever `effectiveCenterActive` resolves to a
     // new TabRef, regardless of which handler caused the activation.
@@ -1763,17 +1640,9 @@ export function App() {
           }
           return;
         }
-        // Non-disk: register the ref directly without going through
-        // the disk-only fileSessions cache. The render branch picks
-        // FileViewerPage based on the payload version.
-        if (selectedThreadId) {
-          setThreadPageTabs((prev) => {
-            const existing = prev[selectedThreadId] ?? [];
-            if (existing.some((t) => t.id === ref.id)) return prev;
-            return { ...prev, [selectedThreadId]: [...existing, ref] };
-          });
-          setCenterActive(ref.id);
-        }
+        // Non-disk: no fileSessions entry (that cache is the working
+        // tree's); the render branch picks FileViewerPage by version.
+        openTab(ref);
         return;
       }
       case "page": {
@@ -1793,7 +1662,7 @@ export function App() {
     // handleOpenDiff is a plain function over state setters and
     // selectedThreadId, which is already a dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleOpenFile, handleOpenWiki, selectedThreadId, selectedThreadSessions, selectedThreadWork, setCenterActive, stream?.id]);
+  }, [handleOpenFile, handleOpenWiki, openTab, selectedThreadId, selectedThreadSessions, selectedThreadWork, setCenterActive, stream?.id]);
 
   /**
    * Open the ref `ref` (of any kind) where its kind's page says
@@ -1831,20 +1700,12 @@ export function App() {
     openRefRef.current(hit.ref, { newTab: true }, (tab) => handleOpenPage(tab));
   }, [handleOpenPage]);
 
-  /**
-   * Browser-style in-tab navigation. Replaces the page tab whose
-   * current id is `currentTabId` with `ref`, and pushes the prior ref
-   * onto that tab's back stack (carrying any existing back/forward
-   * with it). The tab's id changes to `ref.id`; centerActive follows.
-   * If `currentTabId` doesn't refer to a known page tab, falls back to
-   * `handleOpenPage` (open in new tab).
-   */
+  /** Close the shown thread's tab showing `id`: its file buffer, title
+   *  and snapshot go with it. */
   const closePageTab = useCallback((id: string) => {
     if (!selectedThreadId) return;
-    // File tabs live in fileSessions for content + dirty state; close
-    // their content cache too when the tab closes from the unified
-    // list so we don't leak buffers. Stream-scoped because the
-    // session map is keyed by stream.
+    // A working-tree file's content and dirty state live in its stream's
+    // session; drop that buffer too.
     const path = diskFilePath(id);
     if (path !== null && stream) {
       setFileSessions((prev) => {
@@ -1853,282 +1714,93 @@ export function App() {
         return { ...prev, [stream.id]: closeOpenFile(session, path) };
       });
     }
-    setThreadPageTabs((prev) => {
-      const existing = prev[selectedThreadId] ?? [];
-      if (!existing.some((t) => t.id === id)) return prev;
-      return { ...prev, [selectedThreadId]: existing.filter((t) => t.id !== id) };
-    });
-    setThreadPageHistory((prev) => {
-      const perThread = prev[selectedThreadId] ?? {};
-      if (!(id in perThread)) return prev;
-      const { [id]: _drop, ...rest } = perThread;
-      return { ...prev, [selectedThreadId]: rest };
+    updateSession(selectedThreadId, (session) => {
+      const slot = slotShowing(session, id);
+      return slot ? sessionClose(session, slot) : session;
     });
     setPageTitles((prev) => {
       if (!(id in prev)) return prev;
       const { [id]: _drop, ...rest } = prev;
       return rest;
     });
-    setThreadPageMru((prev) => {
-      const cur = prev[selectedThreadId] ?? [];
-      const next = dropFromMru(cur, id);
-      return next === cur ? prev : { ...prev, [selectedThreadId]: next };
-    });
-    setCenterActive((current) => (current === id ? HOME_TAB : current));
     // GC the per-page snapshot so closed tabs don't leak forever.
-    if (selectedThreadId) {
-      const pageKey = `${selectedThreadId}::${id}`;
-      clearPageSnapshot(pageKey);
-    }
-  }, [selectedThreadId, setCenterActive, setThreadPageMru, stream]);
+    clearPageSnapshot(`${selectedThreadId}::${id}`);
+  }, [selectedThreadId, stream, updateSession]);
 
+  /** The collection a page is opened from, as an entry keeps it. */
+  const originOf = (siblings: NavSiblings | undefined, ref: TabRef): Origin | undefined => {
+    if (!siblings) return undefined;
+    const items = siblings.entries.map((e) => ({ ref: e.diffSpec ? diffRef(e.diffSpec) : e.ref, label: e.label }));
+    const at = items.findIndex((item) => item.ref.id === ref.id);
+    const index = at !== -1 ? at : siblings.index;
+    if (index < 0 || index >= items.length) return undefined;
+    return { title: siblings.title, items, index };
+  };
+
+  /** What showing `ref` in a tab needs besides the tab: a working-tree
+   *  file's buffer (and its line). */
+  const prepareFor = (ref: TabRef) => {
+    if (ref.kind !== "file") return;
+    const payload = ref.payload as { path?: string; version?: import("./revision.js").Revision; line?: number } | null;
+    // Only the working tree's version has a buffer (and LSP); another
+    // version's page reads it itself.
+    const isDisk = !payload?.version || payload.version === WORKING;
+    if (!payload?.path || !isDisk) return;
+    void handleOpenFile(payload.path);
+    if (payload.line && payload.line > 0) setEditorNavigationTarget({ path: payload.path, line: payload.line, column: 1 });
+  };
+
+  /**
+   * Browser-style in-tab navigation: the tab showing `currentTabId` goes
+   * to `ref`, pushed (Back returns) or in its place with `replace`. A tab
+   * id no tab shows opens `ref` in a new tab.
+   */
   const handleNavigateInTab = useCallback((
     currentTabId: string,
     ref: TabRef,
-    siblings?: import("./tabs/PageNavigationContext.js").NavSiblings,
+    siblings?: NavSiblings,
     replace = false,
   ) => {
     if (!selectedThreadId) return;
-    // A symbol isn't a page: it opens its file at its line. Replacing,
-    // the page it's replacing closes first.
-    if (ref.kind === "symbol") {
-      if (replace) closePageTab(currentTabId);
+    const slot = slotShowing(sessions[selectedThreadId] ?? { tabs: [], active: null, mru: [], next: 1 }, currentTabId);
+    // A symbol isn't a page (it opens its file at its line), and an agent
+    // session has its own tab: replacing, the page they replace closes.
+    if (ref.kind === "symbol" || ref.kind === "agent_session" || !slot) {
+      if (replace && slot) closePageTab(currentTabId);
       handleOpenPage(ref);
       return;
     }
-    const existing = threadPageTabs[selectedThreadId] ?? [];
-    const idx = existing.findIndex((t) => t.id === currentTabId);
-    if (idx < 0) {
-      handleOpenPage(ref);
-      return;
-    }
-    if (existing[idx]!.id === ref.id) return;
-    // agent still lives in its own slot — promote to a regular
-    // open. Files and diffs DO support in-tab nav: the page tab
-    // becomes a file viewer / diff viewer (back returns to the
-    // prior page). Diffs require their spec to be pre-registered
-    // in `diffTabs`; the helper that initiates the navigation
-    // (handleOpenDiffInTab) is responsible for that.
-    if (ref.kind === "agent_session") {
-      if (replace) closePageTab(currentTabId);
-      handleOpenPage(ref);
-      return;
-    }
-    if (ref.kind === "file") {
-      const payload = ref.payload as {
-        path?: string;
-        version?: import("./revision.js").Revision;
-        line?: number;
-      } | null;
-      // Only the disk version needs to populate the fileSessions
-      // dirty-state cache + LSP wiring. Non-disk versions render
-      // through FileViewerPage which loads content directly via
-      // readAt(version) — calling handleOpenFile here would
-      // pollute the cache with disk content the user didn't ask
-      // for.
-      const isDisk = !payload?.version || payload.version === WORKING;
-      if (payload?.path && isDisk) void handleOpenFile(payload.path);
-      // A line on the ref (lens `file` links with `line:`) reveals it.
-      if (payload?.path && isDisk && payload.line && payload.line > 0) {
-        setEditorNavigationTarget({ path: payload.path, line: payload.line, column: 1 });
-      }
-    }
-    if (isPage(ref, "diff")) {
-      // A diff ref that carries its whole spec (lens `diff-at` links)
-      // registers it here, since no handleOpenDiffInTab ran first.
-      const spec = pagePayload(ref)?.state as DiffSpec | undefined;
-      if (spec?.path && spec.leftVersion && spec.rightVersion) {
-        setDiffTabs((prev) =>
-          prev.some((t) => t.id === ref.id)
-            ? prev.map((t) => (t.id === ref.id ? { id: ref.id, spec } : t))
-            : [...prev, { id: ref.id, spec }],
-        );
-      }
-    }
-    const oldRef = existing[idx]!;
-    setThreadPageTabs((prev) => {
-      const list = prev[selectedThreadId] ?? [];
-      const next = list.slice();
-      // If `ref` already exists elsewhere as a page tab, drop the
-      // duplicate to mirror browser dedup-on-navigate.
-      const dupIdx = next.findIndex((t, i) => i !== idx && t.id === ref.id);
-      if (dupIdx >= 0) next.splice(dupIdx, 1);
-      const targetIdx = dupIdx >= 0 && dupIdx < idx ? idx - 1 : idx;
-      next[targetIdx] = ref;
-      return { ...prev, [selectedThreadId]: next };
-    });
-    setThreadPageHistory((prev) => {
-      const perThread = prev[selectedThreadId] ?? {};
-      const old = perThread[currentTabId] ?? { back: [], forward: [], siblings: null };
-      const { [currentTabId]: _drop, ...rest } = perThread;
-      return {
-        ...prev,
-        [selectedThreadId]: { ...rest, [ref.id]: navigatedHistory(old, oldRef, ref, siblings, replace) },
-      };
-    });
-    setCenterActive(ref.id);
-  }, [closePageTab, handleOpenPage, selectedThreadId, setCenterActive, threadPageTabs]);
+    prepareFor(ref);
+    updateSession(selectedThreadId, (session) =>
+      sessionNavigate(session, slot, { ref, from: originOf(siblings, ref) }, { replace }),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closePageTab, handleOpenPage, selectedThreadId, sessions, updateSession]);
 
-  /**
-   * Open a diff *in-tab* — replaces the active page tab's ref with
-   * the diff ref, with the diff's spec registered in `diffTabs` so
-   * the page-tab renderer can find it. Pushes the prior ref onto the
-   * back stack so Back returns to the originating page (e.g. the
-   * change-analysis dashboard). Caller passes the active tab id so
-   * we know which slot to mutate.
-   */
-  const handleOpenDiffInTab = useCallback((
-    currentTabId: string,
-    spec: DiffSpec,
-    siblings?: import("./tabs/PageNavigationContext.js").NavSiblings,
-  ) => {
-    const id = computeDiffId(spec);
-    // Always rewrite the spec so per-click metadata that doesn't
-    // affect the id (e.g. revealLine pointing at a function's start
-    // line) is honored on subsequent clicks of the same diff.
-    //
-    // When siblings carry diffSpecs, pre-register every sibling's
-    // spec too — otherwise stepping the prev/next arrow lands on a
-    // diff TabRef whose spec the renderer can't find and the tab
-    // silently disappears.
-    setDiffTabs((prev) => {
-      const byId = new Map(prev.map((t) => [t.id, t.spec]));
-      byId.set(id, spec);
-      if (siblings) {
-        for (const e of siblings.entries) {
-          if (e.diffSpec) byId.set(computeDiffId(e.diffSpec), e.diffSpec);
-        }
-      }
-      return [...byId.entries()].map(([tid, tspec]) => ({ id: tid, spec: tspec }));
-    });
+  /** Open a diff in the tab showing `currentTabId`; Back returns to the
+   *  page it came from. */
+  const handleOpenDiffInTab = useCallback((currentTabId: string, spec: DiffSpec, siblings?: NavSiblings) => {
     handleNavigateInTab(currentTabId, diffRef(spec), siblings);
   }, [handleNavigateInTab]);
 
-  /**
-   * Step the active tab to a sibling at `targetIdx` without touching
-   * back/forward. The tab id changes to the new ref's id and the
-   * siblings record migrates with it.
-   */
-  const handleStepSibling = useCallback((currentTabId: string, targetIdx: number) => {
+  /** Show item `index` of the collection the tab was opened from, in
+   *  place: history untouched. */
+  const handleStepSibling = useCallback((slot: string, index: number) => {
     if (!selectedThreadId) return;
-    const perThread = threadPageHistory[selectedThreadId] ?? {};
-    const entry = perThread[currentTabId];
-    if (!entry || !entry.siblings) return;
-    if (targetIdx < 0 || targetIdx >= entry.siblings.entries.length) return;
-    const target = entry.siblings.entries[targetIdx]!.ref;
-    const existing = threadPageTabs[selectedThreadId] ?? [];
-    const idx = existing.findIndex((t) => t.id === currentTabId);
-    if (idx < 0) return;
-    if (target.id === currentTabId) return;
-    if (target.kind === "file") {
-      const payload = target.payload as { path?: string; version?: import("./revision.js").Revision } | null;
-      const isDisk = !payload?.version || payload.version === WORKING;
-      if (payload?.path && isDisk) void handleOpenFile(payload.path);
-    }
-    setThreadPageTabs((prev) => {
-      const list = prev[selectedThreadId] ?? [];
-      const next = list.slice();
-      const dupIdx = next.findIndex((t, i) => i !== idx && t.id === target.id);
-      if (dupIdx >= 0) next.splice(dupIdx, 1);
-      const adjustedIdx = dupIdx >= 0 && dupIdx < idx ? idx - 1 : idx;
-      next[adjustedIdx] = target;
-      return { ...prev, [selectedThreadId]: next };
-    });
-    setThreadPageHistory((prev) => {
-      const perThread = prev[selectedThreadId] ?? {};
-      const old = perThread[currentTabId];
-      if (!old) return prev;
-      const { [currentTabId]: _drop, ...rest } = perThread;
-      return {
-        ...prev,
-        [selectedThreadId]: {
-          ...rest,
-          [target.id]: {
-            // Preserve back/forward — sibling navigation is orthogonal.
-            back: old.back,
-            forward: old.forward,
-            siblings: old.siblings ? { entries: old.siblings.entries, index: targetIdx, title: old.siblings.title } : null,
-          },
-        },
-      };
-    });
-    setCenterActive(target.id);
-  }, [handleOpenFile, selectedThreadId, setCenterActive, threadPageHistory, threadPageTabs]);
+    const tab = sessions[selectedThreadId]?.tabs.find((t) => t.slot === slot);
+    const target = tab ? currentEntry(tab).from?.items[index]?.ref : undefined;
+    if (target) prepareFor(target);
+    updateSession(selectedThreadId, (session) => stepOrigin(session, slot, index));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedThreadId, sessions, updateSession]);
 
-  const handleGoBack = useCallback((currentTabId: string) => {
-    if (!selectedThreadId) return;
-    const perThread = threadPageHistory[selectedThreadId] ?? {};
-    const entry = perThread[currentTabId];
-    if (!entry || entry.back.length === 0) return;
-    const targetFrame = entry.back[entry.back.length - 1]!;
-    const target = targetFrame.ref;
-    const existing = threadPageTabs[selectedThreadId] ?? [];
-    const idx = existing.findIndex((t) => t.id === currentTabId);
-    if (idx < 0) return;
-    const oldRef = existing[idx]!;
-    setThreadPageTabs((prev) => {
-      const list = prev[selectedThreadId] ?? [];
-      const next = list.slice();
-      next[idx] = target;
-      return { ...prev, [selectedThreadId]: next };
-    });
-    setThreadPageHistory((prev) => {
-      const perThread = prev[selectedThreadId] ?? {};
-      const { [currentTabId]: drop, ...rest } = perThread;
-      return {
-        ...prev,
-        [selectedThreadId]: {
-          ...rest,
-          [target.id]: {
-            back: entry.back.slice(0, -1),
-            // Push the page we're leaving onto the forward stack
-            // along with its siblings so a re-forward also restores.
-            forward: [...entry.forward, { ref: oldRef, siblings: entry.siblings }],
-            // Restore the back-target's original siblings — keep
-            // up/down arrows alive on the page we're returning to.
-            siblings: targetFrame.siblings,
-          },
-        },
-      };
-    });
-    setCenterActive(target.id);
-  }, [selectedThreadId, setCenterActive, threadPageHistory, threadPageTabs]);
+  const handleGoBack = useCallback((slot: string) => {
+    if (selectedThreadId) updateSession(selectedThreadId, (session) => sessionBack(session, slot));
+  }, [selectedThreadId, updateSession]);
 
-  const handleGoForward = useCallback((currentTabId: string) => {
-    if (!selectedThreadId) return;
-    const perThread = threadPageHistory[selectedThreadId] ?? {};
-    const entry = perThread[currentTabId];
-    if (!entry || entry.forward.length === 0) return;
-    const targetFrame = entry.forward[entry.forward.length - 1]!;
-    const target = targetFrame.ref;
-    const existing = threadPageTabs[selectedThreadId] ?? [];
-    const idx = existing.findIndex((t) => t.id === currentTabId);
-    if (idx < 0) return;
-    const oldRef = existing[idx]!;
-    setThreadPageTabs((prev) => {
-      const list = prev[selectedThreadId] ?? [];
-      const next = list.slice();
-      next[idx] = target;
-      return { ...prev, [selectedThreadId]: next };
-    });
-    setThreadPageHistory((prev) => {
-      const perThread = prev[selectedThreadId] ?? {};
-      const { [currentTabId]: drop, ...rest } = perThread;
-      return {
-        ...prev,
-        [selectedThreadId]: {
-          ...rest,
-          [target.id]: {
-            back: [...entry.back, { ref: oldRef, siblings: entry.siblings }],
-            forward: entry.forward.slice(0, -1),
-            siblings: targetFrame.siblings,
-          },
-        },
-      };
-    });
-    setCenterActive(target.id);
-  }, [selectedThreadId, setCenterActive, threadPageHistory, threadPageTabs]);
-
+  const handleGoForward = useCallback((slot: string) => {
+    if (selectedThreadId) updateSession(selectedThreadId, (session) => sessionForward(session, slot));
+  }, [selectedThreadId, updateSession]);
 
   // The window as a command host (`clientHost.ts`): what only it can do,
   // for a command the daemon runs over it — an agent's `oxplow.tab.*`, in
@@ -2166,8 +1838,11 @@ export function App() {
         });
         mutateFileSession(streamId, (s) => setLoadedFileContent(s, path, file.content));
       }
-      setThreadPageTabs((prev) => withTab(prev, thread, ref));
-      if (focus) setThreadCenterActive((prev) => ({ ...prev, [thread]: ref.id }));
+      updateSession(thread, (session) => {
+        const opened = sessionOpen(session, { ref });
+        // Opened without focus, it waits behind what the thread shows.
+        return focus ? opened : { ...opened, active: session.active, mru: [...session.mru, ...opened.mru.filter((m) => !session.mru.includes(m))] };
+      });
       return { ref: ref.id, focused: focus };
     };
     return {
@@ -2176,7 +1851,7 @@ export function App() {
         save: async (input, ctx) => {
           const thread = threadOf(ctx);
           const id = (input as { ref?: unknown } | null)?.ref;
-          const shown = thread === selectedThreadId ? centerActive : threadCenterActive[thread];
+          const shown = thread === selectedThreadId ? centerActive : activeRef(sessions[thread])?.id;
           const tab = typeof id === "string" ? id : shown;
           const path = tab ? diskFilePath(tab) : null;
           if (path === null) throw new Error(typeof id === "string" ? `\`${id}\` isn't a file in the working tree` : "no file is shown");
@@ -2244,10 +1919,10 @@ export function App() {
           if (thread === selectedThreadId) {
             closePageTab(ref.id);
           } else {
-            setThreadPageTabs((prev) => withoutTab(prev, thread, ref.id));
-            setThreadCenterActive((prev) =>
-              prev[thread] === ref.id ? { ...prev, [thread]: HOME_TAB } : prev,
-            );
+            updateSession(thread, (session) => {
+              const slot = slotShowing(session, ref.id);
+              return slot ? sessionClose(session, slot) : session;
+            });
           }
           return { ref: ref.id, closed: true };
         },
@@ -2256,7 +1931,7 @@ export function App() {
     // getFileSession / mutateFileSession are plain functions over the
     // session state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedThreadId, threadStates, closePageTab, setThreadPageTabs, setThreadCenterActive, centerActive, threadCenterActive, selectedFilePath, stream, setCenterActive]);
+  }, [selectedThreadId, threadStates, closePageTab, updateSession, centerActive, sessions, selectedFilePath, stream, setCenterActive]);
   const windowHandlersRef = useRef(windowHandlers);
   windowHandlersRef.current = windowHandlers;
   useEffect(() => startClientHost(() => windowHandlersRef.current), []);
@@ -2265,83 +1940,43 @@ export function App() {
   // Rather than closing the tab outright, navigate it back one entry in
   // its own history; only close when there's nothing to go back to.
   const closeOrGoBackPageTab = useCallback((id: string) => {
-    if (!selectedThreadId) { closePageTab(id); return; }
-    const perThread = threadPageHistory[selectedThreadId] ?? {};
-    const existing = threadPageTabs[selectedThreadId] ?? [];
-    const idx = existing.findIndex((t) => t.id === id);
-    const plan = planCloseOrGoBack(perThread[id], idx >= 0);
-    if (plan.action === "close") {
+    if (!selectedThreadId) return;
+    const session = sessions[selectedThreadId];
+    const slot = session ? slotShowing(session, id) : null;
+    const tab = session?.tabs.find((t) => t.slot === slot);
+    if (!slot || !tab || tab.at === 0) {
       closePageTab(id);
       return;
     }
-    const target = plan.target;
-    setThreadPageTabs((prev) => {
-      const list = prev[selectedThreadId] ?? [];
-      const i = list.findIndex((t) => t.id === id);
-      if (i < 0) return prev;
-      const next = list.slice();
-      next[i] = target;
-      return { ...prev, [selectedThreadId]: next };
-    });
-    setThreadPageHistory((prev) => {
-      const pt = prev[selectedThreadId] ?? {};
-      const { [id]: _drop, ...rest } = pt;
-      return { ...prev, [selectedThreadId]: { ...rest, [target.id]: plan.nextEntry } };
-    });
+    updateSession(selectedThreadId, (s) => dropCurrent(s, slot));
     setPageTitles((prev) => {
       if (!(id in prev)) return prev;
       const { [id]: _drop, ...rest } = prev;
       return rest;
     });
-    setCenterActive((current) => (current === id ? target.id : current));
-    const pageKey = `${selectedThreadId}::${id}`;
-    clearPageSnapshot(pageKey);
-  }, [selectedThreadId, threadPageHistory, threadPageTabs, closePageTab, setCenterActive]);
+    clearPageSnapshot(`${selectedThreadId}::${id}`);
+  }, [selectedThreadId, sessions, closePageTab, updateSession]);
 
-  // Track tab recency: whatever tab becomes active moves to the front of
-  // its thread's MRU list. Driven off `centerActive` (not setCenterActive)
-  // so it captures every activation path — explicit clicks, opens, history
-  // navigation. (the agent tab lands here too but is never a page tab, so it's
-  // harmless filler the eviction pass ignores.)
+  // Enforce the page-tab cap on the shown thread: past MAX_PAGE_TABS the
+  // least recently used tabs close (`evictions`). The active tab, pinned
+  // ones and files with unsaved changes stay (a soft cap never discards
+  // work). Eviction is closePageTab — the same cleanup a manual close does.
   useEffect(() => {
     if (!selectedThreadId) return;
-    setThreadPageMru((prev) => {
-      const cur = prev[selectedThreadId] ?? [];
-      const next = touchMru(cur, centerActive);
-      return next === cur ? prev : { ...prev, [selectedThreadId]: next };
-    });
-  }, [centerActive, selectedThreadId, setThreadPageMru]);
-
-  // Enforce the page-tab cap on the active thread: when its open tabs
-  // exceed MAX_PAGE_TABS, evict the least-recently-used ones. The active
-  // tab and any dirty file tabs are protected (a soft cap never discards
-  // unsaved work). Eviction routes through closePageTab — the same cleanup
-  // a manual close does (drops file session / history / title / snapshot).
-  // Closing shrinks threadPageTabs, re-running this effect until it
-  // settles at or below the cap.
-  useEffect(() => {
-    if (!selectedThreadId) return;
-    const tabsList = threadPageTabs[selectedThreadId] ?? [];
-    if (tabsList.length <= MAX_PAGE_TABS) return;
-    const protect = new Set<string>();
-    if (centerActive) protect.add(centerActive);
-    const session = stream ? fileSessions[stream.id] : undefined;
-    if (session) {
-      for (const t of tabsList) {
-        const path = diskFilePath(t.id);
-        if (path === null) continue;
-        const file = session.files[path];
-        if (file && file.draftContent !== file.savedContent) protect.add(t.id);
-      }
+    const session = sessions[selectedThreadId];
+    if (!session) return;
+    const files = stream ? fileSessions[stream.id] : undefined;
+    const dirty = (id: string) => {
+      const path = diskFilePath(id);
+      const file = path === null ? undefined : files?.files[path];
+      return !!file && file.draftContent !== file.savedContent;
+    };
+    const victims = evictions(session, MAX_PAGE_TABS, (t) => dirty(currentEntry(t).ref.id));
+    for (const slot of victims) {
+      const tab = session.tabs.find((t) => t.slot === slot);
+      if (tab) closePageTab(currentEntry(tab).ref.id);
     }
-    const mru = threadPageMru[selectedThreadId] ?? [];
-    const victims = selectLruEvictions(
-      tabsList.map((t) => t.id),
-      mru,
-      { max: MAX_PAGE_TABS, protect },
-    );
-    for (const id of victims) closePageTab(id);
-  }, [threadPageTabs, selectedThreadId, centerActive, threadPageMru, fileSessions, stream, closePageTab]);
+  }, [sessions, selectedThreadId, fileSessions, stream, closePageTab]);
 
   // Keep the forward ref in sync with the latest handleOpenPage. Used by
   // the forms and offers (declared above handleOpenPage) so menu/keyboard
@@ -2372,38 +2007,19 @@ export function App() {
   const extensions = useExtensions();
   const centerTabs: CenterTab[] = useMemo(() => {
     const tabs: CenterTab[] = [];
-    // File tabs live in `threadPageTabs` like every other page kind;
-    // the page-tab loop's `ref.kind === "file"` branch handles the
-    // render. fileSessions owns the file content + dirty state, but
-    // tab membership and order are driven by the unified list.
-    // The unified-chrome wrap loop below applies to every tab pushed
-    // after this index — every per-thread page tab (agent sessions,
-    // notes, files, diffs, tasks, etc.).
-    // Diffs live in `threadPageTabs` like every other page kind; the
-    // standalone diffTabs array is just the spec registry indexed by
-    // id, looked up by the diff render branch below.
+    // Every tab is a session tab (`tabs/session.ts`): files, diffs, agent
+    // sessions and pages alike. A tab keeps a body mounted per page in its
+    // history (`bodies`) so Back shows a page as it was; only the current
+    // one is in the strip. fileSessions owns a file's content and dirty
+    // state, the session its place.
     const pageTabStartIdx = tabs.length;
-    const pageTabsForThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
-    // Pre-build the per-slot stack ([...back, current, ...forward]) so
-    // back/forward stack entries get their own tab body that stays
-    // mounted alongside the current page. This preserves state
-    // (scroll, expanded trees, draft text) across in-tab navigation.
-    // After the loop we tag non-current tabs as hidden so they don't
-    // appear in the strip.
-    const perThreadHistoryForBuilder = selectedThreadId ? threadPageHistory[selectedThreadId] ?? {} : {};
-    const stripVisibleIds = new Set<string>();
-    for (const slotRef of pageTabsForThread) stripVisibleIds.add(slotRef.id);
-    // Tab ids must be unique across the whole rendered list — they
-    // back React keys, the active-tab lookup, and the close-button
-    // handler. Duplicates make all three break: React warns about
-    // duplicate keys, only one of the rendered tabs becomes
-    // selectable, and the close button fires against an arbitrary
-    // matching record. Track ids globally so a back-stack entry
-    // that shares an id with another slot (or with its own slot's
-    // current ref, which can happen when the same ref appears in
-    // back+current after a malformed history transition) only
-    // contributes one tab to the render.
+    const threadSession = selectedThreadId ? sessions[selectedThreadId] : undefined;
+    // Tab ids must be unique across the rendered list — the active-tab
+    // lookup and the close button key on them — so a page shows once.
     const renderedTabIds = new Set<string>();
+    // For each rendered tab: its session tab, its entry's ref, and whether
+    // it is that tab's current entry.
+    const placed: { tab: Tab; ref: TabRef; current: boolean }[] = [];
     // One renderer per page kind. `Record<PageKind, …>` makes the table
     // exhaustive: a kind without a renderer (or a renderer for a kind that
     // no longer exists) is a compile error, not a blank tab.
@@ -2424,7 +2040,6 @@ export function App() {
       workListProfile,
       planOpenCreateRef,
       harnesses,
-      diffTabs,
       effectiveCenterActive,
       setCenterActive,
       vcsEnabled: workspaceContext.vcsEnabled,
@@ -2629,7 +2244,7 @@ export function App() {
           label: lensId,
           closable: true,
           render: () => (
-            <LensPage lensId={lensId} initialParams={payload?.params} stream={stream} onOpenPage={nav.navOpen} />
+            <LensPage lensId={lensId} params={payload?.params} pageRef={(params) => lensRef(lensId, params)} stream={stream} onOpenPage={nav.navOpen} />
           ),
         };
       },
@@ -2719,114 +2334,80 @@ export function App() {
         };
       },
     };
-    for (const slotRef of pageTabsForThread) {
-      const histEntry = perThreadHistoryForBuilder[slotRef.id] ?? { back: [], forward: [], siblings: null };
-      // back/forward are HistoryFrame[] (ref + siblings); we only
-      // need the refs for the render pass — siblings are restored
-      // by handleGoBack/Forward when the user actually navigates.
-      const rawSlotStack = [
-        ...histEntry.back.map((f) => f.ref),
-        slotRef,
-        ...histEntry.forward.map((f) => f.ref),
-      ];
-      // Per-slot dedup: if back/forward contains an entry with the
-      // same id as the slot's current ref (shouldn't happen in
-      // normal flow, but corrupted history can produce it), keep
-      // only the slot's current ref so we don't render two copies.
-      const seenInSlot = new Set<string>();
-      const slotStack: TabRef[] = [];
-      for (const r of rawSlotStack) {
-        if (seenInSlot.has(r.id)) continue;
-        seenInSlot.add(r.id);
-        slotStack.push(r);
-      }
-      // Closures bind navigation to the SLOT's current ref id so that
-      // when a back-stack page (still mounted, hidden) navigates, it
-      // mutates the slot — same behavior as the visible page.
-      const navOpen = (
-        newRef: TabRef,
-        opts?: import("./tabs/PageNavigationContext.js").NavigateOptions,
-      ) => {
+    // A page that redraws from its ref's params keeps one body across them
+    // (`bodies`): a lens, and an extension's page drawn by a lens or a
+    // component. Oxplow's built-in pages mount per entry.
+    const livePage = (ref: TabRef) => {
+      if (ref.kind === "lens") return true;
+      if (ref.kind !== "page") return false;
+      const page = pagePayload(ref);
+      const declared = page ? declaredPage(extensions, page) : null;
+      return !!declared && declared.body.kind !== "builtIn";
+    };
+    for (const sessionTab of threadSession?.tabs ?? []) {
+      // Navigation from any of the tab's bodies (a hidden back page too)
+      // moves the tab.
+      const currentId = currentEntry(sessionTab).ref.id;
+      const navOpen = (newRef: TabRef, opts?: import("./tabs/PageNavigationContext.js").NavigateOptions) => {
         if (opts?.newTab) handleOpenPage(newRef);
-        else handleNavigateInTab(slotRef.id, newRef, opts?.siblings, opts?.replace);
+        else handleNavigateInTab(currentId, newRef, opts?.siblings, opts?.replace);
       };
       const navOpenFile = (path: string, opts?: { newTab?: boolean }) => {
         if (opts?.newTab) handleOpenPage(fileRef(path));
-        else handleNavigateInTab(slotRef.id, fileRef(path));
+        else handleNavigateInTab(currentId, fileRef(path));
       };
-      // Open a diff *in this slot* — slot navigates to the diff,
-      // back returns to the originating page. Used by pages that
-      // surface a diff (tasks, wiki, local history, etc.).
-      const navOpenDiff = (
-        spec: DiffSpec,
-        siblings?: import("./tabs/PageNavigationContext.js").NavSiblings,
-      ) => {
-        handleOpenDiffInTab(slotRef.id, spec, siblings);
-      };
-      const navRevealCommit = (sha: string) => {
-        navOpen(gitCommitRef(sha));
-      };
-      const slotNav: SlotNav = { slotId: slotRef.id, navOpen, navOpenFile, navOpenDiff, navRevealCommit };
-      for (const ref of slotStack) {
-      // Global dedup across all slots — never push two tabs with
-      // the same id, even if multiple slots' stacks happen to
-      // contain it.
-      if (renderedTabIds.has(ref.id)) continue;
-      renderedTabIds.add(ref.id);
-      const tab = pageRenderers[ref.kind](ref, slotNav);
-      if (tab) tabs.push(tab);
-      } // end inner stack loop
-    }
-    // Tag back/forward stack entries as hidden so they don't appear in
-    // the tab strip but their bodies stay mounted (preserving state).
-    for (let i = pageTabStartIdx; i < tabs.length; i++) {
-      if (!stripVisibleIds.has(tabs[i]!.id)) {
-        tabs[i] = { ...tabs[i]!, hidden: true };
+      // A diff in this tab: Back returns to the page it came from.
+      const navOpenDiff = (spec: DiffSpec, siblings?: NavSiblings) => handleOpenDiffInTab(currentId, spec, siblings);
+      const navRevealCommit = (sha: string) => navOpen(gitCommitRef(sha));
+      const slotNav: SlotNav = { slotId: currentId, navOpen, navOpenFile, navOpenDiff, navRevealCommit };
+      for (const body of bodies(sessionTab, livePage)) {
+        const ref = body.entry.ref;
+        if (renderedTabIds.has(ref.id)) continue;
+        renderedTabIds.add(ref.id);
+        const tab = pageRenderers[ref.kind](ref, slotNav);
+        if (!tab) continue;
+        tabs.push({ ...tab, key: body.key, ...(body.current ? {} : { hidden: true }) });
+        placed.push({ tab: sessionTab, ref, current: body.current });
       }
     }
     // Wrap each page-tab render with PageNavigationContext so descendants
     // (BacklinksList, RouteLink, in-page cross-references) can navigate
-    // in-tab and the Page chrome auto-mounts a back/forward nav bar.
-    const perThreadHistory = selectedThreadId ? threadPageHistory[selectedThreadId] ?? {} : {};
-    const pageRefsForThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
+    // in-tab and the Page chrome mounts its nav bar.
     for (let i = pageTabStartIdx; i < tabs.length; i++) {
       const tab = tabs[i]!;
+      const { tab: sessionTab, ref, current: isCurrent } = placed[i - pageTabStartIdx]!;
+      const slot = sessionTab.slot;
       const tabId = tab.id;
-      const entry = perThreadHistory[tabId] ?? { back: [], forward: [], siblings: null };
-      const ref = pageRefsForThread.find((r) => r.id === tabId);
+      const currentId = currentEntry(sessionTab).ref.id;
+      const from = isCurrent ? currentEntry(sessionTab).from : undefined;
+      const siblings: NavSiblings | null = from ? { entries: from.items, index: from.index, title: from.title } : null;
       const innerRender = tab.render;
-      const bookmarkScope = ref ? bookmarks.find((b) => b.ref.id === ref.id)?.scope ?? null : null;
+      const bookmarkScope = bookmarks.find((b) => b.ref.id === ref.id)?.scope ?? null;
       const registeredTitle = pageTitles[tabId];
-      const navValue = {
-        navigate: (newRef: TabRef, opts?: import("./tabs/PageNavigationContext.js").NavigateOptions) => {
+      const navValue: PageNavigation = {
+        navigate: (newRef, opts) => {
           if (opts?.newTab) handleOpenPage(newRef);
-          else handleNavigateInTab(tabId, newRef, opts?.siblings, opts?.replace);
+          else handleNavigateInTab(currentId, newRef, opts?.siblings, opts?.replace);
         },
-        openRef: (target: string, how?: import("./tabs/PageNavigationContext.js").NavigateOptions) =>
-          openRefRef.current(target, how ?? {}, (tab, h) => {
-            if (h.newTab) handleOpenPage(tab);
-            else handleNavigateInTab(tabId, tab, h.siblings, h.replace);
+        openRef: (target, how) =>
+          openRefRef.current(target, how ?? {}, (opened, h) => {
+            if (h.newTab) handleOpenPage(opened);
+            else handleNavigateInTab(currentId, opened, h.siblings, h.replace);
           }),
-        goBack: () => handleGoBack(tabId),
-        goForward: () => handleGoForward(tabId),
-        canGoBack: entry.back.length > 0,
-        canGoForward: entry.forward.length > 0,
+        goBack: () => handleGoBack(slot),
+        goForward: () => handleGoForward(slot),
+        canGoBack: sessionTab.at > 0,
+        canGoForward: sessionTab.at < sessionTab.entries.length - 1,
         pinned: !!tab.pinned,
-        siblings: entry.siblings,
-        goPrevSibling: entry.siblings && entry.siblings.index > 0
-          ? () => handleStepSibling(tabId, entry.siblings!.index - 1)
-          : undefined,
-        goNextSibling: entry.siblings && entry.siblings.index < entry.siblings.entries.length - 1
-          ? () => handleStepSibling(tabId, entry.siblings!.index + 1)
-          : undefined,
-        goSibling: entry.siblings
-          ? (i: number) => handleStepSibling(tabId, i)
-          : undefined,
+        siblings,
+        goPrevSibling: siblings && siblings.index > 0 ? () => handleStepSibling(slot, siblings.index - 1) : undefined,
+        goNextSibling: siblings && siblings.index < siblings.entries.length - 1 ? () => handleStepSibling(slot, siblings.index + 1) : undefined,
+        goSibling: siblings ? (index: number) => handleStepSibling(slot, index) : undefined,
         setTitle: (t: string) => setPageTitle(tabId, t),
         title: registeredTitle,
         pageKey: selectedThreadId ? `${selectedThreadId}::${tabId}` : undefined,
-        ask: ref && parseRef(ref.id) ? { ref: ref.id } : undefined,
-        bookmark: ref ? {
+        ask: parseRef(ref.id) ? { ref: ref.id } : undefined,
+        bookmark: {
           scope: bookmarkScope,
           toggle: (scope: BookmarkScope) => {
             const viewer = { threadId: selectedThreadId, streamId: stream?.id ?? null };
@@ -2836,7 +2417,16 @@ export function App() {
             write.catch((e: unknown) =>
               recordOpError({ label: "Bookmark", message: e instanceof Error ? e.message : String(e) }));
           },
-        } : undefined,
+        },
+        ref,
+        // Only the page the tab shows changes the tab's ref; a hidden back
+        // page drawing an older entry can't.
+        replaceRef: isCurrent && selectedThreadId
+          ? (next: TabRef, opts?: { push?: boolean }) => {
+              const thread = selectedThreadId;
+              updateSession(thread, (session) => sessionReplaceRef(session, slot, next, opts));
+            }
+          : undefined,
       };
       if (registeredTitle && registeredTitle !== tab.label) {
         tab.label = registeredTitle;
@@ -2866,15 +2456,15 @@ export function App() {
     currentSession.files,
     editorFindRequest,
     editorNavigationTarget,
-    diffTabs,
     handleOpenWiki,
     handleOpenCommit,
     handleOpenExternalUrl,
     selectedThreadId,
-    threadPageTabs,
-    threadPageHistory,
+    sessions,
+    updateSession,
     handleOpenPage,
     handleNavigateInTab,
+    handleOpenDiffInTab,
     handleGoBack,
     handleGoForward,
     handleStepSibling,

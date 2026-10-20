@@ -56,6 +56,20 @@ export interface Session {
   next: number;
 }
 
+/** The most tabs a thread keeps open; pinned tabs don't count. */
+export const MAX_PAGE_TABS = 15;
+
+/** The slot of the tab showing `id` now; null when none does. */
+export function slotShowing(s: Session, id: string): string | null {
+  return s.tabs.find((t) => current(t).ref.id === id)?.slot ?? null;
+}
+
+/** The active tab's current page; null when none is active. */
+export function activeRef(s: Session | undefined): TabRef | null {
+  const tab = s?.tabs.find((t) => t.slot === s.active);
+  return tab ? current(tab).ref : null;
+}
+
 export function emptySession(): Session {
   return { tabs: [], active: null, mru: [], next: 1 };
 }
@@ -84,11 +98,18 @@ function withTab(s: Session, slot: string, f: (t: Tab) => Tab): Session {
   return { ...s, tabs };
 }
 
-/** Show `entry`: the tab already showing its page, else a new tab. The
- *  tab becomes active. */
+/** Show `entry`: the tab already showing its page (its ref refreshed,
+ *  its state kept), else a new tab. The tab becomes active. */
 export function open(s: Session, entry: Entry, opts: { pinned?: boolean } = {}): Session {
   const there = s.tabs.find((t) => current(t).ref.id === entry.ref.id);
-  if (there) return activate(s, there.slot);
+  if (there) {
+    const refreshed = withTab(s, there.slot, (t) => {
+      const entries = [...t.entries];
+      entries[t.at] = { ...entries[t.at]!, ref: entry.ref, ...(entry.from ? { from: entry.from } : {}) };
+      return { ...t, entries };
+    });
+    return activate(refreshed, there.slot);
+  }
   const slot = `t${s.next}`;
   const tab: Tab = { slot, entries: [entry], at: 0, ...(opts.pinned ? { pinned: true as const } : {}) };
   return { tabs: [...s.tabs, tab], active: slot, mru: touched(s.mru, slot), next: s.next + 1 };
@@ -159,6 +180,40 @@ export function close(s: Session, slot: string): Session {
   const tabs = s.tabs.filter((t) => t.slot !== slot);
   const active = s.active === slot ? (mru.find((m) => tabs.some((t) => t.slot === m)) ?? null) : s.active;
   return { ...s, tabs, mru, active };
+}
+
+/** Each tab's current page, in strip order. */
+export function refsOf(s: Session): TabRef[] {
+  return s.tabs.map((t) => current(t).ref);
+}
+
+/** The strip shows `refs`, in that order: a tab already showing one keeps
+ *  its slot and history, a new one opens (pinned when its ref is), and a
+ *  tab showing none closes. The same session when nothing changes. */
+export function setStrip(s: Session, refs: TabRef[]): Session {
+  const now = refsOf(s);
+  if (refs.length === now.length && refs.every((r, i) => r.id === now[i]!.id)) return s;
+  let next = s.next;
+  const tabs = refs.map((ref): Tab => {
+    const there = s.tabs.find((t) => current(t).ref.id === ref.id);
+    if (there) return there;
+    const slot = `t${next++}`;
+    return { slot, entries: [{ ref }], at: 0, ...(ref.pinned ? { pinned: true as const } : {}) };
+  });
+  const kept = (slot: string) => tabs.some((t) => t.slot === slot);
+  const mru = s.mru.filter(kept);
+  const active = s.active !== null && kept(s.active) ? s.active : (mru[0] ?? null);
+  return { tabs, active, mru, next };
+}
+
+/** The page `slot` shows is gone (its record was deleted): go back,
+ *  dropping its entry so Forward never leads to it; close the tab when
+ *  there is nothing to go back to. */
+export function dropCurrent(s: Session, slot: string): Session {
+  const tab = s.tabs.find((t) => t.slot === slot);
+  if (!tab) return s;
+  if (tab.at === 0) return close(s, slot);
+  return withTab(s, slot, (t) => ({ ...t, entries: t.entries.filter((_, i) => i !== t.at), at: t.at - 1 }));
 }
 
 /** The tabs in `order`; any it doesn't name follow, in their order. */

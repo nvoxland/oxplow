@@ -14,8 +14,11 @@ import {
   navigate,
   open,
   parseSession,
+  dropCurrent,
+  refsOf,
   reorder,
   replaceRef,
+  setStrip,
   serializeSession,
   setState,
   stepOrigin,
@@ -45,6 +48,15 @@ describe("open", () => {
     s = open(s, e(a));
     expect(ids(s)).toEqual(["wiki:a", "wiki:b"]);
     expect(s.active).toBe(slotOf(s, "wiki:a"));
+  });
+
+  test("opening a page that is showing refreshes its ref, keeping its state (a diff's line to reveal)", () => {
+    const first = { ...a, payload: { slug: "a", line: 1 } };
+    const again = { ...a, payload: { slug: "a", line: 9 } };
+    let s = open(emptySession(), e(first, { state: { scroll: 4 } }));
+    s = open(s, e(again));
+    expect(current(s.tabs[0]!).ref.payload).toEqual({ slug: "a", line: 9 });
+    expect(current(s.tabs[0]!).state).toEqual({ scroll: 4 });
   });
 
   test("slots are stable names, never ids", () => {
@@ -242,5 +254,48 @@ describe("persistence", () => {
   test("a stored session that isn't one reads as nothing", () => {
     expect(parseSession("nope")).toBeNull();
     expect(parseSession(JSON.stringify({ tabs: 3 }))).toBeNull();
+  });
+});
+
+describe("setStrip: the strip as a list of pages", () => {
+  test("keeps the tabs still listed with their history, opens the new ones and drops the rest, in the list's order", () => {
+    let s = open(open(emptySession(), e(a)), e(b));
+    const sa = slotOf(s, "wiki:a");
+    s = navigate(s, sa, e(c));
+    s = setStrip(s, [wikiPageRef("d"), c]);
+    expect(ids(s)).toEqual(["wiki:d", "wiki:c"]);
+    expect(s.tabs[1]!.slot).toBe(sa);
+    expect(s.tabs[1]!.entries).toHaveLength(2);
+  });
+
+  test("a pinned ref opens pinned; the same list is the same session", () => {
+    const pinned = { ...a, pinned: true as const };
+    const s = setStrip(emptySession(), [pinned, b]);
+    expect(s.tabs[0]!.pinned).toBe(true);
+    expect(setStrip(s, refsOf(s))).toBe(s);
+    expect(refsOf(s).map((r) => r.id)).toEqual(["wiki:a", "wiki:b"]);
+  });
+
+  test("dropping the active tab activates the most recent one left", () => {
+    let s = open(open(emptySession(), e(a)), e(b));
+    s = setStrip(s, [a]);
+    expect(s.active).toBe(slotOf(s, "wiki:a"));
+  });
+});
+
+describe("dropCurrent: the page's record is gone", () => {
+  test("goes back, dropping the entry, so Forward never leads to it", () => {
+    let s = open(emptySession(), e(a));
+    const slot = s.active!;
+    s = navigate(navigate(s, slot, e(b)), slot, e(c));
+    s = back(s, slot);
+    s = dropCurrent(s, slot);
+    expect(ids(s)).toEqual(["wiki:a"]);
+    expect(s.tabs[0]!.entries.map((x) => x.ref.id)).toEqual(["wiki:a", "wiki:c"]);
+  });
+
+  test("with nothing to go back to, closes the tab", () => {
+    const s = open(emptySession(), e(a));
+    expect(dropCurrent(s, s.active!).tabs).toEqual([]);
   });
 });

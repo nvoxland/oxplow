@@ -8,7 +8,7 @@ import { searchLauncher } from "../../support/ui.js";
 
 /// A page made of lens files: typed params in its toolbar narrow the
 /// commits, and clicking one fills the next section with its files.
-test("the rail's params narrow a lens, and a row click shows the next section its pick", async ({ fresh }) => {
+test("the rail's params narrow a lens, a row click shows the next section its pick, and the tab keeps both", async ({ fresh }) => {
   const { page, daemon } = fresh;
   const git = (...args: string[]) =>
     execFileSync("git", ["-c", "user.name=E2E", "-c", "user.email=e2e@example.com", ...args], { cwd: daemon.project, stdio: "ignore" });
@@ -59,6 +59,25 @@ test("the rail's params narrow a lens, and a row click shows the next section it
   await expect(row).toHaveAttribute("aria-selected", "true");
   await expect(files).toContainText("numbat.txt");
   await expect(rail.getByTestId("lens-rail-selection")).toContainText("Add the numbat");
+
+  // The page's view is its tab's entry: the search and the pick are in
+  // its id, so a bookmark or a reopened tab keeps them.
+  const body = page.locator('[data-testid^="center-tab-body-lens:commit-history/history"]:visible');
+  await expect(body).toHaveAttribute("data-testid", /q=numbat/);
+  await expect(body).toHaveAttribute("data-testid", /commit=/);
+  // Picking pushed an entry: Back un-selects, the filter stays, and the
+  // page isn't mounted again (Forward finds the picked row's facts).
+  await page.getByTestId("page-nav-back").filter({ visible: true }).click();
+  await expect(row).toHaveAttribute("aria-selected", "false");
+  await expect(rail.getByTestId("lens-rail-selection")).toContainText("Click a row to select it.");
+  await expect(filters.getByTestId("lens-param-q-value")).toHaveText("numbat");
+  await page.getByTestId("page-nav-forward").filter({ visible: true }).click();
+  await expect(row).toHaveAttribute("aria-selected", "true");
+  await expect(rail.getByTestId("lens-rail-selection")).toContainText("Add the numbat");
+  // A reload brings the tab back with its values.
+  await page.reload();
+  await expect(filters.getByTestId("lens-param-q-value")).toHaveText("numbat");
+  await expect(files).toContainText("numbat.txt");
 
   // A custom range opens over the page; Escape closes it.
   await filters.getByTestId("lens-param-range-value").click();

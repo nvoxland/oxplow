@@ -40,7 +40,9 @@ test("the wiki index filters by body and marks the match", async ({ page, daemon
   await openFromLauncher(page, "Wiki");
   const index = page.locator('[data-section="pages"]:visible');
   await expect(index).toContainText("Kiwi notes");
-  await page.getByLabel("Search titles + bodies").filter({ visible: true }).fill("quokka");
+  // The search is a row in the page's rail: its value opens it.
+  await page.getByTestId("lens-param-filter-value").filter({ visible: true }).click();
+  await page.getByTestId("lens-param-filter-edit").fill("quokka");
   await page.keyboard.press("Enter");
   await expect(index).toContainText("Kiwi notes");
   await expect(index).not.toContainText("Other notes");

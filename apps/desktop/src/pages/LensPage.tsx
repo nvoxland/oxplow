@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Page } from "../tabs/Page.js";
-import { usePageTitle } from "../tabs/PageNavigationContext.js";
+import { useOptionalPageNavigation, usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Stream } from "../tauri-bridge/index.js";
 import { querySql, runLens, type LensRun, type SqlCell } from "../api.js";
@@ -18,9 +18,12 @@ import type { PageAction } from "../kit/actions.js";
 export interface LensPageProps {
   /** `<extension>/<slug>`. */
   lensId: string;
-  /** Param values the tab opened with (from its id), e.g. a slot's
-   *  `{ effort_id }`; the params form edits on top of them. */
-  initialParams?: Record<string, SqlCell>;
+  /** Its view: the param values its ref carries (a slot's `{ effort_id }`,
+   *  a filter, a row picked). The page draws from them. */
+  params?: Record<string, SqlCell>;
+  /** The page's ref at other params (`lensRef`, an extension page's ref):
+   *  how a change of view goes back to its tab. */
+  pageRef?(params: Record<string, SqlCell>): TabRef;
   /** The page's name as its host knows it (an extension page's manifest
    *  title); the lens's own title otherwise. */
   title?: string;
@@ -36,13 +39,21 @@ export interface LensPageProps {
  * picked, and where it comes from; Copy, Add to Agent Context and its
  * own actions are the page's, in the nav bar. See `.context/extensions.md`.
  */
-export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOpenPage }: LensPageProps) {
+export function LensPage({ lensId, params, pageRef, title: pageTitle, stream, onOpenPage }: LensPageProps) {
   const streamId = stream?.id ?? null;
   const [run, setRun] = useState<LensRun | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [overrides, setOverrides] = useState<Record<string, SqlCell>>(initialParams ?? {});
+  // Its view is its tab's entry (`tabs/session.ts`): a change goes back
+  // through the tab and the page redraws from the ref it gets. Outside a
+  // tab (no `replaceRef`) it keeps its view itself.
+  const nav = useOptionalPageNavigation();
+  const inTab = !!nav?.replaceRef && !!pageRef;
+  const [own, setOwn] = useState<Record<string, SqlCell>>(params ?? {});
+  const fromRef = params ?? NO_PARAMS;
+  const overrides = inTab ? fromRef : own;
   const overridesRef = useRef(overrides);
   overridesRef.current = overrides;
+  const viewKey = JSON.stringify(overrides);
 
   const guard = useRequestGuard();
 
@@ -66,7 +77,7 @@ export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOp
 
   useEffect(() => {
     void refresh();
-  }, [refresh, overrides]);
+  }, [refresh, viewKey]);
 
   useRerunOnChange(run?.result.reads ?? NO_READS, () => void refresh());
 
@@ -74,15 +85,16 @@ export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOp
   const title = pageTitle ?? lens?.title ?? lensId;
   usePageTitle(title);
 
-  // Publish this lens's live params so an agent asking "what am I looking
-  // at" (`get_open_page`) re-runs it with exactly these values.
+  // Publish this lens's live params, under the id its tab shows, so an
+  // agent asking "what am I looking at" (`get_open_page`) re-runs it with
+  // exactly these values.
   const runParams = run?.params;
+  const pageId = nav?.ref?.id ?? lensRef(lensId, overrides).id;
   useEffect(() => {
     const store = getPageDetailStore();
-    const pageId = lensRef(lensId, initialParams).id;
     store.publish(pageId, { lensId, params: runParams ?? {} });
     return () => store.publish(pageId, null);
-  }, [lensId, initialParams, runParams]);
+  }, [lensId, pageId, runParams]);
 
   const improveWithAgent = () => {
     const params = lens ? changedParams(lens, run?.params ?? {}) : {};
@@ -106,7 +118,16 @@ export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOp
   // with the row it picked for the rail's Selection).
   const [picked, setPicked] = useState<Record<string, PickedRow>>({});
   const setParam = (name: string, value: SqlCell, row?: PickedRow) => {
-    setOverrides((o) => ({ ...o, [name]: value }));
+    // What the ref carries: the values that differ from the defaults.
+    const next = lens ? changedParams(lens, { ...overridesRef.current, [name]: value }) : { ...overridesRef.current, [name]: value };
+    if (inTab) {
+      // A filter refines what's shown (the entry is replaced); a row picked
+      // is somewhere to come back from (an entry is pushed).
+      const role = lens?.params.find((p) => p.name === name)?.role;
+      nav!.replaceRef!(pageRef!(next), { push: role === "selection" && value !== null });
+    } else {
+      setOwn(next);
+    }
     setPicked((p) => {
       const { [name]: _, ...rest } = p;
       return row ? { ...rest, [name]: row } : rest;
@@ -146,6 +167,8 @@ export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOp
     </Page>
   );
 }
+
+const NO_PARAMS: Record<string, SqlCell> = {};
 
 /** Whether an extension's source changed after the deployment that runs:
  *  its live source hash against the deployed one. False with no

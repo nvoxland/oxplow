@@ -11,6 +11,9 @@ import { tabsToCloseOthers, tabsToCloseRight } from "./tabClose.js";
 
 export interface CenterTab {
   id: string;
+  /** Its body's React key, when it must outlive a change of `id` (a page
+   *  whose params changed stays mounted); `id` otherwise. */
+  key?: string;
   label: string;
   closable: boolean;
   /** Pinned: it leads the strip, isn't dragged or dropped on, and the
@@ -423,7 +426,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
           const isActive = tab.id === active?.id;
           return (
             <div
-              key={tab.id}
+              key={tab.key ?? tab.id}
               style={{
                 display: isActive ? "flex" : "none",
                 flex: 1,

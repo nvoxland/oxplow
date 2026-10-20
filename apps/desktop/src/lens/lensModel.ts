@@ -15,7 +15,7 @@ import {
   formatRelative,
   formatShortDateTime,
 } from "../components/format.js";
-import type { ColumnFormat, Extension, Lens, SlotAt, LensChart, LensLink, LensRun, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
+import type { ColumnFormat, Extension, Lens, LensParam, SlotAt, LensChart, LensLink, LensRun, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/RailHud/sections.js";
 import { diffRef, duplicateBlockRef, effortDiffRef, fileRef, gitCommitRef, lensRef, metricRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
@@ -367,12 +367,28 @@ export function parseParamInput(text: string): SqlCell {
  *  `oxplow_run_lens` needs as overrides and what an agent mention should carry. */
 export function changedParams(lens: Lens, values: Record<string, SqlCell>): Record<string, SqlCell> {
   const out: Record<string, SqlCell> = {};
-  for (const p of lens.params) {
-    if (!(p.name in values)) continue;
-    const v = values[p.name] ?? null;
-    if (v !== (p.default ?? null)) out[p.name] = v;
+  for (const [name, value] of Object.entries(values)) {
+    const param = lens.params.find((p) => p.name === name);
+    if (!param || !isDefaultValue(param, value ?? null)) out[name] = value ?? null;
   }
   return out;
+}
+
+/** Whether `value` is `param`'s default: a bool by truth (its echo is
+ *  0/1, a ref's `true`/`false`), anything else by its text. */
+export function isDefaultValue(param: Pick<LensParam, "type" | "options" | "default">, value: SqlCell): boolean {
+  const fallback = param.default ?? null;
+  const type = param.type ?? ((param.options?.length ?? 0) > 0 ? "choice" : "text");
+  if (type === "bool") return truthy(value) === truthy(fallback);
+  return text(value) === text(fallback);
+}
+
+function truthy(value: SqlCell): boolean {
+  return value === true || (typeof value === "number" && value !== 0) || (typeof value === "string" && value !== "" && value !== "0" && value !== "false");
+}
+
+function text(value: SqlCell): string {
+  return value === null || value === undefined ? "" : String(value);
 }
 
 /** Events that can't change what a lens shows (UI bookkeeping). */

@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
+import { useState } from "react";
 
 import { CenterTabs, type CenterTab } from "./CenterTabs.js";
 
@@ -128,4 +129,23 @@ test("an agent session's tab draws its harness's declared logo", () => {
   expect(within("agent_session:ses2")?.getAttribute("data-icon")).toBe("fallback");
   // Only a session's tab: another kind keeps its own kind icon.
   expect(within("file:a.ts")).toBeNull();
+});
+
+// A page whose params changed is the same page: with the same `key` its
+// body stays mounted while its id changes, so its state survives.
+test("a body with the same key keeps its state when its id changes", () => {
+  function Counter() {
+    const [n, setN] = useState(0);
+    return (
+      <button type="button" data-testid="count" onClick={() => setN(n + 1)}>
+        {n}
+      </button>
+    );
+  }
+  const tab = (id: string): CenterTab => ({ id, key: "t1/lens:x/y", label: "Lens", closable: true, render: () => <Counter /> });
+  const view = render(<CenterTabs tabs={[tab("lens:x/y")]} activeId="lens:x/y" onActivate={() => {}} onClose={() => {}} onReorder={() => {}} />);
+  fireEvent.click(view.getByTestId("count"));
+  view.rerender(<CenterTabs tabs={[tab("lens:x/y?range=7d")]} activeId="lens:x/y?range=7d" onActivate={() => {}} onClose={() => {}} onReorder={() => {}} />);
+  expect(view.getByTestId("count").textContent).toBe("1");
+  expect(view.getByTestId("center-tab-body-lens:x/y?range=7d")).not.toBeNull();
 });
