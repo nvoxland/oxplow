@@ -3945,6 +3945,12 @@ export type LensColumn = {
 	 *  case-insensitive occurrence of its current value marked.
 	 */
 	highlight?: string | null,
+	/**
+	 *  A param of the lens that clicking a row sets to this column's
+	 *  value, re-running what reads it (a document's other sections):
+	 *  master and detail. The row whose value it holds is drawn selected.
+	 */
+	select?: string | null,
 };
 
 /**  A `custom` lens's component and the props it starts with. */
@@ -4116,6 +4122,22 @@ export type LensParam = {
 	 *  `default` must be one; a run supplying another is refused.
 	 */
 	options?: LensParamOption[],
+	/**
+	 *  What it holds, and so how a page draws it. Left out, it is a
+	 *  `choice` when it has `options`, else `text`; a loaded lens always
+	 *  says.
+	 */
+	type?: ParamType | null,
+	/**
+	 *  Where a page draws it: the rail (the default) or the toolbar above
+	 *  the lens's body.
+	 */
+	place?: ParamPlace,
+	/**
+	 *  A `date_range`'s quick picks, of `1d 2d 3d 7d 30d 90d all`; the
+	 *  default is `1d 7d 30d all`.
+	 */
+	presets?: string[],
 };
 
 /**  One value a choice param takes, and what the viewer sees for it. */
@@ -5327,6 +5349,37 @@ export type PanelPlacement = {
  *  the current thread — which of `stream_id` / `thread_id` its lenses get.
  */
 export type PanelScope = "project" | "stream" | "thread";
+
+/**  Where a page draws a lens param. */
+export type ParamPlace = 
+/**  In the page's rail, under "Parameters". */
+"rail" | 
+/**  In the toolbar above the lens's body. */
+"toolbar";
+
+/**  What a lens param holds. */
+export type ParamType = 
+/**  Any value; a text box. */
+"text" | 
+/**  One of its `options`; a select. */
+"choice" | 
+/**  True or false, bound as 1 or 0; a checkbox. */
+"bool" | 
+/**
+ *  A span of time: a preset (`7d`, `all`) or `<from>..<to>` (dates or
+ *  times, either end empty for open). Its own value is that text;
+ *  the query also gets `:<name>_from` and `:<name>_to` (RFC 3339,
+ *  NULL for an open end), a date's `to` the day after so the day
+ *  counts.
+ */
+"date_range" | 
+/**  A branch's name, NULL for every branch; a select of the branches. */
+"branch" | 
+/**
+ *  Text to look for, trimmed, NULL when empty; a box that applies as
+ *  you type.
+ */
+"search";
 
 /**  An oxplow session a row is about. */
 export type PastSession = {

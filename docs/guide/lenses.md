@@ -69,6 +69,41 @@ empty: Nothing is blocked.
     local-history snapshot) or `git:<rev>` (a sha, branch or `HEAD`).
 - Unknown keys are errors, so typos show up instead of being ignored.
 
+### Typed params
+
+A param's `type` decides what it holds and which control the page draws:
+
+```yaml
+params:
+  - { name: range, type: date_range, place: toolbar, default: 7d, presets: [1d, 7d, 30d, all] }
+  - { name: q, type: search, place: toolbar }
+  - { name: branch, type: branch }
+  - { name: merged, type: bool, default: false }
+  - { name: state, default: open, options: [{ value: open, label: Open }, { value: done, label: Done }] }
+query: |
+  SELECT sha, subject FROM v_commit
+  WHERE (:range_from IS NULL OR committed_at >= :range_from)
+    AND (:range_to IS NULL OR committed_at < :range_to)
+    AND (:q IS NULL OR subject LIKE '%' || :q || '%')
+```
+
+- `text` (the default) is a text box; with `options` a param is a
+  `choice`, drawn as a select.
+- `bool` is a checkbox and binds 1 or 0.
+- `search` applies as you type; empty binds NULL.
+- `branch` picks one of the repository's branches; "All branches" binds NULL.
+- `date_range` is a preset (`1d`, `2d`, `3d`, `7d`, `30d`, `90d`, `all`)
+  or a custom `from..to`. The query gets `:<name>_from` and
+  `:<name>_to` as times, NULL for an open end; a custom range includes
+  its last day.
+- `place: toolbar` draws the control above the lens instead of in the
+  side panel.
+
+A column's `select: <param>` makes a row clickable: clicking it sets the
+param to that column's value. In a document, the other sections that
+read the param re-run, so one section can be the list and another the
+detail of the row picked. The document declares the param too.
+
 Charts name the columns they draw:
 
 ```yaml

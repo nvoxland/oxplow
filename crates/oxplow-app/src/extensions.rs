@@ -542,6 +542,11 @@ pub struct LensColumn {
     /// case-insensitive occurrence of its current value marked.
     #[serde(default)]
     pub highlight: Option<String>,
+    /// A param of the lens that clicking a row sets to this column's
+    /// value, re-running what reads it (a document's other sections):
+    /// master and detail. The row whose value it holds is drawn selected.
+    #[serde(default)]
+    pub select: Option<String>,
 }
 
 /// How a column's value reads in the UI. An agent reads the raw value.
@@ -699,7 +704,79 @@ pub struct LensParam {
     /// `default` must be one; a run supplying another is refused.
     #[serde(default)]
     pub options: Vec<LensParamOption>,
+    /// What it holds, and so how a page draws it. Left out, it is a
+    /// `choice` when it has `options`, else `text`; a loaded lens always
+    /// says.
+    #[serde(default, rename = "type")]
+    pub kind: Option<ParamType>,
+    /// Where a page draws it: the rail (the default) or the toolbar above
+    /// the lens's body.
+    #[serde(default)]
+    pub place: ParamPlace,
+    /// A `date_range`'s quick picks, of `1d 2d 3d 7d 30d 90d all`; the
+    /// default is `1d 7d 30d all`.
+    #[serde(default)]
+    pub presets: Vec<String>,
 }
+
+/// What a lens param holds.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ParamType {
+    /// Any value; a text box.
+    Text,
+    /// One of its `options`; a select.
+    Choice,
+    /// True or false, bound as 1 or 0; a checkbox.
+    Bool,
+    /// A span of time: a preset (`7d`, `all`) or `<from>..<to>` (dates or
+    /// times, either end empty for open). Its own value is that text;
+    /// the query also gets `:<name>_from` and `:<name>_to` (RFC 3339,
+    /// NULL for an open end), a date's `to` the day after so the day
+    /// counts.
+    DateRange,
+    /// A branch's name, NULL for every branch; a select of the branches.
+    Branch,
+    /// Text to look for, trimmed, NULL when empty; a box that applies as
+    /// you type.
+    Search,
+}
+
+/// Where a page draws a lens param.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    specta::Type,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ParamPlace {
+    /// In the page's rail, under "Parameters".
+    #[default]
+    Rail,
+    /// In the toolbar above the lens's body.
+    Toolbar,
+}
+
+/// A `date_range`'s presets and how far back each reaches (`all`: no
+/// start).
+const RANGE_PRESETS: &[(&str, Option<i64>)] = &[
+    ("1d", Some(1)),
+    ("2d", Some(2)),
+    ("3d", Some(3)),
+    ("7d", Some(7)),
+    ("30d", Some(30)),
+    ("90d", Some(90)),
+    ("all", None),
+];
 
 /// One value a choice param takes, and what the viewer sees for it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
@@ -710,37 +787,171 @@ pub struct LensParamOption {
 }
 
 impl LensParam {
-    /// Whether `value` is one this param takes: anything when it has no
-    /// options.
-    fn allows(&self, value: &SqlCell) -> bool {
-        self.options.is_empty()
-            || matches!(value, SqlCell::Text(v) if self.options.iter().any(|o| &o.value == v))
+    /// Its type, as written or as it follows from `options`.
+    pub fn kind(&self) -> ParamType {
+        self.kind.unwrap_or(if self.options.is_empty() {
+            ParamType::Text
+        } else {
+            ParamType::Choice
+        })
+    }
+
+    /// `value` as this param binds it, or why it doesn't take it. NULL is
+    /// always taken (no value).
+    fn take(&self, value: &SqlCell) -> Result<SqlCell, String> {
+        let shown = || match value {
+            SqlCell::Text(v) => format!("`{v}`"),
+            other => format!("`{other:?}`"),
+        };
+        if matches!(value, SqlCell::Null(())) {
+            return Ok(value.clone());
+        }
+        match self.kind() {
+            ParamType::Text => Ok(value.clone()),
+            ParamType::Choice => match value {
+                SqlCell::Text(v) if self.options.iter().any(|o| &o.value == v) => Ok(value.clone()),
+                _ => Err(format!(
+                    "takes one of {}, not {}",
+                    self.options
+                        .iter()
+                        .map(|o| o.value.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    shown()
+                )),
+            },
+            ParamType::Bool => match value {
+                SqlCell::Bool(b) => Ok(SqlCell::Int(i64::from(*b))),
+                SqlCell::Int(n @ (0 | 1)) => Ok(SqlCell::Int(*n)),
+                SqlCell::Text(t) if matches!(t.as_str(), "true" | "1") => Ok(SqlCell::Int(1)),
+                SqlCell::Text(t) if matches!(t.as_str(), "false" | "0") => Ok(SqlCell::Int(0)),
+                _ => Err(format!("is true or false, not {}", shown())),
+            },
+            ParamType::Search | ParamType::Branch => match value {
+                SqlCell::Text(t) if t.trim().is_empty() => Ok(SqlCell::Null(())),
+                SqlCell::Text(t) => Ok(SqlCell::Text(t.trim().to_string())),
+                _ => Err(format!("is text, not {}", shown())),
+            },
+            ParamType::DateRange => match value {
+                SqlCell::Text(t) if range_ends(t, time::OffsetDateTime::now_utc()).is_some() => {
+                    Ok(value.clone())
+                }
+                _ => Err(format!(
+                    "is a preset ({}) or `<from>..<to>`, not {}",
+                    RANGE_PRESETS
+                        .iter()
+                        .map(|(k, _)| *k)
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    shown()
+                )),
+            },
+        }
     }
 }
 
-/// A choice param whose default isn't one of its options (or that has
-/// none: a choice starts somewhere).
+/// A date_range value's two ends as RFC 3339 text (`None` for an open
+/// end), or `None` when it isn't one: a preset back from `now`, or
+/// `<from>..<to>` of dates or times, `to` not before `from`. A date's
+/// `to` is the next day's start, so the day counts.
+fn range_ends(value: &str, now: time::OffsetDateTime) -> Option<(Option<String>, Option<String>)> {
+    use time::format_description::well_known::Rfc3339;
+    if let Some((_, days)) = RANGE_PRESETS.iter().find(|(k, _)| *k == value) {
+        let from = match days {
+            Some(d) => Some((now - time::Duration::days(*d)).format(&Rfc3339).ok()?),
+            None => None,
+        };
+        return Some((from, None));
+    }
+    let (from, to) = value.split_once("..")?;
+    let date = time::macros::format_description!("[year]-[month]-[day]");
+    // An end as given (its text, its instant), the day after for a `to` date.
+    let end = |text: &str, last: bool| -> Option<Option<(String, time::OffsetDateTime)>> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Some(None);
+        }
+        if let Ok(at) = time::OffsetDateTime::parse(text, &Rfc3339) {
+            return Some(Some((text.to_string(), at)));
+        }
+        let day = time::Date::parse(text, &date).ok()?;
+        let day = if last { day.next_day()? } else { day };
+        Some(Some((day.format(&date).ok()?, day.midnight().assume_utc())))
+    };
+    let (from, to) = (end(from, false)?, end(to, true)?);
+    if let (Some((_, a)), Some((_, b))) = (&from, &to) {
+        if b < a {
+            return None;
+        }
+    }
+    Some((from.map(|(t, _)| t), to.map(|(t, _)| t)))
+}
+
+/// A param whose type its other fields or its default don't fit: a
+/// choice with no options or a default not among them, options or
+/// presets on another type, an unknown preset.
 fn param_problem(lens: &Lens) -> Option<String> {
-    lens.params
-        .iter()
-        .filter(|p| !p.options.is_empty())
-        .find(|p| !p.default.as_ref().is_some_and(|d| p.allows(d)))
-        .map(|p| {
-            let default = match &p.default {
-                Some(SqlCell::Text(v)) => format!("`{v}`"),
-                Some(other) => format!("`{other:?}`"),
-                None => "no default".into(),
-            };
-            format!(
-                "param `{}` has {default}, not one of its options ({})",
-                p.name,
-                p.options
-                    .iter()
-                    .map(|o| o.value.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
+    lens.params.iter().find_map(|p| {
+        let kind = p.kind();
+        let problem = if kind == ParamType::Choice && p.options.is_empty() {
+            Some("a choice needs `options`".to_string())
+        } else if kind != ParamType::Choice && !p.options.is_empty() {
+            Some("`options` are only for a choice".to_string())
+        } else if kind != ParamType::DateRange && !p.presets.is_empty() {
+            Some("`presets` are only for a date_range".to_string())
+        } else if let Some(bad) = p
+            .presets
+            .iter()
+            .find(|k| !RANGE_PRESETS.iter().any(|(r, _)| r == k))
+        {
+            Some(format!("unknown preset `{bad}`"))
+        } else if kind == ParamType::Choice && p.default.is_none() {
+            // A choice starts somewhere.
+            Some("a choice needs a `default`, one of its options".to_string())
+        } else {
+            p.default
+                .as_ref()
+                .and_then(|d| p.take(d).err())
+                .map(|why| format!("its default {why}"))
+        };
+        problem.map(|why| format!("param `{}`: {why}", p.name))
+    })
+}
+
+/// `params` with each one's type written out, so a page never infers it.
+fn typed(params: Vec<LensParam>) -> Vec<LensParam> {
+    params
+        .into_iter()
+        .map(|p| LensParam {
+            kind: Some(p.kind()),
+            ..p
         })
+        .collect()
+}
+
+/// What a lens's query binds: its params, and each date_range's
+/// `<name>_from` / `<name>_to`.
+fn binds(
+    lens: &Lens,
+    params: &BTreeMap<String, SqlCell>,
+    now: time::OffsetDateTime,
+) -> Vec<(String, SqlCell)> {
+    let mut out: Vec<(String, SqlCell)> =
+        params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    let text = |t: Option<String>| t.map_or(SqlCell::Null(()), SqlCell::Text);
+    for p in lens
+        .params
+        .iter()
+        .filter(|p| p.kind() == ParamType::DateRange)
+    {
+        let (from, to) = match params.get(&p.name) {
+            Some(SqlCell::Text(v)) => range_ends(v, now).unwrap_or((None, None)),
+            _ => (None, None),
+        };
+        out.push((format!("{}_from", p.name), text(from)));
+        out.push((format!("{}_to", p.name), text(to)));
+    }
+    out
 }
 
 /// A lens file as written on disk (`lenses/<slug>.yaml`).
@@ -3354,7 +3565,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 description: l.description,
                 query: l.query,
                 viz: l.viz,
-                params: l.params,
+                params: typed(l.params),
                 columns: l.columns,
                 empty: l.empty,
                 chart: l.chart,
@@ -3415,6 +3626,21 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         }
     }
     ext.lenses.retain(|l| !bad.contains(&l.id));
+    let selects: Vec<(String, String)> = ext
+        .lenses
+        .iter()
+        .filter_map(|l| {
+            Some((
+                l.id.clone(),
+                format!("{}: {}", l.path, selects_problem(l, &ext.lenses)?),
+            ))
+        })
+        .collect();
+    for (_, problem) in &selects {
+        ext.errors.push(problem.clone());
+    }
+    ext.lenses
+        .retain(|l| !selects.iter().any(|(id, _)| id == &l.id));
 
     for s in slot_files {
         let mount_line = entry_line(&manifest, "ui", "lens", &s.lens);
@@ -4121,13 +4347,31 @@ fn shape_problem(
 /// A column that highlights a param the lens doesn't declare.
 fn highlight_problem(lens: &Lens) -> Option<String> {
     lens.columns.iter().find_map(|c| {
-        let name = c.highlight.as_deref()?;
-        (!lens.params.iter().any(|p| p.name == name)).then(|| {
-            format!(
-                "column `{}`: `highlight: {name}` names a param the lens doesn't declare",
-                c.key
-            )
-        })
+        [("highlight", &c.highlight), ("select", &c.select)]
+            .into_iter()
+            .find_map(|(field, name)| {
+                let name = name.as_deref()?;
+                (!lens.params.iter().any(|p| p.name == name)).then(|| {
+                    format!(
+                        "column `{}`: `{field}: {name}` names a param the lens doesn't declare",
+                        c.key
+                    )
+                })
+            })
+    })
+}
+
+/// A document's or dashboard's own part whose rows select a param the
+/// page doesn't declare: the page holds the value its parts share, so a
+/// click there would reach nothing.
+fn selects_problem(lens: &Lens, lenses: &[Lens]) -> Option<String> {
+    lens.part_lenses().find_map(|id| {
+        let part = lenses.iter().find(|l| l.id == id)?;
+        part.columns
+            .iter()
+            .filter_map(|c| c.select.as_deref())
+            .find(|name| !lens.params.iter().any(|p| &p.name == name))
+            .map(|name| format!("part `{id}` selects `{name}`, a param this lens doesn't declare"))
     })
 }
 
@@ -4489,8 +4733,9 @@ fn explain_unsynced(
 }
 
 /// The value of each of `lens`'s params: as supplied, else from the
-/// context (`stream_id` / `thread_id`), else its default, else NULL. An
-/// unknown supplied name is refused, naming the lens's params.
+/// context (`stream_id` / `thread_id`), else its default, else NULL, each
+/// as its type binds it (`LensParam::take`). An unknown supplied name, or
+/// a value its param doesn't take, is refused.
 pub fn resolve_params(
     lens: &Lens,
     supplied: &BTreeMap<String, SqlCell>,
@@ -4511,30 +4756,17 @@ pub fn resolve_params(
             }
         )));
     }
-    if let Some(p) = lens
-        .params
-        .iter()
-        .find(|p| supplied.get(&p.name).is_some_and(|v| !p.allows(v)))
-    {
-        return Err(DomainError::Invalid(format!(
-            "lens {}: param `{}` takes one of {}",
-            lens.id,
-            p.name,
-            p.options
-                .iter()
-                .map(|o| o.value.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )));
-    }
     let mut params = BTreeMap::new();
     for p in &lens.params {
-        let v = supplied
-            .get(&p.name)
-            .cloned()
-            .or_else(|| ctx.value(&p.name))
-            .or_else(|| p.default.clone())
-            .unwrap_or(SqlCell::Null(()));
+        let v = match supplied.get(&p.name) {
+            Some(v) => p.take(v).map_err(|why| {
+                DomainError::Invalid(format!("lens {}: param `{}` {why}", lens.id, p.name))
+            })?,
+            None => ctx
+                .value(&p.name)
+                .or_else(|| p.default.as_ref().and_then(|d| p.take(d).ok()))
+                .unwrap_or(SqlCell::Null(())),
+        };
         params.insert(p.name.clone(), v);
     }
     Ok(params)
@@ -4589,8 +4821,7 @@ async fn execute(
     ctx: &LensContext,
 ) -> Result<LensRun, DomainError> {
     let params = resolve_params(&lens, &supplied, ctx)?;
-    let named: Vec<(String, SqlCell)> =
-        params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    let named = binds(&lens, &params, time::OffsetDateTime::now_utc());
     // A lens's `:stream_id` is the stream its metrics (`metric_grid()`)
     // are read over.
     let stream = match params.get("stream_id") {
@@ -5114,7 +5345,7 @@ impl Lens {
             description: spec.description.clone(),
             query: spec.query.clone(),
             viz: spec.viz,
-            params: spec.params.clone(),
+            params: typed(spec.params.clone()),
             columns: spec.columns.clone(),
             empty: spec.empty.clone(),
             chart: spec.chart.clone(),
@@ -7474,6 +7705,181 @@ commands:
         assert!(resolve_params(ok, &supplied, &LensContext::default()).is_ok());
         let supplied = BTreeMap::from([("mode".to_string(), SqlCell::Text("all".into()))]);
         assert!(resolve_params(ok, &supplied, &LensContext::default()).is_err());
+    }
+
+    /// A param's `type` says what it holds and how a page draws it; with
+    /// none it's a choice when it has options, else text. What doesn't fit
+    /// its type is refused at load.
+    #[test]
+    fn typed_params_are_checked_at_load() {
+        let (_d, ext) = load_x(
+            &[
+                ("ok", "title: OK\nquery: SELECT 1 AS a\nparams:\n  - { name: range, type: date_range, place: toolbar, presets: [7d, all], default: 7d }\n  - { name: flag, type: bool, default: true }\n  - { name: q, type: search, place: toolbar }\n  - { name: br, type: branch }\n  - { name: mode, default: a, options: [{ value: a, label: A }] }\n  - { name: free }\n"),
+                ("choice_without_options", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, type: choice }]\n"),
+                ("options_on_text", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, type: text, options: [{ value: a, label: A }] }]\n"),
+                ("presets_on_text", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, presets: [7d] }]\n"),
+                ("unknown_preset", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, type: date_range, presets: [5y] }]\n"),
+                ("bad_range", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, type: date_range, default: soon }]\n"),
+                ("bad_bool", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, type: bool, default: maybe }]\n"),
+            ],
+            "",
+        );
+        let ok = ext
+            .lenses
+            .iter()
+            .find(|l| l.slug == "ok")
+            .expect("ok loads");
+        let kinds: Vec<_> = ok.params.iter().map(|p| (p.kind, p.place)).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                (Some(ParamType::DateRange), ParamPlace::Toolbar),
+                (Some(ParamType::Bool), ParamPlace::Rail),
+                (Some(ParamType::Search), ParamPlace::Toolbar),
+                (Some(ParamType::Branch), ParamPlace::Rail),
+                (Some(ParamType::Choice), ParamPlace::Rail),
+                (Some(ParamType::Text), ParamPlace::Rail),
+            ]
+        );
+        let errs = ext.errors.join("\n");
+        for (slug, says) in [
+            ("choice_without_options", "needs `options`"),
+            ("options_on_text", "`options` are only for a choice"),
+            ("presets_on_text", "`presets` are only for a date_range"),
+            ("unknown_preset", "`5y`"),
+            ("bad_range", "`soon`"),
+            ("bad_bool", "`maybe`"),
+        ] {
+            assert!(ext.lenses.iter().all(|l| l.slug != slug), "{slug} loaded");
+            assert!(
+                errs.lines()
+                    .any(|e| e.contains(&format!("{slug}.yaml")) && e.contains(says)),
+                "{slug}: {errs}"
+            );
+        }
+    }
+
+    /// A bool binds 1 or 0, a search its trimmed text or NULL, and a
+    /// date_range its own text plus `:<name>_from` / `:<name>_to`: a
+    /// preset back from now, a custom range's days with the last one
+    /// included, `all` neither end. What doesn't fit is refused.
+    #[tokio::test]
+    async fn typed_params_bind_by_type() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
+        write(
+            dir.path(),
+            ".oxplow/extensions/review/lenses/typed.yaml",
+            "title: Typed\nparams:\n  - { name: flag, type: bool, default: false }\n  - { name: q, type: search }\n  - { name: range, type: date_range, default: all }\nquery: SELECT :flag AS flag, :q AS q, :range AS range, :range_from AS f, :range_to AS t\n",
+        );
+        let sl = layer().await;
+        let run = |over: Vec<(&str, &str)>| {
+            let supplied: BTreeMap<String, SqlCell> = over
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), SqlCell::Text(v.to_string())))
+                .collect();
+            let sl = &sl;
+            let root = dir.path();
+            async move {
+                run_lens(
+                    sl,
+                    &cat(),
+                    root,
+                    "review/typed",
+                    supplied,
+                    &LensContext::default(),
+                )
+                .await
+            }
+        };
+        let rows = |r: &LensRun| serde_json::to_value(&r.result.rows).unwrap();
+
+        let first = run(vec![]).await.unwrap();
+        assert_eq!(
+            rows(&first),
+            serde_json::json!([[0, null, "all", null, null]])
+        );
+        assert!(!first.params.contains_key("range_from"));
+
+        let custom = run(vec![
+            ("flag", "true"),
+            ("q", "  fix "),
+            ("range", "2026-10-01..2026-10-20"),
+        ])
+        .await
+        .unwrap();
+        assert_eq!(
+            rows(&custom),
+            serde_json::json!([[
+                1,
+                "fix",
+                "2026-10-01..2026-10-20",
+                "2026-10-01",
+                "2026-10-21"
+            ]])
+        );
+        assert_eq!(
+            run(vec![("q", "  ")]).await.unwrap().result.rows[0][1],
+            SqlCell::Null(())
+        );
+
+        let week = run(vec![("range", "7d")]).await.unwrap();
+        let SqlCell::Text(from) = &week.result.rows[0][3] else {
+            panic!("7d binds a from: {:?}", week.result.rows)
+        };
+        let from =
+            time::OffsetDateTime::parse(from, &time::format_description::well_known::Rfc3339)
+                .expect("an RFC 3339 time");
+        let back = time::OffsetDateTime::now_utc() - from;
+        assert!(
+            back > time::Duration::days(7) - time::Duration::minutes(1)
+                && back < time::Duration::days(7) + time::Duration::minutes(1),
+            "{back}"
+        );
+        assert_eq!(week.result.rows[0][4], SqlCell::Null(()));
+
+        for (k, v) in [
+            ("flag", "maybe"),
+            ("range", "soon"),
+            ("range", "2026-10-20..2026-10-01"),
+        ] {
+            assert!(run(vec![(k, v)]).await.is_err(), "{k}={v} was taken");
+        }
+    }
+
+    /// A column's `select` names a param the lens declares; a document's
+    /// own section that selects needs the document to hold that param, or
+    /// a click in it couldn't reach the other sections.
+    #[test]
+    fn a_select_names_a_param_its_page_holds() {
+        let (_d, ext) = load_x(
+            &[
+                ("rows", "title: Rows\nquery: SELECT 'a' AS sha\nparams: [{ name: commit }]\ncolumns: [{ key: sha, select: commit }]\n"),
+                ("nope", "title: Nope\nquery: SELECT 'a' AS sha\ncolumns: [{ key: sha, select: commit }]\n"),
+                ("holds", "title: Holds\nviz: document\nparams: [{ name: commit }]\nsections: [{ lens: rows }]\n"),
+                ("lacks", "title: Lacks\nviz: document\nsections: [{ lens: rows }]\n"),
+            ],
+            "",
+        );
+        let rows = ext
+            .lenses
+            .iter()
+            .find(|l| l.slug == "rows")
+            .expect("rows loads");
+        assert_eq!(rows.columns[0].select.as_deref(), Some("commit"));
+        assert!(ext.lenses.iter().any(|l| l.slug == "holds"));
+        for slug in ["nope", "lacks"] {
+            assert!(ext.lenses.iter().all(|l| l.slug != slug), "{slug} loaded");
+        }
+        let errs = ext.errors.join("\n");
+        assert!(
+            errs.contains("nope.yaml") && errs.contains("`select: commit`"),
+            "{errs}"
+        );
+        assert!(
+            errs.contains("lacks.yaml") && errs.contains("x/rows") && errs.contains("`commit`"),
+            "{errs}"
+        );
     }
 
     /// Validation checks every block's columns, not only the chart's.

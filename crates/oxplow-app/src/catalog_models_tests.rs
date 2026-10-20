@@ -56,7 +56,9 @@ async fn lenses_and_extensions_are_models_that_follow_the_catalog() {
                 json!("table"),
                 json!(0),
                 json!("Data"),
-                json!(r#"[{"name":"kind","label":null,"default":null,"options":[]}]"#)
+                json!(
+                    r#"[{"name":"kind","label":null,"default":null,"options":[],"type":"text","place":"rail","presets":[]}]"#
+                )
             ],
             vec![
                 json!("lens:acme/detail"),

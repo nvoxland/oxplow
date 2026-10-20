@@ -510,7 +510,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     contribution kinds; see "`extension.yaml`" below).
   - `lenses/<slug>.yaml` contains `title`, `description`, `query`, `viz`
     (`table` | `list` | `number` | `markdown`), `params` (`name`, `label`,
-    `default`), `columns` (`key`, `label`, `link: {kind: page | file |
+    `default`, `type`, `place`, …), `columns` (`key`, `label`, `select`, `link: {kind: page | file |
     wiki | effort-diff | …, from}` — a work item links as `page` by its
     ref) and `empty`.
   - Unknown keys are errors, so typos surface instead of being ignored.
@@ -1781,8 +1781,31 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
 `description`, `query`, `viz`, `params`, `columns`, `empty`, `chart`,
 `sections`, `tiles`, `launcher`, `hidden`, `actions` and `alert`.
 
-- `params`: `name`, `label`, `default`, `options`. Untyped: a value is
-  bound as-is.
+- `params`: `name`, `label`, `default`, `options`, `type`, `place`,
+  `presets`.
+- **Typed params** (`ParamType`, `LensParam::take`): `type` is `text`
+  (bound as-is; the default with no `options`), `choice` (one of
+  `options`; the default with them), `bool` (`true`/`false`/`1`/`0`,
+  bound 1 or 0), `search` and `branch` (text, trimmed, NULL when empty;
+  `branch` NULL means every branch), or `date_range`. A loaded lens
+  always says its type (`typed`), so a page never infers it. A
+  `date_range`'s value is one text — a preset (`1d 2d 3d 7d 30d 90d
+  all`; `presets:` picks the page's quick picks, default `1d 7d 30d
+  all`) or `<from>..<to>` of dates or RFC 3339 times, an end empty for
+  open — so tab ids, `run.params` and agents see one value; `binds`
+  adds `:<name>_from` / `:<name>_to` (RFC 3339, NULL for an open end; a
+  date's `to` is the next day, so the day counts) just before the query
+  runs, never as params. The loader refuses `options` off a choice,
+  `presets` off a date_range, an unknown preset and a default its type
+  doesn't take (`param_problem`); a run supplying such a value is
+  refused (`resolve_params`). `place: toolbar` draws the control above
+  the lens's body instead of in the rail (`place: rail`, the default).
+- **`columns[].select: <param>`** — clicking a row sets that param to the
+  column's value, so whatever reads it re-runs: a document's other
+  sections, master and detail from existing pieces. It names a declared
+  param (`highlight_problem`), and a document's or dashboard's own part
+  that selects needs the page to declare the param too, since the page
+  holds what its parts share (`selects_problem`).
 - **Choice params.** `options: [{ value, label }]` makes a
   param a choice: a lens page shows a select, and an extension panel
   whose body lens has one shows it as a toggle in the panel's header
