@@ -632,7 +632,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     "<ext>/<id>" }`): a **custom page**, the component filling the page
     body under core's nav bar (`pages/CustomPageView.tsx`), told the
     page's params, stream and thread in `init.page`, setting its title
-    and actions as data core draws ("Custom components", protocol 5). A
+    and actions as data core draws, and its params kept in its tab
+    entry (`setParams` / `params`; "Custom components", protocol 6). A
     page's `icon` is one of the ref-kind icons (`REF_KIND_ICONS`; an
     unknown one is a load error); the tab strip, launcher, Go To lists
     and backlinks draw it (`PageKindIcon` by the page's id), the lens
@@ -2586,8 +2587,17 @@ submission through `invoke_component_command`; closing it answers
 setActions, actions: [{ id, label, primary?, disabled? }] }` (the page's
 title and its nav-bar actions, data core draws; a press posts
 `{ type: action, id }` to the frame). `openForm`, `setTitle` and
-`setActions` are a custom page's: shown by a lens (which owns its page)
-they answer `INVALID`;
+`setActions` are a custom page's, and — protocol 6 — `{ id, method:
+setParams, params }` (string values, null drops one): the page's view
+goes into its tab entry (`CustomPageView` builds the page's ref and
+`replaceRef`s it — a component has no selection role, so it never
+pushes; going somewhere is `navigate`), and the host posts `{ type:
+params, params }` when the entry's params change (Back, Forward, the
+echo of its own `setParams`; `createBridgeHost` sends only what the
+frame hasn't seen). Shown by a lens (which owns its page) these answer
+`INVALID`. A component keeps no view state of its own: `check` warns
+(`bundle_warnings`) at a bundle script that uses `localStorage` or
+`sessionStorage`;
 replies `{ id, ok, result |
 error: { code, message, field? } }` (`field`: the input an `INVALID`
 refusal names, so a component's form marks it; protocol 4); a re-run sends `update { run }` — only

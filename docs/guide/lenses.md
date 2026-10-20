@@ -499,6 +499,9 @@ oxplow.connect().then(async (component) => {
   await component.setTitle(`Efforts since ${component.page.params.from}`);
   await component.setActions([{ id: "refresh", label: "Refresh", primary: true }]);
   component.onAction((id) => { if (id === "refresh") location.reload(); });
+  // Its view lives in its tab, so Back and a bookmark keep it:
+  //   await component.setParams({ from: "2026-10-01" });
+  //   component.onParams((params) => draw(params));
   // A form oxplow shows; resolves with the result, or rejects CANCELLED:
   //   await component.openForm("oxplow.work_item.create", { title: "" })
 });
@@ -506,8 +509,13 @@ oxplow.connect().then(async (component) => {
 
 `querySql` needs `sql: read` on the component and `permissions: { sql:
 read }` on the extension; it reads oxplow's models only, never writes.
-`setTitle`, `setActions` and `openForm` are a page's: a component a lens
-shows can't use them (the lens owns its page). A component written in
+`setTitle`, `setActions`, `openForm` and `setParams` are a page's: a
+component a lens shows can't use them (the lens owns its page). Keep a
+page's view (a range, a search, what is selected) in its params with
+`setParams`, not in browser storage: oxplow keeps params in the tab, so
+Back, a bookmark and a reopened tab show the page the same way.
+`oxplow extension check` warns when a component's script uses
+`localStorage` or `sessionStorage`. A component written in
 TypeScript or with a library declares a `build:` ("Extensions" → "Builds"),
 so only its sources are committed. oxplow-foundation's Timeline page is a
 working example (`extensions/oxplow-foundation/src/timeline/`).

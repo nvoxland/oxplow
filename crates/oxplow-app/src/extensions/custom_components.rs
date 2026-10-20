@@ -185,6 +185,53 @@ pub fn bundle_problems(
     out
 }
 
+/// What `ext`'s components do that works but goes against how a page is
+/// built, as check warnings at the file: a script its `index.html` loads
+/// from the bundle that keeps state in browser storage. A component's view
+/// is its page's params (`component.setParams`), kept in its tab, so Back,
+/// a bookmark and a reopened tab keep it; storage keeps it nowhere oxplow
+/// knows.
+pub fn bundle_warnings(
+    ext: &super::Extension,
+    read: &dyn Fn(&str) -> Option<String>,
+) -> Vec<String> {
+    let dir = ext.path.trim_end_matches('/');
+    let mut out = Vec::new();
+    for c in &ext.custom_components {
+        let bundle = c.bundle.trim_end_matches('/');
+        let Some(html) = read(&format!("{bundle}/index.html")) else {
+            continue;
+        };
+        for tag in tags(&html).into_iter().filter(|t| t.name == "script") {
+            let Some(src) = tag
+                .attrs
+                .iter()
+                .find(|(k, _)| k == "src")
+                .map(|(_, v)| v.trim())
+            else {
+                continue;
+            };
+            // Only the bundle's own files: oxplow's library and anything
+            // outside are not the component's code.
+            if src.starts_with('/') || src.contains("://") || src.starts_with("data:") {
+                continue;
+            }
+            let rel = format!("{bundle}/{}", src.trim_start_matches("./"));
+            let Some(script) = read(&rel) else { continue };
+            for store in ["localStorage", "sessionStorage"] {
+                if script.contains(store) {
+                    out.push(format!(
+                        "{dir}/{rel}: it uses `{store}` — a component keeps its view in its page's \
+                         params, which its tab keeps: set them with `component.setParams` and draw \
+                         from `component.onParams`"
+                    ));
+                }
+            }
+        }
+    }
+    out
+}
+
 /// What one of a bundle's pages asks for that the bundle's CSP refuses
 /// silently or that ends the component: an inline `<script>` or event
 /// handler, a `type="module"` script, a load from outside the bundle
@@ -584,7 +631,7 @@ mod tests {
         );
     }
 
-    use super::{bundle_problems, page_problems};
+    use super::{bundle_problems, bundle_warnings, page_problems};
     use crate::extensions::{load_extensions, Extension, LensViz};
     use std::path::Path;
 
@@ -793,6 +840,36 @@ mod tests {
         // to lint: loading says when a bundle has no `index.html`.
         let missing = |_: &str| None;
         assert_eq!(bundle_problems(&ext, &missing), Vec::<String>::new());
+    }
+
+    /// A component keeps its view in its page's params (`setParams`), never
+    /// in browser storage: a script its page loads that reads or writes
+    /// `localStorage` / `sessionStorage` is a warning at that script; the
+    /// client library and a script without it are not.
+    #[test]
+    fn a_bundle_that_keeps_state_in_browser_storage_is_warned() {
+        let d = tempfile::tempdir().unwrap();
+        let ext = load(d.path(), "  - { id: burndown }\n");
+        let files = |rel: &str| match rel {
+            "components/burndown/index.html" => Some(
+                r#"<!doctype html><script src="/component-lib/oxplow-component.js"></script>
+                   <script src="app.js"></script><script src="./lib/plain.js"></script>"#
+                    .to_string(),
+            ),
+            "components/burndown/app.js" => {
+                Some("const last = localStorage.getItem('range');".to_string())
+            }
+            "components/burndown/lib/plain.js" => Some("export const x = 1;".to_string()),
+            _ => None,
+        };
+        let warnings = bundle_warnings(&ext, &files);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].starts_with(".oxplow/extensions/x/components/burndown/app.js: ")
+                && warnings[0].contains("`localStorage`")
+                && warnings[0].contains("setParams"),
+            "{warnings:?}"
+        );
     }
 
     /// tsk961: the check reports a bundle's page problems at the page —

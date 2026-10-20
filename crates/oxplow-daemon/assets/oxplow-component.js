@@ -21,7 +21,10 @@
 // its params, stream and thread, and it reads with `querySql` (when it
 // declares `sql: read`), titles its page with `setTitle`, puts actions in
 // the page's bar with `setActions` and hears them with `onAction`, and
-// opens a command's form in oxplow with `openForm`.
+// opens a command's form in oxplow with `openForm`. Its params are its
+// view, kept in its tab: change them with `setParams` (never keep view
+// state yourself — a frame has no storage) and draw from what `onParams`
+// says, which Back and Forward change too.
 //
 // For oxplow's look, link the kit's stylesheet too —
 //   <link rel="stylesheet" href="/component-lib/oxplow-kit.css">
@@ -34,7 +37,7 @@
   "use strict";
 
   // The protocol this library speaks; `init` says which one the host does.
-  const PROTOCOL = 5;
+  const PROTOCOL = 6;
 
   function component(port, init) {
     let next = 0;
@@ -42,6 +45,8 @@
     const pending = new Map();
     const listeners = new Set();
     const actionListeners = new Set();
+    const paramsListeners = new Set();
+    const page = init.page === undefined ? null : init.page;
 
     port.onmessage = (event) => {
       const data = event.data;
@@ -53,6 +58,11 @@
       }
       if (data.type === "action") {
         for (const listener of Array.from(actionListeners)) listener(data.id);
+        return;
+      }
+      if (data.type === "params") {
+        if (page) page.params = data.params;
+        for (const listener of Array.from(paramsListeners)) listener(data.params);
         return;
       }
       const waiting = pending.get(data.id);
@@ -80,7 +90,7 @@
       },
       // The page it is — `{ params, streamId, threadId }` — or null when a
       // lens shows it.
-      page: init.page === undefined ? null : init.page,
+      page,
       // The lens's `custom.props`, or null.
       props: init.props === undefined ? null : init.props,
       // The theme's CSS variables, by name (`--text-primary`).
@@ -114,6 +124,18 @@
       // The page's actions — `[{ id, label, primary?, disabled? }]` — drawn
       // by oxplow in the page's bar. A page only.
       setActions: (actions) => call({ method: "setActions", actions }),
+      // Change the page's view: these params (a value null drops one) go
+      // into its tab, so Back, a bookmark and a reopened tab keep them.
+      // A page only.
+      setParams: (params) => call({ method: "setParams", params }),
+      // Hear the page's params each time they change (Back, Forward, a
+      // setParams); returns how to stop.
+      onParams(listener) {
+        paramsListeners.add(listener);
+        return () => {
+          paramsListeners.delete(listener);
+        };
+      },
       // Hear each press of a page action, by its id; returns how to stop.
       onAction(listener) {
         actionListeners.add(listener);

@@ -81,6 +81,12 @@ export interface OxplowComponent {
   setActions(actions: OxplowAction[]): Promise<null>;
   /** Hear each press of a page action, by id; returns how to stop. */
   onAction(listener: (id: string) => void): () => void;
+  /** Change the page's view: these params (null drops one) go into its
+   *  tab, so Back, a bookmark and a reopened tab keep them. A page only. */
+  setParams(params: Record<string, string | null>): Promise<null>;
+  /** Hear the page's params each time they change (Back, Forward, a
+   *  `setParams`); returns how to stop. */
+  onParams(listener: (params: Record<string, string>) => void): () => void;
   /** Set each theme token, and the host's `color-scheme`, on the
    *  document's root, where the kit's stylesheet
    *  (`/component-lib/oxplow-kit.css`) reads them. Without the

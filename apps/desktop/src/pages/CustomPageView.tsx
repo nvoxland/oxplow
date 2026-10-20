@@ -15,8 +15,8 @@ import { ComponentFrame, CustomBadge, noteStyle, useComponentBundle, type Bridge
 import type { FrameAction, PageInit } from "../lens/componentBridge.js";
 import { FormSlideover, useFormSubmit } from "../lens/LensResultView.js";
 import { Page } from "../tabs/Page.js";
-import { usePageTitle } from "../tabs/PageNavigationContext.js";
-import type { PagePayload } from "../tabs/pageRefs.js";
+import { useOptionalPageNavigation, usePageTitle } from "../tabs/PageNavigationContext.js";
+import { extPageRef, pageTabRef, type PagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { remoteBaseUrl } from "../tauri-bridge/transport.js";
 import type { ExtensionPage, FormStart, Stream } from "../tauri-bridge/generated/bindings.js";
@@ -77,10 +77,27 @@ export function CustomPageView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [JSON.stringify(page.params), streamId, threadId],
   );
+  // Its view is its tab entry's params: a change replaces the entry (a
+  // component has no selection to push; going somewhere is `navigate`).
+  const nav = useOptionalPageNavigation();
+  const navRef = useRef(nav);
+  navRef.current = nav;
+  const pageRef = useRef(page);
+  pageRef.current = page;
   const pageDeps = useMemo(
     () => ({
       setTitle: setFrameTitle,
       setActions: setFrameActions,
+      setParams: (changes: Record<string, string | null>) => {
+        const at = pageRef.current;
+        const next: Record<string, string> = { ...at.params };
+        for (const [k, v] of Object.entries(changes)) {
+          if (v === null) delete next[k];
+          else next[k] = v;
+        }
+        const ref = at.extension === null ? pageTabRef(at.page, next, at.state) : extPageRef(at.extension, at.page, next);
+        navRef.current?.replaceRef?.(ref);
+      },
       openForm: (command: string, input: unknown, version: string) =>
         new Promise<{ result: unknown } | null>((resolve, reject) => {
           setAsked({ command, input, version, resolve, reject });

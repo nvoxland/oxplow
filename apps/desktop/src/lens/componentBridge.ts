@@ -13,9 +13,11 @@
 ///                 { id, method: "openForm", command, input } a declared command's form, in the host
 ///                 { id, method: "setTitle", title }          a page's title (a page only)
 ///                 { id, method: "setActions", actions }      a page's actions (a page only)
+///                 { id, method: "setParams", params }        a page's view changed (a page only)
 ///   host → frame  { type: "init", protocol, run, props, page, tokens }
 ///                 { type: "update", run }                    the lens re-ran
 ///                 { type: "action", id }                     a page action was pressed
+///                 { type: "params", params }                 a page's params changed (Back, Forward)
 ///                 { id, ok: true, result } | { id, ok: false, error: { code, message, field? } }
 ///
 /// Shown by a lens, `init` carries the lens's run and `page` is null; shown
@@ -38,8 +40,9 @@ import type { CommandOutcome, LensRun, SqlCell, SqlQueryResult } from "../tauri-
 /// names one (`INVALID`), so a component's form marks that field.
 /// 5: a component can be a page — `init.page`, a null `run` — and asks
 /// `querySql`, `openForm`, `setTitle`, `setActions`; the host sends
-/// `action`.
-export const BRIDGE_PROTOCOL = 5;
+/// `action`. 6: a page's params are its tab entry's view: it sets them
+/// (`setParams`, a value null to drop one) and hears them (`params`).
+export const BRIDGE_PROTOCOL = 6;
 
 /** A page action a component declares; core draws it in the nav bar. */
 export interface FrameAction {
@@ -63,7 +66,8 @@ export type BridgeRequest =
   | { id: string; method: "querySql"; sql: string; params: SqlCell[] }
   | { id: string; method: "openForm"; command: string; input: unknown }
   | { id: string; method: "setTitle"; title: string }
-  | { id: string; method: "setActions"; actions: FrameAction[] };
+  | { id: string; method: "setActions"; actions: FrameAction[] }
+  | { id: string; method: "setParams"; params: Record<string, string | null> };
 
 export type FrameMessage = { type: "ready" } | { type: "request"; request: BridgeRequest };
 
@@ -110,6 +114,12 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
         actions.push({ id: a.id, label: a.label, primary: a.primary === true, disabled: a.disabled === true });
       }
       return { type: "request", request: { id: m.id, method: "setActions", actions } };
+    }
+    case "setParams": {
+      const params = m.params;
+      if (!params || typeof params !== "object" || Array.isArray(params)) return null;
+      if (!Object.values(params).every((v) => v === null || typeof v === "string")) return null;
+      return { type: "request", request: { id: m.id, method: "setParams", params: params as Record<string, string | null> } };
     }
     default:
       return null;
@@ -177,6 +187,9 @@ export interface BridgeDeps {
   setTitle?(title: string): void;
   /** The page's actions, drawn by core in the nav bar. A page only. */
   setActions?(actions: FrameAction[]): void;
+  /** Change the page's view: these params (null drops one) go into its
+   *  tab entry, replacing it. A page only. */
+  setParams?(params: Record<string, string | null>): void;
 }
 
 /** Why an invoke was refused (`DENIED`: the component isn't approved, or a
@@ -199,17 +212,20 @@ export function componentMayOpen(ref: string): boolean {
 const shown = (run: LensRun | null) => (run ? JSON.stringify([run.params, run.result]) : "");
 
 /** What a component shown by a lens may not do: the lens owns the page. */
-const PAGE_ONLY = "A lens shows this component: only a component shown as a page sets its title, actions or forms.";
+const PAGE_ONLY = "A lens shows this component: only a component shown as a page sets its title, actions, forms or params.";
 
 /** Answer the frame's requests arriving on `port`. `sent` is the run the
- *  `init` message carried; `update` posts only a run whose params or
- *  result the frame hasn't seen, and `ready` is heard once. */
+ *  `init` message carried and `sentParams` a page's params in it;
+ *  `update` and `params` post only what the frame hasn't seen, and
+ *  `ready` is heard once. */
 export function createBridgeHost(
   port: MessagePort,
   deps: BridgeDeps,
   sent: LensRun | null,
-): { update(run: LensRun): void; action(id: string): void; close(): void } {
+  sentParams: Record<string, string> | null = null,
+): { update(run: LensRun): void; params(params: Record<string, string>): void; action(id: string): void; close(): void } {
   let last = shown(sent);
+  let lastParams = sentParams ? JSON.stringify(sentParams) : null;
   let ready = false;
   const reply = (id: string, result: unknown) => port.postMessage({ id, ok: true, result });
   const fail = (id: string, code: string, message: string, field: string | null = null) =>
@@ -279,6 +295,10 @@ export function createBridgeHost(
         if (!deps.setActions) return fail(r.id, "INVALID", PAGE_ONLY);
         deps.setActions(r.actions);
         return reply(r.id, null);
+      case "setParams":
+        if (!deps.setParams) return fail(r.id, "INVALID", PAGE_ONLY);
+        deps.setParams(r.params);
+        return reply(r.id, null);
     }
   };
   port.onmessage = (e: MessageEvent) => {
@@ -298,6 +318,12 @@ export function createBridgeHost(
       if (key === last) return;
       last = key;
       port.postMessage({ type: "update", run });
+    },
+    params: (params) => {
+      const key = JSON.stringify(params);
+      if (key === lastParams) return;
+      lastParams = key;
+      port.postMessage({ type: "params", params });
     },
     action: (id) => port.postMessage({ type: "action", id }),
     close: () => port.close(),

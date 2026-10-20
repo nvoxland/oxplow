@@ -69,11 +69,11 @@ test("theme tokens carry the root's color-scheme, so the frame paints no opaque 
 // bundle links from the daemon. Dropping `kitCss` made the protocol 2;
 // `navigate`'s `newTab` made it 3; an error's `field`, 4; a component as a
 // page (`page`, a null `run`) and the calls a page makes, 5.
-test("init carries the run, props and tokens, at protocol 5", () => {
+test("init carries the run, props and tokens, at protocol 6", () => {
   const r = { lens: { id: "x/b", custom: { component: "b", props: { a: 1 } } }, params: {}, result: { columns: [], rows: [], truncated: false } } as unknown as LensRun;
   expect(initMessage(r, { "--accent": "#08f" })).toEqual({
     type: "init",
-    protocol: 5,
+    protocol: 6,
     run: r,
     props: { a: 1 },
     page: null,
@@ -83,7 +83,7 @@ test("init carries the run, props and tokens, at protocol 5", () => {
 
 test("a component shown as a page gets its page and no run", () => {
   const page = { params: { from: "2026-10-01" }, streamId: "str1", threadId: "thr2" };
-  expect(initMessage(null, {}, page)).toEqual({ type: "init", protocol: 5, run: null, props: null, page, tokens: {} });
+  expect(initMessage(null, {}, page)).toEqual({ type: "init", protocol: 6, run: null, props: null, page, tokens: {} });
 });
 
 test("a page's calls parse: setTitle, setActions, openForm and querySql", () => {
@@ -254,13 +254,37 @@ test("a page's title and actions reach the host, and a press reaches the frame",
   h.channel.port1.close();
 });
 
-test("shown by a lens, a component sets no page title, actions or form", async () => {
+// A page's view is its params, in its tab's entry: the component sets
+// them through the host (a filter: the entry is replaced) and hears them
+// when Back or Forward changes them.
+test("a page sets its params through the host, and hears them change", async () => {
+  const set: unknown[] = [];
+  const h = harness({ setParams: (p) => set.push(p) });
+  h.send({ id: "p", method: "setParams", params: { from: "2026-10-01", to: null } });
+  h.send({ id: "q", method: "setParams", params: { from: 3 } });
+  await h.settle();
+  expect(set).toEqual([{ from: "2026-10-01", to: null }]);
+  expect(h.received[0]).toEqual({ id: "p", ok: true, result: null });
+  expect((h.received[1] as { error: { code: string } }).error.code).toBe("BAD_REQUEST");
+  h.host.params({ from: "2026-10-01" });
+  h.host.params({ from: "2026-10-01" });
+  h.host.params({ from: "2026-10-08" });
+  await h.settle();
+  expect(h.received.slice(2)).toEqual([
+    { type: "params", params: { from: "2026-10-01" } },
+    { type: "params", params: { from: "2026-10-08" } },
+  ]);
+  h.channel.port1.close();
+});
+
+test("shown by a lens, a component sets no page title, actions, form or params", async () => {
   const h = harness();
   h.send({ id: "t", method: "setTitle", title: "Oct" });
   h.send({ id: "a", method: "setActions", actions: [] });
   h.send({ id: "f", method: "openForm", command: "x.y.z" });
+  h.send({ id: "p", method: "setParams", params: {} });
   await h.settle();
-  expect(h.received.map((m) => (m as { error?: { code: string } }).error?.code)).toEqual(["INVALID", "INVALID", "INVALID"]);
+  expect(h.received.map((m) => (m as { error?: { code: string } }).error?.code)).toEqual(["INVALID", "INVALID", "INVALID", "INVALID"]);
   h.channel.port1.close();
 });
 

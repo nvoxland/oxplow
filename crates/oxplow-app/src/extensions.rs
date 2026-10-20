@@ -5200,6 +5200,8 @@ fn check_components(
 ) {
     let pages = custom_components::bundle_problems(ext, read);
     ext.errors.extend(pages);
+    let warnings = custom_components::bundle_warnings(ext, read);
+    ext.warnings.extend(warnings);
     if let Some(schema_of) = commands {
         let missing: Vec<(String, String)> = ext
             .custom_components

@@ -224,6 +224,27 @@ test("a page's component gets its page, runs its own SQL, opens a form and sets 
   h.close();
 });
 
+test("a page's component sets its params, and hears them when they change", async () => {
+  const set: unknown[] = [];
+  const h = pageHarness({ setParams: (p) => set.push(p) });
+  const connecting = connect({ target: h.frame });
+  h.init();
+  const c = await connecting;
+  await c.setParams({ from: "2026-10-08", to: null });
+  expect(set).toEqual([{ from: "2026-10-08", to: null }]);
+  const heard: unknown[] = [];
+  const stop = c.onParams((p: unknown) => heard.push(p));
+  h.host.params({ from: "2026-10-15" });
+  await settle();
+  expect(heard).toEqual([{ from: "2026-10-15" }]);
+  expect(c.page.params).toEqual({ from: "2026-10-15" });
+  stop();
+  h.host.params({ from: "2026-10-22" });
+  await settle();
+  expect(heard).toHaveLength(1);
+  h.close();
+});
+
 test("onAction hears each press of a page action", async () => {
   const h = pageHarness();
   const connecting = connect({ target: h.frame });

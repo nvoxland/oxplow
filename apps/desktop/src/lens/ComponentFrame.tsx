@@ -30,6 +30,8 @@ export interface PageDeps {
   setTitle(title: string): void;
   setActions(actions: FrameAction[]): void;
   openForm(command: string, input: unknown, version: string): Promise<{ result: unknown } | null>;
+  /** Change the page's view (its tab entry's params; null drops one). */
+  setParams(params: Record<string, string | null>): void;
 }
 
 /** The bundle a component's frame runs, loaded for `componentKey` (from
@@ -132,6 +134,13 @@ export function ComponentFrame({
     if (run) hostRef.current?.update(run);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run]);
+  // A page's params changed (Back, Forward, its own setParams echoed): the
+  // frame hears them as `params`.
+  const paramsKey = page ? JSON.stringify(page.params) : null;
+  useEffect(() => {
+    if (page) hostRef.current?.params(page.params);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paramsKey]);
   useEffect(() => () => hostRef.current?.close(), []);
 
   const onLoad = () => {
@@ -183,6 +192,7 @@ export function ComponentFrame({
               setActions: (a: FrameAction[]) => pageDepsRef.current?.setActions(a),
               openForm: (command: string, input: unknown) =>
                 pageDepsRef.current ? pageDepsRef.current.openForm(command, input, version) : Promise.resolve(null),
+              setParams: (params: Record<string, string | null>) => pageDepsRef.current?.setParams(params),
             }
           : {}),
         confirm: (command) => new Promise<boolean>((answer) => setAsking({ command, answer })),
@@ -194,6 +204,7 @@ export function ComponentFrame({
         },
       },
       initial,
+      page?.params ?? null,
     );
     const tokens = tokensFromStyle(getComputedStyle(document.documentElement));
     // An opaque-origin frame can only be addressed with "*"; the port goes
