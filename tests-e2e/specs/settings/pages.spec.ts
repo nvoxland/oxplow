@@ -37,12 +37,14 @@ test("a Settings area is the page's view: the same page, and Back returns to the
   await openFromLauncher(page, "Settings");
   const body = page.locator('[data-testid^="center-tab-body-page:settings"]:visible');
   await expect(body).toHaveAttribute("data-testid", "center-tab-body-page:settings");
-  await body.getByTestId("settings-areas").evaluate((el) => {
+  // A mark on the page's own element (the rail inside it may redraw as
+  // its layout settles; the page must not mount again).
+  await body.getByTestId("page-settings").evaluate((el) => {
     el.setAttribute("data-mounted-once", "yes");
   });
   await body.getByTestId("settings-area-data").click();
   await expect(body).toHaveAttribute("data-testid", "center-tab-body-page:settings?area=data");
-  await expect(body.getByTestId("settings-areas")).toHaveAttribute("data-mounted-once", "yes");
+  await expect(body.getByTestId("page-settings")).toHaveAttribute("data-mounted-once", "yes");
   await page.getByTestId("page-nav-back").filter({ visible: true }).click();
   await expect(body).toHaveAttribute("data-testid", "center-tab-body-page:settings");
   await expect(body.getByRole("heading", { level: 1 })).toHaveText("Settings");
