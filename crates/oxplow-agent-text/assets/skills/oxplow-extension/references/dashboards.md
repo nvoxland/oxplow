@@ -12,6 +12,7 @@ same rules hold.
 | A page they come back to | a lens file (`lens-format.md`) | Anyone with the extension, live |
 | Several numbers at a glance | an oxplow **dashboard** (below) | The project, live: tiles re-run as the data moves |
 | A view no lens viz draws | a **custom component** (below) | As a lens: live, sandboxed |
+| A whole page of your own (a data app: its own layout, actions, forms) | a **custom page**: a component named in `pages:` (below) | A page in the launcher, under oxplow's bar |
 | Something to share outside oxplow (a Claude artifact, a doc) | a **snapshot**: run the queries, put the rows in it | Whoever it's shared with; frozen when you made it |
 
 Ask when it isn't clear which. Say which you built and how fresh it is: a
@@ -152,5 +153,28 @@ for a page): it runs in a sandbox, so adapt it before it will:
   pasted into the file: pasted rows are a snapshot.
 - Colours from the theme (`applyTheme`, the kit's classes), not fixed
   hex, so it reads in light and dark.
+- A library (a chart, a timeline): write TypeScript, import it, and
+  declare `build: { run: "bun install --frozen-lockfile && bun run build",
+  output: dist, exclude: [node_modules] }` with `bundle: dist/<id>`;
+  bundle to one classic script (`bun build --format iife`). The deploy
+  builds it and the person approves the build command
+  (`repair-and-sharing.md`).
 
 Then `oxplow_validate_extension`, and `oxplow_run_lens` on the lens.
+
+## A custom page
+
+When the view is the whole page — its own layout, its own buttons —
+name the component in `pages:` instead of a lens:
+`pages: [{ id: timeline, title: Timeline, icon: history, category:
+Activity, params: [from, to], component: timeline }]`. It fills the page
+under oxplow's bar. It has no lens run (`component.run` is null);
+`component.page` has the page's `params`, `streamId` and `threadId`.
+It reads with `component.querySql(sql, params)` (declare `sql: read` on
+the component and `permissions: { sql: read }` on the extension; read
+only, `?1` params), titles the page with `setTitle`, puts its actions in
+oxplow's bar with `setActions([{ id, label, primary? }])` and hears them
+with `onAction`, and opens a declared command's form in oxplow with
+`openForm(command, input)`. Don't draw page-level buttons inside the
+frame: the bar is oxplow's. `extensions/oxplow-foundation/src/timeline/`
+is a working one.

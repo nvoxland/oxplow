@@ -276,6 +276,13 @@ Things I keep forgetting. Read this before adding any UI.
   isn't oxplow's. Its confirmations appear in oxplow (`CommandConfirm`
   below the frame), never inside the frame. When it can't start, a muted
   line says so and the lens's table shows.
+- A **custom page** (`pages[].component`, `pages/CustomPageView.tsx`)
+  keeps oxplow's nav bar and the **custom** badge; the frame fills only
+  the page body. Its title and actions are data the frame sends
+  (`setTitle`, `setActions`) and core draws in the bar — never buttons of
+  oxplow's look inside the frame for page-level actions. A form it asks
+  for (`openForm`) is oxplow's slideover, with Enter submitting and
+  Escape closing as every form.
 
 ## A replaced component is marked, and falls back to oxplow's
 

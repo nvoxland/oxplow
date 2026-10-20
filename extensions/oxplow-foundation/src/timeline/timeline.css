@@ -1,0 +1,17 @@
+/* The timeline fills the page; its colors are the theme's tokens. */
+html, body { height: 100%; }
+body { display: flex; flex-direction: column; }
+#timeline { flex: 1; min-height: 0; }
+#empty { padding: var(--space-3, 12px); }
+.vis-timeline { border: none; font-family: var(--font-ui); font-size: var(--text-sm, 12px); color: var(--text-primary); }
+.vis-panel.vis-left, .vis-panel.vis-center, .vis-panel.vis-top, .vis-panel.vis-bottom { border-color: var(--border-subtle); }
+.vis-labelset .vis-label { color: var(--text-secondary); border-color: var(--border-subtle); }
+.vis-time-axis .vis-text { color: var(--text-muted); }
+.vis-time-axis .vis-grid.vis-minor, .vis-time-axis .vis-grid.vis-major { border-color: var(--border-subtle); }
+.vis-item { border-radius: var(--radius-sm, 4px); color: var(--text-primary); background: var(--surface-card); border-color: var(--border-strong, var(--border-subtle)); cursor: pointer; }
+.vis-item.vis-selected { border-color: var(--accent); }
+.vis-item.kind-effort { background: var(--accent-soft-bg); border-color: var(--accent); }
+.vis-item.kind-session { background: var(--surface-card); }
+.vis-item.kind-thread { background: transparent; }
+.vis-item.kind-commit { background: var(--accent); border-color: var(--accent); }
+.vis-current-time { background: var(--accent); }

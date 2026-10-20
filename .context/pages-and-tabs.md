@@ -201,8 +201,13 @@ and a test checks they match.
 The desktop draws a `page` tab in one renderer (`App.tsx`,
 `pageRenderers.page`): it finds the declaration (`declaredPage`, by tab
 id among the enabled extensions), draws a built-in from the
-`builtInPages` table (`pages/builtInPages.tsx`) by name, and a lens page through
-`DeclaredPageView` (`LensPage` with the id's params). Each built-in body is a
+`builtInPages` table (`pages/builtInPages.tsx`) by name, a lens page through
+`DeclaredPageView` (`LensPage` with the id's params), and a custom page
+(`body.kind === "component"`) through `CustomPageView`: the component's
+frame filling the body under the nav bar, told the page's params, stream
+and thread, its title and actions the frame's (`setTitle`,
+`setActions`). oxplow's Timeline (`page:timeline`, params `from`, `to`,
+`thread`) is one. Each built-in body is a
 `(ctx) => CenterTab | null` over `{ ref, params, state, nav, scope }`;
 `scope` is the `AppScope` (`pages/appScope.ts`), the explicit list of
 what core offers them (selection, work state, handlers) that `App.tsx`
@@ -332,7 +337,7 @@ comment's time and the task panel use it, not their own copies.
 |---|---|---|---|
 | **Document** (the default) | reading, picking, small forms, lists | `DocumentLayout`: title + intro in a reading column, then `Section`s (a heading over a rule, no boxes) | `viz: document` + `sections:` |
 | **Dashboard** | many numbers and charts at a glance | `TileGrid` / `TileSlot` / `Tile` at full width | `viz: dashboard` + `tiles:` |
-| **Custom** | what the kit can't express: editors, terminals, boards, git flows | a React page on `Page`, using kit parts where they fit | `viz: custom` (the sandboxed component) |
+| **Custom** | what the kit can't express: editors, terminals, boards, git flows | a React page on `Page`, using kit parts where they fit | `viz: custom` (the sandboxed component), or a whole custom page: `pages[].component: <id>` (`CustomPageView`) |
 
 A cell's match is drawn with the kit class `.ox-mark` (a lens column's `highlight`, extensions.md "Lenses").
 

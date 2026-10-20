@@ -1574,7 +1574,9 @@ mod tests {
                 ],
                 vec![
                     oxplow_db::SqlCell::Text("oxplow-foundation".into()),
-                    oxplow_db::SqlCell::Text("{\"files\":\"read\",\"ai\":true}".into())
+                    oxplow_db::SqlCell::Text(
+                        "{\"sql\":\"read\",\"files\":\"read\",\"ai\":true}".into()
+                    )
                 ],
             ]
         );
@@ -2269,25 +2271,22 @@ mod tests {
         for built in [true, false] {
             let (dir, svc) = unbooted();
             let to = dir.path().join(".oxplow/extensions/oxplow-foundation");
+            // Foundation's own source as it ships, its output only when built
+            // (the build itself a no-op here: cargo's would have run it).
             for (rel, bytes) in crate::bundled_extensions::find("oxplow-foundation")
                 .unwrap()
                 .files
             {
-                write(&to, rel, &String::from_utf8_lossy(bytes));
+                if built || !rel.starts_with("dist/") {
+                    write(&to, rel, &String::from_utf8_lossy(bytes));
+                }
             }
             let manifest = std::fs::read_to_string(to.join("extension.yaml")).unwrap();
             write(
                 &to,
                 "extension.yaml",
-                &manifest.replacen(
-                    "\ncommands:\n",
-                    "\nbuild: { run: \"true\", output: dist }\ncommands:\n",
-                    1,
-                ),
+                &manifest.replacen(crate::test_fixtures::FOUNDATION_BUILD, "\"true\"", 1),
             );
-            if built {
-                write(&to, "dist/note.txt", "built");
-            }
             write(
                 dir.path(),
                 ".oxplow/project.yaml",

@@ -4,11 +4,20 @@ name: oxplow-foundation
 namespace: oxplow
 description: oxplow's own commands, declared like any extension's — each backed by an operation of a scope. Required; it can't be disabled.
 engine: ">=0.7"
-# What it reaches beyond the baseline: its AI providers call models, and
-# its code-metric collectors read the project's files.
+# What it reaches beyond the baseline: its AI providers call models, its
+# code-metric collectors read the project's files, and the Timeline page
+# reads the models with its own SQL.
 permissions:
   ai: true
   files: read
+  sql: read
+# Its custom components are TypeScript (src/), built into dist/ when oxplow
+# is built and on every deploy; dist/ and node_modules/ aren't committed.
+build: { run: "bun install --frozen-lockfile && bun run build", output: dist, exclude: [node_modules] }
+custom_components:
+  # Efforts, sessions, threads and commits on a zoomable time axis
+  # (vis-timeline, which the kit has no viz for).
+  - { id: timeline, title: Timeline, bundle: dist/timeline, sql: read }
 intent:
   purpose: >-
     Declare oxplow's own commands — what a person, an agent and a lens can
@@ -155,6 +164,7 @@ pages:
   # Activity
   - { id: local-history, title: Local History, icon: history, category: Activity, component: "oxplow:local-history" }
   - { id: comments, title: Comments, icon: inbox, category: Activity, component: "oxplow:comments" }
+  - { id: timeline, title: Timeline, icon: history, category: Activity, keywords: efforts sessions commits threads time axis history, params: [from, to, thread], component: timeline }
   - { id: hook-events, title: Hook Events, icon: activity, category: Activity, lens: hook-events }
   # Knowledge
   - { id: wiki-index, title: Wiki, icon: book-open, category: Knowledge, lens: wiki-index }

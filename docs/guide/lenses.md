@@ -414,6 +414,47 @@ with no such `commands` needs no permission.
 A command that needs confirmation is confirmed by you in oxplow, not
 inside the frame.
 
+### A custom page
+
+A component can also be a whole page: name it in `pages:` instead of a
+lens. It fills the page under oxplow's own bar, which still draws the
+title, back and forward, bookmarks and the page's actions.
+
+```yaml
+# extension.yaml
+permissions: { sql: read }              # it runs its own SQL
+custom_components:
+  - { id: timeline, bundle: dist/timeline, sql: read }
+pages:
+  - { id: timeline, title: Timeline, icon: history, category: Activity, params: [from, to], component: timeline }
+```
+
+A page's component has no lens run (`component.run` is null); instead
+`component.page` carries the page's `params`, `streamId` and
+`threadId`. It reads with its own read-only SQL, titles the page, puts
+actions in the bar and opens a command's form in oxplow:
+
+```js
+oxplow.connect().then(async (component) => {
+  component.applyTheme();
+  const { rows } = await component.querySql(
+    "SELECT ref, title FROM v_effort WHERE started_at >= ?1", [component.page.params.from]);
+  await component.setTitle(`Efforts since ${component.page.params.from}`);
+  await component.setActions([{ id: "refresh", label: "Refresh", primary: true }]);
+  component.onAction((id) => { if (id === "refresh") location.reload(); });
+  // A form oxplow shows; resolves with the result, or rejects CANCELLED:
+  //   await component.openForm("oxplow.work_item.create", { title: "" })
+});
+```
+
+`querySql` needs `sql: read` on the component and `permissions: { sql:
+read }` on the extension; it reads oxplow's models only, never writes.
+`setTitle`, `setActions` and `openForm` are a page's: a component a lens
+shows can't use them (the lens owns its page). A component written in
+TypeScript or with a library declares a `build:` ("Extensions" → "Builds"),
+so only its sources are committed. oxplow-foundation's Timeline page is a
+working example (`extensions/oxplow-foundation/src/timeline/`).
+
 ## Replacing a view
 
 An extension can put its own lens where one of oxplow's views is: the
