@@ -1,21 +1,22 @@
-import { useEffect, useMemo, useState, type ComponentProps } from "react";
+import { useMemo, type ComponentProps } from "react";
 import { bucketWorkList, type WorkList } from "../../workItems.js";
 import { PlanPane } from "./PlanPane.js";
-import { TasksFilterBar, loadTasksFilters, saveTasksFilters } from "./TasksFilterBar.js";
+import { TasksFilterBar } from "./TasksFilterBar.js";
 import type { FieldFilter } from "./plan-utils.js";
 
 type PlanPaneProps = ComponentProps<typeof PlanPane>;
 
 /**
  * Composed list shell for the Tasks page: the declared-field filter bar
- * above + PlanPane below. Holds the chips, persists them to local
- * storage, and narrows the list to the matching items before handing it
- * to PlanPane (an epic stays while any child matches).
+ * above + PlanPane below. The chips are the page's (its view params,
+ * `tasksView.ts`); this narrows the list to the matching items before
+ * handing it to PlanPane (an epic stays while any child matches).
  */
-export function TasksList(props: Omit<PlanPaneProps, "onlyStates" | "excludeStates">) {
-  const [filter, setFilter] = useState<FieldFilter>(() => loadTasksFilters());
-  useEffect(() => { saveTasksFilters(filter); }, [filter]);
-
+export function TasksList({
+  filter,
+  onFilterChange,
+  ...props
+}: Omit<PlanPaneProps, "onlyStates" | "excludeStates"> & { filter: FieldFilter; onFilterChange(filter: FieldFilter): void }) {
   const filteredThreadWork = useMemo<WorkList | null>(() => {
     const list = props.threadWork;
     if (!list) return null;
@@ -53,7 +54,7 @@ export function TasksList(props: Omit<PlanPaneProps, "onlyStates" | "excludeStat
           position: static !important;
         }
       `}</style>
-      <TasksFilterBar fields={props.fields} filter={filter} onChange={setFilter} />
+      <TasksFilterBar fields={props.fields} filter={filter} onChange={onFilterChange} />
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "auto" }}>
         <PlanPane
           {...props}

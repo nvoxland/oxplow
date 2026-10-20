@@ -18,24 +18,6 @@ export type TasksScope =
   | { kind: "stream"; streamId: string }
   | { kind: "all" };
 
-export const STORAGE_KEY = "tasks-scope";
-
-export function loadScope(): TasksScope {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { kind: "currentThread" };
-    const parsed = JSON.parse(raw) as TasksScope;
-    if (parsed && typeof parsed === "object" && "kind" in parsed) return parsed;
-  } catch {}
-  return { kind: "currentThread" };
-}
-
-export function saveScope(scope: TasksScope): void {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(scope));
-  } catch {}
-}
-
 /**
  * Merge several threads' lists into one so the TasksList/PlanPane render
  * path can show items across threads. The result's `threadId` is empty

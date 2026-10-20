@@ -1,6 +1,6 @@
 import { run, waitForModels } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { expandRailSection, openNewTask } from "../../support/ui.js";
+import { expandRailSection, openFromLauncher, openNewTask } from "../../support/ui.js";
 
 // On a daemon of their own: the rail's Up Next shows the thread's first ten
 // ready tasks, which other specs' tasks would otherwise fill.
@@ -23,4 +23,27 @@ test("a task made elsewhere appears without a reload", async ({ fresh }) => {
     run(daemon, "oxplow.work_item.create", { title: "Made elsewhere", thread: daemon.thread }),
   );
   await expect(page.getByTestId("rail-section-ext:oxplow-bundled/work")).toContainText("Made elsewhere");
+});
+
+// The Tasks page's scope is its view params: in its tab's id, so Back
+// undoes a change, a reload keeps it, and opening Tasks again while one
+// tab shows another scope opens a second tab beside it.
+test("the Tasks page's scope is its tab's, kept by a reload and undone by nothing but a change", async ({ fresh }) => {
+  const { page } = fresh;
+  await page.goto("/");
+  await openFromLauncher(page, "Tasks");
+  const body = () => page.locator('[data-testid^="center-tab-body-page:tasks"]:visible');
+  await expect(body()).toHaveAttribute("data-testid", "center-tab-body-page:tasks");
+  await body().getByTestId("tasks-scope-button").click();
+  await body().getByTestId("tasks-scope-all").click();
+  await expect(body()).toHaveAttribute("data-testid", "center-tab-body-page:tasks?scope=all");
+  // A scope is a filter: it replaced the entry, so there's no Back to it.
+  await expect(page.getByTestId("page-nav-back").filter({ visible: true })).toBeDisabled();
+  await page.reload();
+  await expect(body()).toHaveAttribute("data-testid", "center-tab-body-page:tasks?scope=all");
+  await expect(body().getByTestId("tasks-scope-button")).toContainText("Everything");
+  // Tasks at its default view is another page of the tab strip.
+  await openFromLauncher(page, "Tasks");
+  await expect(page.getByTestId("center-tab-page:tasks")).toBeVisible();
+  await expect(page.getByTestId("center-tab-page:tasks?scope=all")).toBeVisible();
 });

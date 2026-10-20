@@ -72,28 +72,3 @@ export function TasksFilterBar({
     </div>
   );
 }
-
-const STORAGE_KEY = "tasks-filters";
-
-/** The person's chips, kept per browser across reloads. */
-export function loadTasksFilters(): FieldFilter {
-  if (typeof window === "undefined") return {};
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}");
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const out: Record<string, string[]> = {};
-    for (const [name, values] of Object.entries(parsed as Record<string, unknown>)) {
-      if (Array.isArray(values)) out[name] = values.filter((v): v is string => typeof v === "string");
-    }
-    return out;
-  } catch {
-    return {};
-  }
-}
-
-export function saveTasksFilters(filter: FieldFilter): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(filter));
-  } catch { /* ignore quota */ }
-}

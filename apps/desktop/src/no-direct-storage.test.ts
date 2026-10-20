@@ -41,17 +41,10 @@ test("the scan finds a store however it is reached, and not one named in a comme
   expect(storesUsed("const myLocalStorageKey = 1;")).toEqual([]);
 });
 
-// Moving to their homes (`.context/pages-and-tabs.md` "Page state"); this
-// list only shrinks.
-const NOT_MOVED_YET = [
-  "components/Plan/TasksFilterBar.tsx",
-  "components/Plan/tasks-scope.ts",
-];
-
 test("only shellStorage.ts touches the browser's storage", () => {
   const offenders = sourceFiles()
     .filter((rel) => !ALLOWED.has(rel))
     .filter((rel) => storesUsed(readFileSync(join(SRC_DIR, rel), "utf8")).length > 0)
     .sort();
-  expect(offenders).toEqual(NOT_MOVED_YET);
+  expect(offenders).toEqual([]);
 });

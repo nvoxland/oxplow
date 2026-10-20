@@ -837,6 +837,12 @@ sessions, the open files' paths, the remote daemon and its token, the
 recent remotes, the window's log id); `no-direct-storage.test.ts` holds
 every other file to it.
 
+Core pages follow the same rule: the Tasks page's scope and filter chips
+are its view params (`components/Plan/tasksView.ts`: `scope` with
+`stream`/`thread`, one `f.<field>` per filtered field), so two Tasks tabs
+can differ, a scope or chip change replaces the entry, and a reload or a
+bookmark keeps it.
+
 ## Every tab holds a Page
 
 Every tab is a session tab, whatever its kind (`wiki`, `file`, a

@@ -1,4 +1,4 @@
-import { type ComponentProps, useCallback, useEffect, useMemo, useState } from "react";
+import { type ComponentProps, useEffect, useMemo, useState } from "react";
 import { Page } from "../tabs/Page.js";
 import { PlanPane } from "../components/Plan/PlanPane.js";
 import { TasksList } from "../components/Plan/TasksList.js";
@@ -7,13 +7,12 @@ import { BacklogDrawer } from "../components/Plan/BacklogDrawer.js";
 import { TasksScopePicker } from "../components/Plan/TasksScopePicker.js";
 import {
   type TasksScope,
-  loadScope,
-  saveScope,
   mergeThreadWork,
   isReadOnlyScope,
 } from "../components/Plan/tasks-scope.js";
 import { cardLinkButton } from "../components/Card.js";
-import type { TaskSectionKind } from "../components/Plan/plan-utils.js";
+import type { FieldFilter, TaskSectionKind } from "../components/Plan/plan-utils.js";
+import { useTasksView } from "../components/Plan/tasksView.js";
 import { backlogRef, doneWorkRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { type Stream } from "../api.js";
@@ -93,11 +92,12 @@ export function TasksPage({
   currentStreamId,
   ...rest
 }: TasksPageProps) {
-  const [scope, setScopeState] = useState<TasksScope>(() => loadScope());
-  const setScope = useCallback((next: TasksScope) => {
-    setScopeState(next);
-    saveScope(next);
-  }, []);
+  // Its scope and filter chips are its view params (`tasksView.ts`): in
+  // its tab, so two tabs differ and Back and a bookmark keep them.
+  const [view, setView] = useTasksView();
+  const scope = view.scope;
+  const setScope = (next: TasksScope) => setView({ ...view, scope: next });
+  const setFilter = (filter: FieldFilter) => setView({ ...view, filter });
 
   const [scopedWorkStates, setScopedWorkStates] = useState<Record<string, WorkList>>({});
   const [scopedError, setScopedError] = useState<string | null>(null);
@@ -273,6 +273,8 @@ export function TasksPage({
               fallback={
                 <TasksList
                   {...listProps}
+                  filter={view.filter}
+                  onFilterChange={setFilter}
                   visibleSections={TASKS_PAGE_SECTIONS}
                   sectionItemLimit={{ done: PREVIEW_LIMIT }}
                   extraSectionLinks={{ done: viewAllDone }}
