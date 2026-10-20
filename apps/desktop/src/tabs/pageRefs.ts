@@ -26,6 +26,7 @@ import {
   revisionSlot,
   parseRevision,
   revisionFromSlot,
+  shortRevisionLabel,
 } from "../revision.js";
 import type { SqlCell } from "../tauri-bridge/generated/bindings.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
@@ -57,13 +58,13 @@ export function withPageParams(tabId: string, params: Record<string, ParamValue>
 }
 
 /** What a page tab carries: whose page (`null` for oxplow's own, which are
- *  core-named), its id, the params its id carries, and look-aside `state`
- *  the id doesn't hold (where Settings lands, a new item's parent). */
+ *  core-named), its id and the params its id carries. Nothing rides beside
+ *  the id: what a page shows is in its params, what only one step of a tab
+ *  keeps is that entry's history state. */
 export interface PagePayload {
   extension: string | null;
   page: string;
   params: Record<string, string>;
-  state?: unknown;
 }
 
 function cleanParams(params?: Record<string, ParamValue>): Record<string, string> {
@@ -73,10 +74,9 @@ function cleanParams(params?: Record<string, ParamValue>): Record<string, string
 }
 
 /** One of oxplow's own pages: `page:<id>[?params]`. */
-export function pageTabRef(page: string, params?: Record<string, ParamValue>, state?: unknown): TabRef {
+export function pageTabRef(page: string, params?: Record<string, ParamValue>): TabRef {
   const clean = cleanParams(params);
   const payload: PagePayload = { extension: null, page, params: clean };
-  if (state !== undefined) payload.state = state;
   return { id: pageRefString(page, Object.keys(clean).length ? clean : undefined), kind: "page", payload };
 }
 
@@ -196,15 +196,15 @@ export function viewParamsOf(ref: TabRef): Record<string, SqlCell> {
 }
 
 /** `ref` showing `params` as its view, in its own kind of ref: a lens's,
- *  a declared page's (keeping a page's look-aside state) or a metric's. A
- *  ref without a view comes back as it is. */
+ *  a declared page's or a metric's. A ref without a view comes back as it
+ *  is. */
 export function withViewParams(ref: TabRef, params: Record<string, SqlCell>): TabRef {
   const values = params as Record<string, ParamValue>;
   if (ref.kind === "lens") return lensRef((ref.payload as { lensId: string }).lensId, params);
   if (ref.kind === "metric") return metricRef((ref.payload as { metricKey: string }).metricKey, params);
   const page = pagePayload(ref);
   if (!page) return ref;
-  return page.extension === null ? pageTabRef(page.page, values, page.state) : extPageRef(page.extension, page.page, values);
+  return page.extension === null ? pageTabRef(page.page, values) : extPageRef(page.extension, page.page, values);
 }
 
 /** Parse a metric id's raw `<key>?k=v` tail back into a ref. */
@@ -238,47 +238,58 @@ export function newSessionRef(): TabRef {
 
 /** A Settings area's page (`page:settings?area=agents`); the overview is
  *  `page:settings`. `section` is where it lands: an area's section id or
- *  an anchor inside one (look-aside state: it doesn't change the tab). */
+ *  an anchor inside one. Both are view params: one Settings page shows
+ *  them. */
 export function settingsRef(area: string | null = null, section: string | null = null): TabRef {
   const shown = area && area !== "overview" ? area : null;
-  return pageTabRef("settings", { area: shown }, section ? { section } : undefined);
+  return pageTabRef("settings", { area: shown, section });
 }
 
-/** Stable id for a diff tab. Keyed off the path + both side versions
- *  + label override so re-opening the same diff with a new revealLine
- *  reuses the existing tab. */
-export function computeDiffId(spec: DiffSpec): string {
+/** A diff page: its spec as params — `path`, `left`, `right`, `label`
+ *  (the tab's suffix), `base` (the left side's name, when it isn't the
+ *  version's own short label) and `line` (the line it lands on, a view
+ *  param: a new line re-renders the same page). Literal text (a clipboard
+ *  compare) isn't an address: it rides as the entry's history state
+ *  (`diffTextOf`). */
+export function diffRef(spec: DiffSpec): TabRef {
   return pageTabRef("diff", {
     path: spec.path,
     left: spec.leftVersion,
     right: spec.rightVersion,
     label: spec.labelOverride ?? null,
-  }).id;
+    base: spec.baseLabel && spec.baseLabel !== shortRevisionLabel(spec.leftVersion) ? spec.baseLabel : null,
+    line: spec.revealLine && spec.revealLine > 0 ? spec.revealLine : null,
+  });
 }
 
-/** The TabRef for a diff page: the full `DiffSpec` rides as its state
- *  (opening it registers the spec, keyed by this id, in the diff spec
- *  registry, which persists). */
-export function diffRef(spec: DiffSpec): TabRef {
-  return pageTabRef(
-    "diff",
-    {
-      path: spec.path,
-      left: spec.leftVersion,
-      right: spec.rightVersion,
-      label: spec.labelOverride ?? null,
-    },
-    spec,
-  );
-}
-
-/** A diff page's spec, rebuilt from its params when the registry has none
- *  (a restored tab). */
+/** A diff page's spec, from its params; null when they don't name a path
+ *  and two versions. */
 export function diffSpecOf(params: Record<string, string>): DiffSpec | null {
   const left = parseRevision(params.left ?? "");
   const right = parseRevision(params.right ?? "");
   if (!params.path || !left || !right) return null;
-  return { path: params.path, leftVersion: left, rightVersion: right, baseLabel: "", labelOverride: params.label };
+  const line = Number(params.line);
+  return {
+    path: params.path,
+    leftVersion: left,
+    rightVersion: right,
+    baseLabel: params.base ?? shortRevisionLabel(left),
+    labelOverride: params.label,
+    revealLine: Number.isInteger(line) && line > 0 ? line : undefined,
+  };
+}
+
+/** The history state a diff of literal text opens with, and reads back:
+ *  the two sides' text, which no address holds. */
+export interface DiffText {
+  diffText: { left: string; right: string };
+}
+
+/** The two sides' literal text in a diff entry's history state; null for
+ *  a diff of versions. */
+export function diffTextOf(historyState: Record<string, unknown> | undefined): DiffText["diffText"] | null {
+  const t = historyState?.diffText as { left?: unknown; right?: unknown } | undefined;
+  return t && typeof t.left === "string" && typeof t.right === "string" ? { left: t.left, right: t.right } : null;
 }
 
 export interface DuplicateBlockPayload {
@@ -490,7 +501,7 @@ export function newStreamRef(): TabRef {
  *  wanting different defaults should `closeTab` before opening with a
  *  new payload. */
 export function newTaskRef(payload: NewTaskPayload = {}): TabRef {
-  return pageTabRef("new-task", undefined, payload);
+  return pageTabRef("new-task", { parent: payload.parentRef ?? null });
 }
 
 export function streamSettingsRef(streamId: string): TabRef {

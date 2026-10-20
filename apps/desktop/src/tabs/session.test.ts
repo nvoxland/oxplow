@@ -51,13 +51,27 @@ describe("open", () => {
     expect(s.active).toBe(slotOf(s, "wiki:a"));
   });
 
-  test("opening a page that is showing refreshes its ref, keeping its state (a diff's line to reveal)", () => {
+  test("opening a page that is showing refreshes its ref, keeping its state", () => {
     const first = { ...a, payload: { slug: "a", line: 1 } };
     const again = { ...a, payload: { slug: "a", line: 9 } };
     let s = open(emptySession(), e(first, { historyState: { scroll: 4 } }));
     s = open(s, e(again));
     expect(current(s.tabs[0]!).ref.payload).toEqual({ slug: "a", line: 9 });
     expect(current(s.tabs[0]!).historyState).toEqual({ scroll: 4 });
+  });
+
+  // A diff opened again at another line is the diff that's showing: the
+  // caller says what "the same page" is.
+  test("with an identity, a tab showing the page at another view is the one refreshed", () => {
+    const at = (line: number) => pageTabRef("diff", { path: "a.ts", line });
+    const identity = (ref: Entry["ref"]) => identityOf(ref.id);
+    let s = open(emptySession(), e(at(1), { historyState: { scroll: 4 } }));
+    s = open(s, e(at(9)), { identity });
+    expect(ids(s)).toEqual(["page:diff?path=a.ts&line=9"]);
+    expect(current(s.tabs[0]!).historyState).toEqual({ scroll: 4 });
+    // Without one, another view is another page.
+    s = open(s, e(at(3)));
+    expect(ids(s)).toHaveLength(2);
   });
 
   test("slots are stable names, never ids", () => {

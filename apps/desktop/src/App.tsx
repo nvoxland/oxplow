@@ -940,9 +940,10 @@ export function App() {
   /** Show `ref` in the shown thread: the tab showing it (its ref
    *  refreshed), else a new one; it becomes active. */
   const openTab = useCallback(
-    (ref: TabRef) => {
+    (ref: TabRef, opts: { historyState?: Record<string, unknown>; identity?: (ref: TabRef) => string } = {}) => {
       if (!selectedThreadId) return;
-      updateSession(selectedThreadId, (session) => sessionOpen(session, { ref }, { pinned: !!ref.pinned }));
+      const entry = opts.historyState ? { ref, historyState: opts.historyState } : { ref };
+      updateSession(selectedThreadId, (session) => sessionOpen(session, entry, { pinned: !!ref.pinned, identity: opts.identity }));
     },
     [selectedThreadId, updateSession],
   );
@@ -1487,11 +1488,6 @@ export function App() {
     return () => clearTimeout(timer);
   }, [effectiveCenterActive, selectedThreadId, sessions, pageTitles, pageDetailTick, windowFocused, windowVisible]);
 
-  // A diff's spec rides in its ref (`diffRef`'s state), so opening the
-  // same diff again refreshes it: per-click metadata that doesn't change
-  // the id (a line to reveal) is honored.
-  const handleOpenDiff = (request: DiffSpec) => openTab(diffRef(request));
-
   const handleCompareWithClipboard = async (selection: string, path: string) => {
     let clipboard = "";
     try {
@@ -1500,24 +1496,12 @@ export function App() {
       setError(`Clipboard read failed: ${String(err)}`);
       return;
     }
-    // Use a deterministic id with a timestamp so each compare-with-
-    // clipboard session is its own tab.
+    // The two texts are no address: they ride as the entry's history
+    // state (`diffTextOf`). Each compare is its own tab (the time in its
+    // label); WORKING on both sides is a sentinel the text replaces.
     const ts = Date.now();
-    const spec: DiffSpec = {
-      path,
-      // The compare-with-clipboard view never reads either side from
-      // disk/git — the inline `leftContent` / `rightContent` literals
-      // bypass the version dispatcher entirely. We still need to
-      // satisfy the `Revision` shape; WORKING is a harmless sentinel
-      // here.
-      leftVersion: WORKING,
-      rightVersion: WORKING,
-      baseLabel: "clipboard",
-      leftContent: selection,
-      rightContent: clipboard,
-      labelOverride: `selection vs clipboard (${ts})`,
-    };
-    handleOpenDiff(spec);
+    const ref = diffRef({ path, leftVersion: WORKING, rightVersion: WORKING, baseLabel: "clipboard", labelOverride: `selection vs clipboard (${ts})` });
+    openTab(ref, { historyState: { diffText: { left: selection, right: clipboard } } });
   };
 
   const handleRevealCommit = (sha: string) => {
@@ -1675,21 +1659,16 @@ export function App() {
         return;
       }
       case "page": {
-        // A diff built from its spec (e.g. a lens `diff-at` link).
-        const spec = isPage(ref, "diff") ? (pagePayload(ref)?.state as DiffSpec | undefined) : undefined;
-        if (spec?.path && spec.leftVersion && spec.rightVersion) {
-          handleOpenDiff(spec);
-          return;
-        }
-        openAsPageTab();
+        // A diff is the same page at any line: opened again, the tab
+        // already showing it moves to the new line.
+        if (isPage(ref, "diff")) openTab(ref, { identity: pageIdentity });
+        else openAsPageTab();
         return;
       }
       default:
         openAsPageTab();
         return;
     }
-    // handleOpenDiff is a plain function over state setters and
-    // selectedThreadId, which is already a dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handleOpenFile, handleOpenWiki, openTab, selectedThreadId, selectedThreadSessions, selectedThreadWork, setCenterActive, stream?.id]);
 
@@ -2364,7 +2343,7 @@ export function App() {
               ? page.page
               : null;
         if (builtIn && isBuiltInPage(builtIn)) {
-          const tab = builtInPages[builtIn]({ ref, params: page.params, state: page.state, nav, scope });
+          const tab = builtInPages[builtIn]({ ref, params: page.params, nav, scope });
           return tab ? { ...tab, label: tab.label || declared?.title || page.page } : null;
         }
         return {

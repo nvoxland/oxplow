@@ -181,8 +181,6 @@ pages:
   - { id: extensions, title: Extensions, icon: package, category: System, keywords: deploy rollback permissions enable disable share, lens: extensions }
   # Opened from elsewhere
   - { id: alerts, title: Alerts, icon: bell, component: "oxplow:alerts" }
-  - { id: local-history-full, title: All Snapshots, icon: history, component: "oxplow:local-history-full" }
-  - { id: local-history-by-commit-full, title: All Commits, icon: history, component: "oxplow:local-history-by-commit-full" }
   - { id: custom-dashboard, title: Dashboard, icon: layout-dashboard, params: [id], component: "oxplow:custom-dashboard" }
   - { id: new-session, title: New Session, icon: plus, component: "oxplow:new-session" }
   - { id: new-stream, title: New Stream, icon: plus, component: "oxplow:new-stream" }

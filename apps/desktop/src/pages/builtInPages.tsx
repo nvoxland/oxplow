@@ -1,6 +1,5 @@
 import { agentSessionRef, diffSpecOf, duplicateBlockOf, endpointsOf, fileRef, isPage, newTaskRef, workItemTabRef, type DiffViewPayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
-import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import { idOf } from "../refs/ref.js";
 import type { Stream } from "../api.js";
 import { openAgentSession, openExternalUrl } from "../api.js";
@@ -40,8 +39,6 @@ export interface BuiltInPageContext {
   ref: TabRef;
   /** The id's params (`pagePayload(ref).params`). */
   params: Record<string, string>;
-  /** Look-aside data the id doesn't hold (`pagePayload(ref).state`). */
-  state: unknown;
   nav: SlotNav;
   scope: AppScope;
 }
@@ -157,10 +154,8 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
       />
     ),
   }),
-  diff: ({ ref, params, state, nav, scope }) => {
-    // Its spec rides in its ref; a bare id (a link, a bookmark) rebuilds
-    // what its params say.
-    const spec = (state as DiffSpec | undefined) ?? diffSpecOf(params);
+  diff: ({ ref, params, nav, scope }) => {
+    const spec = diffSpecOf(params);
     if (!spec) return null;
     const label = spec.path.split("/").pop() ?? spec.path;
     const suffix = spec.labelOverride ?? "diff";
@@ -206,9 +201,9 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
       ) : null,
     };
   },
-  settings: ({ ref, params, state, nav }) => {
+  settings: ({ ref, params, nav }) => {
     const area = settingsArea(params.area);
-    const section = (state as { section?: string } | undefined)?.section ?? null;
+    const section = params.section ?? null;
     return {
       id: ref.id,
       label: area.id === "overview" ? "Settings" : `Settings: ${area.title}`,
@@ -225,34 +220,6 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
         <LocalHistoryDashboardPage
           stream={scope.stream}
           onOpenPage={nav.navOpen}
-        />
-      ),
-    };
-  },
-  "local-history-full": ({ ref, nav, scope }) => {
-    return {
-      id: ref.id,
-      label: "All snapshots",
-      closable: true,
-      render: () => (
-        <LocalHistoryDashboardPage
-          stream={scope.stream}
-          onOpenPage={nav.navOpen}
-          mode="full-list"
-        />
-      ),
-    };
-  },
-  "local-history-by-commit-full": ({ ref, nav, scope }) => {
-    return {
-      id: ref.id,
-      label: "All commits",
-      closable: true,
-      render: () => (
-        <LocalHistoryDashboardPage
-          stream={scope.stream}
-          onOpenPage={nav.navOpen}
-          mode="full-by-commit"
         />
       ),
     };
@@ -492,15 +459,14 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
       ),
     };
   },
-  "new-task": ({ ref, state, scope }) => {
-    const payload = (state as { parentRef?: string | null } | undefined) ?? {};
+  "new-task": ({ ref, params, scope }) => {
     return {
       id: ref.id,
       label: "New item",
       closable: true,
       render: () => (
         <NewTaskPage
-          defaults={{ parentRef: payload.parentRef ?? null }}
+          defaults={{ parentRef: params.parent ?? null }}
           epics={scope.threadWork?.epics ?? []}
           onClose={() => scope.closePageTab(ref.id)}
           onSubmit={(input) => scope.handleCreateTask({ ...input, state: input.state ?? "todo" })}

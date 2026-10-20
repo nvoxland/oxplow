@@ -20,7 +20,8 @@ import { logUi } from "../logger.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Origin, OriginItem } from "../tabs/session.js";
-import { gitCommitRef, pageTabRef, snapshotRef } from "../tabs/pageRefs.js";
+import { gitCommitRef, snapshotRef } from "../tabs/pageRefs.js";
+import { useViewParam } from "../tabs/useViewParam.js";
 import { wikiRef } from "../refs/ref.js";
 import { workItemLabel } from "../workItemRef.js";
 import { vcsRevOf } from "../revision.js";
@@ -38,21 +39,9 @@ const BY_COMMIT_GROUP_LIMIT = 10;
  *  enough. */
 const FULL_HISTORY_LIMIT = 500;
 
-/** "dashboard" — the default landing view with both modes available
- *  via toggle, capped lists.
- *  "full-list" — dedicated page locked to the recent-snapshots
- *  layout with all snapshots up to FULL_HISTORY_LIMIT.
- *  "full-by-commit" — same idea, locked to the by-commit grouping. */
-export type LocalHistoryMode = "dashboard" | "full-list" | "full-by-commit";
-
 export interface LocalHistoryDashboardPageProps {
   stream: Stream | null;
   onOpenPage(ref: TabRef, opts?: { newTab?: boolean; origin?: Origin }): void;
-  /** Controls layout + fetch limits. Defaults to "dashboard"
-   *  (capped, toggle-able). The "full-*" modes are used by the
-   *  dedicated index pages reachable via the dashboard's footer
-   *  links. */
-  mode?: LocalHistoryMode;
 }
 
 interface SnapshotRowEffort {
@@ -144,13 +133,17 @@ interface DashboardData {
 export function LocalHistoryDashboardPage({
   stream,
   onOpenPage,
-  mode = "dashboard",
 }: LocalHistoryDashboardPageProps) {
+  // Its view: the grouping (`mode`) and whether the lists are capped
+  // (`all`, a step Back returns from).
+  const [mode, setMode] = useViewParam("mode", "recent");
+  const [all, setAll] = useViewParam("all", false, { push: true });
+  const grouping: GroupingMode = mode === "by-commit" ? "by-commit" : "recent";
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const streamId = stream?.id ?? null;
-  const fetchLimit = mode === "dashboard" ? RECENT_LIMIT : FULL_HISTORY_LIMIT;
+  const fetchLimit = all ? FULL_HISTORY_LIMIT : RECENT_LIMIT;
 
   const refresh = useCallback(async () => {
     if (!streamId) {
@@ -279,12 +272,7 @@ export function LocalHistoryDashboardPage({
 
   const byBranch = useMemo(() => groupByBranch(data?.rows ?? []), [data?.rows]);
 
-  const pageTitle =
-    mode === "full-list"
-      ? "All snapshots"
-      : mode === "full-by-commit"
-      ? "All commits"
-      : "Local History";
+  const pageTitle = !all ? "Local History" : grouping === "by-commit" ? "All commits" : "All snapshots";
 
   if (!streamId) {
     return (
@@ -301,7 +289,10 @@ export function LocalHistoryDashboardPage({
         {loading && !data ? <div style={muted}>Loading…</div> : null}
         {data ? (
           <DashboardBody
-            mode={mode}
+            grouping={grouping}
+            onGrouping={setMode}
+            all={all}
+            onViewAll={() => setAll(true)}
             data={data}
             byBranch={byBranch}
             onOpenPage={onOpenPage}
@@ -315,83 +306,74 @@ export function LocalHistoryDashboardPage({
 type GroupingMode = "recent" | "by-commit";
 
 function DashboardBody({
-  mode: pageMode,
+  grouping,
+  onGrouping,
+  all,
+  onViewAll,
   data,
   byBranch,
   onOpenPage,
 }: {
-  mode: LocalHistoryMode;
+  grouping: GroupingMode;
+  onGrouping(next: GroupingMode): void;
+  /** Every snapshot or commit, no caps and no "view all" links. */
+  all: boolean;
+  onViewAll(): void;
   data: DashboardData;
   byBranch: Array<{ commit: string; rows: SnapshotRow[] }>;
   onOpenPage(ref: TabRef, opts?: { newTab?: boolean; origin?: Origin }): void;
 }) {
-  // Full-history pages lock the layout to a single view (no toggle,
-  // no caps, no "view full" link — they ARE the full view). The
-  // dashboard mode keeps the toggle + caps + footer links.
-  const isFullList = pageMode === "full-list";
-  const isFullByCommit = pageMode === "full-by-commit";
-  const isDashboard = !isFullList && !isFullByCommit;
-
   const byCommitAvailable = byBranch.length > 0;
-  const [toggleMode, setToggleMode] = useState<GroupingMode>("recent");
-  const effectiveMode: GroupingMode = isFullList
-    ? "recent"
-    : isFullByCommit
-    ? "by-commit"
-    : toggleMode === "by-commit" && !byCommitAvailable
-    ? "recent"
-    : toggleMode;
+  const effectiveMode: GroupingMode = grouping === "by-commit" && !byCommitAvailable ? "recent" : grouping;
 
   // Cap the by-commit list to the last N commit groups. Uncommitted
   // (if present) sits at the top and is not counted against the cap
-  // since it's not really a commit. The full page lifts the cap.
+  // since it's not really a commit. `all` lifts the cap.
   const cappedByBranch = useMemo(() => {
-    if (isFullByCommit) return byBranch;
+    if (all) return byBranch;
     const uncommitted = byBranch.filter((g) => g.commit === UNCOMMITTED_GROUP_KEY);
     const commits = byBranch.filter((g) => g.commit !== UNCOMMITTED_GROUP_KEY);
     return [...uncommitted, ...commits.slice(0, BY_COMMIT_GROUP_LIMIT)];
-  }, [byBranch, isFullByCommit]);
+  }, [byBranch, all]);
   const commitOverflow = useMemo(
     () =>
-      isFullByCommit
+      all
         ? 0
         : Math.max(
             0,
             byBranch.filter((g) => g.commit !== UNCOMMITTED_GROUP_KEY).length -
               BY_COMMIT_GROUP_LIMIT,
           ),
-    [byBranch, isFullByCommit],
+    [byBranch, all],
   );
-  // The recent-list cap mirrors RECENT_LIMIT for the dashboard. The
-  // full page renders all fetched rows.
+  // The recent list is capped by its fetch (RECENT_LIMIT; with `all`,
+  // FULL_HISTORY_LIMIT).
   const recentRows = data.rows;
   const recentOverflow = 0; // RECENT_LIMIT is the fetch ceiling so there's nothing past it to count.
 
   return (
     <>
-      {isDashboard ? (
-        <GroupingToggle
-          mode={effectiveMode}
-          onChange={setToggleMode}
-          byCommitAvailable={byCommitAvailable}
-        />
-      ) : null}
+      <GroupingToggle
+        mode={effectiveMode}
+        onChange={onGrouping}
+        byCommitAvailable={byCommitAvailable}
+      />
       {effectiveMode === "recent" ? (
         <RecentSnapshotsCard
           rows={recentRows}
           overflowCount={recentOverflow}
-          showViewAllLink={isDashboard}
+          showViewAllLink={!all}
           onSelect={(id, origin) => onOpenPage(snapshotRef(id), { origin })}
-          onViewAll={() => onOpenPage(pageTabRef("local-history-full"))}
+          onViewAll={onViewAll}
           refLabels={data.refLabels}
         />
       ) : (
         <ByBranchCard
           groups={cappedByBranch}
           overflowCount={commitOverflow}
-          showViewAllLink={isDashboard}
+          showViewAllLink={!all}
           onSelect={(id, origin) => onOpenPage(snapshotRef(id), { origin })}
-          onViewAll={() => onOpenPage(pageTabRef("local-history-by-commit-full"))}
+          onViewAll={onViewAll}
           refLabels={data.refLabels}
           onOpenCommit={(sha) => onOpenPage(gitCommitRef(sha))}
         />
@@ -566,7 +548,7 @@ function RecentSnapshotsCard({
             type="button"
             onClick={onViewAll}
             style={cardLinkButton}
-            title="Open the full snapshot history in its own tab"
+            title="Show every snapshot (Back returns here)"
           >
             View all snapshots →
             {overflowCount > 0 ? ` (${overflowCount} more)` : ""}
@@ -694,7 +676,7 @@ function ByBranchCard({
             type="button"
             onClick={onViewAll}
             style={cardLinkButton}
-            title="Open the full by-commit history in its own tab"
+            title="Show every commit (Back returns here)"
           >
             View all commits →
             {overflowCount > 0 ? ` (${overflowCount} more)` : ""}

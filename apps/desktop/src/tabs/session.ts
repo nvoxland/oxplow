@@ -100,9 +100,17 @@ function withTab(s: Session, slot: string, f: (t: Tab) => Tab): Session {
 }
 
 /** Show `entry`: the tab already showing its page (its ref refreshed,
- *  its state kept), else a new tab. The tab becomes active. */
-export function open(s: Session, entry: Entry, opts: { pinned?: boolean } = {}): Session {
-  const there = s.tabs.find((t) => current(t).ref.id === entry.ref.id);
+ *  its state kept), else a new tab. The tab becomes active. Its page is
+ *  its ref's id, or what `identity` says (a diff at another line is the
+ *  diff showing). */
+export function open(
+  s: Session,
+  entry: Entry,
+  opts: { pinned?: boolean; identity?: (ref: Entry["ref"]) => string } = {},
+): Session {
+  const same = opts.identity ?? ((ref: Entry["ref"]) => ref.id);
+  const page = same(entry.ref);
+  const there = s.tabs.find((t) => same(current(t).ref) === page);
   if (there) {
     const refreshed = withTab(s, there.slot, (t) => {
       const entries = [...t.entries];

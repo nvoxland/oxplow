@@ -110,8 +110,7 @@ extension host lands.
   `alerts`
 - **Code & review:** `file`, `dir`, `files`, `diff`, `diff-view`,
   `uncommitted-changes`, `commit`, `git-history`, `git-dashboard`,
-  `local-history`, `local-history-full`, `local-history-by-commit-full`,
-  `terminal`
+  `local-history`, `terminal`
 - **Knowledge:** `wiki`
 - **Lenses:** `lens` (`lens:<extension>/<slug>`, user/agent-built from
   `.oxplow/extensions/`; see [extensions.md](./extensions.md))
@@ -145,10 +144,11 @@ inside an id (`work_item:oxplow:tsk42`) never splits it. Two families:
   `page:tasks`, `page:settings?area=agents`) and
   `page:<extension>/<id>[?params]` for any other extension's. Every
   page tab's `TabRef.kind` is `page`; its payload is `PagePayload
-  { extension, page, params, state? }` (`extension` null for oxplow's).
-  `state` is look-aside data the id doesn't hold (a diff's spec,
-  Settings' landing section, a new item's parent): lost on a restart by
-  design, so a page must draw from its params alone. Pages never appear
+  { extension, page, params }` (`extension` null for oxplow's). Nothing
+  rides beside the id: what a page shows is its params (a diff's spec,
+  Settings' landing section, a new item's parent), and what only one step
+  of a tab keeps (a clipboard compare's two texts) is that entry's history
+  state. Pages never appear
   in `page_ref`. Params are a query string whose values escape only
   what would break the id (`&`, `=`, `+`, `%`, `@`, `#`, whitespace),
   so `path=src/a.ts&left=git:abc` stays readable.
@@ -211,7 +211,9 @@ id among the enabled extensions), draws a built-in from the
 frame filling the body under the nav bar, told the page's params, stream
 and thread, its title and actions the frame's (`setTitle`,
 `setActions`). oxplow's Timeline (`page:timeline`, params `from`, `to`,
-`thread`) is one. Each built-in body is a
+`thread`) is one: its window is its view params, written on every change
+(not its opening default) and followed on Back/Forward. A frame's
+`setViewParams` reaches the tab as `patchViewParams` (null drops a key). Each built-in body is a
 `(ctx) => CenterTab | null` over `{ ref, params, state, nav, scope }`;
 `scope` is the `AppScope` (`pages/appScope.ts`), the explicit list of
 what core offers them (selection, work state, handlers) that `App.tsx`
@@ -232,15 +234,19 @@ oxplow's pages and their params:
   `hook-events`, `done-work`, `catalog`.
 - Built-in pages: `tasks`, `backlog` (badge: `backlog-count`), `board`,
   `files`, `git-dashboard`, `git-history`, `uncommitted-changes`,
-  `local-history`, `local-history-full`, `local-history-by-commit-full`,
-  `comments`, `explore-data`, `metrics-recorded`, `terminal`, `alerts`,
-  `settings` (`area`; `section` rides `state`), `custom-dashboard`
-  (`id`), `new-session`, `new-stream`, `new-task` (`parentRef` rides
-  `state`), `stream-settings` (`stream`), `thread-settings` (`thread`),
-  `external-url` (`url`), `diff` (`path`, `left`, `right`, `label`; the
-  full spec rides `state`, `diffSpecOf` rebuilds it from the params),
-  `diff-view` (`start`, `end`: `none` / `working` / `snap:<id>` /
-  `git:<rev>`; `endpointsOf`), `duplicate-block` (`left`, `left_lines`,
+  `local-history` (view: `mode` `recent` | `by-commit`, `all` — "View
+  all" pushes it), `comments`, `explore-data`, `metrics-recorded`,
+  `terminal`, `alerts`, `settings` (view: `area`, `section` — another
+  area is a pushed view change, never a page opened over it),
+  `custom-dashboard` (`id`), `new-session`, `new-stream`, `new-task`
+  (`parent`), `stream-settings` (`stream`), `thread-settings` (`thread`),
+  `external-url` (`url`), `diff` (`path`, `left`, `right`, `label`,
+  `base` — the left side's name when it isn't the version's own — and
+  `line`, a view param: the same diff opened at another line moves the
+  tab showing it; `diffSpecOf` reads the spec back; a clipboard compare's
+  texts are history state, `diffTextOf`), `diff-view` (`start`, `end`:
+  `none` / `working` / `snap:<id>` / `git:<rev>`; `endpointsOf`; a
+  picked endpoint is a pushed view change), `duplicate-block` (`left`, `left_lines`,
   `left_at`, `right`, `right_lines`, `right_at`; `duplicateBlockOf`).
 
 New Session (`page:new-session`) is a Document page (`DocumentLayout`):
@@ -892,6 +898,11 @@ is refused as an op error and the tab stays, rather than silently
 remounting the page. A list's cursor (↑/↓ before a pick) is the list's
 own (`useListNav`); only a pick is a selection, and `useListNav`'s
 `selected` puts the cursor on a kept pick.
+
+**A page never navigates to itself, and a mode is a param, not a page
+name.** Settings' areas, Diff View's endpoints and Local History's
+grouping and "View all" are view changes on one page (pushed when Back
+should return), so the page stays mounted and its other state stays.
 
 Core pages follow the same rule: the Tasks page's scope and filter chips
 are its view params (`components/Plan/tasksView.ts`: `scope` with

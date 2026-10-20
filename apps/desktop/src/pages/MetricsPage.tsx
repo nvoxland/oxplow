@@ -238,7 +238,8 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
   const branch = branchName || null;
   const search = useSearchFilter("q", { label: "Filter metrics by name", placeholder: "Filter by name…", testId: "recorded-search" });
   const query = search.value;
-  const [showMode, setShowMode] = useViewParam<ShowMode>("show", DEFAULT_SHOW_MODE);
+  const [showText, setShowMode] = useViewParam("show", DEFAULT_SHOW_MODE as string);
+  const showMode: ShowMode = showText === "all" ? "all" : "enabled";
   // Slice By (tsk594): a dimension splits every metric that has it into groups.
   const [sliceKey, setSlice] = useViewParam<string>("slice", "");
   const sliceBy = sliceKey || null;
@@ -357,7 +358,7 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
             show={showMode}
             showOptions={SHOW_MODES.map((m) => ({ value: m.key, label: m.label }))}
             onApply={(name, value) =>
-              ({ range: setRangeKey, branch: setBranch, slice: setSlice, show: (v: string) => setShowMode(v as ShowMode) })[name](value)
+              ({ range: setRangeKey, branch: setBranch, slice: setSlice, show: (v: string) => setShowMode(v) })[name](value)
             }
           />
           {/* Not a filter, but this rail is the page's control panel — the

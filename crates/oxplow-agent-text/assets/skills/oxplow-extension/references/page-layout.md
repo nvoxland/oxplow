@@ -93,6 +93,14 @@ the open page sees the same values. So:
   `sessionStorage` (`check` warns). What only that page's entry needs
   to remember (scroll, open sections) oxplow keeps for the kit's
   components already.
+- **A component writes its view on every change and follows it back.**
+  Call `setViewParams` when what it shows changes (a drag, a zoom, a
+  button), and redraw in `onViewParams` when Back or Forward moves the
+  tab; skip a value it already shows. A default it computes ("the last
+  week") stays out of the params, so a bookmark doesn't freeze it to one
+  date. oxplow-foundation's Timeline does exactly this with `from`/`to`.
+- **The page never opens itself.** Another mode or "View all" is a param
+  on the same page, not a second page.
 
 ## Where a page comes from
 

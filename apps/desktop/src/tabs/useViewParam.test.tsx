@@ -57,6 +57,22 @@ test("a view param reads its tab's value back in its own type, and writes a chan
   expect(patches).toEqual([]);
 });
 
+// "View all" is a step Back returns from, not a filter.
+test("a view param said to push pushes every change", () => {
+  const patches: Patch[] = [];
+  function All() {
+    hooks.all = useViewParam("all", false, { push: true });
+    return null;
+  }
+  render(
+    <PageNavigationContext.Provider value={nav({}, patches)}>
+      <All />
+    </PageNavigationContext.Provider>,
+  );
+  set("all", true);
+  expect(patches).toEqual([[{ all: true }, { push: true }]]);
+});
+
 test("a view param missing or unreadable is its default", () => {
   render(
     <PageNavigationContext.Provider value={nav({ days: "soon" }, [])}>

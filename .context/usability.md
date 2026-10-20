@@ -398,6 +398,17 @@ directory and commit links silently ignored it (tsk265). A new link kind
 gets the behaviour by being added to `linkRef`, not by growing
 another branch.
 
+## A page changes its own view, it doesn't open itself
+
+A filter, a mode, a pick or "View all" on a page is that page at another
+view: it writes its view params (`useViewParam`, `useViewSelection`,
+`.context/pages-and-tabs.md` "Page state"), and the page stays mounted —
+its scroll, open groups and drafts stay. A filter replaces the tab's
+entry; a pick or a step the person will want Back from ("View all",
+another Settings area, another diff endpoint) pushes one. A mode is a
+param, never a second page name. A list's cursor (↑/↓ before Enter) is
+not a pick and isn't in the address.
+
 ## Hover reveals, click rearranges
 
 > **These rules are enforced by code, not just written down here.** The

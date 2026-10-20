@@ -84,21 +84,13 @@ export function CustomPageView({
   );
   const navRef = useRef(nav);
   navRef.current = nav;
-  const pageRef = useRef(page);
-  pageRef.current = page;
   const pageDeps = useMemo(
     () => ({
       setTitle: setFrameTitle,
       setActions: setFrameActions,
       setHistoryState: (patch: Record<string, unknown>) => navRef.current?.setHistoryState?.(patch),
-      setViewParams: (changes: Record<string, string | null>) => {
-        const next: Record<string, string> = { ...pageRef.current.params };
-        for (const [k, v] of Object.entries(changes)) {
-          if (v === null) delete next[k];
-          else next[k] = v;
-        }
-        navRef.current?.setViewParams?.(next);
-      },
+      setViewParams: (changes: Record<string, string | null>) =>
+        navRef.current?.patchViewParams?.(Object.fromEntries(Object.entries(changes).map(([k, v]) => [k, v ?? undefined]))),
       openForm: (command: string, input: unknown, version: string) =>
         new Promise<{ result: unknown } | null>((resolve, reject) => {
           setAsked({ command, input, version, resolve, reject });
