@@ -948,6 +948,17 @@ impl Instance {
             live.take()
         };
         let Some(mut gone) = gone else { return };
+        // The host's own doing: its revocation monitor stops a process whose
+        // authority is gone, before the generation saying so is published.
+        // That is no failure of the instance, and nothing to restart. (The
+        // gate can hash files: off the async workers.)
+        let calls = self.host_calls.clone();
+        if tokio::task::spawn_blocking(move || calls.revoked())
+            .await
+            .unwrap_or(false)
+        {
+            return;
+        }
         let status = gone.conn.exit_status().await;
         let how = match status.and_then(|s| s.code()) {
             Some(code) => format!("its process exited (status {code})"),

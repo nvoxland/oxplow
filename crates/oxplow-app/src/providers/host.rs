@@ -455,6 +455,13 @@ impl HostCalls {
         *self.gate.lock() = Some(gate);
     }
 
+    /// Whether its gate now refuses it (the extension or instance was
+    /// turned off, its approval withdrawn): the host stops its process then.
+    pub(crate) fn revoked(&self) -> bool {
+        let gate = self.gate.lock().clone();
+        gate.is_some_and(|gate| gate().is_err())
+    }
+
     pub(crate) fn authority_current(&self) -> bool {
         let gate = self.gate.lock().clone();
         gate.is_some_and(|gate| gate().is_ok())

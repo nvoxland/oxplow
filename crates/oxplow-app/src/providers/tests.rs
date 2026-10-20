@@ -3282,6 +3282,37 @@ async fn a_global_instances_credential_is_shared_across_projects() {
     ));
 }
 
+/// The host ends a process whose authority was revoked (its extension
+/// disabled, its config turned off) before the generation that says so is
+/// published. That exit is the host's doing: not a failure counted against
+/// the instance, and not restarted.
+#[tokio::test]
+async fn a_process_the_host_ended_for_revoked_authority_counts_no_failure() {
+    let (fx, _ext) = deployed("").await;
+    configure(&fx, true, json!({ "team": "core" }));
+    crate::test_fixtures::activate(&fx.svc).await;
+    first_read(&fx).await;
+    let running = fx.svc.providers.get(INSTANCE).await.unwrap();
+    let (peer, _) = running.connection_if_running().await.unwrap();
+    // Turned off in the config, before any generation says so.
+    configure(&fx, false, json!({ "team": "core" }));
+    tokio::time::timeout(std::time::Duration::from_secs(10), peer.closed())
+        .await
+        .expect("the monitor ends a revoked process");
+    // The supervisor's side of the exit has run once the process is gone
+    // from the instance.
+    for _ in 0..200 {
+        if !running.has_process().await {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let health = fx.svc.providers.health(INSTANCE).unwrap();
+    assert_eq!(health.consecutive_failures, 0, "{:?}", health.state);
+    assert!(!matches!(health.state, InstanceState::Failing { .. }));
+}
+
 /// tsk820: a call's outcome is its instance's while that instance runs.
 /// One that finishes after the instance was stopped — the first read an
 /// enable starts, say — changes nothing: not "Ready" for something that
