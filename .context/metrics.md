@@ -1722,7 +1722,7 @@ just carries a Help blurb pointing there.
 > `CollapsibleSections` provider and the kit `Section` with `collapsible` — a chevron on
 > each section header, with the **Expand all / Collapse all pair living in the
 > details rail** beside the filters (`SectionCollapseControls`, tsk86). Collapsed
-> state persists under `pageKey: "metrics-recorded"`. The provider wraps the whole
+> state is kept in the tab entry. The provider wraps the whole
 > `<Page>` so its context reaches the rail as well as the body. See
 > `.context/usability.md` → "Collapsible page sections".
 >

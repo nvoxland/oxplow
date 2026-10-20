@@ -1,12 +1,9 @@
-// Pure state + persistence for the collapsible page sections (tsk84). React-free
+// Pure state for the collapsible page sections. React-free
 // so the rules are unit-testable without mounting a page.
 //
 // The state is stored as the set of **collapsed** ids, not expanded ones: a
 // section defaults to expanded, so "collapsed" is the exception worth recording
 // and a brand-new section needs no migration to appear open.
-
-/** localStorage key. `{ [pageKey]: collapsedId[] }` — one entry per page. */
-export const SECTIONS_COLLAPSED_KEY = "oxplow.page.sectionsCollapsed.v1";
 
 /** Sections default to **expanded** — only an explicit collapse is recorded.
  *  A section that `defaultCollapsed` is the mirror image: it starts closed
@@ -21,10 +18,6 @@ export function isExpanded(
 }
 
 const EMPTY: ReadonlySet<string> = new Set();
-
-/** Where a page's opened-by-the-person ids live in the blob (beside its
- *  collapsed ones, under the same key plus this suffix). */
-export const OPENED_SUFFIX = "#opened";
 
 /** Flip one section in whichever set records its exceptions: `collapsed`
  *  for a section that starts open, `opened` for one that starts closed. */
@@ -84,46 +77,4 @@ export function allCollapsed(
   startsClosed: ReadonlySet<string> = EMPTY,
 ): boolean {
   return ids.length > 0 && ids.every((id) => !isExpanded(collapsed, id, opened, startsClosed.has(id)));
-}
-
-/** One page's collapsed ids out of the raw storage blob. Tolerates missing,
- *  malformed, and wrong-shaped values by reading them as "nothing collapsed" —
- *  a corrupt entry costs a lost preference, never a crash.
- *
- *  Deliberately **not** reconciled against the sections that exist right now
- *  (unlike the rail's section ORDER, which drops unknown ids): a section hidden
- *  by a search filter must come back still collapsed, so an id we don't
- *  currently recognize is remembered rather than pruned. */
-export function parseCollapsed(raw: string | null, pageKey: string): Set<string> {
-  if (!raw) return new Set();
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return new Set();
-    const entry = (parsed as Record<string, unknown>)[pageKey];
-    if (!Array.isArray(entry)) return new Set();
-    return new Set(entry.filter((v): v is string => typeof v === "string"));
-  } catch {
-    return new Set();
-  }
-}
-
-/** Write one page's collapsed ids back into the raw storage blob, preserving
- *  every other page's entry. */
-export function serializeCollapsed(
-  raw: string | null,
-  pageKey: string,
-  collapsed: ReadonlySet<string>,
-): string {
-  let base: Record<string, unknown> = {};
-  if (raw) {
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        base = parsed as Record<string, unknown>;
-      }
-    } catch {
-      // Malformed blob — start clean rather than lose this page's write too.
-    }
-  }
-  return JSON.stringify({ ...base, [pageKey]: [...collapsed] });
 }

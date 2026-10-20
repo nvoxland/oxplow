@@ -50,7 +50,6 @@ function setup() {
     canGoBack: false,
     canGoForward: false,
     setTitle: (t: string) => titles.push(t),
-    pageKey: "thr1::tab1",
   } as unknown as PageNavigation;
   const view = render(
     <PageNavigationContext.Provider value={nav}>

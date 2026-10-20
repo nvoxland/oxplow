@@ -8,6 +8,7 @@ import type { LensParam, ParamType } from "../tauri-bridge/generated/bindings.js
 import { humanize } from "./humanize.js";
 import { Popover } from "./Popover.js";
 import { DEFAULT_RANGE_PRESETS, rangePresetLabel, splitRange } from "./rangePresets.js";
+import { useEntryState } from "../tabs/useEntryState.js";
 import { useDebounced } from "./useDebounced.js";
 
 /** How long a search waits for the next keystroke before it applies. */
@@ -127,7 +128,7 @@ export interface ParamListProps {
 /** A page's params as rows, in their declared order: six, the rest behind
  *  More (N) — except one that is set, which always shows. */
 export function ParamList({ params, values, onApply, query }: ParamListProps) {
-  const [all, setAll] = useState(false);
+  const [all, setAll] = useEntryState<boolean>("paramsMore", false);
   const shown = params.filter((p, i) => all || i < SHOWN_ROWS || !sameValue(paramType(p), values[p.name] ?? null, p.default ?? null));
   const folded = params.length - shown.length;
   return (

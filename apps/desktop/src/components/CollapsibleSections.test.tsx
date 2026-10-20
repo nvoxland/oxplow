@@ -1,15 +1,36 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
+import { useState, type ReactNode } from "react";
 
 import { Section } from "../kit/index.js";
 import { CollapsibleSections, SectionCollapseControls } from "./CollapsibleSections.js";
-import { SECTIONS_COLLAPSED_KEY } from "./sectionCollapse.js";
+import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
+
+/** A tab entry's state, kept outside the page so it outlives a mount, as
+ *  the session does. */
+interface Entry {
+  state: Record<string, unknown>;
+}
+const freshEntry = (): Entry => ({ state: {} });
+
+function Host({ entry, children }: { entry: Entry; children: ReactNode }) {
+  const [, tick] = useState(0);
+  const nav = {
+    state: entry.state,
+    setEntryState: (patch: Record<string, unknown>) => {
+      entry.state = { ...entry.state, ...patch };
+      tick((n) => n + 1);
+    },
+  } as unknown as PageNavigation;
+  return <PageNavigationContext.Provider value={nav}>{children}</PageNavigationContext.Provider>;
+}
 
 // Mirrors the real adoption: the controls render OUTSIDE the section stack
 // (on Metrics, in the details rail), reaching state through context.
-function view(sections: Array<{ id: string; label: string }> = SECTIONS, pageKey = "p") {
+function view(sections: Array<{ id: string; label: string }> = SECTIONS, entry: Entry = freshEntry()) {
   return render(
-    <CollapsibleSections pageKey={pageKey} testIdPrefix="t">
+    <Host entry={entry}>
+    <CollapsibleSections testIdPrefix="t">
       <aside>
         <SectionCollapseControls />
       </aside>
@@ -20,7 +41,8 @@ function view(sections: Array<{ id: string; label: string }> = SECTIONS, pageKey
           </Section>
         ))}
       </main>
-    </CollapsibleSections>,
+    </CollapsibleSections>
+    </Host>,
   );
 }
 
@@ -30,9 +52,6 @@ const SECTIONS = [
 ];
 
 describe("CollapsibleSections", () => {
-  beforeEach(() => {
-    window.localStorage.clear();
-  });
   // RTL's auto-cleanup doesn't run under bun:test — every component test file
   // here registers it by hand, else renders pile up in `document.body` and the
   // queries hit "found multiple elements".
@@ -80,18 +99,19 @@ describe("CollapsibleSections", () => {
     expect((getByTestId("t-collapse-all") as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("restores the collapsed set on remount, scoped to its own page key", () => {
-    const first = view();
+  it("restores the collapsed set on remount, scoped to its own entry", () => {
+    const entry = freshEntry();
+    const first = view(SECTIONS, entry);
     fireEvent.click(first.getByTestId("t-section-toggle-testing"));
     first.unmount();
 
-    const again = view();
+    const again = view(SECTIONS, entry);
     expect(again.queryByTestId("body-testing")).toBeNull();
     expect(again.queryByTestId("body-static-rust")).toBeTruthy();
     again.unmount();
 
-    // A different page reads its own entry — not this one's.
-    const other = view(SECTIONS, "other-page");
+    // Another entry reads its own state — not this one's.
+    const other = view();
     expect(other.queryByTestId("body-testing")).toBeTruthy();
   });
 
@@ -99,33 +119,35 @@ describe("CollapsibleSections", () => {
     // The search box on Metrics can drop a whole section; the
     // remembered collapse must survive its absence (the storage read is
     // deliberately not reconciled against the rendered ids).
-    const first = view();
+    const entry = freshEntry();
+    const first = view(SECTIONS, entry);
     fireEvent.click(first.getByTestId("t-section-toggle-static-rust"));
     first.unmount();
 
     // Re-render with that section filtered away entirely...
-    const filtered = view([{ id: "testing", label: "Tests" }]);
+    const filtered = view([{ id: "testing", label: "Tests" }], entry);
     // ...and Collapse all reads as available, since the only rendered section
     // is expanded — the absent one must not make it look all-collapsed.
     expect((filtered.getByTestId("t-collapse-all") as HTMLButtonElement).disabled).toBe(false);
     filtered.unmount();
 
     // Bring it back: still collapsed.
-    const restored = view();
+    const restored = view(SECTIONS, entry);
     expect(restored.queryByTestId("body-static-rust")).toBeNull();
   });
 
   it("leaves a filtered-out section's state alone when expanding all", () => {
-    const first = view();
+    const entry = freshEntry();
+    const first = view(SECTIONS, entry);
     fireEvent.click(first.getByTestId("t-collapse-all"));
     first.unmount();
 
     // Expand all while `static-rust` is hidden must not silently expand it.
-    const filtered = view([{ id: "testing", label: "Tests" }]);
+    const filtered = view([{ id: "testing", label: "Tests" }], entry);
     fireEvent.click(filtered.getByTestId("t-expand-all"));
     filtered.unmount();
 
-    const restored = view();
+    const restored = view(SECTIONS, entry);
     expect(restored.queryByTestId("body-testing")).toBeTruthy();
     expect(restored.queryByTestId("body-static-rust")).toBeNull();
   });
@@ -144,7 +166,7 @@ describe("CollapsibleSections", () => {
   it("hides the controls entirely when there are no sections to act on", () => {
     // Loading / empty state: two permanently-disabled buttons would be noise.
     const { queryByTestId } = render(
-      <CollapsibleSections pageKey="p" testIdPrefix="t">
+      <CollapsibleSections testIdPrefix="t">
         <SectionCollapseControls />
         <div>Loading…</div>
       </CollapsibleSections>,
@@ -167,12 +189,6 @@ describe("CollapsibleSections", () => {
     expect(getByTestId("body-solo")).toBeTruthy();
   });
 
-  it("survives a malformed storage blob rather than throwing", () => {
-    window.localStorage.setItem(SECTIONS_COLLAPSED_KEY, "not json");
-    const { getByTestId } = view();
-    expect(getByTestId("body-testing")).toBeTruthy();
-  });
-
   it("puts the toggle, a real button, inside the heading", () => {
     const { getByTestId } = view();
     const toggle = getByTestId("t-section-toggle-testing");
@@ -183,7 +199,7 @@ describe("CollapsibleSections", () => {
 
   it("starts a defaultCollapsed section closed, and remembers when it is opened", () => {
     const sections = (
-      <CollapsibleSections pageKey="d" testIdPrefix="t">
+      <CollapsibleSections testIdPrefix="t">
         <SectionCollapseControls />
         <Section id="a" title="A" collapsible defaultCollapsed>
           <div data-testid="body-a">a</div>
@@ -193,14 +209,15 @@ describe("CollapsibleSections", () => {
         </Section>
       </CollapsibleSections>
     );
-    const first = render(sections);
+    const entry = freshEntry();
+    const first = render(<Host entry={entry}>{sections}</Host>);
     expect(first.queryByTestId("body-a")).toBeNull();
     expect(first.getByTestId("body-b")).toBeTruthy();
     fireEvent.click(first.getByTestId("t-section-toggle-a"));
     expect(first.getByTestId("body-a")).toBeTruthy();
     first.unmount();
     // A later visit finds it as it was left; the other stays open.
-    const again = render(sections);
+    const again = render(<Host entry={entry}>{sections}</Host>);
     expect(again.getByTestId("body-a")).toBeTruthy();
     // Collapse all closes what's rendered, Expand all opens it again.
     fireEvent.click(again.getByTestId("t-collapse-all"));

@@ -337,7 +337,7 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
     // rail (which holds the Expand/Collapse-all controls) and the body (which
     // holds the sections) — `rightRail` is created here but rendered inside
     // Page's subtree, and context follows the render tree.
-    <CollapsibleSections pageKey="metrics-recorded" testIdPrefix="recorded">
+    <CollapsibleSections testIdPrefix="recorded">
     <Page
       testId="page-metrics-recorded"
       title="Metrics"

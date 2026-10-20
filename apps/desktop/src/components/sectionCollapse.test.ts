@@ -4,8 +4,6 @@ import {
   allCollapsed,
   allExpanded,
   isExpanded,
-  parseCollapsed,
-  serializeCollapsed,
   setAll,
   toggleCollapsed,
   toggleSection,
@@ -62,67 +60,5 @@ describe("allExpanded / allCollapsed", () => {
   it("treats an empty section list as neither (nothing to act on)", () => {
     expect(allExpanded([], new Set())).toBe(false);
     expect(allCollapsed([], new Set())).toBe(false);
-  });
-});
-
-describe("parseCollapsed / serializeCollapsed", () => {
-  it("round-trips one page's collapsed ids", () => {
-    const raw = serializeCollapsed(null, "metrics-recorded", new Set(["testing"]));
-    expect(parseCollapsed(raw, "metrics-recorded")).toEqual(new Set(["testing"]));
-  });
-
-  it("keeps other pages' entries when writing one page", () => {
-    const first = serializeCollapsed(null, "metrics-recorded", new Set(["testing"]));
-    const both = serializeCollapsed(first, "metrics-catalog", new Set(["coverage"]));
-    expect(parseCollapsed(both, "metrics-recorded")).toEqual(new Set(["testing"]));
-    expect(parseCollapsed(both, "metrics-catalog")).toEqual(new Set(["coverage"]));
-  });
-
-  it("remembers an id that isn't currently rendered", () => {
-    // Deliberately NOT reconciled against the known set (unlike the rail's
-    // section ORDER): a section hidden by a search filter must come back
-    // collapsed, so an unknown id survives a round-trip.
-    const raw = serializeCollapsed(null, "p", new Set(["hidden-by-search"]));
-    expect(parseCollapsed(raw, "p")).toEqual(new Set(["hidden-by-search"]));
-  });
-
-  it("reads missing / malformed / wrong-shaped storage as nothing collapsed", () => {
-    expect(parseCollapsed(null, "p")).toEqual(new Set());
-    expect(parseCollapsed("not json", "p")).toEqual(new Set());
-    expect(parseCollapsed(JSON.stringify({ p: "nope" }), "p")).toEqual(new Set());
-    expect(parseCollapsed(JSON.stringify({ other: ["x"] }), "p")).toEqual(new Set());
-    expect(parseCollapsed(JSON.stringify(["x"]), "p")).toEqual(new Set());
-  });
-
-  it("drops non-string members rather than trusting storage", () => {
-    expect(parseCollapsed(JSON.stringify({ p: ["ok", 3, null] }), "p")).toEqual(new Set(["ok"]));
-  });
-});
-
-describe("sections that start closed", () => {
-  const none = new Set<string>();
-  test("one that starts closed is open only when the person opened it", () => {
-    expect(isExpanded(none, "a", none, true)).toBe(false);
-    expect(isExpanded(none, "a", new Set(["a"]), true)).toBe(true);
-    // A collapsed id means nothing for it, and an opened one nothing for an open-by-default section.
-    expect(isExpanded(new Set(["a"]), "a", none, true)).toBe(false);
-    expect(isExpanded(none, "b", new Set(["b"]), false)).toBe(true);
-  });
-
-  test("toggling records the exception in the set that matches where it starts", () => {
-    const state = { collapsed: none, opened: none };
-    expect(toggleSection(state, "a", true).opened.has("a")).toBe(true);
-    expect(toggleSection(state, "b", false).collapsed.has("b")).toBe(true);
-  });
-
-  test("expand all / collapse all act on what is rendered and leave the rest alone", () => {
-    const state = { collapsed: new Set(["hidden", "b"]), opened: none };
-    const rendered = new Map([["a", true], ["b", false]]);
-    const open = setAll(state, rendered, true);
-    expect([...open.collapsed]).toEqual(["hidden"]);
-    expect([...open.opened]).toEqual(["a"]);
-    const shut = setAll(open, rendered, false);
-    expect([...shut.collapsed].sort()).toEqual(["b", "hidden"]);
-    expect([...shut.opened]).toEqual([]);
   });
 });

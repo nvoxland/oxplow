@@ -17,7 +17,7 @@ import { RichTextField } from "../RichText/RichTextField.js";
 import { recordOpError } from "../opErrorsStore.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef } from "../../tabs/pageRefs.js";
-import { usePageSnapshot } from "../../tabs/usePageSnapshot.js";
+import { useEntryState } from "../../tabs/useEntryState.js";
 import type { WikiPageController } from "./useWikiPageController.js";
 
 const FRESHNESS_LABEL: Record<WikiFreshnessLevel, string> = {
@@ -74,21 +74,25 @@ export function WikiPageTab({
     [body, profile],
   );
 
-  // Persist scroll position across restart — see original WikiPageTab
-  // for the rationale (ref-based to avoid wheel-event setState loops).
+  // Keep the scroll position with the tab's entry (Back, a restart). The
+  // position lives in a ref while scrolling, so a wheel doesn't set state;
+  // it is written once the scroll settles and when the page goes away.
+  const [savedY, setSavedY] = useEntryState<number>("scrollY", 0);
   const scrollHostRef = useRef<HTMLDivElement | null>(null);
-  const scrollYRef = useRef(0);
-  const pendingRestoreRef = useRef<number | null>(null);
-  usePageSnapshot<{ scrollY: number }>({
-    serialize: () => ({ scrollY: scrollYRef.current }),
-    restore: (snap) => {
-      if (typeof snap.scrollY === "number") {
-        scrollYRef.current = snap.scrollY;
-        pendingRestoreRef.current = snap.scrollY;
+  const scrollYRef = useRef(savedY);
+  const pendingRestoreRef = useRef<number | null>(savedY > 0 ? savedY : null);
+  const saveScrollRef = useRef(setSavedY);
+  saveScrollRef.current = setSavedY;
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (scrollTimerRef.current) {
+        clearTimeout(scrollTimerRef.current);
+        saveScrollRef.current(scrollYRef.current);
       }
     },
-    deps: [body],
-  });
+    [],
+  );
   useEffect(() => {
     const el = scrollHostRef.current;
     if (!el) return;
@@ -105,7 +109,14 @@ export function WikiPageTab({
           scrollHostRef.current = el;
           onScrollHostMounted?.(el);
         }}
-        onScroll={(e) => { scrollYRef.current = (e.currentTarget as HTMLDivElement).scrollTop; }}
+        onScroll={(e) => {
+          scrollYRef.current = (e.currentTarget as HTMLDivElement).scrollTop;
+          if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+          scrollTimerRef.current = setTimeout(() => {
+            scrollTimerRef.current = null;
+            saveScrollRef.current(scrollYRef.current);
+          }, 200);
+        }}
         style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}
         // The body is a wiki context node so any plain-DOM selection in
         // it (and the page_ref graph) resolves to `wiki:<slug>`; the

@@ -105,14 +105,6 @@ export interface PageNavigation {
    * `title` prop is supplied.
    */
   title?: string;
-  /**
-   * Stable identity for this page within the persistence layer.
-   * Format: `${threadId}::${tabId}`. The `usePageSnapshot` hook
-   * uses this as the key when reading/writing the per-page snapshot
-   * blob so scroll/expanded/draft state survives across restarts.
-   * Null for surfaces with no per-thread identity (rail, palette).
-   */
-  pageKey?: string;
   /** The page this body draws: its entry's ref (`tabs/session.ts`). A
    *  page whose view is live reads its params from here. */
   ref?: TabRef;
@@ -123,6 +115,13 @@ export interface PageNavigation {
    * page.
    */
   replaceRef?(ref: TabRef, opts?: { push?: boolean }): void;
+  /** The entry's own memory (`Entry.state`): what the page keeps across
+   *  Back and a restart — scroll, a folded section. Read and written
+   *  through `useEntryState`. */
+  state?: Record<string, unknown>;
+  /** Keep `patch` with the entry. Absent on a body that isn't the tab's
+   *  current page. */
+  setEntryState?(patch: Record<string, unknown>): void;
 }
 
 export const PageNavigationContext = createContext<PageNavigation | null>(null);
