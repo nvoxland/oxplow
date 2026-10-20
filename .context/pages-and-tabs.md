@@ -856,6 +856,27 @@ sessions, the open files' paths, the remote daemon and its token, the
 recent remotes, the window's log id); `no-direct-storage.test.ts` holds
 every other file to it.
 
+**One hook per kind, as easy as `useState`** (`tabs/useViewParam.ts`);
+outside a tab each is the component's own state:
+
+| Hook | Kind | Writes |
+|---|---|---|
+| `useViewParam(key, initial)` | a filter (a range, a search, a mode) | replaces the entry; typed back by `initial`'s type; dropped at `initial` |
+| `useViewSelection(key)` | a pick (a row, a commit) | pushes when set (Back un-selects), replaces when cleared |
+| `useViewList(key)` | several values (authors, states) | comma-joined, as a filter |
+| `useCollapsedSet(key)` | open/closed groups | history state |
+| `useDraft(key, initial)` | an unsaved form | history state; `clear` on submit |
+
+They write through `nav.patchViewParams(patch, { push })`, which merges
+into the tab's *current* entry inside the session update (`undefined`
+drops a key), so two changes in one tick both land. Every write goes
+through `withView` (`pages/pageIdentity.ts`): a key that would change the
+page's identity — one a built-in page didn't declare in `BUILT_IN_VIEW` —
+is refused as an op error and the tab stays, rather than silently
+remounting the page. A list's cursor (↑/↓ before a pick) is the list's
+own (`useListNav`); only a pick is a selection, and `useListNav`'s
+`selected` puts the cursor on a kept pick.
+
 Core pages follow the same rule: the Tasks page's scope and filter chips
 are its view params (`components/Plan/tasksView.ts`: `scope` with
 `stream`/`thread`, one `f.<field>` per filtered field), so two Tasks tabs

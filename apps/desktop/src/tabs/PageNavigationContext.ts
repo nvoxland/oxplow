@@ -91,6 +91,10 @@ export interface PageNavigation {
    * isn't the tab's current page.
    */
   setViewParams?(params: Record<string, SqlCell>, opts?: { push?: boolean }): void;
+  /** Merge `patch` into the page's view params (`undefined` drops a key),
+   *  against the tab's current entry, so two changes in one tick both
+   *  land. What `useViewParam` and its siblings write through. */
+  patchViewParams?(patch: Record<string, SqlCell | undefined>, opts?: { push?: boolean }): void;
   /** **History state** — this step of this tab's history (`Entry.historyState`):
    *  scroll, an open section, a draft; back with Back and after a
    *  restart, never shared. Read and written through `useHistoryState`. */

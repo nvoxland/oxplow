@@ -16,7 +16,8 @@
 
 import { isTasksViewParam } from "../components/Plan/tasksView.js";
 import { identityOf } from "../tabs/session.js";
-import { extPageRef, pagePayload, pageTabRef } from "../tabs/pageRefs.js";
+import { extPageRef, pagePayload, pageTabRef, viewParamsOf, withViewParams } from "../tabs/pageRefs.js";
+import type { SqlCell } from "../tauri-bridge/generated/bindings.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { isBuiltInPage } from "./declaredPages.js";
 
@@ -38,4 +39,21 @@ export function pageIdentity(ref: TabRef): string {
   const isView = BUILT_IN_VIEW[page.page];
   if (!isView) return ref.id;
   return pageTabRef(page.page, Object.fromEntries(Object.entries(page.params).filter(([key]) => !isView(key)))).id;
+}
+
+/** `ref` showing `params` as its view — refused when that would change
+ *  what the page is: a param a built-in page writes must be one it
+ *  declares in `BUILT_IN_VIEW`, or the page would mount again on every
+ *  change. */
+export function withView(ref: TabRef, params: Record<string, SqlCell>): TabRef {
+  const next = withViewParams(ref, params);
+  const was = pageIdentity(ref);
+  if (pageIdentity(next) === was) return next;
+  // Each key that, written alone over what the page has, changes it.
+  const now = viewParamsOf(ref);
+  const culprits = Object.keys({ ...now, ...params }).filter(
+    (k) => pageIdentity(withViewParams(ref, { ...now, [k]: params[k] ?? null })) !== was,
+  );
+  const named = culprits.map((k) => `\`${k}\``).join(", ") || "a param";
+  throw new Error(`${named} isn't a view param of ${was}: declare it in BUILT_IN_VIEW (pages/pageIdentity.ts)`);
 }

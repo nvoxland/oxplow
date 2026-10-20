@@ -241,3 +241,25 @@ test("Loading says what it's reading", () => {
   const { getByText } = render(<Loading what="saved sessions" />);
   expect(getByText("Reading saved sessions…").className).toContain("ox-loading");
 });
+
+// A pick kept elsewhere (a view selection) puts the cursor on its row, on
+// mount and when it changes (Back to an earlier pick).
+test("useListNav's cursor follows the picked row", () => {
+  function Picked({ selected }: { selected: number | null }) {
+    const nav = useListNav({ count: 3, onPick: () => {}, selected, id: "picked" });
+    return (
+      <ul {...nav.listProps}>
+        {[0, 1, 2].map((i) => (
+          <li key={i} {...nav.optionProps(i)} />
+        ))}
+      </ul>
+    );
+  }
+  const { getAllByRole, rerender } = render(<Picked selected={2} />);
+  const cursor = () => getAllByRole("option").findIndex((o) => o.getAttribute("aria-selected") === "true");
+  expect(cursor()).toBe(2);
+  rerender(<Picked selected={1} />);
+  expect(cursor()).toBe(1);
+  rerender(<Picked selected={null} />);
+  expect(cursor()).toBe(1);
+});

@@ -8,11 +8,16 @@ import { useEffect, useState, type HTMLAttributes, type InputHTMLAttributes, typ
  * `optionProps(i)` on each row; the input names the cursor's row
  * (`aria-activedescendant`), so focus never leaves it. A list that holds
  * focus itself (no input) spreads `keyProps` on the list instead.
+ *
+ * The cursor is the list's own and goes nowhere; a pick that is kept (a
+ * view selection, `useViewSelection`) comes back as `selected`, and the
+ * cursor follows it.
  */
 export function useListNav({
   count,
   onPick,
   onEscape,
+  selected,
   id,
 }: {
   count: number;
@@ -20,10 +25,16 @@ export function useListNav({
   /** Escape: true when it did something (cleared the filter), so the key
    *  goes no further. */
   onEscape?(): boolean | void;
+  /** The picked row, when the pick is kept: the cursor starts there and
+   *  moves there when it changes. */
+  selected?: number | null;
   /** Prefix for the rows' element ids. */
   id: string;
 }) {
-  const [cursor, setCursor] = useState(0);
+  const [cursor, setCursor] = useState(selected ?? 0);
+  useEffect(() => {
+    if (selected !== null && selected !== undefined && selected >= 0) setCursor(selected);
+  }, [selected]);
   // A shorter list (a narrower filter) keeps the cursor on a row.
   useEffect(() => {
     if (cursor > 0 && cursor >= count) setCursor(Math.max(0, count - 1));

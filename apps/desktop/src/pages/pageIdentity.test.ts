@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { diffRef, extPageRef, fileRef, lensRef, pageTabRef } from "../tabs/pageRefs.js";
-import { pageIdentity } from "./pageIdentity.js";
+import { pageIdentity, withView } from "./pageIdentity.js";
 
 // A page's identity is its ref without its view params: what it is, not
 // how it is viewed. One mounted body per identity in a tab; visits count
@@ -23,4 +23,13 @@ test("a built-in page's identity keeps every param but the view params it declar
 
 test("an entity page is its ref", () => {
   expect(pageIdentity(fileRef("src/a.ts"))).toBe(fileRef("src/a.ts").id);
+});
+
+// A page changes only its view: writing a param it doesn't declare as view
+// would make it another page (and mount it again), so it is refused, by name.
+test("withView writes a page's view params and refuses one that would change what the page is", () => {
+  expect(withView(pageTabRef("tasks"), { scope: "all" }).id).toBe("page:tasks?scope=all");
+  expect(withView(lensRef("x/y"), { range: "7d" }).id).toBe(lensRef("x/y", { range: "7d" }).id);
+  expect(() => withView(pageTabRef("tasks"), { sort: "age" })).toThrow(/`sort`.*page:tasks.*BUILT_IN_VIEW/);
+  expect(() => withView(pageTabRef("custom-dashboard", { id: "7" }), { id: "7", range: "7d" })).toThrow(/^`range` isn't/);
 });

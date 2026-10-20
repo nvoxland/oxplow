@@ -115,7 +115,7 @@ import { LensPage } from "./pages/LensPage.js";
 import { insertIntoAgent } from "./agent-input-bus.js";
 import { getPageDetailStore } from "./tabs/openPageDetail.js";
 import { DeclaredPageView } from "./pages/DeclaredPageView.js";
-import { pageIdentity } from "./pages/pageIdentity.js";
+import { pageIdentity, withView } from "./pages/pageIdentity.js";
 import { kindForTabId } from "./pageKinds.js";
 import { declaredPage, isBuiltInPage } from "./pages/declaredPages.js";
 import { useExtensions } from "./extensionsStore.js";
@@ -126,7 +126,7 @@ import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { agentSessionRef, diskFilePath, lensRef, pageKindOf, refFromTabId, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, pageTabRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, viewParamsOf, withViewParams, type DiffViewPayload } from "./tabs/pageRefs.js";
+import { agentSessionRef, diskFilePath, lensRef, pageKindOf, refFromTabId, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, pageTabRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, viewParamsOf, type DiffViewPayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
@@ -160,6 +160,7 @@ import {
   stepOrigin,
   type Entry,
   type Origin,
+  type Session,
   type Tab,
 } from "./tabs/session.js";
 import {
@@ -251,6 +252,26 @@ function homeTabOf(tabs: TabRef[]): string {
     tabs[0]?.id ??
     HOME_TAB
   );
+}
+
+/** `slot`'s page shown at the view params `view` makes of its current
+ *  ones (`setView`); a param the page doesn't declare as view is refused
+ *  and reported (`withView`), and the tab stays as it was. */
+function changeView(
+  session: Session,
+  slot: string,
+  view: (now: Record<string, SqlCell>) => Record<string, SqlCell>,
+  opts?: { push?: boolean },
+): Session {
+  const tab = session.tabs.find((t) => t.slot === slot);
+  if (!tab) return session;
+  const ref = currentEntry(tab).ref;
+  try {
+    return sessionSetView(session, slot, withView(ref, view(viewParamsOf(ref))), opts);
+  } catch (e) {
+    recordOpError({ label: "Change the page's view", message: e instanceof Error ? e.message : String(e) });
+    return session;
+  }
 }
 
 export function App() {
@@ -2433,7 +2454,22 @@ export function App() {
         setViewParams: isCurrent && selectedThreadId
           ? (params: Record<string, SqlCell>, opts?: { push?: boolean }) => {
               const thread = selectedThreadId;
-              updateSession(thread, (session) => sessionSetView(session, slot, withViewParams(ref, params), opts));
+              updateSession(thread, (session) => changeView(session, slot, () => params, opts));
+            }
+          : undefined,
+        patchViewParams: isCurrent && selectedThreadId
+          ? (patch: Record<string, SqlCell | undefined>, opts?: { push?: boolean }) => {
+              const thread = selectedThreadId;
+              updateSession(thread, (session) =>
+                changeView(session, slot, (now) => {
+                  const next: Record<string, SqlCell> = { ...now };
+                  for (const [k, v] of Object.entries(patch)) {
+                    if (v === undefined) delete next[k];
+                    else next[k] = v;
+                  }
+                  return next;
+                }, opts),
+              );
             }
           : undefined,
         historyState: entry.historyState && typeof entry.historyState === "object" && !Array.isArray(entry.historyState) ? (entry.historyState as Record<string, unknown>) : undefined,
