@@ -9,8 +9,8 @@ query: |
    ORDER BY path
 viz: table
 columns:
-  - { key: path, link: { kind: file, from: path } }
-  - { key: status, width: 80 }
+  - { key: path, label: File, link: { kind: file, from: path } }
+  - { key: status, label: Change, width: 80 }
   - { key: additions, label: "+", width: 60 }
   - { key: deletions, label: "−", width: 60 }
 empty: Click a commit to see its files.

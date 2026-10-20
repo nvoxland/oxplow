@@ -120,9 +120,9 @@ export function NewSessionPage({
     },
     { key: "status", label: <span className="ox-sr-only">Status</span>, width: 24, render: (r) => <StatusIcon status={r.status} note={r.note} /> },
     { key: "session", label: "Session", truncate: true, render: (r) => r.label, title: (r) => r.label },
-    { key: "when", label: "Last active", width: 96, truncate: true, render: (r) => <Faint value={r.when} />, title: (r) => r.whenExact ?? undefined },
+    { key: "when", label: "Last active", width: 96, render: (r) => <Faint value={r.when} />, title: (r) => r.whenExact ?? undefined },
     { key: "turns", label: "Turns", width: 52, numeric: true, render: (r) => <Faint value={r.turns} /> },
-    { key: "size", label: "Size", width: 72, numeric: true, truncate: true, render: (r) => <Faint value={r.size} /> },
+    { key: "size", label: "Size", width: 72, numeric: true, render: (r) => <Faint value={r.size} /> },
   ];
 
   const start = (

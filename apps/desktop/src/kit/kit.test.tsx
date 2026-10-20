@@ -79,6 +79,49 @@ test("DataTable lays out its columns: widths, numeric alignment, truncation", ()
   expect(cells[1]!.className).toContain("ox-num");
 });
 
+// A fixed width is a promise the column keeps: its cells stay one line
+// unless the column says it wraps, so no table has to ask for it.
+test("DataTable cuts a column with a width to one line unless it wraps", () => {
+  const { container } = render(
+    <DataTable
+      columns={[
+        { key: "sha", label: "Commit", width: 90, render: (r: Row) => r.name },
+        { key: "note", label: "Note", width: 90, truncate: false, render: (r: Row) => r.name },
+        { key: "rest", label: "Rest", render: (r: Row) => r.name },
+      ]}
+      rows={[{ id: "a", name: "ba74ce57721f3c01a7a96267399953c2a96b163a", size: 1 }]}
+      rowKey={(r) => r.id}
+    />,
+  );
+  const [sha, note, rest] = [...container.querySelectorAll("tbody td")];
+  expect(sha!.className).toContain("ox-truncate");
+  expect(note!.className).not.toContain("ox-truncate");
+  expect(rest!.className).not.toContain("ox-truncate");
+});
+
+// The whole text on hover comes for free, and only when the cell is cut.
+test("DataTable gives a cut cell its whole text on hover, and a cell that fits none", () => {
+  const { container } = render(
+    <DataTable
+      columns={[{ key: "sha", label: "Commit", width: 90, render: (r: Row) => <span>{r.name}</span> }]}
+      rows={[
+        { id: "a", name: "ba74ce57721f3c01a7a96267399953c2a96b163a", size: 1 },
+        { id: "b", name: "short", size: 1 },
+      ]}
+      rowKey={(r) => r.id}
+    />,
+  );
+  const [cut, fits] = [...container.querySelectorAll("tbody td")] as HTMLElement[];
+  Object.defineProperty(cut!, "scrollWidth", { value: 300 });
+  Object.defineProperty(cut!, "clientWidth", { value: 90 });
+  Object.defineProperty(fits!, "scrollWidth", { value: 40 });
+  Object.defineProperty(fits!, "clientWidth", { value: 90 });
+  fireEvent.mouseEnter(cut!);
+  fireEvent.mouseEnter(fits!);
+  expect(cut!.getAttribute("title")).toBe("ba74ce57721f3c01a7a96267399953c2a96b163a");
+  expect(fits!.getAttribute("title")).toBeNull();
+});
+
 test("DataTable passes each row its props, and draws group headings", () => {
   const clicked: string[] = [];
   const { getByTestId, getByText } = render(

@@ -8,10 +8,12 @@ export interface DataColumn<R> {
   width?: number | string;
   /** A number: right-aligned, in tabular figures. */
   numeric?: boolean;
-  /** Cut a long cell to one line; `title` gives the whole text on hover. */
+  /** Cut a long cell to one line. On by default for a column with a
+   *  `width` (`false` lets it wrap); a cut cell shows its whole text on
+   *  hover. */
   truncate?: boolean;
   render(row: R): ReactNode;
-  /** The cell's hover text. */
+  /** The cell's hover text; else a cut cell's own text. */
   title?(row: R): string | undefined;
 }
 
@@ -41,6 +43,18 @@ export interface DataTableProps<R> {
   testId?: string;
   /** For a list driven from an input (`useListNav`'s `listProps`). */
   tableProps?: HTMLAttributes<HTMLTableElement>;
+}
+
+/** Whether a column's cells are cut to one line. */
+function cuts(c: Pick<DataColumn<unknown>, "truncate" | "width">): boolean {
+  return c.truncate ?? c.width !== undefined;
+}
+
+/** A cut cell's hover: its whole text, only when the cut hides some. */
+function showWhole(e: React.MouseEvent<HTMLTableCellElement>) {
+  const td = e.currentTarget;
+  if (td.scrollWidth > td.clientWidth) td.title = td.textContent ?? "";
+  else td.removeAttribute("title");
 }
 
 /** The one table: core pages and lenses draw rows through it. */
@@ -83,16 +97,21 @@ export function DataTable<R>({ columns, rows, groups, rowKey, rowProps, cellStyl
               const i = index++;
               return (
                 <tr key={rowKey(row, i)} {...rowProps?.(row, i)}>
-                  {columns.map((c, j) => (
-                    <td
-                      key={c.key}
-                      className={[c.numeric ? "ox-num" : "", c.truncate ? "ox-truncate" : ""].filter(Boolean).join(" ") || undefined}
-                      title={c.title?.(row)}
-                      style={cellStyle?.(row, c, j)}
-                    >
-                      {c.render(row)}
-                    </td>
-                  ))}
+                  {columns.map((c, j) => {
+                    const cut = cuts(c);
+                    const title = c.title?.(row);
+                    return (
+                      <td
+                        key={c.key}
+                        className={[c.numeric ? "ox-num" : "", cut ? "ox-truncate" : ""].filter(Boolean).join(" ") || undefined}
+                        title={title}
+                        onMouseEnter={cut && title === undefined ? showWhole : undefined}
+                        style={cellStyle?.(row, c, j)}
+                      >
+                        {c.render(row)}
+                      </td>
+                    );
+                  })}
                 </tr>
               );
             })}

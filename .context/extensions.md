@@ -1971,7 +1971,9 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   (`lens/PartsViz.tsx`), running every part together and re-running all of
   them on any part's reads (`useLensRuns`).
 - **Columns** also take `width` (pixels: the table lays out fixed, so
-  columns line up) and `format` (`date`, `datetime`, `relative`, `bytes`,
+  columns line up, and that column's cells are cut to one line with the
+  whole text on hover — `DataTable` does it for every table, so a long
+  value never runs into the next column) and `format` (`date`, `datetime`, `relative`, `bytes`,
   `duration` in ms, `integer`, `percent` of a 0–1 fraction), read by
   `formatCell` in the UI only; an agent reads the raw value. `highlight:
   <param>` draws the cell's text with every case-insensitive occurrence of

@@ -17,7 +17,7 @@ query: |
 viz: table
 columns:
   - { key: sha, label: Commit, width: 90, select: commit }
-  - { key: subject, highlight: q }
-  - { key: author, width: 140 }
+  - { key: subject, label: Subject, highlight: q }
+  - { key: author, label: Author, width: 140 }
   - { key: committed_at, label: When, format: relative, width: 100 }
 empty: No commits match.

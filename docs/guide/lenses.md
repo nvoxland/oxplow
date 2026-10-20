@@ -116,7 +116,9 @@ viz: treemap
 chart: { label: path, size: churn, group: zone }
 ```
 
-A column can also set `width` (in pixels) and `format`: `date`,
+A column can also set `width` (in pixels). A long value in that column
+is cut to one line, and the whole value shows when you hover over it.
+A column can also set `format`: `date`,
 `datetime`, `relative` (how long ago), `bytes`, `duration`
 (milliseconds), `integer` or `percent` (a 0-1 fraction). `format`
 changes only what you see. Agents read the raw values.
