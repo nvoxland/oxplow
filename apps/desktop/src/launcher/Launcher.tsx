@@ -14,6 +14,7 @@ import {
   rememberRemote,
   type RecentRemote,
 } from "./remoteRecents.js";
+import { shellStorage } from "../shellStorage.js";
 
 /// Start screen shown when oxplow launches with no project (a bare
 /// Finder/dock launch). Lists recent projects to reopen and offers two
@@ -167,7 +168,7 @@ function RemoteConnectSection() {
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [recents, setRecents] = useState<RecentRemote[]>(() =>
-    loadRecentRemotes(window.localStorage),
+    loadRecentRemotes(shellStorage),
   );
 
   const connect = useCallback(async (raw: string, typedToken: string) => {
@@ -179,7 +180,7 @@ function RemoteConnectSection() {
     setConnecting(true);
     try {
       await probeRemoteDaemon(base, uiToken);
-      rememberRemote(window.localStorage, base);
+      rememberRemote(shellStorage, base);
       connectRemote(base, uiToken); // reloads the window into remote mode
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -190,7 +191,7 @@ function RemoteConnectSection() {
   }, []);
 
   const handleForget = useCallback((base: string) => {
-    setRecents(forgetRemote(window.localStorage, base));
+    setRecents(forgetRemote(shellStorage, base));
   }, []);
 
   const cm = useContextMenu();

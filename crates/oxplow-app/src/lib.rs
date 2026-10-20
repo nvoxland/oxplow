@@ -668,6 +668,8 @@ pub struct Services {
     pub thread_answer_store: oxplow_db::SqliteThreadAnswerStore,
     /// The person's left-nav layout (P6.G1).
     pub panel_layout_store: oxplow_db::SqlitePanelLayoutStore,
+    /// The person's page memory and app preferences (`ui_preference`).
+    pub ui_preference_store: oxplow_db::SqliteUiPreferenceStore,
     /// Agent decisions and claims (`v_decision`, `v_claim`).
     pub reasoning_store: Arc<oxplow_db::SqliteReasoningStore>,
     /// Persisted agent tool calls (`v_tool_call` and derived views).
@@ -1723,6 +1725,7 @@ impl Services {
         }
         let thread_answer_store = oxplow_db::SqliteThreadAnswerStore::new(db.clone());
         let panel_layout_store = oxplow_db::SqlitePanelLayoutStore::new(db.clone());
+        let ui_preference_store = oxplow_db::SqliteUiPreferenceStore::new(db.clone());
         for command in knowledge::ops(knowledge::KnowledgeTarget {
             project_dir: layout.project_dir.clone(),
             vcs: vcs.clone(),
@@ -1931,6 +1934,7 @@ impl Services {
             collector_runner,
             thread_answer_store,
             panel_layout_store,
+            ui_preference_store,
             reasoning_store,
             tool_call_store,
             git_store,

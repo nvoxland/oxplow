@@ -65,6 +65,7 @@ pub mod thread_note_store;
 pub mod thread_store;
 pub mod token_usage_store;
 pub mod tool_call_store;
+pub mod ui_preference_store;
 pub mod wiki_page_store;
 pub mod wiki_page_thread_updates;
 pub mod work_item_refs;
@@ -141,5 +142,6 @@ pub use token_usage_store::{
     AgentTokenUsage, NewAgentTokenUsage, SqliteTokenUsageStore, TokenUsageTotals,
 };
 pub use tool_call_store::{NewToolCall, SqliteToolCallStore};
+pub use ui_preference_store::{SqliteUiPreferenceStore, UiPreference};
 pub use wiki_page_store::{SqliteWikiPageStore, WikiPage};
 pub use wiki_page_thread_updates::{SqliteWikiPageThreadUpdateStore, WikiPageThreadUpdate};

@@ -14680,5 +14680,32 @@
         "name"
       ]
     }
+  },
+  "ui_preference": {
+    "1": {
+      "columns": [
+        {
+          "name": "scope",
+          "type": "TEXT",
+          "doc": "`app`; a page's ref (`page:…`, `lens:…`) or `kind:<kind>`; a panel's ref; or `component:<extension>/<id>`."
+        },
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "What is remembered, within its scope (`railWidth`, `mergeMode.str1.main`)."
+        },
+        {
+          "name": "value_json",
+          "type": "TEXT",
+          "doc": "Its value, as JSON text."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp of the last change."
+        }
+      ],
+      "key": []
+    }
   }
 }

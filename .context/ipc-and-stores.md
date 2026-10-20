@@ -30,6 +30,7 @@ command):
 | hook ingest, chat prompt / cancel / permission answers, terminal input | agent-session activity, born as `agent.*` events ([data-model.md](./data-model.md) "event_log"); oxplow never synthesizes agent input |
 | terminal / chat session open and close, LSP restart and requests | process control and protocol passthrough: an agent session's *process*. Its slot — opening, renaming, closing an `agent_session` — is a command (`oxplow.agent_session.*`), and closing it stops the process |
 | the left-nav panel layout (`set_panel_layout`) | a UI layout pointer, like the selection pointers |
+| page memory and app preferences (`set_ui_preference`) | the person's UI memory, like the panel layout: a pointer, not an intent (`v_ui_preference` reads it) |
 | workspace file write / create / rename / delete, applying an LSP edit | the person's own hands on their worktree, like their terminal; snapshots record it |
 | a change's analysis (`oxplow_ensure_change`) | a derived cache, recomputed from the VCS on demand like a materialized model — not an intent |
 | a model call's record (`ai_call`, `ai_result`) | the computation as it happened (`AiCompute`), like a test run's capture — the run that asked for it is what's audited |

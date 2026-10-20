@@ -245,6 +245,8 @@ macro_rules! oxplow_command_table {
                 list_data_entities => $crate::commands::semantic::list_data_entities {} -> Vec<::oxplow_app::semantic_catalog::DataEntity>,
                 get_panel_layout => $crate::commands::semantic::get_panel_layout {} -> Vec<::oxplow_db::PanelPlacement>,
                 set_panel_layout => $crate::commands::semantic::set_panel_layout { layout: Vec<::oxplow_db::PanelPlacement> } -> (),
+                get_ui_preferences => $crate::commands::semantic::get_ui_preferences {} -> Vec<::oxplow_db::UiPreference>,
+                set_ui_preference => $crate::commands::semantic::set_ui_preference { scope: String, key: String, value_json: Option<String> } -> (),
                 list_extensions => $crate::commands::extensions::list_extensions {} -> Vec<::oxplow_app::extensions::Extension>,
                 save_extension_secret => $crate::commands::extensions::save_extension_secret { extension: String, reference: Option<::oxplow_domain::extension_secret::SecretRef>, value: String } -> ::oxplow_domain::extension_secret::SecretRef,
                 extension_secret_is_set => $crate::commands::extensions::extension_secret_is_set { extension: String, reference: ::oxplow_domain::extension_secret::SecretRef } -> bool,

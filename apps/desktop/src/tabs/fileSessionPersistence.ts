@@ -1,16 +1,17 @@
-// localStorage persistence for the open files of each stream (their
+// Persistence for the open files of each stream (their
 // paths; content and drafts are read again). The tabs themselves are
 // `useTabSessions`'s. Readers are total: a parse failure is "nothing
 // persisted", never a throw.
 
 import type { FileSessionState } from "../editor-session.js";
 import { logUi } from "../logger.js";
+import { shellStorage } from "../shellStorage.js";
 
 export const FILE_SESSIONS_STORAGE_KEY = "oxplow.layout.v2.fileSessions";
 
 export function readPersistedFileSessionPaths(): Record<string, string[]> {
   try {
-    const raw = window.localStorage.getItem(FILE_SESSIONS_STORAGE_KEY);
+    const raw = shellStorage.getItem(FILE_SESSIONS_STORAGE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return {};
@@ -34,6 +35,6 @@ export function writePersistedFileSessionPaths(sessions: Record<string, FileSess
     for (const [streamId, session] of Object.entries(sessions)) {
       if (session.openOrder.length > 0) out[streamId] = session.openOrder;
     }
-    window.localStorage.setItem(FILE_SESSIONS_STORAGE_KEY, JSON.stringify(out));
+    shellStorage.setItem(FILE_SESSIONS_STORAGE_KEY, JSON.stringify(out));
   } catch {}
 }

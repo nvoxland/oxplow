@@ -1,4 +1,5 @@
 import { desktopBridge } from "./api.js";
+import { windowStorage } from "./shellStorage.js";
 
 export type UiLogLevel = "debug" | "info" | "warn" | "error";
 
@@ -370,10 +371,10 @@ export function logUi(level: UiLogLevel, message: string, context?: Record<strin
 
 export function getUiClientId(): string {
   try {
-    const existing = sessionStorage.getItem(CLIENT_ID_KEY);
+    const existing = windowStorage.getItem(CLIENT_ID_KEY);
     if (existing) return existing;
     const id = globalThis.crypto?.randomUUID?.() ?? `client-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    sessionStorage.setItem(CLIENT_ID_KEY, id);
+    windowStorage.setItem(CLIENT_ID_KEY, id);
     return id;
   } catch {
     return `client-${Date.now()}`;

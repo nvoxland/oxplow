@@ -2065,6 +2065,20 @@ expanded after the ones it does, and a named panel that no longer exists
 is dropped (`components/Panels/panelLayout.ts` `resolveLayout`). UI-only
 RPCs `get_panel_layout` / `set_panel_layout`.
 
+### `ui_preference` — `SqliteUiPreferenceStore` (`crates/oxplow-db/src/ui_preference_store.rs`)
+
+V96. What the person's oxplow remembers for them outside any one tab
+(`.context/pages-and-tabs.md` "Page state"): `(scope, key)` → `value_json`
+(JSON text), `updated_at`. Scopes: `app` (app preferences); a page's ref
+without its params (`page:tasks`, `page:acme/pulls`, `lens:acme/board`) or
+`kind:<kind>` (page memory, shared by every tab of the page); a panel's
+ref; `component:<ext>/<id>` (a custom component's own memory). Anything
+else is refused, as is text that isn't JSON or a value over 64 KB, and a
+component's keys together stay under 1 MB. Local state, never the repo,
+like `panel_layout`. UI-only RPCs `get_ui_preferences` (all, read once at
+start by `prefs/remembered.ts`) / `set_ui_preference { scope, key,
+value_json | null }`; agents read `v_ui_preference`.
+
 ### `bookmark` — `bookmark_store` (`crates/oxplow-db/src/bookmark_store.rs`)
 
 V4. The pages the person starred, each at one scope: `thread`

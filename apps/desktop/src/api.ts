@@ -43,6 +43,7 @@ import type {
   AiSettings,
   HarnessListing,
   PanelPlacement,
+  UiPreference,
   ChangeRow,
   ChangeTarget,
   CheckReport,
@@ -666,6 +667,17 @@ export async function getPanelLayout(): Promise<PanelPlacement[]> {
 
 export async function setPanelLayout(layout: PanelPlacement[]): Promise<void> {
   unwrap(await commands.setPanelLayout(layout));
+}
+
+/** What the person's oxplow remembers outside any one tab: page memory
+ *  and app preferences (`ui_preference`; `prefs/remembered.ts`). */
+export async function getUiPreferences(): Promise<UiPreference[]> {
+  return unwrap(await commands.getUiPreferences());
+}
+
+/** Remember one value (JSON text), or forget it with null. */
+export async function setUiPreference(scope: string, key: string, valueJson: string | null): Promise<void> {
+  unwrap(await commands.setUiPreference(scope, key, valueJson));
 }
 
 /** Run an answer an agent showed in a thread (`answer:<id>`). */

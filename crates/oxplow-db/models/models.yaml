@@ -152,6 +152,17 @@
     - { not_null: input_hash }
     - { unique: id }
     - { relationships: { column: ai_call_id, to: ai_call, field: id } }
+- name: ui_preference
+  version: 1
+  description: "What the person's oxplow remembers for them outside any one tab: a page's page memory (scoped by the page's ref without its params — `page:tasks`, `lens:acme/board` — or `kind:<kind>` for every page of an entity kind; shared by every tab of it), a panel's (its `panel:` ref), a custom component's own (`component:<extension>/<id>`) and the app's preferences (`app`). A tab's view params and history state are in its tab, not here. Local to this project, never the repo."
+  columns:
+    - { name: "scope", type: "TEXT", doc: "`app`; a page's ref (`page:…`, `lens:…`) or `kind:<kind>`; a panel's ref; or `component:<extension>/<id>`." }
+    - { name: "key", type: "TEXT", doc: "What is remembered, within its scope (`railWidth`, `mergeMode.str1.main`)." }
+    - { name: "value_json", type: "TEXT", doc: "Its value, as JSON text." }
+    - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp of the last change." }
+  tests:
+    - { not_null: scope }
+    - { not_null: key }
 - name: bookmark
   version: 1
   description: "Pages the person bookmarked, each at one scope: a thread's, a stream's or the whole project's. A thread sees its own, its stream's and the project's; a ref is bookmarked at most once across those."

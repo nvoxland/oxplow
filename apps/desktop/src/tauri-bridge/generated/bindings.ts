@@ -159,6 +159,16 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	getUiPreferences: () => typedError<UiPreference[], IpcError_Serialize>(__TAURI_INVOKE("get_ui_preferences")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	setUiPreference: (scope: string, key: string, valueJson: string | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("set_ui_preference", { scope, key, valueJson })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listExtensions: () => typedError<Extension_Serialize[], IpcError_Serialize>(__TAURI_INVOKE("list_extensions")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -6536,6 +6546,15 @@ export type UiLogEntry = {
 	 */
 	context: string | null,
 	timestamp: string | null,
+};
+
+/**  One remembered value. */
+export type UiPreference = {
+	/**  `app`, `page:<page>`, `panel:<id>` or `component:<ext>/<id>`. */
+	scope: string,
+	key: string,
+	/**  Its value, as JSON text. */
+	valueJson: string,
 };
 
 /**

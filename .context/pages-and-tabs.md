@@ -812,6 +812,31 @@ If you're adding a new index/list page and find yourself threading an
 to a row's `onClick`, **stop and use the hook instead**. The callback
 should only survive as the rail-side fallback.
 
+## Page state: four homes, one name each
+
+Every piece of state a page keeps has one home, and its name says its
+scope — the same name in core, `PageNavigation`, the component bridge,
+the docs and the skill:
+
+| Name | Scope | Home | API |
+|---|---|---|---|
+| **view params** | this tab's address: shareable, bookmarkable, agents see it; a filter replaces the entry, a pick pushes one | the entry's ref | `nav.viewParams`, `nav.setViewParams(params, { push })` |
+| **history state** | this step of this tab's history: scroll, open sections, a draft | `Entry.historyState` | `useHistoryState(key, initial)` |
+| **page memory** | this page, for the person, every tab of it, across restarts | `ui_preference`, scoped by the page's ref without params (`page:tasks`, `lens:x/y`) or `kind:<kind>` | `usePageMemory(key, initial)` (scope from the page) |
+| **app preference** | the whole app, for the person | `ui_preference`, scope `app` | `useAppPreference(key, initial)` |
+| (a panel's memory) | a left-nav panel, for the person | `ui_preference`, the panel's ref | `usePanelMemory(panel, key, initial)` |
+| **extension state** | shared with the team, read by scripts | the extension's state | commands |
+
+`prefs/remembered.ts` holds page memory and app preferences: one store
+loads everything once (`get_ui_preferences`), a change shows at once and
+is written after a pause per key (`set_ui_preference`), a value equal to
+what's there writes nothing; tests give it a backend
+(`RememberedContext`). **Nothing touches the browser's storage but
+`shellStorage.ts`**, which holds only the shell's own keys (the tab
+sessions, the open files' paths, the remote daemon and its token, the
+recent remotes, the window's log id); `no-direct-storage.test.ts` holds
+every other file to it.
+
 ## Every tab holds a Page
 
 Every tab is a session tab, whatever its kind (`wiki`, `file`, a

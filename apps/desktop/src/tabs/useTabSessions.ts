@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { logUi } from "../logger.js";
+import { shellStorage } from "../shellStorage.js";
 import { emptySession, parseSession, serializeSession, type Session } from "./session.js";
 
 /** Every thread's center tabs (`tabs/session.ts`), in one key. */
@@ -9,7 +10,7 @@ export const SESSIONS_STORAGE_KEY = "oxplow.layout.v4.sessions";
 /** The stored sessions; nothing for text that isn't them. */
 export function readPersistedSessions(): Record<string, Session> {
   try {
-    const raw = window.localStorage.getItem(SESSIONS_STORAGE_KEY);
+    const raw = shellStorage.getItem(SESSIONS_STORAGE_KEY);
     if (!raw) return {};
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return {};
@@ -29,7 +30,7 @@ export function writePersistedSessions(sessions: Record<string, Session>): void 
   try {
     const out: Record<string, unknown> = {};
     for (const [thread, session] of Object.entries(sessions)) out[thread] = JSON.parse(serializeSession(session));
-    window.localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(out));
+    shellStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(out));
   } catch (err) {
     logUi("warn", "failed to store the tab sessions", { error: String(err) });
   }

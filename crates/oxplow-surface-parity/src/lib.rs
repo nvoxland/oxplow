@@ -195,6 +195,8 @@ pub const MANIFEST: &[Capability] = &[
     ),
     ui("get_panel_layout", "the person's left-nav layout (P6.G1)"),
     ui("set_panel_layout", "the person's left-nav layout (P6.G1)"),
+    model("get_ui_preferences", &["v_ui_preference"]),
+    ui("set_ui_preference", "the person's page memory and app preferences, a UI pointer like the panel layout"),
     model("list_extensions", &["v_extension", "v_contribution"]),
     ui("get_lens", "the lens page's definition; an agent reads the lens's ref with `read`"),
     both_named("run_lens", "run_lens", "oxplow_run_lens"),

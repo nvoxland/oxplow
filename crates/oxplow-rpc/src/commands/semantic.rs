@@ -50,6 +50,27 @@ pub async fn get_panel_layout(svc: &Services) -> Result<Vec<oxplow_db::PanelPlac
     Ok(svc.panel_layout_store.get().await?)
 }
 
+/// Everything the person's oxplow remembers outside any one tab: page
+/// memory and app preferences (`ui_preference`). UI-only; an agent reads
+/// `v_ui_preference`.
+pub async fn get_ui_preferences(svc: &Services) -> Result<Vec<oxplow_db::UiPreference>, IpcError> {
+    Ok(svc.ui_preference_store.all().await?)
+}
+
+/// Remember one value (JSON text), or forget it with none.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "off the bus: page memory and app preferences"
+)]
+pub async fn set_ui_preference(
+    svc: &Services,
+    scope: String,
+    key: String,
+    value_json: Option<String>,
+) -> Result<(), IpcError> {
+    Ok(svc.ui_preference_store.set(scope, key, value_json).await?)
+}
+
 /// Replace the layout (the order is the list's).
 #[expect(
     clippy::disallowed_methods,

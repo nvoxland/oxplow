@@ -29,6 +29,7 @@ import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen, type UnlistenFn } from "@tauri-apps/api/event";
 import { CHANNEL_ROUTING, EVENT_CHANNELS, type ListenChannel } from "./channels";
 import { SHELL_COMMANDS } from "./generated/shellCommands";
+import { shellStorage } from "../shellStorage.js";
 
 /// Channels multiplexed over the daemon's /events WebSocket, keyed by
 /// the wire `channel` value in each frame. Sourced from the shared
@@ -136,8 +137,8 @@ function readRemoteEndpoint(): { base: string | null; token: string | null } {
   let fragment: string | null = null;
   try {
     stored = {
-      base: window.localStorage.getItem("oxplow.remoteBase"),
-      token: window.localStorage.getItem("oxplow.remoteToken"),
+      base: shellStorage.getItem("oxplow.remoteBase"),
+      token: shellStorage.getItem("oxplow.remoteToken"),
     };
     fragment = window.location.hash;
   } catch {
@@ -182,16 +183,16 @@ export function remoteBaseUrl(): string | null {
 /// transport reads the key once at module load, so a reload is the
 /// mode switch.
 export function connectRemote(base: string, token: string | null): void {
-  window.localStorage.setItem("oxplow.remoteBase", base.trim().replace(/\/+$/, ""));
-  if (token) window.localStorage.setItem("oxplow.remoteToken", token);
-  else window.localStorage.removeItem("oxplow.remoteToken");
+  shellStorage.setItem("oxplow.remoteBase", base.trim().replace(/\/+$/, ""));
+  if (token) shellStorage.setItem("oxplow.remoteToken", token);
+  else shellStorage.removeItem("oxplow.remoteToken");
   window.location.reload();
 }
 
 /// Drop the remote base and reload back into local mode.
 export function disconnectRemote(): void {
-  window.localStorage.removeItem("oxplow.remoteBase");
-  window.localStorage.removeItem("oxplow.remoteToken");
+  shellStorage.removeItem("oxplow.remoteBase");
+  shellStorage.removeItem("oxplow.remoteToken");
   window.location.reload();
 }
 
