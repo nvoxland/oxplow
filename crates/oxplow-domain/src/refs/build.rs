@@ -187,6 +187,49 @@ pub fn lens_ref_with(id: &str, params: &[(&str, Option<&str>)]) -> Result<String
     })
 }
 
+/// A page's id as its identity (the ref without its `?…`) and its view
+/// (the query's params, in order, decoded): the inverse of
+/// [`lens_ref_with`] and the desktop's `withParams`.
+pub fn view_of(id: &str) -> (String, Vec<(String, String)>) {
+    let Some((head, query)) = id.split_once('?') else {
+        return (id.to_string(), Vec::new());
+    };
+    let params = query
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .map(|pair| {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            (query_unescape(key), query_unescape(value))
+        })
+        .collect();
+    (head.to_string(), params)
+}
+
+/// The inverse of [`query_escape`]: `+` is a space, `%XX` a byte.
+fn query_unescape(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'+' => out.push(b' '),
+            b'%' if i + 2 < bytes.len() => {
+                let hex = |b: u8| (b as char).to_digit(16);
+                match (hex(bytes[i + 1]), hex(bytes[i + 2])) {
+                    (Some(hi), Some(lo)) => {
+                        out.push((hi * 16 + lo) as u8);
+                        i += 2;
+                    }
+                    _ => out.push(b'%'),
+                }
+            }
+            b => out.push(b),
+        }
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// `encodeURIComponent`, keeping `/ : ? ,` and writing a space as `+`.
 fn query_escape(s: &str) -> String {
     let mut out = String::new();
@@ -425,6 +468,31 @@ mod tests {
         );
         assert_eq!(lens_ref_with("acme/x", &[]).unwrap(), "lens:acme/x");
         assert!(lens_ref_with("", &[]).is_err());
+    }
+
+    /// A page's id is its identity and its view: `view_of` reads back what
+    /// `lens_ref_with` (and the desktop's `withParams`) wrote.
+    #[test]
+    fn a_page_id_splits_into_its_identity_and_its_params() {
+        let id = lens_ref_with(
+            "acme/x",
+            &[("a", Some("b c&d=e%")), ("q", Some("")), ("z", Some("1"))],
+        )
+        .unwrap();
+        let (page, params) = view_of(&id);
+        assert_eq!(page, "lens:acme/x");
+        assert_eq!(
+            params,
+            vec![
+                ("a".to_string(), "b c&d=e%".to_string()),
+                ("q".to_string(), String::new()),
+                ("z".to_string(), "1".to_string()),
+            ]
+        );
+        assert_eq!(
+            view_of("file:src/a.rs@git:HEAD"),
+            ("file:src/a.rs@git:HEAD".to_string(), vec![])
+        );
     }
 
     #[test]

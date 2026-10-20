@@ -198,6 +198,11 @@ async fn open(svc: &Services, input: OpenPageInput) -> Result<Value, CommandErro
         Value::Null
     };
     let this = pages.iter().find(|p| p.page_id == page_id);
+    let (page, view) = oxplow_domain::refs::build::view_of(&page_id);
+    let params: serde_json::Map<String, Value> = view
+        .into_iter()
+        .map(|(k, v)| (k, Value::String(v)))
+        .collect();
     let others: Vec<&crate::client_reports::OpenPage> = pages
         .iter()
         .filter(|p| this.is_none_or(|t| t.client != p.client))
@@ -205,8 +210,15 @@ async fn open(svc: &Services, input: OpenPageInput) -> Result<Value, CommandErro
     Ok(json!({
         "open": {
             "pageId": page_id,
+            // What it is and how it's viewed, apart: the id is only their
+            // string form.
+            "page": page,
+            "params": params,
             "kind": kind,
             "detail": detail,
+            "back": this.map(|p| p.back.clone()).unwrap_or_default(),
+            "forward": this.map(|p| p.forward.clone()).unwrap_or_default(),
+            "origin": this.and_then(|p| p.origin.clone()),
             "client": this.map(|p| p.client.clone()),
             "visible": this.is_some_and(|p| p.visible),
             "reportedAt": this.map(|p| p.reported_at),
@@ -331,7 +343,61 @@ mod tests {
             id: id.into(),
             kind: kind.into(),
             title: format!("{id} title"),
+            back: Vec::new(),
+            forward: Vec::new(),
+            origin: None,
         }
+    }
+
+    /// The open page reads as what it is and how it's viewed: its identity
+    /// and its params apart, and where its tab's history leads — so an
+    /// agent never parses a tab id.
+    #[tokio::test]
+    async fn the_open_page_says_its_page_its_params_and_its_history() {
+        let fx = services_with_effort().await;
+        let actor = Actor::Agent {
+            session_id: None,
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let id = "lens:acme/commits?range=7d&q=numbat+bay";
+        report(
+            &fx.svc,
+            "a",
+            true,
+            fx.thread,
+            vec![ReportedTab {
+                back: vec!["wiki:home".into()],
+                forward: vec!["lens:acme/commits?range=7d&q=numbat+bay&commit=abc".into()],
+                origin: Some("Recent commits".into()),
+                ..tab(id, "lens")
+            }],
+            id,
+        );
+        let open = fx
+            .svc
+            .commands
+            .run(
+                &actor,
+                PAGE_OPEN,
+                json!({ "thread_id": fx.thread.to_string() }),
+                false,
+            )
+            .await
+            .unwrap()
+            .result;
+        assert_eq!(open["open"]["pageId"], id);
+        assert_eq!(open["open"]["page"], "lens:acme/commits");
+        assert_eq!(
+            open["open"]["params"],
+            json!({ "range": "7d", "q": "numbat bay" })
+        );
+        assert_eq!(open["open"]["back"], json!(["wiki:home"]));
+        assert_eq!(
+            open["open"]["forward"][0],
+            "lens:acme/commits?range=7d&q=numbat+bay&commit=abc"
+        );
+        assert_eq!(open["open"]["origin"], "Recent commits");
     }
 
     fn report(

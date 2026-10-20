@@ -1439,24 +1439,19 @@ export function App() {
     const timer = setTimeout(() => {
       const ctx = visitContextRef.current;
       const shown = ctx.pageTabs.find((t) => t.id === effectiveCenterActive) ?? null;
-      const activeByThread: Record<string, string | undefined> = Object.fromEntries(
-        Object.entries(sessions).map(([thread, session]) => [thread, activeRef(session)?.id]),
-      );
-      if (selectedThreadId) activeByThread[selectedThreadId] = shown?.id;
       const report = buildTabReport({
         client: getUiClientId(),
         focused: windowFocused,
         visible: windowVisible,
         shownThread: selectedThreadId ?? null,
-        threadPageTabs,
-        activeByThread,
+        sessions,
         titleOf: (tab) => tabLabelByIdRef.current[tab.id] ?? pageTitles[tab.id],
         detail: shown ? getPageDetailStore().get(shown.id) : null,
       });
       void reportTabs(report).catch(() => {});
     }, 300);
     return () => clearTimeout(timer);
-  }, [effectiveCenterActive, selectedThreadId, threadPageTabs, sessions, pageTitles, pageDetailTick, windowFocused, windowVisible]);
+  }, [effectiveCenterActive, selectedThreadId, sessions, pageTitles, pageDetailTick, windowFocused, windowVisible]);
 
   // A diff's spec rides in its ref (`diffRef`'s state), so opening the
   // same diff again refreshes it: per-click metadata that doesn't change
