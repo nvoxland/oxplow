@@ -45,7 +45,7 @@ A manifest without `manifest: 2` doesn't load. Unknown keys are errors, and `che
 title: Waiting on me
 description: Blocked work items on this stream's threads.
 params:                         # optional; bound as :name in the query
-  - { name: stream_id, label: Stream }   # filled in: the viewer's stream
+  - { name: stream_id, label: Stream }   # filled in: the viewer's stream; see "Params have a type"
   # ref / effort_id / thread_id / stream_id are pickers on the lens page
 query: |
   SELECT w.ref, w.title, w.state, t.title AS thread
@@ -93,6 +93,34 @@ empty: Nothing is waiting on you.
   `relative` (how long ago), `bytes`, `duration` (milliseconds),
   `integer` or `percent` (a 0-1 fraction). `format` changes only what
   the person sees. Agents read the raw values.
+- **Params have a `type`**, which picks their control on the page:
+  `text` (the default), `choice` (`options: [{ value, label }]` and a
+  `default` that is one of them), `bool` (bound 1 or 0), `search`
+  (trimmed text, NULL when empty; applies as the person types), `branch`
+  (a branch name, NULL for all) and `date_range` (a preset `1d 2d 3d 7d
+  30d 90d all`, or `<from>..<to>`; pick the quick picks with `presets:`).
+  A `date_range` named `range` gives the query `:range_from` and
+  `:range_to` (RFC 3339, NULL for an open end):
+  ```yaml
+  params:
+    - { name: range, label: When, type: date_range, default: 30d, presets: [7d, 30d, 90d, all] }
+    - { name: q, label: Search subjects, type: search }
+    - { name: merges, label: Merges only, type: bool, default: false }
+  query: |
+    SELECT sha, subject FROM v_commit
+     WHERE (:range_from IS NULL OR committed_at >= :range_from)
+       AND (:q IS NULL OR subject LIKE '%' || :q || '%')
+       AND (:merges = 0 OR parent_count > 1)
+  ```
+  You don't say where a param goes, and you never write its `role`: the
+  page puts every param in its rail. Read `references/page-layout.md`
+  before you add params to a page.
+- **`columns[].select: <param>`** makes a row clickable: a click sets
+  that param to the column's value, and the page shows the picked row as
+  its selection (never an input). In a document, the param is the
+  document's, so the other sections that read it run again — master and
+  detail with no code. Give the detail section an `empty:` that says
+  what to click.
 - **`columns[].highlight: <param>`** marks the param's current value in
   the cell's text (every case-insensitive occurrence; nothing when the
   param is empty). It must name a param the lens declares. Use it on the

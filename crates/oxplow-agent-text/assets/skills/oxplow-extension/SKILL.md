@@ -33,7 +33,8 @@ with `name: oxplow-extension` and `reference: <name>`):
 - `references/scaffolding.md`: the kinds `extension new` makes, the words used exactly.
 - `references/semantic-layer.md`: finding data, refs in SQL and scripts, publishing and
   importing models.
-- `references/lens-format.md`: manifest, lens keys, viz, links, row styling, alerts, actions.
+- `references/lens-format.md`: manifest, lens keys, viz, params, links, row styling, alerts, actions.
+- `references/page-layout.md`: where things go on a page (nav bar, body, rail) and what check warns about.
 - `references/ui-contributions.md`: slots, pages, panels, decorators, replacing a core view.
 - `references/commands-and-forms.md`: your own commands, custom components, forms.
 - `references/collectors.md`: outside or derived data, credentials, host services, `ai_*`.

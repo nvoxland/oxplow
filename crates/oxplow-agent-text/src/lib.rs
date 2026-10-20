@@ -157,6 +157,7 @@ const OXPLOW_SKILLS: &[SkillFiles] = &[
             "scaffolding",
             "semantic-layer",
             "lens-format",
+            "page-layout",
             "ui-contributions",
             "commands-and-forms",
             "collectors",

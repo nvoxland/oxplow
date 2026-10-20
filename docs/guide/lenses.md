@@ -98,6 +98,9 @@ query: |
   its last day.
 
 Every param shows in the page's side panel. You don't choose where.
+Give each one a short `label`, and declare them in the order people use
+them: the one changed most first, toggles last. Six show; the rest fold
+behind "More".
 
 A column's `select: <param>` makes a row clickable: clicking it sets the
 param to that column's value. In a document, the other sections that
@@ -346,6 +349,23 @@ Problems show under Settings → Extensions. Agents check their work with
 `oxplow_validate_extension`.
 
 ## On the page
+
+Every lens page has the same layout:
+
+- **The title row** holds what acts on the whole page: Refresh, Copy,
+  Add to Agent Context, Improve with Agent and the lens's own actions.
+- **The body** is the content: the title, the description, then the
+  sections, tables and charts.
+- **The side panel** has three groups. **Filters** lists each param
+  beside its value; click a value to change it. A control too wide for
+  the panel, like a custom date range, opens over the page. Escape puts
+  the value back. **Selection** shows the row you clicked, when a column
+  `select`s a param. **About this page** names the extension and the
+  file to edit.
+
+oxplow warns when a page has too many filters, sections or columns, or
+a param no query reads. The warnings show in `oxplow extension check`
+and on the Extensions page, each with what to do instead.
 
 - Right-click a row → **Add Row to Agent Context**.
 - **Improve with Agent** puts `[oxplow lens <id>]` in the agent's input so you
