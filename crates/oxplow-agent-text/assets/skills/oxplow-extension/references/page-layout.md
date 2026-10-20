@@ -73,6 +73,25 @@ selection, and the rail shows the picked row instead of an input.
 A warning doesn't stop the page from loading, but fix it before you tell
 the person the page is ready.
 
+## State: a page's state is its params
+
+A page's view — its filters, its search, the row picked — is its params,
+and oxplow keeps them in the page's tab. A bookmark, a reopened tab, a
+restart and Back all show the page the same way, and an agent reading
+the open page sees the same values. So:
+
+- **Declare what the page shows by as params**, with defaults. Only the
+  values that differ from a default go into the page's ref.
+- **A filter replaces; a pick pushes.** You don't choose: a param a
+  column `select`s is the selection (Back un-selects it); every other
+  param is a filter (no history entry per change).
+- **Never keep view state anywhere else.** A custom component sets its
+  page's params with `component.setParams({ k: v })` and draws from
+  `component.onParams(cb)`; it never uses `localStorage` or
+  `sessionStorage` (`check` warns). What only that page's entry needs
+  to remember (scroll, open sections) oxplow keeps for the kit's
+  components already.
+
 ## Where a page comes from
 
 `oxplow_get_open_page` and `oxplow_read lens:<id>` give `origin.source`:

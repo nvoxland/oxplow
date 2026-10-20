@@ -98,6 +98,10 @@ query: |
   its last day.
 
 Every param shows in the page's side panel. You don't choose where.
+The values you change are kept in the page's tab: a bookmark, a
+reopened tab or a restart shows the same filters and the same row
+picked. Changing a filter doesn't add a step to Back; picking a row
+does, so Back un-selects it.
 Give each one a short `label`, and declare them in the order people use
 them: the one changed most first, toggles last. Six show; the rest fold
 behind "More".

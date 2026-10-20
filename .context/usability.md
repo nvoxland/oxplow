@@ -650,6 +650,15 @@ declaring *what it is* and mounting the generic layer.
   page was opened from (`tabs/navigationKeys.ts`, the global handler in
   `App.tsx`). They don't fire while focus is in a field, a select, a
   contenteditable or Monaco.
+- **A page's view is its tab's, and Back follows what you did.** A
+  filter change (a range, a search, a toggle) replaces the tab's entry:
+  it adds nothing to Back, as a filter bar doesn't. Picking a row (a
+  column's `select`) adds an entry: Back un-selects and Forward
+  re-selects, as in a mail client. Core decides by the param's role; no
+  page chooses. The page doesn't remount for either, so nothing flashes
+  Loading and its open sections stay open. A bookmark is of the values
+  shown: change a filter and the star goes off; set it back and it's
+  on. Closing the active tab shows the most recent other one.
 - **The native menu is renderer-driven.** `App.tsx` pushes the menu
   snapshot to `set_native_menu` (built in
   `crates/oxplow-tauri-ipc/src/commands/menu.rs`); macOS shows the

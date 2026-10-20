@@ -585,9 +585,14 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     (`onSetParam` with the row, through a document's or dashboard's
     parts when the page holds the param). Copy, Add to Agent Context
     and the whole-lens actions are handed to the nav bar
-    (`toolbarTo`). Param values are
-    the page's state; they aren't written back into the tab id yet.
-    A tab id may carry starting values (`lens:<ext>/<slug>?effort_id=12`).
+    (`toolbarTo`). **A lens page is a function of its tab entry**
+    (`tabs/session.ts`): its params are its ref's
+    (`lens:<ext>/<slug>?k=v`, a declared page's `page:…?k=v`), and a
+    change goes back through `PageNavigation.replaceRef` with the values
+    that differ from the defaults (`changedParams`, by type) — a filter
+    replaces the entry, a selection pushes one. So a reopened tab, a
+    restart, a bookmark and Back show the same filters and the same
+    pick. Outside a tab it keeps its params itself.
   - A run failure shows the error inline, with a nudge to use "Improve
     with Agent".
   - The page re-runs when a model it read changed (`modelsChanged`), when
