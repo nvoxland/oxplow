@@ -5789,6 +5789,18 @@ export type ReportedTab = {
 	kind: string,
 	/**  The title on the tab. */
 	title: string,
+	/**
+	 *  Where its Back leads: the ids of the entries before the one it
+	 *  shows, oldest first.
+	 */
+	back?: string[],
+	/**  Where its Forward leads (the ids of the entries after it). */
+	forward?: string[],
+	/**
+	 *  The collection the page was opened from (its title), whose items
+	 *  Up and Down step through.
+	 */
+	origin?: string | null,
 };
 
 /**  How long a namespace's event payloads and large content are kept. */

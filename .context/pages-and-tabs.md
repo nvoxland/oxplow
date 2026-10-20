@@ -694,9 +694,12 @@ model (content, drafts), not navigation.
 ## What agents see of the tabs
 
 Each window reports what it shows (`report_tabs`, debounced 300 ms from
-`App.tsx`, built by the pure `tabs/tabReport.ts`): every thread's tabs
-with their shown titles (the tab strip's label, else a page's own title,
-else its kind's label) and the one selected in each, the thread it shows,
+`App.tsx`, built by the pure `tabs/tabReport.ts` from the sessions):
+every thread's tabs with their shown titles (the tab strip's label, else
+a page's own title, else its kind's label), each tab's `back` and
+`forward` (the ids of its entries before and after, oldest first) and
+`origin` (the title of the collection it was opened from), the one
+selected in each, the thread it shows,
 whether it is focused and visible, and the detail the shown page
 publishes through `tabs/openPageDetail.ts` (a lens's `{lensId, params}`,
 an editor's `{path, caret, selection}`). A window is its renderer's
@@ -712,8 +715,11 @@ forgotten, a report older than a minute is listed as stale.
   window and staleness; `unreported` names the threads no window reported.
 - `oxplow_get_open_page { thread_id, tab? }` is the page selected in the
   thread in the window the person was in last (most recently focused),
-  with `others` (each other window's), or the listed `tab`; detail comes
-  only from a window showing that thread's page. Two windows never
+  with `others` (each other window's), or the listed `tab`: its
+  `pageId`, its `page` (identity) and `params` (the view, decoded —
+  `refs::build::view_of`; an agent never parses an id), its tab's
+  `back`, `forward` and `origin`, and, for a lens, the lens re-run as
+  text. Detail comes only from a window showing that thread's page. Two windows never
   collapse into one "open page".
 
 Both are read-only: nothing an agent reads activates a tab or a window.

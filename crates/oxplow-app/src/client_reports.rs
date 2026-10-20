@@ -30,6 +30,17 @@ pub struct ReportedTab {
     pub kind: String,
     /// The title on the tab.
     pub title: String,
+    /// Where its Back leads: the ids of the entries before the one it
+    /// shows, oldest first.
+    #[serde(default)]
+    pub back: Vec<String>,
+    /// Where its Forward leads (the ids of the entries after it).
+    #[serde(default)]
+    pub forward: Vec<String>,
+    /// The collection the page was opened from (its title), whose items
+    /// Up and Down step through.
+    #[serde(default)]
+    pub origin: Option<String>,
 }
 
 /// A thread's tabs in one window.
@@ -97,6 +108,10 @@ pub struct OpenPage {
     #[serde(rename = "reportedAt")]
     pub reported_at: Timestamp,
     pub stale: bool,
+    /// Its tab's history and origin (`ReportedTab`).
+    pub back: Vec<String>,
+    pub forward: Vec<String>,
+    pub origin: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -196,6 +211,9 @@ impl ClientReports {
                 visible: shown && c.report.visible,
                 reported_at: c.reported_at,
                 stale: now.unix_ms() - c.reported_at.unix_ms() > STALE_AFTER_MS,
+                back: tab.back.clone(),
+                forward: tab.forward.clone(),
+                origin: tab.origin.clone(),
             });
         }
         out
@@ -227,6 +245,9 @@ mod tests {
             id: id.into(),
             kind: kind.into(),
             title: id.into(),
+            back: Vec::new(),
+            forward: Vec::new(),
+            origin: None,
         }
     }
 
