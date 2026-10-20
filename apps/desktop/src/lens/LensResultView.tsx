@@ -1,3 +1,4 @@
+import { Approvals } from "../kit/Approvals.js";
 import { Fragment, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { commandOpenAfter, lensActionForm, lensForm, lensText, runLensAction, submitLensForm, type LensRun, type SqlCell } from "../api.js";
 import { Slideover } from "../components/Slideover.js";
@@ -535,6 +536,10 @@ function LensViz({
       return <DetailViz row={result.rows[0]!} cols={cols} cell={cell} rowMenu={rowMenu} />;
     case "steps":
       return <StepsViz steps={stepItems(lens, result)} rowMenu={rowMenu} />;
+    case "approvals":
+      // The pending proposals are read by the kit component itself; the
+      // lens's rows are ignored, its params narrow the list.
+      return <Approvals thread={paramText(run.params.thread)} setting={paramText(run.params.setting)} />;
     case "hunks":
       return <HunksViz rows={hunkRows(lens, result)} streamId={streamId} rowMenu={rowMenu} />;
     case "list":
@@ -1164,3 +1169,8 @@ const linkStyle: CSSProperties = {
   textAlign: "left",
   font: "inherit",
 };
+
+/** A lens param as text, or null when it is unset or empty. */
+function paramText(value: SqlCell | undefined): string | null {
+  return value === undefined || value === null || value === "" ? null : String(value);
+}

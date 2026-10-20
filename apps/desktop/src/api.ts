@@ -57,7 +57,6 @@ import type {
   LensRun,
   LensViz,
   LensSpec,
-  ProviderConfig,
   RecentProjectView,
   RoleBinding,
   CollectorListing,
@@ -74,7 +73,14 @@ import type {
   SqlQueryResult,
 } from "./tauri-bridge/generated/bindings.js";
 
-export type { AiSettings, ProviderConfig, RoleBinding };
+export type { AiSettings, RoleBinding };
+
+/** A provider as `oxplow.ai.set_provider` takes it. */
+export interface ProviderConfig {
+  id: string;
+  kind: string;
+  baseUrl: string | null;
+}
 export type { ChangedPath, DiffEntry };
 export type { ServiceListing, ScriptServices };
 export type { DataEntity, Extension, Lens, LensRun, LensViz, LensSpec, SearchHit, CollectorListing, CollectorRunReport, SqlCell, SqlQueryResult };

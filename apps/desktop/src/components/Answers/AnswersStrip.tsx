@@ -7,9 +7,9 @@
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 
-import { decide, useThreadProposals } from "../../proposals.js";
+import { useThreadProposals } from "../../proposals.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { ProposalCard } from "../Proposals/ProposalCard.js";
+import { ProposalList } from "../../kit/Approvals.js";
 import { ThreadAnswer } from "./ThreadAnswer.js";
 import { useThreadAnswers } from "./useThreadAnswers.js";
 
@@ -57,9 +57,7 @@ export function AnswersStrip({ threadId, onOpenPage }: { threadId: string; onOpe
       {waiting.length === 0 ? null : (
         <div data-testid="thread-proposals" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <h2 style={headingStyle}>Waiting for you ({waiting.length})</h2>
-          {waiting.map((p) => (
-            <ProposalCard key={p.id} proposal={p} onDecide={decide} />
-          ))}
+          <ProposalList proposals={waiting} />
         </div>
       )}
       {answers.length === 0 ? null : (

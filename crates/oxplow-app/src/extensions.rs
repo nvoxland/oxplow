@@ -111,6 +111,13 @@ pub enum LensViz {
     /// like an action's) and the query's first row, if the lens has one.
     /// Submitting runs the command as the lens.
     Form,
+    /// The pending proposals an agent raised, each with Approve and
+    /// Decline: core's consent component. The viz reads
+    /// `v_command_proposal` itself and decides through the person-only
+    /// path, so the lens needs no query beyond `SELECT 1`; its params
+    /// `thread` (a thread ref) and `setting` (a config key) narrow the
+    /// list.
+    Approvals,
     /// The extension's own web component (`custom.component`), in
     /// a sandboxed frame; its rows are what it shows and what an agent
     /// reads (as a table).
@@ -4084,9 +4091,12 @@ fn shape_problem(
             "viz `{}` needs a `query`",
             format!("{:?}", lens.viz).to_lowercase()
         )),
-        LensViz::Table | LensViz::List | LensViz::Number | LensViz::Markdown | LensViz::Detail => {
-            None
-        }
+        LensViz::Table
+        | LensViz::List
+        | LensViz::Number
+        | LensViz::Markdown
+        | LensViz::Detail
+        | LensViz::Approvals => None,
     }
 }
 

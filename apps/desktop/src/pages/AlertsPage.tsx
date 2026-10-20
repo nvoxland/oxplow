@@ -17,9 +17,8 @@ import { OpErrorDetail } from "../components/Alerts/OpErrorDetail.js";
 import { alertsSummary } from "../components/Alerts/alertsModel.js";
 import { DeliveryList } from "../components/DeliveryList.js";
 import { getOpErrorsStore, recordOpError } from "../components/opErrorsStore.js";
-import { ProposalCard } from "../components/Proposals/ProposalCard.js";
+import { ProposalList } from "../kit/Approvals.js";
 import { dismissHint } from "../hints.js";
-import { decide } from "../proposals.js";
 import { Section } from "../kit/index.js";
 import { Page } from "../tabs/Page.js";
 import { lensRef, settingsRef } from "../tabs/pageRefs.js";
@@ -41,11 +40,7 @@ export function AlertsPage({ onOpenPage }: { onOpenPage(ref: TabRef): void }) {
         ) : null}
         {proposals.length > 0 ? (
           <Section title="Needs your decision" testId="alerts-decisions">
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {proposals.map((p) => (
-                <ProposalCard key={p.id} proposal={p} onDecide={decide} />
-              ))}
-            </div>
+            <ProposalList proposals={proposals} />
           </Section>
         ) : null}
         {hints.length > 0 ? (

@@ -31,6 +31,8 @@ pub const MAX_HUNK_BYTES: usize = 8_000;
 pub struct Resolved {
     pub children: Vec<LensRun>,
     pub diffs: Vec<String>,
+    /// An `approvals` lens's pending proposals, one line each.
+    pub approvals: Vec<String>,
 }
 
 /// A lens run as an agent reads it: the text, and what it needs to know
@@ -118,6 +120,7 @@ pub async fn resolve(
                 );
             }
         }
+        LensViz::Approvals => out.approvals = pending_proposals(svc, run).await?,
         LensViz::Hunks => {
             let h = run.lens.hunks.clone().unwrap_or_default();
             let (Some(p), Some(f), Some(t)) = (
@@ -140,6 +143,46 @@ pub async fn resolve(
         _ => {}
     }
     Ok(out)
+}
+
+/// The pending proposals an `approvals` lens shows, one line each: its
+/// params `thread` (a thread ref) and `setting` (a config key) narrow them.
+async fn pending_proposals(
+    svc: &crate::Services,
+    run: &LensRun,
+) -> Result<Vec<String>, DomainError> {
+    let param = |name: &str| run.params.get(name).map(cell).filter(|v| !v.is_empty());
+    let result = svc
+        .sql
+        .query_sql(
+            "SELECT ref, COALESCE(json_extract(preview, '$.summary'), command), actor_kind, \
+                    (SELECT title FROM v_thread t WHERE t.id = p.thread_id) \
+             FROM v_command_proposal p \
+             WHERE decision = 'pending' \
+               AND (?1 IS NULL OR thread_id = (SELECT id FROM v_thread WHERE ref = ?1)) \
+               AND (?2 IS NULL OR key = ?2) \
+             ORDER BY id DESC",
+            vec![
+                param("thread").map_or(SqlCell::Null(()), SqlCell::Text),
+                param("setting")
+                    .map(|key| oxplow_domain::refs::build::config_ref(&key))
+                    .map_or(SqlCell::Null(()), SqlCell::Text),
+            ],
+            None,
+        )
+        .await?;
+    Ok(result
+        .rows
+        .iter()
+        .map(|r| {
+            let at = |i: usize| r.get(i).map(cell).unwrap_or_default();
+            let by = match at(3) {
+                title if !title.is_empty() => format!("the {} in “{title}”", at(2)),
+                _ => format!("a {}", at(2)),
+            };
+            format!("- {} — {} (proposed by {by})", at(0), at(1))
+        })
+        .collect())
 }
 
 /// `path`'s unified diff from revision `from` to `to`, or why there is
@@ -239,6 +282,16 @@ pub fn render(run: &LensRun, resolved: &Resolved) -> String {
         LensViz::Detail => detail(run),
         LensViz::Steps => steps(run),
         LensViz::Hunks => hunks(run, &resolved.diffs),
+        LensViz::Approvals => {
+            if resolved.approvals.is_empty() {
+                "No proposals wait for a decision.".to_string()
+            } else {
+                format!(
+                    "Proposals waiting for a person's decision (an agent can't decide them):\n{}",
+                    resolved.approvals.join("\n")
+                )
+            }
+        }
         LensViz::Table | LensViz::List | LensViz::Document | LensViz::Dashboard | LensViz::Form => {
             table(run)
         }
@@ -864,7 +917,8 @@ mod tests {
                 &grid,
                 &Resolved {
                     children: vec![a, b],
-                    diffs: Vec::new()
+                    diffs: Vec::new(),
+                    approvals: Vec::new(),
                 }
             ),
             "### Open\n\n5\n\n### About\n\nRead me.\n\n### Notes\n\n**ok**"
@@ -1025,6 +1079,7 @@ mod tests {
         let resolved = Resolved {
             children: Vec::new(),
             diffs: vec!["-old\n+new\n".into()],
+            approvals: Vec::new(),
         };
         assert_eq!(
             render(&r, &resolved),
@@ -1064,5 +1119,68 @@ mod tests {
         .await
         .unwrap();
         assert!(text.contains("-one") && text.contains("+two"), "{text}");
+    }
+
+    /// An approvals lens reads the pending proposals itself: an agent
+    /// sees what waits (and that it can't decide), narrowed by the
+    /// lens's `thread` param; with none waiting it says so.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn approvals_list_the_pending_proposals() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let root = fx.svc.layout.project_dir.clone();
+        let approvals = |params: &[(&str, SqlCell)]| {
+            let mut r = run(
+                LensViz::Approvals,
+                None,
+                &["n"],
+                vec![vec![SqlCell::Int(1)]],
+            );
+            for (k, v) in params {
+                r.params.insert(k.to_string(), v.clone());
+            }
+            r
+        };
+        let ctx = crate::extensions::LensContext::default();
+        let none = text_of(&fx.svc, &root, &approvals(&[]), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(none, "No proposals wait for a decision.");
+
+        let agent = oxplow_domain::Actor::Agent {
+            session_id: None,
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &agent,
+                "oxplow.lsp.install_server",
+                serde_json::json!({ "package": "rust-analyzer" }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, oxplow_domain::CommandError::Proposed { .. }),
+            "{err:?}"
+        );
+        let all = text_of(&fx.svc, &root, &approvals(&[]), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            all.contains("waiting for a person's decision") && all.contains("proposal:"),
+            "{all}"
+        );
+        let other = text_of(
+            &fx.svc,
+            &root,
+            &approvals(&[("thread", t("thread:thr999"))]),
+            &ctx,
+        )
+        .await
+        .unwrap();
+        assert_eq!(other, "No proposals wait for a decision.");
     }
 }

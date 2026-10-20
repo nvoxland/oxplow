@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
-import type { Proposal } from "../../proposals.js";
-import { ProposalCard } from "./ProposalCard.js";
-import { SettingRow } from "../../pages/SettingsPage.js";
-import type { EffectiveSetting } from "../../configValues.js";
+import type { Proposal } from "../proposals.js";
+import { narrow, ProposalCard, ProposalList } from "./Approvals.js";
+import { SettingRow } from "../pages/SettingsPage.js";
+import type { EffectiveSetting } from "../configValues.js";
 
 afterEach(cleanup);
 
@@ -103,4 +103,30 @@ test("a setting's row shows its pending proposal", async () => {
   cleanup();
   const none = render(<SettingRow setting={setting} proposal={undefined} onDecide={async () => {}} />);
   expect(none.queryByTestId("proposal-7")).toBeNull();
+});
+
+test("a list narrows to a thread and to a setting, and draws nothing when empty", () => {
+  const other: Proposal = { ...proposal, id: 8, threadId: 9, key: "config:other" };
+  const all = [proposal, other];
+  expect(narrow(all).map((p) => p.id)).toEqual([7, 8]);
+  expect(narrow(all, "thread:thr3").map((p) => p.id)).toEqual([7]);
+  expect(narrow(all, "thr9").map((p) => p.id)).toEqual([8]);
+  expect(narrow(all, null, "other").map((p) => p.id)).toEqual([8]);
+  expect(narrow(all, "thr3", "other")).toEqual([]);
+
+  const empty = render(<ProposalList proposals={[]} />);
+  expect(empty.queryByTestId("approvals")).toBeNull();
+  cleanup();
+  const decided: [number, boolean][] = [];
+  const view = render(
+    <ProposalList
+      proposals={all}
+      onDecide={async (p, approve) => {
+        decided.push([p.id, approve]);
+      }}
+    />,
+  );
+  expect(view.getAllByTestId(/^proposal-\d+$/).length).toBe(2);
+  fireEvent.click(view.getByTestId("proposal-decline-8"));
+  return waitFor(() => expect(decided).toEqual([[8, false]]));
 });

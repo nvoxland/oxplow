@@ -4333,6 +4333,15 @@ export type LensViz =
  */
 "form" | 
 /**
+ *  The pending proposals an agent raised, each with Approve and
+ *  Decline: core's consent component. The viz reads
+ *  `v_command_proposal` itself and decides through the person-only
+ *  path, so the lens needs no query beyond `SELECT 1`; its params
+ *  `thread` (a thread ref) and `setting` (a config key) narrow the
+ *  list.
+ */
+"approvals" | 
+/**
  *  The extension's own web component (`custom.component`), in
  *  a sandboxed frame; its rows are what it shows and what an agent
  *  reads (as a table).

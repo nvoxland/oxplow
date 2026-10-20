@@ -6,6 +6,7 @@
  * new local section, table or filter list is a review finding.
  */
 export type { PageAction } from "./actions.js";
+export { Approvals, ProposalCard, ProposalList } from "./Approvals.js";
 export { ActionButtons } from "./ActionButtons.js";
 export { DataTable, type DataColumn, type DataGroup, type DataTableProps, type RowProps } from "./DataTable.js";
 export { DocumentLayout, type DocSection } from "./DocumentLayout.js";
