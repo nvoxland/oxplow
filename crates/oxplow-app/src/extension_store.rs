@@ -34,9 +34,15 @@ pub struct Inputs {
 
 impl Inputs {
     pub fn of(source: &Path) -> Inputs {
-        let build = std::fs::read_to_string(source.join("extension.yaml"))
+        std::fs::read_to_string(source.join("extension.yaml"))
+            .map(|text| Self::of_text(&text))
+            .unwrap_or_default()
+    }
+
+    /// The inputs a manifest's text declares.
+    pub fn of_text(manifest: &str) -> Inputs {
+        let build = serde_yaml::from_str::<serde_yaml::Value>(manifest)
             .ok()
-            .and_then(|text| serde_yaml::from_str::<serde_yaml::Value>(&text).ok())
             .and_then(|manifest| manifest.get("build").cloned());
         let Some(build) = build else {
             return Inputs::default();
@@ -114,6 +120,32 @@ pub fn files_hash<'a>(files: impl IntoIterator<Item = (&'a str, &'a [u8])>) -> S
     hex::encode(hasher.finalize())[..16].to_string()
 }
 
+/// The hash of the copy of `bundled` built into oxplow, by
+/// [`source_hash`]'s rule: its inputs and its build command, never what
+/// the build wrote — so a deploy of the same source folder resolves to
+/// it.
+pub fn shipped_hash(bundled: &crate::bundled_extensions::BundledExtension) -> String {
+    let inputs = bundled
+        .file("extension.yaml")
+        .map(Inputs::of_text)
+        .unwrap_or_default();
+    let skipped = inputs.skipped();
+    let mut files: Vec<(&str, &[u8])> = bundled
+        .files
+        .iter()
+        .copied()
+        .filter(|(rel, _)| {
+            !skipped
+                .iter()
+                .any(|dir| *rel == *dir || rel.starts_with(&format!("{dir}/")))
+        })
+        .collect();
+    if let Some(run) = &inputs.run {
+        files.push(("\0build", run.as_bytes()));
+    }
+    files_hash(files)
+}
+
 /// Write a bundled extension into the store as its shipped deployment,
 /// unless that hash is there already, and return the hash. The same source
 /// in the repo's `extensions/<name>/` has the same hash.
@@ -121,7 +153,7 @@ pub fn extract_shipped(
     project: &Path,
     bundled: &crate::bundled_extensions::BundledExtension,
 ) -> std::io::Result<String> {
-    let hash = files_hash(bundled.files.iter().copied());
+    let hash = shipped_hash(bundled);
     let target = deployment_dir(project, bundled.name, &hash);
     if target.is_dir() {
         return Ok(hash);
@@ -411,6 +443,34 @@ mod tests {
         );
         assert!(dir.join("src/a.ts").is_file());
         assert!(!dir.join("node_modules").exists());
+    }
+
+    /// The copy built into oxplow hashes as its source folder does: by its
+    /// inputs and build command, not what the build wrote.
+    #[test]
+    fn a_shipped_copy_with_a_build_hashes_by_its_inputs() {
+        let manifest = "name: x\nbuild: { run: make, output: dist, exclude: [node_modules] }\n";
+        let source = tempfile::tempdir().unwrap();
+        write(source.path(), "extension.yaml", manifest);
+        write(source.path(), "src/a.ts", "source");
+        write(source.path(), "dist/w/index.html", "built");
+        let files: &'static [(&'static str, &'static [u8])] = Box::leak(Box::new([
+            ("dist/w/index.html", b"built".as_slice()),
+            ("extension.yaml", manifest.as_bytes()),
+            ("src/a.ts", b"source".as_slice()),
+        ]));
+        let bundled = crate::bundled_extensions::BundledExtension {
+            name: "x",
+            files,
+            required: false,
+        };
+        assert_eq!(shipped_hash(&bundled), source_hash(source.path()).unwrap());
+        // And it ships what the build wrote.
+        let project = tempfile::tempdir().unwrap();
+        let hash = extract_shipped(project.path(), &bundled).unwrap();
+        assert!(deployment_dir(project.path(), "x", &hash)
+            .join("dist/w/index.html")
+            .is_file());
     }
 
     /// A deployment's files are read-only once written: a program running

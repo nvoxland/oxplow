@@ -132,6 +132,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Setup Bun
+        # Building oxplow builds its own extensions (crates/oxplow-app/build.rs).
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
@@ -278,6 +284,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Setup Bun
+        # Building oxplow builds its own extensions (crates/oxplow-app/build.rs).
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable

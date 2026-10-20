@@ -112,7 +112,7 @@ mod tests {
         let mut checked = 0;
         for ext in crate::bundled_extensions::BUNDLED {
             for (path, _) in ext.files {
-                let text = ext.file(path).expect("a manifest or lens is text");
+                // Only manifests and lenses: a bundle's assets may be binary.
                 let schema = if *path == "extension.yaml" {
                     &manifest
                 } else if path.starts_with("lenses/") && path.ends_with(".yaml") {
@@ -120,6 +120,7 @@ mod tests {
                 } else {
                     continue;
                 };
+                let text = ext.file(path).expect("a manifest or lens is text");
                 let p = problems(schema, text);
                 assert!(p.is_empty(), "{}/{path}: {p:#?}", ext.name);
                 checked += 1;

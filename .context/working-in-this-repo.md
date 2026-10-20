@@ -152,6 +152,10 @@ The backend is Rust; the desktop frontend is React/Monaco/xterm.
   `apps/desktop/src-tauri/`. `tauri.conf.json` lives next to the
   shell crate; `bun run tauri:dev` (run from anywhere via root
   workspace scripts) boots Vite + the shell.
+- `extensions/oxplow-foundation`, `extensions/oxplow-bundled` — oxplow's
+  own extensions, compiled into the app by `crates/oxplow-app/build.rs`
+  (every file in the folder ships; a `build:` runs there first). Building
+  oxplow therefore needs bun, as its extension builds use it.
 - `crates/` — reusable Rust libraries. `oxplow-domain` (pure types +
   store traits), `oxplow-db` (rusqlite stores + migrations),
   `oxplow-tasks` (oxplow's own task list, one implementation of the

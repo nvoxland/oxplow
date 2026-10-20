@@ -715,7 +715,8 @@ fn no_tmux_in_the_app() {
 
 /// What core may not do with its own implementations (`.context/work-tracking.md`
 /// "Capabilities"): name a bundled extension (`oxplow-bundled`,
-/// `oxplow-foundation`) as a value outside `bundled_extensions.rs` (its contributions are what any extension's
+/// `oxplow-foundation`) as a value outside `bundled_extensions.rs` and the
+/// `build.rs` that generates its file lists (its contributions are what any extension's
 /// are), or compare a provider id with oxplow's to decide how to treat
 /// it. Each `(file, pattern)` still here says why.
 #[rustfmt::skip]
@@ -743,7 +744,8 @@ fn special_cases() -> BTreeSet<(String, String)> {
     ];
     let mut out = BTreeSet::new();
     for (path, text) in production_sources() {
-        if path.ends_with("/bundled_extensions.rs") {
+        if path.ends_with("/bundled_extensions.rs") || path.ends_with("crates/oxplow-app/build.rs")
+        {
             continue;
         }
         for line in text.lines().filter(|l| !l.trim_start().starts_with("//")) {

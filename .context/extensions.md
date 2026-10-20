@@ -1108,7 +1108,14 @@ source directly: an edit changes nothing until it is deployed.
   compiled into the binary (`bundled_extensions::BUNDLED`) and written to the
   store once per hash as their shipped deployment
   (`extension_store::extract_shipped`); they run from disk like any other.
-  The shipped hash uses the source rule, so deploying an unchanged
+  Their file lists are generated: `crates/oxplow-app/build.rs` walks each
+  folder (dot entries and `build.exclude` left out) into `include_bytes!`
+  arrays, so adding a file to the folder ships it; one with a `build:` is
+  built there first (its command, `/bin/sh -c` in its folder), so its
+  output ships without being committed — building oxplow needs the tools
+  those builds use (bun). The shipped hash uses the source rule
+  (`extension_store::shipped_hash`: the inputs and the build command,
+  never the output), so deploying an unchanged
   `extensions/oxplow-foundation` resolves to the shipped deployment. A
   bundled extension with no active deployment of its own runs the shipped
   one (`Deployment::Shipped`).
@@ -1196,9 +1203,12 @@ whatever `package.json` says. The recorded command
 rollback compares; rollback never rebuilds, and neither does a deploy whose
 hash is already in the store. A component bundle under `output` loads from
 the source as declared (`BundleLook::Unknown`) while `output` doesn't
-exist yet, so validate and preview pass before any build. Shipped
-(bundled) extensions have no build; one that did would need
-`extract_shipped` to hash by the same input rule. `oxplow extension check`
+exist yet, so validate and preview pass before any build. A bundled
+extension's build runs when oxplow is built ("Shipped deployments"); while
+developing oxplow, startup stages the output that build left in its
+source folder (recording the command, so a deploy with the same command
+asks nothing), and a source whose output isn't built is a problem saying
+how to build it. `oxplow extension check`
 runs no build (the built source isn't deployed in its throwaway);
 `extension test` builds, as the author's own run; its copy links the
 `exclude` folders instead of copying them.

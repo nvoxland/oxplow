@@ -309,7 +309,7 @@ fn target_of(
     shipped: Option<&crate::bundled_extensions::BundledExtension>,
     hash: &str,
 ) -> Option<String> {
-    let shipped = shipped.map(|b| extension_store::files_hash(b.files.iter().copied()));
+    let shipped = shipped.map(extension_store::shipped_hash);
     (shipped.as_deref() != Some(hash)).then(|| hash.to_string())
 }
 
@@ -487,12 +487,7 @@ pub async fn rollback(
             match matching.as_slice() {
                 [one] => Some(one.hash.clone()),
                 [] => match shipped_of(svc, name) {
-                    Some(b)
-                        if extension_store::files_hash(b.files.iter().copied())
-                            .starts_with(prefix) =>
-                    {
-                        None
-                    }
+                    Some(b) if extension_store::shipped_hash(b).starts_with(prefix) => None,
                     _ => {
                         return Err(invalid(format!("`{name}` has no deployment `{prefix}`")).into())
                     }
@@ -533,7 +528,7 @@ pub async fn rollback(
     }
     let shown = hash.clone().unwrap_or_else(|| {
         shipped_of(svc, name)
-            .map(|b| extension_store::files_hash(b.files.iter().copied()))
+            .map(extension_store::shipped_hash)
             .unwrap_or_default()
     });
     if live == hash {
@@ -844,6 +839,7 @@ async fn stage(
     source: &Path,
     from_stream: Option<i64>,
     permissions: Permissions,
+    build_run: Option<String>,
 ) -> Result<Option<String>, DomainError> {
     let shipped = shipped_of(svc, name);
     let hash = {
@@ -874,7 +870,7 @@ async fn stage(
         source: source.to_string_lossy().into_owned(),
         active: false,
         permissions,
-        build_run: None,
+        build_run,
     };
     svc.db
         .transaction(move |tx| store_rows::record_tx(tx, &row))
@@ -939,17 +935,26 @@ pub(crate) async fn start(
         let declared = loaded.permissions;
         let trusted = shipped.is_none() && required;
         let baseline = shipped.map(shipped_permissions).unwrap_or_default();
-        if loaded.build.is_some() && trusted {
-            problems.insert(
-                name.clone(),
-                vec!["it has a `build:`, which a person deploys; it isn't running".into()],
-            );
+        // Its build is the one building oxplow ran (`build.rs`): what it
+        // wrote is staged; a source not built yet says how to build it.
+        if let (Some(build), true) = (&loaded.build, trusted) {
+            if !source.join(&build.output).is_dir() {
+                problems.insert(
+                    name.clone(),
+                    vec![format!(
+                        "its `{}` isn't built: run `{}` in {} (building oxplow does)",
+                        build.output,
+                        build.run,
+                        crate::extensions::shown(&project, &source)
+                    )],
+                );
+                continue;
+            }
+        } else if !declared.added_over(&baseline).is_empty() && !trusted || loaded.build.is_some() {
             continue;
         }
-        if !trusted && !declared.added_over(&baseline).is_empty() || loaded.build.is_some() {
-            continue;
-        }
-        match stage(svc, &name, &source, None, declared).await {
+        let build_run = loaded.build.as_ref().map(|b| b.run.clone());
+        match stage(svc, &name, &source, None, declared, build_run).await {
             Ok(Some(target)) => {
                 changes.insert(name, Some(target));
             }
@@ -983,7 +988,7 @@ pub(crate) async fn stage_sources(svc: &Arc<Services>) -> LiveChanges {
             continue;
         }
         let declared = crate::extensions::load_extension_at(&source, &name).permissions;
-        let target = stage(svc, &name, &source, None, declared)
+        let target = stage(svc, &name, &source, None, declared, None)
             .await
             .expect("a source stages");
         if svc.extension_catalog.live().get(&name) != target.as_ref() {
@@ -2253,6 +2258,76 @@ mod tests {
             errors.contains("not_a_key") && errors.contains("isn't active until"),
             "{errors}"
         );
+    }
+
+    /// While developing oxplow, foundation's build is cargo's: startup
+    /// stages the output its source folder already holds, with the build
+    /// recorded, so a later deploy with the same command asks nothing; a
+    /// source whose output isn't built is a problem saying how to build it.
+    #[tokio::test]
+    async fn developing_oxplow_a_built_foundation_stages_what_cargo_built() {
+        for built in [true, false] {
+            let (dir, svc) = unbooted();
+            let to = dir.path().join(".oxplow/extensions/oxplow-foundation");
+            for (rel, bytes) in crate::bundled_extensions::find("oxplow-foundation")
+                .unwrap()
+                .files
+            {
+                write(&to, rel, &String::from_utf8_lossy(bytes));
+            }
+            let manifest = std::fs::read_to_string(to.join("extension.yaml")).unwrap();
+            write(
+                &to,
+                "extension.yaml",
+                &manifest.replacen(
+                    "\ncommands:\n",
+                    "\nbuild: { run: \"true\", output: dist }\ncommands:\n",
+                    1,
+                ),
+            );
+            if built {
+                write(&to, "dist/note.txt", "built");
+            }
+            write(
+                dir.path(),
+                ".oxplow/project.yaml",
+                "enableBundledExtensions: false\n",
+            );
+            let svc = {
+                drop(svc);
+                Services::in_memory_inactive(dir.path()).unwrap()
+            };
+            svc.extension_activation
+                .initialize(svc.clone())
+                .await
+                .unwrap();
+            if !cfg!(debug_assertions) {
+                return;
+            }
+            let why = svc.extension_activation.problems();
+            if built {
+                let ext = running(&svc, "oxplow-foundation").expect("it runs");
+                assert!(matches!(ext.deployment, Deployment::Deployed { .. }));
+                let rows = svc
+                    .db
+                    .read(|c| store_rows::list_tx(c, Some("oxplow-foundation")))
+                    .await
+                    .unwrap();
+                assert_eq!(rows[0].build_run.as_deref(), Some("true"));
+                let root = svc.layout.project_dir.clone();
+                let again = deploy(&svc, "oxplow-foundation", &root, None, false)
+                    .await
+                    .unwrap();
+                assert!(again.already);
+            } else {
+                assert!(running(&svc, "oxplow-foundation").is_none());
+                assert!(
+                    why.get("oxplow-foundation")
+                        .is_some_and(|p| p.iter().any(|m| m.contains("`dist` isn't built"))),
+                    "{why:?}"
+                );
+            }
+        }
     }
 
     /// Everything in an extension's folder is copied into each deployment,
