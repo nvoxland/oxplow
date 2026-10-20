@@ -139,6 +139,78 @@
 .ox-toolbar { display: flex; gap: var(--space-2); align-items: center; margin-bottom: var(--space-2); }
 .ox-toolbar .ox-input { flex: 1; min-width: 0; }
 
+/* A page's rail: groups under small headings, in a fixed order (Filters,
+   Selection, About this page); a param is a row, its label beside its
+   value. The value is a button at rest; clicked, the row's control takes
+   its place, and a control too wide for the row opens in a popover. */
+.ox-rail-group { display: flex; flex-direction: column; gap: var(--space-1); }
+.ox-rail-group + .ox-rail-group { margin-top: var(--space-4); }
+.ox-rail-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ox-rail-group-head .ox-link { text-transform: none; letter-spacing: 0; background: none; border: none; padding: 0; font: inherit; }
+.ox-rail-line { margin: 0; color: var(--text-muted); font-size: var(--text-sm); }
+.ox-params { display: flex; flex-direction: column; }
+.ox-param {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 28px;
+  font-size: var(--text-sm);
+}
+.ox-param-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+/* A row whose value isn't its default: a dot before its label. */
+.ox-param-changed .ox-param-label::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: var(--space-1);
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+.ox-param-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: inherit;
+  text-align: left;
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+  cursor: pointer;
+}
+.ox-param-value:hover,
+.ox-param-value:focus-visible { background: var(--surface-app); border-color: var(--border-strong); outline: none; }
+.ox-param-edit { display: flex; min-width: 0; }
+.ox-param-edit .ox-input,
+.ox-param-edit .ox-select { width: 100%; min-width: 0; }
+.ox-param-check { justify-self: start; margin: 0 var(--space-2); }
+.ox-params-more { align-self: start; background: none; border: none; padding: var(--space-1) 0; font: inherit; font-size: var(--text-xs); }
+.ox-popover {
+  position: fixed;
+  z-index: 1000;
+  width: max-content;
+  padding: var(--space-3);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+}
+
 /* A number with its label. */
 .ox-stat { display: flex; flex-direction: column; gap: 2px; }
 .ox-stat-value { font-size: var(--text-2xl); font-weight: var(--weight-bold); line-height: var(--leading-tight); font-variant-numeric: tabular-nums; }

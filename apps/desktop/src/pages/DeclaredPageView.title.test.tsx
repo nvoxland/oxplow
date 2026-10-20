@@ -15,7 +15,7 @@ mock.module("../api.js", () => ({
     [{ name: "acme", enabled: true, ui: { slots: [], commands: [], decorators: [] }, pages: [] }] as unknown as Extension[],
   runLens: async (): Promise<LensRun> =>
     ({
-      lens: { id: "acme/prs", title: "PRs (lens)", viz: "table", params: [], columns: [], actions: [], children: [] },
+      lens: { id: "acme/prs", title: "PRs (lens)", viz: "table", params: [], columns: [], actions: [], children: [], parts: [], origin: { extension: "acme", source: null, running: "", deployment: null, bundled: false } },
       params: {},
       result: { columns: ["n"], rows: [[1]], truncated: false, reads: { models: [], tables: [], measures: [] } },
       alert: null,

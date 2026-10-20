@@ -3,142 +3,181 @@ import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react
 
 import type { SqlCell, SqlQueryResult } from "../api.js";
 import type { LensParam } from "../tauri-bridge/generated/bindings.js";
-import { ParamControl } from "./ParamControls.js";
+import { ParamList, ParamRow } from "./ParamControls.js";
 
 afterEach(cleanup);
 
 function param(over: Partial<LensParam> & { name: string }): LensParam {
-  return { presets: [], ...over } as LensParam;
+  return { label: null, default: null, options: [], presets: [], role: "filter", ...over } as LensParam;
 }
 
-function setup(p: LensParam, value: SqlCell, extra: { compact?: boolean; query?: (sql: string) => Promise<SqlQueryResult> } = {}) {
+type Query = (sql: string) => Promise<SqlQueryResult>;
+
+function setup(p: LensParam, value: SqlCell, query?: Query) {
   const applied: [string, SqlCell][] = [];
-  const view = render(<ParamControl param={p} value={value} onApply={(n, v) => applied.push([n, v])} {...extra} />);
-  return { applied, view, el: view.getByTestId(`lens-param-${p.name}`) };
+  const view = render(<ParamRow param={p} value={value} onApply={(n, v) => applied.push([n, v])} query={query} />);
+  const valueButton = () => view.getByTestId(`lens-param-${p.name}-value`);
+  const edit = () => view.getByTestId(`lens-param-${p.name}-edit`);
+  return { applied, view, valueButton, edit };
 }
 
-test("text applies on Enter and on blur, and Escape reverts", () => {
-  const { applied, el } = setup(param({ name: "q", type: "text" }), "a");
-  const input = el as HTMLInputElement;
+// At rest a row is its label beside its value; nothing to edit is drawn.
+test("a row shows its label and its value, and Any when it has none", () => {
+  const { view, valueButton } = setup(param({ name: "author_name", type: "text" }), null);
+  expect(view.getByTestId("lens-param-author_name").textContent).toContain("Author name");
+  expect(valueButton().textContent).toBe("Any");
+  expect(view.queryByTestId("lens-param-author_name-edit")).toBeNull();
+});
+
+test("clicking the value edits text in place: Enter applies and closes, focus back on the value", () => {
+  const { applied, valueButton, edit, view } = setup(param({ name: "q", label: "Query", type: "text" }), "a");
+  fireEvent.click(valueButton());
+  const input = edit() as HTMLInputElement;
+  expect(document.activeElement).toBe(input);
   fireEvent.change(input, { target: { value: "42" } });
   fireEvent.keyDown(input, { key: "Enter" });
-  fireEvent.change(input, { target: { value: "zzz" } });
-  fireEvent.keyDown(input, { key: "Escape" });
-  // Escape goes back to what was last applied.
-  expect(input.value).toBe("42");
-  fireEvent.change(input, { target: { value: "b" } });
-  fireEvent.blur(input);
-  expect(applied).toEqual([["q", 42], ["q", "b"]]);
+  expect(applied).toEqual([["q", 42]]);
+  expect(view.queryByTestId("lens-param-q-edit")).toBeNull();
+  expect(valueButton().textContent).toBe("42");
+  expect(document.activeElement).toBe(valueButton());
 });
 
-test("choice is a select of its options", () => {
-  const { applied, el } = setup(param({ name: "mode", type: "choice", options: [{ value: "a", label: "A" }, { value: "b", label: "B" }] }), "a");
-  expect([...(el as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["A", "B"]);
-  fireEvent.change(el, { target: { value: "b" } });
+test("Escape closes an edit and keeps the value from before it opened", () => {
+  const { applied, valueButton, edit, view } = setup(param({ name: "q", type: "text" }), "a");
+  fireEvent.click(valueButton());
+  fireEvent.change(edit(), { target: { value: "zzz" } });
+  fireEvent.keyDown(edit(), { key: "Escape" });
+  expect(applied).toEqual([]);
+  expect(view.queryByTestId("lens-param-q-edit")).toBeNull();
+  expect(valueButton().textContent).toBe("a");
+});
+
+test("a choice shows its option's label and applies the one picked", () => {
+  const p = param({ name: "mode", type: "choice", default: "a", options: [{ value: "a", label: "Recent" }, { value: "b", label: "Most visited" }] });
+  const { applied, valueButton, edit, view } = setup(p, "a");
+  expect(valueButton().textContent).toBe("Recent");
+  fireEvent.click(valueButton());
+  expect([...(edit() as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["Recent", "Most visited"]);
+  fireEvent.change(edit(), { target: { value: "b" } });
   expect(applied).toEqual([["mode", "b"]]);
+  expect(view.queryByTestId("lens-param-mode-edit")).toBeNull();
+  expect(valueButton().textContent).toBe("Most visited");
 });
 
-test("a text param named like an id param draws a picker over what exists", async () => {
-  const query = async () => ({ columns: ["value", "label"], rows: [["t1", "First"], ["t2", "Second"]] }) as unknown as SqlQueryResult;
-  const { applied, el } = setup(param({ name: "thread_id", type: "text" }), "t2", { query });
-  await waitFor(() => expect([...(el as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["First", "Second"]));
-  fireEvent.change(el, { target: { value: "0" } });
+test("a text param named like an id param picks what exists, shown by its title", async () => {
+  const query: Query = async () => ({ columns: ["value", "label"], rows: [["t1", "First"], ["t2", "Second"]] }) as unknown as SqlQueryResult;
+  const { applied, valueButton, edit } = setup(param({ name: "thread_id", type: "text" }), "t2", query);
+  await waitFor(() => expect(valueButton().textContent).toBe("Second"));
+  fireEvent.click(valueButton());
+  fireEvent.change(edit(), { target: { value: "0" } });
   expect(applied).toEqual([["thread_id", "t1"]]);
 });
 
-test("bool is a checkbox: checked when truthy, applies true and false", () => {
-  const on = setup(param({ name: "all", type: "bool" }), 1);
-  expect((on.el as HTMLInputElement).checked).toBe(true);
-  fireEvent.click(on.el);
-  expect(on.applied).toEqual([["all", false]]);
-  cleanup();
-  const off = setup(param({ name: "all", type: "bool" }), 0);
-  expect((off.el as HTMLInputElement).checked).toBe(false);
-  fireEvent.click(off.el);
-  expect(off.applied).toEqual([["all", true]]);
-});
-
-test("search applies only after the pause, and once", async () => {
-  const { applied, el } = setup(param({ name: "q", type: "search" }), null);
-  fireEvent.change(el, { target: { value: "fo" } });
-  fireEvent.change(el, { target: { value: "foo" } });
-  expect(applied).toEqual([]);
-  await waitFor(() => expect(applied).toEqual([["q", "foo"]]), { timeout: 1000 });
-});
-
-test("search applies at once on Enter; Escape clears and applies null", async () => {
-  const { applied, el } = setup(param({ name: "q", type: "search" }), null);
-  fireEvent.change(el, { target: { value: "bar" } });
-  fireEvent.keyDown(el, { key: "Enter" });
-  expect(applied).toEqual([["q", "bar"]]);
-  fireEvent.keyDown(el, { key: "Escape" });
-  expect((el as HTMLInputElement).value).toBe("");
-  expect(applied).toEqual([["q", "bar"], ["q", null]]);
-  // The pause that follows adds nothing: both were applied already.
-  await act(() => new Promise((r) => setTimeout(r, 300)));
-  expect(applied.length).toBe(2);
-});
-
-test("branch lists local branches after All branches, which applies null", async () => {
-  let asked = "";
-  const query = async (sql: string) => {
-    asked = sql;
-    return { columns: ["name"], rows: [["main"], ["Bugfixes"]] } as unknown as SqlQueryResult;
-  };
-  const { applied, el } = setup(param({ name: "branch", type: "branch" }), "main", { query });
-  await waitFor(() => expect([...(el as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["All branches", "main", "Bugfixes"]));
-  expect(asked).toContain("v_branch");
-  fireEvent.change(el, { target: { value: "Bugfixes" } });
-  fireEvent.change(el, { target: { value: "" } });
-  expect(applied).toEqual([["branch", "Bugfixes"], ["branch", null]]);
-});
-
-test("date_range offers its presets, applying the key picked", () => {
-  const { applied, el } = setup(param({ name: "range", type: "date_range", presets: ["7d", "all"] }), "7d");
-  expect([...(el as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["Last 7 days", "All time", "Custom…"]);
-  fireEvent.change(el, { target: { value: "all" } });
-  expect(applied).toEqual([["range", "all"]]);
-});
-
-test("date_range defaults its presets", () => {
-  const { el } = setup(param({ name: "range", type: "date_range" }), "1d");
-  expect([...(el as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["Last day", "Last 7 days", "Last 30 days", "All time", "Custom…"]);
-});
-
-test("Custom… shows two dates and applies a..b, either side may be empty", () => {
-  const { applied, el, view } = setup(param({ name: "range", type: "date_range" }), "7d");
-  expect(view.queryByTestId("lens-param-range-from")).toBeNull();
-  fireEvent.change(el, { target: { value: "__custom__" } });
-  fireEvent.change(view.getByTestId("lens-param-range-from"), { target: { value: "2026-01-01" } });
-  expect(applied).toEqual([["range", "2026-01-01.."]]);
-});
-
-test("a range value a..b shows Custom… with its dates", () => {
-  const { applied, el, view } = setup(param({ name: "range", type: "date_range" }), "2026-01-01..2026-02-01");
-  expect((el as HTMLSelectElement).value).toBe("__custom__");
-  expect((view.getByTestId("lens-param-range-from") as HTMLInputElement).value).toBe("2026-01-01");
-  fireEvent.change(view.getByTestId("lens-param-range-to"), { target: { value: "2026-03-01" } });
-  expect(applied).toEqual([["range", "2026-01-01..2026-03-01"]]);
-});
-
-test("compact drops the label row and names the control", () => {
-  const { view, el } = setup(param({ name: "q", type: "text", label: "Find" }), null, { compact: true });
-  expect(el.getAttribute("aria-label")).toBe("Find");
-  expect(view.queryByText("Find")).toBeNull();
-});
-
-/** A control shows what it just applied at once, before the lens's run
- *  echoes it back, so a click or pick never seems to bounce. */
-test("a control shows the value it applied before the run echoes it", () => {
-  const view = render(<ParamControl param={param({ name: "on", type: "bool" })} value={0} onApply={() => {}} />);
-  const box = view.getByTestId("lens-param-on") as HTMLInputElement;
-  fireEvent.click(box);
+// A bool has nothing to open: its value is the checkbox.
+test("a bool is a checkbox in its row: checked when truthy, applies true and false", () => {
+  const on = setup(param({ name: "merges", label: "Merges only", type: "bool", default: false }), 1);
+  const box = on.edit() as HTMLInputElement;
   expect(box.checked).toBe(true);
+  expect(box.getAttribute("aria-label")).toBe("Merges only");
+  fireEvent.click(box);
+  expect(on.applied).toEqual([["merges", false]]);
   cleanup();
-  const pick = render(
-    <ParamControl param={param({ name: "m", type: "choice", options: [{ value: "a", label: "A" }, { value: "b", label: "B" }] })} value="a" onApply={() => {}} />,
-  );
-  const select = pick.getByTestId("lens-param-m") as HTMLSelectElement;
-  fireEvent.change(select, { target: { value: "b" } });
-  expect(select.value).toBe("b");
+  const off = setup(param({ name: "merges", type: "bool" }), 0);
+  fireEvent.click(off.edit());
+  expect(off.applied).toEqual([["merges", true]]);
+});
+
+test("a search applies as you type, after a pause, and once", async () => {
+  const { applied, valueButton, edit } = setup(param({ name: "q", type: "search" }), null);
+  fireEvent.click(valueButton());
+  fireEvent.change(edit(), { target: { value: "n" } });
+  fireEvent.change(edit(), { target: { value: "numbat" } });
+  expect(applied).toEqual([]);
+  await waitFor(() => expect(applied).toEqual([["q", "numbat"]]));
+});
+
+test("a search's Escape puts back the value it had when it opened", async () => {
+  const { applied, valueButton, edit, view } = setup(param({ name: "q", type: "search" }), "old");
+  fireEvent.click(valueButton());
+  fireEvent.change(edit(), { target: { value: "new" } });
+  fireEvent.keyDown(edit(), { key: "Enter" });
+  expect(applied).toEqual([["q", "new"]]);
+  // Enter closed it; open again, type, Escape: back to "new".
+  fireEvent.click(valueButton());
+  fireEvent.change(edit(), { target: { value: "newer" } });
+  fireEvent.keyDown(edit(), { key: "Escape" });
+  expect(view.queryByTestId("lens-param-q-edit")).toBeNull();
+  await act(async () => new Promise((r) => setTimeout(r, 300)));
+  expect(applied).toEqual([["q", "new"]]);
+});
+
+test("a branch shows All branches for none and lists the local branches", async () => {
+  const query: Query = async () => ({ columns: ["name"], rows: [["main"], ["topic"]] }) as unknown as SqlQueryResult;
+  const { applied, valueButton, edit } = setup(param({ name: "br", type: "branch" }), null, query);
+  expect(valueButton().textContent).toBe("All branches");
+  fireEvent.click(valueButton());
+  await waitFor(() => expect([...(edit() as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["All branches", "main", "topic"]));
+  fireEvent.change(edit(), { target: { value: "topic" } });
+  expect(applied).toEqual([["br", "topic"]]);
+});
+
+test("a date_range shows its preset's name and applies the preset picked", () => {
+  const p = param({ name: "range", label: "When", type: "date_range", default: "30d", presets: ["7d", "30d", "all"] });
+  const { applied, valueButton, edit } = setup(p, "30d");
+  expect(valueButton().textContent).toBe("Last 30 days");
+  fireEvent.click(valueButton());
+  expect([...(edit() as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["Last 7 days", "Last 30 days", "All time", "Custom…"]);
+  fireEvent.change(edit(), { target: { value: "7d" } });
+  expect(applied).toEqual([["range", "7d"]]);
+});
+
+// Two dates don't fit a 320px row: Custom… opens them over the page.
+test("Custom… opens a popover with two dates; Escape closes it with focus on the value", () => {
+  const p = param({ name: "range", label: "When", type: "date_range", default: "30d" });
+  const { applied, valueButton, edit, view } = setup(p, "30d");
+  fireEvent.click(valueButton());
+  fireEvent.change(edit(), { target: { value: "__custom__" } });
+  const pop = view.getByTestId("lens-param-range-custom");
+  expect(pop.getAttribute("role")).toBe("dialog");
+  fireEvent.change(view.getByTestId("lens-param-range-from"), { target: { value: "2026-10-01" } });
+  expect(applied).toEqual([["range", "2026-10-01.."]]);
+  fireEvent.keyDown(view.getByTestId("lens-param-range-from"), { key: "Escape" });
+  expect(view.queryByTestId("lens-param-range-custom")).toBeNull();
+  expect(view.queryByTestId("lens-param-range-edit")).toBeNull();
+  expect(document.activeElement).toBe(valueButton());
+});
+
+test("a custom range shows its two ends", () => {
+  const { valueButton } = setup(param({ name: "range", type: "date_range" }), "2026-10-01..2026-10-20");
+  expect(valueButton().textContent).toBe("2026-10-01 – 2026-10-20");
+});
+
+test("a row whose value isn't its default is marked changed", () => {
+  const p = param({ name: "range", type: "date_range", default: "30d" });
+  expect(setup(p, "30d").view.getByTestId("lens-param-range").className).not.toContain("ox-param-changed");
+  cleanup();
+  expect(setup(p, "7d").view.getByTestId("lens-param-range").className).toContain("ox-param-changed");
+  cleanup();
+  // A bool's echo is 0/1 against a default of false.
+  expect(setup(param({ name: "m", type: "bool", default: false }), 0).view.getByTestId("lens-param-m").className).not.toContain("ox-param-changed");
+});
+
+test("a row shows the value it applied before the run echoes it", () => {
+  const { valueButton, edit } = setup(param({ name: "q", type: "text" }), "a");
+  fireEvent.click(valueButton());
+  fireEvent.change(edit(), { target: { value: "b" } });
+  fireEvent.keyDown(edit(), { key: "Enter" });
+  expect(valueButton().textContent).toBe("b");
+});
+
+// Six rows at most; the rest wait behind More, unless one is set.
+test("a ParamList shows six rows, the rest behind More (N), and a changed one always", () => {
+  const params = Array.from({ length: 9 }, (_, i) => param({ name: `p${i}`, type: "text" }));
+  const view = render(<ParamList params={params} values={{ p8: "set" }} onApply={() => {}} />);
+  const shown = () => params.filter((p) => view.queryByTestId(`lens-param-${p.name}`) !== null).map((p) => p.name);
+  expect(shown()).toEqual(["p0", "p1", "p2", "p3", "p4", "p5", "p8"]);
+  const more = view.getByTestId("lens-params-more");
+  expect(more.textContent).toBe("More (2)");
+  fireEvent.click(more);
+  expect(shown()).toEqual(params.map((p) => p.name));
 });

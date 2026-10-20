@@ -115,7 +115,7 @@ test("a grouped table puts heading rows between its rows", () => {
     "In progress",
     "Ready",
   ]);
-  expect([...table.querySelectorAll("th")].map((th) => th.textContent)).toContain("title");
+  expect([...table.querySelectorAll("th")].map((th) => th.textContent)).toContain("Title");
   expect([...table.querySelectorAll("thead th")].map((th) => th.textContent)).not.toContain("bucket");
 });
 
@@ -230,4 +230,57 @@ test("a row click sets the param its column selects; a link in it doesn't", () =
   // With nowhere to set it, a row is no pick.
   const plain = render(<LensResultView run={run} onOpenPage={() => {}} />);
   expect(plain.getByTestId("lens-row-0").getAttribute("aria-selected")).toBeNull();
+});
+
+// The rail shows what was picked: the row as its columns label it.
+test("a pick passes the row it came from, labelled as its columns are", () => {
+  const rowsPicked: unknown[] = [];
+  const run = {
+    ...runOf({
+      viz: "table",
+      params: [{ name: "pick", label: null, default: null, options: [], type: "text", role: "selection", presets: [] }],
+      columns: [
+        { key: "title", label: null, link: null, unit: null, icon: null, tone: null, select: "pick" },
+        { key: "status", label: "State", link: null, unit: null, icon: null, tone: null },
+      ] as never,
+    }),
+  } as LensRun;
+  const view = render(<LensResultView run={run} onOpenPage={() => {}} onSetParam={(_n, _v, row) => rowsPicked.push(row)} />);
+  fireEvent.click(view.getByTestId("lens-row-1"));
+  expect(rowsPicked).toEqual([
+    {
+      value: "Child",
+      facts: [
+        { label: "Title", text: "Child" },
+        { label: "State", text: "done" },
+      ],
+    },
+  ]);
+});
+
+// A column with no label reads as words, not as its key.
+test("a column with no label is headed by its key in words", () => {
+  const view = render(<LensResultView run={runOf({ ...grouped, viz: "table" })} onOpenPage={() => {}} />);
+  expect([...view.getByTestId("lens-table").querySelectorAll("thead th")].map((th) => th.textContent)).toContain("Title");
+});
+
+// On a page, Copy, Add to Agent Context and the lens's actions are the
+// page's: handed up for its nav bar, not drawn above the body.
+test("toolbarTo hands the toolbar's actions to the page instead of drawing them", async () => {
+  let handed: { id: string; label: string }[] = [];
+  const view = render(
+    <LensResultView
+      run={runOf({ actions: [{ id: "sync", label: "Sync", command: "oxplow.x", input: {}, row: false, group: null }] as never })}
+      onOpenPage={() => {}}
+      toolbarTo={(actions) => (handed = actions.map((a) => ({ id: a.id, label: a.label })))}
+    />,
+  );
+  expect(view.queryByTestId("lens-actions")).toBeNull();
+  await waitFor(() =>
+    expect(handed).toEqual([
+      { id: "lens-copy", label: "Copy" },
+      { id: "lens-add-to-context", label: "Add to Agent Context" },
+      { id: "lens-action-sync", label: "Sync" },
+    ]),
+  );
 });

@@ -4,6 +4,7 @@
  * entries for loaded lenses. React-free so it's unit-tested directly.
  * See `.context/extensions.md`.
  */
+import { humanize } from "../kit/humanize.js";
 import {
   formatBytes,
   formatDateOnly,
@@ -77,7 +78,7 @@ export function displayColumns(lens: Lens, resultColumns: string[]): DisplayColu
   };
   if (lens.columns.length === 0) {
     return resultColumns.flatMap((key, index) =>
-      styling.includes(key) ? [] : [{ key, label: key, index, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null }],
+      styling.includes(key) ? [] : [{ key, label: humanize(key), index, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null }],
     );
   }
   const out: DisplayColumn[] = [];
@@ -86,7 +87,7 @@ export function displayColumns(lens: Lens, resultColumns: string[]): DisplayColu
     if (index === -1 || styling.includes(c.key)) continue;
     out.push({
       key: c.key,
-      label: c.label ?? c.key,
+      label: c.label ?? humanize(c.key),
       index,
       link: c.link ?? null,
       unitIndex: at(c.unit),

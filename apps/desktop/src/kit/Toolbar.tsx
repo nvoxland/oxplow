@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes, ReactNode } from "react";
+import type { InputHTMLAttributes } from "react";
 
 import { ActionButtons } from "./ActionButtons.js";
 import type { PageAction } from "./actions.js";
@@ -14,22 +14,19 @@ export interface ToolbarFilter {
   inputProps?: InputHTMLAttributes<HTMLInputElement>;
 }
 
-/** The row above a list: its controls (a lens's toolbar params), its
- *  filter, then its actions. */
+/** The row above a core list: its filter, then its actions. A lens page
+ *  has none; its controls are in its rail. */
 export function Toolbar({
-  controls,
   filter,
   actions,
   testId,
 }: {
-  controls?: ReactNode;
   filter?: ToolbarFilter;
   actions?: readonly PageAction[];
   testId?: string;
 }) {
   return (
     <div className="ox-toolbar" data-testid={testId}>
-      {controls}
       {filter ? (
         <input
           type="text"

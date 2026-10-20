@@ -30,10 +30,10 @@ const lens = (over: Partial<Lens> = {}): Lens => ({
 });
 
 describe("displayColumns", () => {
-  test("without declared columns shows every result column by name", () => {
+  test("without declared columns shows every result column, its key in words", () => {
     expect(displayColumns(lens(), ["ref", "title"])).toEqual([
-      { key: "ref", label: "ref", index: 0, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null },
-      { key: "title", label: "title", index: 1, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null },
+      { key: "ref", label: "Ref", index: 0, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null },
+      { key: "title", label: "Title", index: 1, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null },
     ]);
   });
 
@@ -47,7 +47,7 @@ describe("displayColumns", () => {
     });
     expect(displayColumns(l, ["id", "title", "u"])).toEqual([
       { key: "title", label: "Task", index: 1, link: { kind: "page", from: "id", line: null, base: null, head: null }, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null },
-      { key: "id", label: "id", index: 0, link: null, unitIndex: 2, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null },
+      { key: "id", label: "Id", index: 0, link: null, unitIndex: 2, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null },
     ]);
   });
 
@@ -61,7 +61,7 @@ describe("displayColumns", () => {
       columns: [{ key: "title", label: null, link: null, unit: null, icon: "glyph", tone: "hue" }, { key: "bucket", label: null, link: null, unit: null }],
     });
     expect(displayColumns(styled, ["title", "bucket", "glyph", "hue"])).toEqual([
-      { key: "title", label: "title", index: 0, link: null, unitIndex: null, iconIndex: 2, toneIndex: 3, width: null, format: null, highlight: null },
+      { key: "title", label: "Title", index: 0, link: null, unitIndex: null, iconIndex: 2, toneIndex: 3, width: null, format: null, highlight: null },
     ]);
     const auto = lens({ group: { by: "bucket", link: null }, emphasis: "on", depth: "d" });
     expect(displayColumns(auto, ["title", "bucket", "on", "d"]).map((c) => c.key)).toEqual(["title"]);

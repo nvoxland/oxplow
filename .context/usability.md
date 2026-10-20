@@ -539,7 +539,8 @@ mounts the kit's, so a page moving to a lens (`viz: approvals`, params
 - **The page places the controls; they are not pinned above the sections
   (tsk86).** `SectionCollapseControls` reads state off context, so it can render
   anywhere under the provider. Recorded Metrics puts it in the **details rail**
-  beside the filters — the rail is the page's control panel. It **self-hides**
+  beside the filters — the rail is the page's control panel (a lens page's
+  too: "A page's controls are in its rail"). It **self-hides**
   when no sections are registered (loading / empty), rather than showing two dead
   buttons.
 - **The provider renders `children` bare — no wrapper element — on purpose.** It
@@ -1040,17 +1041,49 @@ no caller may bypass the bus to write to the terminal.
   isn't the same as opening the target; the recents list shouldn't
   reorder just because the user told the agent to look at something.
 
-## Lens params are drawn once
+## A page's controls are in its rail
 
-A lens param is drawn by the kit's `ParamControl` (`src/kit/ParamControls.tsx`),
-one control per param type: text (Enter or blur applies, Escape reverts), choice,
-bool, search (applies after a 250 ms pause and at once on Enter; Escape clears),
-branch and date_range (presets from `kit/rangePresets.ts`, plus Custom… with two
-dates). `compact` is the toolbar look. A page never draws its own param input.
-A control shows the value it applied at once; it never waits for the run.
+A lens page has **one place for its controls: its rail** (`LensRail`). It
+has no toolbar, and where a control goes is not the author's to say. The
+rail stacks its groups in a fixed order, so nothing moves as values
+change: **Filters** (its filter params), **Selection** (what a row click
+picked) and **About this page** (its extension and the source file to
+edit, and a line when the source changed since its deploy). Page-level
+actions — Refresh, Copy, Add to Agent Context, the lens's whole-lens
+actions, Improve with Agent — are in the nav bar, never in the rail or
+above the body (`LensResultView`'s `toolbarTo` hands them up).
 
+A param is a **row**, drawn by the kit's `ParamRow`
+(`src/kit/ParamControls.tsx`): its label beside its value. At rest the
+value is a button ("Any" when it has none; a dot before the label when it
+isn't the default). Clicking it, or Enter/Space on it, edits:
+- **in place**, the control takes the value's place: text (Enter or blur
+  applies), search (applies after a 250 ms pause, at once on Enter),
+  choice, branch, the id pickers, a date_range's presets. A select applies
+  what is picked and closes. **Escape closes and keeps the value from
+  before the edit** (a search puts it back). Focus returns to the value.
+- **in a popover** (`kit/Popover.tsx`) when the control doesn't fit a
+  320 px row: a date_range's Custom… opens its two dates over the page,
+  beside the row. Escape or a click outside closes it; focus returns.
+- A **bool** has no edit state: its value is the checkbox.
+
+`ParamList` shows six rows in declared order; the rest wait behind
+"More (N)", except a row that is set, which always shows (an active
+filter is never hidden). Filters has **Reset** when one is changed. A
+page never draws its own param input. A row shows the value it applied
+at once; it never waits for the run.
+
+A param a column `select`s is the page's **selection**, never an input.
 A lens row whose column `select`s a param is a pick: it reads as
 clickable (`ox-clickable`), a click or Enter sets the param, and the row
-holding its value is drawn selected (`ox-selected`, `aria-selected`). A
-link or control inside the row keeps its own click (it navigates; it
-doesn't pick), and the row's menu stays on right-click and the Menu key.
+holding its value is drawn selected (`ox-selected`, `aria-selected`). The
+rail's Selection shows the picked row as its facts, labelled as its
+columns are, with Clear; with the value but not the row (a reopened page)
+it shows the value; with none, "Click a row to select it." A link or
+control inside the row keeps its own click (it navigates; it doesn't
+pick), and the row's menu stays on right-click and the Menu key.
+
+A column or param with no `label` is headed by its key in words
+(`kit/humanize.ts`: `committed_at` → "Committed at"). The page-layout
+rules extension authors follow are in the `oxplow-extension` skill
+(`references/page-layout.md`); the loader warns when a page breaks them.

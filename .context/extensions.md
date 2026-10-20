@@ -576,13 +576,16 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `list`, `number` (through `formatMetricValue`) and `markdown`.
     Linked cells go through `RouteLink`, so plain-click navigates in the
     tab.
-  - Params draw by their type through the kit's `ParamControl`
-    (usability.md "Lens params are drawn once"), every one in the right
-    rail (`ParamsForm`; no rail when there are none): a page has one
-    place for its controls, and where is not the author's to say. A
-    control shows what it applied at once, before the run echoes it. A row click on a column that `select`s a param
-    sets it the same way (`onSetParam`, through a document's or
-    dashboard's parts when the page holds the param). Param values are
+  - The rail is the page's one place for controls (`LensRail`,
+    usability.md "A page's controls are in its rail"): its filter params
+    as `ParamRow`s (label beside value, click to edit in place or in a
+    popover), its selection params as the picked row, and About this
+    page (`origin`). A row shows what it applied at once, before the run
+    echoes it. A row click on a column that `select`s a param sets it
+    (`onSetParam` with the row, through a document's or dashboard's
+    parts when the page holds the param). Copy, Add to Agent Context
+    and the whole-lens actions are handed to the nav bar
+    (`toolbarTo`). Param values are
     the page's state; they aren't written back into the tab id yet.
     A tab id may carry starting values (`lens:<ext>/<slug>?effort_id=12`).
   - A run failure shows the error inline, with a nudge to use "Improve

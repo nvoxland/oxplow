@@ -1,3 +1,4 @@
+import type { PickedRow } from "./LensRail.js";
 import type { ReactNode } from "react";
 
 import type { LensRun, SqlCell } from "../api.js";
@@ -24,7 +25,7 @@ interface PartsVizProps {
   streamId: string | null;
   onOpenPage?(ref: TabRef): void;
   /** Set one of the page's params, from a part's row click. */
-  onSetParam?(name: string, value: SqlCell): void;
+  onSetParam?(name: string, value: SqlCell, row?: PickedRow): void;
 }
 
 /** The lens parts of `parts`, run. */
@@ -64,7 +65,7 @@ function PartBody({
   streamId: string | null;
   onOpenPage?(ref: TabRef): void;
   params: Record<string, SqlCell>;
-  onSetParam?(name: string, value: SqlCell): void;
+  onSetParam?(name: string, value: SqlCell, row?: PickedRow): void;
 }): ReactNode {
   if (part.markdown !== null) return <MarkdownView body={part.markdown} />;
   if (!run) return <Loading what={part.title ?? "this part"} />;

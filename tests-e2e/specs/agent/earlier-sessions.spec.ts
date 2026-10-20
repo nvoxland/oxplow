@@ -56,7 +56,7 @@ test("a closed session found by search opens its transcript, which can reopen it
   // Its transcript (it has no turns yet, so nothing is listed), not a tab
   // that isn't there; Reopen brings the session back.
   await expect(page.getByTestId(`center-tab-agent_session:${id}`)).toHaveCount(0);
-  await page.getByTestId("lens-action-reopen").click();
+  await page.getByTestId("action-lens-action-reopen").click();
   await expect(page.getByTestId(`center-tab-agent_session:${id}`)).toBeVisible();
 });
 

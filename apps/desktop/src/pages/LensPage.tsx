@@ -3,7 +3,7 @@ import { Page } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Stream } from "../tauri-bridge/index.js";
-import { runLens, type LensRun, type SqlCell } from "../api.js";
+import { querySql, runLens, type LensRun, type SqlCell } from "../api.js";
 import { lensRef } from "../tabs/pageRefs.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
@@ -12,7 +12,7 @@ import { changedParams } from "../lens/lensModel.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { useRequestGuard } from "../request-guard.js";
 import { LensResultView } from "../lens/LensResultView.js";
-import { ParamControl } from "../kit/ParamControls.js";
+import { LensRail, type PickedRow } from "../lens/LensRail.js";
 import type { PageAction } from "../kit/actions.js";
 
 export interface LensPageProps {
@@ -31,8 +31,10 @@ export interface LensPageProps {
 /**
  * A lens: a user/agent-built query over the semantic layer, read from
  * `.oxplow/extensions/<ext>/lenses/<slug>.yaml` in this stream's worktree.
- * Re-runs when oxplow data changes, so it stays live. Params are edited
- * in the right rail (Enter applies). See `.context/extensions.md`.
+ * Re-runs when oxplow data changes, so it stays live. Its rail is the one
+ * place for its controls (`LensRail`): its filters, what a row click
+ * picked, and where it comes from; Copy, Add to Agent Context and its
+ * own actions are the page's, in the nav bar. See `.context/extensions.md`.
  */
 export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOpenPage }: LensPageProps) {
   const streamId = stream?.id ?? null;
@@ -87,8 +89,11 @@ export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOp
     insertIntoAgent(formatContextMention({ kind: "lens", lensId, params }));
   };
 
+  // The lens's own toolbar, handed up by its view for the nav bar.
+  const [lensActions, setLensActions] = useState<PageAction[]>([]);
   const actions: PageAction[] = [
     { id: "lens-refresh", label: "Refresh", run: () => void refresh() },
+    ...lensActions,
     {
       id: "lens-improve-with-agent",
       label: "Improve with Agent",
@@ -97,10 +102,20 @@ export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOp
     },
   ];
 
-  // A param set from the rail or by a row click (a column's `select`).
-  const setParam = (name: string, value: SqlCell) => setOverrides((o) => ({ ...o, [name]: value }));
-  const rightRail =
-    lens && lens.params.length > 0 ? <ParamsForm lens={lens} values={run?.params ?? {}} onApply={setParam} /> : undefined;
+  // A param set from the rail or by a row click (a column's `select`,
+  // with the row it picked for the rail's Selection).
+  const [picked, setPicked] = useState<Record<string, PickedRow>>({});
+  const setParam = (name: string, value: SqlCell, row?: PickedRow) => {
+    setOverrides((o) => ({ ...o, [name]: value }));
+    setPicked((p) => {
+      const { [name]: _, ...rest } = p;
+      return row ? { ...rest, [name]: row } : rest;
+    });
+  };
+  const outOfDate = useOutOfDate(lens?.origin.extension ?? null, lens?.origin.deployment ?? null);
+  const rightRail = lens ? (
+    <LensRail lens={lens} values={run?.params ?? {}} picked={picked} outOfDate={outOfDate} onApply={setParam} onOpenPage={onOpenPage} />
+  ) : undefined;
 
   return (
     <Page
@@ -112,7 +127,6 @@ export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOp
       actions={actions}
       pin={{ tile: { kind: "lens", lensId, optionsJson: JSON.stringify({ size: "wide" }) }, onOpenPage }}
       rightRail={rightRail}
-      rightRailTitle="Parameters"
     >
       <div style={lens?.viz === "dashboard" ? { padding: "var(--space-5)" } : undefined}>
       <h1 className="ox-title">{title}</h1>
@@ -127,29 +141,32 @@ export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOp
           </div>
         </div>
       ) : null}
-      {run ? <LensResultView run={run} onOpenPage={onOpenPage} onSetParam={setParam} /> : error ? null : <p>Loading…</p>}
+      {run ? <LensResultView run={run} onOpenPage={onOpenPage} onSetParam={setParam} toolbarTo={setLensActions} /> : error ? null : <p>Loading…</p>}
       </div>
     </Page>
   );
 }
 
-/** The lens's params, one kit control each, in the rail; nothing when it
- *  has none. */
-export function ParamsForm({ lens, values, onApply }: ParamsProps) {
-  if (lens.params.length === 0) return null;
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {lens.params.map((p) => (
-        <ParamControl key={p.name} param={p} value={values[p.name] ?? null} onApply={onApply} />
-      ))}
-    </div>
-  );
-}
-
-interface ParamsProps {
-  lens: LensRun["lens"];
-  values: Record<string, SqlCell>;
-  onApply(name: string, value: SqlCell): void;
+/** Whether an extension's source changed after the deployment that runs:
+ *  its live source hash against the deployed one. False with no
+ *  deployment, or when it can't be read. */
+function useOutOfDate(extension: string | null, deployment: string | null): boolean {
+  const [out, setOut] = useState(false);
+  useEffect(() => {
+    setOut(false);
+    if (!extension || !deployment) return;
+    let live = true;
+    querySql("SELECT hash FROM v_extension_source WHERE name = ?1", [extension])
+      .then((r) => {
+        const hash = r.rows[0]?.[0];
+        if (live) setOut(typeof hash === "string" && hash !== deployment);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [extension, deployment]);
+  return out;
 }
 
 const errorStyle: CSSProperties = {

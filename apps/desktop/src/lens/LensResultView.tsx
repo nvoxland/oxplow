@@ -1,5 +1,7 @@
 import { Approvals } from "../kit/Approvals.js";
-import { Fragment, useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import type { PageAction } from "../kit/actions.js";
+import type { PickedRow } from "./LensRail.js";
+import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { commandOpenAfter, lensActionForm, lensForm, lensText, runLensAction, submitLensForm, type LensRun, type SqlCell } from "../api.js";
 import { Slideover } from "../components/Slideover.js";
 import type { CommandOutcome, FormStart } from "../tauri-bridge/generated/bindings.js";
@@ -92,12 +94,14 @@ export function LensResultView(props: LensResultViewProps) {
   const form = actions.form ? (
     <ActionForm run={run} streamId={streamId} pressed={actions.form} onClose={actions.closeForm} />
   ) : null;
-  // Compact strips (a number inline) have no room for buttons.
-  if (compact || !toolbar) {
+  // Compact strips (a number inline) have no room for buttons; a page
+  // that takes them draws them in its nav bar.
+  if (compact || !toolbar || props.toolbarTo) {
     return (
       <>
         {confirm}
         {form}
+        {props.toolbarTo && !compact ? <HandToolbar run={run} streamId={streamId} actions={actions} to={props.toolbarTo} /> : null}
         <LensBody {...props} actions={actions} />
       </>
     );
@@ -130,8 +134,12 @@ interface LensResultViewProps {
   /** For a `viz: custom` lens: its component said `ready`. */
   onCustomReady?(): void;
   /** Set one of the lens's params (a row click on a column that
-   *  `select`s it); without it, rows are no picks. */
-  onSetParam?(name: string, value: SqlCell): void;
+   *  `select`s it, with the row it picked); without it, rows are no
+   *  picks. */
+  onSetParam?(name: string, value: SqlCell, row?: PickedRow): void;
+  /** Hand Copy, Add to Agent Context and the whole-lens actions to the
+   *  page (its nav bar) instead of drawing them above the body. */
+  toolbarTo?(actions: PageAction[]): void;
 }
 
 /** Where a command's `ui.open_after` page opens from a lens: in the page
@@ -188,6 +196,49 @@ function useLensActions(run: LensRun, streamId: string | null) {
 }
 
 type LensActionsState = ReturnType<typeof useLensActions>;
+
+/** The toolbar's actions as the page's: Copy, Add to Agent Context and
+ *  the whole-lens actions, handed up whenever what they say changes. */
+function HandToolbar({ run, streamId, actions, to }: { run: LensRun; streamId: string | null; actions: LensActionsState; to(actions: PageAction[]): void }) {
+  const [copied, setCopied] = useState(false);
+  const buttons = run.lens.actions.filter((a) => !a.row && !a.group);
+  const toRef = useRef(to);
+  toRef.current = to;
+  const pressRef = useRef(actions.run);
+  pressRef.current = actions.run;
+  useEffect(() => {
+    toRef.current([
+      {
+        id: "lens-copy",
+        label: copied ? "Copied" : "Copy",
+        title: "Copy what the lens shows, as text",
+        run: () =>
+          void copyLens(run, streamId, {
+            lensText,
+            copyText: (t) => navigator.clipboard.writeText(t),
+            recordError: (label, message) => recordOpError({ label, message }),
+          }).then((ok) => {
+            if (ok) {
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1500);
+            }
+          }),
+      },
+      { id: "lens-add-to-context", label: "Add to Agent Context", run: () => addLensToContext(run, insertIntoAgent) },
+      ...buttons.map((a) => ({
+        id: `lens-action-${a.id}`,
+        label: a.label,
+        title: a.command,
+        busy: actions.busy === a.id,
+        disabled: actions.busy !== null && actions.busy !== a.id,
+        run: () => pressRef.current(a, null),
+      })),
+    ]);
+    // `buttons` follows `run`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run, streamId, copied, actions.busy]);
+  return null;
+}
 
 /** Copy, Add to Agent Context, and the lens's whole-lens actions (a row's
  *  are in its menu, a group's in its heading). */
@@ -440,14 +491,18 @@ interface RowLookOut {
 
 /** The param a lens's rows set when clicked (its column's `select`), if
  *  it has one and there's somewhere to set it. */
-function rowPicks(run: LensRun, onSetParam: ((name: string, value: SqlCell) => void) | undefined) {
+function rowPicks(run: LensRun, onSetParam: LensResultViewProps["onSetParam"]) {
   const column = run.lens.columns.find((c) => c.select);
   const index = column ? run.result.columns.indexOf(column.key) : -1;
   if (!onSetParam || !column?.select || index === -1) return null;
   const name = column.select;
   const current = run.params[name] ?? null;
+  const cols = displayColumns(run.lens, run.result.columns);
+  // The row as the page's rail shows it: each column's label and text.
+  const facts = (row: SqlCell[]) =>
+    cols.map((c) => ({ label: c.label, text: formatCell(row[c.index] ?? null, c.unitIndex === null ? undefined : (row[c.unitIndex] ?? null), c.format) }));
   return {
-    pick: (row: SqlCell[]) => onSetParam(name, row[index] ?? null),
+    pick: (row: SqlCell[]) => onSetParam(name, row[index] ?? null, { value: row[index] ?? null, facts: facts(row) }),
     selected: (row: SqlCell[]) => current !== null && String(row[index] ?? "") === String(current),
   };
 }

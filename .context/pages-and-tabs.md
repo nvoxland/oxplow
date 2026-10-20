@@ -350,8 +350,8 @@ the extension that added it), `DocumentLayout` (its own sections plus what
 extensions mount in its parts slot, placed by `placeParts`; a contents list
 in the rail from four sections), `DataTable` (fixed `<col>` widths,
 `numeric` and `truncate` columns, groups, per-row props — the lens `table`
-viz draws through it), `Toolbar` (controls — a lens's toolbar params —
-a filter and actions) with `useListNav`
+viz draws through it), `Toolbar` (a core list's filter and actions; a
+lens page has none) with `useListNav`
 (the one ↑/↓/Enter/Escape contract, usability.md "Keyboard"; a list that
 holds focus itself spreads its `keyProps`), `Stat` (a figure; `big` when
 it is its place's whole — the lens `number` viz), `Facts` (labels beside
@@ -388,7 +388,10 @@ the body region differs.
   reading area.
 - **The rail** is the page's control panel (params, filters, collapse
   controls, a contents list): a `320px` sticky column beside a body of
-  **either** width (the body is padded then), titled by `rightRailTitle`.
+  **either** width (the body is padded then), titled by `rightRailTitle`
+  ("Details" by default). A lens page's rail is `LensRail` — Filters,
+  Selection, About this page, built from `RailGroup` and `ParamList`
+  (usability.md "A page's controls are in its rail").
   It is orthogonal to the archetype — a dashboard may have one for its
   filters, Git History has one only while an extension mounts something
   in `vcs.history.sidebar`.
