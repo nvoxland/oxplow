@@ -16,7 +16,7 @@ import type { FrameAction, PageInit } from "../lens/componentBridge.js";
 import { FormSlideover, useFormSubmit } from "../lens/LensResultView.js";
 import { Page } from "../tabs/Page.js";
 import { useOptionalPageNavigation, usePageTitle } from "../tabs/PageNavigationContext.js";
-import { extPageRef, pageTabRef, type PagePayload } from "../tabs/pageRefs.js";
+import type { PagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { remoteBaseUrl } from "../tauri-bridge/transport.js";
 import type { ExtensionPage, FormStart, Stream } from "../tauri-bridge/generated/bindings.js";
@@ -89,14 +89,12 @@ export function CustomPageView({
       setTitle: setFrameTitle,
       setActions: setFrameActions,
       setParams: (changes: Record<string, string | null>) => {
-        const at = pageRef.current;
-        const next: Record<string, string> = { ...at.params };
+        const next: Record<string, string> = { ...pageRef.current.params };
         for (const [k, v] of Object.entries(changes)) {
           if (v === null) delete next[k];
           else next[k] = v;
         }
-        const ref = at.extension === null ? pageTabRef(at.page, next, at.state) : extPageRef(at.extension, at.page, next);
-        navRef.current?.replaceRef?.(ref);
+        navRef.current?.setViewParams?.(next);
       },
       openForm: (command: string, input: unknown, version: string) =>
         new Promise<{ result: unknown } | null>((resolve, reject) => {

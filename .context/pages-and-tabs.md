@@ -92,7 +92,7 @@ pages are THE shell.
 | `apps/desktop/src/components/Analytics/DailyBarChart.tsx` | Generic daily bar chart (`{ label, value }[]`); renders `bar` lenses. |
 | `apps/desktop/src/pages/StreamSettingsPage.tsx` | Per-stream settings page (custom prompt). Replaces the in-rail StreamRail settings modal. Routed via `streamSettingsRef(streamId)`. |
 | `apps/desktop/src/pages/ThreadSettingsPage.tsx` | Per-thread settings page (custom prompt). Replaces the in-rail ThreadRail settings modal. Routed via `threadSettingsRef(threadId)`. |
-| `apps/desktop/src/components/CollapsibleSections.tsx` | Collapsible page sections (tsk84, tsk86). Two parts plus a hook: `CollapsibleSections` (state provider), `SectionCollapseControls` (the "Expand all" / "Collapse all" pair), and `useSectionCollapse`, which the kit `Section` (`collapsible`, `defaultCollapsed`; the toggle is a button inside the `<h2>`) reads. Sections register themselves on mount so the controls know what "all" means — only what's **currently rendered** counts, so a filtered-out section is never silently expanded — and the controls self-hide when nothing is registered. **The page places the controls**: Recorded Metrics renders them in the **details rail** beside its filters, which works because the provider wraps the whole `<Page>` and `rightRail` is *rendered* inside Page's subtree (context follows the render tree, not the creation site). For that to be safe the provider renders `children` **bare** — a wrapper element there would break the page chrome's `height: 100%` column. Collapsed ids are the tab entry's state (`useEntryState`); default is expanded, and stored ids are deliberately **not** reconciled against the rendered set (a section hidden by a page's search must return still collapsed). Pure state/persistence in the sibling `sectionCollapse.ts`. **Not a `Page` prop** — see `.context/usability.md` → "Collapsible page sections". Adopters: `MetricsPage`. |
+| `apps/desktop/src/components/CollapsibleSections.tsx` | Collapsible page sections (tsk84, tsk86). Two parts plus a hook: `CollapsibleSections` (state provider), `SectionCollapseControls` (the "Expand all" / "Collapse all" pair), and `useSectionCollapse`, which the kit `Section` (`collapsible`, `defaultCollapsed`; the toggle is a button inside the `<h2>`) reads. Sections register themselves on mount so the controls know what "all" means — only what's **currently rendered** counts, so a filtered-out section is never silently expanded — and the controls self-hide when nothing is registered. **The page places the controls**: Recorded Metrics renders them in the **details rail** beside its filters, which works because the provider wraps the whole `<Page>` and `rightRail` is *rendered* inside Page's subtree (context follows the render tree, not the creation site). For that to be safe the provider renders `children` **bare** — a wrapper element there would break the page chrome's `height: 100%` column. Collapsed ids are the tab entry's state (`useHistoryState`); default is expanded, and stored ids are deliberately **not** reconciled against the rendered set (a section hidden by a page's search must return still collapsed). Pure state/persistence in the sibling `sectionCollapse.ts`. **Not a `Page` prop** — see `.context/usability.md` → "Collapsible page sections". Adopters: `MetricsPage`. |
 | `apps/desktop/src/components/Slideover.tsx` | Right-edge panel primitive (~38vw, backdrop-click + Escape close, focus-into-panel on open) for form-shaped flows that don't justify a full page. Use instead of a centered modal. |
 
 ## Page kinds
@@ -629,9 +629,9 @@ the bodies, Back/Forward, Up/Down, the star, Ask, what agents read.
 |---|---|
 | a tab's session history | `Tab { slot, entries, at, pinned? }` — `slot` a stable name (`t3`), never an id |
 | URL = path + query | an entry's `ref`: identity (kind + id) and view (its payload's `params`; `kind:id?k=v` as a string) |
-| `history.state` | `Entry.state` (persisted when it is JSON) |
+| `history.state` | `Entry.historyState` (persisted when it is JSON) |
 | the page you came from a list of | `Entry.from: Origin { title, items: [{ ref, label }], index }` |
-| pushState / replaceState | `navigate(slot, entry, { replace })`, `replaceRef(slot, ref, { push })` |
+| pushState / replaceState | `navigate(slot, entry, { replace })`, `setView(slot, ref, { push })` |
 | back-forward cache | `bodies(tab, live)`: hidden bodies stay mounted |
 | a SPA re-rendering on popstate | a **live** page (a lens; an extension page drawn by a lens or a component) has **one body per identity**, keyed `slot/identity`, so entries that differ only in params re-render it — no remount, no Loading |
 
@@ -639,7 +639,7 @@ the bodies, Back/Forward, Up/Down, the star, Ask, what agents read.
 showing the page — its ref refreshed, as a re-clicked diff's line to
 reveal — else a new tab; active), `navigate` (push; clears forward;
 `replace` takes the current entry's place; a page shown in another tab
-closes there), `replaceRef` (a page changes its own view), `setState`,
+closes there), `setView` (a page changes its own view), `setHistoryState`, `patchHistoryState`,
 `back`, `forward`, `stepOrigin` (Up/Down in place, history untouched),
 `close` (the most recent other tab becomes active, as a browser does),
 `dropCurrent` (the page's record was deleted: back, dropping the entry,
@@ -648,12 +648,21 @@ reconcile, a new thread's tabs, an agent's `oxplow.tab.*` in another
 thread), `reorder`, `activate`, `evictions` (`MAX_PAGE_TABS` = 15;
 never the active, a pinned or a dirty file's tab).
 
-**A page changes its own view through `PageNavigation.replaceRef`.**
+**A page changes its view params through `PageNavigation.setViewParams(params, { push })`**
+(the whole set, defaults left out; the host writes them into the page's
+own kind of ref, `withViewParams`, and reads them back as
+`PageNavigation.viewParams`, `viewParamsOf`).
 A filter replaces the entry (typing a search adds nothing to Back); a
 selection — a param a column `select`s — pushes one, so Back un-selects
 and Forward re-selects. Core decides by the param's role; no page
 chooses. Only the body drawing the tab's current entry gets
-`replaceRef`. `PageNavigation.ref` is the entry's ref the body draws.
+`setViewParams`. `PageNavigation.ref` is the entry's ref the body draws.
+
+**Names say the scope**, the same in core, `PageNavigation`, the
+component bridge, the docs and the skill: **view params** (this tab's
+address), **history state** (this step of this tab's history), **page
+memory** (this page, for this person, every tab) and **app preference**
+(the whole app, for this person).
 
 **Origins.** A list passes an `origin: Origin` (`{ title?, items:
 [{ ref, label }], index }`) to `useRouteDispatch` / `navigate`; the host
@@ -838,13 +847,13 @@ constructor with its `refFromTabId` inverse, and its `pageRenderers`
 entry. **Don't** add a parallel tab track or keep tab state outside the
 session.
 
-**Per-page memory is `Entry.state`, through `useEntryState(key, initial)`**
-(`tabs/useEntryState.ts`): one JSON value under `key` in the entry's state
-object, as a browser's `history.state`. It comes back with Back and
-Forward and across a restart, each entry its own. The host gives the body
-`PageNavigation.state` and, to the tab's current page only,
-`setEntryState(patch)` (`patchState` in the model, which ignores a write
-that changes nothing). Outside a tab it is local state. Used by the editor
+**History state is `Entry.historyState`, through `useHistoryState(key, initial)`**
+(`tabs/useHistoryState.ts`): one JSON value under `key` in the entry's
+history state, as a browser's `history.state`. It comes back with Back
+and Forward and across a restart, each entry its own. The host gives the
+body `PageNavigation.historyState` and, to the tab's current page only,
+`setHistoryState(patch)` (`patchHistoryState` in the model, which ignores
+a write that changes nothing). Outside a tab it is local state. Used by the editor
 (Monaco's view state), a wiki page (scroll), the collapsed sections
 (`CollapsibleSections`) and a lens's "More" params. Keep values JSON: one
 value that isn't drops the entry's whole state from storage.
@@ -884,7 +893,7 @@ A new **entity** kind (a thing in the graph whose tab id is its ref):
 
 Do **not** introduce a parallel state slot for the new kind's tabs
 (no `fooTabs` array, no look-aside registry): what a page needs rides
-in its ref (its payload) or its entry's `state`, and its tab is a
+in its ref (its payload) or its entry's `historyState`, and its tab is a
 session tab (`tabs/session.ts`).
 
 ## When to update this doc

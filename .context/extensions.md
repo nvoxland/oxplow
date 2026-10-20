@@ -588,7 +588,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     (`toolbarTo`). **A lens page is a function of its tab entry**
     (`tabs/session.ts`): its params are its ref's
     (`lens:<ext>/<slug>?k=v`, a declared page's `page:…?k=v`), and a
-    change goes back through `PageNavigation.replaceRef` with the values
+    change goes back through `PageNavigation.setViewParams` with the values
     that differ from the defaults (`changedParams`, by type) — a filter
     replaces the entry, a selection pushes one. So a reopened tab, a
     restart, a bookmark and Back show the same filters and the same
@@ -2599,8 +2599,8 @@ title and its nav-bar actions, data core draws; a press posts
 `{ type: action, id }` to the frame). `openForm`, `setTitle` and
 `setActions` are a custom page's, and — protocol 6 — `{ id, method:
 setParams, params }` (string values, null drops one): the page's view
-goes into its tab entry (`CustomPageView` builds the page's ref and
-`replaceRef`s it — a component has no selection role, so it never
+goes into its tab entry (`CustomPageView` passes them to
+`setViewParams` — a component has no selection role, so it never
 pushes; going somewhere is `navigate`), and the host posts `{ type:
 params, params }` when the entry's params change (Back, Forward, the
 echo of its own `setParams`; `createBridgeHost` sends only what the

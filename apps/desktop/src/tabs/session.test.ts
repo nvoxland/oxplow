@@ -17,11 +17,11 @@ import {
   dropCurrent,
   refsOf,
   reorder,
-  replaceRef,
+  setView,
   setStrip,
   serializeSession,
-  patchState,
-  setState,
+  patchHistoryState,
+  setHistoryState,
   stepOrigin,
   type Entry,
   type Origin,
@@ -54,10 +54,10 @@ describe("open", () => {
   test("opening a page that is showing refreshes its ref, keeping its state (a diff's line to reveal)", () => {
     const first = { ...a, payload: { slug: "a", line: 1 } };
     const again = { ...a, payload: { slug: "a", line: 9 } };
-    let s = open(emptySession(), e(first, { state: { scroll: 4 } }));
+    let s = open(emptySession(), e(first, { historyState: { scroll: 4 } }));
     s = open(s, e(again));
     expect(current(s.tabs[0]!).ref.payload).toEqual({ slug: "a", line: 9 });
-    expect(current(s.tabs[0]!).state).toEqual({ scroll: 4 });
+    expect(current(s.tabs[0]!).historyState).toEqual({ scroll: 4 });
   });
 
   test("slots are stable names, never ids", () => {
@@ -113,41 +113,41 @@ describe("history", () => {
   });
 });
 
-describe("replaceRef: a page changes its own view", () => {
+describe("setView: a page changes its own view", () => {
   test("a filter replaces the entry, keeping its state, its origin and both directions", () => {
     let s = open(emptySession(), e(a));
     const slot = s.active!;
-    s = navigate(s, slot, e(lensRef("x/y"), { state: { scroll: 40 } }));
+    s = navigate(s, slot, e(lensRef("x/y"), { historyState: { scroll: 40 } }));
     s = navigate(s, slot, e(c));
     s = back(s, slot);
-    s = replaceRef(s, slot, lensRef("x/y", { range: "7d" }));
+    s = setView(s, slot, lensRef("x/y", { range: "7d" }));
     const tab = s.tabs[0]!;
     expect(current(tab).ref.id).toBe("lens:x/y?range=7d");
-    expect(current(tab).state).toEqual({ scroll: 40 });
+    expect(current(tab).historyState).toEqual({ scroll: 40 });
     expect(tab.entries.map((x) => x.ref.id)).toEqual(["wiki:a", "lens:x/y?range=7d", "wiki:c"]);
   });
 
   test("a selection's entry starts with the page's state, so open sections stay open", () => {
-    let s = open(emptySession(), e(lensRef("x/y"), { state: { collapsed: ["files"] } }));
-    s = replaceRef(s, s.active!, lensRef("x/y", { commit: "abc" }), { push: true });
-    expect(current(s.tabs[0]!).state).toEqual({ collapsed: ["files"] });
+    let s = open(emptySession(), e(lensRef("x/y"), { historyState: { collapsed: ["files"] } }));
+    s = setView(s, s.active!, lensRef("x/y", { commit: "abc" }), { push: true });
+    expect(current(s.tabs[0]!).historyState).toEqual({ collapsed: ["files"] });
   });
 
   test("a selection pushes: Back returns to the page without it", () => {
     let s = open(emptySession(), e(lensRef("x/y")));
     const slot = s.active!;
-    s = replaceRef(s, slot, lensRef("x/y", { commit: "abc" }), { push: true });
+    s = setView(s, slot, lensRef("x/y", { commit: "abc" }), { push: true });
     expect(ids(s)).toEqual(["lens:x/y?commit=abc"]);
     expect(ids(back(s, slot))).toEqual(["lens:x/y"]);
   });
 });
 
-test("setState keeps an entry's memory with it", () => {
+test("setHistoryState keeps an entry's memory with it", () => {
   let s = open(emptySession(), e(a));
   const slot = s.active!;
-  s = setState(s, slot, { scroll: 120 });
+  s = setHistoryState(s, slot, { scroll: 120 });
   s = back(navigate(s, slot, e(b)), slot);
-  expect(current(s.tabs[0]!).state).toEqual({ scroll: 120 });
+  expect(current(s.tabs[0]!).historyState).toEqual({ scroll: 120 });
 });
 
 describe("origin: the collection a page was opened from", () => {
@@ -186,7 +186,7 @@ describe("bodies: what stays mounted", () => {
   test("entries of one page whose view is live share one body, which shows the current one", () => {
     let s = open(emptySession(), e(lensRef("x/y")));
     const slot = s.active!;
-    s = replaceRef(s, slot, lensRef("x/y", { commit: "abc" }), { push: true });
+    s = setView(s, slot, lensRef("x/y", { commit: "abc" }), { push: true });
     s = navigate(s, slot, e(a));
     const out = bodies(s.tabs[0]!, live);
     expect(out.map((x) => x.key)).toEqual([`${slot}/lens:x/y`, `${slot}/wiki:a`]);
@@ -245,17 +245,17 @@ describe("closing, ordering, eviction", () => {
 
 describe("persistence", () => {
   test("a session round-trips, with its history, its active tab and its JSON state", () => {
-    let s = open(emptySession(), e(a, { state: { scroll: 3 } }));
+    let s = open(emptySession(), e(a, { historyState: { scroll: 3 } }));
     s = navigate(s, s.active!, e(lensRef("x/y", { range: "7d" })));
     const back2 = parseSession(serializeSession(s));
     expect(back2).toEqual(s);
   });
 
   test("state that isn't JSON is dropped, not the entry", () => {
-    const s = open(emptySession(), e(a, { state: { at: 1, node: { f: () => 1 } } }));
+    const s = open(emptySession(), e(a, { historyState: { at: 1, node: { f: () => 1 } } }));
     const out = parseSession(serializeSession(s))!;
     expect(current(out.tabs[0]!).ref.id).toBe("wiki:a");
-    expect(current(out.tabs[0]!).state).toBeUndefined();
+    expect(current(out.tabs[0]!).historyState).toBeUndefined();
   });
 
   test("a stored session that isn't one reads as nothing", () => {
@@ -307,11 +307,11 @@ describe("dropCurrent: the page's record is gone", () => {
   });
 });
 
-test("patchState merges keys into the entry's state and ignores an unchanged write", () => {
+test("patchHistoryState merges keys into the entry's state and ignores an unchanged write", () => {
   let s = open(emptySession(), e(wikiPageRef("a")));
   const slot = s.tabs[0]!.slot;
-  s = patchState(s, slot, { scrollY: 40 });
-  s = patchState(s, slot, { collapsed: ["x"] });
-  expect(current(s.tabs[0]!).state).toEqual({ scrollY: 40, collapsed: ["x"] });
-  expect(patchState(s, slot, { scrollY: 40, collapsed: ["x"] })).toBe(s);
+  s = patchHistoryState(s, slot, { scrollY: 40 });
+  s = patchHistoryState(s, slot, { collapsed: ["x"] });
+  expect(current(s.tabs[0]!).historyState).toEqual({ scrollY: 40, collapsed: ["x"] });
+  expect(patchHistoryState(s, slot, { scrollY: 40, collapsed: ["x"] })).toBe(s);
 });

@@ -17,7 +17,7 @@ import { RichTextField } from "../RichText/RichTextField.js";
 import { recordOpError } from "../opErrorsStore.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef } from "../../tabs/pageRefs.js";
-import { useEntryState } from "../../tabs/useEntryState.js";
+import { useHistoryState } from "../../tabs/useHistoryState.js";
 import type { WikiPageController } from "./useWikiPageController.js";
 
 const FRESHNESS_LABEL: Record<WikiFreshnessLevel, string> = {
@@ -77,7 +77,7 @@ export function WikiPageTab({
   // Keep the scroll position with the tab's entry (Back, a restart). The
   // position lives in a ref while scrolling, so a wheel doesn't set state;
   // it is written once the scroll settles and when the page goes away.
-  const [savedY, setSavedY] = useEntryState<number>("scrollY", 0);
+  const [savedY, setSavedY] = useHistoryState<number>("scrollY", 0);
   const scrollHostRef = useRef<HTMLDivElement | null>(null);
   const scrollYRef = useRef(savedY);
   const pendingRestoreRef = useRef<number | null>(savedY > 0 ? savedY : null);

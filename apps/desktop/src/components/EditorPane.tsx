@@ -13,7 +13,7 @@ import { registerLspProviders } from "./editor-lsp-providers.js";
 import { logUi } from "../logger.js";
 import { useLspClients } from "./useLspClients.js";
 import { BLAME_WIDTH, useBlame } from "./useBlame.js";
-import { useEntryState } from "../tabs/useEntryState.js";
+import { useHistoryState } from "../tabs/useHistoryState.js";
 import type { MenuItem } from "../menu.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { gitRevision } from "../revision.js";
@@ -121,7 +121,7 @@ export function EditorPane({
   // tab's entry: Back and a restart land on the same line. The state is an
   // opaque, JSON-safe blob from saveViewState; it is written when the
   // editor settles after a move, and read once when the editor mounts.
-  const [viewState, setViewState] = useEntryState<unknown>(`viewState:${filePath ?? ""}`, null);
+  const [viewState, setViewState] = useHistoryState<unknown>(`viewState:${filePath ?? ""}`, null);
   const viewStateRef = useRef({ viewState, setViewState });
   viewStateRef.current = { viewState, setViewState };
   const saveViewStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);

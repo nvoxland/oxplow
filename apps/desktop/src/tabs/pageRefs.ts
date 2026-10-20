@@ -182,6 +182,25 @@ export function lensRef(lensId: string, params?: Record<string, SqlCell>): TabRe
   return { id, kind: "lens", payload: { lensId, params } };
 }
 
+/** A page's view params: what its ref carries besides what it is (a
+ *  lens's params, a declared page's). None for a page without a view. */
+export function viewParamsOf(ref: TabRef): Record<string, SqlCell> {
+  if (ref.kind === "lens") return { ...((ref.payload as { params?: Record<string, SqlCell> } | null)?.params ?? {}) };
+  if (ref.kind === "page") return { ...(pagePayload(ref)?.params ?? {}) };
+  return {};
+}
+
+/** `ref` showing `params` as its view, in its own kind of ref: a lens's
+ *  or a declared page's (keeping a page's look-aside state). A page
+ *  without a view comes back as it is. */
+export function withViewParams(ref: TabRef, params: Record<string, SqlCell>): TabRef {
+  const values = params as Record<string, ParamValue>;
+  if (ref.kind === "lens") return lensRef((ref.payload as { lensId: string }).lensId, params);
+  const page = pagePayload(ref);
+  if (!page) return ref;
+  return page.extension === null ? pageTabRef(page.page, values, page.state) : extPageRef(page.extension, page.page, values);
+}
+
 /** Parse a lens id's raw `<lensId>?k=v` tail back into a ref. Numeric
  *  values come back as numbers, as the params form reads them. */
 function lensRefFromTail(tail: string): TabRef {

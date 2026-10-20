@@ -2,19 +2,19 @@ import { afterEach, expect, test } from "bun:test";
 import { act, cleanup, render } from "@testing-library/react";
 
 import { PageNavigationContext, type PageNavigation } from "./PageNavigationContext.js";
-import { useEntryState } from "./useEntryState.js";
+import { useHistoryState } from "./useHistoryState.js";
 
 afterEach(cleanup);
 
 let setter: ((v: number) => void) | null = null;
 function Probe() {
-  const [n, set] = useEntryState<number>("n", 0);
+  const [n, set] = useHistoryState<number>("n", 0);
   setter = set;
   return <span data-testid="n">{n}</span>;
 }
 
 function nav(state: Record<string, unknown>, writes: Record<string, unknown>[]): PageNavigation {
-  return { state, setEntryState: (patch) => writes.push(patch) } as unknown as PageNavigation;
+  return { historyState: state, setHistoryState: (patch) => writes.push(patch) } as unknown as PageNavigation;
 }
 
 test("in a tab it reads the entry's value and writes the entry, once per change", () => {

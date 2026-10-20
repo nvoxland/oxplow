@@ -33,6 +33,9 @@ import {
   wikiFreshnessRef,
   wikiPageRef,
   workItemTabRef,
+  pagePayload,
+  viewParamsOf,
+  withViewParams,
   type PagePayload,
 } from "./pageRefs.js";
 import type { TabRef } from "./tabState.js";
@@ -349,3 +352,25 @@ test("a work item ref opens for every provider", () => {
 });
 
 
+
+// A page's view params are its ref's; the host writes a new view back
+// into the same kind of ref, keeping what isn't view (a page's state).
+describe("view params", () => {
+  test("a lens's and a page's view params read from their ref", () => {
+    expect(viewParamsOf(lensRef("x/y", { range: "7d", n: 3 }))).toEqual({ range: "7d", n: 3 });
+    expect(viewParamsOf(extPageRef("acme", "pulls", { state: "open" }))).toEqual({ state: "open" });
+    expect(viewParamsOf(wikiPageRef("home"))).toEqual({});
+  });
+
+  test("withViewParams writes the view into the page's own kind of ref", () => {
+    expect(withViewParams(lensRef("x/y", { range: "7d" }), { q: "a" }).id).toBe(lensRef("x/y", { q: "a" }).id);
+    expect(withViewParams(extPageRef("acme", "pulls"), { state: "open" }).id).toBe("page:acme/pulls?state=open");
+    const own = pageTabRef("settings", { area: "agents" }, { section: "x" });
+    const next = withViewParams(own, { area: "data" });
+    expect(next.id).toBe("page:settings?area=data");
+    expect(pagePayload(next)?.state).toEqual({ section: "x" });
+    // A page with no view keeps its ref.
+    const wiki = wikiPageRef("home");
+    expect(withViewParams(wiki, { a: "b" })).toBe(wiki);
+  });
+});

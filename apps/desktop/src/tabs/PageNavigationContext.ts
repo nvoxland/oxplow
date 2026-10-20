@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect } from "react";
 import type { TabRef } from "./tabState.js";
+import type { SqlCell } from "../tauri-bridge/generated/bindings.js";
 import type { BookmarkScope } from "./bookmarks.js";
 import type { Origin } from "./session.js";
 
@@ -77,23 +78,26 @@ export interface PageNavigation {
    * `title` prop is supplied.
    */
   title?: string;
-  /** The page this body draws: its entry's ref (`tabs/session.ts`). A
-   *  page whose view is live reads its params from here. */
+  /** The page this body draws: its entry's ref (`tabs/session.ts`). */
   ref?: TabRef;
+  /** **View params** — this tab's address: what the page shows (its
+   *  filters, its search, the row picked). Shareable: a bookmark, a
+   *  reopened tab and an agent see them. */
+  viewParams?: Record<string, SqlCell>;
   /**
-   * The page now shows `ref` — its own view changed (a filter, a row
-   * picked). A filter replaces the tab's entry; a selection (`push`) adds
-   * one, so Back undoes it. Absent on a body that isn't the tab's current
-   * page.
+   * Show `params` as the page's view params (the whole set; the values at
+   * their defaults left out). A filter replaces the tab's entry; a
+   * selection (`push`) adds one, so Back undoes it. Absent on a body that
+   * isn't the tab's current page.
    */
-  replaceRef?(ref: TabRef, opts?: { push?: boolean }): void;
-  /** The entry's own memory (`Entry.state`): what the page keeps across
-   *  Back and a restart — scroll, a folded section. Read and written
-   *  through `useEntryState`. */
-  state?: Record<string, unknown>;
-  /** Keep `patch` with the entry. Absent on a body that isn't the tab's
-   *  current page. */
-  setEntryState?(patch: Record<string, unknown>): void;
+  setViewParams?(params: Record<string, SqlCell>, opts?: { push?: boolean }): void;
+  /** **History state** — this step of this tab's history (`Entry.historyState`):
+   *  scroll, an open section, a draft; back with Back and after a
+   *  restart, never shared. Read and written through `useHistoryState`. */
+  historyState?: Record<string, unknown>;
+  /** Merge `patch` into the history state. Absent on a body that isn't
+   *  the tab's current page. */
+  setHistoryState?(patch: Record<string, unknown>): void;
 }
 
 export const PageNavigationContext = createContext<PageNavigation | null>(null);

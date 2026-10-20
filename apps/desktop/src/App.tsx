@@ -125,7 +125,7 @@ import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { agentSessionRef, diskFilePath, lensRef, pageKindOf, refFromTabId, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, pageTabRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, type DiffViewPayload } from "./tabs/pageRefs.js";
+import { agentSessionRef, diskFilePath, lensRef, pageKindOf, refFromTabId, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, pageTabRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, viewParamsOf, withViewParams, type DiffViewPayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
@@ -153,8 +153,8 @@ import {
   open as sessionOpen,
   refsOf,
   reorder as sessionReorder,
-  patchState as sessionPatchState,
-  replaceRef as sessionReplaceRef,
+  patchHistoryState as sessionPatchHistoryState,
+  setView as sessionSetView,
   setStrip,
   slotShowing,
   stepOrigin,
@@ -2265,7 +2265,7 @@ export function App() {
           label: lensId,
           closable: true,
           render: () => (
-            <LensPage lensId={lensId} params={payload?.params} pageRef={(params) => lensRef(lensId, params)} stream={stream} onOpenPage={nav.navOpen} />
+            <LensPage lensId={lensId} params={payload?.params} stream={stream} onOpenPage={nav.navOpen} />
           ),
         };
       },
@@ -2436,19 +2436,20 @@ export function App() {
           },
         },
         ref,
-        // Only the page the tab shows changes the tab's ref; a hidden back
-        // page drawing an older entry can't.
-        replaceRef: isCurrent && selectedThreadId
-          ? (next: TabRef, opts?: { push?: boolean }) => {
+        viewParams: viewParamsOf(ref),
+        // Only the page the tab shows changes the tab; a hidden back page
+        // drawing an older entry can't.
+        setViewParams: isCurrent && selectedThreadId
+          ? (params: Record<string, SqlCell>, opts?: { push?: boolean }) => {
               const thread = selectedThreadId;
-              updateSession(thread, (session) => sessionReplaceRef(session, slot, next, opts));
+              updateSession(thread, (session) => sessionSetView(session, slot, withViewParams(ref, params), opts));
             }
           : undefined,
-        state: entry.state && typeof entry.state === "object" && !Array.isArray(entry.state) ? (entry.state as Record<string, unknown>) : undefined,
-        setEntryState: isCurrent && selectedThreadId
+        historyState: entry.historyState && typeof entry.historyState === "object" && !Array.isArray(entry.historyState) ? (entry.historyState as Record<string, unknown>) : undefined,
+        setHistoryState: isCurrent && selectedThreadId
           ? (patch: Record<string, unknown>) => {
               const thread = selectedThreadId;
-              updateSession(thread, (session) => sessionPatchState(session, slot, patch));
+              updateSession(thread, (session) => sessionPatchHistoryState(session, slot, patch));
             }
           : undefined,
       };

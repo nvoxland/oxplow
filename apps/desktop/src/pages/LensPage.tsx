@@ -18,12 +18,9 @@ import type { PageAction } from "../kit/actions.js";
 export interface LensPageProps {
   /** `<extension>/<slug>`. */
   lensId: string;
-  /** Its view: the param values its ref carries (a slot's `{ effort_id }`,
-   *  a filter, a row picked). The page draws from them. */
+  /** Its view params: what its ref carries (a slot's `{ effort_id }`, a
+   *  filter, a row picked). The page draws from them. */
   params?: Record<string, SqlCell>;
-  /** The page's ref at other params (`lensRef`, an extension page's ref):
-   *  how a change of view goes back to its tab. */
-  pageRef?(params: Record<string, SqlCell>): TabRef;
   /** The page's name as its host knows it (an extension page's manifest
    *  title); the lens's own title otherwise. */
   title?: string;
@@ -39,15 +36,15 @@ export interface LensPageProps {
  * picked, and where it comes from; Copy, Add to Agent Context and its
  * own actions are the page's, in the nav bar. See `.context/extensions.md`.
  */
-export function LensPage({ lensId, params, pageRef, title: pageTitle, stream, onOpenPage }: LensPageProps) {
+export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage }: LensPageProps) {
   const streamId = stream?.id ?? null;
   const [run, setRun] = useState<LensRun | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Its view is its tab's entry (`tabs/session.ts`): a change goes back
-  // through the tab and the page redraws from the ref it gets. Outside a
-  // tab (no `replaceRef`) it keeps its view itself.
+  // Its view params are its tab's (`tabs/session.ts`): a change goes back
+  // through the tab and the page redraws from what it gets. Outside a tab
+  // (no `setViewParams`) it keeps them itself.
   const nav = useOptionalPageNavigation();
-  const inTab = !!nav?.replaceRef && !!pageRef;
+  const inTab = !!nav?.setViewParams;
   const [own, setOwn] = useState<Record<string, SqlCell>>(params ?? {});
   const fromRef = params ?? NO_PARAMS;
   const overrides = inTab ? fromRef : own;
@@ -124,7 +121,7 @@ export function LensPage({ lensId, params, pageRef, title: pageTitle, stream, on
       // A filter refines what's shown (the entry is replaced); a row picked
       // is somewhere to come back from (an entry is pushed).
       const role = lens?.params.find((p) => p.name === name)?.role;
-      nav!.replaceRef!(pageRef!(next), { push: role === "selection" && value !== null });
+      nav!.setViewParams!(next, { push: role === "selection" && value !== null });
     } else {
       setOwn(next);
     }

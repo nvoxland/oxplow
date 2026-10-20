@@ -71,7 +71,7 @@ function nav(ref: TabRef, replaced: { ref: TabRef; push: boolean }[]): PageNavig
     canGoBack: false,
     canGoForward: false,
     ref,
-    replaceRef: (next, opts) => replaced.push({ ref: next, push: !!opts?.push }),
+    setViewParams: (params, opts) => replaced.push({ ref: lensRef("x/y", params), push: !!opts?.push }),
   };
 }
 
@@ -79,7 +79,7 @@ function page(ref: TabRef, replaced: { ref: TabRef; push: boolean }[]) {
   const params = (ref.payload as { params?: Record<string, SqlCell> }).params;
   return (
     <PageNavigationContext.Provider value={nav(ref, replaced)}>
-      <LensPage lensId="x/y" params={params} pageRef={(p) => lensRef("x/y", p)} stream={null} onOpenPage={() => {}} />
+      <LensPage lensId="x/y" params={params} stream={null} onOpenPage={() => {}} />
     </PageNavigationContext.Provider>
   );
 }

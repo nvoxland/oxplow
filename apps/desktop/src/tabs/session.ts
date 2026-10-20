@@ -8,9 +8,9 @@
  * - A **tab** is a slot (a stable name, never an id) with its entries and
  *   where it is among them.
  * - An **entry** is a page: its `ref` — identity (kind + id) and view (the
- *   params in its payload, `kind:id?k=v` as a string) — its own `state`
+ *   params in its payload, `kind:id?k=v` as a string) — its `historyState`
  *   (scroll, a draft, …), and `from`, the collection it was opened from.
- * - A page changes its own view with `replaceRef`: a filter replaces the
+ * - A page changes its own view with `setView`: a filter replaces the
  *   entry, a selection pushes one.
  */
 
@@ -31,8 +31,9 @@ export interface Origin {
 
 export interface Entry {
   ref: TabRef;
-  /** The entry's own memory, persisted when it is JSON. */
-  state?: unknown;
+  /** This step's own memory (scroll, open sections, a draft), as a
+   *  browser's `history.state`; persisted when it is JSON. */
+  historyState?: unknown;
   from?: Origin;
 }
 
@@ -131,14 +132,14 @@ export function navigate(s: Session, slot: string, entry: Entry, opts: { replace
 /** The page in `slot` now shows `ref` — its own view changed. A filter
  *  replaces the entry (keeping its state, its origin and both history
  *  directions); a selection (`push`) adds an entry, so Back undoes it. */
-export function replaceRef(s: Session, slot: string, ref: TabRef, opts: { push?: boolean } = {}): Session {
+export function setView(s: Session, slot: string, ref: TabRef, opts: { push?: boolean } = {}): Session {
   const tab = s.tabs.find((t) => t.slot === slot);
   if (!tab || current(tab).ref.id === ref.id) return s;
   // A pick is the same page further on: it starts with the page's state
   // (its open sections) and its origin.
   if (opts.push) {
     const now = current(tab);
-    return navigate(s, slot, { ref, ...(now.from ? { from: now.from } : {}), ...(now.state !== undefined ? { state: now.state } : {}) });
+    return navigate(s, slot, { ref, ...(now.from ? { from: now.from } : {}), ...(now.historyState !== undefined ? { historyState: now.historyState } : {}) });
   }
   return withTab(s, slot, (t) => {
     const entries = [...t.entries];
@@ -147,26 +148,26 @@ export function replaceRef(s: Session, slot: string, ref: TabRef, opts: { push?:
   });
 }
 
-/** Keep `state` with the current entry of `slot`. */
-export function setState(s: Session, slot: string, state: unknown): Session {
+/** Keep `state` as the history state of `slot`'s current entry. */
+export function setHistoryState(s: Session, slot: string, state: unknown): Session {
   return withTab(s, slot, (t) => {
     const entries = [...t.entries];
-    entries[t.at] = { ...entries[t.at]!, state };
+    entries[t.at] = { ...entries[t.at]!, historyState: state };
     return { ...t, entries };
   });
 }
 
-/** Merge `patch` into the current entry's state when it is an object of
- *  keys (what pages keep through `useEntryState`). A patch that changes
+/** Merge `patch` into the current entry's history state when it is an object of
+ *  keys (what pages keep through `useHistoryState`). A patch that changes
  *  no value returns `s` itself, so a repeated write costs no render. */
-export function patchState(s: Session, slot: string, patch: Record<string, unknown>): Session {
+export function patchHistoryState(s: Session, slot: string, patch: Record<string, unknown>): Session {
   return withTab(s, slot, (t) => {
     const now = current(t);
-    const had = now.state && typeof now.state === "object" && !Array.isArray(now.state) ? (now.state as Record<string, unknown>) : {};
+    const had = now.historyState && typeof now.historyState === "object" && !Array.isArray(now.historyState) ? (now.historyState as Record<string, unknown>) : {};
     const same = Object.entries(patch).every(([k, v]) => JSON.stringify(had[k]) === JSON.stringify(v));
     if (same) return t;
     const entries = [...t.entries];
-    entries[t.at] = { ...now, state: { ...had, ...patch } };
+    entries[t.at] = { ...now, historyState: { ...had, ...patch } };
     return { ...t, entries };
   });
 }
@@ -306,8 +307,8 @@ function isJson(v: unknown): boolean {
 }
 
 function storable(entry: Entry): Entry {
-  if (entry.state === undefined || isJson(entry.state)) return entry;
-  const { state: _, ...rest } = entry;
+  if (entry.historyState === undefined || isJson(entry.historyState)) return entry;
+  const { historyState: _, ...rest } = entry;
   return rest;
 }
 

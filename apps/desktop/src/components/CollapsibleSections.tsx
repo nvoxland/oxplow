@@ -1,7 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
-import { useEntryState } from "../tabs/useEntryState.js";
+import { useHistoryState } from "../tabs/useHistoryState.js";
 import {
   allCollapsed,
   allExpanded,
@@ -16,7 +16,7 @@ import {
  * provider through `useSectionCollapse`). Each section's heading carries an
  * expand/collapse toggle; `<SectionCollapseControls>` renders the "Expand all" /
  * "Collapse all" pair. The collapsed set is the tab entry's state
- * (`useEntryState`): Back and a restart bring it back.
+ * (`useHistoryState`): Back and a restart bring it back.
  *
  * **Three parts, because the page owns placement (tsk86).** The provider holds
  * state only and renders `children` bare — no wrapper element — so it can wrap a
@@ -77,7 +77,7 @@ export function CollapsibleSections({
 }) {
   // Only exceptions are kept: collapsed ids of sections that start open,
   // opened ids of those that start closed.
-  const [stored, setStored] = useEntryState<{ collapsed: string[]; opened: string[] }>("sections", { collapsed: [], opened: [] });
+  const [stored, setStored] = useHistoryState<{ collapsed: string[]; opened: string[] }>("sections", { collapsed: [], opened: [] });
   const state = useMemo(() => ({ collapsed: new Set(stored.collapsed), opened: new Set(stored.opened) }), [stored]);
   const { collapsed, opened } = state;
   // The rendered section ids (and whether each starts closed) — only

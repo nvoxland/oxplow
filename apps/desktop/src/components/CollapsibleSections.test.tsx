@@ -16,8 +16,8 @@ const freshEntry = (): Entry => ({ state: {} });
 function Host({ entry, children }: { entry: Entry; children: ReactNode }) {
   const [, tick] = useState(0);
   const nav = {
-    state: entry.state,
-    setEntryState: (patch: Record<string, unknown>) => {
+    historyState: entry.state,
+    setHistoryState: (patch: Record<string, unknown>) => {
       entry.state = { ...entry.state, ...patch };
       tick((n) => n + 1);
     },
