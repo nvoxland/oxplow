@@ -1811,6 +1811,20 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   (the loader refuses it): `selection` when a column of the lens, or of a
   part of the document or dashboard, `select`s it — the page shows the
   picked row, not an input — else `filter`. A loaded lens always says.
+- **Page-layout warnings** (`layout_warnings`, run in `load_one` after the
+  roles pass): load, validate, `v_extension.warnings` and a deploy's result
+  carry them, each naming its lens file and the fix after the dash. A
+  warning never stops a lens loading.
+
+  | Rule | Limit |
+  |---|---|
+  | `filter` params on a page | 6 — fold related ones into one `choice`, or split the page |
+  | options of a `choice` | 12 — use a `search`, or a lens that lists them |
+  | a param no query of the page reads (the lens's own and its parts'; `:x` whole token, a date_range also `:x_from` / `:x_to`, an action's `{{param.x}}`; not for `custom`, `form`, `approvals`) | none — remove it, or read it |
+  | description of a visible lens (`hidden: false`; a hidden lens's is never shown) | 200 characters |
+  | sections of a `document` | 8 |
+  | declared `columns` of a `table` / `list` (not a `tool:` lens, whose rows are for an agent) | 8 — put the rest in a section a row `select`s |
+
 - **Where a lens comes from** (`Lens.origin`, `LensProvenance`): its
   `extension`, the `running` file (a deployment's copy in the store, or
   the source when loaded from it), the `deployment` hash, `bundled`, and

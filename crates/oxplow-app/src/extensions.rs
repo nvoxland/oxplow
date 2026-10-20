@@ -3701,6 +3701,16 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             });
         }
     }
+    let layout: Vec<String> = ext
+        .lenses
+        .iter()
+        .flat_map(|l| {
+            layout_warnings(l, &ext.lenses)
+                .into_iter()
+                .map(|w| format!("{}: {w}", l.origin.running))
+        })
+        .collect();
+    ext.warnings.extend(layout);
 
     for s in slot_files {
         let mount_line = entry_line(&manifest, "ui", "lens", &s.lens);
@@ -4418,6 +4428,109 @@ fn highlight_problem(lens: &Lens) -> Option<String> {
                     )
                 })
             })
+    })
+}
+
+/// The most `filter` params a page draws, `choice` options a select
+/// lists, characters a description runs, sections a document holds and
+/// columns a table shows before the layout warnings say so.
+const MAX_FILTERS: usize = 6;
+const MAX_CHOICE_OPTIONS: usize = 12;
+const MAX_DESCRIPTION: usize = 200;
+const MAX_SECTIONS: usize = 8;
+const MAX_COLUMNS: usize = 8;
+
+/// What an agent should change about a lens's page so it reads well: a
+/// warning each, with the fix after the dash. Never a reason to refuse
+/// the lens.
+fn layout_warnings(lens: &Lens, lenses: &[Lens]) -> Vec<String> {
+    let mut out = Vec::new();
+    let filters = lens
+        .params
+        .iter()
+        .filter(|p| p.role == Some(ParamRole::Filter))
+        .count();
+    if filters > MAX_FILTERS {
+        out.push(format!(
+            "{filters} filters; a page shows {MAX_FILTERS} at most — fold related ones into one `choice` (not several `bool`s), or split the page"
+        ));
+    }
+    for p in &lens.params {
+        if p.kind == Some(ParamType::Choice) && p.options.len() > MAX_CHOICE_OPTIONS {
+            out.push(format!(
+                "param `{}` has {} options — use a `search`, or a lens that lists them",
+                p.name,
+                p.options.len()
+            ));
+        }
+    }
+    // A form, a custom component and the approvals list take their params
+    // by means other than a query.
+    if !matches!(
+        lens.viz,
+        LensViz::Custom | LensViz::Form | LensViz::Approvals
+    ) {
+        let queries: Vec<&str> = std::iter::once(lens.query.as_str())
+            .chain(
+                lens.part_lenses()
+                    .filter_map(|id| lenses.iter().find(|l| l.id == id))
+                    .map(|l| l.query.as_str()),
+            )
+            .collect();
+        let templated: Vec<String> = lens
+            .actions
+            .iter()
+            .flat_map(|a| action_templates(&a.input))
+            .filter(|(scope, _)| scope == "param")
+            .map(|(_, name)| name)
+            .collect();
+        for p in &lens.params {
+            let read = |token: &str| queries.iter().any(|q| reads_param(q, token));
+            let range = p.kind == Some(ParamType::DateRange);
+            if !(read(&p.name)
+                || range && (read(&format!("{}_from", p.name)) || read(&format!("{}_to", p.name)))
+                || templated.contains(&p.name))
+            {
+                out.push(format!(
+                    "param `{0}` isn't read by any query of the page — remove it, or read it as `:{0}`",
+                    p.name
+                ));
+            }
+        }
+    }
+    let described = lens.description.chars().count();
+    if described > MAX_DESCRIPTION && !lens.hidden {
+        out.push(format!(
+            "the description is {described} characters — keep it to a sentence or two; put the rest in a markdown section"
+        ));
+    }
+    if lens.viz == LensViz::Document && lens.parts.len() > MAX_SECTIONS {
+        out.push(format!(
+            "{} sections — a page reads best with {MAX_SECTIONS} at most; split it",
+            lens.parts.len()
+        ));
+    }
+    if matches!(lens.viz, LensViz::Table | LensViz::List)
+        && lens.tool.is_none()
+        && lens.columns.len() > MAX_COLUMNS
+    {
+        out.push(format!(
+            "{} columns — show {MAX_COLUMNS} at most; put the rest in a section a row `select`s",
+            lens.columns.len()
+        ));
+    }
+    out
+}
+
+/// Whether `query` binds `:name` as a whole token (`:range` is not
+/// `:range_from`).
+fn reads_param(query: &str, name: &str) -> bool {
+    let token = format!(":{name}");
+    query.match_indices(&token).any(|(at, _)| {
+        !query[at + token.len()..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphanumeric() || c == '_')
     })
 }
 
@@ -8063,6 +8176,218 @@ commands:
         );
         assert!(origin.out_of_date(d.path()));
         assert_eq!(origin.to_json(d.path())["outOfDate"], true);
+    }
+
+    /// The layout warnings of one lens file: its loaded extension's
+    /// warnings, and whether the lens still loaded.
+    fn layout_of(lens_body: &str) -> (Vec<String>, bool) {
+        let (_d, ext) = load_x(&[("p", lens_body)], "");
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        (
+            layout_only(&ext.warnings),
+            ext.lenses.iter().any(|l| l.slug == "p"),
+        )
+    }
+
+    /// The layout warnings among `warnings`.
+    fn layout_only(warnings: &[String]) -> Vec<String> {
+        const MARKS: [&str; 6] = [
+            " filters; ",
+            "isn't read by any query",
+            " options — ",
+            "the description is",
+            " sections — ",
+            " columns — ",
+        ];
+        warnings
+            .iter()
+            .filter(|w| MARKS.iter().any(|m| w.contains(m)))
+            .cloned()
+            .collect()
+    }
+
+    fn filters(n: usize) -> String {
+        let params: Vec<String> = (0..n).map(|i| format!("{{ name: f{i} }}")).collect();
+        let reads: Vec<String> = (0..n).map(|i| format!(":f{i}")).collect();
+        format!(
+            "title: P\nparams: [{}]\nquery: SELECT {} AS a\n",
+            params.join(", "),
+            reads.join(" || ")
+        )
+    }
+
+    #[test]
+    fn more_than_six_filters_warn_and_six_do_not() {
+        let (warns, loaded) = layout_of(&filters(7));
+        assert!(loaded);
+        assert!(
+            warns.iter().any(|w| w.starts_with(
+                ".oxplow/extensions/x/lenses/p.yaml: 7 filters; a page shows 6 at most — fold"
+            )),
+            "{warns:?}"
+        );
+        assert!(layout_of(&filters(6)).0.is_empty());
+    }
+
+    fn choice(n: usize) -> String {
+        let options: Vec<String> = (0..n)
+            .map(|i| format!("{{ value: v{i}, label: V{i} }}"))
+            .collect();
+        format!(
+            "title: P\nparams: [{{ name: c, default: v0, options: [{}] }}]\nquery: SELECT :c AS a\n",
+            options.join(", ")
+        )
+    }
+
+    #[test]
+    fn a_choice_of_more_than_twelve_options_warns() {
+        let (warns, loaded) = layout_of(&choice(13));
+        assert!(loaded);
+        assert!(
+            warns.iter().any(|w| w
+                .ends_with("param `c` has 13 options — use a `search`, or a lens that lists them")),
+            "{warns:?}"
+        );
+        assert!(layout_of(&choice(12)).0.is_empty());
+    }
+
+    #[test]
+    fn a_param_no_query_reads_warns_and_a_token_is_whole() {
+        let (warns, loaded) = layout_of(
+            "title: P\nparams: [{ name: q }, { name: r }]\nquery: SELECT :q AS a, :r_x AS b\n",
+        );
+        assert!(loaded);
+        assert_eq!(warns.len(), 1, "{warns:?}");
+        assert!(
+            warns[0].ends_with(
+                "param `r` isn't read by any query of the page — remove it, or read it as `:r`"
+            ),
+            "{warns:?}"
+        );
+        // `:q` at the end of the text counts.
+        assert!(
+            layout_of("title: P\nparams: [{ name: q }]\nquery: SELECT 1 AS a WHERE 1 = :q\n")
+                .0
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_range_is_read_through_its_from_or_to() {
+        let body = |read: &str| {
+            format!("title: P\nparams: [{{ name: range, type: date_range, default: all }}]\nquery: SELECT 1 AS a WHERE 1 {read}\n")
+        };
+        assert!(layout_of(&body("OR :range_from IS NULL")).0.is_empty());
+        assert!(layout_of(&body("OR :range_to IS NULL")).0.is_empty());
+        assert!(layout_of(&body("OR :range = 'all'")).0.is_empty());
+    }
+
+    #[test]
+    fn a_part_lens_query_and_an_action_input_read_a_param() {
+        let (_d, ext) = load_x(
+            &[
+                ("n", "title: N\nparams: [{ name: q }]\nquery: SELECT :q AS n\nviz: number\n"),
+                ("doc", "title: D\nviz: document\nparams: [{ name: q }]\nsections: [{ lens: n }]\n"),
+                (
+                    "act",
+                    "title: A\nparams: [{ name: k }]\nquery: SELECT 1 AS a\nactions:\n  - { id: go, label: Go, command: oxplow.work_item.transition, input: { ref: '{{param.k}}' } }\n",
+                ),
+            ],
+            "",
+        );
+        assert!(
+            ext.warnings.iter().all(|w| !w.contains("isn't read")),
+            "{:?}",
+            ext.warnings
+        );
+    }
+
+    #[test]
+    fn a_long_description_warns() {
+        let body = |n: usize| {
+            format!(
+                "title: P\ndescription: {}\nquery: SELECT 1 AS a\n",
+                "d".repeat(n)
+            )
+        };
+        let (warns, loaded) = layout_of(&body(201));
+        assert!(loaded);
+        assert!(
+            warns.iter().any(|w| w.ends_with("the description is 201 characters — keep it to a sentence or two; put the rest in a markdown section")),
+            "{warns:?}"
+        );
+        assert!(layout_of(&body(200)).0.is_empty());
+    }
+
+    #[test]
+    fn a_document_of_more_than_eight_sections_warns() {
+        let doc = |n: usize| {
+            let parts: Vec<String> = (0..n)
+                .map(|i| format!("{{ id: s{i}, markdown: hi }}"))
+                .collect();
+            format!(
+                "title: P\nviz: document\nsections: [{}]\n",
+                parts.join(", ")
+            )
+        };
+        let (warns, loaded) = layout_of(&doc(9));
+        assert!(loaded);
+        assert!(
+            warns
+                .iter()
+                .any(|w| w.ends_with("9 sections — a page reads best with 8 at most; split it")),
+            "{warns:?}"
+        );
+        assert!(layout_of(&doc(8)).0.is_empty());
+    }
+
+    #[test]
+    fn a_table_of_more_than_eight_columns_warns() {
+        let table = |n: usize| {
+            let cols: Vec<String> = (0..n).map(|i| format!("  - {{ key: c{i} }}")).collect();
+            let sel: Vec<String> = (0..n).map(|i| format!("1 AS c{i}")).collect();
+            format!(
+                "title: P\nquery: SELECT {}\ncolumns:\n{}\n",
+                sel.join(", "),
+                cols.join("\n")
+            )
+        };
+        let (warns, loaded) = layout_of(&table(9));
+        assert!(loaded);
+        assert!(
+            warns.iter().any(|w| w.ends_with(
+                "9 columns — show 8 at most; put the rest in a section a row `select`s"
+            )),
+            "{warns:?}"
+        );
+        assert!(layout_of(&table(8)).0.is_empty());
+    }
+
+    #[tokio::test]
+    async fn validate_returns_the_layout_warning() {
+        let (d, _) = load_x(&[("p", &filters(7))], "");
+        let v = validate_extension(&layer().await, &cat(), d.path(), "x", None)
+            .await
+            .unwrap();
+        assert!(
+            v.warnings.iter().any(|w| w.contains("7 filters")),
+            "{:?}",
+            v.warnings
+        );
+        assert!(v.lenses.iter().any(|l| l.slug == "p"));
+    }
+
+    /// What the app ships follows its own page-layout rules.
+    #[test]
+    fn the_bundled_lenses_have_no_layout_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        let exts = load_extensions(dir.path());
+        let bundled: Vec<&Extension> = exts.iter().filter(|e| e.origin == "bundled").collect();
+        assert_eq!(bundled.len(), 2);
+        for e in bundled {
+            let layout = layout_only(&e.warnings);
+            assert!(layout.is_empty(), "{}: {layout:#?}", e.name);
+        }
     }
 
     /// Validation checks every block's columns, not only the chart's.

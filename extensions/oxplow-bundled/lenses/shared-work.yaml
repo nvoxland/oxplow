@@ -1,5 +1,5 @@
 title: Shared work
-description: Where two threads hold the same thing — a work item with open efforts on both, a file their efforts changed in the last day, an epic whose children sit on different threads. Nothing is refused; an item stays on the thread it is on.
+description: "Where two threads hold the same thing: a work item with open efforts on both, a file both changed in the last day, an epic whose children sit on different threads."
 query: |
   WITH open_work AS (
     SELECT e.id AS effort_id, e.thread_id, e.work_item, t.title AS thread_title,

@@ -732,22 +732,22 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .map(|row| (row[0].clone(), row[6].clone()))
+            .map(|row| (row[0].clone(), row[3].clone()))
             .collect();
         // Newest first, the week and a day old run out.
         assert_eq!(
             outcomes,
             vec![
                 (
-                    serde_json::json!("collector:acme/pull"),
+                    serde_json::json!("collector:acme/pull (collector)"),
                     serde_json::json!("ok")
                 ),
                 (
-                    serde_json::json!("collector:acme/pull"),
+                    serde_json::json!("collector:acme/pull (collector)"),
                     serde_json::json!("failed")
                 ),
                 (
-                    serde_json::json!("collector:acme/pull"),
+                    serde_json::json!("collector:acme/pull (collector)"),
                     serde_json::json!("denied")
                 ),
             ]
@@ -3153,23 +3153,20 @@ mod tests {
             &[("thread_id", f.thread.value())],
         )
         .await;
-        let got: Vec<(String, serde_json::Value, serde_json::Value)> = rows
+        let got: Vec<(String, serde_json::Value)> = rows
             .as_array()
             .unwrap()
             .iter()
-            .map(|r| {
-                (
-                    r[1].as_str().unwrap().to_string(),
-                    r[4].clone(),
-                    r[5].clone(),
-                )
-            })
+            .map(|r| (r[1].as_str().unwrap().to_string(), r[4].clone()))
             .collect();
         assert_eq!(
             got,
             vec![
-                ("without one".into(), "52k".into(), 0.into()),
-                ("with a window".into(), "52k of 200k (26%)".into(), 1.into()),
+                ("without one".into(), "52k".into()),
+                (
+                    "with a window".into(),
+                    "52k of 200k (26%), compacted 1×".into()
+                ),
             ]
         );
     }
