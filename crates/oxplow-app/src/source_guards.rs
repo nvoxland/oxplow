@@ -163,9 +163,9 @@ const EMITTERS: &[(&str, &str)] = &[
     // A call to the window (`client_host.rs`): not a change to re-read but
     // a request it answers.
     ("ClientCall", "crates/oxplow-app/src/client_host.rs"),
+    ("ConfigChanged", "crates/oxplow-app/src/commands/ai_settings.rs"),
     ("ConfigChanged", "crates/oxplow-app/src/commands/config_commands.rs"),
     ("ConfigChanged", "crates/oxplow-app/src/lib.rs"),
-    ("ConfigChanged", "crates/oxplow-rpc/src/commands/ai.rs"),
     ("CredentialChanged", "crates/oxplow-app/src/providers/registry.rs"),
     // The extension catalog's own signal (tsk1030): what extensions
     // contribute isn't a model to re-read, and a file path was a guess.

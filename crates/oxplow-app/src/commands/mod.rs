@@ -16,6 +16,7 @@
 
 pub mod agent_reads;
 pub mod agent_session;
+pub mod ai_settings;
 pub mod bookmark;
 pub mod comment;
 pub mod compose;

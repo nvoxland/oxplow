@@ -297,6 +297,31 @@ commands:
     invokers: { human: true, agent: true, lens: true }
     tool: ai_summarize
     example: {"text": "<a long log>", "focus": "risks"}
+  # ai.settings, ai.test — Settings → AI, a person's alone (their keys and their money).
+  - name: ai.set_provider
+    summary: "Add or replace an AI provider: its kind and API base, and its key (kept in the OS keychain, never read back or recorded). Left out, the stored key stays. A person's alone."
+    scope: ai.settings
+    op: set_provider
+    invokers: { human: true, agent: false, lens: false }
+    example: {"id": "anthropic", "kind": "anthropic", "key": "sk-ant-…"}
+  - name: ai.remove_provider
+    summary: "Remove an AI provider and its key. Refused while a role uses it. A person's alone."
+    scope: ai.settings
+    op: remove_provider
+    invokers: { human: true, agent: false, lens: false }
+    example: {"id": "anthropic"}
+  - name: ai.set_role
+    summary: "Bind a role (`main`, `summarize`, `decide`, or an extension's profile `acme/review`) to a provider and model, or unbind it with neither. `restrict` forbids `tools`, `sql`, `streaming` or `images` for the binding. A person's alone."
+    scope: ai.settings
+    op: set_role
+    invokers: { human: true, agent: false, lens: false }
+    example: {"role": "summarize", "provider": "anthropic", "model": "claude-haiku-5-5"}
+  - name: ai.test_provider
+    summary: "Make one small call to a provider's model to check its key, URL and model; returns the reply. Spends the person's key. A person's alone."
+    scope: ai.test
+    op: test_provider
+    invokers: { human: true, agent: false, lens: false }
+    example: {"id": "anthropic", "model": "claude-haiku-5-5"}
   # bookmarks.write — a person's navigation, not the agent's.
   - name: bookmark.set
     summary: "Bookmark a page at a scope (`thread`, `stream` or `project`), moving it there if it's bookmarked at another."

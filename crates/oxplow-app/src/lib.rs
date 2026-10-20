@@ -1790,6 +1790,7 @@ impl Services {
             ))
             .chain(commands::effect::ops(services_slot.clone()))
             .chain(commands::delivery::ops(services_slot.clone()))
+            .chain(commands::ai_settings::ops(services_slot.clone()))
             .chain([commands::lsp::restart_op(services_slot.clone())])
             .chain(commands::extension_deploy::ops(services_slot.clone()))
             .chain(commands::agent_reads::ops(services_slot.clone()))
@@ -2255,7 +2256,13 @@ mod tests {
                 // (`commands/agent_reads`): they change no record. A model call
                 // is recorded as the computation it was.
                 "oxplow.ai.decide",
+                // Settings → AI: the user-global ai.yaml and the keychain,
+                // a person's alone.
+                "oxplow.ai.remove_provider",
+                "oxplow.ai.set_provider",
+                "oxplow.ai.set_role",
                 "oxplow.ai.summarize",
+                "oxplow.ai.test_provider",
                 "oxplow.change.ensure",
                 "oxplow.code.call_hierarchy",
                 "oxplow.code.definition",

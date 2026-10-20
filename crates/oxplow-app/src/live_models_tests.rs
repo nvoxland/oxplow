@@ -309,8 +309,8 @@ async fn scopes_list_what_a_command_may_need() {
     );
 }
 
-/// A scope that spends the person's money says so: a model call is the
-/// only one.
+/// A scope that spends the person's money says so: a model call, and the
+/// test call that checks a provider.
 #[tokio::test]
 async fn the_scope_that_spends_the_persons_key_says_so() {
     let fx = services_with_effort().await;
@@ -319,7 +319,13 @@ async fn the_scope_that_spends_the_persons_key_says_so() {
         "SELECT id, spends FROM v_scope WHERE spends = 1 ORDER BY id",
     )
     .await;
-    assert_eq!(got, [vec![json!("ai.compute"), json!(1)]]);
+    assert_eq!(
+        got,
+        [
+            vec![json!("ai.compute"), json!(1)],
+            vec![json!("ai.test"), json!(1)]
+        ]
+    );
 }
 
 /// Rows of `sql` run as a lens for stream `stream` would (its row id).

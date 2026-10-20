@@ -327,19 +327,6 @@ pub const MANIFEST: &[Capability] = &[
     ),
     both_named("ensure_change", "ensure_change", "oxplow_ensure_change"),
     model("ai_settings", &["v_ai_role", "v_ai_provider"]),
-    ui(
-        "save_ai_provider",
-        "AI providers and their keys are a person's to set",
-    ),
-    ui(
-        "remove_ai_provider",
-        "AI providers and their keys are a person's to set",
-    ),
-    ui("set_ai_role", "AI settings are a person's to set"),
-    ui(
-        "test_ai_provider",
-        "checks a person's AI provider settings before they save them",
-    ),
     ui("read_ai_call", "a person's look at a recorded model call; an agent reads its own with `read`"),
     agent("oxplow_ai_decide"),
     agent("oxplow_ai_summarize"),

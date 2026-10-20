@@ -131,6 +131,20 @@ pub const SCOPES: &[Scope] = &[
         summary: "Read declared AI models, capabilities and limits, without credentials or paid probes.",
     },
     Scope {
+        id: "ai.settings",
+        access: Access::Write,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Set the person's AI providers (their keys go to the keychain), remove one, or bind a role to a provider and model.",
+    },
+    Scope {
+        id: "ai.test",
+        access: Access::Read,
+        host: Host::Daemon,
+        spends: true,
+        summary: "Make one small call to a configured AI provider to check its key, URL and model, spending the person's key.",
+    },
+    Scope {
         id: "bookmarks.write",
         access: Access::Record,
         host: Host::Daemon,

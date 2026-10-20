@@ -363,36 +363,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	saveAiProvider: (provider: ProviderConfig, key: string | null) => typedError<AiSettings, IpcError_Serialize>(__TAURI_INVOKE("save_ai_provider", { provider, key })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	removeAiProvider: (id: string) => typedError<AiSettings, IpcError_Serialize>(__TAURI_INVOKE("remove_ai_provider", { id })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	setAiRole: (role: string, binding: {
-	/**  A provider `id`. */
-	provider: string,
-	model: string,
-	/**
-	 *  What a person forbids this binding (`restrict: [tools, sql]`): a
-	 *  typed request needing it is refused, whichever profile or job
-	 *  chose the binding. Empty: nothing forbidden.
-	 */
-	restrict?: AiRestriction[],
-} | null) => typedError<AiSettings, IpcError_Serialize>(__TAURI_INVOKE("set_ai_role", { role, binding })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	testAiProvider: (id: string, model: string) => typedError<string, IpcError_Serialize>(__TAURI_INVOKE("test_ai_provider", { id, model })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	readAiCall: (id: AiCallId, body: AiCallBody) => typedError<{
 	text: string,
 	size: number,
@@ -5395,24 +5365,6 @@ export type PersonalExtensions = {
 
 /**  A `command_proposal` row: an agent's run waiting on a person. */
 export type ProposalId = number;
-
-export type ProviderConfig = {
-	/**
-	 *  Your name for it, e.g. `anthropic` or `local-ollama`. Also the
-	 *  keychain entry name for its key.
-	 */
-	id: string,
-	/**
-	 *  What it is: a declared `ai_provider` id (`anthropic`, `openai`,
-	 *  `openai_compatible`, `openrouter`, `typesafe`).
-	 */
-	kind: string,
-	/**
-	 *  Its API base: required for a kind with no default
-	 *  (`openai_compatible`), an override for the others.
-	 */
-	baseUrl?: string | null,
-};
 
 export type ProviderImpact = {
 	id: string,

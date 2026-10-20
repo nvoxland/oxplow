@@ -610,10 +610,18 @@ its source; with no model bound, the recorded ones are all there is.
 ## Settings → AI (current)
 
 `apps/desktop/src/components/AiSection.tsx` (+ pure `aiSettingsModel.ts`),
-a section of the Settings page. IPC: `ai_settings`, `save_ai_provider`,
-`remove_ai_provider`, `set_ai_role` (announces `ConfigChanged`: a role's
-binding is a row of the effective-config view, which refreshes on that
-one signal), `test_ai_provider`.
+a section of the Settings page. It reads with the `ai_settings` IPC and
+writes with commands (`commands/ai_settings.rs`), each a person's alone
+(`Invokers::HUMAN_ONLY`: not an agent, not a lens acting for one — the keys and
+where the person's money goes are theirs): `oxplow.ai.set_provider { id, kind,
+base_url?, key? }` (scope `ai.settings`; `key` is `with_unrecorded`, so a
+refusal that could quote it is recorded without its words, and it goes only to
+the keychain), `oxplow.ai.remove_provider { id }`, `oxplow.ai.set_role { role,
+provider?, model?, restrict? }` (neither provider nor model unbinds; it
+announces `ConfigChanged`: a role's binding is a row of the effective-config
+view, which refreshes on that one signal) and `oxplow.ai.test_provider { id,
+model }` (scope `ai.test`, `spends`: one small call on the person's key). The
+`api.ts` wrappers run them and re-read the settings.
 
 - Providers: add or update by name (kind, base URL, key). A blank key keeps
   the saved one. Remove is refused while a role uses the provider, and

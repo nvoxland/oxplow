@@ -715,26 +715,43 @@ export async function aiSettings(): Promise<AiSettings> {
   return unwrap(await commands.aiSettings());
 }
 
-/// Add or replace a provider. A non-empty `key` goes to the OS keychain;
-/// null keeps the stored one.
+/// Add or replace a provider (`oxplow.ai.set_provider`). A non-empty `key`
+/// goes to the OS keychain (and is not recorded); null keeps the stored one.
 export async function saveAiProvider(provider: ProviderConfig, key: string | null): Promise<AiSettings> {
-  return unwrap(await commands.saveAiProvider(provider, key));
+  await runCommand("oxplow.ai.set_provider", {
+    id: provider.id,
+    kind: provider.kind,
+    base_url: provider.baseUrl,
+    key,
+  });
+  return aiSettings();
 }
 
-/// Remove a provider and its key (refused while a role uses it).
+/// Remove a provider and its key (`oxplow.ai.remove_provider`; refused while
+/// a role uses it).
 export async function removeAiProvider(id: string): Promise<AiSettings> {
-  return unwrap(await commands.removeAiProvider(id));
+  await runCommand("oxplow.ai.remove_provider", { id });
+  return aiSettings();
 }
 
-/// Assign a role to a provider + model, or unassign it with null.
-/// `role` is a built-in (`summarize`) or an extension's AI profile (`acme/review`).
+/// Assign a role to a provider + model, or unassign it with null
+/// (`oxplow.ai.set_role`). `role` is a built-in (`summarize`) or an
+/// extension's AI profile (`acme/review`).
 export async function setAiRole(role: string, binding: RoleBinding | null): Promise<AiSettings> {
-  return unwrap(await commands.setAiRole(role, binding));
+  await runCommand(
+    "oxplow.ai.set_role",
+    binding
+      ? { role, provider: binding.provider, model: binding.model, restrict: binding.restrict ?? [] }
+      : { role },
+  );
+  return aiSettings();
 }
 
-/// One small call to check a provider's key, URL and model; returns the reply.
+/// One small call to check a provider's key, URL and model
+/// (`oxplow.ai.test_provider`); returns the reply.
 export async function testAiProvider(id: string, model: string): Promise<string> {
-  return unwrap(await commands.testAiProvider(id, model));
+  const out = await runCommand("oxplow.ai.test_provider", { id, model });
+  return (out.result as { reply: string }).reply;
 }
 
 /** What `oxplow.lens.keep` kept: the lens id. It is live when the command
