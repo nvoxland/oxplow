@@ -132,11 +132,6 @@ export function LensPage({ lensId, initialParams, title: pageTitle, stream, onOp
         </div>
       ) : null}
       {run ? <LensResultView run={run} onOpenPage={onOpenPage} onSetParam={setParam} /> : error ? null : <p>Loading…</p>}
-      {lens ? (
-        <p style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)", marginTop: 24 }}>
-          {lens.path}
-        </p>
-      ) : null}
       </div>
     </Page>
   );
