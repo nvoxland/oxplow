@@ -201,11 +201,19 @@ Frontend tests still use `bun test` (run from `apps/desktop/`); root
 
 **A fresh worktree runs as-is.** `test:fast`, `test:collect` and
 `lint:collect` start with `scripts/test-prereqs.sh`, which builds what no
-crate's own graph does, only when it's missing: the staged sidecars
-(oxplow-desktop's build script validates them, so a workspace test or
-clippy run fails without them) and the fake provider's binary
-(oxplow-app's provider tests spawn it). Both used to fail a new
-worktree's first run.
+crate's own graph does: the staged sidecars (oxplow-desktop's build
+script validates them, so a workspace test or clippy run fails without
+them) and the fake provider's binary (oxplow-app's provider tests spawn
+it). Both used to fail a new worktree's first run. Both are built every
+run (a no-op when current) and the sidecars restaged when they changed,
+because tauri-build copies a staged sidecar over `target/debug/<name>`:
+a stale one ran old script-worker code under the tests.
+
+**Building oxplow to run it: `bun run build:dev`**, never a `cargo
+build` of the shell alone. The shell runs the daemon beside it, and
+building the shell copies the *staged* daemon there, so without staging
+first it runs the last staged one, however old; `DEV.md` "Run from
+source" has the rest.
 
 **Which tests and lint to run, and when, is the agent's call** — run
 what the change warrants; nothing requires a full run before a commit.

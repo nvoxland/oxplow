@@ -46,6 +46,22 @@ no Vite. The `tauri` CLI turns the feature on; a plain `cargo build`
 does not — so a plain `cargo build` binary, **debug _or_ `--release`,
 always needs Vite.**
 
+**The backend is a second binary, and the shell runs the copy staged
+for it.** Every project window is backed by an `oxplow-daemon`, which
+the shell runs from beside its own executable (`target/debug/oxplow-daemon`
+next to `target/debug/oxplow`). Building the shell doesn't build the
+daemon; it *copies* the one staged in `apps/desktop/src-tauri/binaries/`
+(`externalBin`) over `target/debug/oxplow-daemon`, every time
+oxplow-desktop's build script runs. So **stage before you build the
+shell** (`bash apps/desktop/src-tauri/scripts/stage-sidecars.sh debug`
+builds the daemon, the MCP adapter and the script worker and restages
+the ones that changed): a bare `cargo build -p oxplow-desktop` or
+`cargo build --bin oxplow` runs whatever daemon was staged last, even
+right after you built a new one. The symptom is a backend older than
+the code: a config field it calls unknown, a migration "missing from
+the filesystem", a fixed bug still there. `bun run build:dev` and
+`bun run tauri:dev` stage first.
+
 That also decides whether the CSP exists. Tauri applies the
 `tauri.conf.json` `security.csp` to **asset-protocol responses only**,
 so a binary loading `devUrl` serves a plain Vite page with *no*
@@ -60,9 +76,11 @@ below, or `bun run tauri:build`).
 bun run tauri:dev          # repo root; passes OXPLOW_PROJECT_DIR=$PWD
 ```
 
-One command, one terminal: starts Vite, builds + runs the debug
-binary, watches Rust and TS, auto-restarts the window on Rust changes.
-Use this unless you have a reason not to.
+One command, one terminal: stages the sidecars, starts Vite, builds +
+runs the debug binary, watches Rust and TS, auto-restarts the window on
+Rust changes. Use this unless you have a reason not to. Its watcher
+rebuilds the **shell** only: after a change to the daemon's code (most
+of `crates/**`), stop it and start it again, which restages.
 
 ### Option B: split-process dev
 
@@ -75,14 +93,16 @@ binary, same Vite, driven manually.
 bun run --cwd apps/desktop dev          # vite on :5173
 
 # terminal 2 — debug binary; loads the Vite server above
-cargo build -p oxplow-desktop && ./target/debug/oxplow .
+bash apps/desktop/src-tauri/scripts/stage-sidecars.sh debug && cargo build -p oxplow-desktop && ./target/debug/oxplow .
 ```
 
 ### Option C: embedded binary (no Vite)
 
-For a faster *debug*-profile embedded binary:
-`bun run --cwd apps/desktop build && cargo build -p oxplow-desktop --features tauri/custom-protocol`
-run as `./target/debug/oxplow .`.
+For a faster *debug*-profile embedded binary, `bun run build:dev`
+(stages the sidecars, builds the frontend, then the shell with
+`--features tauri/custom-protocol`), run as `./target/debug/oxplow .`.
+It is also how to rebuild a debug build you work in day to day: run it
+after every pull or change, not a `cargo build` of one binary.
 
 
 For **release*-profile embedded binary:
@@ -104,9 +124,11 @@ Then iterate:
 - **Frontend-only change (`apps/desktop/src/**`)**: save the file —
   Vite HMR pushes it into the running window. No rebuild, no restart.
 - **Rust crate change (`crates/**` or `apps/desktop/src-tauri/**`)**:
-  `cargo build -p oxplow-desktop` in terminal 2, then quit the app
-  window and re-run `./target/debug/oxplow .`. Cargo's incremental
-  builds make this ~5–15s for typical edits.
+  the staging line in terminal 2 again (stage, then `cargo build -p
+  oxplow-desktop`), then quit the app window and re-run
+  `./target/debug/oxplow .`. Cargo's incremental builds make this
+  ~5–15s for typical edits. Skipping the stage keeps the old daemon
+  under the new shell.
 - **`tauri.conf.json` / capability JSON change**: same as Rust —
   `tauri-build` only re-embeds config when its build script reruns.
   A `cargo clean -p oxplow-desktop` + rebuild forces it.
@@ -123,6 +145,11 @@ Then iterate:
 - **`tauri-build` doesn't re-embed `frontendDist` automatically** —
   it caches across builds. If an embedded (`custom-protocol`) build
   picks up stale assets, `cargo clean -p oxplow-desktop` and rebuild.
+- **The backend behaves like an older build** (it calls a config field
+  unknown, says a migration is missing from the filesystem, or a fix
+  isn't there): the staged daemon was older than the code. Compare
+  `ls -l target/debug/oxplow-daemon` with your last change, then
+  restage and rebuild (`bun run build:dev`).
 - **Bare-DB boot** (no streams / threads) is normal on a fresh clone.
   The desktop shell auto-creates the primary stream and seeds a
   default thread on first launch.
@@ -325,8 +352,15 @@ bash apps/desktop/src-tauri/scripts/stage-sidecars.sh debug
 
 `debug` is enough to satisfy the build script and shares the dependency
 build with a debug workspace build, so it's much cheaper than the
-release staging a bundle needs. `bun run tauri:dev` and CI both do this
-for you; a bare `cargo` invocation on a fresh clone does not.
+release staging a bundle needs. `bun run tauri:dev`, `bun run
+build:dev`, the test and lint runs (`scripts/test-prereqs.sh`) and CI
+all do this for you; a bare `cargo` invocation does not.
+
+It isn't only for a fresh clone either: tauri-build copies each staged
+binary over `target/<profile>/<name>` whenever that build script runs,
+so a staged copy older than the code puts the old daemon under the app
+(see "Run from source"). The script copies only what changed, so
+running it on every build costs a no-op cargo build when nothing did.
 
 Only the **host** architecture, always — nothing passes
 `--target universal-apple-darwin`, so an Apple Silicon machine

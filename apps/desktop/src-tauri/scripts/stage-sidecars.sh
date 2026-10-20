@@ -23,6 +23,13 @@
 #                                #   script, and shares the dependency
 #                                #   build with a debug workspace build
 #
+# **Stage again whenever a sidecar's crate changed.** tauri-build copies
+# each staged file next to the shell (`target/<profile>/<name>`) when
+# oxplow-desktop's build script runs, over the one cargo just built: a
+# staged copy older than the code puts that old binary under the app,
+# and under the tests that spawn it. `bun run build:dev` and the test and
+# lint runs (`scripts/test-prereqs.sh`) stage first.
+#
 # Locates everything from its own path, so it doesn't care where it's
 # invoked from. It is invoked from `beforeBuildCommand`, whose cwd is the
 # **app dir** (`apps/desktop`) — not `src-tauri`, which cost tsk263 a
@@ -54,8 +61,15 @@ esac
 # shellcheck disable=SC2086 # profile_flag is intentionally word-split (empty for debug)
 cargo build $profile_flag -p oxplow-daemon -p oxplow-provider-mcp -p oxplow-script --bins --manifest-path "$repo_root/Cargo.toml"
 
+# Copied only when it changed: tauri-build reruns oxplow-desktop's build
+# script when a staged file is touched, so an unconditional copy would
+# relink the desktop on every run.
 mkdir -p binaries
 for name in "${sidecars[@]}"; do
-  cp "$repo_root/target/$target_subdir/$name$ext" "binaries/$name-$triple$ext"
-  echo "staged binaries/$name-$triple$ext ($profile)"
+  built="$repo_root/target/$target_subdir/$name$ext"
+  staged="binaries/$name-$triple$ext"
+  if ! cmp -s "$built" "$staged"; then
+    cp "$built" "$staged"
+    echo "staged $staged ($profile)"
+  fi
 done

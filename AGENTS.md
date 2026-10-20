@@ -49,6 +49,10 @@ or exact mechanics.
     they're pushed. Plain `cargo clippy --workspace --all-targets -- -D
     warnings` gives readable diagnostics. Run `cargo fmt --all` after
     editing `.rs`. Don't `#[allow(...)]` a real lint.
+- **Build oxplow to run it with `bun run build:dev`** (or `bun run
+  tauri:dev`), not `cargo build --bin oxplow`: building the shell copies
+  the *staged* daemon next to it, so a shell built without restaging
+  runs an old backend. `DEV.md` "Run from source".
 - **Plan mode** for multi-subsystem work (3+ areas touched) or ambiguous
   requirements; skip it for single-file changes, typos, renames, narrow
   refactors.
