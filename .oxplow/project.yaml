@@ -130,3 +130,8 @@ extensions:
 extensionSources:
   oxplow-foundation: extensions/oxplow-foundation
   oxplow-bundled: extensions/oxplow-bundled
+# And runs them from those sources, deployed like any extension, instead of
+# the copies built into oxplow (a dev build only): editing foundation and
+# deploying it takes effect without rebuilding oxplow. Set it to true in
+# your own .oxplow/personal.yaml to run the built-in copies.
+enableBundledExtensions: false
