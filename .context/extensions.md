@@ -666,6 +666,15 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       command's `invokers.lens`, and the agent policy through
       `on_behalf_of`, so an agent can't reach a human-only command or
       confirm one through a lens. The audit records `lens:<id>`.
+    - **The command runs after the read.** An action, a form submit and
+      a component's invoke are resolved under one pinned catalog
+      generation (`lens_actions::Prepared`: the lens, its `when`, the
+      bound input, the bundle's commands), and the command runs once
+      that pin is released. Activation waits for every reader of the
+      generation it replaces, so a command that activates (the
+      Extensions page's Deploy, Disable, Remove) would wait on its own
+      pin and is refused with "activation cannot wait on its own
+      reader".
     - A command that asks (`NEEDS_CONFIRMATION`, now kept on the thrown
       `IpcCallError`'s `code`) shows a confirm strip in the toolbar: Run
       (focused, Enter) or Cancel (Escape).

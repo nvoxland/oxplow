@@ -42,17 +42,39 @@ pub async fn run_lens_action(
     ctx: &extensions::LensContext,
 ) -> Result<CommandOutcome, CommandError> {
     svc.sql
-        .read_generation(async { run_lens_action_unpinned(svc, lens_root, call, ctx).await })
+        .read_generation(async { prepare_lens_action(svc, lens_root, call, ctx) })
         .await
-        .map_err(CommandError::from)?
+        .map_err(CommandError::from)??
+        .run(svc)
+        .await
 }
 
-async fn run_lens_action_unpinned(
+/// The command a lens's action, form or component runs, resolved from one
+/// catalog generation. It runs after that generation is let go: a command
+/// that activates (an extension's deploy, enable, disable or remove) waits
+/// for every reader of the generation it replaces, and would wait on its
+/// own.
+struct Prepared {
+    actor: Actor,
+    command: String,
+    input: Value,
+    confirmed: bool,
+}
+
+impl Prepared {
+    async fn run(self, svc: &crate::Services) -> Result<CommandOutcome, CommandError> {
+        svc.commands
+            .run(&self.actor, &self.command, self.input, self.confirmed)
+            .await
+    }
+}
+
+fn prepare_lens_action(
     svc: &crate::Services,
     lens_root: &Path,
     call: LensActionCall,
     ctx: &extensions::LensContext,
-) -> Result<CommandOutcome, CommandError> {
+) -> Result<Prepared, CommandError> {
     let LensActionCall {
         lens_id,
         action_id,
@@ -127,17 +149,15 @@ async fn run_lens_action_unpinned(
         }
         Some(given) => filled(bound, given, &action.fixed)?,
     };
-    svc.commands
-        .run(
-            &Actor::Lens {
-                lens_id: lens_id.to_string(),
-                on_behalf_of: Box::new(on_behalf_of),
-            },
-            &action.command,
-            input,
-            confirmed,
-        )
-        .await
+    Ok(Prepared {
+        actor: Actor::Lens {
+            lens_id: lens_id.to_string(),
+            on_behalf_of: Box::new(on_behalf_of),
+        },
+        command: action.command,
+        input,
+        confirmed,
+    })
 }
 
 /// What a form shows: its command (the fields come from its input
@@ -386,17 +406,19 @@ pub async fn submit_form(
     ctx: &extensions::LensContext,
 ) -> Result<CommandOutcome, CommandError> {
     svc.sql
-        .read_generation(async { submit_form_unpinned(svc, lens_root, submission, ctx).await })
+        .read_generation(async { prepare_form(svc, lens_root, submission, ctx) })
         .await
-        .map_err(CommandError::from)?
+        .map_err(CommandError::from)??
+        .run(svc)
+        .await
 }
 
-async fn submit_form_unpinned(
+fn prepare_form(
     svc: &crate::Services,
     lens_root: &Path,
     submission: FormSubmission,
     ctx: &extensions::LensContext,
-) -> Result<CommandOutcome, CommandError> {
+) -> Result<Prepared, CommandError> {
     let FormSubmission {
         lens_id,
         input,
@@ -424,17 +446,15 @@ async fn submit_form_unpinned(
         None => Value::Object(serde_json::Map::new()),
     };
     let merged = filled(defaults, input, &form.fixed)?;
-    svc.commands
-        .run(
-            &Actor::Lens {
-                lens_id: lens_id.to_string(),
-                on_behalf_of: Box::new(on_behalf_of),
-            },
-            form.command.as_deref().unwrap_or_default(),
-            merged,
-            confirmed,
-        )
-        .await
+    Ok(Prepared {
+        actor: Actor::Lens {
+            lens_id: lens_id.to_string(),
+            on_behalf_of: Box::new(on_behalf_of),
+        },
+        command: form.command.unwrap_or_default(),
+        input: merged,
+        confirmed,
+    })
 }
 
 /// The component a `custom` lens renders, from its extension.
@@ -578,16 +598,18 @@ pub async fn invoke_component_command(
     call: ComponentInvoke,
 ) -> Result<CommandOutcome, CommandError> {
     svc.sql
-        .read_generation(async { invoke_component_command_unpinned(svc, lens_root, call).await })
+        .read_generation(async { prepare_component_command(svc, lens_root, call) })
         .await
-        .map_err(CommandError::from)?
+        .map_err(CommandError::from)??
+        .run(svc)
+        .await
 }
 
-async fn invoke_component_command_unpinned(
+fn prepare_component_command(
     svc: &crate::Services,
     lens_root: &Path,
     call: ComponentInvoke,
-) -> Result<CommandOutcome, CommandError> {
+) -> Result<Prepared, CommandError> {
     let (ext, component) = component_of(svc, lens_root, &call.lens_id)?;
     let loaded = svc
         .component_bundles
@@ -614,17 +636,15 @@ async fn invoke_component_command_unpinned(
             ),
         });
     }
-    svc.commands
-        .run(
-            &Actor::Lens {
-                lens_id: call.lens_id,
-                on_behalf_of: Box::new(call.on_behalf_of),
-            },
-            &call.command,
-            call.input,
-            call.confirmed,
-        )
-        .await
+    Ok(Prepared {
+        actor: Actor::Lens {
+            lens_id: call.lens_id,
+            on_behalf_of: Box::new(call.on_behalf_of),
+        },
+        command: call.command,
+        input: call.input,
+        confirmed: call.confirmed,
+    })
 }
 
 /// Load the bundle of `lens_id`'s component as it is now under

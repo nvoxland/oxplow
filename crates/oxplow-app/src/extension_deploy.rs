@@ -1563,6 +1563,45 @@ mod tests {
         assert_eq!(acme().await, (text("out of date"), int(1), int(1)));
     }
 
+    /// The Extensions page's row actions run their commands from inside a
+    /// lens action's read: disabling, enabling and removing there activate
+    /// all the same.
+    #[tokio::test]
+    async fn the_extensions_page_row_actions_disable_enable_and_remove() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        source(svc, "One");
+        deploy(svc, "acme", &root, None, true).await.unwrap();
+        let press = |action: &str| crate::lens_actions::LensActionCall {
+            lens_id: "oxplow-foundation/extensions-list".into(),
+            action_id: action.into(),
+            params: Default::default(),
+            row: Some(
+                [
+                    ("name".to_string(), oxplow_db::SqlCell::Text("acme".into())),
+                    (format!("can_{action}"), oxplow_db::SqlCell::Int(1)),
+                ]
+                .into(),
+            ),
+            input: None,
+            on_behalf_of: oxplow_domain::Actor::Human,
+            confirmed: true,
+        };
+        for action in ["disable", "enable", "remove"] {
+            crate::lens_actions::run_lens_action(
+                svc,
+                &root,
+                press(action),
+                &crate::extensions::LensContext::default(),
+            )
+            .await
+            .unwrap_or_else(|e| panic!("{action}: {e}"));
+        }
+        assert!(rows(svc).await.is_empty());
+        assert!(!svc.extension_catalog.live().contains_key("acme"));
+    }
+
     /// A source runs nothing until it is deployed; a deploy runs it, turns
     /// it on for the person and records the deployment; the same source
     /// again changes nothing.
