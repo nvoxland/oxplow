@@ -69,8 +69,8 @@ test("TODOs are sorted by the scripted model, and a decision from the board or t
   try {
     await install(daemon);
     // The model: the suite extension's scripted provider, at the echo server.
-    await ipc(daemon, "save_ai_provider", { provider: { id: "sorter", kind: "sorter", baseUrl: model.url }, key: null });
-    await ipc(daemon, "set_ai_role", { role: "decide", binding: { provider: "sorter", model: "sorter" } });
+    await run(daemon, "oxplow.ai.set_provider", { id: "sorter", kind: "sorter", base_url: model.url });
+    await run(daemon, "oxplow.ai.set_role", { role: "decide", provider: "sorter", model: "sorter" });
     await until("the todos collector to be listed", 60_000, async () => {
       const collectors = await ipc<Array<{ owner: string; spec: { id: string } }>>(daemon, "list_collectors");
       return collectors.some((c) => c.owner === "triage" && c.spec.id === "todos");
