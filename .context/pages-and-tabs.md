@@ -644,8 +644,11 @@ the bodies, Back/Forward, Up/Down, the star, Ask, what agents read.
 | a SPA re-rendering on popstate | **every page is live**: one body per page identity, keyed `slot/identity`, so entries that differ only in view params re-render it — no remount, no Loading |
 
 **Operations** (pure, tested in `session.test.ts`): `open` (the tab
-showing the page — its ref refreshed, as a re-clicked diff's line to
-reveal — else a new tab; active), `navigate` (push; clears forward;
+showing that exact ref, view params included, else a new tab; active.
+A decision, not an accident: opening Board while a tab shows
+`page:board?show=all` opens a second tab, because the views differ. The
+one exception is a diff, opened with `identity: pageIdentity`: the same
+diff at another line moves the tab showing it), `navigate` (push; clears forward;
 `replace` takes the current entry's place; a page shown in another tab
 closes there), `setView` (a page changes its own view), `setHistoryState`, `patchHistoryState`,
 `back`, `forward`, `stepOrigin` (Up/Down in place, history untouched),
