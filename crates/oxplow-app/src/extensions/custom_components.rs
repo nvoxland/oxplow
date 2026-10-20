@@ -188,7 +188,7 @@ pub fn bundle_problems(
 /// What `ext`'s components do that works but goes against how a page is
 /// built, as check warnings at the file: a script its `index.html` loads
 /// from the bundle that keeps state in browser storage. A component's view
-/// is its page's params (`component.setParams`), kept in its tab, so Back,
+/// is its page's view params (`component.setViewParams`), kept in its tab, so Back,
 /// a bookmark and a reopened tab keep it; storage keeps it nowhere oxplow
 /// knows.
 pub fn bundle_warnings(
@@ -222,8 +222,9 @@ pub fn bundle_warnings(
                 if script.contains(store) {
                     out.push(format!(
                         "{dir}/{rel}: it uses `{store}` — a component keeps its view in its page's \
-                         params, which its tab keeps: set them with `component.setParams` and draw \
-                         from `component.onParams`"
+                         view params, which its tab keeps (`component.setViewParams`, \
+                         `onViewParams`), this step's in its history state (`setHistoryState`) and \
+                         its own memory for the person in `component.pageMemory`"
                     ));
                 }
             }
@@ -842,7 +843,7 @@ mod tests {
         assert_eq!(bundle_problems(&ext, &missing), Vec::<String>::new());
     }
 
-    /// A component keeps its view in its page's params (`setParams`), never
+    /// A component keeps its view in its page's view params, never
     /// in browser storage: a script its page loads that reads or writes
     /// `localStorage` / `sessionStorage` is a warning at that script; the
     /// client library and a script without it are not.
@@ -867,7 +868,7 @@ mod tests {
         assert!(
             warnings[0].starts_with(".oxplow/extensions/x/components/burndown/app.js: ")
                 && warnings[0].contains("`localStorage`")
-                && warnings[0].contains("setParams"),
+                && warnings[0].contains("setViewParams"),
             "{warnings:?}"
         );
     }

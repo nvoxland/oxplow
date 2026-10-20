@@ -6550,7 +6550,10 @@ export type UiLogEntry = {
 
 /**  One remembered value. */
 export type UiPreference = {
-	/**  `app`, `page:<page>`, `panel:<id>` or `component:<ext>/<id>`. */
+	/**
+	 *  `app`; a page's ref (`page:…`, `lens:…`) or `kind:<kind>`; a
+	 *  panel's ref (`panel:…`); or `component:<ext>/<id>`.
+	 */
 	scope: string,
 	key: string,
 	/**  Its value, as JSON text. */

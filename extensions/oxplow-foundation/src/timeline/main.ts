@@ -12,7 +12,9 @@ interface Rows {
   truncated: boolean;
 }
 interface Component {
-  page: { params: Record<string, string>; streamId: string | null; threadId: string | null } | null;
+  page: { streamId: string | null; threadId: string | null } | null;
+  /** Its view params: the page's tab's address (`from`, `to`, `thread`). */
+  viewParams: Record<string, string> | null;
   querySql(sql: string, params?: Cell[]): Promise<Rows>;
   navigate(ref: string, options?: { newTab?: boolean }): Promise<null>;
   setTitle(title: string): Promise<null>;
@@ -84,7 +86,7 @@ const shortDate = (d: Date) => d.toLocaleDateString(undefined, { month: "short",
 
 oxplow.connect().then((component) => {
   component.applyTheme();
-  const params = component.page?.params ?? {};
+  const params = component.viewParams ?? {};
   const now = Date.now();
   const start = dateOf(params.from, now - 7 * DAY);
   const end = dateOf(params.to, now + DAY / 4);

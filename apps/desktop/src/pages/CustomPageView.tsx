@@ -71,15 +71,17 @@ export function CustomPageView({
   );
 
   const streamId = stream?.id ?? null;
-  const init: PageInit = useMemo(
-    () => ({ params: page.params, streamId, threadId }),
-    // `page.params` is a fresh object per render; its content is the key.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [JSON.stringify(page.params), streamId, threadId],
-  );
-  // Its view is its tab entry's params: a change replaces the entry (a
-  // component has no selection to push; going somewhere is `navigate`).
+  // Its view params and history state are its tab entry's: a view change
+  // replaces the entry (a component has no selection to push; going
+  // somewhere is `navigate`).
   const nav = useOptionalPageNavigation();
+  const historyState = nav?.historyState ?? NO_STATE;
+  const init: PageInit = useMemo(
+    () => ({ viewParams: page.params, historyState, streamId, threadId }),
+    // Fresh objects per render; their content is the key.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [JSON.stringify(page.params), JSON.stringify(historyState), streamId, threadId],
+  );
   const navRef = useRef(nav);
   navRef.current = nav;
   const pageRef = useRef(page);
@@ -88,7 +90,8 @@ export function CustomPageView({
     () => ({
       setTitle: setFrameTitle,
       setActions: setFrameActions,
-      setParams: (changes: Record<string, string | null>) => {
+      setHistoryState: (patch: Record<string, unknown>) => navRef.current?.setHistoryState?.(patch),
+      setViewParams: (changes: Record<string, string | null>) => {
         const next: Record<string, string> = { ...pageRef.current.params };
         for (const [k, v] of Object.entries(changes)) {
           if (v === null) delete next[k];
@@ -227,3 +230,5 @@ function PageForm({
     />
   );
 }
+
+const NO_STATE: Record<string, unknown> = {};

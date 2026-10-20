@@ -636,9 +636,10 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `custom_components` (`PageBody::Component { component:
     "<ext>/<id>" }`): a **custom page**, the component filling the page
     body under core's nav bar (`pages/CustomPageView.tsx`), told the
-    page's params, stream and thread in `init.page`, setting its title
-    and actions as data core draws, and its params kept in its tab
-    entry (`setParams` / `params`; "Custom components", protocol 6). A
+    page's view params, history state, stream and thread in
+    `init.page`, setting its title and actions as data core draws, and
+    its view params and history state kept in its tab entry
+    ("Custom components", protocol 7). A
     page's `icon` is one of the ref-kind icons (`REF_KIND_ICONS`; an
     unknown one is a load error); the tab strip, launcher, Go To lists
     and backlinks draw it (`PageKindIcon` by the page's id), the lens
@@ -2597,15 +2598,22 @@ submission through `invoke_component_command`; closing it answers
 setActions, actions: [{ id, label, primary?, disabled? }] }` (the page's
 title and its nav-bar actions, data core draws; a press posts
 `{ type: action, id }` to the frame). `openForm`, `setTitle` and
-`setActions` are a custom page's, and — protocol 6 — `{ id, method:
-setParams, params }` (string values, null drops one): the page's view
-goes into its tab entry (`CustomPageView` passes them to
-`setViewParams` — a component has no selection role, so it never
-pushes; going somewhere is `navigate`), and the host posts `{ type:
-params, params }` when the entry's params change (Back, Forward, the
-echo of its own `setParams`; `createBridgeHost` sends only what the
-frame hasn't seen). Shown by a lens (which owns its page) these answer
-`INVALID`. A component keeps no view state of its own: `check` warns
+`setActions` are a custom page's, and — protocol 7, each kind of page
+state by the name of its scope — `{ id, method: setViewParams, params }`
+(string values, null drops one: its tab entry's view, replaced —
+`CustomPageView` passes them to `PageNavigation.setViewParams`; a
+component has no selection role, so it never pushes, and going somewhere
+is `navigate`) and `{ id, method: setHistoryState, patch }` (this step of
+its tab). The host posts `{ type: viewParams, params }` and `{ type:
+historyState, state }` when the entry's change (Back, Forward, an echo;
+`createBridgeHost` sends only what the frame hasn't seen); `init.page`
+carries both. Shown by a lens (which owns its page) these answer
+`INVALID`. Any component, page or not, has **page memory**: `{ id,
+method: pageMemoryGet, key }` and `{ id, method: pageMemorySet, key,
+value }` (null forgets), scope `component:<ext>/<id>` in `ui_preference`
+— for the person, in every tab of it; a value over 64 KB or a component
+over 1 MB is refused `INVALID` (`componentMemoryProblem`, before the
+write). A component keeps no view state of its own: `check` warns
 (`bundle_warnings`) at a bundle script that uses `localStorage` or
 `sessionStorage`;
 replies `{ id, ok, result |

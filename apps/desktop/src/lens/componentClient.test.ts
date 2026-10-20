@@ -203,7 +203,7 @@ function pageHarness(deps: Partial<BridgeDeps> = {}) {
     null,
   );
   const frame = new EventTarget();
-  const page = { params: { from: "2026-10-01" }, streamId: "str1", threadId: null };
+  const page = { viewParams: { from: "2026-10-01" }, historyState: { scroll: 3 }, streamId: "str1", threadId: null };
   const init = () =>
     frame.dispatchEvent(Object.assign(new Event("message"), { data: initMessage(null, {}, page), ports: [channel.port2] }));
   return { frame, init, host, titles, close: () => channel.port1.close() };
@@ -215,7 +215,9 @@ test("a page's component gets its page, runs its own SQL, opens a form and sets 
   h.init();
   const c = await connecting;
   expect(c.run).toBeNull();
-  expect(c.page).toEqual({ params: { from: "2026-10-01" }, streamId: "str1", threadId: null });
+  expect(c.page).toEqual({ streamId: "str1", threadId: null });
+  expect(c.viewParams).toEqual({ from: "2026-10-01" });
+  expect(c.historyState).toEqual({ scroll: 3 });
   expect(await c.querySql("SELECT ?1", [3])).toEqual({ columns: ["sql", "n"], rows: [["SELECT ?1", 3]], truncated: false });
   expect(await c.openForm("acme.item.create", { title: "x" })).toEqual({ made: true });
   await c.setTitle("October");
@@ -224,24 +226,47 @@ test("a page's component gets its page, runs its own SQL, opens a form and sets 
   h.close();
 });
 
-test("a page's component sets its params, and hears them when they change", async () => {
-  const set: unknown[] = [];
-  const h = pageHarness({ setParams: (p) => set.push(p) });
+test("a page's component sets its view params and history state, and hears them change", async () => {
+  const views: unknown[] = [];
+  const states: unknown[] = [];
+  const h = pageHarness({ setViewParams: (p) => views.push(p), setHistoryState: (p) => states.push(p) });
   const connecting = connect({ target: h.frame });
   h.init();
   const c = await connecting;
-  await c.setParams({ from: "2026-10-08", to: null });
-  expect(set).toEqual([{ from: "2026-10-08", to: null }]);
-  const heard: unknown[] = [];
-  const stop = c.onParams((p: unknown) => heard.push(p));
-  h.host.params({ from: "2026-10-15" });
+  await c.setViewParams({ from: "2026-10-08", to: null });
+  await c.setHistoryState({ scroll: 90 });
+  expect(views).toEqual([{ from: "2026-10-08", to: null }]);
+  expect(states).toEqual([{ scroll: 90 }]);
+  const heardViews: unknown[] = [];
+  const heardStates: unknown[] = [];
+  const stopViews = c.onViewParams((p: unknown) => heardViews.push(p));
+  c.onHistoryState((s: unknown) => heardStates.push(s));
+  h.host.viewParams({ from: "2026-10-15" });
+  h.host.historyState({ scroll: 5 });
   await settle();
-  expect(heard).toEqual([{ from: "2026-10-15" }]);
-  expect(c.page.params).toEqual({ from: "2026-10-15" });
-  stop();
-  h.host.params({ from: "2026-10-22" });
+  expect(heardViews).toEqual([{ from: "2026-10-15" }]);
+  expect(heardStates).toEqual([{ scroll: 5 }]);
+  expect(c.viewParams).toEqual({ from: "2026-10-15" });
+  expect(c.historyState).toEqual({ scroll: 5 });
+  stopViews();
+  h.host.viewParams({ from: "2026-10-22" });
   await settle();
-  expect(heard).toHaveLength(1);
+  expect(heardViews).toHaveLength(1);
+  h.close();
+});
+
+test("a component's page memory reads and writes through the host", async () => {
+  const kept = new Map<string, unknown>();
+  const h = pageHarness({
+    pageMemoryGet: async (key) => kept.get(key) ?? null,
+    pageMemorySet: (key, value) => void kept.set(key, value),
+  });
+  const connecting = connect({ target: h.frame });
+  h.init();
+  const c = await connecting;
+  expect(await c.pageMemory.get("layout")).toBeNull();
+  await c.pageMemory.set("layout", { cols: 3 });
+  expect(await c.pageMemory.get("layout")).toEqual({ cols: 3 });
   h.close();
 });
 

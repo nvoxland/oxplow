@@ -86,8 +86,10 @@ the open page sees the same values. So:
   column `select`s is the selection (Back un-selects it); every other
   param is a filter (no history entry per change).
 - **Never keep view state anywhere else.** A custom component sets its
-  page's params with `component.setParams({ k: v })` and draws from
-  `component.onParams(cb)`; it never uses `localStorage` or
+  page's view params with `component.setViewParams({ k: v })` and draws
+  from `component.onViewParams(cb)`; this step's own memory with
+  `setHistoryState` / `onHistoryState`; its own memory for the person,
+  in every tab, with `component.pageMemory.get/set`. It never uses `localStorage` or
   `sessionStorage` (`check` warns). What only that page's entry needs
   to remember (scroll, open sections) oxplow keeps for the kit's
   components already.

@@ -81,12 +81,27 @@ export interface OxplowComponent {
   setActions(actions: OxplowAction[]): Promise<null>;
   /** Hear each press of a page action, by id; returns how to stop. */
   onAction(listener: (id: string) => void): () => void;
-  /** Change the page's view: these params (null drops one) go into its
-   *  tab, so Back, a bookmark and a reopened tab keep them. A page only. */
-  setParams(params: Record<string, string | null>): Promise<null>;
-  /** Hear the page's params each time they change (Back, Forward, a
-   *  `setParams`); returns how to stop. */
-  onParams(listener: (params: Record<string, string>) => void): () => void;
+  /** **View params** — its tab's address: what the page shows. A page
+   *  only; null when a lens shows it. */
+  readonly viewParams: Record<string, string> | null;
+  /** Change its view params (null drops one): its tab's entry is replaced,
+   *  so Back, a bookmark and a reopened tab keep them. A page only. */
+  setViewParams(params: Record<string, string | null>): Promise<null>;
+  /** Hear its view params each time they change; returns how to stop. */
+  onViewParams(listener: (params: Record<string, string>) => void): () => void;
+  /** **History state** — this step of its tab's history (scroll, what's
+   *  expanded, a draft). A page only; null when a lens shows it. */
+  readonly historyState: Record<string, unknown> | null;
+  /** Merge `patch` into its history state. A page only. */
+  setHistoryState(patch: Record<string, unknown>): Promise<null>;
+  /** Hear its history state each time it changes; returns how to stop. */
+  onHistoryState(listener: (state: Record<string, unknown>) => void): () => void;
+  /** **Page memory** — the component's own, for the person, in every tab
+   *  of it. Values are JSON: 64 KB each, 1 MB a component. */
+  readonly pageMemory: {
+    get(key: string): Promise<unknown>;
+    set(key: string, value: unknown): Promise<null>;
+  };
   /** Set each theme token, and the host's `color-scheme`, on the
    *  document's root, where the kit's stylesheet
    *  (`/component-lib/oxplow-kit.css`) reads them. Without the

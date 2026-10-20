@@ -21,10 +21,19 @@
 // its params, stream and thread, and it reads with `querySql` (when it
 // declares `sql: read`), titles its page with `setTitle`, puts actions in
 // the page's bar with `setActions` and hears them with `onAction`, and
-// opens a command's form in oxplow with `openForm`. Its params are its
-// view, kept in its tab: change them with `setParams` (never keep view
-// state yourself — a frame has no storage) and draw from what `onParams`
-// says, which Back and Forward change too.
+// opens a command's form in oxplow with `openForm`.
+//
+// A component keeps no state of its own (a frame has no storage); oxplow
+// keeps each kind, named by its scope:
+//   - view params — the page's tab's address: what it shows. Shareable:
+//     Back, a bookmark and an agent see them. `viewParams`,
+//     `setViewParams`, `onViewParams`. A page only.
+//   - history state — this step of the tab's history: scroll, what's
+//     expanded, a draft. `historyState`, `setHistoryState`,
+//     `onHistoryState`. A page only.
+//   - page memory — the component's own, for the person, in every tab of
+//     it: a layout, a last choice. `pageMemory.get` / `pageMemory.set`
+//     (JSON; 64 KB a value, 1 MB a component).
 //
 // For oxplow's look, link the kit's stylesheet too —
 //   <link rel="stylesheet" href="/component-lib/oxplow-kit.css">
@@ -37,7 +46,7 @@
   "use strict";
 
   // The protocol this library speaks; `init` says which one the host does.
-  const PROTOCOL = 6;
+  const PROTOCOL = 7;
 
   function component(port, init) {
     let next = 0;
@@ -45,8 +54,12 @@
     const pending = new Map();
     const listeners = new Set();
     const actionListeners = new Set();
-    const paramsListeners = new Set();
-    const page = init.page === undefined ? null : init.page;
+    const viewListeners = new Set();
+    const stateListeners = new Set();
+    const initPage = init.page === undefined || init.page === null ? null : init.page;
+    let viewParams = initPage ? initPage.viewParams || {} : null;
+    let historyState = initPage ? initPage.historyState || {} : null;
+    const page = initPage ? { streamId: initPage.streamId, threadId: initPage.threadId } : null;
 
     port.onmessage = (event) => {
       const data = event.data;
@@ -60,9 +73,14 @@
         for (const listener of Array.from(actionListeners)) listener(data.id);
         return;
       }
-      if (data.type === "params") {
-        if (page) page.params = data.params;
-        for (const listener of Array.from(paramsListeners)) listener(data.params);
+      if (data.type === "viewParams") {
+        viewParams = data.params;
+        for (const listener of Array.from(viewListeners)) listener(viewParams);
+        return;
+      }
+      if (data.type === "historyState") {
+        historyState = data.state;
+        for (const listener of Array.from(stateListeners)) listener(historyState);
         return;
       }
       const waiting = pending.get(data.id);
@@ -88,9 +106,17 @@
       get run() {
         return run;
       },
-      // The page it is — `{ params, streamId, threadId }` — or null when a
-      // lens shows it.
+      // The page it is — `{ streamId, threadId }` — or null when a lens
+      // shows it.
       page,
+      // Its view params (a page only; null when a lens shows it).
+      get viewParams() {
+        return viewParams;
+      },
+      // Its history state (a page only; null when a lens shows it).
+      get historyState() {
+        return historyState;
+      },
       // The lens's `custom.props`, or null.
       props: init.props === undefined ? null : init.props,
       // The theme's CSS variables, by name (`--text-primary`).
@@ -124,17 +150,34 @@
       // The page's actions — `[{ id, label, primary?, disabled? }]` — drawn
       // by oxplow in the page's bar. A page only.
       setActions: (actions) => call({ method: "setActions", actions }),
-      // Change the page's view: these params (a value null drops one) go
-      // into its tab, so Back, a bookmark and a reopened tab keep them.
+      // Change the page's view params (a value null drops one): its tab's
+      // entry is replaced, so Back, a bookmark and a reopened tab keep them.
       // A page only.
-      setParams: (params) => call({ method: "setParams", params }),
-      // Hear the page's params each time they change (Back, Forward, a
-      // setParams); returns how to stop.
-      onParams(listener) {
-        paramsListeners.add(listener);
+      setViewParams: (params) => call({ method: "setViewParams", params }),
+      // Hear its view params each time they change (Back, Forward, an echo
+      // of setViewParams); returns how to stop.
+      onViewParams(listener) {
+        viewListeners.add(listener);
         return () => {
-          paramsListeners.delete(listener);
+          viewListeners.delete(listener);
         };
+      },
+      // Merge `patch` into its history state. A page only.
+      setHistoryState: (patch) => call({ method: "setHistoryState", patch }),
+      // Hear its history state each time it changes (Back, Forward);
+      // returns how to stop.
+      onHistoryState(listener) {
+        stateListeners.add(listener);
+        return () => {
+          stateListeners.delete(listener);
+        };
+      },
+      // Its page memory: the component's own, for the person, in every tab.
+      pageMemory: {
+        // Resolves its value, or null.
+        get: (key) => call({ method: "pageMemoryGet", key }),
+        // Keep `value` (JSON); null forgets it.
+        set: (key, value) => call({ method: "pageMemorySet", key, value: value === undefined ? null : value }),
       },
       // Hear each press of a page action, by its id; returns how to stop.
       onAction(listener) {

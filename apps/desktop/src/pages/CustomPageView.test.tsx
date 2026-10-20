@@ -79,7 +79,7 @@ async function startFrame(view: ReturnType<typeof render>) {
   return { init: init as Record<string, unknown>, port: port! as MessagePort, received };
 }
 
-test("a component page mounts a marked frame under the declared title, with the page's params", async () => {
+test("a component page mounts a marked frame under the declared title, with its view params and history state", async () => {
   const { view, titles } = setup();
   const { init } = await startFrame(view);
   expect(loads).toEqual(["acme/board"]);
@@ -87,7 +87,7 @@ test("a component page mounts a marked frame under the declared title, with the 
   expect(view.getByTestId("custom-component-badge").textContent).toBe("custom");
   expect(titles[titles.length - 1]).toBe("Board");
   expect(init.run).toBeNull();
-  expect(init.page).toEqual({ params: { a: "1" }, streamId: null, threadId: "thr1" });
+  expect(init.page).toEqual({ viewParams: { a: "1" }, historyState: {}, streamId: null, threadId: "thr1" });
 });
 
 test("the frame's setTitle changes the page's title", async () => {

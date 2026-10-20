@@ -22,6 +22,7 @@ import {
   type FrameAction,
   type PageInit,
 } from "./componentBridge.js";
+import { componentMemoryProblem, useRememberedStore } from "../prefs/remembered.js";
 
 export type BridgeHost = ReturnType<typeof createBridgeHost>;
 
@@ -31,7 +32,8 @@ export interface PageDeps {
   setActions(actions: FrameAction[]): void;
   openForm(command: string, input: unknown, version: string): Promise<{ result: unknown } | null>;
   /** Change the page's view (its tab entry's params; null drops one). */
-  setParams(params: Record<string, string | null>): void;
+  setViewParams(params: Record<string, string | null>): void;
+  setHistoryState(patch: Record<string, unknown>): void;
 }
 
 /** The bundle a component's frame runs, loaded for `componentKey` (from
@@ -134,13 +136,23 @@ export function ComponentFrame({
     if (run) hostRef.current?.update(run);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run]);
-  // A page's params changed (Back, Forward, its own setParams echoed): the
-  // frame hears them as `params`.
-  const paramsKey = page ? JSON.stringify(page.params) : null;
+  // A page's view params or history state changed (Back, Forward, an
+  // echo of its own set): the frame hears them.
+  const viewKey = page ? JSON.stringify(page.viewParams) : null;
   useEffect(() => {
-    if (page) hostRef.current?.params(page.params);
+    if (page) hostRef.current?.viewParams(page.viewParams);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paramsKey]);
+  }, [viewKey]);
+  const stateKey = page ? JSON.stringify(page.historyState) : null;
+  useEffect(() => {
+    if (page) hostRef.current?.historyState(page.historyState);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stateKey]);
+  // Its page memory: the component's own, for the person, every tab of it.
+  const memory = useRememberedStore();
+  const memoryRef = useRef(memory);
+  memoryRef.current = memory;
+  const memoryScope = `component:${component}`;
   useEffect(() => () => hostRef.current?.close(), []);
 
   const onLoad = () => {
@@ -186,13 +198,23 @@ export function ComponentFrame({
           return true;
         },
         querySql: (sql, params) => runComponentSql(component, sql, params, streamId, version),
+        pageMemoryGet: async (key) => {
+          await memoryRef.current.ready;
+          return memoryRef.current.get(memoryScope, key) ?? null;
+        },
+        pageMemorySet: (key, value) => {
+          const problem = componentMemoryProblem(memoryRef.current, memoryScope, key, value);
+          if (problem) throw Object.assign(new Error(problem), { code: "INVALID" });
+          memoryRef.current.set(memoryScope, key, value === null ? undefined : value);
+        },
         ...(pageDeps
           ? {
               setTitle: (t: string) => pageDepsRef.current?.setTitle(t),
               setActions: (a: FrameAction[]) => pageDepsRef.current?.setActions(a),
               openForm: (command: string, input: unknown) =>
                 pageDepsRef.current ? pageDepsRef.current.openForm(command, input, version) : Promise.resolve(null),
-              setParams: (params: Record<string, string | null>) => pageDepsRef.current?.setParams(params),
+              setViewParams: (params: Record<string, string | null>) => pageDepsRef.current?.setViewParams(params),
+              setHistoryState: (patch: Record<string, unknown>) => pageDepsRef.current?.setHistoryState(patch),
             }
           : {}),
         confirm: (command) => new Promise<boolean>((answer) => setAsking({ command, answer })),
@@ -204,7 +226,7 @@ export function ComponentFrame({
         },
       },
       initial,
-      page?.params ?? null,
+      page ?? null,
     );
     const tokens = tokensFromStyle(getComputedStyle(document.documentElement));
     // An opaque-origin frame can only be addressed with "*"; the port goes

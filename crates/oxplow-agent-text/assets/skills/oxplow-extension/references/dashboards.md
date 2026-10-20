@@ -176,8 +176,11 @@ only, `?1` params), titles the page with `setTitle`, puts its actions in
 oxplow's bar with `setActions([{ id, label, primary? }])` and hears them
 with `onAction`, and opens a declared command's form in oxplow with
 `openForm(command, input)`. Its view (a range, a search, what is picked)
-is its page's params: change them with `setParams({ k: v })` (null drops
-one) and draw from `onParams(cb)` — oxplow keeps them in the tab, so Back,
+is its page's **view params**: change them with `setViewParams({ k: v })`
+(null drops one) and draw from `onViewParams(cb)`; this step's scroll or
+what's expanded is its **history state** (`setHistoryState`,
+`onHistoryState`); its own memory for the person, in every tab, is
+`pageMemory.get/set`. oxplow keeps them, so Back,
 a bookmark and a reopened tab keep them. Never use `localStorage` or
 `sessionStorage` for it; `check` warns. Don't draw page-level buttons
 inside the frame: the bar is oxplow's. `extensions/oxplow-foundation/src/timeline/`

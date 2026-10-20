@@ -13,11 +13,15 @@
 ///                 { id, method: "openForm", command, input } a declared command's form, in the host
 ///                 { id, method: "setTitle", title }          a page's title (a page only)
 ///                 { id, method: "setActions", actions }      a page's actions (a page only)
-///                 { id, method: "setParams", params }        a page's view changed (a page only)
+///                 { id, method: "setViewParams", params }    a page's view params (a page only)
+///                 { id, method: "setHistoryState", patch }   this step of its tab (a page only)
+///                 { id, method: "pageMemoryGet", key }       its own memory, for the person
+///                 { id, method: "pageMemorySet", key, value } (null forgets it)
 ///   host → frame  { type: "init", protocol, run, props, page, tokens }
 ///                 { type: "update", run }                    the lens re-ran
 ///                 { type: "action", id }                     a page action was pressed
-///                 { type: "params", params }                 a page's params changed (Back, Forward)
+///                 { type: "viewParams", params }             its view params changed (Back, Forward)
+///                 { type: "historyState", state }            its history state changed (Back, Forward)
 ///                 { id, ok: true, result } | { id, ok: false, error: { code, message, field? } }
 ///
 /// Shown by a lens, `init` carries the lens's run and `page` is null; shown
@@ -40,9 +44,13 @@ import type { CommandOutcome, LensRun, SqlCell, SqlQueryResult } from "../tauri-
 /// names one (`INVALID`), so a component's form marks that field.
 /// 5: a component can be a page — `init.page`, a null `run` — and asks
 /// `querySql`, `openForm`, `setTitle`, `setActions`; the host sends
-/// `action`. 6: a page's params are its tab entry's view: it sets them
-/// (`setParams`, a value null to drop one) and hears them (`params`).
-export const BRIDGE_PROTOCOL = 6;
+/// `action`. 6: a page's params are its tab entry's view (`setParams`,
+/// `params`). 7: each kind of page state by the name of its scope —
+/// **view params** (`page.viewParams`, `setViewParams`, `viewParams`),
+/// **history state** (`page.historyState`, `setHistoryState`,
+/// `historyState`) and **page memory** (`pageMemoryGet`, `pageMemorySet`:
+/// the component's own, for the person, every tab of it).
+export const BRIDGE_PROTOCOL = 7;
 
 /** A page action a component declares; core draws it in the nav bar. */
 export interface FrameAction {
@@ -54,7 +62,10 @@ export interface FrameAction {
 
 /** What a component shown as a page is told about it. */
 export interface PageInit {
-  params: Record<string, string>;
+  /** Its tab's address: what the page shows. */
+  viewParams: Record<string, string>;
+  /** This step of its tab's history: what it kept there. */
+  historyState: Record<string, unknown>;
   streamId: string | null;
   threadId: string | null;
 }
@@ -67,7 +78,10 @@ export type BridgeRequest =
   | { id: string; method: "openForm"; command: string; input: unknown }
   | { id: string; method: "setTitle"; title: string }
   | { id: string; method: "setActions"; actions: FrameAction[] }
-  | { id: string; method: "setParams"; params: Record<string, string | null> };
+  | { id: string; method: "setViewParams"; params: Record<string, string | null> }
+  | { id: string; method: "setHistoryState"; patch: Record<string, unknown> }
+  | { id: string; method: "pageMemoryGet"; key: string }
+  | { id: string; method: "pageMemorySet"; key: string; value: unknown };
 
 export type FrameMessage = { type: "ready" } | { type: "request"; request: BridgeRequest };
 
@@ -115,12 +129,23 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
       }
       return { type: "request", request: { id: m.id, method: "setActions", actions } };
     }
-    case "setParams": {
+    case "setViewParams": {
       const params = m.params;
       if (!params || typeof params !== "object" || Array.isArray(params)) return null;
       if (!Object.values(params).every((v) => v === null || typeof v === "string")) return null;
-      return { type: "request", request: { id: m.id, method: "setParams", params: params as Record<string, string | null> } };
+      return { type: "request", request: { id: m.id, method: "setViewParams", params: params as Record<string, string | null> } };
     }
+    case "setHistoryState": {
+      const patch = m.patch;
+      if (!patch || typeof patch !== "object" || Array.isArray(patch)) return null;
+      return { type: "request", request: { id: m.id, method: "setHistoryState", patch: patch as Record<string, unknown> } };
+    }
+    case "pageMemoryGet":
+      if (typeof m.key !== "string" || !m.key) return null;
+      return { type: "request", request: { id: m.id, method: "pageMemoryGet", key: m.key } };
+    case "pageMemorySet":
+      if (typeof m.key !== "string" || !m.key) return null;
+      return { type: "request", request: { id: m.id, method: "pageMemorySet", key: m.key, value: m.value ?? null } };
     default:
       return null;
   }
@@ -187,9 +212,16 @@ export interface BridgeDeps {
   setTitle?(title: string): void;
   /** The page's actions, drawn by core in the nav bar. A page only. */
   setActions?(actions: FrameAction[]): void;
-  /** Change the page's view: these params (null drops one) go into its
-   *  tab entry, replacing it. A page only. */
-  setParams?(params: Record<string, string | null>): void;
+  /** Change the page's view params (null drops one): its tab's entry is
+   *  replaced. A page only. */
+  setViewParams?(params: Record<string, string | null>): void;
+  /** Merge `patch` into its history state. A page only. */
+  setHistoryState?(patch: Record<string, unknown>): void;
+  /** Its page memory's `key`; null when none is kept. */
+  pageMemoryGet?(key: string): Promise<unknown>;
+  /** Keep `value` (JSON) as its page memory's `key`, null forgetting it;
+   *  throws `{ code: "INVALID" }` past the size caps. */
+  pageMemorySet?(key: string, value: unknown): void;
 }
 
 /** Why an invoke was refused (`DENIED`: the component isn't approved, or a
@@ -212,20 +244,27 @@ export function componentMayOpen(ref: string): boolean {
 const shown = (run: LensRun | null) => (run ? JSON.stringify([run.params, run.result]) : "");
 
 /** What a component shown by a lens may not do: the lens owns the page. */
-const PAGE_ONLY = "A lens shows this component: only a component shown as a page sets its title, actions, forms or params.";
+const PAGE_ONLY = "A lens shows this component: only a component shown as a page sets its title, actions, forms, view params or history state.";
 
 /** Answer the frame's requests arriving on `port`. `sent` is the run the
- *  `init` message carried and `sentParams` a page's params in it;
- *  `update` and `params` post only what the frame hasn't seen, and
- *  `ready` is heard once. */
+ *  `init` message carried and `sentPage` the page it told; `update`,
+ *  `viewParams` and `historyState` post only what the frame hasn't seen,
+ *  and `ready` is heard once. */
 export function createBridgeHost(
   port: MessagePort,
   deps: BridgeDeps,
   sent: LensRun | null,
-  sentParams: Record<string, string> | null = null,
-): { update(run: LensRun): void; params(params: Record<string, string>): void; action(id: string): void; close(): void } {
+  sentPage: PageInit | null = null,
+): {
+  update(run: LensRun): void;
+  viewParams(params: Record<string, string>): void;
+  historyState(state: Record<string, unknown>): void;
+  action(id: string): void;
+  close(): void;
+} {
   let last = shown(sent);
-  let lastParams = sentParams ? JSON.stringify(sentParams) : null;
+  let lastView = sentPage ? JSON.stringify(sentPage.viewParams) : null;
+  let lastState = sentPage ? JSON.stringify(sentPage.historyState) : null;
   let ready = false;
   const reply = (id: string, result: unknown) => port.postMessage({ id, ok: true, result });
   const fail = (id: string, code: string, message: string, field: string | null = null) =>
@@ -295,10 +334,31 @@ export function createBridgeHost(
         if (!deps.setActions) return fail(r.id, "INVALID", PAGE_ONLY);
         deps.setActions(r.actions);
         return reply(r.id, null);
-      case "setParams":
-        if (!deps.setParams) return fail(r.id, "INVALID", PAGE_ONLY);
-        deps.setParams(r.params);
+      case "setViewParams":
+        if (!deps.setViewParams) return fail(r.id, "INVALID", PAGE_ONLY);
+        deps.setViewParams(r.params);
         return reply(r.id, null);
+      case "setHistoryState":
+        if (!deps.setHistoryState) return fail(r.id, "INVALID", PAGE_ONLY);
+        deps.setHistoryState(r.patch);
+        return reply(r.id, null);
+      case "pageMemoryGet":
+        if (!deps.pageMemoryGet) return fail(r.id, "INVALID", "This host keeps no page memory.");
+        try {
+          reply(r.id, (await deps.pageMemoryGet(r.key)) ?? null);
+        } catch (e) {
+          failWith(r.id, e);
+        }
+        return;
+      case "pageMemorySet":
+        if (!deps.pageMemorySet) return fail(r.id, "INVALID", "This host keeps no page memory.");
+        try {
+          deps.pageMemorySet(r.key, r.value);
+          reply(r.id, null);
+        } catch (e) {
+          failWith(r.id, e);
+        }
+        return;
     }
   };
   port.onmessage = (e: MessageEvent) => {
@@ -319,11 +379,17 @@ export function createBridgeHost(
       last = key;
       port.postMessage({ type: "update", run });
     },
-    params: (params) => {
+    viewParams: (params) => {
       const key = JSON.stringify(params);
-      if (key === lastParams) return;
-      lastParams = key;
-      port.postMessage({ type: "params", params });
+      if (key === lastView) return;
+      lastView = key;
+      port.postMessage({ type: "viewParams", params });
+    },
+    historyState: (state) => {
+      const key = JSON.stringify(state);
+      if (key === lastState) return;
+      lastState = key;
+      port.postMessage({ type: "historyState", state });
     },
     action: (id) => port.postMessage({ type: "action", id }),
     close: () => port.close(),

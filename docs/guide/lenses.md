@@ -499,13 +499,17 @@ actions in the bar and opens a command's form in oxplow:
 oxplow.connect().then(async (component) => {
   component.applyTheme();
   const { rows } = await component.querySql(
-    "SELECT ref, title FROM v_effort WHERE started_at >= ?1", [component.page.params.from]);
-  await component.setTitle(`Efforts since ${component.page.params.from}`);
+    "SELECT ref, title FROM v_effort WHERE started_at >= ?1", [component.viewParams.from]);
+  await component.setTitle(`Efforts since ${component.viewParams.from}`);
   await component.setActions([{ id: "refresh", label: "Refresh", primary: true }]);
   component.onAction((id) => { if (id === "refresh") location.reload(); });
-  // Its view lives in its tab, so Back and a bookmark keep it:
-  //   await component.setParams({ from: "2026-10-01" });
-  //   component.onParams((params) => draw(params));
+  // Its view params live in its tab, so Back and a bookmark keep them:
+  //   await component.setViewParams({ from: "2026-10-01" });
+  //   component.onViewParams((params) => draw(params));
+  // This step's own memory (scroll, what's open), back with Back:
+  //   await component.setHistoryState({ scroll: 120 });
+  // Its own memory for you, in every tab:
+  //   await component.pageMemory.set("columns", ["title", "state"]);
   // A form oxplow shows; resolves with the result, or rejects CANCELLED:
   //   await component.openForm("oxplow.work_item.create", { title: "" })
 });
@@ -513,11 +517,14 @@ oxplow.connect().then(async (component) => {
 
 `querySql` needs `sql: read` on the component and `permissions: { sql:
 read }` on the extension; it reads oxplow's models only, never writes.
-`setTitle`, `setActions`, `openForm` and `setParams` are a page's: a
-component a lens shows can't use them (the lens owns its page). Keep a
-page's view (a range, a search, what is selected) in its params with
-`setParams`, not in browser storage: oxplow keeps params in the tab, so
-Back, a bookmark and a reopened tab show the page the same way.
+`setTitle`, `setActions`, `openForm`, `setViewParams` and
+`setHistoryState` are a page's: a component a lens shows can't use them
+(the lens owns its page). Each kind of state has a name that says how far
+it reaches: **view params** (the tab's address: what the page shows, kept
+by Back, a bookmark and a reopened tab, seen by an agent), **history
+state** (this step of the tab: scroll, what's expanded) and **page
+memory** (yours, in every tab of the component; JSON, 64 KB a value and
+1 MB a component). Never browser storage: a component's frame has none.
 `oxplow extension check` warns when a component's script uses
 `localStorage` or `sessionStorage`. A component written in
 TypeScript or with a library declares a `build:` ("Extensions" → "Builds"),

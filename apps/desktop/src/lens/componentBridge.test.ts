@@ -69,11 +69,11 @@ test("theme tokens carry the root's color-scheme, so the frame paints no opaque 
 // bundle links from the daemon. Dropping `kitCss` made the protocol 2;
 // `navigate`'s `newTab` made it 3; an error's `field`, 4; a component as a
 // page (`page`, a null `run`) and the calls a page makes, 5.
-test("init carries the run, props and tokens, at protocol 6", () => {
+test("init carries the run, props and tokens, at protocol 7", () => {
   const r = { lens: { id: "x/b", custom: { component: "b", props: { a: 1 } } }, params: {}, result: { columns: [], rows: [], truncated: false } } as unknown as LensRun;
   expect(initMessage(r, { "--accent": "#08f" })).toEqual({
     type: "init",
-    protocol: 6,
+    protocol: 7,
     run: r,
     props: { a: 1 },
     page: null,
@@ -82,8 +82,8 @@ test("init carries the run, props and tokens, at protocol 6", () => {
 });
 
 test("a component shown as a page gets its page and no run", () => {
-  const page = { params: { from: "2026-10-01" }, streamId: "str1", threadId: "thr2" };
-  expect(initMessage(null, {}, page)).toEqual({ type: "init", protocol: 6, run: null, props: null, page, tokens: {} });
+  const page = { viewParams: { from: "2026-10-01" }, historyState: { scroll: 3 }, streamId: "str1", threadId: "thr2" };
+  expect(initMessage(null, {}, page)).toEqual({ type: "init", protocol: 7, run: null, props: null, page, tokens: {} });
 });
 
 test("a page's calls parse: setTitle, setActions, openForm and querySql", () => {
@@ -254,37 +254,78 @@ test("a page's title and actions reach the host, and a press reaches the frame",
   h.channel.port1.close();
 });
 
-// A page's view is its params, in its tab's entry: the component sets
-// them through the host (a filter: the entry is replaced) and hears them
-// when Back or Forward changes them.
-test("a page sets its params through the host, and hears them change", async () => {
-  const set: unknown[] = [];
-  const h = harness({ setParams: (p) => set.push(p) });
-  h.send({ id: "p", method: "setParams", params: { from: "2026-10-01", to: null } });
-  h.send({ id: "q", method: "setParams", params: { from: 3 } });
+// Each kind of page state by the name of its scope: a page's view params
+// (its tab's address) and its history state (this step of its tab), set
+// through the host and heard when Back or Forward changes them.
+test("a page sets its view params and history state through the host, and hears them change", async () => {
+  const views: unknown[] = [];
+  const states: unknown[] = [];
+  const h = harness({ setViewParams: (p) => views.push(p), setHistoryState: (p) => states.push(p) });
+  h.send({ id: "p", method: "setViewParams", params: { from: "2026-10-01", to: null } });
+  h.send({ id: "q", method: "setViewParams", params: { from: 3 } });
+  h.send({ id: "s", method: "setHistoryState", patch: { scroll: 40, open: ["a"] } });
+  h.send({ id: "t", method: "setHistoryState", patch: [1] });
   await h.settle();
-  expect(set).toEqual([{ from: "2026-10-01", to: null }]);
-  expect(h.received[0]).toEqual({ id: "p", ok: true, result: null });
-  expect((h.received[1] as { error: { code: string } }).error.code).toBe("BAD_REQUEST");
-  h.host.params({ from: "2026-10-01" });
-  h.host.params({ from: "2026-10-01" });
-  h.host.params({ from: "2026-10-08" });
+  expect(views).toEqual([{ from: "2026-10-01", to: null }]);
+  expect(states).toEqual([{ scroll: 40, open: ["a"] }]);
+  expect(h.received.map((m) => {
+    const r = m as { ok: boolean; error?: { code: string } };
+    return r.ok ? true : r.error!.code;
+  })).toEqual([
+    true,
+    "BAD_REQUEST",
+    true,
+    "BAD_REQUEST",
+  ]);
+  h.received.length = 0;
+  h.host.viewParams({ from: "2026-10-01" });
+  h.host.viewParams({ from: "2026-10-01" });
+  h.host.viewParams({ from: "2026-10-08" });
+  h.host.historyState({ scroll: 40 });
+  h.host.historyState({ scroll: 40 });
   await h.settle();
-  expect(h.received.slice(2)).toEqual([
-    { type: "params", params: { from: "2026-10-01" } },
-    { type: "params", params: { from: "2026-10-08" } },
+  expect(h.received).toEqual([
+    { type: "viewParams", params: { from: "2026-10-01" } },
+    { type: "viewParams", params: { from: "2026-10-08" } },
+    { type: "historyState", state: { scroll: 40 } },
   ]);
   h.channel.port1.close();
 });
 
-test("shown by a lens, a component sets no page title, actions, form or params", async () => {
+// Page memory is the component's own, for the person, in every tab of it.
+test("a component reads and writes its page memory through the host; a refused write says why", async () => {
+  const kept = new Map<string, unknown>([["layout", { cols: 3 }]]);
+  const h = harness({
+    pageMemoryGet: async (key) => kept.get(key) ?? null,
+    pageMemorySet: (key, value) => {
+      if (JSON.stringify(value).length > 10) throw Object.assign(new Error("too big"), { code: "INVALID" });
+      kept.set(key, value);
+    },
+  });
+  h.send({ id: "g", method: "pageMemoryGet", key: "layout" });
+  h.send({ id: "s", method: "pageMemorySet", key: "n", value: 2 });
+  h.send({ id: "b", method: "pageMemorySet", key: "n", value: "far too long a value" });
+  h.send({ id: "x", method: "pageMemoryGet", key: "" });
+  await h.settle();
+  expect(h.received).toEqual([
+    { id: "g", ok: true, result: { cols: 3 } },
+    { id: "s", ok: true, result: null },
+    { id: "b", ok: false, error: { code: "INVALID", message: "too big" } },
+    { id: "x", ok: false, error: { code: "BAD_REQUEST", message: "Not a request this host knows." } },
+  ]);
+  expect(kept.get("n")).toBe(2);
+  h.channel.port1.close();
+});
+
+test("shown by a lens, a component sets no page title, actions, form, view params or history state", async () => {
   const h = harness();
   h.send({ id: "t", method: "setTitle", title: "Oct" });
   h.send({ id: "a", method: "setActions", actions: [] });
   h.send({ id: "f", method: "openForm", command: "x.y.z" });
-  h.send({ id: "p", method: "setParams", params: {} });
+  h.send({ id: "p", method: "setViewParams", params: {} });
+  h.send({ id: "s", method: "setHistoryState", patch: {} });
   await h.settle();
-  expect(h.received.map((m) => (m as { error?: { code: string } }).error?.code)).toEqual(["INVALID", "INVALID", "INVALID", "INVALID"]);
+  expect(h.received.map((m) => (m as { error?: { code: string } }).error?.code)).toEqual(["INVALID", "INVALID", "INVALID", "INVALID", "INVALID"]);
   h.channel.port1.close();
 });
 

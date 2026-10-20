@@ -41,6 +41,24 @@ export interface RememberedStore {
   subscribe(listener: () => void): () => void;
   /** Changes on every change: what `useSyncExternalStore` compares. */
   version(): number;
+  /** The bytes of JSON kept under `scope`, leaving out `except`'s. */
+  scopeBytes(scope: string, except?: string): number;
+}
+
+/** The most one value may be, in bytes of JSON (`ui_preference_store.rs`). */
+export const MAX_VALUE_BYTES = 64 * 1024;
+/** The most one component's memory may be, all its keys together. */
+export const MAX_COMPONENT_BYTES = 1024 * 1024;
+
+/** Why `value` can't be kept as `key` of a component's memory: past a size
+ *  cap. Null when it fits. */
+export function componentMemoryProblem(store: RememberedStore, scope: string, key: string, value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const bytes = JSON.stringify(value).length;
+  if (bytes > MAX_VALUE_BYTES) return `\`${key}\` is ${bytes} bytes; a value is ${MAX_VALUE_BYTES} at most`;
+  const total = store.scopeBytes(scope, key) + bytes;
+  if (total > MAX_COMPONENT_BYTES) return `this component would keep ${total} bytes; it keeps ${MAX_COMPONENT_BYTES} at most`;
+  return null;
 }
 
 const at = (scope: string, key: string) => `${scope}\u0000${key}`;
@@ -97,6 +115,14 @@ export function createRememberedStore(backend: RememberedBackend, debounceMs = 3
       };
     },
     version: () => version,
+    scopeBytes: (scope, except) => {
+      const prefix = `${scope}\u0000`;
+      let total = 0;
+      for (const [id, value] of values) {
+        if (id.startsWith(prefix) && id !== at(scope, except ?? "")) total += JSON.stringify(value).length;
+      }
+      return total;
+    },
   };
 }
 
