@@ -11,6 +11,7 @@ export { ActionButtons } from "./ActionButtons.js";
 export { DataTable, type DataColumn, type DataGroup, type DataTableProps, type RowProps } from "./DataTable.js";
 export { DocumentLayout, type DocSection } from "./DocumentLayout.js";
 export { Facts, type Fact } from "./Facts.js";
+export { ParamControl, type ParamControlProps } from "./ParamControls.js";
 export { Loading } from "./Loading.js";
 export { placeParts, type PartAt, type Placed } from "./placeParts.js";
 export { Section, type SectionProps } from "./Section.js";

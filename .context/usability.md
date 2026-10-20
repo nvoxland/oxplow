@@ -1039,3 +1039,11 @@ no caller may bypass the bus to write to the terminal.
 - **Don't fire `recordUsage`** for these gestures — adding to context
   isn't the same as opening the target; the recents list shouldn't
   reorder just because the user told the agent to look at something.
+
+## Lens params are drawn once
+
+A lens param is drawn by the kit's `ParamControl` (`src/kit/ParamControls.tsx`),
+one control per param type: text (Enter or blur applies, Escape reverts), choice,
+bool, search (applies after a 250 ms pause and at once on Enter; Escape clears),
+branch and date_range (presets from `kit/rangePresets.ts`, plus Custom… with two
+dates). `compact` is the toolbar look. A page never draws its own param input.
