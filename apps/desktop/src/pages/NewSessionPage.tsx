@@ -263,7 +263,7 @@ const STATUS_WORDS: Record<EarlierStatus, string> = {
   closed_here: "closed here",
   elsewhere: "from another thread",
   outside: "not started in oxplow",
-  open_elsewhere: "open in another thread (can't be opened here)",
+  open_elsewhere: "open in another thread",
 };
 
 /** A cell's value, or a dash when there's none to show. */
