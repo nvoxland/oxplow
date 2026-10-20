@@ -127,6 +127,12 @@ describe("replaceRef: a page changes its own view", () => {
     expect(tab.entries.map((x) => x.ref.id)).toEqual(["wiki:a", "lens:x/y?range=7d", "wiki:c"]);
   });
 
+  test("a selection's entry starts with the page's state, so open sections stay open", () => {
+    let s = open(emptySession(), e(lensRef("x/y"), { state: { collapsed: ["files"] } }));
+    s = replaceRef(s, s.active!, lensRef("x/y", { commit: "abc" }), { push: true });
+    expect(current(s.tabs[0]!).state).toEqual({ collapsed: ["files"] });
+  });
+
   test("a selection pushes: Back returns to the page without it", () => {
     let s = open(emptySession(), e(lensRef("x/y")));
     const slot = s.active!;

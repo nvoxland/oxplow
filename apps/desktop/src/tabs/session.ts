@@ -134,7 +134,12 @@ export function navigate(s: Session, slot: string, entry: Entry, opts: { replace
 export function replaceRef(s: Session, slot: string, ref: TabRef, opts: { push?: boolean } = {}): Session {
   const tab = s.tabs.find((t) => t.slot === slot);
   if (!tab || current(tab).ref.id === ref.id) return s;
-  if (opts.push) return navigate(s, slot, { ref, from: current(tab).from });
+  // A pick is the same page further on: it starts with the page's state
+  // (its open sections) and its origin.
+  if (opts.push) {
+    const now = current(tab);
+    return navigate(s, slot, { ref, ...(now.from ? { from: now.from } : {}), ...(now.state !== undefined ? { state: now.state } : {}) });
+  }
   return withTab(s, slot, (t) => {
     const entries = [...t.entries];
     entries[t.at] = { ...entries[t.at]!, ref };
