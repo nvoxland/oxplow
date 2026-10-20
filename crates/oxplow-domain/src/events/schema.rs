@@ -506,6 +506,8 @@ pub enum ActorKind {
     Human,
     Agent,
     Lens,
+    /// An extension's custom component, for whoever uses it.
+    Component,
     System,
     /// An extension's effect (P8.D8).
     Effect,
@@ -540,6 +542,11 @@ impl TryFrom<ActorKind> for ActorKindV2 {
                     "a job cannot emit a command proposal".into(),
                 ))
             }
+            ActorKind::Component => {
+                return Err(DomainError::Invalid(
+                    "a component cannot emit a command proposal: it acts for a person".into(),
+                ))
+            }
         })
     }
 }
@@ -554,10 +561,11 @@ pub enum CommandOutcome {
     Error,
 }
 
-/// Version 3 adds durable job attribution; earlier schemas stay frozen.
+/// Version 4 adds a custom component among the actors (v3, durable job
+/// attribution; V93 rewrote v3 events: each is a v4 one as is).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct CommandExecutedV3 {
+pub struct CommandExecutedV4 {
     /// The command's name (`oxplow.work_item.transition`, `oxplow.config.set`).
     pub command: String,
     pub actor_kind: ActorKind,
@@ -573,8 +581,8 @@ pub struct CommandExecutedV3 {
 pub struct CommandExecuted;
 impl EventType for CommandExecuted {
     const TYPE: &'static str = "command.executed";
-    const V: u32 = 3;
-    type Payload = CommandExecutedV3;
+    const V: u32 = 4;
+    type Payload = CommandExecutedV4;
 }
 
 /// `command.proposed@2`: an agent or an effect ran a command that needs a
@@ -2277,7 +2285,7 @@ mod tests {
                 ("collector.synced", 1),
                 ("command.approved", 1),
                 ("command.declined", 1),
-                ("command.executed", 3),
+                ("command.executed", 4),
                 ("command.proposed", 2),
                 ("config.changed", 2),
                 ("contribution.disabled", 1),

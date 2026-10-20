@@ -2528,9 +2528,10 @@ Draft V54 widens command_audit actor_kind to include `job`, retaining every
 column/row, proposal audit links, the refused-audit index and AUTOINCREMENT
 high-water. The rebuild uses the migration transaction and legacy rename mode;
 the runner turns foreign_keys off around migrations. It has not been executed.
-ActorKindV2 preserves both published command event schemas; current
-command.executed@3 adds job attribution with identity upcasts from v1/v2.
-command.proposed remains v2 because jobs cannot create confirmation proposals.
+ActorKindV2 preserves command.proposed@2's actor kinds; command.executed@4
+adds a custom component (`component`) to v3's (V93 rewrote v3 events, each
+a v4 one as is). command.proposed remains v2 because neither a job nor a
+component (which acts for a person) creates a confirmation proposal.
 
 Metric declaration upserts expose caller-transaction helpers for coherent
 extension generation publication. Their async wrappers use the same helpers;

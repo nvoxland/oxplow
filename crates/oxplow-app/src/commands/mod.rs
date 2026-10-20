@@ -68,7 +68,7 @@ use oxplow_db::{
 };
 use oxplow_domain::events::schema::{
     CommandApproved, CommandApprovedV1, CommandDeclined, CommandDeclinedV1, CommandExecuted,
-    CommandExecutedV3, CommandOutcome as Outcome, CommandProposed, CommandProposedV2,
+    CommandExecutedV4, CommandOutcome as Outcome, CommandProposed, CommandProposedV2,
 };
 use oxplow_domain::refs::build::{command_ref, proposal_ref};
 use oxplow_domain::{

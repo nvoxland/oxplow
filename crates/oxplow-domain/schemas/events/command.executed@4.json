@@ -13,6 +13,11 @@
           "type": "string"
         },
         {
+          "const": "component",
+          "description": "An extension's custom component, for whoever uses it.",
+          "type": "string"
+        },
+        {
           "const": "effect",
           "description": "An extension's effect (P8.D8).",
           "type": "string"
@@ -37,7 +42,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Version 3 adds durable job attribution; earlier schemas stay frozen.",
+  "description": "Version 4 adds a custom component among the actors (v3, durable job\nattribution; V93 rewrote v3 events: each is a v4 one as is).",
   "properties": {
     "actor_id": {
       "type": [
@@ -72,6 +77,6 @@
     "audit_id",
     "undoable"
   ],
-  "title": "CommandExecutedV3",
+  "title": "CommandExecutedV4",
   "type": "object"
 }

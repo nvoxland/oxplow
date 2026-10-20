@@ -50,13 +50,15 @@ export function CustomComponentViz({
   readyTimeoutMs?: number;
 }) {
   const component = run.lens.custom?.component ?? null;
-  const lensId = run.lens.id;
+  // The component itself names every call: it acts as itself wherever
+  // it is shown.
+  const componentKey = component ? `${run.lens.extension}/${component}` : null;
   // The bundle its frame runs, loaded for the lens (from the main
   // worktree, whatever the stream): the daemon serves the frame that
   // snapshot, by its version, and the frame invokes with it. Loaded again
   // when the activated extensions change — a hot update: a new version
   // mounts a new frame, the same one keeps the frame it has.
-  const loadKey = base && component ? lensId : null;
+  const loadKey = base && componentKey ? componentKey : null;
   const [loaded, setLoaded] = useState<{ key: string; version?: string; error?: string } | null>(null);
   const [activations, setActivations] = useState(0);
   useEffect(() => {
@@ -68,7 +70,7 @@ export function CustomComponentViz({
   useEffect(() => {
     if (loadKey === null) return;
     let live = true;
-    loadComponent(lensId).then(
+    loadComponent(loadKey).then(
       (version) => {
         if (live) setLoaded({ key: loadKey, version });
       },
@@ -131,7 +133,7 @@ export function CustomComponentViz({
         key={src}
         src={src}
         version={version}
-        component={component}
+        component={componentKey ?? ""}
         run={run}
         streamId={streamId}
         readyTimeoutMs={readyTimeoutMs}
@@ -156,6 +158,7 @@ function ComponentFrame({
   src: string;
   /** The bundle version it was loaded at: what it invokes with. */
   version: string;
+  /** `<extension>/<component id>`: what every call names. */
   component: string;
   run: LensRun;
   streamId: string | null;
@@ -205,10 +208,10 @@ function ComponentFrame({
     hostRef.current = createBridgeHost(
       channel.port1,
       {
-        query: (asset, params) => runComponentQuery(runRef.current.lens.id, asset, params, streamId, version),
+        query: (asset, params) => runComponentQuery(component, asset, params, streamId, version),
         invoke: async (command, input, confirmed) => {
           try {
-            const out = await invokeComponentCommand(runRef.current.lens.id, command, input, confirmed, version);
+            const out = await invokeComponentCommand(component, command, input, confirmed, version);
             setRefused(null);
             return out;
           } catch (e) {
@@ -226,7 +229,7 @@ function ComponentFrame({
         onReady: () => {
           ready = true;
           clearTimeout(timer);
-          void recordUsage({ kind: "custom_component", key: `${initial.lens.extension}/${component}`, streamId }).catch(() => {});
+          void recordUsage({ kind: "custom_component", key: component, streamId }).catch(() => {});
           onReady?.();
         },
       },

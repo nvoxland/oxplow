@@ -95,7 +95,9 @@ fn task_author(actor: &Actor) -> Option<TaskAuthor> {
     match actor {
         Actor::Human => Some(TaskAuthor::User),
         Actor::Agent { .. } => Some(TaskAuthor::Agent),
-        Actor::Lens { on_behalf_of, .. } => task_author(on_behalf_of),
+        Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+            task_author(on_behalf_of)
+        }
         Actor::Effect { .. } | Actor::Job { .. } | Actor::System => None,
     }
 }
@@ -108,7 +110,9 @@ fn note_author(actor: &Actor) -> String {
     match actor {
         Actor::Human => "user".into(),
         Actor::Agent { .. } => "agent".into(),
-        Actor::Lens { on_behalf_of, .. } => note_author(on_behalf_of),
+        Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+            note_author(on_behalf_of)
+        }
         Actor::Effect { effect, .. } => oxplow_domain::refs::build::effect_source(effect),
         Actor::System => "oxplow".into(),
         Actor::Job { .. } => actor.source(),

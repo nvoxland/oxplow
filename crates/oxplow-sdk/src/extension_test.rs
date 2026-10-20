@@ -891,26 +891,10 @@ async fn component_example(
         invoke_component_command, load_component, run_component_query, ComponentInvoke,
     };
     let shown = ex.shown;
-    // The lens that shows it: the one the fixture names, else its first.
-    let lens = ex
-        .input
-        .get("lens")
-        .and_then(Value::as_str)
-        .map(|slug| format!("{}/{slug}", ext.name))
-        .or_else(|| {
-            ext.lenses
-                .iter()
-                .find(|l| l.custom.as_ref().and_then(|c| c.component.as_deref()) == Some(id))
-                .map(|l| l.id.clone())
-        });
-    let Some(lens) = lens else {
-        report.errors.push(format!(
-            "{shown}:1: component `{id}`: no lens of this extension shows it — fix: a `viz: \
-             custom` lens with `custom: {{ component: {id} }}`, or name one with `lens:`"
-        ));
-        return;
-    };
-    let version = match load_component(&host.svc, &host.root, &lens) {
+    // The component itself: a lens or a page may show it; it acts as
+    // itself either way.
+    let key = format!("{}/{id}", ext.name);
+    let version = match load_component(&host.svc, &host.root, &key) {
         Ok(v) => v,
         Err(e) => {
             report
@@ -968,7 +952,7 @@ async fn component_example(
             })
             .unwrap_or_default();
         queries.push(
-            match run_component_query(&host.svc, &host.root, &lens, &asset, params, &ctx, &version)
+            match run_component_query(&host.svc, &host.root, &key, &asset, params, &ctx, &version)
                 .await
             {
                 Ok(run) => json!({ "rows": run.result.rows.len() }),
@@ -988,7 +972,7 @@ async fn component_example(
             &host.svc,
             &host.root,
             ComponentInvoke {
-                lens_id: lens.clone(),
+                component: key.clone(),
                 command: i
                     .get("command")
                     .and_then(Value::as_str)

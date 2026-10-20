@@ -2524,10 +2524,9 @@ mod tests {
                   '{"turn":"turn:1","thread":"thread:thr1","outcome":"completed"}');"#,
         )
         .unwrap();
-        embedded::migrations::runner()
-            .set_target(refinery::Target::Version(70))
-            .run(&mut conn)
-            .unwrap();
+        // Through every later rewrite too (V93: command.executed@4), so
+        // each ends at its type's newest version.
+        embedded::migrations::runner().run(&mut conn).unwrap();
         let rows: Vec<(String, String, u32, String)> = conn
             .prepare("SELECT id, type, v, payload FROM event_log ORDER BY seq")
             .unwrap()

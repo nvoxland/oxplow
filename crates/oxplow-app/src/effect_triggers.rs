@@ -978,7 +978,7 @@ mod tests {
     use super::*;
     use oxplow_domain::events::schema::EventType as _;
     use oxplow_domain::events::schema::{
-        ActorKind, CommandExecuted, CommandExecutedV3, CommandOutcome, WorkItemEdited,
+        ActorKind, CommandExecuted, CommandExecutedV4, CommandOutcome, WorkItemEdited,
         WorkItemStateChanged, WorkItemStateChangedV1,
     };
     use oxplow_domain::work_items::CanonicalState;
@@ -1651,7 +1651,7 @@ mod tests {
         for i in 0..MAX_CHAIN {
             let mut executed = Envelope::typed::<CommandExecuted>(
                 format!("effect:other/e{i}"),
-                &CommandExecutedV3 {
+                &CommandExecutedV4 {
                     command: "oxplow.command.sequence".into(),
                     actor_kind: ActorKind::Effect,
                     actor_id: Some(format!("other/e{i}")),
@@ -1988,7 +1988,7 @@ mod tests {
         for i in 0..MAX_CHAIN {
             let mut executed = Envelope::typed::<CommandExecuted>(
                 format!("effect:acme-pr/e{i}"),
-                &CommandExecutedV3 {
+                &CommandExecutedV4 {
                     command: "oxplow.command.sequence".into(),
                     actor_kind: ActorKind::Effect,
                     actor_id: Some(format!("acme-pr/e{i}")),

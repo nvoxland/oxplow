@@ -320,6 +320,10 @@ fn valid_actor(actor: &Actor, depth: usize) -> Result<bool, JobContextError> {
             lens_id,
             on_behalf_of,
         } => valid_label(lens_id) && valid_actor(on_behalf_of, depth + 1)?,
+        Actor::Component {
+            component,
+            on_behalf_of,
+        } => valid_label(component) && valid_actor(on_behalf_of, depth + 1)?,
     })
 }
 
@@ -357,7 +361,9 @@ fn actor_anchors_match(actor: &Actor, anchors: &Anchors) -> bool {
             actor_id_matches(*stream_id, anchors.stream_id)
                 && actor_id_matches(*thread_id, anchors.thread_id)
         }
-        Actor::Lens { on_behalf_of, .. } => actor_anchors_match(on_behalf_of, anchors),
+        Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+            actor_anchors_match(on_behalf_of, anchors)
+        }
     }
 }
 
@@ -411,6 +417,10 @@ enum WireActor {
         lens_id: String,
         on_behalf_of: Box<WireActor>,
     },
+    Component {
+        component: String,
+        on_behalf_of: Box<WireActor>,
+    },
     System {},
     Effect {
         effect: String,
@@ -446,6 +456,13 @@ impl From<WireActor> for Actor {
                 ..
             } => Self::Lens {
                 lens_id,
+                on_behalf_of: Box::new((*on_behalf_of).into()),
+            },
+            WireActor::Component {
+                component,
+                on_behalf_of,
+            } => Self::Component {
+                component,
                 on_behalf_of: Box::new((*on_behalf_of).into()),
             },
             WireActor::System {} => Self::System,
@@ -512,6 +529,10 @@ fn valid_wire_actor(
             on_behalf_of,
             ..
         } => valid_label(lens_id) && valid_wire_actor(on_behalf_of, depth + 1, anchors)?,
+        WireActor::Component {
+            component,
+            on_behalf_of,
+        } => valid_label(component) && valid_wire_actor(on_behalf_of, depth + 1, anchors)?,
         WireActor::Effect {
             effect,
             thread_id,
@@ -556,4 +577,31 @@ fn valid_wire_anchors(a: &WireAnchors) -> bool {
         && a.agent_session_id.is_none_or(|id| id.value() > 0)
         && a.turn_id.is_none_or(|id| id > 0)
         && a.snapshot_id.is_none_or(|id| id > 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::run::{Mode, RunContext};
+    use crate::{StreamId, ThreadId};
+
+    /// A job a custom component scheduled for an agent keeps who scheduled
+    /// it, through the strict wire shape and back.
+    #[test]
+    fn a_job_a_component_scheduled_round_trips() {
+        let run = RunContext::core(
+            Actor::Component {
+                component: "acme/board".into(),
+                on_behalf_of: Box::new(Actor::Agent {
+                    session_id: None,
+                    thread_id: Some(ThreadId::new(3)),
+                    stream_id: Some(StreamId::new(1)),
+                }),
+            },
+            Mode::External,
+        );
+        let context = JobInvocationContext::capture(&run).unwrap();
+        let decoded = JobInvocationContext::decode_json(&context.encode_json().unwrap()).unwrap();
+        assert_eq!(decoded.scheduled_by(), run.actor());
+    }
 }

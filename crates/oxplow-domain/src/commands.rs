@@ -534,6 +534,15 @@ pub enum Actor {
         lens_id: String,
         on_behalf_of: Box<Actor>,
     },
+    /// An extension's custom component acting for whoever uses it (its
+    /// `invoke`, `querySql`), wherever it is shown — a lens or a page:
+    /// what acts is the component a person approved when its extension
+    /// was deployed. A lens's invoker class.
+    Component {
+        /// `<extension>/<component id>`.
+        component: String,
+        on_behalf_of: Box<Actor>,
+    },
     System,
     /// An extension's effect reacting to an event (`effects:`, P8.D8):
     /// an agent's rights and gates, for the thread and stream the event
@@ -583,6 +592,7 @@ impl Actor {
             Actor::Human => ActorKind::Human,
             Actor::Agent { .. } => ActorKind::Agent,
             Actor::Lens { .. } => ActorKind::Lens,
+            Actor::Component { .. } => ActorKind::Component,
             Actor::System => ActorKind::System,
             Actor::Effect { .. } => ActorKind::Effect,
             Actor::Job { .. } => ActorKind::Job,
@@ -595,7 +605,9 @@ impl Actor {
     pub fn may_confirm(&self) -> bool {
         match self {
             Actor::Human => true,
-            Actor::Lens { on_behalf_of, .. } => on_behalf_of.may_confirm(),
+            Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+                on_behalf_of.may_confirm()
+            }
             Actor::Agent { .. } | Actor::System | Actor::Effect { .. } | Actor::Job { .. } => false,
         }
     }
@@ -605,7 +617,9 @@ impl Actor {
     pub fn proposes(&self) -> bool {
         match self {
             Actor::Agent { .. } | Actor::Effect { .. } => true,
-            Actor::Lens { on_behalf_of, .. } => on_behalf_of.proposes(),
+            Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+                on_behalf_of.proposes()
+            }
             Actor::Human | Actor::System | Actor::Job { .. } => false,
         }
     }
@@ -615,7 +629,9 @@ impl Actor {
     pub fn is_agent_driven(&self) -> bool {
         match self {
             Actor::Agent { .. } => true,
-            Actor::Lens { on_behalf_of, .. } => on_behalf_of.is_agent_driven(),
+            Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+                on_behalf_of.is_agent_driven()
+            }
             Actor::Human | Actor::System | Actor::Effect { .. } | Actor::Job { .. } => false,
         }
     }
@@ -627,7 +643,9 @@ impl Actor {
         match self {
             Actor::Effect { thread_id, .. } => Some(*thread_id),
             Actor::Job { thread_id, .. } => Some(*thread_id),
-            Actor::Lens { on_behalf_of, .. } => on_behalf_of.gated_thread(),
+            Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+                on_behalf_of.gated_thread()
+            }
             other => other.agent_thread(),
         }
     }
@@ -652,7 +670,9 @@ impl Actor {
     /// agent (or a lens acting for one), or an effect, in its event's.
     pub fn confined_to_own_stream(&self) -> bool {
         match self {
-            Actor::Lens { on_behalf_of, .. } => on_behalf_of.confined_to_own_stream(),
+            Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+                on_behalf_of.confined_to_own_stream()
+            }
             _ => self.is_agent_driven() || matches!(self, Actor::Effect { .. } | Actor::Job { .. }),
         }
     }
@@ -661,7 +681,9 @@ impl Actor {
     pub fn agent_thread(&self) -> Option<Option<ThreadId>> {
         match self {
             Actor::Agent { thread_id, .. } => Some(*thread_id),
-            Actor::Lens { on_behalf_of, .. } => on_behalf_of.agent_thread(),
+            Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+                on_behalf_of.agent_thread()
+            }
             Actor::Human | Actor::System | Actor::Effect { .. } | Actor::Job { .. } => None,
         }
     }
@@ -670,10 +692,12 @@ impl Actor {
         match self {
             Actor::Human | Actor::System => Invoker::Human,
             Actor::Agent { .. } | Actor::Effect { .. } => Invoker::Agent,
-            Actor::Lens { on_behalf_of, .. } if on_behalf_of.invoker() == Invoker::Job => {
+            Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. }
+                if on_behalf_of.invoker() == Invoker::Job =>
+            {
                 Invoker::Job
             }
-            Actor::Lens { .. } => Invoker::Lens,
+            Actor::Lens { .. } | Actor::Component { .. } => Invoker::Lens,
             Actor::Job { .. } => Invoker::Job,
         }
     }
@@ -690,6 +714,17 @@ impl Actor {
                 thread_id: None, ..
             } => "agent".into(),
             Actor::Lens { lens_id, .. } => crate::refs::build::lens_ref(lens_id),
+            // It is its contribution, by its ref.
+            Actor::Component { component, .. } => {
+                let (extension, id) = component.split_once('/').unwrap_or(("", component));
+                crate::contribution::ContributionId::new(
+                    extension,
+                    crate::contribution::ContributionKind::CustomComponent,
+                    id,
+                )
+                .reference()
+                .to_string()
+            }
             Actor::System => "system".into(),
             Actor::Effect { effect, .. } => crate::refs::build::effect_source(effect),
             // The run, by its ref; its attempt and fence are on the run's row.
@@ -704,6 +739,7 @@ impl Actor {
                 thread_id: Some(t), ..
             } => Some(t.to_string()),
             Actor::Lens { lens_id, .. } => Some(lens_id.clone()),
+            Actor::Component { component, .. } => Some(component.clone()),
             Actor::Effect { effect, .. } => Some(effect.clone()),
             Actor::Job {
                 job_id,
@@ -720,7 +756,9 @@ impl Actor {
             Actor::Agent { thread_id, .. }
             | Actor::Effect { thread_id, .. }
             | Actor::Job { thread_id, .. } => *thread_id,
-            Actor::Lens { on_behalf_of, .. } => on_behalf_of.thread_id(),
+            Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+                on_behalf_of.thread_id()
+            }
             _ => None,
         }
     }
@@ -732,7 +770,9 @@ impl Actor {
             Actor::Agent { stream_id, .. }
             | Actor::Effect { stream_id, .. }
             | Actor::Job { stream_id, .. } => *stream_id,
-            Actor::Lens { on_behalf_of, .. } => on_behalf_of.stream_id(),
+            Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+                on_behalf_of.stream_id()
+            }
             _ => None,
         }
     }
@@ -742,7 +782,9 @@ impl Actor {
     pub fn session_id(&self) -> Option<AgentSessionId> {
         match self {
             Actor::Agent { session_id, .. } => *session_id,
-            Actor::Lens { on_behalf_of, .. } => on_behalf_of.session_id(),
+            Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+                on_behalf_of.session_id()
+            }
             _ => None,
         }
     }
@@ -766,6 +808,13 @@ impl Actor {
                 on_behalf_of,
             } => Actor::Lens {
                 lens_id: lens_id.clone(),
+                on_behalf_of: Box::new(on_behalf_of.in_stream(stream)),
+            },
+            Actor::Component {
+                component,
+                on_behalf_of,
+            } => Actor::Component {
+                component: component.clone(),
                 on_behalf_of: Box::new(on_behalf_of.in_stream(stream)),
             },
             other => other.clone(),
@@ -1365,6 +1414,44 @@ mod tests {
         assert_eq!(effect.source(), "effect:acme/notify");
         assert_eq!(effect.id().as_deref(), Some("acme/notify"));
         assert_eq!(effect.kind(), ActorKind::Effect);
+    }
+
+    /// A custom component acts as itself, for the person (or agent) using
+    /// it: its own source and kind, a lens's invoker class, and everything
+    /// else from who it acts for.
+    #[test]
+    fn a_component_acts_as_itself_for_who_uses_it() {
+        let agent = Actor::Agent {
+            session_id: Some(AgentSessionId::new(5)),
+            thread_id: Some(ThreadId::new(3)),
+            stream_id: Some(StreamId::new(1)),
+        };
+        let component = |on: Actor| Actor::Component {
+            component: "acme/board".into(),
+            on_behalf_of: Box::new(on),
+        };
+        let shown = component(Actor::Human);
+        assert_eq!(shown.kind(), ActorKind::Component);
+        assert_eq!(shown.invoker(), Invoker::Lens);
+        assert_eq!(shown.source(), "custom_component:acme/board");
+        assert_eq!(shown.id().as_deref(), Some("acme/board"));
+        assert!(shown.may_confirm());
+        assert!(!shown.proposes());
+        let driven = component(agent.clone());
+        assert!(driven.is_agent_driven() && !driven.may_confirm() && driven.proposes());
+        assert_eq!(driven.thread_id(), Some(ThreadId::new(3)));
+        assert_eq!(driven.stream_id(), Some(StreamId::new(1)));
+        assert_eq!(driven.session_id(), Some(AgentSessionId::new(5)));
+        assert_eq!(driven.gated_thread(), agent.gated_thread());
+        assert!(driven.confined_to_own_stream());
+        let moved = component(Actor::Agent {
+            session_id: None,
+            thread_id: Some(ThreadId::new(3)),
+            stream_id: None,
+        })
+        .in_stream(StreamId::new(2));
+        assert_eq!(moved.stream_id(), Some(StreamId::new(2)));
+        assert_eq!(moved.source(), "custom_component:acme/board");
     }
 
     /// An agent's session is its own and anchors what it causes; a lens

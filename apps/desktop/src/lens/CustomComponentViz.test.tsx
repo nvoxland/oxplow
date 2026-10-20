@@ -50,7 +50,7 @@ test("the component's frame is sandboxed to scripts and forms, at its loaded bun
     <CustomComponentViz run={run({ component: "burndown", props: null })} streamId="str1" fallback={fallback} base="http://127.0.0.1:9" />,
   );
   const frame = await view.findByTestId("custom-component-frame");
-  expect(loads).toEqual(["x/burn"]);
+  expect(loads).toEqual(["x/burndown"]);
   expect(frame.getAttribute("sandbox")).toBe("allow-scripts allow-forms");
   expect(frame.getAttribute("src")).toBe("http://127.0.0.1:9/components/v/v-1/");
   expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer");
@@ -139,7 +139,7 @@ test("a stream switch keeps the same frame", async () => {
   const frame = await view.findByTestId("custom-component-frame");
   view.rerender(props("str2"));
   expect(view.getByTestId("custom-component-frame")).toBe(frame);
-  expect(loads).toEqual(["x/burn"]);
+  expect(loads).toEqual(["x/burndown"]);
 });
 
 // A hot update reaches a mounted component: when the activated extensions
@@ -152,7 +152,7 @@ test("an activated change reloads its bundle: a new version is a new frame", asy
   );
   const first = await view.findByTestId("custom-component-frame");
   emit({ kind: "extensionsChanged" });
-  await waitFor(() => expect(loads).toEqual(["x/burn", "x/burn"]));
+  await waitFor(() => expect(loads).toEqual(["x/burndown", "x/burndown"]));
   expect(view.getByTestId("custom-component-frame")).toBe(first);
 
   version = "v-2";
@@ -161,6 +161,6 @@ test("an activated change reloads its bundle: a new version is a new frame", asy
   await waitFor(() =>
     expect(view.getByTestId("custom-component-frame").getAttribute("src")).toBe("http://127.0.0.1:9/components/v/v-2/"),
   );
-  expect(loads).toEqual(["x/burn", "x/burn", "x/burn"]);
+  expect(loads).toEqual(["x/burndown", "x/burndown", "x/burndown"]);
   expect(view.getByTestId("custom-component-frame")).not.toBe(first);
 });

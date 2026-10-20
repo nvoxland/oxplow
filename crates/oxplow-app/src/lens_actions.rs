@@ -457,11 +457,13 @@ fn prepare_form(
     })
 }
 
-/// The component a `custom` lens renders, from its extension.
+/// The custom component `key` names (`<extension>/<component id>`) — the
+/// one a frame shows, whether a lens or a page shows it — from its
+/// extension.
 fn component_of(
     svc: &crate::Services,
     lens_root: &Path,
-    lens_id: &str,
+    key: &str,
 ) -> Result<
     (
         extensions::Extension,
@@ -469,35 +471,21 @@ fn component_of(
     ),
     CommandError,
 > {
-    // One catalog read: the lens and its extension's components together.
-    let not_found = || CommandError::from(oxplow_domain::DomainError::NotFound);
-    let (ext_name, slug) = lens_id.split_once('/').ok_or_else(not_found)?;
+    let (ext_name, id) = key
+        .split_once('/')
+        .ok_or_else(|| CommandError::from(oxplow_domain::DomainError::NotFound))?;
     let ext = svc
         .extension_catalog
         .named(lens_root, ext_name)
         .map_err(CommandError::from)?;
-    let lens = ext
-        .lenses
-        .iter()
-        .find(|l| l.slug == slug)
-        .ok_or_else(not_found)?;
-    let component = match (&lens.viz, &lens.custom) {
-        (extensions::LensViz::Custom, Some(c)) => c.component.clone().unwrap_or_default(),
-        _ => {
-            return Err(CommandError::Invalid {
-                field: Some("/lens".into()),
-                message: format!("`{lens_id}` isn't a custom component lens"),
-            })
-        }
-    };
     let component = ext
         .custom_components
         .iter()
-        .find(|c| c.id == component)
+        .find(|c| c.id == id)
         .cloned()
         .ok_or_else(|| CommandError::Invalid {
-            field: Some("/lens".into()),
-            message: format!("`{lens_id}`'s component `{component}` isn't loaded"),
+            field: Some("/id".into()),
+            message: format!("`{ext_name}` has no custom component `{id}`"),
         })?;
     Ok((ext, component))
 }
@@ -508,7 +496,7 @@ fn component_of(
 pub async fn run_component_query(
     svc: &crate::Services,
     lens_root: &Path,
-    lens_id: &str,
+    component: &str,
     asset: &str,
     params: BTreeMap<String, SqlCell>,
     ctx: &extensions::LensContext,
@@ -516,7 +504,8 @@ pub async fn run_component_query(
 ) -> Result<extensions::LensRun, CommandError> {
     svc.sql
         .read_generation(async {
-            run_component_query_unpinned(svc, lens_root, lens_id, asset, params, ctx, version).await
+            run_component_query_unpinned(svc, lens_root, component, asset, params, ctx, version)
+                .await
         })
         .await
         .map_err(CommandError::from)?
@@ -525,13 +514,13 @@ pub async fn run_component_query(
 async fn run_component_query_unpinned(
     svc: &crate::Services,
     lens_root: &Path,
-    lens_id: &str,
+    key: &str,
     asset: &str,
     params: BTreeMap<String, SqlCell>,
     ctx: &extensions::LensContext,
     version: &str,
 ) -> Result<extensions::LensRun, CommandError> {
-    let (ext, component) = component_of(svc, lens_root, lens_id)?;
+    let (ext, component) = component_of(svc, lens_root, key)?;
     let loaded = svc
         .component_bundles
         .get(version)
@@ -572,8 +561,8 @@ async fn run_component_query_unpinned(
 
 /// A custom component invokes one of its declared commands.
 pub struct ComponentInvoke {
-    /// The `custom` lens whose frame asked.
-    pub lens_id: String,
+    /// The component whose frame asked: `<extension>/<component id>`.
+    pub component: String,
     pub command: String,
     /// Sent as is: a component's input is literal (no placeholders).
     pub input: Value,
@@ -587,7 +576,7 @@ pub struct ComponentInvoke {
     pub version: String,
 }
 
-/// Run `call`'s command as the lens acting for its viewer, so every
+/// Run `call`'s command as the component acting for its viewer, so every
 /// policy applies as if they ran it — a component can offer an action but
 /// never grant a power — when the bundle its frame was loaded at declares
 /// the command and a person approved that version (tsk960, tsk984): what
@@ -610,7 +599,7 @@ fn prepare_component_command(
     lens_root: &Path,
     call: ComponentInvoke,
 ) -> Result<Prepared, CommandError> {
-    let (ext, component) = component_of(svc, lens_root, &call.lens_id)?;
+    let (ext, component) = component_of(svc, lens_root, &call.component)?;
     let loaded = svc
         .component_bundles
         .get(&call.version)
@@ -637,8 +626,8 @@ fn prepare_component_command(
         });
     }
     Ok(Prepared {
-        actor: Actor::Lens {
-            lens_id: call.lens_id,
+        actor: Actor::Component {
+            component: call.component,
             on_behalf_of: Box::new(call.on_behalf_of),
         },
         command: call.command,
@@ -647,14 +636,15 @@ fn prepare_component_command(
     })
 }
 
-/// Load the bundle of `lens_id`'s component as it is now under
-/// `lens_root`, for its frame: the version to serve it at and invoke with.
+/// Load the bundle of component `key` (`<extension>/<id>`) as it is now
+/// under `lens_root`, for its frame: the version to serve it at and invoke
+/// with.
 pub fn load_component(
     svc: &crate::Services,
     lens_root: &Path,
-    lens_id: &str,
+    key: &str,
 ) -> Result<String, CommandError> {
-    let (ext, component) = component_of(svc, lens_root, lens_id)?;
+    let (ext, component) = component_of(svc, lens_root, key)?;
     let loaded = svc
         .component_bundles
         .load(lens_root, &ext, &component)
@@ -666,10 +656,10 @@ pub fn load_component(
 pub async fn load_component_pinned(
     svc: &crate::Services,
     lens_root: &Path,
-    lens_id: &str,
+    key: &str,
 ) -> Result<String, CommandError> {
     svc.sql
-        .read_generation(async { load_component(svc, lens_root, lens_id) })
+        .read_generation(async { load_component(svc, lens_root, key) })
         .await
         .map_err(CommandError::from)?
 }
@@ -1212,22 +1202,22 @@ actions:
         (fx, root)
     }
 
-    /// Load `acme/view`'s bundle as its frame does: the version it runs.
+    /// Load `acme/board`'s bundle as its frame does: the version it runs.
     async fn load_board(fx: &crate::test_fixtures::EffortFixture, root: &Path) -> String {
         // Whatever was edited since is published first, as the owner of
         // generations does on the file change.
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
-        load_component(&fx.svc, root, "acme/view").unwrap()
+        load_component(&fx.svc, root, "acme/board").unwrap()
     }
 
-    /// An invoke of `command` from `acme/view`'s frame loaded at `version`.
+    /// An invoke of `command` from `acme/board`'s frame loaded at `version`.
     fn board_invoke(
         fx: &crate::test_fixtures::TaskEffortFixture,
         command: &str,
         version: &str,
     ) -> ComponentInvoke {
         ComponentInvoke {
-            lens_id: "acme/view".into(),
+            component: "acme/board".into(),
             command: command.into(),
             input: serde_json::json!({ "ref": oxplow_tasks::work_item_ref(fx.task), "to": "done" }),
             on_behalf_of: Actor::Human,
@@ -1402,7 +1392,7 @@ actions:
         run_component_query(
             &fx.svc,
             &root,
-            "acme/view",
+            "acme/board",
             "tasks",
             BTreeMap::new(),
             &ctx,
@@ -1419,7 +1409,7 @@ actions:
         let run = run_component_query(
             &fx.svc,
             &root,
-            "acme/view",
+            "acme/board",
             "tasks",
             BTreeMap::new(),
             &ctx,
@@ -1431,7 +1421,7 @@ actions:
         let err = run_component_query(
             &fx.svc,
             &root,
-            "acme/view",
+            "acme/board",
             "acme/view",
             BTreeMap::new(),
             &ctx,
@@ -1446,7 +1436,7 @@ actions:
         let err = run_component_query(
             &fx.svc,
             &root,
-            "acme/tasks",
+            "acme/nope",
             "tasks",
             BTreeMap::new(),
             &ctx,
@@ -1455,13 +1445,14 @@ actions:
         .await
         .unwrap_err();
         assert!(
-            err.to_string().contains("isn't a custom component lens"),
+            err.to_string()
+                .contains("`acme` has no custom component `nope`"),
             "{err}"
         );
     }
 
     #[tokio::test]
-    async fn a_component_invokes_only_its_declared_commands_as_the_lens() {
+    async fn a_component_invokes_only_its_declared_commands_as_itself() {
         let (fx, root) = component_fixture().await;
         let version = load_board(&fx, &root).await;
         let invoke = |command: &str| board_invoke(&fx, command, &version);
@@ -1486,9 +1477,9 @@ actions:
             .unwrap();
         assert_eq!(
             audit.actor_kind,
-            oxplow_domain::events::schema::ActorKind::Lens
+            oxplow_domain::events::schema::ActorKind::Component
         );
-        assert_eq!(audit.actor_id.as_deref(), Some("acme/view"));
+        assert_eq!(audit.actor_id.as_deref(), Some("acme/board"));
         assert_eq!(state(&fx.svc, fx.task).await, "done");
     }
 
@@ -1507,7 +1498,7 @@ actions:
                 &fx.svc,
                 &root,
                 ComponentInvoke {
-                    lens_id: "acme/view".into(),
+                    component: "acme/board".into(),
                     command: "oxplow.work_item.transition".into(),
                     input: input.clone(),
                     on_behalf_of: Actor::Human,

@@ -1458,7 +1458,7 @@
     - { name: "session_id", type: "INTEGER", doc: "The agent session that ran it, if any (v_agent_session.id)." }
   tests:
     - { accepted_values: { column: outcome, values: [ok, invalid, denied, error] } }
-    - { accepted_values: { column: actor_kind, values: [human, agent, lens, system, effect, job] } }
+    - { accepted_values: { column: actor_kind, values: [human, agent, lens, component, system, effect, job] } }
 - name: zone
   version: 1
   description: "The project's architectural zone table (`zones:` in `.oxplow/project.yaml`) with the effect it has on the primary worktree's files: one row per rule in evaluation order (the first matching rule claims a file), each with how many files it claims, then a closing `other` row for the files no rule matched. Read live when a query names it. Change the table with `oxplow.config.set { key: \"zones\" }`; a large `other` count or a `v_zone_unmatched` full of real source means the table has gone stale as the repo grew."

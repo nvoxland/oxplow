@@ -12,7 +12,8 @@ use oxplow_app::lens_actions::{invoke_component_command, load_component, Compone
 use oxplow_domain::{Actor, CommandError};
 use serde_json::{json, Value};
 
-const LENS: &str = "triage/todo-board";
+/// The todo board, as its frame names it.
+const BOARD: &str = "triage/todo-board";
 
 fn copy_dir(from: &Path, to: &Path) {
     std::fs::create_dir_all(to).expect("it works");
@@ -69,12 +70,12 @@ async fn as_board(
     command: &str,
     input: Value,
 ) -> Result<Value, CommandError> {
-    let version = load_component(svc, root, LENS).expect("it works");
+    let version = load_component(svc, root, BOARD).expect("it works");
     invoke_component_command(
         svc,
         root,
         ComponentInvoke {
-            lens_id: LENS.into(),
+            component: BOARD.into(),
             command: command.into(),
             input,
             on_behalf_of: Actor::Human,
@@ -99,7 +100,7 @@ async fn decisions(svc: &oxplow_app::Services, root: &Path) -> Value {
 }
 
 fn component_version(svc: &oxplow_app::Services, root: &Path) -> String {
-    load_component(svc, root, LENS).expect("it works")
+    load_component(svc, root, BOARD).expect("it works")
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -172,8 +173,8 @@ async fn a_stale_stamp_is_refused_and_each_decision_reads_its_own() {
     let stale = svc
         .commands
         .run(
-            &Actor::Lens {
-                lens_id: LENS.into(),
+            &Actor::Component {
+                component: BOARD.into(),
                 on_behalf_of: Box::new(Actor::Human),
             },
             "triage.state.set",

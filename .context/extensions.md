@@ -2450,21 +2450,26 @@ warns when a custom lens also fills a kit role block (`chart`, `tree`,
 the honest extent of a "this reimplements the kit" lint.
 
 **The bridged calls** (P6b.D2, `lens_actions.rs`; the frame reaches them
-only through the host): `run_component_query { id, asset, params,
-stream_id }` runs `asset` — a lens id, a bare slug meaning the
-component's extension — when it's one of the component's `assets`
-(`Invalid` naming them otherwise), through `oxplow_run_lens`: the lens's own
-read-only, parameterised query, never SQL from the frame.
-`invoke_component_command { id, command, input, stream_id, confirmed }`
-runs `command` when it's one of the component's `commands` at the version
-loaded now, as
-`Actor::Lens { lens_id: id, on_behalf_of: Human }`, so every policy
-applies as if the person ran it; the input is literal (no placeholders);
-a command that asks comes back `NEEDS_CONFIRMATION` and the **host**
-asks, never the frame. Both are UI RPCs (`ui` in surface parity).
+only through the host). Each names the component by `id`, `<extension>/<component
+id>` — the component itself, whatever shows it — and the bundle `version` its
+frame was loaded at (`load_component { id }`); a version that isn't the
+current one is `Denied` ("reload its lens"). `run_component_query { id,
+asset, params, stream_id, version }` runs `asset` — a lens id, a bare slug
+meaning the component's extension — when it's one of the component's
+`assets` (`Invalid` naming them otherwise), through `oxplow_run_lens`: the
+lens's own read-only, parameterised query. `invoke_component_command { id,
+command, input, confirmed, version }` runs `command` when it's one of the
+component's `commands` at that version, as **`Actor::Component { component:
+id, on_behalf_of: Human }`** — the component acting for the person, so every
+policy applies as if they ran it, audited as kind `component` with source
+`custom_component:<ext>/<id>` (`command.executed@4`; a lens's invoker
+class, so `invokers.lens` decides). The input is literal (no
+placeholders); a command that asks comes back `NEEDS_CONFIRMATION` and the
+**host** asks, never the frame. A component acts for a person, so it never
+proposes. All are UI RPCs (`ui` in surface parity).
 
 **The host** (P6b.D4, `lens/CustomComponentViz.tsx` +
-`lens/componentBridge.ts`): `<iframe sandbox="allow-scripts"
+`lens/componentBridge.ts`): `<iframe sandbox="allow-scripts allow-forms"
 referrerPolicy="no-referrer">` at `componentBundleUrl(base, version)`
 (the daemon's `/components/v/<version>/`, once `load_component` answered;
 a bundle that can't be loaded shows the table and why; with no daemon
@@ -3466,7 +3471,7 @@ A run is the registered `oxplow.command.sequence` — its spec and compiled inpu
 schema, shared (`Command::with_handler`) — over what the script composed
 (calls, and its own events through `own_events`), run by
 `CommandBus::run_effect` as `Actor::Effect` with
-`RunOrigin::Effect(key)`: its `command.executed@3` is caused by the
+`RunOrigin::Effect(key)`: its `command.executed@4` is caused by the
 triggering event, and the reaction's `effect_run` row and
 `effect.result@4 { effect, event, outcome, reason?, proposal?, attempt,
 origin }` (caused by that run) land **in the run's transaction**; with a step outside it, a

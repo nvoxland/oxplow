@@ -304,7 +304,7 @@ pub(super) fn record_tx(
     )?;
     let mut executed = Envelope::typed::<CommandExecuted>(
         actor.source(),
-        &CommandExecutedV3 {
+        &CommandExecutedV4 {
             command: spec.id.clone(),
             actor_kind: actor.kind(),
             actor_id: actor.id(),

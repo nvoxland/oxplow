@@ -212,7 +212,8 @@ pub async fn submit_lens_form(
 }
 
 /// A custom component's frame reads one of its declared lenses (P6b.D2):
-/// the person is looking at lens `id`; `asset` names the lens to run.
+/// `id` is the component (`<extension>/<component id>`); `asset` names the
+/// lens to run.
 pub async fn run_component_query(
     svc: &Services,
     id: String,
@@ -235,15 +236,15 @@ pub async fn run_component_query(
     .await?)
 }
 
-/// Load the bundle of the `custom` lens `id`'s component as it is now, for
-/// its frame (tsk984): the version the daemon serves it at
+/// Load the bundle of component `id` (`<extension>/<component id>`) as it
+/// is now, for its frame (tsk984): the version the daemon serves it at
 /// (`/components/v/<version>/`) and the frame invokes with.
 pub async fn load_component(svc: &Services, id: String) -> Result<String, IpcError> {
     Ok(oxplow_app::lens_actions::load_component_pinned(svc, root(svc), &id).await?)
 }
 
 /// A custom component's frame invokes one of its declared commands, as the
-/// lens acting for the person (`NEEDS_CONFIRMATION`: the host asks them,
+/// component acting for the person (`NEEDS_CONFIRMATION`: the host asks them,
 /// never the frame) — when the bundle `version` the frame was loaded at is
 /// approved.
 pub async fn invoke_component_command(
@@ -258,7 +259,7 @@ pub async fn invoke_component_command(
         svc,
         root(svc),
         oxplow_app::lens_actions::ComponentInvoke {
-            lens_id: id,
+            component: id,
             command,
             input: input.0,
             on_behalf_of: oxplow_domain::Actor::Human,

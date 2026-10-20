@@ -502,7 +502,7 @@ skipping.
    agent's session too, `session_id`, V40 — input,
    outcome, the handler's `result` — V114, so a run's answer, such as a
    merge's conflicts, stays readable after the fact — inverse, and the
-   scopes it called, "Scopes"), `command.executed@3` in the event log
+   scopes it called, "Scopes"), `command.executed@4` in the event log
    pointing at the audit row, the handler's domain events (with `cause` =
    the executed event, and the actor's thread/stream/agent session —
    `Actor::anchors()` —
@@ -553,9 +553,11 @@ released if it fails — so two concurrent undos can't both apply it
 already undone", `lost_race`) and leaves **no audit row**: it didn't
 fail, it was beaten to it. An approval's lost race is the same.
 
-**Agent rules follow the agent.** An `Actor::Lens { on_behalf_of }`
-whose chain ends at an agent (`Actor::is_agent_driven`) gets the agent
-policy and can never confirm, exactly like the agent.
+**Agent rules follow the agent.** An `Actor::Lens { on_behalf_of }` —
+or an `Actor::Component { component, on_behalf_of }`, a custom component
+acting for whoever uses it ("Custom components") — whose chain ends at an
+agent (`Actor::is_agent_driven`) gets the agent policy and can never
+confirm, exactly like the agent. Both are the lens invoker class.
 
 **Only a person confirms; an effect runs with an agent's rights**
 (P8.D8). `Actor::may_confirm()` is true for `Human` and a lens acting for
@@ -578,7 +580,7 @@ commands on that stream only (`Actor::confined_to_own_stream`; an event
 with no stream reaches no worktree). Its source is
 `effect:<extension>/<id>`, and only a
 `Human` approves or declines a proposal. The audit and events say so:
-`actor_kind = 'effect'`, carried by `command.executed@3` (whose
+`actor_kind = 'effect'`, carried by `command.executed@4` (whose
 `ActorKind` also has `job`) and `command.proposed@2` (whose `ActorKindV2`
 has no `job`: a job can't leave a proposal). The log holds only these
 versions (V70 rewrote older rows). An effect's reaction runs
