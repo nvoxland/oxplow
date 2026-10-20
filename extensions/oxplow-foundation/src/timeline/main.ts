@@ -161,13 +161,27 @@ oxplow.connect().then((component) => {
     void component.navigate(event.item, { newTab: event.event.metaKey || event.event.ctrlKey });
   });
 
+  // Everything loaded, with room past both ends: a span that starts near
+  // now still shows its label (the timeline's own fit ends at the last end).
+  const fit = () => {
+    let first = Infinity;
+    let last = -Infinity;
+    items.forEach((item) => {
+      first = Math.min(first, item.start.getTime());
+      last = Math.max(last, (item.end ?? item.start).getTime());
+    });
+    if (first > last) return;
+    const pad = Math.max((last - first) * 0.08, 60 * 60 * 1000);
+    timeline.setWindow(new Date(first - pad), new Date(last + pad));
+  };
+
   void component.setActions([
     { id: "today", label: "Today" },
     { id: "fit", label: "Fit" },
   ]);
   component.onAction((id) => {
     if (id === "today") timeline.setWindow(new Date(Date.now() - DAY / 2), new Date(Date.now() + DAY / 2));
-    if (id === "fit") timeline.fit();
+    if (id === "fit") fit();
   });
 
   void show(start, end);
