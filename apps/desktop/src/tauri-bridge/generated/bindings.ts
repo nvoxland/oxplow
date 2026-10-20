@@ -5094,6 +5094,14 @@ export type OxplowConfig = {
 	 *  `.oxplow/personal.yaml`), over the team's.
 	 */
 	personalExtensionSources: { [key in string]: string },
+	/**
+	 *  `enableBundledExtensions`: `false` asks a dev build to run oxplow's
+	 *  own extensions from their `extensionSources` folders, not the
+	 *  copies built in ([`bundled_from_sources`]).
+	 */
+	enableBundledExtensions: boolean | null,
+	/**  The person's own `enableBundledExtensions`, over the project's. */
+	personalEnableBundledExtensions: boolean | null,
 };
 
 /**

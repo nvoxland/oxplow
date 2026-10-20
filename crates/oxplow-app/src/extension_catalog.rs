@@ -282,6 +282,11 @@ pub struct ExtensionCatalog {
     /// The primary worktree's extensions may have changed.
     changes: tokio::sync::broadcast::Sender<()>,
     runtime_changes: tokio::sync::broadcast::Sender<()>,
+    /// oxplow's own extensions run from their sources
+    /// (`enableBundledExtensions: false` in a dev build), as read when it
+    /// was made: changing it takes a restart, since flipping it under a
+    /// running foundation would take foundation away.
+    bundled_from_sources: bool,
     /// A private catalog holding one candidate for staging: it is no
     /// generation a reader could straddle, so reading it needs no pin. Only
     /// the pin assertion reads it.
@@ -301,6 +306,7 @@ impl Default for ExtensionCatalog {
             loads: AtomicUsize::default(),
             changes: tokio::sync::broadcast::channel(64).0,
             runtime_changes: tokio::sync::broadcast::channel(64).0,
+            bundled_from_sources: false,
             #[cfg(test)]
             staged: false,
         }
@@ -316,9 +322,26 @@ impl ExtensionCatalog {
     /// The daemon's: whatever root it is asked about, it loads
     /// `project_dir`'s live set.
     pub fn for_project(project_dir: &Path) -> Self {
+        let settings = oxplow_config::extension_settings(project_dir);
+        if settings.bundled_requested == Some(false) && !settings.bundled_from_sources {
+            tracing::warn!(
+                "enableBundledExtensions: false is honored only by a dev build; \
+                 oxplow's own extensions run as they ship"
+            );
+        }
         Self {
             project: Some(project_dir.to_path_buf()),
+            bundled_from_sources: settings.bundled_from_sources,
             ..Self::default()
+        }
+    }
+
+    /// `project`'s extension settings, with where oxplow's own extensions
+    /// come from as it was when this catalog was made.
+    pub fn settings(&self, project: &Path) -> oxplow_config::ExtensionSettings {
+        oxplow_config::ExtensionSettings {
+            bundled_from_sources: self.bundled_from_sources,
+            ..oxplow_config::extension_settings(project)
         }
     }
 
@@ -406,7 +429,7 @@ impl ExtensionCatalog {
 
     /// The project's live set with the staged changes applied, loaded.
     fn deployed_snapshot(&self, project: &Path) -> Arc<CatalogSnapshot> {
-        let settings = oxplow_config::extension_settings(project);
+        let settings = self.settings(project);
         let mut live = self.live.lock().clone();
         for (name, hash) in self.pending.lock().iter() {
             match hash {
@@ -504,7 +527,7 @@ impl ExtensionCatalog {
         let Some(active) = self.active.lock().clone() else {
             return self.snapshot(root);
         };
-        let settings = oxplow_config::extension_settings(project);
+        let settings = self.settings(project);
         if !active
             .extensions()
             .iter()

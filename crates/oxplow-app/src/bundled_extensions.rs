@@ -264,6 +264,18 @@ pub fn find(name: &str) -> Option<&'static BundledExtension> {
     BUNDLED.iter().find(|b| b.name == name)
 }
 
+/// The copy of `name` built into oxplow, when it runs from that copy: not
+/// when `settings` run oxplow's own extensions from their sources
+/// (`enableBundledExtensions: false`, a dev build). `find` is the name.
+pub fn shipped(
+    name: &str,
+    settings: &oxplow_config::ExtensionSettings,
+) -> Option<&'static BundledExtension> {
+    (!settings.bundled_from_sources)
+        .then(|| find(name))
+        .flatten()
+}
+
 /// Whether oxplow relies on extension `name` (it can't be disabled).
 pub fn is_required(name: &str) -> bool {
     find(name).is_some_and(|b| b.required)

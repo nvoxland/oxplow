@@ -1107,6 +1107,21 @@ source directly: an edit changes nothing until it is deployed.
   `extensions/oxplow-foundation` resolves to the shipped deployment. A
   bundled extension with no active deployment of its own runs the shipped
   one (`Deployment::Shipped`).
+- **Developing oxplow (`enableBundledExtensions: false`):** in a dev
+  build (`cfg!(debug_assertions)`; a release build logs and ignores it),
+  oxplow's own extensions don't run from the copies built in: they load
+  from their `extensionSources` folders and are deployed like any
+  extension (`bundled_extensions::shipped(name, &settings)` is the one
+  accessor for the shipped files; `find`, `is_required`, `is_reserved`
+  and `origin_of` stay name-based, so the `oxplow` namespace and the other
+  rules for oxplow's own extensions still apply). Set in `project.yaml`
+  (this repo commits it), overridable in `personal.yaml`, human-only, read
+  once when the catalog is made (`ExtensionCatalog::settings`): changing
+  it takes a restart. At startup a required extension with no shipped
+  copy deploys from its source with nothing to approve (it is the
+  project's own code); `oxplow-bundled` waits for its permissions like any
+  extension. Nothing ships to roll back to, and a non-required one can be
+  removed.
 - **The live set:** each extension's active deployment, in the
   `extension_deployment` table (`v_extension_deployment`: name, hash,
   deployed_at, stream, source, active). The publish transaction of every

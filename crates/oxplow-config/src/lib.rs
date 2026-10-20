@@ -46,6 +46,7 @@ pub const PERSONAL_KEYS: &[&str] = &[
     "enableExtensions",
     "disableExtensions",
     "extensionSources",
+    "enableBundledExtensions",
 ];
 
 /// What a personal key is, for Settings.
@@ -69,6 +70,11 @@ pub fn personal_key_doc(key: &str) -> &'static str {
         "extensionSources" => {
             "Where your extensions' sources are, over the project's `extensionSources` \
              (.oxplow/personal.yaml, which git ignores)."
+        }
+        "enableBundledExtensions" => {
+            "Your own `enableBundledExtensions`, over the project's: `false` runs oxplow's own \
+             extensions from their sources in a dev build (.oxplow/personal.yaml, which git \
+             ignores)."
         }
         _ => "",
     }
@@ -772,6 +778,14 @@ pub struct OxplowConfig {
     /// `.oxplow/personal.yaml`), over the team's.
     #[serde(rename = "personalExtensionSources")]
     pub personal_extension_sources: std::collections::BTreeMap<String, String>,
+    /// `enableBundledExtensions`: `false` asks a dev build to run oxplow's
+    /// own extensions from their `extensionSources` folders, not the
+    /// copies built in ([`bundled_from_sources`]).
+    #[serde(rename = "enableBundledExtensions")]
+    pub enable_bundled_extensions: Option<bool>,
+    /// The person's own `enableBundledExtensions`, over the project's.
+    #[serde(rename = "personalEnableBundledExtensions")]
+    pub personal_enable_bundled_extensions: Option<bool>,
 }
 
 /// A person's `enableExtensions` and `disableExtensions`.
@@ -802,6 +816,19 @@ pub struct ExtensionSettings {
     pub team_sources: std::collections::BTreeMap<String, String>,
     pub personal: PersonalExtensions,
     pub personal_sources: std::collections::BTreeMap<String, String>,
+    /// `enableBundledExtensions` as asked (the person's, else the team's).
+    pub bundled_requested: Option<bool>,
+    /// oxplow's own extensions run from their sources like any extension,
+    /// not from the copies built in ([`bundled_from_sources`]).
+    pub bundled_from_sources: bool,
+}
+
+/// Whether oxplow's own extensions run from their source folders: asked
+/// (`enableBundledExtensions: false`) and a dev build. A shipped oxplow
+/// always runs the copies built into it, so a cloned repo can't replace
+/// oxplow's own commands.
+pub fn bundled_from_sources(requested: Option<bool>, dev_build: bool) -> bool {
+    dev_build && requested == Some(false)
 }
 
 /// The folder that holds extension sources by default, under a checkout.
@@ -821,6 +848,21 @@ impl ExtensionSettings {
             team_sources: config.extension_sources.clone(),
             personal: config.personal_extensions.clone(),
             personal_sources: config.personal_extension_sources.clone(),
+            ..Self::bundled(
+                config
+                    .personal_enable_bundled_extensions
+                    .or(config.enable_bundled_extensions),
+            )
+        }
+    }
+
+    /// The settings `requested` (`enableBundledExtensions`) makes, in
+    /// this build.
+    fn bundled(requested: Option<bool>) -> Self {
+        Self {
+            bundled_requested: requested,
+            bundled_from_sources: bundled_from_sources(requested, cfg!(debug_assertions)),
+            ..Self::default()
         }
     }
 
@@ -879,6 +921,8 @@ pub fn extension_settings(project_dir: impl AsRef<Path>) -> ExtensionSettings {
         disable: Vec<String>,
         #[serde(default, rename = "extensionSources")]
         extension_sources: std::collections::BTreeMap<String, String>,
+        #[serde(default, rename = "enableBundledExtensions")]
+        enable_bundled: Option<bool>,
     }
     fn read(path: &Path) -> OnlyExtensions {
         std::fs::read_to_string(path)
@@ -897,6 +941,7 @@ pub fn extension_settings(project_dir: impl AsRef<Path>) -> ExtensionSettings {
             disable: personal.disable,
         },
         personal_sources: personal.extension_sources,
+        ..ExtensionSettings::bundled(personal.enable_bundled.or(team.enable_bundled))
     }
 }
 
@@ -1097,6 +1142,9 @@ struct RawConfig {
     /// Where an extension's source is when it isn't `.oxplow/extensions/<name>/`: `{ <name>: <folder> }`, relative to the checkout or absolute (`~/` is the home folder). Enables code.
     #[serde(rename = "extensionSources", default)]
     extension_sources: Option<std::collections::BTreeMap<String, String>>,
+    /// Run oxplow's own extensions (oxplow-foundation, oxplow-bundled) from the copies built into it: the default. `false`, honored only by a dev build, runs them from their `extensionSources` folders and deploys them like any extension — how oxplow develops itself. Read when oxplow starts. Enables code.
+    #[serde(rename = "enableBundledExtensions", default)]
+    enable_bundled_extensions: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
@@ -1180,6 +1228,7 @@ struct PersonalLayer {
     new_thread_session: Option<String>,
     extensions: PersonalExtensions,
     extension_sources: std::collections::BTreeMap<String, String>,
+    enable_bundled_extensions: Option<bool>,
 }
 
 impl PersonalLayer {
@@ -1189,6 +1238,7 @@ impl PersonalLayer {
             new_thread_session: config.personal_new_thread_session.clone(),
             extensions: config.personal_extensions.clone(),
             extension_sources: config.personal_extension_sources.clone(),
+            enable_bundled_extensions: config.personal_enable_bundled_extensions,
         }
     }
 
@@ -1199,6 +1249,7 @@ impl PersonalLayer {
             personal_new_thread_session: self.new_thread_session,
             personal_extensions: self.extensions,
             personal_extension_sources: self.extension_sources,
+            personal_enable_bundled_extensions: self.enable_bundled_extensions,
             ..config
         }
     }
@@ -1232,6 +1283,9 @@ impl PersonalLayer {
                 "extensionSources".into(),
                 serde_yaml::to_value(&self.extension_sources).expect("a map serializes"),
             );
+        }
+        if let Some(on) = self.enable_bundled_extensions {
+            map.insert("enableBundledExtensions".into(), on.into());
         }
         map
     }
@@ -1296,6 +1350,14 @@ fn parse_personal(doc: serde_yaml::Value) -> Result<PersonalLayer, ConfigError> 
                     ConfigError::Invalid(format!(".oxplow/personal.yaml: extensionSources: {e}"))
                 })?;
             }
+            Some("enableBundledExtensions") => {
+                layer.enable_bundled_extensions =
+                    Some(serde_yaml::from_value(value).map_err(|e| {
+                        ConfigError::Invalid(format!(
+                            ".oxplow/personal.yaml: enableBundledExtensions: {e}"
+                        ))
+                    })?);
+            }
             other => {
                 return Err(ConfigError::Invalid(format!(
                     ".oxplow/personal.yaml may set only {} (found `{}`)",
@@ -1328,6 +1390,9 @@ pub fn personal_value(config: &OxplowConfig, key: &str) -> Option<serde_json::Va
         "extensionSources" if !config.personal_extension_sources.is_empty() => {
             serde_json::to_value(&config.personal_extension_sources).ok()
         }
+        "enableBundledExtensions" => config
+            .personal_enable_bundled_extensions
+            .map(serde_json::Value::Bool),
         _ => None,
     }
 }
@@ -1739,6 +1804,11 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
         to_yaml(&config.extension_sources),
         !config.extension_sources.is_empty(),
     );
+    put(
+        "enableBundledExtensions",
+        to_yaml(&config.enable_bundled_extensions),
+        config.enable_bundled_extensions.is_some(),
+    );
     {
         let mut ai = serde_yaml::Mapping::new();
         // A role restricted from nothing is written without `restrict`.
@@ -1838,6 +1908,8 @@ fn default_config(project_name: String) -> OxplowConfig {
         extension_sources: Default::default(),
         personal_extensions: Default::default(),
         personal_extension_sources: Default::default(),
+        enable_bundled_extensions: None,
+        personal_enable_bundled_extensions: None,
     }
 }
 
@@ -2377,6 +2449,8 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         extension_sources: raw.extension_sources.unwrap_or_default(),
         personal_extensions: Default::default(),
         personal_extension_sources: Default::default(),
+        enable_bundled_extensions: raw.enable_bundled_extensions,
+        personal_enable_bundled_extensions: None,
     })
 }
 
@@ -4652,6 +4726,33 @@ lsp:
         assert!(cfg.extensions.is_empty());
         write_rendered(none.path(), &cfg);
         assert!(extension_settings(none.path()).enabled().is_empty());
+    }
+
+    /// `enableBundledExtensions: false` runs oxplow's own extensions from
+    /// their sources, only in a dev build; the person's layer wins.
+    #[test]
+    fn bundled_extensions_run_from_their_sources_only_when_a_dev_build_is_asked() {
+        assert!(!bundled_from_sources(None, true));
+        assert!(!bundled_from_sources(Some(true), true));
+        assert!(bundled_from_sources(Some(false), true));
+        assert!(!bundled_from_sources(Some(false), false), "a release build");
+        let dir = tempdir().unwrap();
+        std::fs::write(cfg_path(dir.path()), "enableBundledExtensions: false\n").unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(cfg.enable_bundled_extensions, Some(false));
+        write_rendered(dir.path(), &cfg);
+        let settings = extension_settings(dir.path());
+        assert_eq!(settings.bundled_requested, Some(false));
+        assert_eq!(settings.bundled_from_sources, cfg!(debug_assertions));
+        assert_eq!(ExtensionSettings::of(&cfg), settings);
+        std::fs::write(personal_path(dir.path()), "enableBundledExtensions: true\n").unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(cfg.personal_enable_bundled_extensions, Some(true));
+        let settings = extension_settings(dir.path());
+        assert_eq!(settings.bundled_requested, Some(true));
+        assert!(!settings.bundled_from_sources);
+        assert_eq!(ExtensionSettings::of(&cfg), settings);
+        assert!(crate::keys::HUMAN_ONLY_KEYS.contains(&"enableBundledExtensions"));
     }
 
     #[test]

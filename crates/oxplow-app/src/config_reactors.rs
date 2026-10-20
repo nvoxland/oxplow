@@ -124,7 +124,12 @@ pub fn register(state: &Arc<crate::Services>) {
     };
     state.event_pump.register_async(reactor(
         EXTENSIONS,
-        &["extensions", "enableExtensions", "disableExtensions"],
+        &[
+            "extensions",
+            "enableExtensions",
+            "disableExtensions",
+            "extensionSources",
+        ],
         Box::new(|svc| Box::pin(async move { svc.extension_catalog.changed() })),
     ));
     state.event_pump.register_async(reactor(

@@ -141,6 +141,34 @@ pub async fn open_session(
 pub async fn services_with_effort() -> EffortFixture {
     let dir = tempfile::tempdir().unwrap();
     init_git_repo(dir.path());
+    services_with_effort_in(dir).await
+}
+
+/// [`services_with_effort`] while developing oxplow: oxplow's own
+/// extensions run from their sources (`enableBundledExtensions: false`),
+/// each a copy of the repo's folder in the project's
+/// `.oxplow/extensions/`, deployed at startup like any extension.
+pub async fn services_developing_oxplow() -> EffortFixture {
+    let dir = tempfile::tempdir().unwrap();
+    init_git_repo(dir.path());
+    for b in crate::bundled_extensions::BUNDLED {
+        let to = dir.path().join(".oxplow/extensions").join(b.name);
+        for (rel, bytes) in b.files {
+            let file = to.join(rel);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, bytes).unwrap();
+        }
+    }
+    std::fs::write(
+        dir.path().join(".oxplow/project.yaml"),
+        "enableBundledExtensions: false\n",
+    )
+    .unwrap();
+    services_with_effort_in(dir).await
+}
+
+/// [`services_with_effort`] over the project `dir`, already set up.
+pub async fn services_with_effort_in(dir: tempfile::TempDir) -> EffortFixture {
     let svc = crate::Services::in_memory(dir.path()).await.unwrap();
     svc.streams.ensure_primary().await.unwrap();
     // Activation logged the capability choices; the policy has heard them

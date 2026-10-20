@@ -93,6 +93,18 @@ fn shipped_permissions(b: &crate::bundled_extensions::BundledExtension) -> Permi
         .unwrap_or_default()
 }
 
+/// The copy of `name` built into oxplow, when this oxplow runs it
+/// (`bundled_extensions::shipped`).
+fn shipped_of(
+    svc: &Services,
+    name: &str,
+) -> Option<&'static crate::bundled_extensions::BundledExtension> {
+    crate::bundled_extensions::shipped(
+        name,
+        &svc.extension_catalog.settings(&svc.layout.project_dir),
+    )
+}
+
 /// `name`'s deployment as it runs now, if one does.
 fn running(svc: &Services, name: &str) -> Option<crate::extensions::Extension> {
     svc.extension_catalog.active().and_then(|snapshot| {
@@ -116,7 +128,7 @@ fn running(svc: &Services, name: &str) -> Option<crate::extensions::Extension> {
 fn active_permissions(svc: &Services, name: &str) -> Permissions {
     running(svc, name)
         .map(|e| e.permissions)
-        .or_else(|| crate::bundled_extensions::find(name).map(shipped_permissions))
+        .or_else(|| shipped_of(svc, name).map(shipped_permissions))
         .unwrap_or_default()
 }
 
@@ -291,11 +303,13 @@ fn source_of(project: &Path, root: &Path, name: &str) -> Result<PathBuf, DomainE
     }
 }
 
-/// The live-set change that runs `hash` for `name`: none for a bundled
-/// extension whose shipped deployment has that hash.
-fn target_of(name: &str, hash: &str) -> Option<String> {
-    let shipped = crate::bundled_extensions::find(name)
-        .map(|b| extension_store::files_hash(b.files.iter().copied()));
+/// The live-set change that runs `hash`: none when it is the hash of the
+/// copy that ships (`shipped`, when this oxplow runs one).
+fn target_of(
+    shipped: Option<&crate::bundled_extensions::BundledExtension>,
+    hash: &str,
+) -> Option<String> {
+    let shipped = shipped.map(|b| extension_store::files_hash(b.files.iter().copied()));
     (shipped.as_deref() != Some(hash)).then(|| hash.to_string())
 }
 
@@ -329,7 +343,7 @@ pub async fn deploy(
         .map_err(storage)?
         .map_err(|e| invalid(format!("extension `{name}`: {e}")))?
     };
-    let target = target_of(name, &hash);
+    let target = target_of(shipped_of(svc, name), &hash);
     let live_now = svc.extension_catalog.live().get(name) == target.as_ref();
     requirements_met(
         &oxplow_config::extension_settings(&project),
@@ -472,7 +486,7 @@ pub async fn rollback(
                 rows.iter().filter(|r| r.hash.starts_with(prefix)).collect();
             match matching.as_slice() {
                 [one] => Some(one.hash.clone()),
-                [] => match crate::bundled_extensions::find(name) {
+                [] => match shipped_of(svc, name) {
                     Some(b)
                         if extension_store::files_hash(b.files.iter().copied())
                             .starts_with(prefix) =>
@@ -497,7 +511,7 @@ pub async fn rollback(
                 .skip_while(|r| Some(&r.hash) != live.as_ref())
                 .nth(1)
                 .or_else(|| rows.iter().find(|r| Some(&r.hash) != live.as_ref()));
-            match (previous, crate::bundled_extensions::find(name)) {
+            match (previous, shipped_of(svc, name)) {
                 (Some(row), _) => Some(row.hash.clone()),
                 (None, Some(_)) if live.is_some() => None,
                 _ => {
@@ -518,7 +532,7 @@ pub async fn rollback(
         }
     }
     let shown = hash.clone().unwrap_or_else(|| {
-        crate::bundled_extensions::find(name)
+        shipped_of(svc, name)
             .map(|b| extension_store::files_hash(b.files.iter().copied()))
             .unwrap_or_default()
     });
@@ -537,7 +551,7 @@ pub async fn rollback(
         Some(_) => target_row
             .map(|r| r.permissions.clone())
             .unwrap_or_default(),
-        None => crate::bundled_extensions::find(name)
+        None => shipped_of(svc, name)
             .map(shipped_permissions)
             .unwrap_or_default(),
     };
@@ -670,7 +684,7 @@ pub async fn set_enabled(
     }
     write_personal(svc, &settings)?;
     let undeployed = enabled
-        && crate::bundled_extensions::find(name).is_none()
+        && shipped_of(svc, name).is_none()
         && !svc.extension_catalog.live().contains_key(name);
     if undeployed {
         let root = svc.layout.project_dir.clone();
@@ -684,7 +698,12 @@ pub async fn set_enabled(
 /// deployments and its stored state and settings. Its source stays.
 pub async fn remove(svc: &Arc<Services>, name: &str) -> Result<(), DomainError> {
     valid(name)?;
-    if crate::bundled_extensions::find(name).is_some() {
+    if crate::bundled_extensions::is_required(name) {
+        return Err(invalid(format!(
+            "`{name}` is part of oxplow; it can't be removed"
+        )));
+    }
+    if shipped_of(svc, name).is_some() {
         return Err(invalid(format!(
             "`{name}` ships with oxplow; turn it off instead"
         )));
@@ -826,6 +845,7 @@ async fn stage(
     from_stream: Option<i64>,
     permissions: Permissions,
 ) -> Result<Option<String>, DomainError> {
+    let shipped = shipped_of(svc, name);
     let hash = {
         let (project, owned, source) = (
             svc.layout.project_dir.clone(),
@@ -834,7 +854,7 @@ async fn stage(
         );
         tokio::task::spawn_blocking(move || {
             let hash = extension_store::source_hash(&source)?;
-            if target_of(&owned, &hash).is_some() {
+            if target_of(shipped, &hash).is_some() {
                 extension_store::copy_into_store(&project, &owned, &source, &hash)?;
             }
             Ok::<_, std::io::Error>(hash)
@@ -843,7 +863,7 @@ async fn stage(
         .map_err(storage)?
         .map_err(|e| storage(format!("stage `{name}`: {e}")))?
     };
-    let Some(target) = target_of(name, &hash) else {
+    let Some(target) = target_of(shipped, &hash) else {
         return Ok(None);
     };
     let row = DeploymentRow {
@@ -897,14 +917,15 @@ pub(crate) async fn start(svc: &Arc<Services>) -> Result<LiveChanges, DomainErro
         }
         // One that would add permissions waits for a person to deploy it
         // (its listing says what for); a bundled one's baseline is what
-        // ships.
-        // One with a build waits too: nothing has approved its command.
+        // ships. One with a build waits too: nothing has approved its
+        // command. A required one with no copy shipping (oxplow
+        // developing itself) is the project's own code and deploys.
         let loaded = crate::extensions::load_extension_at(&source, &name);
         let declared = loaded.permissions;
-        let baseline = crate::bundled_extensions::find(&name)
-            .map(shipped_permissions)
-            .unwrap_or_default();
-        if !declared.added_over(&baseline).is_empty() || loaded.build.is_some() {
+        let shipped = shipped_of(svc, &name);
+        let trusted = shipped.is_none() && crate::bundled_extensions::is_required(&name);
+        let baseline = shipped.map(shipped_permissions).unwrap_or_default();
+        if !trusted && !declared.added_over(&baseline).is_empty() || loaded.build.is_some() {
             continue;
         }
         match stage(svc, &name, &source, None, declared).await {
@@ -941,7 +962,7 @@ pub(crate) async fn stage_sources(svc: &Arc<Services>) -> LiveChanges {
         if svc.extension_catalog.live().get(&name) != target.as_ref() {
             changes.insert(name.clone(), target);
         }
-        if !settings.is_enabled(&name) && crate::bundled_extensions::find(&name).is_none() {
+        if !settings.is_enabled(&name) && !crate::bundled_extensions::is_reserved(&name) {
             settings.personal.enable.push(name);
             turned_on = true;
         }
@@ -1803,6 +1824,74 @@ mod tests {
             .unwrap();
         assert_eq!(ghost.deployment, Deployment::NotHere);
         assert!(!ghost.enabled && ghost.errors.is_empty());
+    }
+
+    /// While developing oxplow (`enableBundledExtensions: false`) its own
+    /// extensions run from their sources: foundation is deployed at
+    /// startup like any extension, with nothing to approve (it is the
+    /// project's own code); `oxplow-bundled` waits for a person to approve
+    /// its permissions, as any extension does.
+    #[tokio::test]
+    async fn developing_oxplow_its_own_extensions_run_from_their_sources() {
+        let fx = crate::test_fixtures::services_developing_oxplow().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        let source = |name: &str| root.join(".oxplow/extensions").join(name);
+        let listed = |name: &str| {
+            svc.extension_catalog
+                .active()
+                .unwrap()
+                .extensions()
+                .iter()
+                .find(|e| e.name == name)
+                .cloned()
+                .unwrap()
+        };
+        assert_eq!(
+            listed("oxplow-foundation").deployment,
+            Deployment::Deployed {
+                hash: extension_store::source_hash(&source("oxplow-foundation")).unwrap()
+            }
+        );
+        assert!(svc.commands.spec("oxplow.config.get").is_some());
+        let bundled = listed("oxplow-bundled");
+        assert_eq!(bundled.deployment, Deployment::Undeployed);
+        assert!(!bundled.pending.is_empty(), "it waits on its permissions");
+
+        // A deploy of the unchanged source is the one running; nothing
+        // ships to roll back to.
+        let again = deploy(svc, "oxplow-foundation", &root, None, false)
+            .await
+            .unwrap();
+        assert!(again.already);
+        let e = rollback(svc, "oxplow-foundation", None, true)
+            .await
+            .unwrap_err();
+        assert!(e.to_string().contains("no earlier deployment"), "{e}");
+        let e = remove(svc, "oxplow-foundation").await.unwrap_err();
+        assert!(e.to_string().contains("part of oxplow"), "{e}");
+
+        // An edit deploys like any extension's, and rolls back.
+        let manifest =
+            std::fs::read_to_string(source("oxplow-foundation").join("extension.yaml")).unwrap();
+        std::fs::write(
+            source("oxplow-foundation").join("extension.yaml"),
+            manifest.replacen("\ncommands:\n", "\ncommands:\n  - name: test.draft_again\n    summary: \"A second draft command.\"\n    scope: agent_input.write\n    op: draft\n    invokers: { human: true, agent: false, lens: true }\n", 1),
+        )
+        .unwrap();
+        let edited = deploy(svc, "oxplow-foundation", &root, None, false)
+            .await
+            .unwrap();
+        assert!(!edited.already);
+        assert!(svc.commands.spec("oxplow.test.draft_again").is_some());
+        rollback(svc, "oxplow-foundation", None, true)
+            .await
+            .unwrap();
+        assert!(svc.commands.spec("oxplow.test.draft_again").is_none());
+        assert_eq!(
+            listed("oxplow-foundation").deployment,
+            Deployment::Deployed { hash: again.hash }
+        );
     }
 
     /// Foundation's commands are what its active deployment declares:

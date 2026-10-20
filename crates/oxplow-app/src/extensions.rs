@@ -1896,7 +1896,7 @@ pub(super) fn load_sources(
     let mut out = Vec::new();
     for name in known_names(root, settings) {
         let dir = settings.source(root, &name);
-        let bundled = crate::bundled_extensions::find(&name);
+        let bundled = crate::bundled_extensions::shipped(&name, settings);
         if dir.is_dir() {
             out.push(load_one(
                 &Disk(dir.clone()),
@@ -1944,7 +1944,7 @@ pub fn load_deployed(
                     )
                 });
             }
-            if let Some(b) = crate::bundled_extensions::find(name) {
+            if let Some(b) = crate::bundled_extensions::shipped(name, settings) {
                 return Some(shipped(project, b));
             }
             let source = settings.source(project, name);
@@ -1962,7 +1962,7 @@ pub fn load_deployed(
                     permissions: loaded.permissions,
                     ..listed_only(name, &shown(project, &source), Deployment::Undeployed)
                 })
-            } else if settings.is_enabled(name) {
+            } else if settings.is_enabled(name) || crate::bundled_extensions::is_required(name) {
                 Some(listed_only(
                     name,
                     &shown(project, &source),
@@ -2256,9 +2256,10 @@ fn parse_block<T: serde::de::DeserializeOwned>(
 /// source when the checkout has one, else, for an extension that ships with
 /// oxplow, its shipped deployment in `project`'s store.
 pub fn source_or_shipped(project: &Path, root: &Path, name: &str) -> String {
-    let source = oxplow_config::extension_settings(project).source(root, name);
+    let settings = oxplow_config::extension_settings(project);
+    let source = settings.source(root, name);
     if !source.is_dir() {
-        if let Some(b) = crate::bundled_extensions::find(name) {
+        if let Some(b) = crate::bundled_extensions::shipped(name, &settings) {
             if let Ok(hash) = crate::extension_store::extract_shipped(project, b) {
                 return crate::extension_store::deployment_dir(project, name, &hash)
                     .to_string_lossy()

@@ -43,6 +43,7 @@ pub const HUMAN_ONLY_KEYS: &[&str] = &[
     "testing",
     "extensions",
     "extensionSources",
+    "enableBundledExtensions",
     "agentPromptAppend",
 ];
 

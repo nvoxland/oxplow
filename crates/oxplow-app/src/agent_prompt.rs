@@ -246,6 +246,8 @@ mod tests {
             extension_sources: Default::default(),
             personal_extensions: Default::default(),
             personal_extension_sources: Default::default(),
+            enable_bundled_extensions: None,
+            personal_enable_bundled_extensions: None,
         }
     }
 

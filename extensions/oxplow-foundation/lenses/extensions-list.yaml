@@ -15,7 +15,7 @@ query: |
          (s.hash IS NOT NULL AND (e.deployment = 'undeployed'
             OR (e.hash IS NOT NULL AND s.hash != e.hash))) AS can_deploy,
          (e.deployment = 'deployed') AS can_rollback,
-         (e.origin = 'project' AND NOT e.enabled) AS can_enable,
+         (NOT e.enabled) AS can_enable,
          (e.enabled AND e.name != 'oxplow-foundation') AS can_disable,
          (e.origin = 'project') AS can_remove,
          (e.origin = 'project' AND NOT e.shared AND s.path LIKE '.oxplow/extensions/%') AS can_share,
