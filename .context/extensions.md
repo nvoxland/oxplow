@@ -1823,7 +1823,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   |---|---|
   | `filter` params on a page | 6 — fold related ones into one `choice`, or split the page |
   | options of a `choice` | 12 — use a `search`, or a lens that lists them |
-  | a param no query of the page reads (the lens's own and its parts'; `:x` whole token, a date_range also `:x_from` / `:x_to`, an action's `{{param.x}}`; not for `custom`, `form`, `approvals`) | none — remove it, or read it |
+  | a param no query of the page reads (the lens's own and its parts'; `:x` whole token, a date_range also `:x_from` / `:x_to`, an action's `{{param.x}}`, a column that `select`s or `highlight`s it; not for `custom`, `form`, `approvals`) | none — remove it, or read it |
   | description of a visible lens (`hidden: false`; a hidden lens's is never shown) | 200 characters |
   | sections of a `document` | 8 |
   | declared `columns` of a `table` / `list` (not a `tool:` lens, whose rows are for an agent) | 8 — put the rest in a section a row `select`s |
@@ -1839,7 +1839,9 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   changed after the deployment was made), and the open page lists its
   document or dashboard `parts` with each part's `source`. `v_lens`
   has `source`, not the running path. A deploy returns the loaded
-  extension's warnings as well as the size warning.
+  extension's warnings as well as the size warning. A deployed
+  extension's errors and warnings name its source files (`locate`
+  rewrites the running copy's prefix), so they say what to edit.
 - **`columns[].select: <param>`** — clicking a row sets that param to the
   column's value, so whatever reads it re-runs: a document's other
   sections, master and detail from existing pieces. It names a declared

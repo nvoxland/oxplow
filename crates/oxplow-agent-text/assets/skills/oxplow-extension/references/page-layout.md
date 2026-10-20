@@ -65,7 +65,7 @@ selection, and the rail shows the picked row instead of an input.
 |---|---|
 | more than 6 filters | fold related ones into one `choice`, or split the page |
 | a `choice` with more than 12 options | use a `search`, or a lens that lists them |
-| a param no query of the page reads | remove it, or read it as `:name` |
+| a param no query of the page reads (a column's `select` or `highlight` counts) | remove it, or read it as `:name` |
 | a description over 200 characters | keep a sentence or two; move the rest to a markdown section |
 | a document with more than 8 sections | split the page |
 | a table or list with more than 8 columns | show the rest in a section a row `select`s |

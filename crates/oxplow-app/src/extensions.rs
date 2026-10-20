@@ -2237,6 +2237,16 @@ fn locate(ext: &mut Extension, project: &Path, settings: &oxplow_config::Extensi
     };
     let dir = settings.source(project, &ext.name);
     let source = dir.is_dir().then(|| shown(project, &dir));
+    // What it reports names the source files, the ones to edit, not the
+    // copy that runs.
+    if let Some(source) = source.as_ref().filter(|s| **s != ext.path) {
+        let (from, to) = (format!("{}/", ext.path), format!("{source}/"));
+        for message in ext.errors.iter_mut().chain(ext.warnings.iter_mut()) {
+            if let Some(rest) = message.strip_prefix(&from) {
+                *message = format!("{to}{rest}");
+            }
+        }
+    }
     for lens in &mut ext.lenses {
         let file = lens.origin.running.rsplit('/').next().unwrap_or_default();
         lens.origin.source = source.as_ref().map(|dir| format!("{dir}/lenses/{file}"));
@@ -4484,12 +4494,20 @@ fn layout_warnings(lens: &Lens, lenses: &[Lens]) -> Vec<String> {
             .filter(|(scope, _)| scope == "param")
             .map(|(_, name)| name)
             .collect();
+        // A column that selects or highlights a param uses it.
+        let marked: Vec<&str> = lens
+            .columns
+            .iter()
+            .flat_map(|c| [c.select.as_deref(), c.highlight.as_deref()])
+            .flatten()
+            .collect();
         for p in &lens.params {
             let read = |token: &str| queries.iter().any(|q| reads_param(q, token));
             let range = p.kind == Some(ParamType::DateRange);
             if !(read(&p.name)
                 || range && (read(&format!("{}_from", p.name)) || read(&format!("{}_to", p.name)))
-                || templated.contains(&p.name))
+                || templated.contains(&p.name)
+                || marked.contains(&p.name.as_str()))
             {
                 out.push(format!(
                     "param `{0}` isn't read by any query of the page — remove it, or read it as `:{0}`",
@@ -8269,6 +8287,55 @@ commands:
             layout_of("title: P\nparams: [{ name: q }]\nquery: SELECT 1 AS a WHERE 1 = :q\n")
                 .0
                 .is_empty()
+        );
+    }
+
+    /// A param a column `select`s or `highlight`s is in use: a click sets
+    /// it, or the cells mark it, whether or not this lens's query reads it.
+    #[test]
+    fn a_param_a_column_selects_or_highlights_is_read() {
+        let (warns, loaded) = layout_of(
+            "title: P\nparams: [{ name: commit }, { name: q }]\nquery: SELECT 'a' AS sha, 'b' AS s\ncolumns: [{ key: sha, select: commit }, { key: s, highlight: q }]\n",
+        );
+        assert!(loaded);
+        assert!(warns.is_empty(), "{warns:?}");
+    }
+
+    /// What a deployed extension reports names its source files, the
+    /// ones to edit, not the copy in the store.
+    #[test]
+    fn a_deployed_extension_s_warnings_name_its_source() {
+        let (d, _) = load_x(
+            &[(
+                "ok",
+                "title: OK\nparams: [{ name: z }]\nquery: SELECT 1 AS a\n",
+            )],
+            "",
+        );
+        let source = d.path().join(".oxplow/extensions/x");
+        let hash = crate::extension_store::source_hash(&source).unwrap();
+        crate::extension_store::copy_into_store(d.path(), "x", &source, &hash).unwrap();
+        let mut settings = oxplow_config::extension_settings(d.path());
+        settings.personal.enable.push("x".into());
+        let live = BTreeMap::from([("x".to_string(), hash.clone())]);
+        let ext = load_deployed(d.path(), &settings, &live)
+            .into_iter()
+            .find(|e| e.name == "x")
+            .unwrap();
+        let unread: Vec<&String> = ext
+            .warnings
+            .iter()
+            .filter(|w| w.contains("param `z`"))
+            .collect();
+        assert_eq!(unread.len(), 1, "{:?}", ext.warnings);
+        assert!(
+            unread[0].starts_with(".oxplow/extensions/x/lenses/ok.yaml: "),
+            "{unread:?}"
+        );
+        assert!(
+            ext.warnings.iter().all(|w| !w.contains(&hash)),
+            "{:?}",
+            ext.warnings
         );
     }
 
