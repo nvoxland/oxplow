@@ -211,7 +211,9 @@ id among the enabled extensions), draws a built-in from the
 frame filling the body under the nav bar, told the page's params, stream
 and thread, its title and actions the frame's (`setTitle`,
 `setActions`). oxplow's Timeline (`page:timeline`, params `from`, `to`,
-`thread`) is one. Each built-in body is a
+`thread`) is one: its window is its view params, written on every change
+(not its opening default) and followed on Back/Forward. A frame's
+`setViewParams` reaches the tab as `patchViewParams` (null drops a key). Each built-in body is a
 `(ctx) => CenterTab | null` over `{ ref, params, state, nav, scope }`;
 `scope` is the `AppScope` (`pages/appScope.ts`), the explicit list of
 what core offers them (selection, work state, handlers) that `App.tsx`

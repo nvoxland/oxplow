@@ -529,7 +529,11 @@ memory** (yours, in every tab of the component; JSON, 64 KB a value and
 `localStorage` or `sessionStorage`. A component written in
 TypeScript or with a library declares a `build:` ("Extensions" → "Builds"),
 so only its sources are committed. oxplow-foundation's Timeline page is a
-working example (`extensions/oxplow-foundation/src/timeline/`).
+working example (`extensions/oxplow-foundation/src/timeline/`): it reads
+its window from `from` and `to`, writes every change of it back with
+`setViewParams`, and follows `onViewParams` when Back or Forward moves the
+tab. A default it computes ("the last week") stays out of the address, so
+a bookmark doesn't freeze it to one date.
 
 ## Replacing a view
 

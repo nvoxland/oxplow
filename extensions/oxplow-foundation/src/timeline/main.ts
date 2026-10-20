@@ -2,7 +2,10 @@
 // timeline }]`): efforts, agent sessions, threads and commits on a
 // zoomable time axis. A custom page: it reads its rows with `querySql`
 // (the component declares `sql: read`), titles its page with the range,
-// puts Today and Fit in the page's bar, and opens what is clicked.
+// puts Today and Fit in the page's bar, and opens what is clicked. Its
+// window is its view params (`from`, `to`): every change of it — a drag,
+// a zoom, Today, Fit, a bucket clicked — goes into the tab's address, and
+// Back or Forward moves the window back.
 import { DataSet, Timeline } from "vis-timeline/standalone";
 
 type Cell = string | number | boolean | null;
@@ -15,6 +18,11 @@ interface Component {
   page: { streamId: string | null; threadId: string | null } | null;
   /** Its view params: the page's tab's address (`from`, `to`, `thread`). */
   viewParams: Record<string, string> | null;
+  /** Change the page's view (null drops a param): a filter, so it
+   *  replaces the tab's entry. */
+  setViewParams(params: Record<string, string | null>): Promise<null>;
+  /** The view params, when the tab moves (Back, Forward). */
+  onViewParams(listener: (params: Record<string, string>) => void): () => void;
   querySql(sql: string, params?: Cell[]): Promise<Rows>;
   navigate(ref: string, options?: { newTab?: boolean }): Promise<null>;
   setTitle(title: string): Promise<null>;
@@ -215,9 +223,27 @@ oxplow.connect().then((component) => {
       note.textContent = `Couldn't load this range: ${(e as { message?: string })?.message ?? String(e)}`;
     });
   let timer: ReturnType<typeof setTimeout> | undefined;
+  // The window last written to (or read from) the address: one the tab
+  // already shows writes nothing.
+  let shown = { from: params.from ?? null, to: params.to ?? null };
   timeline.on("rangechanged", (event: { start: Date; end: Date; byUser: boolean }) => {
     clearTimeout(timer);
-    timer = setTimeout(() => void show(event.start, event.end), 250);
+    timer = setTimeout(() => {
+      void show(event.start, event.end);
+      const next = { from: event.start.toISOString(), to: event.end.toISOString() };
+      if (next.from === shown.from && next.to === shown.to) return;
+      // The window it opened at, with no range asked for, stays out of the
+      // address: "the last week" mustn't become the week it was opened.
+      if (!shown.from && !shown.to && event.start.getTime() === start.getTime() && event.end.getTime() === end.getTime()) return;
+      shown = next;
+      void component.setViewParams(next);
+    }, 250);
+  });
+  component.onViewParams((next) => {
+    if ((next.from ?? null) === shown.from && (next.to ?? null) === shown.to) return;
+    shown = { from: next.from ?? null, to: next.to ?? null };
+    const now = Date.now();
+    timeline.setWindow(dateOf(next.from, now - 7 * DAY), dateOf(next.to, now + DAY / 4));
   });
   timeline.on("click", (event: { item: string | null; event: MouseEvent }) => {
     if (!event.item) return;

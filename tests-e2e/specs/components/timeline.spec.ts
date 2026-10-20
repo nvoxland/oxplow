@@ -19,3 +19,29 @@ test("the Timeline page draws the project's activity and titles itself", async (
   await page.getByTestId("action-fit").click();
   await expect(frame.locator(".vis-item").first()).toBeVisible();
 });
+
+// Its window is its view params: Fit writes `from` and `to` into the tab's
+// address (a filter: it replaces the entry), and a reload shows the same
+// window.
+test("the Timeline's window is its tab's: Fit puts it in the address, a reload keeps it", async ({ fresh }) => {
+  const { page } = fresh;
+  await page.goto("/");
+  await openFromLauncher(page, "Timeline");
+  const frame = page.frameLocator('[data-testid="custom-component-frame"]');
+  await expect(frame.locator(".vis-item").first()).toBeVisible();
+  // The window it opens at is "the last week", not a date: not in the address.
+  const body = page.locator('[data-testid^="center-tab-body-page:timeline"]:visible');
+  await expect(body).toHaveAttribute("data-testid", "center-tab-body-page:timeline");
+  await expect(page.getByTestId("page-nav-title")).toContainText("Timeline:");
+  const opened = await page.getByTestId("page-nav-title").textContent();
+  await page.getByTestId("action-fit").click();
+  await expect(body).toHaveAttribute("data-testid", /from=.*to=|to=.*from=/);
+  await expect(page.getByTestId("page-nav-back").filter({ visible: true })).toBeDisabled();
+  // The page titles itself with the window it loaded: Fit's, once loaded.
+  await expect(page.getByTestId("page-nav-title")).not.toHaveText(opened!);
+  const title = await page.getByTestId("page-nav-title").textContent();
+  const id = await body.getAttribute("data-testid");
+  await page.reload();
+  await expect(body).toHaveAttribute("data-testid", id!);
+  await expect(page.getByTestId("page-nav-title")).toHaveText(title!);
+});
