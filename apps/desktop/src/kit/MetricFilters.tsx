@@ -21,7 +21,10 @@ export interface MetricFiltersProps {
   slice?: string;
   /** The dimensions a metric can be sliced by; none hides the filter. */
   dimensions?: readonly { key: string; label: string }[];
-  onApply(name: "range" | "branch" | "slice", value: string): void;
+  /** Which metrics are listed (a choice); none hides the filter. */
+  show?: string;
+  showOptions?: readonly { value: string; label: string }[];
+  onApply(name: "range" | "branch" | "slice" | "show", value: string): void;
 }
 
 /**
@@ -38,9 +41,17 @@ export function MetricFilters({
   branches = [],
   slice,
   dimensions = [],
+  show,
+  showOptions = [],
   onApply,
 }: MetricFiltersProps) {
   const rows: { param: LensParam; value: SqlCell }[] = [];
+  if (show !== undefined && showOptions.length > 0) {
+    rows.push({
+      param: { name: "show", type: "choice", default: showOptions[0]!.value, options: showOptions.map((o) => ({ ...o })) },
+      value: show,
+    });
+  }
   if (range !== undefined) rows.push({ param: { name: "range", type: "date_range", default: defaultRange, presets }, value: range });
   if (branch !== undefined) {
     rows.push({
@@ -72,7 +83,7 @@ export function MetricFilters({
           key={param.name}
           param={param}
           value={value}
-          onApply={(name, next) => onApply(name as "range" | "branch" | "slice", next === null ? "" : String(next))}
+          onApply={(name, next) => onApply(name as "range" | "branch" | "slice" | "show", next === null ? "" : String(next))}
         />
       ))}
     </div>

@@ -23,7 +23,7 @@ import { metricRef } from "../tabs/pageRefs.js";
 import { Page } from "../tabs/Page.js";
 import { routeDispatch, routeHandlers } from "../tabs/RouteLink.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
-import { DataTable, MetricFilters, Section, type DataColumn } from "../kit/index.js";
+import { DataTable, MetricFilters, Section, Toolbar, useSearchFilter, type DataColumn } from "../kit/index.js";
 import type { OriginItem } from "../tabs/session.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { buildMetricSections } from "./metricCategories.js";
@@ -205,8 +205,6 @@ function MetricsTable({
   );
 }
 
-const sel = { fontSize: 12, width: "100%" } as const;
-
 /**
  * Metrics — every catalogued metric as a `title · trend sparkline ·
  * latest value` row, organized as **one table per section** under headings, via
@@ -238,7 +236,8 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
   const [rangeKey, setRangeKey] = useViewParam<string>("range", DEFAULT_RANGE_KEY);
   const [branchName, setBranch] = useViewParam<string>("branch", "");
   const branch = branchName || null;
-  const [query, setQuery] = useViewParam<string>("q", "");
+  const search = useSearchFilter("q", { label: "Filter metrics by name", placeholder: "Filter by name…", testId: "recorded-search" });
+  const query = search.value;
   const [showMode, setShowMode] = useViewParam<ShowMode>("show", DEFAULT_SHOW_MODE);
   // Slice By (tsk594): a dimension splits every metric that has it into groups.
   const [sliceKey, setSlice] = useViewParam<string>("slice", "");
@@ -349,40 +348,17 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
       rightRailTitle="Filters"
       rightRail={
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ opacity: 0.6, fontSize: 12 }}>Search</span>
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Filter by name…"
-              data-testid="recorded-search"
-              style={sel}
-            />
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ opacity: 0.6, fontSize: 12 }}>Show</span>
-            <select
-              value={showMode}
-              onChange={(e) => setShowMode(e.target.value as ShowMode)}
-              data-testid="recorded-show-mode"
-              title="Enabled lists only metrics this project has turned on; All also lists the ones it hasn't."
-              style={sel}
-            >
-              {SHOW_MODES.map((m) => (
-                <option key={m.key} value={m.key}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </div>
           <MetricFilters
             range={rangeKey}
             branch={branchName}
             branches={branches}
             slice={sliceKey}
             dimensions={dimensions}
-            onApply={(name, value) => ({ range: setRangeKey, branch: setBranch, slice: setSlice })[name](value)}
+            show={showMode}
+            showOptions={SHOW_MODES.map((m) => ({ value: m.key, label: m.label }))}
+            onApply={(name, value) =>
+              ({ range: setRangeKey, branch: setBranch, slice: setSlice, show: (v: string) => setShowMode(v as ShowMode) })[name](value)
+            }
           />
           {/* Not a filter, but this rail is the page's control panel — the
               controls self-hide while there are no sections to act on. */}
@@ -415,6 +391,7 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
         </div>
       }
     >
+      <Toolbar filter={search} />
       <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
         {loading ? (
           <div style={{ opacity: 0.6 }}>Loading…</div>

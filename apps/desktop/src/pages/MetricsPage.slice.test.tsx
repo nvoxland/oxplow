@@ -120,5 +120,6 @@ test("the filters are the tab's view params: read from it, written to it", async
   expect(view.getByTestId("lens-param-range-value").textContent).toBe("Last 30 days");
   pick(view, "range", "3d");
   fireEvent.change(view.getByTestId("recorded-search"), { target: { value: "" } });
-  expect(patches).toEqual([{ range: "3d" }, { q: undefined }]);
+  pick(view, "show", "all");
+  expect(patches).toEqual([{ range: "3d" }, { q: undefined }, { show: "all" }]);
 });
