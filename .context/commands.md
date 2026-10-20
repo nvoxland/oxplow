@@ -376,10 +376,15 @@ operation's schema, undo and atomicity, its access from the scope's,
 and
 the scope in its `needs`; the manifest says the rest. oxplow's own
 are declared in **`oxplow-foundation`** — a shipped extension that is
-**required** (`BundledExtension::required`: it can't be disabled, and
-`extension_commands::register_required` registers its commands when
-services are built, before anything runs one; activation leaves it
-alone). An extension may declare a command over the same operation in
+**required** (`BundledExtension::required`: it can't be disabled). Its
+commands are staged and published with each generation like any
+extension's, from its active deployment (the shipped one, or one deployed
+while developing oxplow), so deploying it with a new command registers
+that command at once; nothing runs a command before the first activation
+publishes. Each runs as its extension's contribution (an
+extension-scoped operation — configuration, state, jobs — finds its owner
+that way), so foundation's command runs are `oxplow-foundation`'s
+`v_extension_run` rows like any extension's. An extension may declare a command over the same operation in
 its own namespace. A script reaches record and write operations only by
 composing commands.
 
@@ -1042,8 +1047,8 @@ headers reach `command.executed`'s `source = agent:thr…`.
 ## Adding a command
 
 oxplow's own commands are declared in `extensions/oxplow-foundation`
-over operations of the scopes ("Scopes" → "Operations"); `Services::new` adds the operations and registers the
-declarations (`register_required`). Only `oxplow.command.sequence`, the
+over operations of the scopes ("Scopes" → "Operations"); `Services::new` adds the operations and each activation
+registers the declarations from foundation's active deployment. Only `oxplow.command.sequence`, the
 bus's composition primitive, is registered as a Rust command. A bus with
 one area's operations (a test's, `oxplow-dev`'s) registers what's
 declared over them with `register_declared`.

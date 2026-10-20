@@ -498,6 +498,16 @@ pub struct NamespaceCommands {
     pub commands: Vec<Command>,
 }
 
+/// Why a batch of namespace replacements was refused: the source whose
+/// commands didn't fit, the source it collided with (if one did), and the
+/// error.
+#[derive(Debug)]
+pub struct NamespaceRefusal {
+    pub source: String,
+    pub holder: Option<String>,
+    pub error: CommandError,
+}
+
 /// Validated command registry candidate. It carries the registry identity it
 /// was prepared against; publication cannot overwrite intervening changes or
 /// another bus. No active handler changes while this value is held.
@@ -671,13 +681,17 @@ impl Registry {
         ids
     }
 
-    fn replacing(&self, replacements: Vec<NamespaceCommands>) -> Result<Self, CommandError> {
+    fn replacing(&self, replacements: Vec<NamespaceCommands>) -> Result<Self, NamespaceRefusal> {
         let mut sources = std::collections::BTreeSet::new();
         for replacement in &replacements {
             if !sources.insert(&replacement.source) {
-                return Err(CommandError::Invalid {
-                    field: Some("/source".into()),
-                    message: "a command source may be replaced only once in a batch".into(),
+                return Err(NamespaceRefusal {
+                    source: replacement.source.clone(),
+                    holder: None,
+                    error: CommandError::Invalid {
+                        field: Some("/source".into()),
+                        message: "a command source may be replaced only once in a batch".into(),
+                    },
                 });
             }
         }
@@ -686,13 +700,30 @@ impl Registry {
             candidate.remove_source(&replacement.source);
         }
         for replacement in replacements {
-            if !replacement.commands.is_empty() {
-                candidate.add(
-                    &replacement.namespace,
-                    &replacement.source,
-                    replacement.commands,
-                )?;
+            if replacement.commands.is_empty() {
+                continue;
             }
+            // Who it would collide with: the namespace's holder, else the
+            // source of an id it repeats.
+            let holder = candidate
+                .holders
+                .get(&replacement.namespace)
+                .filter(|h| **h != replacement.source && *h != oxplow_domain::OXPLOW_NAMESPACE)
+                .cloned()
+                .or_else(|| {
+                    replacement
+                        .commands
+                        .iter()
+                        .find_map(|c| candidate.sources.get(&c.spec.id).cloned())
+                });
+            let source = replacement.source.clone();
+            candidate
+                .add(&replacement.namespace, &source, replacement.commands)
+                .map_err(|error| NamespaceRefusal {
+                    source,
+                    holder,
+                    error,
+                })?;
         }
         // Even an empty publication receives a distinct identity.
         candidate.revision = Arc::new(());
@@ -906,7 +937,7 @@ impl CommandBus {
         replacements: Vec<NamespaceCommands>,
     ) -> Result<(), CommandError> {
         let mut registry = self.commands.write();
-        *registry = registry.replacing(replacements)?;
+        *registry = registry.replacing(replacements).map_err(|r| r.error)?;
         Ok(())
     }
 
@@ -915,7 +946,7 @@ impl CommandBus {
     pub fn prepare_namespaces(
         &self,
         replacements: Vec<NamespaceCommands>,
-    ) -> Result<PreparedNamespaces, CommandError> {
+    ) -> Result<PreparedNamespaces, NamespaceRefusal> {
         let registry = self.commands.read().clone();
         Ok(PreparedNamespaces {
             base: registry.revision.clone(),

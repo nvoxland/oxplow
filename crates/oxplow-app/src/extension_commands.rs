@@ -1021,58 +1021,10 @@ pub fn extension_command(
     Command::new(spec, handler)
 }
 
-/// Register the commands of oxplow's required extensions
-/// (`oxplow-foundation`: its own commands) on `bus`, whose operations are
-/// already added — when services are built, before anything runs a
-/// command, and once: they're compiled in, so they never change. An error
-/// is a broken build (a declaration naming an op that isn't there).
-pub fn register_required(bus: &std::sync::Arc<crate::commands::CommandBus>) -> Result<(), String> {
-    for b in crate::bundled_extensions::BUNDLED
-        .iter()
-        .filter(|b| b.required)
-    {
-        let file = format!("{}/extension.yaml", b.name);
-        let manifest = b
-            .file("extension.yaml")
-            .ok_or_else(|| format!("{file} is missing"))?;
-        let doc: serde_yaml::Value =
-            serde_yaml::from_str(manifest).map_err(|e| format!("{file}: {e}"))?;
-        let namespace = doc["namespace"]
-            .as_str()
-            .map(str::to_string)
-            .unwrap_or_else(|| oxplow_domain::contribution::extension_namespace(b.name));
-        let (decls, errors) = parse_commands(
-            &namespace,
-            true,
-            &doc["commands"],
-            &file,
-            manifest,
-            &|path| b.file(path).map(str::to_string),
-            &no_providers,
-        );
-        if !errors.is_empty() {
-            return Err(errors.join("\n"));
-        }
-        let built = decls
-            .iter()
-            .map(|decl| {
-                extension_command(bus, b.name, decl).map_err(|e| format!("`{}`: {e}", decl.name))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        bus.register_namespace(
-            &namespace,
-            &oxplow_domain::refs::build::extension_ref(b.name),
-            built,
-        )
-        .map_err(|e| format!("{file}: {e}"))?;
-    }
-    Ok(())
-}
-
 /// The commands oxplow's required extensions declare over the operations
 /// `bus` has, skipping the rest — a bus with one area's operations (a
-/// test's, `oxplow-dev`'s). Services register them all
-/// (`register_required`).
+/// test's, `oxplow-dev`'s), which never activates. Services register them
+/// at activation, from foundation's active deployment.
 pub fn register_declared(bus: &std::sync::Arc<crate::commands::CommandBus>) {
     for b in crate::bundled_extensions::BUNDLED
         .iter()
@@ -1243,12 +1195,7 @@ impl ExtensionCommands {
         snapshot
             .extensions()
             .iter()
-            // Required commands are immutable registrations made at boot.
-            .filter(|e| {
-                e.enabled
-                    && !e.commands.is_empty()
-                    && !crate::bundled_extensions::is_required(&e.name)
-            })
+            .filter(|e| e.enabled && !e.commands.is_empty())
             .map(|e| {
                 (
                     e.name.clone(),
@@ -1273,8 +1220,7 @@ impl ExtensionCommands {
         let mut problems: BTreeMap<String, String> = snapshot
             .extensions()
             .iter()
-            .filter(|e| e.enabled && !crate::bundled_extensions::is_required(&e.name))
-            .filter(|e| !e.errors.is_empty())
+            .filter(|e| e.enabled && !e.errors.is_empty())
             .map(|e| (e.name.clone(), e.errors.join("\n")))
             .collect();
         if !problems.is_empty() {
@@ -1305,15 +1251,24 @@ impl ExtensionCommands {
                 });
             }
         }
-        let commands = self.bus.prepare_namespaces(replacements).map_err(|error| {
-            let problem = registration_problem(error);
-            // A shared registry collision rejects all participating sources.
-            wanted
-                .keys()
-                .chain(registered.keys())
-                .map(|name| (name.clone(), problem.clone()))
-                .collect::<BTreeMap<_, _>>()
-        })?;
+        let commands = self
+            .bus
+            .prepare_namespaces(replacements)
+            .map_err(|refusal| {
+                let problem = registration_problem(refusal.error);
+                // The source refused is held, and the one it collided with
+                // when that is an extension of this batch; nothing else.
+                let ours = |source: &str| {
+                    oxplow_domain::refs::build::id_of(source, oxplow_domain::refs::kind::EXTENSION)
+                        .ok()
+                        .filter(|name| wanted.contains_key(name) || registered.contains_key(name))
+                };
+                std::iter::once(refusal.source.as_str())
+                    .chain(refusal.holder.as_deref())
+                    .filter_map(ours)
+                    .map(|name| (name, problem.clone()))
+                    .collect::<BTreeMap<_, _>>()
+            })?;
         Ok(StagedExtensionCommands {
             generation: snapshot.generation().to_string(),
             source_generation: snapshot.source_generation().to_string(),
@@ -2833,6 +2788,9 @@ mod tests {
             "{:?}",
             held_problem(&fx, "my-review")
         );
+        // Only the colliding extension is held: oxplow's own commands stay.
+        assert!(bus.spec("oxplow.config.get").is_some());
+        assert_eq!(held_problem(&fx, "oxplow-foundation"), None);
     }
 
     /// A script declines with `{ refuse: "<why>" }`: the run is `Invalid`

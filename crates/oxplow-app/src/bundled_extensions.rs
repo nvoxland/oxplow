@@ -10,8 +10,7 @@ pub struct BundledExtension {
     pub name: &'static str,
     pub files: &'static [(&'static str, &'static [u8])],
     /// oxplow itself relies on it (`oxplow-foundation`, its own
-    /// commands): it can't be disabled, and its commands are registered
-    /// when services are built rather than by the reconciler.
+    /// commands): it can't be disabled or removed.
     pub required: bool,
 }
 
@@ -302,6 +301,23 @@ mod tests {
             assert_eq!(
                 listed, on_disk,
                 "extensions/{} files vs BUNDLED list",
+                b.name
+            );
+        }
+    }
+
+    /// What ships is the repo's folder as a deployment would hash it: a
+    /// deploy of the unchanged source resolves to the shipped copy.
+    #[test]
+    fn a_shipped_copy_hashes_as_its_source_folder() {
+        for b in super::BUNDLED {
+            let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../extensions")
+                .join(b.name);
+            assert_eq!(
+                crate::extension_store::files_hash(b.files.iter().copied()),
+                crate::extension_store::source_hash(&dir).unwrap(),
+                "{}",
                 b.name
             );
         }
@@ -878,6 +894,17 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn the_runs_lens_counts_each_extensions_week() {
         let f = crate::test_fixtures::services_with_effort().await;
+        // Only these runs: the fixture's own (foundation's
+        // `oxplow.effort.open`) are runs too.
+        f.svc
+            .db
+            .transaction(|tx| {
+                tx.execute("DELETE FROM extension_run", [])
+                    .map_err(oxplow_db::map_sql_err)
+                    .map(|_| ())
+            })
+            .await
+            .unwrap();
         // (extension, outcome, days ago, cpu ms, model calls)
         let runs: [(&str, &str, i64, i64, i64); 6] = [
             ("acme", "ok", 1, 10, 0),

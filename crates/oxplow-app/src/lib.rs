@@ -1804,7 +1804,6 @@ impl Services {
         {
             commands.add_op(op).expect("core ops register");
         }
-        extension_commands::register_required(&commands).expect("oxplow's own commands register");
         let token_usage_store = Arc::new(SqliteTokenUsageStore::new(db.clone()));
         let token_usage = token_usage::TokenUsageService::new(
             token_usage_store.clone(),

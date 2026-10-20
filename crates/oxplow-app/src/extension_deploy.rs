@@ -1805,6 +1805,57 @@ mod tests {
         assert!(!ghost.enabled && ghost.errors.is_empty());
     }
 
+    /// Foundation's commands are what its active deployment declares:
+    /// deploying it with a new command registers that command with core's
+    /// authority, as boot registers the shipped ones, and rolling back
+    /// takes it away again.
+    #[tokio::test]
+    async fn deploying_foundation_registers_the_commands_its_deployment_declares() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        let name = "oxplow-foundation";
+        svc.extension_activation
+            .initialize(svc.clone())
+            .await
+            .unwrap();
+        let dir = root.join(".oxplow/extensions").join(name);
+        let shipped = crate::bundled_extensions::find(name).unwrap();
+        for (rel, bytes) in shipped.files {
+            let to = dir.join(rel);
+            std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+            std::fs::write(to, bytes).unwrap();
+        }
+        let manifest = std::fs::read_to_string(dir.join("extension.yaml")).unwrap();
+        let added = "commands:\n  - name: test.draft_again\n    summary: \"A second draft command.\"\n    scope: agent_input.write\n    op: draft\n    invokers: { human: true, agent: false, lens: true }\n";
+        assert!(manifest.contains("\ncommands:\n"));
+        std::fs::write(
+            dir.join("extension.yaml"),
+            manifest.replacen("\ncommands:\n", &format!("\n{added}"), 1),
+        )
+        .unwrap();
+        assert!(svc.commands.spec("oxplow.test.draft_again").is_none());
+
+        deploy(svc, name, &root, None, true).await.unwrap();
+        assert!(svc.commands.spec("oxplow.test.draft_again").is_some());
+        // Its other commands are still there, with core's authority: a
+        // person's config read runs.
+        assert!(svc.commands.spec("oxplow.agent.draft").is_some());
+        svc.commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "oxplow.config.get",
+                serde_json::json!({ "key": "extensions" }),
+                false,
+            )
+            .await
+            .unwrap();
+
+        rollback(svc, name, None, true).await.unwrap();
+        assert!(svc.commands.spec("oxplow.test.draft_again").is_none());
+        assert!(svc.commands.spec("oxplow.agent.draft").is_some());
+    }
+
     /// Foundation is always on: a deployment of it that doesn't load at
     /// boot (one an older oxplow wrote, a bad deploy from the repo) gives
     /// way to the shipped one, never to no foundation, and says so.
