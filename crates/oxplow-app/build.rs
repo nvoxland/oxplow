@@ -8,8 +8,15 @@
 //! without being committed: building oxplow runs its command (`/bin/sh
 //! -c`, in its folder — `bun` for the Timeline).
 //!
-//! Cargo reruns this when an input changes: every input file and folder,
-//! the manifest. Never the output: the build writes it.
+//! Cargo reruns this when an input changes: the manifest, every input file,
+//! and the input folders — but only folders that hold nothing skipped. Cargo
+//! checks a folder it is given recursively, so a folder holding the build's
+//! output (or `node_modules`, or a dot entry a tool rewrites) would make
+//! every cargo command find this crate dirty again after the build step
+//! writes there. Such a folder is watched through its files and its clean
+//! subfolders instead. A new top-level file (or one in a folder like that)
+//! is therefore noticed only once something else changes: touch the
+//! extension's `extension.yaml`.
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -147,28 +154,49 @@ fn walk(dir: &Path, skip: &[String]) -> Vec<(String, PathBuf)> {
     out
 }
 
-/// Every folder under `dir` (itself included) but dot entries and the
-/// `skip` folders: a file added or removed there changes its mtime.
+/// The folders to watch for a file added or removed: the topmost folders
+/// under `dir` that hold nothing skipped (no dot entry, no `skip` path, at
+/// any depth), since cargo checks a watched folder recursively. A folder
+/// that does hold one is not watched itself; its subfolders are looked at
+/// in turn, and its own files are watched one by one (`walk`).
 fn folders(dir: &Path, skip: &[String]) -> Vec<PathBuf> {
-    let mut out = vec![dir.to_path_buf()];
-    let mut i = 0;
-    while i < out.len() {
-        let here = out[i].clone();
-        i += 1;
-        let Ok(entries) = std::fs::read_dir(&here) else {
-            continue;
+    fn holds_skipped(dir: &Path, rel: &str, skip: &[String]) -> bool {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return false;
+        };
+        entries.flatten().any(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let child = if rel.is_empty() {
+                name.clone()
+            } else {
+                format!("{rel}/{name}")
+            };
+            name.starts_with('.')
+                || skip.contains(&child)
+                || (entry.path().is_dir() && holds_skipped(&entry.path(), &child, skip))
+        })
+    }
+    fn go(dir: &Path, rel: &str, skip: &[String], out: &mut Vec<PathBuf>) {
+        if !holds_skipped(dir, rel, skip) {
+            out.push(dir.to_path_buf());
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
         };
         for entry in entries.flatten() {
-            let path = entry.path();
             let name = entry.file_name().to_string_lossy().into_owned();
-            let rel = path
-                .strip_prefix(dir)
-                .map(|r| r.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            if path.is_dir() && !name.starts_with('.') && !skip.contains(&rel) {
-                out.push(path);
+            let child = if rel.is_empty() {
+                name.clone()
+            } else {
+                format!("{rel}/{name}")
+            };
+            if entry.path().is_dir() && !name.starts_with('.') && !skip.contains(&child) {
+                go(&entry.path(), &child, skip, out);
             }
         }
     }
+    let mut out = Vec::new();
+    go(dir, "", skip, &mut out);
     out
 }

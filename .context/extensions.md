@@ -1129,7 +1129,12 @@ source directly: an edit changes nothing until it is deployed.
   arrays, so adding a file to the folder ships it; one with a `build:` is
   built there first (its command, `/bin/sh -c` in its folder), so its
   output ships without being committed — building oxplow needs the tools
-  those builds use (bun). The shipped hash uses the source rule
+  those builds use (bun). Cargo is told to rerun on the manifest, every
+  input file, and the input folders that hold nothing skipped — never a
+  folder holding the output, `node_modules` or a dot entry, which cargo
+  would check recursively and find rewritten by the build every time. So a
+  new top-level file (or one in a folder like that) is noticed only after
+  `extension.yaml` is touched. The shipped hash uses the source rule
   (`extension_store::shipped_hash`: the inputs and the build command,
   never the output), so deploying an unchanged
   `extensions/oxplow-foundation` resolves to the shipped deployment. A
