@@ -1,4 +1,5 @@
 import { LensSlots } from "../lens/LensSlots.js";
+import { useDraft } from "../tabs/useViewParam.js";
 import { numericRowId } from "../lens/lensModel.js";
 import { useChange } from "../lens/useChange.js";
 import { useCallback, useState } from "react";
@@ -37,7 +38,7 @@ export function UncommittedChangesPage({
   const { change } = useChange(streamId ? { kind: "working", streamId } : null);
   const changed = useChangedFiles(streamId ? { kind: "working", streamId } : null);
   const [committing, setCommitting] = useState(false);
-  const [commitMessage, setCommitMessage] = useState("");
+  const [commitMessage, setCommitMessage, clearCommitMessage] = useDraft<string>("commitMessage", "");
 
   const fileCount = changed.files.length;
   const hasUntracked = changed.files.some((f) => f.status === "untracked");
@@ -57,7 +58,7 @@ export function UncommittedChangesPage({
         recordOpError(opErrorOf("Commit all changes", "commit", result));
         onOpenPage(alertsRef(), { newTab: true });
       } else {
-        setCommitMessage("");
+        clearCommitMessage();
         await changed.refresh();
       }
     } finally {

@@ -1,4 +1,5 @@
 import { InlineConfirm } from "../InlineConfirm.js";
+import { useDraft } from "../../tabs/useViewParam.js";
 import { workItemLabel } from "../../workItemRef.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -121,9 +122,14 @@ function TitleField({
   value: string;
   onCommit(value: string): void;
 }) {
-  const [draft, setDraft] = useState(value);
+  // The title being edited is an unsaved draft (this step's history state);
+  // untouched, it is the saved one.
+  const [edited, setDraft, clearDraft] = useDraft<string | null>("taskTitle", null);
+  const draft = edited ?? value;
   const cancelRequested = useRef(false);
-  useEffect(() => { setDraft(value); }, [value]);
+  useEffect(() => {
+    if (edited !== null && edited === value) clearDraft();
+  }, [edited, value, clearDraft]);
   return (
     <div className="oxplow-rt-field" style={{ position: "relative", paddingLeft: 0, paddingRight: 22, maxWidth: "none", margin: 0 }}>
       <textarea
@@ -134,11 +140,12 @@ function TitleField({
         onBlur={() => {
           if (cancelRequested.current) {
             cancelRequested.current = false;
-            setDraft(value);
+            clearDraft();
             return;
           }
+          // A committed title stays shown until the saved one catches up.
           if (draft.trim() && draft !== value) onCommit(draft);
-          else setDraft(value);
+          else clearDraft();
         }}
         onKeyDown={(e) => {
           if (e.key === "Escape") {
