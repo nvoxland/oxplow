@@ -1,0 +1,7 @@
+# A repository with no commits shows none, at any range.
+input:
+  lens: commits
+  params: { range: all }
+expect:
+  columns: [sha, subject, author, committed_at]
+  rows: 0

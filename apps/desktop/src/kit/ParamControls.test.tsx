@@ -24,7 +24,8 @@ test("text applies on Enter and on blur, and Escape reverts", () => {
   fireEvent.keyDown(input, { key: "Enter" });
   fireEvent.change(input, { target: { value: "zzz" } });
   fireEvent.keyDown(input, { key: "Escape" });
-  expect(input.value).toBe("a");
+  // Escape goes back to what was last applied.
+  expect(input.value).toBe("42");
   fireEvent.change(input, { target: { value: "b" } });
   fireEvent.blur(input);
   expect(applied).toEqual([["q", 42], ["q", "b"]]);
@@ -124,4 +125,20 @@ test("compact drops the label row and names the control", () => {
   const { view, el } = setup(param({ name: "q", type: "text", label: "Find" }), null, { compact: true });
   expect(el.getAttribute("aria-label")).toBe("Find");
   expect(view.queryByText("Find")).toBeNull();
+});
+
+/** A control shows what it just applied at once, before the lens's run
+ *  echoes it back, so a click or pick never seems to bounce. */
+test("a control shows the value it applied before the run echoes it", () => {
+  const view = render(<ParamControl param={param({ name: "on", type: "bool" })} value={0} onApply={() => {}} />);
+  const box = view.getByTestId("lens-param-on") as HTMLInputElement;
+  fireEvent.click(box);
+  expect(box.checked).toBe(true);
+  cleanup();
+  const pick = render(
+    <ParamControl param={param({ name: "m", type: "choice", options: [{ value: "a", label: "A" }, { value: "b", label: "B" }] })} value="a" onApply={() => {}} />,
+  );
+  const select = pick.getByTestId("lens-param-m") as HTMLSelectElement;
+  fireEvent.change(select, { target: { value: "b" } });
+  expect(select.value).toBe("b");
 });

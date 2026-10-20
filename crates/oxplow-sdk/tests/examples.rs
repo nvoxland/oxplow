@@ -1044,6 +1044,62 @@ async fn the_session_notes_example_adds_a_section_to_the_new_session_page() {
     assert!(ext.warnings.is_empty(), "{:?}", ext.warnings);
 }
 
+/// The commit-history example is a page of typed params and a row that
+/// selects: it checks clean, its params keep their types and places, its
+/// commits column selects the page's `commit`, and its examples run.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_commit_history_example_narrows_with_typed_params_and_selects_a_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    oxplow_app::vcs::GitProvider
+        .init_repository(root)
+        .await
+        .unwrap();
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions");
+    copy_dir(
+        &examples.join("commit-history"),
+        &root.join(".oxplow/extensions/commit-history"),
+    );
+    let report = check(
+        root,
+        "commit-history",
+        &ExtensionCatalog::new(),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(report.ok, "{}", render_findings(&report, Format::Text));
+    let tested = test_extension(root, "commit-history", false).await.unwrap();
+    assert_eq!(tested.errors, Vec::<String>::new());
+    for name in ["example commits", "example files"] {
+        assert!(tested.ran.contains(&name.to_string()), "{:?}", tested.ran);
+    }
+    let ext = ExtensionCatalog::new()
+        .named(root, "commit-history")
+        .unwrap();
+    assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+    let page = ext.lenses.iter().find(|l| l.slug == "history").unwrap();
+    use oxplow_app::extensions::{ParamPlace, ParamType};
+    let params: Vec<_> = page
+        .params
+        .iter()
+        .map(|p| (p.name.as_str(), p.kind, p.place))
+        .collect();
+    assert_eq!(
+        params,
+        vec![
+            ("range", Some(ParamType::DateRange), ParamPlace::Toolbar),
+            ("q", Some(ParamType::Search), ParamPlace::Toolbar),
+            ("merges", Some(ParamType::Bool), ParamPlace::Toolbar),
+            ("commit", Some(ParamType::Text), ParamPlace::Rail),
+        ]
+    );
+    let commits = ext.lenses.iter().find(|l| l.slug == "commits").unwrap();
+    assert_eq!(commits.columns[0].select.as_deref(), Some("commit"));
+}
+
 /// Both examples copied into one project.
 async fn review_project(with_producer: bool) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();

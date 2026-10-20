@@ -1047,3 +1047,10 @@ one control per param type: text (Enter or blur applies, Escape reverts), choice
 bool, search (applies after a 250 ms pause and at once on Enter; Escape clears),
 branch and date_range (presets from `kit/rangePresets.ts`, plus Custom… with two
 dates). `compact` is the toolbar look. A page never draws its own param input.
+A control shows the value it applied at once; it never waits for the run.
+
+A lens row whose column `select`s a param is a pick: it reads as
+clickable (`ox-clickable`), a click or Enter sets the param, and the row
+holding its value is drawn selected (`ox-selected`, `aria-selected`). A
+link or control inside the row keeps its own click (it navigates; it
+doesn't pick), and the row's menu stays on right-click and the Menu key.

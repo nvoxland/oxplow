@@ -26,7 +26,14 @@ export interface ParamControlProps {
 /** One lens param, drawn as the control its type calls for. */
 export function ParamControl({ param, value, onApply, compact = false, query = querySql }: ParamControlProps) {
   const label = param.label ?? param.name;
-  const common = { name: param.name, label, compact, value, onApply };
+  // What it applied shows at once; the run's echo replaces it when it comes.
+  const [shown, setShown] = useState<SqlCell>(value);
+  useEffect(() => setShown(value), [value]);
+  const apply = (name: string, next: SqlCell) => {
+    setShown(next);
+    onApply(name, next);
+  };
+  const common = { name: param.name, label, compact, value: shown, onApply: apply };
   const type = param.type ?? ((param.options?.length ?? 0) > 0 ? "choice" : "text");
   switch (type) {
     case "choice":

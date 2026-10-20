@@ -1,0 +1,19 @@
+manifest: 2
+name: commit-history
+description: The project's commits over a time range, searchable, with the files of the one you click.
+engine: ">=0.7"
+version: 0.1.0
+intent:
+  purpose: >-
+    Show how typed params and a row that selects make a page without code:
+    a range, a search and a merges-only switch in the toolbar narrow the
+    commits, and clicking one fills the section under it with its files.
+    It reads oxplow's commits and writes nothing.
+  origin: null
+  examples:
+    - name: commits
+      input: { lens: commits, params: { range: all } }
+      expect: no rows in a repository with no commits
+    - name: files
+      input: { lens: files, params: { commit: "0000000" } }
+      expect: no rows for a commit that isn't there

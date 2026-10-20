@@ -350,7 +350,8 @@ the extension that added it), `DocumentLayout` (its own sections plus what
 extensions mount in its parts slot, placed by `placeParts`; a contents list
 in the rail from four sections), `DataTable` (fixed `<col>` widths,
 `numeric` and `truncate` columns, groups, per-row props — the lens `table`
-viz draws through it), `Toolbar` (a filter and actions) with `useListNav`
+viz draws through it), `Toolbar` (controls — a lens's toolbar params —
+a filter and actions) with `useListNav`
 (the one ↑/↓/Enter/Escape contract, usability.md "Keyboard"; a list that
 holds focus itself spreads its `keyProps`), `Stat` (a figure; `big` when
 it is its place's whole — the lens `number` viz), `Facts` (labels beside
