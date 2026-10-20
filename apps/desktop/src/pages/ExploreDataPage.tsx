@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useDraft, useViewParam, useViewSelection } from "../tabs/useViewParam.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { lensRef } from "../tabs/pageRefs.js";
@@ -19,7 +20,10 @@ import {
   chartDefaults,
   DIMENSIONS_SQL,
   metricTemplate,
+  parseChart,
+  parseTemplate,
   sliceTemplate,
+  templateParam,
   type MetricTemplate,
   keepBlockedReason,
   lineage,
@@ -75,21 +79,29 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
   const newLensPrompt = useCommandDraft(NEW_LENS_COMMAND);
   const [catalog, setCatalog] = useState<ModelRow[]>([]);
   const [catalogReads, setCatalogReads] = useState<Reads>(NO_READS);
-  const [selected, setSelected] = useState<string | null>(null);
+  // What the page shows is its view (`exploreView.ts`), in its tab's
+  // address: the model picked (a selection, so Back un-picks), the query it
+  // ran, how it is shown, and whether the read was raw. The SQL being
+  // edited, not yet run, is this step's history state.
+  const [selected, setSelected] = useViewSelection("model");
   const [columns, setColumns] = useState<ModelColumn[]>([]);
   const [lineageOf, setLineageOf] = useState<Lineage | null>(null);
-  const [raw, setRaw] = useState(false);
-  // Whether the result on screen was a raw read.
-  const [ranRaw, setRanRaw] = useState(false);
-  const [sql, setSql] = useState("");
-  const [viz, setViz] = useState<LensViz>("table");
-  const [chart, setChart] = useState<LensChart | null>(null);
+  const [raw, setRaw] = useViewParam<boolean>("raw", false);
+  const [ranSql, setRanSql] = useViewParam<string>("sql", "");
+  const [edited, setEdited, clearEdited] = useDraft<string | null>("sql", null);
+  const sql = edited ?? ranSql;
+  const [vizParam, setViz] = useViewParam<string>("viz", "table");
+  const viz: LensViz = (VIZ_OPTIONS as readonly string[]).includes(vizParam) ? (vizParam as LensViz) : "table";
+  const [chartText, setChartText] = useViewParam<string>("chart", "");
   // The explorer's own metric query (P6.F1): Slice By regenerates it with a
   // dimension. Once the SQL is edited by hand it's free SQL, never rewritten.
-  const [template, setTemplate] = useState<MetricTemplate | null>(null);
+  const [templateText, setTemplateText] = useViewParam<string>("template", "");
+  const template = useMemo(() => parseTemplate(templateText), [templateText]);
+  // The result on screen, the query that made it and whether it was a raw read.
+  const [result, setResult] = useState<{ query: string; result: SqlQueryResult; raw: boolean } | null>(null);
+  const executed = useRef("");
   const [metricKeys, setMetricKeys] = useState<{ key: string; title: string }[]>([]);
   const [dimensions, setDimensions] = useState<{ key: string; label: string }[]>([]);
-  const [run, setRun] = useState<LensRun | null>(null);
   const [error, setError] = useState<string | null>(null);
   const guard = useRequestGuard();
 
@@ -131,67 +143,86 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
     };
   }, [selected]);
 
-  async function execute(
-    query: string,
-    as: LensViz = viz,
-    rawRead: boolean = raw,
-    withChart: LensChart | null | undefined = undefined,
-  ) {
+  async function execute(query: string, rawRead: boolean = raw) {
+    executed.current = query;
     // A slower earlier query mustn't land over this one.
     const current = guard.begin();
     setError(null);
     try {
-      const result = await querySql(query, [], null, rawRead);
+      const read = await querySql(query, [], null, rawRead);
       if (!current()) return;
-      // A chart keeps the columns it names while the result still has them.
-      const kept = withChart !== undefined ? withChart : chart;
-      const next = kept && chartFits(kept, result) ? kept : chartDefaults(as, result);
-      setChart(next);
-      setRun({ lens: adHocLens(query, as, next), params: {}, result, alert: null, warnings: [], inactive: null });
-      setRanRaw(rawRead);
+      setResult({ query, result: read, raw: rawRead });
     } catch (e) {
       if (!current()) return;
-      setRun(null);
+      setResult(null);
       setError(e instanceof Error ? e.message : String(e));
     }
   }
 
+  // The query in the address is the one on screen: it runs when it changes
+  // by Back or Forward, or on opening the page; Run has already run it.
+  useEffect(() => {
+    if (ranSql === executed.current) return;
+    if (ranSql === "") {
+      executed.current = "";
+      setResult(null);
+      return;
+    }
+    void execute(ranSql);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ranSql]);
+
+  // A chart keeps the columns it names while the result still has them.
+  const chartParam = useMemo(() => parseChart(chartText), [chartText]);
+  const chart: LensChart | null = result
+    ? chartParam && chartFits(chartParam, result.result)
+      ? chartParam
+      : chartDefaults(viz, result.result)
+    : null;
+  const run: LensRun | null = result
+    ? { lens: adHocLens(result.query, viz, chart), params: {}, result: result.result, alert: null, warnings: [], inactive: null }
+    : null;
+  const ranRaw = result?.raw ?? false;
+
   // Live like a lens: the query re-runs when what it read changes.
-  useRerunOnChange(run?.result.reads ?? NO_READS, () => {
-    if (run) void execute(run.lens.query, run.lens.viz, ranRaw, run.lens.chart);
+  useRerunOnChange(result?.result.reads ?? NO_READS, () => {
+    if (result) void execute(result.query, result.raw);
   });
   const blocked = keepBlockedReason(ranRaw);
 
+  function runSql(query: string) {
+    setRanSql(query);
+    clearEdited();
+    void execute(query);
+  }
+
   function pick(name: string) {
-    const q = `SELECT * FROM ${name} LIMIT ${SAMPLE_LIMIT}`;
     setSelected(name);
-    setSql(q);
     setViz("table");
-    setTemplate(null);
-    void execute(q, "table", raw, null);
+    setChartText("");
+    setTemplateText("");
+    runSql(`SELECT * FROM ${name} LIMIT ${SAMPLE_LIMIT}`);
   }
 
   function applyTemplate(next: MetricTemplate) {
-    setTemplate(next);
-    setSql(next.sql);
+    setTemplateText(templateParam(next));
     setViz(next.viz);
-    void execute(next.sql, next.viz, false, next.chart);
+    setChartText(JSON.stringify(next.chart));
+    setRaw(false);
+    setRanSql(next.sql);
+    clearEdited();
+    void execute(next.sql, false);
   }
   const templateActive = template !== null && sql === template.sql;
 
   function showAs(next: LensViz) {
     setViz(next);
-    if (!run) return;
-    const nextChart = chartDefaults(next, run.result);
-    setChart(nextChart);
-    setRun({ ...run, lens: adHocLens(run.lens.query, next, nextChart) });
+    setChartText("");
   }
 
   function setRole(key: keyof LensChart, column: string | null) {
-    if (!run || !chart) return;
-    const nextChart = { ...chart, [key]: column };
-    setChart(nextChart);
-    setRun({ ...run, lens: adHocLens(run.lens.query, viz, nextChart) });
+    if (!chart) return;
+    setChartText(JSON.stringify({ ...chart, [key]: column }));
   }
 
   const model = catalog.find((m) => m.view === selected) ?? null;
@@ -247,18 +278,18 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
         data-testid="explore-sql"
         value={sql}
         placeholder="SELECT … FROM v_work_item …  or  SELECT bucket, MEASURE('…') FROM metric_grid('day')   (Cmd/Ctrl+Enter runs)"
-        onChange={(e) => setSql(e.target.value)}
+        onChange={(e) => setEdited(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
-            void execute(sql);
+            runSql(sql);
           }
         }}
         rows={5}
         style={sqlStyle}
       />
       <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "8px 0 16px" }}>
-        <button type="button" data-testid="explore-run" disabled={!sql.trim()} onClick={() => void execute(sql)}>
+        <button type="button" data-testid="explore-run" disabled={!sql.trim()} onClick={() => runSql(sql)}>
           Run
         </button>
         <label style={{ fontSize: "var(--text-sm)" }}>

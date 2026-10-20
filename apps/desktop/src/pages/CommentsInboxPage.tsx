@@ -7,6 +7,7 @@ import type { Stream } from "../api.js";
 import type { CommentThread } from "../tauri-bridge/generated/bindings.js";
 import { anchorIsApprox, CommentPopover } from "../components/Comments/CommentPopover.js";
 import { Page } from "../tabs/Page.js";
+import { useViewParam } from "../tabs/useViewParam.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { agentSessionRef, fileRef, wikiPageRef, workItemTabRef } from "../tabs/pageRefs.js";
@@ -55,7 +56,8 @@ export function CommentsInboxPage({
   const [active, setActive] = useState<{ id: string; rect: DOMRect } | null>(null);
   // null = unresolved only (default); a number N = also show threads
   // resolved within the last N days.
-  const [resolvedWindowDays, setResolvedWindowDays] = useState<number | null>(null);
+  const [days, setDays] = useViewParam<number>("days", 0);
+  const resolvedWindowDays = days === 0 ? null : days;
   const streamId = stream?.id ?? null;
 
   useEffect(() => {
@@ -134,7 +136,7 @@ export function CommentsInboxPage({
               data-testid="comments-resolved-filter"
               value={resolvedWindowDays ?? ""}
               onChange={(e) =>
-                setResolvedWindowDays(e.target.value === "" ? null : Number(e.target.value))
+                setDays(e.target.value === "" ? 0 : Number(e.target.value))
               }
               style={{
                 background: "var(--surface-card)",

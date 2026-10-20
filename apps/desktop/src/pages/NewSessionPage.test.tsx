@@ -4,6 +4,9 @@ import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/re
 import type { Thread } from "../api.js";
 import type { EarlierSessions, HarnessListing } from "../tauri-bridge/generated/bindings.js";
 import type { EarlierRow } from "../components/earlierSessionRows.js";
+import { createRememberedStore, RememberedContext } from "../prefs/remembered.js";
+import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
+import { pageTabRef } from "../tabs/pageRefs.js";
 import { NewSessionPage } from "./NewSessionPage.js";
 
 afterEach(cleanup);
@@ -190,4 +193,22 @@ test("empty cells show a dash, and the icons shown have a key", async () => {
   expect(legend.textContent).toContain("not started in oxplow");
   expect(legend.textContent).toContain("open in another thread");
   expect(legend.textContent).not.toContain("closed here");
+});
+
+/** The agent picked is the page's memory, kept for the person across tabs of it. */
+test("the agent picked is page memory: a new tab of the page starts at it", () => {
+  const store = createRememberedStore({ load: async () => [], save: async () => {} });
+  const page = () => (
+    <RememberedContext.Provider value={store}>
+      <PageNavigationContext.Provider value={{ ref: pageTabRef("new-session") } as unknown as PageNavigation}>
+        <NewSessionPage thread={thread} harnesses={harnesses} onStart={async () => {}} />
+      </PageNavigationContext.Provider>
+    </RememberedContext.Provider>
+  );
+  const first = render(page());
+  fireEvent.change(first.getByTestId("new-session-agent"), { target: { value: "codex" } });
+  expect(store.get("page:new-session", "agent")).toBe("codex");
+  first.unmount();
+  const second = render(page());
+  expect((second.getByTestId("new-session-agent") as HTMLSelectElement).value).toBe("codex");
 });

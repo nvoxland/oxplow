@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { diffRef, extPageRef, fileRef, lensRef, pageTabRef } from "../tabs/pageRefs.js";
+import { diffRef, extPageRef, fileRef, lensRef, metricRef, pageTabRef } from "../tabs/pageRefs.js";
 import { pageIdentity, withView } from "./pageIdentity.js";
 
 // A page's identity is its ref without its view params: what it is, not
@@ -19,10 +19,29 @@ test("a built-in page's identity keeps every param but the view params it declar
   const b = diffRef({ path: "b.ts", leftVersion: { kind: "disk" }, rightVersion: { kind: "disk" } } as never);
   expect(pageIdentity(a)).not.toBe(pageIdentity(b));
   expect(pageIdentity(pageTabRef("custom-dashboard", { id: "7" }))).toBe("page:custom-dashboard?id=7");
+  // A dashboard's range and branch are its view; its id is not.
+  expect(pageIdentity(pageTabRef("custom-dashboard", { id: "7", range: "7d", branch: "main" }))).toBe("page:custom-dashboard?id=7");
+  expect(pageIdentity(pageTabRef("metrics-recorded", { range: "30d", slice: "oxplow.language", q: "x", show: "all" }))).toBe("page:metrics-recorded");
 });
 
-test("an entity page is its ref", () => {
+test("the search pages' filters are view, so a change re-renders them", () => {
+  expect(pageIdentity(pageTabRef("git-history", { q: "fix", author: "a", branch: "main" }))).toBe("page:git-history");
+  expect(pageIdentity(pageTabRef("comments", { days: 7 }))).toBe("page:comments");
+  expect(pageIdentity(pageTabRef("settings", { q: "model" }))).toBe("page:settings");
+  expect(pageIdentity(pageTabRef("explore-data", { model: "v_effort", sql: "SELECT 1", viz: "bar", raw: true }))).toBe("page:explore-data");
+});
+
+test("a mode or a pick is view: the Files filter and the open Alerts row", () => {
+  expect(pageIdentity(pageTabRef("files", { filter: "branch" }))).toBe("page:files");
+  expect(pageIdentity(pageTabRef("alerts", { open: "op-errors" }))).toBe("page:alerts");
+  expect(pageIdentity(pageTabRef("board", { show: "backlog" }))).toBe("page:board");
+});
+
+test("an entity page is its ref, less the view its kind declares", () => {
   expect(pageIdentity(fileRef("src/a.ts"))).toBe(fileRef("src/a.ts").id);
+  expect(pageIdentity(metricRef("oxplow.todos", { range: "30d", branch: "main", slice: "oxplow.language" }))).toBe("metric:oxplow.todos");
+  expect(withView(metricRef("oxplow.todos"), { range: "30d" }).id).toBe("metric:oxplow.todos?range=30d");
+  expect(() => withView(metricRef("oxplow.todos"), { sort: "age" })).toThrow(/`sort` isn't a view param of metric:oxplow.todos/);
 });
 
 // A page changes only its view: writing a param it doesn't declare as view
@@ -31,5 +50,5 @@ test("withView writes a page's view params and refuses one that would change wha
   expect(withView(pageTabRef("tasks"), { scope: "all" }).id).toBe("page:tasks?scope=all");
   expect(withView(lensRef("x/y"), { range: "7d" }).id).toBe(lensRef("x/y", { range: "7d" }).id);
   expect(() => withView(pageTabRef("tasks"), { sort: "age" })).toThrow(/`sort`.*page:tasks.*BUILT_IN_VIEW/);
-  expect(() => withView(pageTabRef("custom-dashboard", { id: "7" }), { id: "7", range: "7d" })).toThrow(/^`range` isn't/);
+  expect(() => withView(pageTabRef("custom-dashboard", { id: "7" }), { id: "7", sort: "age" })).toThrow(/^`sort` isn't/);
 });

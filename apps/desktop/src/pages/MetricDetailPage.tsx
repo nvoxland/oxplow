@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { MetricFilters } from "../kit/MetricFilters.js";
+import { DEFAULT_RANGE_KEY, rangeFromPreset, rangeValue, resolveRange, type TimeRange } from "../kit/rangePresets.js";
+import { useViewParam } from "../tabs/useViewParam.js";
 import {
   type Dashboard,
   type MetricCatalogEntry,
@@ -29,15 +32,12 @@ import { customDashboardRef } from "../tabs/pageRefs.js";
 import { Page, pageH1Style } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { MetricControls, MetricStatsRail, RecordingsTable, TrendChart, UncheckedFiles } from "./MetricDetail.js";
+import { MetricStatsRail, RecordingsTable, TrendChart, UncheckedFiles } from "./MetricDetail.js";
 import {
-  DEFAULT_RANGE_KEY,
-  type TimeRange,
   branchOptions,
   defaultChartMode,
   filterByBranch,
   filterByRange,
-  rangeFromPreset,
   UNCHECKED_FILES_SQL,
   type UncheckedFile,
   widestPresetWindow,
@@ -76,11 +76,22 @@ export function MetricDetailPage({
   const [configBusy, setConfigBusy] = useState(false);
   const [samples, setSamples] = useState<SeriesPoint[]>([]);
   const [loading, setLoading] = useState(true);
-  // Filters. Default to the last 7 days, all branches.
-  const [range, setRange] = useState<TimeRange>(() => rangeFromPreset(DEFAULT_RANGE_KEY, Date.now()));
-  const [branch, setBranch] = useState<string | null>(null);
+  // Filters are the metric's view params (`metricsView.ts`): in its ref's
+  // query, so Back and a restart bring them back. Default to the last 7
+  // days, all branches.
+  const [rangeKey, setRangeKey] = useViewParam<string>("range", DEFAULT_RANGE_KEY);
+  const [branchName, setBranch] = useViewParam<string>("branch", "");
+  const branch = branchName || null;
   // Slice By (P6.F1): a dimension groups the captures into one series each.
-  const [sliceBy, setSliceBy] = useState<string | null>(null);
+  const [sliceKey, setSlice] = useViewParam<string>("slice", "");
+  const sliceBy = sliceKey || null;
+  // The window the range stands for, fixed when the range changes (a preset
+  // is "the last 7 days from then"); a range of all time shows the default.
+  const range = useMemo<TimeRange>(
+    () => resolveRange(rangeKey, Date.now()) ?? rangeFromPreset(DEFAULT_RANGE_KEY, Date.now()),
+    [rangeKey],
+  );
+  const brush = (from: number, to: number) => setRangeKey(rangeValue({ from, to }, Date.now()));
   const [dimensions, setDimensions] = useState<{ key: string; label: string }[]>([]);
   useEffect(() => {
     void querySql(DIMENSIONS_SQL, [], null)
@@ -308,7 +319,7 @@ export function MetricDetailPage({
                   domain={range}
                   unit={def.unit}
                   height={140}
-                  onSelectRange={(from, to) => setRange({ from, to })}
+                  onSelectRange={brush}
                 />
               </div>
             ))}
@@ -319,13 +330,13 @@ export function MetricDetailPage({
             target={mode === "value" ? def.target : null}
             domain={range}
             unit={def.unit}
-            onSelectRange={(from, to) => setRange({ from, to })}
+            onSelectRange={brush}
           />
         )}
         <UncheckedFiles files={unchecked} />
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <SectionLabel>Recordings</SectionLabel>
-          <RecordingsTable samples={filtered} unit={def.unit} />
+          <RecordingsTable samples={filtered} unit={def.unit} filterKey={`${rangeKey}|${branchName}|${sliceKey}`} />
         </div>
       </div>
     );
@@ -341,13 +352,13 @@ export function MetricDetailPage({
       rightRail={
         def ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <MetricControls
-              range={range}
-              onRange={setRange}
-              branch={branch}
+            <MetricFilters
+              range={rangeKey}
+              branch={branchName}
               branches={branches}
-              onBranch={setBranch}
-              slice={{ dimensions, value: sliceBy, onChange: setSliceBy }}
+              slice={sliceKey}
+              dimensions={dimensions}
+              onApply={(name, value) => ({ range: setRangeKey, branch: setBranch, slice: setSlice })[name](value)}
             />
             <MetricStatsRail def={def} samples={filtered} />
             {dashboardBlock}

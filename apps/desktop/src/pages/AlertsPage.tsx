@@ -10,7 +10,6 @@
 /// - From extensions — panel badges that fire, each opening its lens.
 
 import type { CSSProperties } from "react";
-import { useState } from "react";
 
 import { useAlerts } from "../components/Alerts/useAlerts.js";
 import { OpErrorDetail } from "../components/Alerts/OpErrorDetail.js";
@@ -21,13 +20,15 @@ import { ProposalList } from "../kit/Approvals.js";
 import { dismissHint } from "../hints.js";
 import { Section } from "../kit/index.js";
 import { Page } from "../tabs/Page.js";
+import { useViewSelection } from "../tabs/useViewParam.js";
 import { lensRef, settingsRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 
 export function AlertsPage({ onOpenPage }: { onOpenPage(ref: TabRef): void }) {
   const { items, proposals, opErrors, badges, hints } = useAlerts();
   const store = getOpErrorsStore();
-  const [open, setOpen] = useState<string | null>(null);
+  // The row open is a pick: the page's `open` view param, so Back closes it.
+  const [open, setOpen] = useViewSelection("open");
   const problems = items.opErrors.length + items.undelivered + items.failedReactions + items.extensionProblems.length;
   const { count } = alertsSummary(items);
   return (

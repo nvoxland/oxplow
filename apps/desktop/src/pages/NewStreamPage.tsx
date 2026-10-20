@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { useDraft } from "../tabs/useViewParam.js";
 import { useEffect, useRef, useState } from "react";
 import {
   createStream,
@@ -90,19 +91,23 @@ export interface NewStreamPageProps {
  * worktree.
  */
 export function NewStreamPage({ vcsEnabled, defaultTitle, onClose, onCreated }: NewStreamPageProps) {
-  const [mode, setMode] = useState<NewStreamMode>("existing");
-  const [title, setTitle] = useState(defaultTitle ?? "");
-  const [selectedRef, setSelectedRef] = useState("");
-  const [selectedRefLabel, setSelectedRefLabel] = useState("");
-  const [newBranch, setNewBranch] = useState("");
-  const [startPointRef, setStartPointRef] = useState("");
-  const [startPointLabel, setStartPointLabel] = useState("");
-  const [worktreePath, setWorktreePath] = useState("");
+  // The form is an unsaved draft: this step's history state.
+  const [mode, setMode] = useDraft<NewStreamMode>("mode", "existing");
+  const [title, setTitle] = useDraft<string>("title", defaultTitle ?? "");
+  const [selectedRef, setSelectedRef] = useDraft<string>("selectedRef", "");
+  const [selectedRefLabel, setSelectedRefLabel] = useDraft<string>("selectedRefLabel", "");
+  const [newBranch, setNewBranch] = useDraft<string>("newBranch", "");
+  const [startPointRef, setStartPointRef] = useDraft<string>("startPointRef", "");
+  const [startPointLabel, setStartPointLabel] = useDraft<string>("startPointLabel", "");
+  const [worktreePath, setWorktreePath] = useDraft<string>("worktreePath", "");
   const [worktrees, setWorktrees] = useState<VcsWorkspace[]>([]);
   const [loadingBranches, setLoadingBranches] = useState(false);
   const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
+  // What the form holds when the branch list arrives: it fills only what is empty.
+  const drafted = useRef({ selectedRef, selectedRefLabel, startPointRef, startPointLabel, worktreePath });
+  drafted.current = { selectedRef, selectedRefLabel, startPointRef, startPointLabel, worktreePath };
 
   useEffect(() => {
     if (!vcsEnabled) return;
@@ -117,16 +122,16 @@ export function NewStreamPage({ vcsEnabled, defaultTitle, onClose, onCreated }: 
         setWorktrees(nextWorktrees);
         const first = nextBranches[0];
         if (first) {
-          setSelectedRef((prev) => prev || first.ref);
-          setSelectedRefLabel((prev) => prev || first.name);
+          if (!drafted.current.selectedRef) setSelectedRef(first.ref);
+          if (!drafted.current.selectedRefLabel) setSelectedRefLabel(first.name);
         }
         const defaultEntry = pickDefaultBranchEntry(nextBranches, defaultBranch) ?? first;
         if (defaultEntry) {
-          setStartPointRef((prev) => prev || defaultEntry.ref);
-          setStartPointLabel((prev) => prev || defaultEntry.name);
+          if (!drafted.current.startPointRef) setStartPointRef(defaultEntry.ref);
+          if (!drafted.current.startPointLabel) setStartPointLabel(defaultEntry.name);
         }
         const firstWt = nextWorktrees[0];
-        if (firstWt) setWorktreePath((prev) => prev || firstWt.path);
+        if (firstWt && !drafted.current.worktreePath) setWorktreePath(firstWt.path);
         logUi("info", "loaded branch list", {
           branchCount: nextBranches.length,
           worktreeCount: nextWorktrees.length,

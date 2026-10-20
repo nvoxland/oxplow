@@ -2,6 +2,7 @@ import { EmptyState } from "../Prompts/EmptyState.js";
 import type { CSSProperties } from "react";
 import { InlinePromptStrip } from "../InlinePromptStrip.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCollapsedSet, useViewParam } from "../../tabs/useViewParam.js";
 import { coalescedRefresh, type CoalescedRefresh } from "../../coalesced-refresh.js";
 import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
 import type { Reads } from "../../tauri-bridge/generated/bindings.js";
@@ -69,6 +70,8 @@ interface Props {
   commitRequest?: number;
 }
 
+const ROOT_OPEN = [""];
+
 export function ProjectPanel({
   stream,
   vcsEnabled,
@@ -83,7 +86,19 @@ export function ProjectPanel({
   onToggleGenerated,
   commitRequest,
 }: Props) {
-  const [expandedDirs, setExpandedDirs] = useState<Record<string, boolean>>({ "": true });
+  // The open folders are this step's history state (the root starts open).
+  const openDirs = useCollapsedSet("openDirs", ROOT_OPEN);
+  const openDirsRef = useRef(openDirs.ids);
+  openDirsRef.current = openDirs.ids;
+  const expandedDirs = useMemo<Record<string, boolean>>(() => Object.fromEntries(openDirs.ids.map((d) => [d, true])), [openDirs.ids]);
+  const setOpenDirs = openDirs.set;
+  const setExpandedDirs = useCallback(
+    (next: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => {
+      const value = typeof next === "function" ? next(Object.fromEntries(openDirsRef.current.map((d) => [d, true]))) : next;
+      setOpenDirs(Object.keys(value).filter((d) => value[d]));
+    },
+    [setOpenDirs],
+  );
   const [entriesByDir, setEntriesByDir] = useState<Record<string, WorkspaceEntry[]>>({});
   const [loadingDirs, setLoadingDirs] = useState<Record<string, boolean>>({});
   const [indexedFiles, setIndexedFiles] = useState<WorkspaceIndexedFile[]>([]);
@@ -203,7 +218,9 @@ export function ProjectPanel({
   }, [loadDir, loadWorkspaceIndex, stream]);
 
   type FilterMode = "all" | "uncommitted" | "branch" | "unpushed";
-  const [filterMode, setFilterMode] = useState<FilterMode>("all");
+  // Which files the tree lists is the page's `filter` view param.
+  const [filterText, setFilterMode] = useViewParam<string>("filter", "all");
+  const filterMode = filterText as FilterMode;
   const [scopes, setScopes] = useState<ChangeScopes | null>(null);
   // Paths that the filter includes (always the superset — deleted files end
   // up here too so they pass the tree filter below).

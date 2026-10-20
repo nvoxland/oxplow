@@ -23,18 +23,17 @@ import { metricRef } from "../tabs/pageRefs.js";
 import { Page } from "../tabs/Page.js";
 import { routeDispatch, routeHandlers } from "../tabs/RouteLink.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
-import { DataTable, Section, type DataColumn } from "../kit/index.js";
+import { DataTable, MetricFilters, Section, Toolbar, useSearchFilter, type DataColumn } from "../kit/index.js";
 import type { OriginItem } from "../tabs/session.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { buildMetricSections } from "./metricCategories.js";
 import { DIMENSIONS_SQL } from "./exploreData.js";
+import { DEFAULT_RANGE_KEY, resolveRange } from "../kit/rangePresets.js";
+import { useViewParam } from "../tabs/useViewParam.js";
 import {
-  DEFAULT_RANGE_KEY,
-  RANGE_PRESETS,
   branchOptions,
   filterByBranch,
   filterByRange,
-  rangeFromPreset,
   widestPresetWindow,
 } from "./metricDetailData.js";
 import {
@@ -206,8 +205,6 @@ function MetricsTable({
   );
 }
 
-const sel = { fontSize: 12, width: "100%" } as const;
-
 /**
  * Metrics — every catalogued metric as a `title · trend sparkline ·
  * latest value` row, organized as **one table per section** under headings, via
@@ -234,12 +231,18 @@ const sel = { fontSize: 12, width: "100%" } as const;
 export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void } = {}) {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
-  const [rangeKey, setRangeKey] = useState<string>(DEFAULT_RANGE_KEY);
-  const [branch, setBranch] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [showMode, setShowMode] = useState<ShowMode>(DEFAULT_SHOW_MODE);
+  // The page's filters are its view params (`metricsView.ts`): in its tab's
+  // address, so Back and a restart bring them back.
+  const [rangeKey, setRangeKey] = useViewParam<string>("range", DEFAULT_RANGE_KEY);
+  const [branchName, setBranch] = useViewParam<string>("branch", "");
+  const branch = branchName || null;
+  const search = useSearchFilter("q", { label: "Filter metrics by name", placeholder: "Filter by name…", testId: "recorded-search" });
+  const query = search.value;
+  const [showText, setShowMode] = useViewParam("show", DEFAULT_SHOW_MODE as string);
+  const showMode: ShowMode = showText === "all" ? "all" : "enabled";
   // Slice By (tsk594): a dimension splits every metric that has it into groups.
-  const [sliceBy, setSliceBy] = useState<string | null>(null);
+  const [sliceKey, setSlice] = useViewParam<string>("slice", "");
+  const sliceBy = sliceKey || null;
   const [dimensions, setDimensions] = useState<{ key: string; label: string }[]>([]);
   useEffect(() => {
     void querySql(DIMENSIONS_SQL, [], null)
@@ -309,10 +312,11 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
   // branch — an in-scope metric with no recording in the window stays listed
   // and just shows "—".
   const viewRows = useMemo(() => {
-    const range = rangeFromPreset(rangeKey, Date.now());
+    const range = resolveRange(rangeKey, Date.now());
+    const within = (s: SeriesPoint[]) => filterByBranch(range ? filterByRange(s, range) : s, branch);
     return filterMetricRows(rows, showMode, query).map((r) => {
-      const samples = filterByBranch(filterByRange(r.samples, range), branch);
-      const grouped = filterByBranch(filterByRange(r.grouped, range), branch);
+      const samples = within(r.samples);
+      const grouped = within(r.grouped);
       return { ...r, latest: samples[0] ?? null, samples, grouped };
     });
   }, [rows, rangeKey, branch, query, showMode]);
@@ -345,81 +349,18 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
       rightRailTitle="Filters"
       rightRail={
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ opacity: 0.6, fontSize: 12 }}>Search</span>
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Filter by name…"
-              data-testid="recorded-search"
-              style={sel}
-            />
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ opacity: 0.6, fontSize: 12 }}>Show</span>
-            <select
-              value={showMode}
-              onChange={(e) => setShowMode(e.target.value as ShowMode)}
-              data-testid="recorded-show-mode"
-              title="Enabled lists only metrics this project has turned on; All also lists the ones it hasn't."
-              style={sel}
-            >
-              {SHOW_MODES.map((m) => (
-                <option key={m.key} value={m.key}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ opacity: 0.6, fontSize: 12 }}>Range</span>
-            <select
-              value={rangeKey}
-              onChange={(e) => setRangeKey(e.target.value)}
-              data-testid="recorded-range"
-              style={sel}
-            >
-              {RANGE_PRESETS.map((p) => (
-                <option key={p.key} value={p.key}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ opacity: 0.6, fontSize: 12 }}>Branch</span>
-            <select
-              value={branch ?? ""}
-              onChange={(e) => setBranch(e.target.value || null)}
-              data-testid="recorded-branch-filter"
-              style={sel}
-            >
-              <option value="">All branches</option>
-              {branches.map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ opacity: 0.6, fontSize: 12 }}>Slice by</span>
-            <select
-              value={sliceBy ?? ""}
-              onChange={(e) => setSliceBy(e.target.value || null)}
-              data-testid="recorded-slice-by"
-              title="Splits each metric that has the dimension into its groups, the top few beneath it."
-              style={sel}
-            >
-              <option value="">No slice</option>
-              {dimensions.map((d) => (
-                <option key={d.key} value={d.key}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          <MetricFilters
+            range={rangeKey}
+            branch={branchName}
+            branches={branches}
+            slice={sliceKey}
+            dimensions={dimensions}
+            show={showMode}
+            showOptions={SHOW_MODES.map((m) => ({ value: m.key, label: m.label }))}
+            onApply={(name, value) =>
+              ({ range: setRangeKey, branch: setBranch, slice: setSlice, show: (v: string) => setShowMode(v) })[name](value)
+            }
+          />
           {/* Not a filter, but this rail is the page's control panel — the
               controls self-hide while there are no sections to act on. */}
           <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -451,6 +392,7 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
         </div>
       }
     >
+      <Toolbar filter={search} />
       <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
         {loading ? (
           <div style={{ opacity: 0.6 }}>Loading…</div>

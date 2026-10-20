@@ -1093,7 +1093,9 @@ isn't the default). Clicking it, or Enter/Space on it, edits:
 `ParamList` shows six rows in declared order; the rest wait behind
 "More (N)", except a row that is set, which always shows (an active
 filter is never hidden). Filters has **Reset** when one is changed. A
-page never draws its own param input. A row shows the value it applied
+page never draws its own param input. One range vocabulary serves every page (`kit/rangePresets.ts`): a preset
+key (`1d`…`90d`), `all`, or `a..b` (dates or date-times, either end open) —
+a lens `date_range`, the metric pages' range and a chart's brushed window. A row shows the value it applied
 at once; it never waits for the run.
 
 A param a column `select`s is the page's **selection**, never an input.

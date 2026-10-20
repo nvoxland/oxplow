@@ -316,7 +316,8 @@ pub fn core_kinds() -> KindRegistry {
 /// contributions: a page is also a shell route (`page:settings`), a model
 /// also one of core's (`model:effort`), a collector also a project's
 /// (`collector:project/repo.scan`), and a lens or
-/// page ref may carry its params (`lens:acme/blocked?stream_id=2`).
+/// page ref may carry its params (`lens:acme/blocked?stream_id=2`), and a
+/// metric's page its view (`metric:oxplow.todos?range=7d`).
 fn contribution_kind(kind: crate::contribution::ContributionKind) -> Result<KindSpec, KindError> {
     use crate::contribution::ContributionKind as C;
     let local = if kind.spec().dotted {
@@ -329,7 +330,8 @@ fn contribution_kind(kind: crate::contribution::ContributionKind) -> Result<Kind
         C::Command => r"^[a-z0-9_]+(\.[a-z0-9_]+)+$".to_string(),
         C::EventType => r"^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$".to_string(),
         C::RefKind => r"^[a-z][a-z0-9_]*$".to_string(),
-        C::Measure | C::Metric | C::Dimension => r"^[a-z0-9_.-]+$".to_string(),
+        C::Measure | C::Dimension => r"^[a-z0-9_.-]+$".to_string(),
+        C::Metric => r"^[a-z0-9_.-]+(\?.*)?$".to_string(),
         C::Lens => format!(r"^{owned}(\?.*)?$"),
         C::Page => format!(r"^(?:[a-z0-9-]+|{owned})(\?.*)?$"),
         C::Model => format!(r"^(?:[a-z][a-z0-9_]*|{owned})$"),

@@ -35,6 +35,7 @@ import {
   extPageRef as extPageRefString,
   formatRef,
   lensRef as lensRefString,
+  metricRef as metricRefString,
   pageRef as pageRefString,
   parseRef,
   rawAfterKind,
@@ -166,8 +167,11 @@ export function gitCommitRef(sha: string): TabRef {
  *  the task-page metrics-panel drill-in ("In this effort" before→after +
  *  further exploration). Its own page kind (`metric`); Metrics and the
  *  dashboard tiles both navigate into it. */
-export function metricRef(metricKey: string): TabRef {
-  return { id: canonicalId("metric", metricKey), kind: "metric", payload: { metricKey } };
+export function metricRef(metricKey: string, params?: Record<string, SqlCell>): TabRef {
+  const keys = Object.keys(params ?? {}).sort();
+  if (!params || keys.length === 0) return { id: canonicalId("metric", metricKey), kind: "metric", payload: { metricKey } };
+  const id = metricRefString(metricKey, Object.fromEntries(keys.map((k) => [k, params[k] === null ? "" : String(params[k])])));
+  return { id, kind: "metric", payload: { metricKey, params } };
 }
 
 /** A lens page (`lens:<extension>/<slug>`): a user/agent-built query
@@ -187,17 +191,28 @@ export function lensRef(lensId: string, params?: Record<string, SqlCell>): TabRe
 export function viewParamsOf(ref: TabRef): Record<string, SqlCell> {
   if (ref.kind === "lens") return { ...((ref.payload as { params?: Record<string, SqlCell> } | null)?.params ?? {}) };
   if (ref.kind === "page") return { ...(pagePayload(ref)?.params ?? {}) };
+  if (ref.kind === "metric") return { ...((ref.payload as { params?: Record<string, SqlCell> } | null)?.params ?? {}) };
   return {};
 }
 
-/** `ref` showing `params` as its view, in its own kind of ref: a lens's
- *  or a declared page's. A page without a view comes back as it is. */
+/** `ref` showing `params` as its view, in its own kind of ref: a lens's,
+ *  a declared page's or a metric's. A ref without a view comes back as it
+ *  is. */
 export function withViewParams(ref: TabRef, params: Record<string, SqlCell>): TabRef {
   const values = params as Record<string, ParamValue>;
   if (ref.kind === "lens") return lensRef((ref.payload as { lensId: string }).lensId, params);
+  if (ref.kind === "metric") return metricRef((ref.payload as { metricKey: string }).metricKey, params);
   const page = pagePayload(ref);
   if (!page) return ref;
   return page.extension === null ? pageTabRef(page.page, values) : extPageRef(page.extension, page.page, values);
+}
+
+/** Parse a metric id's raw `<key>?k=v` tail back into a ref. */
+function metricRefFromTail(tail: string): TabRef {
+  const { head, params } = splitParams(tail);
+  const out: Record<string, SqlCell> = {};
+  for (const [k, v] of params) out[k] = v === "" ? null : /^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v;
+  return metricRef(head, out);
 }
 
 /** Parse a lens id's raw `<lensId>?k=v` tail back into a ref. Numeric
@@ -555,7 +570,7 @@ export function refFromTabId(id: string): TabRef | null {
     case "commit":
       return gitCommitRef(canonical.id);
     case "metric":
-      return metricRef(canonical.id);
+      return metricRefFromTail(rawAfterKind(id, "metric") ?? "");
     case "snapshot": {
       const n = Number(canonical.id);
       return Number.isInteger(n) ? snapshotRef(n) : null;

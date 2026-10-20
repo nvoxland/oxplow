@@ -32,22 +32,17 @@ import { dashboardsRef } from "../tabs/pageRefs.js";
 import { Page, pageH1Style } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { RANGE_PRESETS, rangeFromPreset } from "./metricDetailData.js";
+import { MetricFilters } from "../kit/MetricFilters.js";
+import { resolveRange } from "../kit/rangePresets.js";
+import { useViewParam } from "../tabs/useViewParam.js";
+
+const DASHBOARD_RANGES = ["all", "1d", "2d", "3d", "7d", "30d"];
 import { type TileOptions, metricTile, parseTileOptions } from "./customDashboardData.js";
 import { TileGrid, TileSlot } from "../kit/Tiles.js";
 
 /** Drag payload for tile reordering — distinct from the rail's section MIME so
  *  a rail drag can never drop into the grid. */
 const TILE_MIME = "application/x-oxplow-dashboard-tile";
-
-const selectStyle: React.CSSProperties = {
-  fontSize: 12,
-  background: "var(--surface-card)",
-  color: "var(--text, #ddd)",
-  border: "1px solid var(--border-subtle)",
-  borderRadius: 6,
-  padding: "4px 6px",
-};
 
 const buttonStyle: React.CSSProperties = {
   fontSize: 13,
@@ -84,8 +79,10 @@ export function CustomDashboardPage({
   const [defs, setDefs] = useState<Map<string, MetricSpec>>(new Map());
   const [catalog, setCatalog] = useState<MetricCatalogEntry[]>([]);
   // Dashboard-level filter, inherited by every tile.
-  const [rangeKey, setRangeKey] = useState("all");
-  const [branch, setBranch] = useState<string | null>(null);
+  // The dashboard's filter is its view params (`metricsView.ts`); its `id` is its identity.
+  const [rangeKey, setRangeKey] = useViewParam<string>("range", "all");
+  const [branchName, setBranch] = useViewParam<string>("branch", "");
+  const branch = branchName || null;
   const [branches, setBranches] = useState<string[]>([]);
   // Drag-reorder state: the tile being dragged + the slot it would land in.
   const [dragId, setDragId] = useState<string | null>(null);
@@ -154,7 +151,7 @@ export function CustomDashboardPage({
   }, []);
 
   const dashboardFilter = useMemo(
-    () => ({ range: rangeKey === "all" ? null : rangeFromPreset(rangeKey, Date.now()), branch }),
+    () => ({ range: resolveRange(rangeKey, Date.now()), branch }),
     [rangeKey, branch],
   );
 
@@ -314,40 +311,14 @@ export function CustomDashboardPage({
         </div>
 
         {/* Dashboard filter — every tile inherits this unless it overrides. */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, opacity: 0.85 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ opacity: 0.6 }}>Range</span>
-            <select
-              value={rangeKey}
-              onChange={(e) => setRangeKey(e.target.value)}
-              data-testid="dashboard-range"
-              style={selectStyle}
-            >
-              <option value="all">All time</option>
-              {RANGE_PRESETS.map((p) => (
-                <option key={p.key} value={p.key}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ opacity: 0.6 }}>Branch</span>
-            <select
-              value={branch ?? ""}
-              onChange={(e) => setBranch(e.target.value || null)}
-              data-testid="dashboard-branch"
-              style={selectStyle}
-            >
-              <option value="">All branches</option>
-              {branches.map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
+        <MetricFilters
+          range={rangeKey}
+          presets={DASHBOARD_RANGES}
+          defaultRange="all"
+          branch={branchName}
+          branches={branches}
+          onApply={(name, value) => (name === "range" ? setRangeKey(value) : setBranch(value))}
+        />
 
         {items.length === 0 ? (
           <div style={{ border: "1px dashed var(--border-subtle)", borderRadius: 6, padding: "12px 24px" }}>

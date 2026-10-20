@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { useDraft } from "../tabs/useViewParam.js";
 import { useEffect, useState } from "react";
 import { setStreamPrompt, type Stream } from "../api.js";
 import { Section } from "../kit/index.js";
@@ -20,13 +21,15 @@ export interface StreamSettingsPageProps {
  * land in this page without growing a new modal.
  */
 export function StreamSettingsPage({ stream, onClose, onSaved }: StreamSettingsPageProps) {
-  const [prompt, setPrompt] = useState("");
+  // The prompt being edited is an unsaved draft (this step's history state);
+  // untouched, it is the saved one.
+  const [draft, setPrompt, clearDraft] = useDraft<string | null>("prompt", null);
+  const prompt = draft ?? stream?.custom_prompt ?? "";
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    setPrompt(stream?.custom_prompt ?? "");
     setError(null);
     setSavedMessage(null);
   }, [stream?.id, stream?.custom_prompt]);
@@ -39,6 +42,7 @@ export function StreamSettingsPage({ stream, onClose, onSaved }: StreamSettingsP
     try {
       const trimmed = prompt.trim();
       const next = await setStreamPrompt(stream.id, trimmed.length === 0 ? null : trimmed);
+      clearDraft();
       setSavedMessage("Saved. Applies to newly-started agent sessions.");
       onSaved?.(next);
     } catch (e) {

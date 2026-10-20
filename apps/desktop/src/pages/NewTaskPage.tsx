@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { useDraft } from "../tabs/useViewParam.js";
 import { useEffect, useRef, useState } from "react";
 import { FieldPill } from "../components/WorkItemFields.js";
 import { Page } from "../tabs/Page.js";
@@ -42,11 +43,13 @@ export interface NewTaskPageProps {
 export function NewTaskPage({ defaults = {}, epics = [], onClose, onSubmit }: NewTaskPageProps) {
   const profile = useWorkListProfile();
   const editable = profile.fields.filter((f) => !f.read_only);
-  const [native, setNative] = useState<Record<string, unknown>>({});
-  const [state, setState] = useState<"todo" | "blocked">("todo");
+  // The form is an unsaved draft: this step's history state, so Back and a
+  // restart bring it back (the parent is the page's, below).
+  const [native, setNative] = useDraft<Record<string, unknown>>("native", {});
+  const [state, setState] = useDraft<"todo" | "blocked">("state", "todo");
   const [parentRef, setParentRef] = useState<string | null>(defaults.parentRef ?? null);
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
+  const [title, setTitle] = useDraft<string>("title", "");
+  const [body, setBody] = useDraft<string>("body", "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
@@ -138,7 +141,7 @@ export function NewTaskPage({ defaults = {}, epics = [], onClose, onSubmit }: Ne
                 <FieldPill
                   field={field}
                   value={native[field.name]}
-                  onChange={(value) => setNative((prev) => ({ ...prev, [field.name]: value }))}
+                  onChange={(value) => setNative({ ...native, [field.name]: value })}
                 />
               </span>
             </Field>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { usePageMemory } from "../prefs/remembered.js";
 import { ArrowLeftRight, CircleDot, ExternalLink, Lock, RotateCcw, type LucideIcon } from "lucide-react";
 
 import { listEarlierSessions, type Thread } from "../api.js";
@@ -53,7 +54,8 @@ export function NewSessionPage({
   const [error, setError] = useState<string | null>(null);
   const [remember, setRemember] = useState(false);
   const choices = agentChoices(harnesses);
-  const [choice, setChoice] = useState<string>(choices[0]?.value ?? "");
+  // The agent last chosen is this page's memory, kept for the person.
+  const [choice, setChoice] = usePageMemory<string>("agent", choices[0]?.value ?? "");
   // Focus the picker when the page opens — unless focus is already
   // somewhere (the launcher a person opened while it loaded): a page that
   // mounts late must not take their typing.

@@ -132,6 +132,19 @@ test("a collapsed set and a draft live in the tab's history state", () => {
   expect(states).toEqual([{ open: ["a", "b"] }, { draft: { title: "" } }]);
 });
 
+test("a collapsed set starts from its initial ids and lists what it holds", () => {
+  let seen: ReturnType<typeof useCollapsedSet> | null = null;
+  function Tree() {
+    seen = useCollapsedSet("dirs", [""]);
+    return null;
+  }
+  render(<Tree />);
+  expect(seen!.ids).toEqual([""]);
+  expect(seen!.has("")).toBe(true);
+  act(() => seen!.set(["", "src"]));
+  expect(seen!.ids).toEqual(["", "src"]);
+});
+
 test("outside a tab, each is the page's own", () => {
   render(<Probe />);
   set("range", "90d");

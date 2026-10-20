@@ -62,7 +62,7 @@ frag := kind-defined                file/dir: L10 or L10-20
 
 Examples: `effort:eff362`, `commit:4c44d495`, `work_item:oxplow:tsk42`,
 `work_item:issues:ENG-12`, `file:src/a.rs@git:HEAD#L10-20`,
-`lens:acme/blocked?stream_id=2`, `page:settings`.
+`lens:acme/blocked?stream_id=2`, `metric:oxplow.todos?range=7d`, `page:settings`.
 
 **Parsing rules,** in this order: the first `:` ends the kind; the first
 `#` ends the id-and-rev (fragments aren't encoded); the first unescaped

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
-import { keepBlockedReason, lineage, LINEAGE_SQL, MODEL_COLUMNS_SQL, MODELS_SQL, modelColumns, models } from "./exploreData.js";
+import { keepBlockedReason, lineage, LINEAGE_SQL, MODEL_COLUMNS_SQL, MODELS_SQL, metricTemplate, modelColumns, models, parseChart, parseTemplate, templateParam } from "./exploreData.js";
 
 const result = (columns: string[], rows: (string | number | null)[][]): SqlQueryResult => ({
   columns,
@@ -79,4 +79,19 @@ test("a chart picks sensible columns from a result", () => {
   expect(chartDefaults("bar", r)).toEqual({ x: "day", y: "n", series: null, label: null, size: null, group: null });
   expect(chartDefaults("treemap", r)).toEqual({ x: null, y: null, series: null, label: "day", size: "n", group: null });
   expect(chartDefaults("table", r)).toBeNull();
+});
+
+test("a metric template and a chart ride in the address as text and read back", () => {
+  const plain = metricTemplate("oxplow.todos", null);
+  expect(templateParam(plain)).toBe("oxplow.todos");
+  expect(parseTemplate("oxplow.todos")).toEqual(plain);
+  const sliced = metricTemplate("oxplow.todos", "oxplow.language");
+  expect(templateParam(sliced)).toBe("oxplow.todos,oxplow.language");
+  expect(parseTemplate("oxplow.todos,oxplow.language")).toEqual(sliced);
+  expect(parseTemplate("")).toBeNull();
+
+  expect(parseChart(JSON.stringify({ x: "t", y: "v" }))).toEqual({ x: "t", y: "v" });
+  expect(parseChart("")).toBeNull();
+  expect(parseChart("{not json")).toBeNull();
+  expect(parseChart("[1]")).toBeNull();
 });

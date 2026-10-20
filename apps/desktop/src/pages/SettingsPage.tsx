@@ -11,6 +11,8 @@ import type { HarnessListing } from "../tauri-bridge/generated/bindings.js";
 import { readSettings, type EffectiveSetting } from "../configValues.js";
 import { askToChange, groupSettings, matchesSearch, valueText } from "./settingsModel.js";
 import { DocumentLayout, type DocSection } from "../kit/DocumentLayout.js";
+import { useDraft } from "../tabs/useViewParam.js";
+import { useSearchFilter } from "../kit/SearchFilter.js";
 import { Toolbar } from "../kit/Toolbar.js";
 import type { PageAction } from "../kit/actions.js";
 import { LspServersSection } from "../components/LspServersSection.js";
@@ -212,9 +214,19 @@ function useAreaContent(area: SettingsArea, open: (id: SettingsAreaId, anchor?: 
  *  comes from, Ask, and — for one only a person sets — its area. */
 function EverySetting({ onOpenControl }: { onOpenControl(area: SettingsAreaId): void }) {
   const [settings, setSettings] = useState<EffectiveSetting[]>([]);
-  const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const proposals = useProposals();
+  // The search is the page's `q` view param.
+  const filter = useSearchFilter("q", {
+    label: "Search settings",
+    placeholder: "Search settings",
+    testId: "settings-search",
+    inputProps: {
+      onKeyDown: (e) => {
+        if (e.key === "Escape") filter.onChange("");
+      },
+    },
+  });
   // The view re-reads when the config changes, whoever changed it.
   useEffect(() => {
     const load = () =>
@@ -232,22 +244,9 @@ function EverySetting({ onOpenControl }: { onOpenControl(area: SettingsAreaId): 
         When the agent changes a setting only a person may change, its change waits on the setting&apos;s row (and in Approvals) for you to
         approve — or change it yourself on its area&apos;s page.
       </p>
-      <Toolbar
-        filter={{
-          value: search,
-          onChange: setSearch,
-          label: "Search settings",
-          placeholder: "Search settings",
-          testId: "settings-search",
-          inputProps: {
-            onKeyDown: (e) => {
-              if (e.key === "Escape") setSearch("");
-            },
-          },
-        }}
-      />
+      <Toolbar filter={filter} />
       {error ? <p className="ox-error">{error}</p> : null}
-      {groupSettings(settings.filter((s) => matchesSearch(s, search))).map((g) => (
+      {groupSettings(settings.filter((s) => matchesSearch(s, filter.value))).map((g) => (
         <div key={g.title} data-testid={`settings-group-${g.title}`} style={{ marginBottom: "var(--space-3)" }}>
           <div className="ox-heading">{g.title}</div>
           {g.settings.map((s) => (
@@ -263,15 +262,20 @@ function EverySetting({ onOpenControl }: { onOpenControl(area: SettingsAreaId): 
  *  one's declared settings, and the prompt additions — saved together. */
 function useAgentsForm(active: boolean) {
   const harnesses = useAgentHarnesses();
-  const [promptAppend, setPromptAppend] = useState("");
+  // What is edited and not yet saved is this step's history state (a
+  // draft; `null` until edited, which shows what is saved).
+  const [loadedPrompt, setLoadedPrompt] = useState("");
+  const [promptDraft, setPromptAppend, clearPrompt] = useDraft<string | null>("agentPrompt", null);
+  const promptAppend = promptDraft ?? loadedPrompt;
   // The enabled harnesses in priority order; `null` until edited, which
   // shows what the project has (every harness when `agents:` names none).
-  const [editedAgents, setEditedAgents] = useState<string[] | null>(null);
+  const [editedAgents, setEditedAgents, clearAgents] = useDraft<string[] | null>("agents", null);
   const agents = editedAgents ?? harnesses.filter((h) => h.enabled).map((h) => h.id);
   // Each harness's settings as loaded (`agentConfig.<harness>.<key>`) and
   // as edited, keyed `<harness>.<key>`.
   const [loadedSettings, setLoadedSettings] = useState<Record<string, string>>({});
-  const [harnessSettings, setHarnessSettings] = useState<Record<string, string>>({});
+  const [settingsDraft, setHarnessSettings, clearSettings] = useDraft<Record<string, string> | null>("agentSettings", null);
+  const harnessSettings = settingsDraft ?? loadedSettings;
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -282,10 +286,8 @@ function useAgentsForm(active: boolean) {
     setLoaded(false);
     void getConfig()
       .then((config) => {
-        setPromptAppend(config.agentPromptAppend ?? "");
-        const values = harnessSettingValues(config.agentConfig ?? {});
-        setLoadedSettings(values);
-        setHarnessSettings(values);
+        setLoadedPrompt(config.agentPromptAppend ?? "");
+        setLoadedSettings(harnessSettingValues(config.agentConfig ?? {}));
         setLoaded(true);
       })
       .catch((e) => {
@@ -309,6 +311,11 @@ function useAgentsForm(active: boolean) {
         }
       }
       await setAgentPromptAppend(promptAppend);
+      setLoadedPrompt(promptAppend);
+      setLoadedSettings(harnessSettings);
+      clearPrompt();
+      clearSettings();
+      clearAgents();
       setSaved("Saved. The prompt applies to sessions started from now on.");
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));

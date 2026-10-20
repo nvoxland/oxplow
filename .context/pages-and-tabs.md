@@ -357,11 +357,13 @@ extensions mount in its parts slot, placed by `placeParts`; a contents list
 in the rail from four sections), `DataTable` (fixed `<col>` widths,
 `numeric` and `truncate` columns, groups, per-row props — the lens `table`
 viz draws through it), `Toolbar` (a core list's filter and actions; a
-lens page has none) with `useListNav`
+lens page has none; `useSearchFilter(key, …)` builds its `filter` on the `key` view
+param) with `useListNav`
 (the one ↑/↓/Enter/Escape contract, usability.md "Keyboard"; a list that
 holds focus itself spreads its `keyProps`), `Stat` (a figure; `big` when
 it is its place's whole — the lens `number` viz), `Facts` (labels beside
 values — the lens `detail` viz, a metric's definition),
+`MetricFilters` (the range, branch and slice of a metric page as `ParamRow`s),
 `TileGrid` / `TileSlot` / `Tile`, `Loading`, `ActionButtons`, and
 `EmptyState` (re-exported; it lives beside the agent prompts it offers).
 Lengths come from the spacing and radius tokens (theming.md).
@@ -833,7 +835,21 @@ visit) and page memory:
 - a lens: all its params are view;
 - an extension's page: all but `ref` (what it was opened for);
 - one of oxplow's own pages: the view params it declares in
-  `BUILT_IN_VIEW` (Tasks and Backlog: `isTasksViewParam`); a page that
+  `BUILT_IN_VIEW` (Tasks and Backlog: `isTasksViewParam`; Metrics: range, branch,
+  slice, q, show; a custom dashboard: range, branch — `pages/metricsView.ts`;
+  the searches — `pages/searchViews.ts`: Git History `q`/`author`/`branch`,
+  Comments `days`, Settings `q`, Explore Data `model` (a pick, so it
+  pushes), `sql` (the query that ran), `viz`, `chart`, `template`, `raw`; the
+  SQL being edited and not yet run is history state `sql`; Files `filter`,
+  which files the tree lists, Alerts `open`, a pick, and Board `show` (it follows
+  the thread until picked) — `pages/modeViews.ts`); New Session's agent choice
+  is page memory;
+  the same table names an **entity kind** whose page has a view: a metric's
+  page is `metric:<key>?range=…&branch=…&slice=…`, its key the identity (so
+  comments, backlinks and visits still anchor on `metric:<key>`). A kind not
+  in the table is all identity, and `withView` refuses a view change to it.
+  The ref grammar needs nothing for it: `?` and `=` are legal in an id, and
+  the Rust `metric` kind accepts the query as `lens` and `page` do; a page that
   declares none is all identity — a diff's path and sides, a dashboard's
   id — so two diffs in a tab are two pages.
 
@@ -870,7 +886,7 @@ outside a tab each is the component's own state:
 | `useViewParam(key, initial)` | a filter (a range, a search, a mode) | replaces the entry; typed back by `initial`'s type; dropped at `initial` |
 | `useViewSelection(key)` | a pick (a row, a commit) | pushes when set (Back un-selects), replaces when cleared |
 | `useViewList(key)` | several values (authors, states) | comma-joined, as a filter |
-| `useCollapsedSet(key)` | open/closed groups | history state |
+| `useCollapsedSet(key, initial?)` | open/closed groups (`ids`, `has`, `toggle`, `set`) | history state |
 | `useDraft(key, initial)` | an unsaved form | history state; `clear` on submit |
 
 They write through `nav.patchViewParams(patch, { push })`, which merges
@@ -937,7 +953,9 @@ body `PageNavigation.historyState` and, to the tab's current page only,
 `setHistoryState(patch)` (`patchHistoryState` in the model, which ignores
 a write that changes nothing). Outside a tab it is local state. Used by the editor
 (Monaco's view state), a wiki page (scroll), the collapsed sections
-(`CollapsibleSections`) and a lens's "More" params. Keep values JSON: one
+(`CollapsibleSections`) and a lens's "More" params; and the unsaved forms (`useDraft`): New item,
+New stream, the stream and thread prompt, the Agents settings form, the
+uncommitted commit message and a task's title. Keep values JSON: one
 value that isn't drops the entry's whole state from storage.
 
 ## Adding a page

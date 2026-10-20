@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { useDraft } from "../tabs/useViewParam.js";
 import { useEffect, useState } from "react";
 import { setThreadPrompt, type Thread } from "../api.js";
 import { sessionLabel } from "../agentKinds.js";
@@ -23,13 +24,15 @@ export interface ThreadSettingsPageProps {
 export function ThreadSettingsPage({ streamId, thread, onClose, onSaved }: ThreadSettingsPageProps) {
   const sessions = useThreadSessions(thread?.id ?? null);
   const harnesses = useAgentHarnesses();
-  const [prompt, setPrompt] = useState("");
+  // The prompt being edited is an unsaved draft (this step's history state);
+  // untouched, it is the saved one.
+  const [draft, setPrompt, clearDraft] = useDraft<string | null>("prompt", null);
+  const prompt = draft ?? thread?.custom_prompt ?? "";
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    setPrompt(thread?.custom_prompt ?? "");
     setError(null);
     setSavedMessage(null);
   }, [thread?.id, thread?.custom_prompt]);
@@ -41,6 +44,7 @@ export function ThreadSettingsPage({ streamId, thread, onClose, onSaved }: Threa
     setSavedMessage(null);
     try {
       const next = await setThreadPrompt(streamId, thread.id, normalizePromptForSave(prompt));
+      clearDraft();
       setSavedMessage("Saved. Applies to newly-started agent sessions.");
       onSaved?.(next);
     } catch (e) {

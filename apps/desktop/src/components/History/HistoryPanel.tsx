@@ -6,6 +6,7 @@ import { NO_READS, readsOf, useRerunOnChange } from "../../lens/lensRerun.js";
 import { logUi } from "../../logger.js";
 import { vcsRevOf } from "../../revision.js";
 import type { TabRef } from "../../tabs/tabState.js";
+import { useViewParam } from "../../tabs/useViewParam.js";
 import type { RevisionInfo } from "../../tauri-bridge/generated/bindings.js";
 import { readHistory, type History } from "../../vcsHistory.js";
 import { Replaceable } from "../Replaceable.js";
@@ -98,9 +99,11 @@ function CommitHistory({
   const [log, setLog] = useState<History | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [author, setAuthor] = useState("");
-  const [branch, setBranch] = useState("");
+  // The filters are the Git History page's view params (`q`, `author`,
+  // `branch`); in the panel anywhere else they are its own.
+  const [query, setQuery] = useViewParam<string>("q", "");
+  const [author, setAuthor] = useViewParam<string>("author", "");
+  const [branch, setBranch] = useViewParam<string>("branch", "");
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
 
   const load = useCallback(

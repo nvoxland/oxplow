@@ -64,17 +64,23 @@ mock.module("../api.js", () => ({
   subscribeOxplowEvents: () => () => {},
 }));
 const { MetricsPage } = await import("./MetricsPage.js");
+const { PageNavigationContext } = await import("../tabs/PageNavigationContext.js");
+type PageNavigation = import("../tabs/PageNavigationContext.js").PageNavigation;
 
 afterEach(cleanup);
+
+const pick = (view: ReturnType<typeof render>, name: string, value: string) => {
+  fireEvent.click(view.getByTestId(`lens-param-${name}-value`));
+  fireEvent.change(view.getByTestId(`lens-param-${name}-edit`), { target: { value } });
+};
 
 test("slicing by a dimension lists each metric's top groups beneath it", async () => {
   const view = render(<MetricsPage />);
   await waitFor(() => expect(view.getByText("TODOs")).toBeTruthy());
   expect(view.queryAllByTestId("recorded-slice-group")).toHaveLength(0);
 
-  const select = (await view.findByTestId("recorded-slice-by")) as HTMLSelectElement;
-  await waitFor(() => expect([...select.options].map((o) => o.value)).toContain("oxplow.language"));
-  fireEvent.change(select, { target: { value: "oxplow.language" } });
+  await waitFor(() => expect(view.queryByTestId("lens-param-slice")).not.toBeNull());
+  pick(view, "slice", "oxplow.language");
 
   await waitFor(() => expect(view.queryAllByTestId("recorded-slice-group").length).toBeGreaterThan(0));
   const groups = view.getAllByTestId("recorded-slice-group").map((g) => g.textContent ?? "");
@@ -92,6 +98,28 @@ test("slicing by a dimension lists each metric's top groups beneath it", async (
   expect(sampleCalls).toContain("oxplow.language");
 
   // Back to no slice: the groups go.
-  fireEvent.change(select, { target: { value: "" } });
+  pick(view, "slice", "");
   await waitFor(() => expect(view.queryAllByTestId("recorded-slice-group")).toHaveLength(0));
+});
+
+test("the filters are the tab's view params: read from it, written to it", async () => {
+  const patches: Record<string, unknown>[] = [];
+  const nav = {
+    viewParams: { slice: "oxplow.language", q: "TODO", range: "30d" },
+    patchViewParams: (patch: Record<string, unknown>) => patches.push(patch),
+  } as unknown as PageNavigation;
+  const view = render(
+    <PageNavigationContext.Provider value={nav}>
+      <MetricsPage />
+    </PageNavigationContext.Provider>,
+  );
+  await waitFor(() => expect(view.queryAllByTestId("recorded-slice-group").length).toBeGreaterThan(0));
+  expect((view.getByTestId("recorded-search") as HTMLInputElement).value).toBe("TODO");
+  // The name filter keeps the one metric that matches.
+  expect(view.queryByText("Flat")).toBeNull();
+  expect(view.getByTestId("lens-param-range-value").textContent).toBe("Last 30 days");
+  pick(view, "range", "3d");
+  fireEvent.change(view.getByTestId("recorded-search"), { target: { value: "" } });
+  pick(view, "show", "all");
+  expect(patches).toEqual([{ range: "3d" }, { q: undefined }, { show: "all" }]);
 });
