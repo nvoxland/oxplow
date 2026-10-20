@@ -243,8 +243,8 @@ impl ModelProvider for FixtureModel {
         Ok(self.typed(req).1)
     }
 
-    /// The next reply a word at a time, each after its `chunk_delay`, then
-    /// its tool calls.
+    /// The next reply a word at a time, each after its `chunk_delay` (with
+    /// none, as one delta), then its tool calls.
     async fn stream_typed(
         &self,
         instance: &ProviderInstance<'_>,
@@ -259,7 +259,17 @@ impl ModelProvider for FixtureModel {
             fold.push(&delta);
             on_delta(delta);
         };
-        for word in reply.text.split_inclusive(' ') {
+        // A pace is what makes it words; with none, one delta (see
+        // `without_a_chunk_delay_the_text_streams_as_one_delta`).
+        let words: Vec<&str> = if reply.chunk_delay.is_zero() {
+            Some(reply.text.as_str())
+                .filter(|t| !t.is_empty())
+                .into_iter()
+                .collect()
+        } else {
+            reply.text.split_inclusive(' ').collect()
+        };
+        for word in words {
             if let Err(stop) = unless_cancelled(cancel, tokio::time::sleep(reply.chunk_delay)).await
             {
                 return Err(stop.error(instance.id, fold.into_partial()));
@@ -411,6 +421,27 @@ mod tests {
         let second = model.complete_typed(&instance(), &ask("r")).await.unwrap();
         assert_eq!(second.finish_reason, FinishReasonV1::Stop);
         assert_eq!(model.asked_typed().len(), 2);
+    }
+
+    /// With no `chunk_delay` there is no pace to keep: the text comes as
+    /// one delta, so what a consumer does with deltas (a job's output
+    /// writer coalesces them by the clock) can't depend on timing.
+    #[tokio::test]
+    async fn without_a_chunk_delay_the_text_streams_as_one_delta() {
+        let model = FixtureModel::new(vec!["src/lib.rs has no TODOs left.".into()]);
+        let mut deltas = Vec::new();
+        model
+            .stream_typed(&instance(), &ask("q"), &Cancel::default(), &mut |d| {
+                deltas.push(d)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            deltas,
+            [StreamDeltaV1::Text {
+                text: "src/lib.rs has no TODOs left.".into()
+            }]
+        );
     }
 
     /// Streamed, a reply comes a word at a time; cancelled mid-way, the

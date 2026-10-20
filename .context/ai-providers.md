@@ -682,6 +682,8 @@ whose last message (its parts as JSON, a tool round's results included)
 contains that text; the others answer in turn; the last repeats. A typed call takes any conversation,
 tools included: the reply's text, then its tool calls (ids `call-<n>`,
 finish `toolCalls`). Streamed, the text comes a word at a time, each after
-`chunk_delay`, honouring cancel. `asked()` / `asked_typed()` are what it
+`chunk_delay`, honouring cancel; with no `chunk_delay` it comes as one delta, so a
+consumer that coalesces by the clock (a job's output rows) sees the same rows
+whatever the load. `asked()` / `asked_typed()` are what it
 was asked. The SDK's throwaway preview binds every role to it, and the
 job tests run on it.
