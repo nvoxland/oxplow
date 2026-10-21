@@ -462,3 +462,20 @@ test("a row re-reads when the instance's health is recorded", async () => {
   }
 });
 
+
+// A name typed for a new instance is the step's history state: switching
+// Settings area, or a restart, keeps it.
+test("the new instance's name is the step's history state", async () => {
+  const { PageNavigationContext } = await import("../tabs/PageNavigationContext.js");
+  const states: Record<string, unknown>[] = [];
+  const nav = { viewParams: {}, patchViewParams() {}, historyState: { "integration-add-name": "fake_two" }, setHistoryState: (p: Record<string, unknown>) => states.push(p) } as never;
+  const view = render(
+    <PageNavigationContext.Provider value={nav}>
+      <IntegrationsSection />
+    </PageNavigationContext.Provider>,
+  );
+  const name = (await waitFor(() => view.getByTestId("integrations-add-name"))) as HTMLInputElement;
+  expect(name.value).toBe("fake_two");
+  fireEvent.change(name, { target: { value: "fake_three" } });
+  expect(states).toContainEqual({ "integration-add-name": "fake_three" });
+});

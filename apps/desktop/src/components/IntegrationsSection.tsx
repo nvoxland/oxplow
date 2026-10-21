@@ -12,6 +12,7 @@
 /// failures in opErrorsStore.
 
 import type { CSSProperties } from "react";
+import { useDraft } from "../tabs/useViewParam.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -200,9 +201,9 @@ function Replacements({
  *  that has the extension. It starts off: configure it, then Enable. */
 function AddInstance({ views, onChanged }: { views: ProviderInstanceView[]; onChanged(views: ProviderInstanceView[]): void }) {
   const programs = providerPrograms(views);
-  const [program, setProgram] = useState("");
-  const [name, setName] = useState("");
-  const [scope, setScope] = useState<"project" | "global">("project");
+  const [program, setProgram] = useDraft("integration-add-program", "");
+  const [name, setName] = useDraft("integration-add-name", "");
+  const [scope, setScope] = useDraft<"project" | "global">("integration-add-scope", "project");
   const [adding, setAdding] = useState(false);
   if (programs.length === 0) return null;
   const of = programs.find((p) => p.key === program) ?? programs[0];
@@ -450,15 +451,24 @@ function IntegrationRow({
   onCredentialChanged(): void;
 }) {
   const saved = view.config as Record<string, unknown>;
-  const [config, setConfig] = useState<Record<string, unknown> | null>(saved);
+  // An edit not yet saved is the step's history state (`null`: the form
+  // is invalid right now); no edit means the saved config.
+  const [edit, setEdit, clearEdit] = useDraft<{ config: Record<string, unknown> | null } | null>(`integration-config:${view.instance}`, null);
+  const config = edit ? edit.config : saved;
+  const setConfig = (next: Record<string, unknown> | null) => setEdit({ config: next });
   const [checked, setChecked] = useState<ProviderInstanceView | null>(null);
   const [busy, setBusy] = useState<"check" | "toggle" | "sync" | "remove" | "off-here" | null>(null);
-  // The draft follows the saved config when it changes, not each re-read
+  // The edit follows the saved config when it changes, not each re-read
   // of the instances, which brings a fresh copy of the same one and would
-  // wipe what the person typed but hasn't saved (tsk1054).
+  // wipe what the person typed but hasn't saved. Not on mount: a restart
+  // brings the edit back.
   const savedText = JSON.stringify(saved);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the content
-  useEffect(() => setConfig(saved), [savedText]);
+  const seenSaved = useRef(savedText);
+  useEffect(() => {
+    if (seenSaved.current === savedText) return;
+    seenSaved.current = savedText;
+    clearEdit();
+  });
 
   const shown = checked ?? view;
   const m = integrationRow(shown);

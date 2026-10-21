@@ -8,7 +8,8 @@
 /// opErrorsStore, not alerts. Changes apply immediately, no Save needed.
 
 import type { CSSProperties } from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useDraft } from "../tabs/useViewParam.js";
 
 import {
   aiSettings,
@@ -184,7 +185,21 @@ function ProviderRow({
 /// Add a provider, or replace an existing one's settings / key by using
 /// its name.
 function ProviderEditor({ settings, onSaved }: { settings: AiSettings; onSaved(s: AiSettings): void }) {
-  const [form, setForm] = useState<ProviderForm>(() => emptyProviderForm(settings.kinds));
+  // What is typed stays with the step; the key is a secret and does not
+  // (it must never reach the stored history).
+  const { key: _blank, ...blank } = emptyProviderForm(settings.kinds);
+  const [draft, setDraft, clearDraft] = useDraft("ai-provider", blank);
+  const [key, setKey] = useState("");
+  const form: ProviderForm = { ...draft, key };
+  const setForm = (next: ProviderForm) => {
+    const { key: nextKey, ...rest } = next;
+    setDraft(rest);
+    setKey(nextKey);
+  };
+  const clearForm = () => {
+    clearDraft();
+    setKey("");
+  };
   const [saving, setSaving] = useState(false);
   const existing = settings.providers.find((p) => p.id === form.id.trim());
   const editing = { ...form, editing: existing !== undefined };
@@ -201,7 +216,7 @@ function ProviderEditor({ settings, onSaved }: { settings: AiSettings; onSaved(s
         form.key.trim() || null,
       );
       onSaved(saved);
-      setForm(emptyProviderForm(settings.kinds));
+      clearForm();
       showToast({ message: form.key.trim() ? `Saved ${id}; its key is in your keychain.` : `Saved ${id}.` });
     } catch (e) {
       recordOpError({ label: "Save AI provider", message: String(e) });
@@ -219,7 +234,7 @@ function ProviderEditor({ settings, onSaved }: { settings: AiSettings; onSaved(s
         void save();
       }}
       onKeyDown={(e) => {
-        if (e.key === "Escape") setForm(emptyProviderForm(settings.kinds));
+        if (e.key === "Escape") clearForm();
       }}
     >
       <input
@@ -264,22 +279,38 @@ function ProviderEditor({ settings, onSaved }: { settings: AiSettings; onSaved(s
   );
 }
 
+interface RoleEdits {
+  provider?: string;
+  model?: string;
+  allowed?: Allowed;
+}
+const NO_EDITS: RoleEdits = {};
+
 function RoleRowEditor({ settings, role, onSaved }: { settings: AiSettings; role: string; onSaved(s: AiSettings): void }) {
   const row = roleRows(settings).find((r) => r.role === role)!;
   const binding = settings.roles.find((r) => r.role === role)?.binding ?? null;
   const savedRestrict = (binding?.restrict ?? []).join(",");
-  const [provider, setProvider] = useState(binding?.provider ?? "");
-  const [model, setModel] = useState(binding?.model ?? "");
-  const [allowed, setAllowed] = useState<Allowed>(allowedOf(binding?.restrict ?? []));
+  // Edits not yet saved are the step's history state; no edit yet means the
+  // saved binding.
+  const [edits, setEdits, revert] = useDraft<RoleEdits>(`ai-role:${role}`, NO_EDITS);
+  const provider = edits.provider ?? binding?.provider ?? "";
+  const model = edits.model ?? binding?.model ?? "";
+  const allowed = edits.allowed ?? allowedOf(binding?.restrict ?? []);
+  const setProvider = (provider: string) => setEdits({ ...edits, provider });
+  const setModel = (model: string) => setEdits({ ...edits, model });
+  const setAllowed = (allowed: Allowed) => setEdits({ ...edits, allowed });
   const [saving, setSaving] = useState(false);
 
-  const revert = () => {
-    setProvider(binding?.provider ?? "");
-    setModel(binding?.model ?? "");
-    setAllowed(allowedOf(binding?.restrict ?? []));
-  };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(revert, [binding?.provider, binding?.model, savedRestrict]);
+  // A binding changed elsewhere drops the edits (not on mount: a restart
+  // brings them back).
+  const seen = useRef(`${binding?.provider}|${binding?.model}|${savedRestrict}`);
+  useEffect(() => {
+    const now = `${binding?.provider}|${binding?.model}|${savedRestrict}`;
+    if (seen.current !== now) {
+      seen.current = now;
+      revert();
+    }
+  });
 
   const restrict = restrictionsOf(allowed);
   const dirty =

@@ -9,6 +9,7 @@
 /// existing BackgroundTaskKind::Lsp indicator.
 
 import type { CSSProperties } from "react";
+import { useDraft } from "../tabs/useViewParam.js";
 import { useEffect, useState } from "react";
 
 import {
@@ -67,7 +68,7 @@ export function availableSuggestions(servers: LspServerListing[]): { language: s
 
 export function LspServersSection() {
   const [servers, setServers] = useState<LspServerListing[]>(() => lspServers());
-  const [packageName, setPackageName] = useState("");
+  const [packageName, setPackageName] = useDraft("lsp-package", "");
   const [installing, setInstalling] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 

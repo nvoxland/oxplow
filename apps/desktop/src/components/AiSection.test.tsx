@@ -73,3 +73,28 @@ test("Escape puts the boxes back as saved", async () => {
   expect((view.getByTestId("ai-role-allow-summarize-streaming") as HTMLInputElement).checked).toBe(false);
   expect(saved).toEqual([]);
 });
+
+// Unsaved input is the step's history state, so switching Settings area
+// or a restart does not lose it; the API key is a secret and never goes there.
+test("a role's edit and a provider's fields are the step's history state, and the key is not", async () => {
+  const { PageNavigationContext } = await import("../tabs/PageNavigationContext.js");
+  const states: Record<string, unknown>[] = [];
+  const nav = {
+    viewParams: {},
+    patchViewParams() {},
+    historyState: { "ai-role:summarize": { model: "typed-model" } },
+    setHistoryState: (p: Record<string, unknown>) => states.push(p),
+  } as never;
+  const view = render(
+    <PageNavigationContext.Provider value={nav}>
+      <AiSection />
+    </PageNavigationContext.Provider>,
+  );
+  const model = (await waitFor(() => view.getByTestId("ai-role-model-summarize"))) as HTMLInputElement;
+  expect(model.value).toBe("typed-model");
+  fireEvent.change(view.getByTestId("ai-provider-id"), { target: { value: "mine" } });
+  fireEvent.change(view.getByTestId("ai-provider-key"), { target: { value: "sk-secret" } });
+  expect(states.map((s) => Object.keys(s))).toEqual([["ai-provider"]]);
+  expect(JSON.stringify(states)).not.toContain("sk-secret");
+  expect(JSON.stringify(states)).toContain("mine");
+});
