@@ -31,12 +31,12 @@
 
 pub mod build;
 pub mod grammar;
-pub mod kind;
+pub mod types;
 
 use std::collections::BTreeSet;
 
-use grammar::CanonicalRef;
-use kind::KindRegistry;
+use grammar::Uri;
+use types::TypeRegistry;
 
 /// Tree version a file ref is pinned to. `Disk` = working tree (the
 /// default, also `@disk` / `@local` literal). `Ref(s)` = a git ref
@@ -99,7 +99,7 @@ pub struct ClassifiedWikilink {
     pub raw: String,
     /// The canonical ref the interior names, or `None` when it matches no
     /// known shape.
-    pub canonical: Option<CanonicalRef>,
+    pub canonical: Option<Uri>,
     /// The typed view of `canonical` for the kinds the link checker and
     /// graph writers understand today; `None` for other kinds.
     pub reference: Option<Reference>,
@@ -108,8 +108,8 @@ pub struct ClassifiedWikilink {
 /// `r` is a canonical ref of a kind `kinds` has, whose id fits that kind.
 /// The kinds are the running vocabulary's (`vocabulary::Vocabulary`):
 /// core's, and the running extensions' `ref_kinds`.
-pub fn validate_ref(kinds: &KindRegistry, r: &str) -> Result<CanonicalRef, crate::DomainError> {
-    let parsed = CanonicalRef::parse(r).map_err(|e| {
+pub fn validate_ref(kinds: &TypeRegistry, r: &str) -> Result<Uri, crate::DomainError> {
+    let parsed = Uri::parse(r).map_err(|e| {
         crate::DomainError::Invalid(format!("`{r}` is not a canonical ref: {}", e.reason()))
     })?;
     kinds
@@ -129,7 +129,7 @@ pub fn validate_ref(kinds: &KindRegistry, r: &str) -> Result<CanonicalRef, crate
 /// - `path/file.ext[@version][:line]` → `file:<path>[@git:<version>][#L<line>]`
 ///   (`@disk` / `@local` mean the working tree and add no revision)
 /// - `bare-slug` → `wiki:<slug>`
-pub fn canonical_wikilink(kinds: &KindRegistry, interior: &str) -> Option<CanonicalRef> {
+pub fn canonical_wikilink(kinds: &TypeRegistry, interior: &str) -> Option<Uri> {
     let interior = interior.trim();
     if interior.is_empty() {
         return None;
@@ -138,26 +138,26 @@ pub fn canonical_wikilink(kinds: &KindRegistry, interior: &str) -> Option<Canoni
     // Sugar with a registered `[[prefix:…]]` (today only `git:`).
     if let Some((prefix, rest)) = interior.split_once(':') {
         if let Some(spec) = reg.kind_for_wikilink_prefix(&prefix.to_ascii_lowercase()) {
-            let r = CanonicalRef::new(&spec.kind, rest.trim(), None, None).ok()?;
+            let r = Uri::new(&spec.kind, rest.trim(), None, None).ok()?;
             return reg.validate(&r).is_ok().then_some(r);
         }
     }
     // dir:<path> keeps its own cleaning (trailing slash, no leading slash).
     if let Some(rest) = strip_prefix_ci(interior, "dir:") {
         let d = clean_dir(rest)?;
-        return CanonicalRef::new("dir", &d, None, None).ok();
+        return Uri::new("dir", &d, None, None).ok();
     }
     if let Some(rest) = strip_prefix_ci(interior, "finding:") {
         let f = clean_finding(rest)?;
-        return CanonicalRef::new("finding", &f, None, None).ok();
+        return Uri::new("finding", &f, None, None).ok();
     }
     // One of the active work list's own ids (`tsk42`, `ENG-12`), as it
     // declares them; anything else falls through (a slug or path).
     if let Some(id) = reg.work_item_id(interior) {
-        return CanonicalRef::new("work_item", &id, None, None).ok();
+        return Uri::new("work_item", &id, None, None).ok();
     }
     // The canonical form itself, for a registered kind.
-    if let Ok(r) = CanonicalRef::parse(interior) {
+    if let Ok(r) = Uri::parse(interior) {
         if reg.validate(&r).is_ok() {
             return Some(r);
         }
@@ -169,7 +169,7 @@ pub fn canonical_wikilink(kinds: &KindRegistry, interior: &str) -> Option<Canoni
             RefVersion::Ref(v) => Some(format!("git:{v}")),
         };
         let frag = detail.line.map(|l| format!("L{l}"));
-        return CanonicalRef::new("file", &detail.path, rev.as_deref(), frag.as_deref()).ok();
+        return Uri::new("file", &detail.path, rev.as_deref(), frag.as_deref()).ok();
     }
     // bare commit sha or wiki slug. `word:tail` is an attempted `kind:id`
     // with an unknown or malformed kind, not a slug named `word`.
@@ -177,10 +177,10 @@ pub fn canonical_wikilink(kinds: &KindRegistry, interior: &str) -> Option<Canoni
         return None;
     }
     if looks_like_commit_sha(interior) {
-        return CanonicalRef::new("commit", interior, None, None).ok();
+        return Uri::new("commit", interior, None, None).ok();
     }
     if looks_like_slug(interior) {
-        return CanonicalRef::new("wiki", interior, None, None).ok();
+        return Uri::new("wiki", interior, None, None).ok();
     }
     None
 }
@@ -190,12 +190,12 @@ fn line_from_frag(frag: &str) -> Option<u32> {
     frag.strip_prefix('L')?.split('-').next()?.parse().ok()
 }
 
-impl TryFrom<&CanonicalRef> for Reference {
+impl TryFrom<&Uri> for Reference {
     type Error = ();
 
     /// The typed view for the six kinds the link checker and graph
     /// writers handle; other kinds (`effort`, `lens`, …) have no view yet.
-    fn try_from(r: &CanonicalRef) -> Result<Self, ()> {
+    fn try_from(r: &Uri) -> Result<Self, ()> {
         match r.kind.as_str() {
             "dir" => Ok(Reference::Dir(r.id.clone())),
             "wiki" => Ok(Reference::Wiki(r.id.clone())),
@@ -227,7 +227,7 @@ impl TryFrom<&CanonicalRef> for Reference {
 /// the kinds that have a typed view. Shared by [`extract`] and
 /// [`classify_wikilinks`] so the graph writer and the link checker never
 /// drift; both go through [`canonical_wikilink`].
-fn classify_interior(kinds: &KindRegistry, interior: &str) -> Option<Reference> {
+fn classify_interior(kinds: &TypeRegistry, interior: &str) -> Option<Reference> {
     Reference::try_from(&canonical_wikilink(kinds, interior)?).ok()
 }
 
@@ -235,7 +235,7 @@ fn classify_interior(kinds: &KindRegistry, interior: &str) -> Option<Reference> 
 /// blocks are masked first (via [`mask_code_regions`]) so illustrative
 /// links inside them are skipped, mirroring [`extract`]. Interiors that
 /// match no known ref shape come back with `reference: None`.
-pub fn classify_wikilinks(kinds: &KindRegistry, body: &str) -> Vec<ClassifiedWikilink> {
+pub fn classify_wikilinks(kinds: &TypeRegistry, body: &str) -> Vec<ClassifiedWikilink> {
     if body.is_empty() {
         return Vec::new();
     }
@@ -258,7 +258,7 @@ pub fn classify_wikilinks(kinds: &KindRegistry, body: &str) -> Vec<ClassifiedWik
 }
 
 /// Parse `body` into [`ExtractedRefs`]. Pure; never errors.
-pub fn extract(kinds: &KindRegistry, body: &str) -> ExtractedRefs {
+pub fn extract(kinds: &TypeRegistry, body: &str) -> ExtractedRefs {
     if body.is_empty() {
         return ExtractedRefs::default();
     }
@@ -726,8 +726,8 @@ mod tests {
     use super::*;
 
     /// The core kinds with oxplow's tasks as the work list (`tsk<n>`).
-    fn tasks_kinds() -> KindRegistry {
-        kind::core_kinds()
+    fn tasks_kinds() -> TypeRegistry {
+        types::core_types()
             .with_work_item_ids("oxplow", r"tsk\d+")
             .unwrap()
     }
@@ -736,7 +736,7 @@ mod tests {
     /// whole tokens and in `[[…]]`; told of none, it recognizes none.
     #[test]
     fn a_work_lists_ids_are_recognized_as_it_declares_them() {
-        let issues = kind::core_kinds()
+        let issues = types::core_types()
             .with_work_item_ids("issues", r"[A-Z]+-\d+")
             .unwrap();
         assert_eq!(
@@ -752,7 +752,7 @@ mod tests {
             r.work_items,
             vec!["issues:ENG-12".to_string(), "issues:ENG-7".to_string()]
         );
-        let none = extract(&kind::core_kinds(), "tsk42 [[tsk7]] ENG-12");
+        let none = extract(&types::core_types(), "tsk42 [[tsk7]] ENG-12");
         assert!(none.work_items.is_empty(), "{none:?}");
     }
 

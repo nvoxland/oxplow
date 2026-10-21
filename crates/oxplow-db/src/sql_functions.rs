@@ -2,9 +2,9 @@
 //! and lenses ship (`.context/semantic-layer.md`).
 //!
 //! `lens_ref(id, key1, value1, …)` is the one way SQL spells a link to a
-//! lens: it builds the `lens:` ref through `refs::build` and escapes the
+//! lens: it builds the `lens:` ref through `uri::build` and escapes the
 //! params, so a lens, model or script never concatenates a `lens:` prefix
-//! (`.context/refs.md` "Using refs"). A NULL value leaves its param out;
+//! (`.context/resources.md` "Using refs"). A NULL value leaves its param out;
 //! a NULL id gives NULL.
 
 use rusqlite::functions::{Context, FunctionFlags};
@@ -56,7 +56,7 @@ fn lens_ref(ctx: &Context<'_>) -> rusqlite::Result<Option<String>> {
         .iter()
         .map(|(k, v)| (k.as_str(), v.as_deref()))
         .collect();
-    oxplow_domain::refs::build::lens_ref_with(&id, &borrowed)
+    oxplow_domain::uri::build::lens_uri_with(&id, &borrowed)
         .map(Some)
         .map_err(|e| Error::UserFunctionError(e.to_string().into()))
 }

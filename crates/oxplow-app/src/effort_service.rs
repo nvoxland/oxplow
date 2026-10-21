@@ -372,7 +372,7 @@ impl EffortService {
                 {
                     if let Some(measure) = facts.get_measure("oxplow.cycle_time").await? {
                         rows.push(NewFact {
-                            subject: Some(oxplow_domain::refs::build::effort_ref(*effort_id)),
+                            subject: Some(oxplow_domain::uri::build::effort_uri(*effort_id)),
                             numerator: Some(cycle_ms as f64),
                             denominator: Some(1.0),
                             ..NewFact::new(measure.id, cycle_ms as f64)
@@ -436,7 +436,7 @@ impl EffortService {
                         }
                         if any {
                             rows.push(NewFact {
-                                subject: Some(oxplow_domain::refs::build::effort_ref(*effort_id)),
+                                subject: Some(oxplow_domain::uri::build::effort_uri(*effort_id)),
                                 numerator: Some(total),
                                 denominator: Some(1.0),
                                 ..NewFact::new(effort_tokens_measure.id, total)
@@ -459,7 +459,7 @@ impl EffortService {
                                     facts.get_measure("oxplow.token_waste").await?
                                 {
                                     rows.push(NewFact {
-                                        subject: Some(oxplow_domain::refs::build::effort_ref(
+                                        subject: Some(oxplow_domain::uri::build::effort_uri(
                                             *effort_id,
                                         )),
                                         numerator: Some(0.0),
@@ -532,7 +532,7 @@ impl EffortService {
                             }
                         }
                         rows.push(NewFact {
-                            subject: Some(oxplow_domain::refs::build::effort_ref(*effort_id)),
+                            subject: Some(oxplow_domain::uri::build::effort_uri(*effort_id)),
                             numerator: Some(total),
                             denominator: Some(1.0),
                             ..NewFact::new(steering_measure.id, total)
@@ -1154,7 +1154,7 @@ mod tests {
         assert_eq!(
             cycle_facts[0].subject.as_deref(),
             Some(
-                oxplow_domain::refs::build::effort_ref(EffortId::new(
+                oxplow_domain::uri::build::effort_uri(EffortId::new(
                     cycle_facts[0].effort_id.unwrap()
                 ))
                 .as_str()
@@ -1314,7 +1314,7 @@ mod tests {
                 .transaction(move |tx| {
                     oxplow_db::comment_store::create_tx(
                         tx,
-                        &oxplow_domain::refs::kind::core_kinds(),
+                        &oxplow_domain::uri::types::core_types(),
                         &new,
                     )
                     .map(|_| ())

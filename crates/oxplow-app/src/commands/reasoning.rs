@@ -20,7 +20,7 @@ use oxplow_db::reasoning_store::{
 };
 use oxplow_db::thread_store::get_tx as thread_tx;
 use oxplow_domain::events::schema::{EffortDecisionsInferred, EffortDecisionsInferredV1};
-use oxplow_domain::refs::build::validate_work_item_ref;
+use oxplow_domain::uri::build::validate_work_item_uri;
 use oxplow_domain::{CommandError, ThreadId};
 use rusqlite::OptionalExtension;
 use schemars::JsonSchema;
@@ -200,7 +200,7 @@ fn place(
             effort: effort.map(|(id, _)| id),
         });
     };
-    validate_work_item_ref(work_item).map_err(|e| invalid("/work_item", e.to_string()))?;
+    validate_work_item_uri(work_item).map_err(|e| invalid("/work_item", e.to_string()))?;
     let open = find_open_for_work_item_tx(ctx.conn, work_item).map_err(sql)?;
     // Whose work it is: the thread of its open effort, else the list it's
     // on (the work-item interface's `thread_id`).
@@ -296,7 +296,7 @@ pub fn replace_inferred_decisions_op() -> Op {
                 .collect();
             let count = replace_inferred_tx(ctx.conn, effort.value(), &decisions)
                 .map_err(CommandError::from)?;
-            let effort_ref = oxplow_domain::refs::build::effort_ref(effort);
+            let effort_ref = oxplow_domain::uri::build::effort_uri(effort);
             let event = ctx
                 .events
                 .typed::<EffortDecisionsInferred>(&EffortDecisionsInferredV1 {
@@ -349,7 +349,7 @@ pub fn replace_inferred_claims_op() -> Op {
                     .map_err(CommandError::from)?;
             Ok(HandlerOutput {
                 result: json!({
-                    "effort": oxplow_domain::refs::build::effort_ref(effort),
+                    "effort": oxplow_domain::uri::build::effort_uri(effort),
                     "count": count,
                 }),
                 ..HandlerOutput::default()
@@ -486,7 +486,7 @@ mod tests {
                 &effect,
                 REPLACE_INFERRED_DECISIONS,
                 json!({
-                    "effort": oxplow_domain::refs::build::effort_ref(fx.effort),
+                    "effort": oxplow_domain::uri::build::effort_uri(fx.effort),
                     "decisions": [
                         { "question": "Which CSV library?", "choice": "csv crate",
                           "alternatives": ["hand-rolled"], "why": "quoting" },
@@ -627,7 +627,7 @@ mod tests {
                 &effect,
                 REPLACE_INFERRED_CLAIMS,
                 json!({
-                    "effort": oxplow_domain::refs::build::effort_ref(fx.effort),
+                    "effort": oxplow_domain::uri::build::effort_uri(fx.effort),
                     "claims": [
                         { "statement": "The parser tests pass.", "kind": "tests_pass" },
                     ],
@@ -698,7 +698,7 @@ mod tests {
                 &effect,
                 REPLACE_INFERRED_CLAIMS,
                 json!({
-                    "effort": oxplow_domain::refs::build::effort_ref(fx.effort),
+                    "effort": oxplow_domain::uri::build::effort_uri(fx.effort),
                     "claims": [{ "statement": "x", "kind": "vibes" }],
                 }),
                 false,
@@ -721,7 +721,7 @@ mod tests {
             }
         };
         let one = json!({ "question": "q", "choice": "c" });
-        let effort = oxplow_domain::refs::build::effort_ref(fx.effort);
+        let effort = oxplow_domain::uri::build::effort_uri(fx.effort);
         for input in [
             json!({ "effort": "effort:eff999", "decisions": [one] }),
             json!({ "effort": effort, "decisions": vec![one.clone(); 9] }),

@@ -1,10 +1,10 @@
-//! Canonical ref builders and readers (`.context/refs.md` "Using refs").
+//! Canonical ref builders and readers (`.context/resources.md` "Using refs").
 //!
 //! Every Rust producer that names a thing — in an event subject, a
-//! payload, a `page_ref` row, a command's input — builds the ref here, and
+//! payload, a `page_uri` row, a command's input — builds the ref here, and
 //! every reader reads one back through [`parse_as`] / [`id_of`] /
-//! [`parse_kind`], so a kind's prefix is spelled once
-//! (`refs::kind::{EFFORT, FILE, …}`) and an id is always escaped and
+//! [`parse_type`], so a kind's prefix is spelled once
+//! (`uri::types::{EFFORT, FILE, …}`) and an id is always escaped and
 //! decoded by the grammar. A work list builds its own items' refs
 //! (`oxplow_tasks::work_item_ref`). The `refs_are_built_and_parsed_through_the_grammar`
 //! source guard refuses a hand-built or hand-parsed ref anywhere else.
@@ -14,8 +14,8 @@ use std::str::FromStr;
 use crate::ids::{
     AgentSessionId, AgentTurnId, CommentId, EffortId, HandoffId, NoteId, StreamId, ThreadId,
 };
-use crate::refs::grammar::{CanonicalRef, RefParseError};
-use crate::refs::kind as k;
+use crate::uri::grammar::{Uri, UriParseError};
+use crate::uri::types as k;
 
 /// `<kind>:<id>`, the id escaped as the grammar needs: what every builder
 /// below is. A producer calls the typed builder for its kind; this is
@@ -31,7 +31,7 @@ pub fn of(kind: &str, id: &str) -> String {
 /// [`of`] with a revision (`git:HEAD`, `snap:01J9…`) and a fragment
 /// (`L10-20`).
 pub fn at(kind: &str, id: &str, rev: Option<&str>, frag: Option<&str>) -> String {
-    CanonicalRef::new(kind, id, rev, frag)
+    Uri::new(kind, id, rev, frag)
         .unwrap_or_else(|e| panic!("building a `{kind}` ref of `{id}`: {e}"))
         .to_string()
 }
@@ -45,8 +45,8 @@ pub struct NotA {
 }
 
 /// `r` parsed, when it is a ref of `kind`: revision and fragment kept.
-pub fn parse_kind(r: &str, kind: &str) -> Result<CanonicalRef, NotA> {
-    CanonicalRef::parse(r)
+pub fn parse_type(r: &str, kind: &str) -> Result<Uri, NotA> {
+    Uri::parse(r)
         .ok()
         .filter(|c| c.kind == kind)
         .ok_or_else(|| NotA {
@@ -57,9 +57,9 @@ pub fn parse_kind(r: &str, kind: &str) -> Result<CanonicalRef, NotA> {
 
 /// The decoded id of a `kind` ref (`file:a%40b.rs` → `a@b.rs`). A
 /// revision or fragment is refused: a reader that wants them calls
-/// [`parse_kind`].
+/// [`parse_type`].
 pub fn id_of(r: &str, kind: &str) -> Result<String, NotA> {
-    let parsed = parse_kind(r, kind)?;
+    let parsed = parse_type(r, kind)?;
     if parsed.rev.is_some() || parsed.frag.is_some() {
         return Err(NotA {
             text: r.to_string(),
@@ -79,62 +79,62 @@ pub fn parse_as<T: FromStr>(r: &str, kind: &str) -> Result<T, NotA> {
 }
 
 /// The kind a ref names, or `None` for a string that isn't a ref.
-pub fn kind_of(r: &str) -> Option<String> {
-    CanonicalRef::parse(r).ok().map(|c| c.kind)
+pub fn type_of(r: &str) -> Option<String> {
+    Uri::parse(r).ok().map(|c| c.kind)
 }
 
-pub fn project_ref(name: &str) -> String {
+pub fn project_uri(name: &str) -> String {
     of(k::PROJECT, name)
 }
 
-pub fn stream_ref(id: StreamId) -> String {
+pub fn stream_uri(id: StreamId) -> String {
     of(k::STREAM, &id.to_string())
 }
 
-pub fn thread_ref(id: ThreadId) -> String {
+pub fn thread_uri(id: ThreadId) -> String {
     of(k::THREAD, &id.to_string())
 }
 
-pub fn effort_ref(id: EffortId) -> String {
+pub fn effort_uri(id: EffortId) -> String {
     of(k::EFFORT, &id.to_string())
 }
 
 /// The effort behind an `effort:` ref (`effort:eff12`), the inverse of
-/// [`effort_ref`]; `None` for any other string, a bare id included.
-pub fn effort_of_ref(r: &str) -> Option<EffortId> {
+/// [`effort_uri`]; `None` for any other string, a bare id included.
+pub fn effort_of_uri(r: &str) -> Option<EffortId> {
     parse_as(r, k::EFFORT).ok()
 }
 
-pub fn turn_ref(id: AgentTurnId) -> String {
+pub fn turn_uri(id: AgentTurnId) -> String {
     of(k::TURN, &id.to_string())
 }
 
 /// A snapshot (`snapshot.id`).
-pub fn snapshot_ref(id: i64) -> String {
+pub fn snapshot_uri(id: i64) -> String {
     of(k::SNAPSHOT, &id.to_string())
 }
 
 /// A commit by sha (7–64 lowercase hex).
-pub fn commit_ref(sha: &str) -> String {
+pub fn commit_uri(sha: &str) -> String {
     of(k::COMMIT, sha)
 }
 
-pub fn branch_ref(name: &str) -> String {
+pub fn branch_uri(name: &str) -> String {
     of(k::BRANCH, name)
 }
 
 /// A file by its workspace-relative path, in the working tree.
-pub fn file_ref(path: &str) -> String {
+pub fn file_uri(path: &str) -> String {
     of(k::FILE, path)
 }
 
 /// A file at a revision (`git:HEAD`, `snap:01J9…`), optionally lines of
 /// it (`L10-20`).
-pub fn file_ref_at(path: &str, rev: Option<&str>, lines: Option<&str>) -> String {
+pub fn file_uri_at(path: &str, rev: Option<&str>, lines: Option<&str>) -> String {
     at(k::FILE, path, rev, lines)
 }
 
-pub fn dir_ref(path: &str) -> String {
+pub fn dir_uri(path: &str) -> String {
     of(k::DIR, path)
 }
 
@@ -142,25 +142,25 @@ pub fn dir_ref(path: &str) -> String {
 /// (`oxplow_code_metrics::Definition::id`: `Parser::parse`, `main~2`).
 /// The current symbol; pin a version with [`at`] (`@snap:<id>`,
 /// `@git:<sha>`).
-pub fn symbol_ref(path: &str, id: &str) -> String {
+pub fn symbol_uri(path: &str, id: &str) -> String {
     of(k::SYMBOL, &format!("{path}/{id}"))
 }
 
-pub fn wiki_ref(slug: &str) -> String {
+pub fn wiki_uri(slug: &str) -> String {
     of(k::WIKI, slug)
 }
 
-pub fn comment_ref(id: CommentId) -> String {
+pub fn comment_uri(id: CommentId) -> String {
     of(k::COMMENT, &id.to_string())
 }
 
 /// A logged event, by its public id (UUIDv7).
-pub fn event_ref(id: &str) -> String {
+pub fn event_uri(id: &str) -> String {
     of(k::EVENT, id)
 }
 
 /// A lens (`<extension>/<slug>`).
-pub fn lens_ref(id: &str) -> String {
+pub fn lens_uri(id: &str) -> String {
     of(k::LENS, id)
 }
 
@@ -171,9 +171,9 @@ pub fn lens_ref(id: &str) -> String {
 ///
 /// # Errors
 /// On an empty id.
-pub fn lens_ref_with(id: &str, params: &[(&str, Option<&str>)]) -> Result<String, RefParseError> {
-    CanonicalRef::new(k::LENS, id, None, None)?;
-    let head = lens_ref(id);
+pub fn lens_uri_with(id: &str, params: &[(&str, Option<&str>)]) -> Result<String, UriParseError> {
+    Uri::new(k::LENS, id, None, None)?;
+    let head = lens_uri(id);
     let query: Vec<String> = params
         .iter()
         .filter_map(|(key, value)| {
@@ -189,7 +189,7 @@ pub fn lens_ref_with(id: &str, params: &[(&str, Option<&str>)]) -> Result<String
 
 /// A page's id as its identity (the ref without its `?…`) and its view
 /// (the query's params, in order, decoded): the inverse of
-/// [`lens_ref_with`] and the desktop's `withParams`.
+/// [`lens_uri_with`] and the desktop's `withParams`.
 pub fn view_of(id: &str) -> (String, Vec<(String, String)>) {
     let Some((head, query)) = id.split_once('?') else {
         return (id.to_string(), Vec::new());
@@ -246,12 +246,12 @@ fn query_escape(s: &str) -> String {
 }
 
 /// An agent's answer in a thread (`thread_answer.id`).
-pub fn answer_ref(id: i64) -> String {
+pub fn answer_uri(id: i64) -> String {
     of(k::ANSWER, &id.to_string())
 }
 
 /// A shell route (`settings`), optionally with its query string.
-pub fn page_ref(name: &str, query: Option<&str>) -> String {
+pub fn page_uri(name: &str, query: Option<&str>) -> String {
     match query {
         Some(q) if !q.is_empty() => of(k::PAGE, &format!("{name}?{q}")),
         _ => of(k::PAGE, name),
@@ -259,116 +259,116 @@ pub fn page_ref(name: &str, query: Option<&str>) -> String {
 }
 
 /// An extension's page (the contribution `page:<extension>/<id>`).
-pub fn extension_page_ref(extension: &str, page: &str) -> String {
+pub fn extension_page_uri(extension: &str, page: &str) -> String {
     of(k::PAGE, &format!("{extension}/{page}"))
 }
 
 /// A metric by its key.
-pub fn metric_ref(key: &str) -> String {
+pub fn metric_uri(key: &str) -> String {
     of(k::METRIC, key)
 }
 
 /// One of core's published models by its name (`effort`, published as
 /// `v_effort`); an extension's is the contribution
 /// `model:<extension>/<name>`.
-pub fn model_ref(name: &str) -> String {
+pub fn model_uri(name: &str) -> String {
     of(k::MODEL, name)
 }
 
 /// One run of a declared job (`v_job_run.id`).
-pub fn job_run_ref(id: &str) -> String {
+pub fn job_run_uri(id: &str) -> String {
     of(k::JOB_RUN, id)
 }
 
 /// One recorded model call (`v_ai_call.id`).
-pub fn ai_call_ref(id: i64) -> String {
+pub fn ai_call_uri(id: i64) -> String {
     of(k::AI_CALL, &id.to_string())
 }
 
 /// A language model by the name its harness or provider reports
 /// (`ai_model:claude-opus-4-8`); not the `model` kind, a published view.
-pub fn ai_model_ref(name: &str) -> String {
+pub fn ai_model_uri(name: &str) -> String {
     of(k::AI_MODEL, name)
 }
 
 /// An extension, by its name.
-pub fn extension_ref(name: &str) -> String {
+pub fn extension_uri(name: &str) -> String {
     of(k::EXTENSION, name)
 }
 
 /// A command by name (`oxplow.config.set`).
-pub fn command_ref(name: &str) -> String {
+pub fn command_uri(name: &str) -> String {
     of(k::COMMAND, name)
 }
 
 /// A `.oxplow/project.yaml` key (`zones`, `metricRetentionDays`).
-pub fn config_ref(key: &str) -> String {
+pub fn config_uri(key: &str) -> String {
     of(k::CONFIG, key)
 }
 
 /// A code-quality finding.
-pub fn finding_ref(id: &str) -> String {
+pub fn finding_uri(id: &str) -> String {
     of(k::FINDING, id)
 }
 
-pub fn thread_note_ref(id: NoteId) -> String {
+pub fn thread_note_uri(id: NoteId) -> String {
     of(k::THREAD_NOTE, &id.to_string())
 }
 
 /// Work handed from one thread to another (`handoff.id`).
-pub fn handoff_ref(id: HandoffId) -> String {
+pub fn handoff_uri(id: HandoffId) -> String {
     of(k::HANDOFF, &id.to_string())
 }
 
 /// An agent slot on a thread (`agent_session.id`).
-pub fn agent_session_ref(id: AgentSessionId) -> String {
+pub fn agent_session_uri(id: AgentSessionId) -> String {
     of(k::AGENT_SESSION, &id.to_string())
 }
 
 /// A subagent of an agent session, by the harness's id for it.
-pub fn subagent_ref(session: AgentSessionId, id: &str) -> String {
+pub fn subagent_uri(session: AgentSessionId, id: &str) -> String {
     of(k::SUBAGENT, &format!("{session}/{id}"))
 }
 
 /// A user-created dashboard (`dashboard.id`).
-pub fn dashboard_ref(id: crate::DashboardId) -> String {
+pub fn dashboard_uri(id: crate::DashboardId) -> String {
     of(k::DASHBOARD, &id.to_string())
 }
 
 /// A test or analysis run (`metric_capture.id`).
-pub fn run_ref(id: i64) -> String {
+pub fn run_uri(id: i64) -> String {
     of(k::RUN, &id.to_string())
 }
 
 /// A command waiting for a person's decision (`command_proposal.id`).
-pub fn proposal_ref(id: i64) -> String {
+pub fn proposal_uri(id: i64) -> String {
     of(k::PROPOSAL, &id.to_string())
 }
 
 /// A claim an agent made about its work (`claim.id`).
-pub fn claim_ref(id: i64) -> String {
+pub fn claim_uri(id: i64) -> String {
     of(k::CLAIM, &id.to_string())
 }
 
 /// A decision an agent recorded or oxplow inferred (`decision.id`).
-pub fn decision_ref(id: i64) -> String {
+pub fn decision_uri(id: i64) -> String {
     of(k::DECISION, &id.to_string())
 }
 
 /// A collector, by its owner and id (`collector_run.owner`/`id`).
-pub fn collector_ref(owner: &str, id: &str) -> String {
+pub fn collector_uri(owner: &str, id: &str) -> String {
     of(k::COLLECTOR, &format!("{owner}/{id}"))
 }
 
 /// One of core's event consumers (`consumer:change.analyze`), as an
 /// `after:` names it.
-pub fn consumer_ref(name: &str) -> String {
+pub fn consumer_uri(name: &str) -> String {
     of(k::CONSUMER, name)
 }
 
 /// The provider-scoped id inside a `work_item` ref (`oxplow:tsk42`,
-/// `issues:ENG-12`) — the `page_ref` id of the work item.
-pub fn work_item_id_of_ref(r: &str) -> Option<&str> {
+/// `issues:ENG-12`) — the `page_uri` id of the work item.
+pub fn work_item_id_of_uri(r: &str) -> Option<&str> {
     r.strip_prefix("work_item:").filter(|id| !id.is_empty())
 }
 
@@ -377,12 +377,12 @@ pub fn work_item_id_of_ref(r: &str) -> Option<&str> {
 /// work item is a unique index), so an alias — a revision, a fragment,
 /// an escaped spelling — is refused rather than treated as a different
 /// item. What a list's own ids look like is that list's to say.
-pub fn validate_work_item_ref(r: &str) -> Result<(), crate::DomainError> {
+pub fn validate_work_item_uri(r: &str) -> Result<(), crate::DomainError> {
     let invalid = |why: &str| Err(crate::DomainError::Invalid(format!("`{r}` {why}")));
     const SHAPE: &str = "a work item ref is `work_item:<provider>:<id>` (`work_item:oxplow:tsk42`)";
     // `work_item` is core's kind, the same in every vocabulary: its shape
     // is checked here, no registry needed.
-    let parsed = crate::refs::CanonicalRef::parse(r).map_err(|e| {
+    let parsed = crate::uri::Uri::parse(r).map_err(|e| {
         crate::DomainError::Invalid(format!(
             "`{r}` is not a canonical ref: {}; {SHAPE}",
             e.reason()
@@ -440,41 +440,41 @@ pub fn provider_source(instance: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::refs::kind::core_kinds;
+    use crate::uri::types::core_types;
 
     /// tsk1025: an `effort.*` payload carries the ref, and every consumer
     /// reads it back through this one inverse.
     #[test]
     fn an_effort_ref_reads_back_to_its_effort() {
         let id = EffortId::try_from_str("eff12").unwrap();
-        assert_eq!(effort_of_ref(&effort_ref(id)), Some(id));
-        assert_eq!(effort_of_ref("eff12"), None, "a bare id isn't a ref");
-        assert_eq!(effort_of_ref("turn:12"), None);
+        assert_eq!(effort_of_uri(&effort_uri(id)), Some(id));
+        assert_eq!(effort_of_uri("eff12"), None, "a bare id isn't a ref");
+        assert_eq!(effort_of_uri("turn:12"), None);
     }
 
     #[test]
     fn a_lens_ref_carries_its_params_escaped_like_a_query() {
         assert_eq!(
-            lens_ref_with("acme/blocked", &[("stream_id", Some("2"))]).unwrap(),
+            lens_uri_with("acme/blocked", &[("stream_id", Some("2"))]).unwrap(),
             "lens:acme/blocked?stream_id=2"
         );
         assert_eq!(
-            lens_ref_with(
+            lens_uri_with(
                 "acme/x",
                 &[("a", Some("b c&d=e%")), ("gone", None), ("z", Some("1"))]
             )
             .unwrap(),
             "lens:acme/x?a=b+c%26d%3De%25&z=1"
         );
-        assert_eq!(lens_ref_with("acme/x", &[]).unwrap(), "lens:acme/x");
-        assert!(lens_ref_with("", &[]).is_err());
+        assert_eq!(lens_uri_with("acme/x", &[]).unwrap(), "lens:acme/x");
+        assert!(lens_uri_with("", &[]).is_err());
     }
 
     /// A page's id is its identity and its view: `view_of` reads back what
-    /// `lens_ref_with` (and the desktop's `withParams`) wrote.
+    /// `lens_uri_with` (and the desktop's `withParams`) wrote.
     #[test]
     fn a_page_id_splits_into_its_identity_and_its_params() {
-        let id = lens_ref_with(
+        let id = lens_uri_with(
             "acme/x",
             &[("a", Some("b c&d=e%")), ("q", Some("")), ("z", Some("1"))],
         )
@@ -497,17 +497,17 @@ mod tests {
 
     #[test]
     fn every_builder_produces_a_valid_canonical_ref() {
-        let reg = core_kinds();
+        let reg = core_types();
         for r in [
-            project_ref("oxplow"),
-            branch_ref("main"),
-            file_ref("src/a@b.rs"),
-            file_ref_at("src/a.rs", Some("git:HEAD"), Some("L10-20")),
-            dir_ref("src/ui"),
-            symbol_ref("src/a.rs", "parse"),
-            symbol_ref("README.md", "Parser::parse(String,int)"),
-            symbol_ref("Sources/App/Main.swift", "<Parser as Display>::fmt~2"),
-            symbol_ref("src/core.clj", "area([:a :b])"),
+            project_uri("oxplow"),
+            branch_uri("main"),
+            file_uri("src/a@b.rs"),
+            file_uri_at("src/a.rs", Some("git:HEAD"), Some("L10-20")),
+            dir_uri("src/ui"),
+            symbol_uri("src/a.rs", "parse"),
+            symbol_uri("README.md", "Parser::parse(String,int)"),
+            symbol_uri("Sources/App/Main.swift", "<Parser as Display>::fmt~2"),
+            symbol_uri("src/core.clj", "area([:a :b])"),
             at(k::SYMBOL, "src/a.rs/Parser::parse", Some("snap:812"), None),
             at(
                 k::SYMBOL,
@@ -515,94 +515,94 @@ mod tests {
                 Some("git:3f2a9c1"),
                 None,
             ),
-            wiki_ref("architecture"),
-            comment_ref(CommentId::new(4)),
-            event_ref("01a1369e-b063-76f8-968f-902d392f882d"),
-            lens_ref("acme/blocked"),
-            answer_ref(3),
-            page_ref("settings", None),
-            page_ref("dashboard", Some("variant=visits")),
-            extension_page_ref("github", "pr"),
-            metric_ref("oxplow.rust.unsafe_blocks"),
-            model_ref("effort"),
-            job_run_ref("01a1369e-b063-76f8-968f-902d392f882d"),
-            ai_call_ref(42),
-            extension_ref("effort-review"),
-            finding_ref("clippy:1"),
-            thread_note_ref(NoteId::new(5)),
-            agent_session_ref(AgentSessionId::new(2)),
-            dashboard_ref(crate::DashboardId::new(3)),
-            subagent_ref(AgentSessionId::new(3), "agent-7f"),
-            run_ref(9),
-            claim_ref(1),
-            decision_ref(2),
-            collector_ref("triage", "todos"),
-            stream_ref(StreamId::new(1)),
-            thread_ref(ThreadId::new(3)),
-            effort_ref(EffortId::new(12)),
-            turn_ref(AgentTurnId::new(7)),
-            snapshot_ref(42),
-            commit_ref("4c44d495"),
-            command_ref("oxplow.config.set"),
-            config_ref("metricRetentionDays"),
+            wiki_uri("architecture"),
+            comment_uri(CommentId::new(4)),
+            event_uri("01a1369e-b063-76f8-968f-902d392f882d"),
+            lens_uri("acme/blocked"),
+            answer_uri(3),
+            page_uri("settings", None),
+            page_uri("dashboard", Some("variant=visits")),
+            extension_page_uri("github", "pr"),
+            metric_uri("oxplow.rust.unsafe_blocks"),
+            model_uri("effort"),
+            job_run_uri("01a1369e-b063-76f8-968f-902d392f882d"),
+            ai_call_uri(42),
+            extension_uri("effort-review"),
+            finding_uri("clippy:1"),
+            thread_note_uri(NoteId::new(5)),
+            agent_session_uri(AgentSessionId::new(2)),
+            dashboard_uri(crate::DashboardId::new(3)),
+            subagent_uri(AgentSessionId::new(3), "agent-7f"),
+            run_uri(9),
+            claim_uri(1),
+            decision_uri(2),
+            collector_uri("triage", "todos"),
+            stream_uri(StreamId::new(1)),
+            thread_uri(ThreadId::new(3)),
+            effort_uri(EffortId::new(12)),
+            turn_uri(AgentTurnId::new(7)),
+            snapshot_uri(42),
+            commit_uri("4c44d495"),
+            command_uri("oxplow.config.set"),
+            config_uri("metricRetentionDays"),
             "work_item:oxplow:tsk42".to_string(),
-            proposal_ref(12),
+            proposal_uri(12),
         ] {
-            let parsed = CanonicalRef::parse(&r).unwrap_or_else(|e| panic!("{r}: {}", e.reason()));
+            let parsed = Uri::parse(&r).unwrap_or_else(|e| panic!("{r}: {}", e.reason()));
             reg.validate(&parsed).unwrap_or_else(|e| panic!("{r}: {e}"));
         }
-        assert_eq!(stream_ref(StreamId::new(1)), "stream:str1");
-        assert_eq!(turn_ref(AgentTurnId::new(7)), "turn:trn7");
-        assert_eq!(proposal_ref(12), "proposal:12");
-        assert_eq!(file_ref("src/a@b.rs"), "file:src/a%40b.rs", "escaped");
+        assert_eq!(stream_uri(StreamId::new(1)), "stream:str1");
+        assert_eq!(turn_uri(AgentTurnId::new(7)), "turn:trn7");
+        assert_eq!(proposal_uri(12), "proposal:12");
+        assert_eq!(file_uri("src/a@b.rs"), "file:src/a%40b.rs", "escaped");
     }
 
     /// Every core kind has a builder: the test above names one ref per
-    /// kind `core_kinds()` registers.
+    /// kind `core_types()` registers.
     #[test]
     fn every_core_kind_has_a_builder() {
         let built: std::collections::BTreeSet<String> = [
-            project_ref("p"),
-            stream_ref(StreamId::new(1)),
-            thread_ref(ThreadId::new(1)),
-            effort_ref(EffortId::new(1)),
-            turn_ref(AgentTurnId::new(1)),
-            snapshot_ref(1),
-            commit_ref("4c44d495"),
-            branch_ref("b"),
-            file_ref("a"),
-            dir_ref("a"),
-            symbol_ref("a", "b"),
+            project_uri("p"),
+            stream_uri(StreamId::new(1)),
+            thread_uri(ThreadId::new(1)),
+            effort_uri(EffortId::new(1)),
+            turn_uri(AgentTurnId::new(1)),
+            snapshot_uri(1),
+            commit_uri("4c44d495"),
+            branch_uri("b"),
+            file_uri("a"),
+            dir_uri("a"),
+            symbol_uri("a", "b"),
             "work_item:oxplow:tsk1".to_string(),
-            wiki_ref("w"),
-            comment_ref(CommentId::new(1)),
-            event_ref("01a1369e-b063-76f8-968f-902d392f882d"),
-            lens_ref("a/b"),
-            answer_ref(1),
-            page_ref("p", None),
-            metric_ref("m"),
-            model_ref("v_a"),
-            job_run_ref("01a1369e-b063-76f8-968f-902d392f882d"),
-            ai_call_ref(1),
-            ai_model_ref("claude-opus-4-8"),
-            extension_ref("e"),
-            command_ref("a.b"),
-            config_ref("c"),
-            finding_ref("f"),
-            thread_note_ref(NoteId::new(1)),
-            agent_session_ref(AgentSessionId::new(1)),
-            handoff_ref(HandoffId::new(1)),
-            dashboard_ref(crate::DashboardId::new(1)),
-            subagent_ref(AgentSessionId::new(1), "a"),
-            run_ref(1),
-            proposal_ref(1),
-            claim_ref(1),
-            decision_ref(1),
-            collector_ref("a", "b"),
-            consumer_ref("change.analyze"),
+            wiki_uri("w"),
+            comment_uri(CommentId::new(1)),
+            event_uri("01a1369e-b063-76f8-968f-902d392f882d"),
+            lens_uri("a/b"),
+            answer_uri(1),
+            page_uri("p", None),
+            metric_uri("m"),
+            model_uri("v_a"),
+            job_run_uri("01a1369e-b063-76f8-968f-902d392f882d"),
+            ai_call_uri(1),
+            ai_model_uri("claude-opus-4-8"),
+            extension_uri("e"),
+            command_uri("a.b"),
+            config_uri("c"),
+            finding_uri("f"),
+            thread_note_uri(NoteId::new(1)),
+            agent_session_uri(AgentSessionId::new(1)),
+            handoff_uri(HandoffId::new(1)),
+            dashboard_uri(crate::DashboardId::new(1)),
+            subagent_uri(AgentSessionId::new(1), "a"),
+            run_uri(1),
+            proposal_uri(1),
+            claim_uri(1),
+            decision_uri(1),
+            collector_uri("a", "b"),
+            consumer_uri("change.analyze"),
         ]
         .iter()
-        .map(|r| kind_of(r).unwrap())
+        .map(|r| type_of(r).unwrap())
         .collect();
         // A contribution's ref is its id's (`ContributionId::reference`).
         let contributions: std::collections::BTreeSet<String> = crate::contribution::KINDS
@@ -610,7 +610,7 @@ mod tests {
             .map(|k| k.kind.segment().to_string())
             .collect();
         let registered: std::collections::BTreeSet<String> =
-            core_kinds().kinds().map(|k| k.kind.clone()).collect();
+            core_types().kinds().map(|k| k.kind.clone()).collect();
         let core: std::collections::BTreeSet<String> =
             registered.difference(&contributions).cloned().collect();
         let built_core: std::collections::BTreeSet<String> =
@@ -634,33 +634,33 @@ mod tests {
         );
         assert!(
             id_of("file:a.rs@git:HEAD", k::FILE).is_err(),
-            "a revision needs parse_kind"
+            "a revision needs parse_type"
         );
-        let at = parse_kind("file:a.rs@git:HEAD#L1", k::FILE).unwrap();
+        let at = parse_type("file:a.rs@git:HEAD#L1", k::FILE).unwrap();
         assert_eq!(
             (at.rev.as_deref(), at.frag.as_deref()),
             (Some("git:HEAD"), Some("L1"))
         );
-        assert_eq!(kind_of("wiki:x").as_deref(), Some("wiki"));
-        assert_eq!(kind_of("nope"), None);
+        assert_eq!(type_of("wiki:x").as_deref(), Some("wiki"));
+        assert_eq!(type_of("nope"), None);
     }
 
     #[test]
     fn the_work_item_inverses() {
         assert_eq!(system_source("hook_ingest"), "system:hook_ingest");
         assert_eq!(
-            work_item_id_of_ref("work_item:issues:ENG-1"),
+            work_item_id_of_uri("work_item:issues:ENG-1"),
             Some("issues:ENG-1")
         );
-        assert_eq!(work_item_id_of_ref("work_item:"), None);
-        assert_eq!(work_item_id_of_ref("effort:eff1"), None);
-        assert!(validate_work_item_ref("work_item:issues:ENG-1").is_ok());
+        assert_eq!(work_item_id_of_uri("work_item:"), None);
+        assert_eq!(work_item_id_of_uri("effort:eff1"), None);
+        assert!(validate_work_item_uri("work_item:issues:ENG-1").is_ok());
         for bad in ["", "tsk1", "effort:eff1", "work_item:"] {
-            assert!(validate_work_item_ref(bad).is_err(), "{bad}");
+            assert!(validate_work_item_uri(bad).is_err(), "{bad}");
         }
         // A wrong shape shows the right one.
         for bad in ["work_item:oxplow/tsk1097", "oxplow:tsk1097", "effort:eff1"] {
-            let e = validate_work_item_ref(bad).unwrap_err().to_string();
+            let e = validate_work_item_uri(bad).unwrap_err().to_string();
             assert!(e.contains("`work_item:<provider>:<id>`"), "{e}");
         }
         // Only the canonical spelling is a key: the open-effort index
@@ -672,7 +672,7 @@ mod tests {
             "work_item:oxplow:tsk1@v2",
             "work_item:issues:ENG%2D1",
         ] {
-            assert!(validate_work_item_ref(alias).is_err(), "{alias}");
+            assert!(validate_work_item_uri(alias).is_err(), "{alias}");
         }
     }
 }

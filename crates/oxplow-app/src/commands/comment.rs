@@ -15,7 +15,7 @@ use oxplow_db::comment_store::{
     add_message_tx, create_tx, delete_tx, get_tx, relink_tx, set_anchor_tx, set_intent_tx,
     set_status_tx, NewComment,
 };
-use oxplow_domain::refs::build::{stream_ref, thread_ref};
+use oxplow_domain::uri::build::{stream_uri, thread_uri};
 use oxplow_domain::{
     Actor, CommandCall, CommandError, CommentId, CommentIntent, CommentStatus, CommentTarget,
     CommentThread, Confirm, Invokers, StreamId,
@@ -140,7 +140,7 @@ fn on_own_stream(ctx: &TxCtx<'_>, stream: StreamId) -> Result<(), CommandError> 
         Some((_, own)) if own != stream => Err(CommandError::Denied {
             reason: format!(
                 "an agent comments only on its own stream (`{}`)",
-                stream_ref(own)
+                stream_uri(own)
             ),
         }),
         _ => Ok(()),
@@ -169,7 +169,7 @@ pub fn add_op() -> Op {
                         return Err(CommandError::Denied {
                             reason: format!(
                                 "an agent comments in its own thread (`{}`)",
-                                thread_ref(own)
+                                thread_uri(own)
                             ),
                         });
                     }
@@ -392,7 +392,7 @@ mod tests {
     #[tokio::test]
     async fn the_author_is_the_actor_and_an_agent_comments_in_its_own_thread() {
         let fx = services_with_effort().await;
-        let stream = stream_ref(StreamId::new(1));
+        let stream = stream_uri(StreamId::new(1));
         let mine = add(&fx, &agent(&fx), comment_on(&stream, None))
             .await
             .unwrap();
@@ -437,7 +437,7 @@ mod tests {
         let c = add(
             &fx,
             &Actor::Human,
-            comment_on(&stream_ref(StreamId::new(1)), None),
+            comment_on(&stream_uri(StreamId::new(1)), None),
         )
         .await
         .unwrap();
@@ -507,7 +507,7 @@ mod tests {
         let c = add(
             &fx,
             &Actor::Human,
-            comment_on(&stream_ref(StreamId::new(1)), None),
+            comment_on(&stream_uri(StreamId::new(1)), None),
         )
         .await
         .unwrap();
@@ -598,7 +598,7 @@ mod tests {
         let c = add(
             &fx,
             &Actor::Human,
-            comment_on(&stream_ref(StreamId::new(1)), None),
+            comment_on(&stream_uri(StreamId::new(1)), None),
         )
         .await
         .unwrap();

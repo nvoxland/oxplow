@@ -46,7 +46,7 @@ export function parseRevision(raw: unknown): Revision | null {
   return null;
 }
 
-/** The ref grammar's `@rev` slot (`.context/refs.md`): null for the
+/** The ref grammar's `@rev` slot (`.context/resources.md`): null for the
  *  working tree. */
 export function revisionSlot(rev: Revision): string | null {
   return rev === WORKING ? null : rev;

@@ -234,7 +234,7 @@ pub async fn check(file: &str, questions: &[Question], c: &Checker<'_>) -> Check
     for (i, q) in questions.iter().enumerate() {
         let at = format!("{file}: question {} ({:?})", i + 1, q.question);
         if let Some(about) = &q.about {
-            if oxplow_domain::refs::kind::core_kinds().get(about).is_none() {
+            if oxplow_domain::uri::types::core_types().get(about).is_none() {
                 out.errors.push(format!(
                     "{at}: `about: {about}` isn't a kind of ref — fix: `file`, `commit`, `effort`, \
                      `work_item`, …"

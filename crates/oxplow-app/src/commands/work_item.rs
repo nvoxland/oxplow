@@ -90,7 +90,7 @@ pub(crate) fn with_loose_refs(
         };
         // A ref stays as it is (a link's target may be any ref);
         // `parent_ref: ""` means no parent.
-        if raw.is_empty() || oxplow_domain::refs::build::kind_of(raw).is_some() {
+        if raw.is_empty() || oxplow_domain::uri::build::type_of(raw).is_some() {
             continue;
         }
         let canonical = registry
@@ -232,12 +232,12 @@ fn target_belongs(
     target: &str,
     field: &str,
 ) -> Result<(), CommandError> {
-    match oxplow_domain::refs::build::kind_of(target) {
+    match oxplow_domain::uri::build::type_of(target) {
         None => Err(invalid_at(
             field,
             format!("`{target}` isn't a ref (<kind>:<id>)"),
         )),
-        Some(kind) if kind == oxplow_domain::refs::kind::WORK_ITEM => {
+        Some(kind) if kind == oxplow_domain::uri::types::WORK_ITEM => {
             belongs(provider, target, field)
         }
         Some(_) => Ok(()),
@@ -280,7 +280,7 @@ fn check_link_targets(
 ) -> Result<(), CommandError> {
     let current = vocabulary.current();
     for (field, target) in link_targets(verb, input) {
-        oxplow_domain::refs::validate_ref(&current.kinds, &target)
+        oxplow_domain::uri::validate_ref(&current.kinds, &target)
             .map_err(|e| invalid_at(&field, e.to_string()))?;
     }
     Ok(())
@@ -1224,7 +1224,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 crate::commands::effort::LINK,
-                json!({ "effort": oxplow_domain::refs::build::effort_ref(fx.effort), "work_item": loose }),
+                json!({ "effort": oxplow_domain::uri::build::effort_uri(fx.effort), "work_item": loose }),
                 false,
             )
             .await

@@ -423,7 +423,7 @@ impl EventConsumer for WorkItemsProjection {
             for l in links {
                 // The target's kind, read through the grammar: a link to
                 // what isn't a ref is the provider's mistake, and dropped.
-                let Some(kind) = oxplow_domain::refs::build::kind_of(&l.target) else {
+                let Some(kind) = oxplow_domain::uri::build::type_of(&l.target) else {
                     tracing::warn!(item = %item.item_ref, target = %l.target, "a link's target isn't a ref");
                     continue;
                 };

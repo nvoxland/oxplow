@@ -127,7 +127,7 @@ A definition's id is its containers' names and its own joined by `::`; then
 always present on callables, defaults dropped) or a Clojure defmethod
 dispatch value, `area(:circle)`; then `~n` for the nth definition with that
 same id in the file, in position order. The ref is `symbol:<path>/<id>`
-(refs.md); no revision is part of the identity.
+(resources.md); no revision is part of the identity.
 
 - `crates/oxplow-app/src/lib.rs/Services::boot`
 - `src/parse.rs/<Parser as Display>::fmt` (Rust trait impl)

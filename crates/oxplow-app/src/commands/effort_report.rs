@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use oxplow_db::{Database, EffortStore as _, NewClaim, SqliteEffortStore};
-use oxplow_domain::refs::build::thread_ref;
+use oxplow_domain::uri::build::thread_uri;
 use oxplow_domain::vcs::Vcs;
 use oxplow_domain::{Actor, CommandError, EffortImpact, ThreadId};
 use schemars::JsonSchema;
@@ -77,7 +77,7 @@ fn agents_thread(actor: &Actor, named: Option<ThreadId>) -> Result<Option<Thread
             Some(t) if t != own => Err(CommandError::Denied {
                 reason: format!(
                     "an agent reports only on its own thread (`{}`)",
-                    thread_ref(own)
+                    thread_uri(own)
                 ),
             }),
             _ => Ok(Some(own)),
@@ -141,7 +141,7 @@ async fn report(
             .ok_or_else(|| {
                 invalid(
                     "/thread",
-                    format!("`{}` has no effort to report on", thread_ref(thread)),
+                    format!("`{}` has no effort to report on", thread_uri(thread)),
                 )
             })?,
     };
@@ -183,7 +183,7 @@ async fn report(
         None => Vec::new(),
     };
     Ok(json!({
-        "effort": oxplow_domain::refs::build::effort_ref(effort.id),
+        "effort": oxplow_domain::uri::build::effort_uri(effort.id),
         "link_warnings": link_warnings,
     }))
 }
@@ -270,7 +270,7 @@ mod tests {
         assert_eq!(task["state"], "done", "{task}");
         assert_eq!(
             report["effort"],
-            json!(oxplow_domain::refs::build::effort_ref(fx.effort))
+            json!(oxplow_domain::uri::build::effort_uri(fx.effort))
         );
 
         let rows = audit.list_recent(50).await.unwrap();
@@ -300,7 +300,7 @@ mod tests {
             .finish(&fx.effort, None, None)
             .await
             .unwrap();
-        let thread = oxplow_domain::refs::build::thread_ref(fx.thread);
+        let thread = oxplow_domain::uri::build::thread_uri(fx.thread);
         fx.svc
             .commands
             .run(
@@ -337,7 +337,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 REPORT,
-                json!({ "thread": oxplow_domain::refs::build::thread_ref(other.id), "summary": "s" }),
+                json!({ "thread": oxplow_domain::uri::build::thread_uri(other.id), "summary": "s" }),
                 false,
             )
             .await
@@ -361,7 +361,7 @@ mod tests {
             .run(
                 &stranger,
                 REPORT,
-                json!({ "thread": oxplow_domain::refs::build::thread_ref(fx.thread), "summary": "mine" }),
+                json!({ "thread": oxplow_domain::uri::build::thread_uri(fx.thread), "summary": "mine" }),
                 false,
             )
             .await
@@ -470,7 +470,7 @@ mod tests {
     #[tokio::test]
     async fn reported_claims_are_recorded_beside_the_inferred_ones() {
         let fx = services_with_effort().await;
-        let effort = oxplow_domain::refs::build::effort_ref(fx.effort);
+        let effort = oxplow_domain::uri::build::effort_uri(fx.effort);
         let report = |claims: Value| {
             let svc = fx.svc.clone();
             let actor = agent(&fx);

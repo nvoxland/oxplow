@@ -8,14 +8,14 @@
 //! result so the authoring agent can self-correct in the same turn.
 //!
 //! Classification (recognized-or-not) lives in
-//! [`oxplow_domain::refs::classify_wikilinks`]; this module adds only the
+//! [`oxplow_domain::uri::classify_wikilinks`]; this module adds only the
 //! existence probes — the database, the project's files and the VCS's
 //! revision graph — synchronously, so `oxplow.knowledge.write_page` refuses a
 //! dangling link inside its transaction.
 
 use serde::{Deserialize, Serialize};
 
-use oxplow_domain::refs::{classify_wikilinks, Reference};
+use oxplow_domain::uri::{classify_wikilinks, Reference};
 use oxplow_domain::vcs::RevisionGraph;
 
 use crate::Services;
@@ -36,7 +36,7 @@ pub struct LinkWarning {
 pub struct LinkWorld<'a> {
     pub conn: &'a rusqlite::Connection,
     /// The ref kinds links may name (the running vocabulary's).
-    pub kinds: &'a oxplow_domain::refs::kind::KindRegistry,
+    pub kinds: &'a oxplow_domain::uri::types::TypeRegistry,
     pub project_dir: &'a std::path::Path,
     pub graph: &'a dyn RevisionGraph,
     pub this_page: Option<&'a str>,
@@ -152,7 +152,7 @@ impl LinkDeps {
     fn warnings_tx(
         &self,
         conn: &rusqlite::Connection,
-        kinds: &oxplow_domain::refs::kind::KindRegistry,
+        kinds: &oxplow_domain::uri::types::TypeRegistry,
         body: &str,
         thread: Option<oxplow_domain::ThreadId>,
     ) -> Vec<LinkWarning> {
@@ -246,7 +246,7 @@ fn exists(conn: &rusqlite::Connection, sql: &str, param: &dyn rusqlite::ToSql) -
 /// probed.
 fn unresolved_ref(
     world: &LinkWorld<'_>,
-    canonical: &oxplow_domain::refs::grammar::CanonicalRef,
+    canonical: &oxplow_domain::uri::grammar::Uri,
 ) -> Option<String> {
     use rusqlite::OptionalExtension;
     let resolve: String = world
@@ -285,7 +285,7 @@ fn missing_reason(world: &LinkWorld<'_>, reference: &Reference) -> Option<String
         Reference::WorkItem(id) => (!exists(
             world.conn,
             "SELECT 1 FROM v_work_item WHERE ref = ?1",
-            &oxplow_domain::refs::build::of("work_item", id),
+            &oxplow_domain::uri::build::of("work_item", id),
         ))
         .then(|| format!("work item `{id}` does not exist")),
         Reference::Wiki(slug) => (world.this_page != Some(slug.as_str())
@@ -299,7 +299,7 @@ fn missing_reason(world: &LinkWorld<'_>, reference: &Reference) -> Option<String
         // A file at a revision is looked for there (tsk895); one on disk in
         // the worktree.
         Reference::File(detail) => match &detail.version {
-            oxplow_domain::refs::RefVersion::Ref(rev) => {
+            oxplow_domain::uri::RefVersion::Ref(rev) => {
                 match world.graph.has_file(rev, &detail.path) {
                     Some(true) => None,
                     Some(false) => {
@@ -308,7 +308,7 @@ fn missing_reason(world: &LinkWorld<'_>, reference: &Reference) -> Option<String
                     None => Some(format!("revision `{rev}` was not found")),
                 }
             }
-            oxplow_domain::refs::RefVersion::Disk => {
+            oxplow_domain::uri::RefVersion::Disk => {
                 (!world.project_dir.join(&detail.path).is_file())
                     .then(|| format!("file `{}` does not exist", detail.path))
             }

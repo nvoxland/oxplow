@@ -12,7 +12,7 @@ import { subscribeNewThreadRequests } from "../new-thread-bus.js";
 import { AgentStatusDot, type AgentStatusDotState } from "./AgentStatusDot.js";
 import { useContextMenu, useRowContextMenu } from "./useRowContextMenu.js";
 import type { MenuItem } from "../menu.js";
-import { threadRef } from "../refs/ref.js";
+import { threadUri } from "../uri/uri.js";
 import { refCommandMenuItems, useRefOffers } from "./refCommands.js";
 import type { OpenHandoffs } from "../handoffs.js";
 import { Slideover } from "./Slideover.js";
@@ -294,7 +294,7 @@ export function Navigator({
       },
       // Then the commands about the thread (usability.md "Menus a page or
       // row gets from extensions").
-      ...refCommandMenuItems(refOffersFor(threadRef(thread.id))),
+      ...refCommandMenuItems(refOffersFor(threadUri(thread.id))),
     );
     return items;
   };

@@ -26,7 +26,7 @@ use oxplow_domain::agent_session::BindingOrigin;
 use oxplow_domain::agent_session::{
     AgentSession, NewAgentSession, SessionCloseReason, SessionKind,
 };
-use oxplow_domain::refs::build::{agent_session_ref, stream_ref, thread_ref};
+use oxplow_domain::uri::build::{agent_session_uri, stream_uri, thread_uri};
 use oxplow_domain::{
     AgentSessionId, CommandCall, CommandError, Confirm, Invokers, ThreadId, Timestamp,
 };
@@ -140,7 +140,7 @@ fn in_own_stream(ctx: &TxCtx<'_>, thread: ThreadId) -> Result<(), CommandError> 
         return Err(CommandError::Denied {
             reason: format!(
                 "an agent changes agent sessions only in its own stream (`{}`)",
-                stream_ref(own)
+                stream_uri(own)
             ),
         });
     }
@@ -191,11 +191,11 @@ pub fn open_op(config: super::config_commands::ConfigTarget, harnesses: HarnessR
             let row = oxplow_db::thread_store::get_tx(ctx.conn, thread)
                 .map_err(sql)?
                 .filter(|t| t.archived_at.is_none())
-                .ok_or_else(|| invalid("/thread", format!("no thread `{}`", thread_ref(thread))))?;
+                .ok_or_else(|| invalid("/thread", format!("no thread `{}`", thread_uri(thread))))?;
             if !row.is_open() {
                 return Err(invalid(
                     "/thread",
-                    format!("`{}` is closed; reopen it first", thread_ref(thread)),
+                    format!("`{}` is closed; reopen it first", thread_uri(thread)),
                 ));
             }
             in_own_stream(ctx, thread)?;
@@ -254,7 +254,7 @@ pub fn open_op(config: super::config_commands::ConfigTarget, harnesses: HarnessR
                 }
             };
             let mut out = HandlerOutput {
-                inverse: call(CLOSE, json!({ "session": agent_session_ref(session.id) })),
+                inverse: call(CLOSE, json!({ "session": agent_session_uri(session.id) })),
                 ..result(&session)
             };
             // Remembering what new threads start with lands with the open
@@ -365,7 +365,7 @@ pub fn reopen_op() -> Op {
                     "/session",
                     format!(
                         "`{}` is closed; reopen it first",
-                        thread_ref(session.thread_id)
+                        thread_uri(session.thread_id)
                     ),
                 ));
             }
@@ -510,7 +510,7 @@ fn free_conversation(
             format!(
                 "it is open in the session `{}` ({}): switch to that one, or fork it",
                 named(&other),
-                oxplow_domain::refs::build::agent_session_ref(other.id)
+                oxplow_domain::uri::build::agent_session_uri(other.id)
             ),
         ));
     }
@@ -680,7 +680,7 @@ mod tests {
             &fx,
             &Actor::Human,
             OPEN,
-            json!({ "thread": thread_ref(fx.thread), "title": "review" }),
+            json!({ "thread": thread_uri(fx.thread), "title": "review" }),
             false,
         )
         .await
@@ -714,7 +714,7 @@ mod tests {
         let s = open(
             &fx,
             &Actor::Human,
-            json!({ "thread": thread_ref(fx.thread), "harness": "claude", "remember": true }),
+            json!({ "thread": thread_uri(fx.thread), "harness": "claude", "remember": true }),
         )
         .await;
         assert_eq!(s.harness, "claude");
@@ -735,7 +735,7 @@ mod tests {
             &fx,
             &agent(&fx),
             OPEN,
-            json!({ "thread": thread_ref(fx.thread), "remember": true }),
+            json!({ "thread": thread_uri(fx.thread), "remember": true }),
             false,
         )
         .await
@@ -758,7 +758,7 @@ mod tests {
     #[tokio::test]
     async fn stopping_marks_the_session_and_starting_clears_it() {
         let fx = services_with_effort().await;
-        let me = serde_json::json!({ "session": agent_session_ref(fx.session) });
+        let me = serde_json::json!({ "session": agent_session_uri(fx.session) });
         let stopped = run(&fx, &Actor::Human, STOP, me.clone(), false)
             .await
             .unwrap();
@@ -794,7 +794,7 @@ mod tests {
     #[tokio::test]
     async fn starting_fresh_forgets_the_conversation_and_the_stop() {
         let fx = services_with_effort().await;
-        let me = serde_json::json!({ "session": agent_session_ref(fx.session) });
+        let me = serde_json::json!({ "session": agent_session_uri(fx.session) });
         let session = fx.session;
         fx.svc
             .db
@@ -826,11 +826,11 @@ mod tests {
     #[tokio::test]
     async fn a_person_resumes_a_chosen_conversation() {
         let fx = services_with_effort().await;
-        let me = agent_session_ref(fx.session);
+        let me = agent_session_uri(fx.session);
         let other = open(
             &fx,
             &Actor::Human,
-            serde_json::json!({ "thread": thread_ref(fx.thread), "harness": "claude" }),
+            serde_json::json!({ "thread": thread_uri(fx.thread), "harness": "claude" }),
         )
         .await;
         let (session, other_id) = (fx.session, other.id);
@@ -876,7 +876,7 @@ mod tests {
         .await
         .unwrap_err();
         assert!(
-            matches!(&err, CommandError::Invalid { field: Some(f), message } if f == "/conversation" && message.contains(&agent_session_ref(other.id))),
+            matches!(&err, CommandError::Invalid { field: Some(f), message } if f == "/conversation" && message.contains(&agent_session_uri(other.id))),
             "{err:?}"
         );
         for (name, input) in [
@@ -907,7 +907,7 @@ mod tests {
             .transaction(move |tx| bind_tx(tx, session, "taken", BindingOrigin::Started, now))
             .await
             .unwrap();
-        let thread = thread_ref(fx.thread);
+        let thread = thread_uri(fx.thread);
         let opened = open(
             &fx,
             &Actor::Human,
@@ -941,7 +941,7 @@ mod tests {
         .await
         .unwrap_err();
         assert!(
-            matches!(&err, CommandError::Invalid { field: Some(f), message } if f == "/resume" && message.contains(&agent_session_ref(fx.session))),
+            matches!(&err, CommandError::Invalid { field: Some(f), message } if f == "/resume" && message.contains(&agent_session_uri(fx.session))),
             "{err:?}"
         );
         // Nothing was left behind by the refusal.
@@ -988,7 +988,7 @@ mod tests {
     #[tokio::test]
     async fn a_fork_marks_the_next_launch() {
         let fx = services_with_effort().await;
-        let me = agent_session_ref(fx.session);
+        let me = agent_session_uri(fx.session);
         let err = run(
             &fx,
             &Actor::Human,
@@ -1022,7 +1022,7 @@ mod tests {
     #[tokio::test]
     async fn the_input_is_checked() {
         let fx = services_with_effort().await;
-        let thread = thread_ref(fx.thread);
+        let thread = thread_uri(fx.thread);
         fx.svc.config.write().unwrap().agents = vec!["claude".into()];
         for (input, field) in [
             (json!({ "thread": thread, "kind": "action" }), "/kind"),
@@ -1057,7 +1057,7 @@ mod tests {
     #[tokio::test]
     async fn an_agent_opens_and_closes_in_its_own_stream() {
         let fx = services_with_effort().await;
-        let mine = open(&fx, &agent(&fx), json!({ "thread": thread_ref(fx.thread) })).await;
+        let mine = open(&fx, &agent(&fx), json!({ "thread": thread_uri(fx.thread) })).await;
         let err = run(
             &fx,
             &Actor::Agent {
@@ -1066,13 +1066,13 @@ mod tests {
                 stream_id: None,
             },
             OPEN,
-            json!({ "thread": thread_ref(fx.thread) }),
+            json!({ "thread": thread_uri(fx.thread) }),
             false,
         )
         .await
         .unwrap_err();
         assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
-        let r = agent_session_ref(mine.id);
+        let r = agent_session_uri(mine.id);
         run(&fx, &agent(&fx), CLOSE, json!({ "session": r }), false)
             .await
             .unwrap();
@@ -1108,7 +1108,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let r = agent_session_ref(s);
+        let r = agent_session_uri(s);
         let out = run(&fx, &Actor::Human, CLOSE, json!({ "session": r }), false)
             .await
             .unwrap();
@@ -1158,7 +1158,7 @@ mod tests {
             &fx,
             &Actor::Human,
             "oxplow.thread.close",
-            json!({ "thread": thread_ref(fx.thread) }),
+            json!({ "thread": thread_uri(fx.thread) }),
             true,
         )
         .await
@@ -1172,7 +1172,7 @@ mod tests {
     #[tokio::test]
     async fn renaming_undoes_to_the_old_title() {
         let fx = services_with_effort().await;
-        let r = agent_session_ref(fx.session);
+        let r = agent_session_uri(fx.session);
         let out = run(
             &fx,
             &Actor::Human,
@@ -1208,14 +1208,14 @@ mod tests {
         let s = open(
             &fx,
             &Actor::Human,
-            json!({ "thread": thread_ref(second.id) }),
+            json!({ "thread": thread_uri(second.id) }),
         )
         .await;
         run(
             &fx,
             &Actor::Human,
             crate::commands::thread::CLOSE,
-            json!({ "thread": thread_ref(second.id) }),
+            json!({ "thread": thread_uri(second.id) }),
             false,
         )
         .await
@@ -1255,7 +1255,7 @@ mod tests {
             &fx,
             &Actor::Human,
             CLOSE,
-            json!({ "session": agent_session_ref(session.id) }),
+            json!({ "session": agent_session_uri(session.id) }),
             true,
         )
         .await
@@ -1266,7 +1266,7 @@ mod tests {
         let s = open(
             &fx,
             &Actor::Human,
-            json!({ "thread": thread_ref(second.id) }),
+            json!({ "thread": thread_uri(second.id) }),
         )
         .await;
         let token = mint(&fx, &s, stream);
@@ -1274,7 +1274,7 @@ mod tests {
             &fx,
             &Actor::Human,
             crate::commands::thread::CLOSE,
-            json!({ "thread": thread_ref(second.id) }),
+            json!({ "thread": thread_uri(second.id) }),
             false,
         )
         .await

@@ -11,7 +11,7 @@
  */
 import { querySql } from "../api.js";
 import { pageColumns, pageTabId, refKindInfo } from "../refKinds.js";
-import { parseRef } from "../refs/ref.js";
+import { parseUri } from "../uri/uri.js";
 import { refFromTabId } from "./pageRefs.js";
 import type { TabRef } from "./tabState.js";
 
@@ -26,7 +26,7 @@ export type RowReader = (view: string, columns: string[], ref: string) => Promis
 
 /** What the window does with tab id `tabId`. */
 function targetOf(tabId: string): RefTarget {
-  const parsed = parseRef(tabId);
+  const parsed = parseUri(tabId);
   if (parsed?.kind === "thread") return { thread: parsed.id };
   if (parsed?.kind === "stream") return { stream: parsed.id };
   const tab = refFromTabId(tabId);
@@ -38,7 +38,7 @@ function targetOf(tabId: string): RefTarget {
 export function refTargetNow(ref: string): RefTarget | null {
   // Before the registry is read (a window starting), a ref opens as
   // itself, which is where every core kind but a few opens.
-  const kind = parseRef(ref)?.kind;
+  const kind = parseUri(ref)?.kind;
   if (kind && !refKindInfo(kind)) return targetOf(ref);
   if (pageColumns(ref)) return null;
   const tabId = pageTabId(ref);

@@ -107,12 +107,12 @@ impl CommandBus {
                 let supersedes: Vec<String> = inserted
                     .superseded
                     .iter()
-                    .map(|id| proposal_ref(*id))
+                    .map(|id| proposal_uri(*id))
                     .collect();
                 let proposed = Envelope::typed::<CommandProposed>(
                     actor_c.source(),
                     &CommandProposedV2 {
-                        proposal: proposal_ref(inserted.id),
+                        proposal: proposal_uri(inserted.id),
                         command: row.command.clone(),
                         actor_kind: actor_c.kind().try_into()?,
                         actor_id: actor_c.id(),
@@ -121,7 +121,7 @@ impl CommandBus {
                     },
                 )
                 .with_anchors(actor_c.anchors())
-                .with_subject([proposal_ref(inserted.id), command_ref(&row.command)]);
+                .with_subject([proposal_uri(inserted.id), command_uri(&row.command)]);
                 append_tx(tx, &vocabulary.current(), &proposed)?;
                 // An effect's reaction ends here: a person decides the rest.
                 if let Some(key) = &effect {
@@ -145,7 +145,7 @@ impl CommandBus {
             Ok((id, supersedes)) => {
                 self.pump.wake();
                 CommandError::Proposed {
-                    proposal: proposal_ref(id),
+                    proposal: proposal_uri(id),
                     preview: Box::new(preview),
                     supersedes,
                 }
@@ -224,11 +224,11 @@ impl CommandBus {
                 let event = Envelope::typed::<CommandDeclined>(
                     actor_c.source(),
                     &CommandDeclinedV1 {
-                        proposal: proposal_ref(id),
+                        proposal: proposal_uri(id),
                         command: declined.command.clone(),
                     },
                 )
-                .with_subject([proposal_ref(id), command_ref(&declined.command)]);
+                .with_subject([proposal_uri(id), command_uri(&declined.command)]);
                 append_tx(tx, &vocabulary.current(), &event)?;
                 Ok(())
             })
@@ -254,14 +254,14 @@ impl CommandBus {
             .await?
             .ok_or_else(|| CommandError::Invalid {
                 field: Some("/proposal".into()),
-                message: format!("{} does not exist", proposal_ref(id)),
+                message: format!("{} does not exist", proposal_uri(id)),
             })?;
         if proposal.decision != ProposalDecision::Pending {
             return Err(CommandError::Invalid {
                 field: Some("/proposal".into()),
                 message: format!(
                     "{} is already {}",
-                    proposal_ref(id),
+                    proposal_uri(id),
                     proposal.decision.as_str()
                 ),
             });
@@ -282,12 +282,12 @@ pub(super) fn log_approved_tx(
     let approved = Envelope::typed::<CommandApproved>(
         actor.source(),
         &CommandApprovedV1 {
-            proposal: proposal_ref(id),
+            proposal: proposal_uri(id),
             command: spec.id.clone(),
             audit_id: recorded.audit_id,
         },
     )
-    .with_subject([proposal_ref(id), command_ref(&spec.id)])
+    .with_subject([proposal_uri(id), command_uri(&spec.id)])
     .with_cause(recorded.event_id.clone());
     append_tx(tx, vocabulary, &approved)?;
     Ok(())

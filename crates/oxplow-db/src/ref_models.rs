@@ -1,4 +1,4 @@
-//! What core declares of each of its ref kinds (`.context/refs.md` "The
+//! What core declares of each of its ref kinds (`.context/resources.md` "The
 //! kind registry"), the way an extension's `ref_kinds:` declares its own:
 //!
 //! - **owner** — the one published model whose SQL spells the kind's
@@ -14,12 +14,12 @@
 //! - **searchable** — the model whose rows (`ref`, `title`, `body`,
 //!   `stream_id`, optional `version`) site search indexes under the kind.
 
-use oxplow_domain::refs::kind as k;
+use oxplow_domain::uri::types as k;
 
 /// A core kind's owning model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RefModel {
-    /// The ref kind (`refs::kind::EFFORT`).
+    /// The ref kind (`uri::types::EFFORT`).
     pub kind: &'static str,
     /// Its published view (`v_effort`), which has a `ref` column.
     pub view: &'static str,
@@ -44,7 +44,7 @@ impl Page {
         match self {
             Page::Itself => "{ref}".to_string(),
             Page::Column(columns) => format!("{{{}}}", columns.join("|")),
-            Page::Route(name) => oxplow_domain::refs::build::page_ref(name, None),
+            Page::Route(name) => oxplow_domain::uri::build::page_uri(name, None),
         }
     }
 }
@@ -236,7 +236,7 @@ mod tests {
         })
         .await
         .unwrap();
-        let registered: Vec<String> = oxplow_domain::refs::kind::core_kinds()
+        let registered: Vec<String> = oxplow_domain::uri::types::core_types()
             .kinds()
             .map(|k| k.kind.clone())
             .collect();

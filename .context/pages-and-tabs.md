@@ -128,8 +128,8 @@ An agent session's tab follows its row (`reconcileSessionTabs`). There is no `ch
 Built only by the helpers in `apps/desktop/src/tabs/pageRefs.ts` — never
 hand-format an id.
 
-**Every tab id is a canonical ref** ([refs.md](./refs.md)), parsed
-through the shared grammar (`apps/desktop/src/refs/ref.ts`) so a `:`
+**Every tab id is a canonical ref** ([resources.md](./resources.md)), parsed
+through the shared grammar (`apps/desktop/src/uri/uri.ts`) so a `:`
 inside an id (`work_item:oxplow:tsk42`) never splits it. Two families:
 
 - **Entity pages** (`EntityPageKind`): the tab id of a file, directory,
@@ -170,7 +170,7 @@ chosen", never a tab), and "is this the editor's working-tree file" is
 moves into an extension, its saved tabs/bookmarks/history are dropped
 (the tab-layout keys started fresh again as `oxplow.layout.v3.*` when
 pages became declared, 2026-10-17; bookmarks
-moved into the project DB and started fresh again) — see the decision in [refs.md](./refs.md).
+moved into the project DB and started fresh again) — see the decision in [resources.md](./resources.md).
 
 | Kind | Id format | Example |
 |---|---|---|
@@ -737,7 +737,7 @@ forgotten, a report older than a minute is listed as stale.
   thread in the window the person was in last (most recently focused),
   with `others` (each other window's), or the listed `tab`: its
   `pageId`, its `page` (identity) and `params` (the view, decoded —
-  `refs::build::view_of`; an agent never parses an id), its tab's
+  `uri::build::view_of`; an agent never parses an id), its tab's
   `back`, `forward` and `origin`, and, for a lens, the lens re-run as
   text. Detail comes only from a window showing that thread's page. Two windows never
   collapse into one "open page".
@@ -750,7 +750,7 @@ Both are read-only: nothing an agent reads activates a tab or a window.
 `v_ref_kind.page` template says where its refs open, for core and
 extension kinds alike, and `tabs/refOpener.ts` (`refTarget`;
 `refTargetNow` when no row is needed) is the one function that fills
-it: a tab, a thread or stream to select, or nothing ([refs.md](./refs.md)
+it: a tab, a thread or stream to select, or nothing ([resources.md](./resources.md)
 "Where a ref opens"). **A link to a ref string opens it at the click**
 through `tabs/openRef.ts`: `openRef(ref, how, host)` resolves it with
 `refTarget` and does what it says through the window's `RefHost` — a tab

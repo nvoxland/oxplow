@@ -12,7 +12,7 @@
 use async_trait::async_trait;
 use oxplow_db::SqliteEventLogStore;
 use oxplow_domain::events::schema::{EffortFinished, EffortFinishedV2};
-use oxplow_domain::refs::build::{snapshot_ref, system_source};
+use oxplow_domain::uri::build::{snapshot_uri, system_source};
 use oxplow_domain::{DomainError, EffortId, Envelope, StoredEvent};
 
 use crate::effort_service::EffortService;
@@ -62,7 +62,7 @@ impl EffortLifecycleConsumer {
                     .unwrap_or_default()
                     .to_string(),
                 work_item: effort.work_item.clone(),
-                end_snapshot: effort.end_snapshot_id.map(snapshot_ref),
+                end_snapshot: effort.end_snapshot_id.map(snapshot_uri),
             },
         )
         .with_anchors(oxplow_domain::Anchors {
@@ -85,7 +85,7 @@ pub(crate) fn effort_of(event: &StoredEvent) -> Result<EffortId, DomainError> {
     let r = event.envelope.payload["effort"]
         .as_str()
         .unwrap_or_default();
-    oxplow_domain::refs::build::effort_of_ref(r).ok_or_else(|| {
+    oxplow_domain::uri::build::effort_of_uri(r).ok_or_else(|| {
         DomainError::Invalid(format!(
             "{} seq {}: `effort` is not an effort ref: `{r}`",
             event.envelope.event_type, event.seq

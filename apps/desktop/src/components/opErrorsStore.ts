@@ -11,7 +11,7 @@
 
 import { runCommand } from "../api.js";
 import { logUi, type UiLogLevel } from "../logger.js";
-import { streamRef, threadRef } from "../refs/ref.js";
+import { streamUri, threadUri } from "../uri/uri.js";
 
 const MAX_ENTRIES = 20;
 
@@ -98,8 +98,8 @@ export function reportOpErrorTo(
     if (entry.exitCode !== null) input.exit_code = entry.exitCode;
     // A thread names its own stream; from no thread, the one on screen
     // does, so its agent can read the output (tsk1079).
-    if (entry.threadId !== null) input.thread = threadRef(entry.threadId);
-    else if (entry.streamId !== null) input.stream = streamRef(entry.streamId);
+    if (entry.threadId !== null) input.thread = threadUri(entry.threadId);
+    else if (entry.streamId !== null) input.stream = streamUri(entry.streamId);
     if (entry.signal !== null) input.signal = entry.signal;
     if (entry.durationMs !== null) input.duration_ms = Math.round(entry.durationMs);
     run("oxplow.ui.report_error", input).catch((error: unknown) => {

@@ -1201,12 +1201,12 @@ actions:
             .run(
                 &Actor::Human,
                 "oxplow.thread.close",
-                json!({ "thread": oxplow_domain::refs::build::thread_ref(closed.id) }),
+                json!({ "thread": oxplow_domain::uri::build::thread_uri(closed.id) }),
                 false,
             )
             .await
             .unwrap();
-        let me = oxplow_domain::refs::build::thread_ref(fx.thread);
+        let me = oxplow_domain::uri::build::thread_uri(fx.thread);
         let start = form_start(
             &fx.svc,
             &root,
@@ -1223,7 +1223,7 @@ actions:
             .iter()
             .map(|c| (c.value.as_str(), c.label.as_str()))
             .collect();
-        let other_ref = oxplow_domain::refs::build::thread_ref(other.id);
+        let other_ref = oxplow_domain::uri::build::thread_uri(other.id);
         assert_eq!(recipients, vec![(other_ref.as_str(), "Docs")]);
         assert!(start.choices["to_thread"][0].group.is_some());
         let items: Vec<&str> = start.choices["work_item"]

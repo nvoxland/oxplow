@@ -52,7 +52,7 @@ pub const VERIFY_REFS: &str = "oxplow.knowledge.verify_refs";
 
 /// A page's ref: `wiki:<slug>`.
 pub fn page_ref(slug: &str) -> String {
-    oxplow_domain::refs::build::wiki_ref(slug)
+    oxplow_domain::uri::build::wiki_uri(slug)
 }
 
 /// Where a page's body lives.
@@ -650,7 +650,7 @@ pub async fn freshness(
             .query_map(params![page], |r| {
                 let target: String = r.get(0)?;
                 Ok(RefFreshness {
-                    target: oxplow_domain::refs::build::file_ref(&target),
+                    target: oxplow_domain::uri::build::file_uri(&target),
                     pinned_snapshot: r.get(1)?,
                     pinned_revision: r.get(4)?,
                     pinned_revision_exact: r.get::<_, i64>(5)? != 0,
@@ -696,7 +696,7 @@ impl crate::event_pump::EventConsumer for WikiAttribution {
                 DomainError::Invalid(format!("knowledge.page.written payload: {e}"))
             })?;
         let Ok(slug) =
-            oxplow_domain::refs::build::id_of(&written.page, oxplow_domain::refs::kind::WIKI)
+            oxplow_domain::uri::build::id_of(&written.page, oxplow_domain::uri::types::WIKI)
         else {
             return Ok(());
         };
@@ -749,14 +749,14 @@ fn domain(e: DomainError) -> CommandError {
 fn links_resolve(
     target: &KnowledgeTarget,
     conn: &rusqlite::Connection,
-    kinds: &oxplow_domain::refs::kind::KindRegistry,
+    kinds: &oxplow_domain::uri::types::TypeRegistry,
     slug: &str,
     body: &str,
 ) -> Result<(), CommandError> {
     let graph = target.vcs.revision_graph(&target.project_dir);
     let existing: std::collections::HashSet<String> = recorded_body_tx(conn, slug)?
         .map(|current| {
-            oxplow_domain::refs::classify_wikilinks(kinds, &current)
+            oxplow_domain::uri::classify_wikilinks(kinds, &current)
                 .into_iter()
                 .map(|l| l.raw)
                 .collect()

@@ -18,7 +18,7 @@ use oxplow_domain::events::schema::{
     EffortClaimDismissed, EffortClaimDismissedV1, EffortClaimVerified, EffortClaimVerifiedV1,
     EffortDecisionReviewed, EffortDecisionReviewedV1,
 };
-use oxplow_domain::refs::build::{claim_ref, decision_ref, effort_ref};
+use oxplow_domain::uri::build::{claim_uri, decision_uri, effort_uri};
 use oxplow_domain::{CommandCall, CommandError, Invokers};
 use rusqlite::OptionalExtension;
 use schemars::JsonSchema;
@@ -76,7 +76,7 @@ pub struct DecisionInput {
 }
 
 fn effort_ref_of(effort: Option<i64>) -> Option<String> {
-    effort.map(|e| effort_ref(oxplow_domain::EffortId::new(e)))
+    effort.map(|e| effort_uri(oxplow_domain::EffortId::new(e)))
 }
 
 /// A claim as a review reads it.
@@ -116,8 +116,8 @@ fn expect_review(row: &ClaimRow, want: Option<&str>) -> Result<(), CommandError>
     Err(invalid(
         "/claim",
         match (&row.review, want) {
-            (Some(was), _) => format!("`{}` is already {was}", claim_ref(row.id)),
-            (None, Some(want)) => format!("`{}` isn't {want}", claim_ref(row.id)),
+            (Some(was), _) => format!("`{}` is already {was}", claim_uri(row.id)),
+            (None, Some(want)) => format!("`{}` isn't {want}", claim_uri(row.id)),
             (None, None) => unreachable!("matched above"),
         },
     ))
@@ -139,10 +139,10 @@ fn set_review(
             rusqlite::params![row.id, review, evidence],
         )
         .map_err(|e| CommandError::from(oxplow_db::map_sql_err(e)))?;
-    let mut subject = vec![claim_ref(row.id)];
+    let mut subject = vec![claim_uri(row.id)];
     subject.extend(effort_ref_of(row.effort));
     Ok(HandlerOutput {
-        result: json!({ "claim": claim_ref(row.id), "review": review, "evidence": evidence }),
+        result: json!({ "claim": claim_uri(row.id), "review": review, "evidence": evidence }),
         inverse: Some(inverse),
         events: vec![event.with_subject(subject)],
         after_commit: None,
@@ -169,13 +169,13 @@ pub fn verify_claim_op() -> Op {
             let event = ctx
                 .events
                 .typed::<EffortClaimVerified>(&EffortClaimVerifiedV1 {
-                    claim: claim_ref(row.id),
+                    claim: claim_uri(row.id),
                     effort: effort_ref_of(row.effort),
                     evidence: Some(backed_by.clone()),
                 });
             let inverse = CommandCall {
                 name: UNVERIFY_CLAIM.into(),
-                input: json!({ "claim": claim_ref(row.id), "evidence": row.evidence }),
+                input: json!({ "claim": claim_uri(row.id), "evidence": row.evidence }),
             };
             set_review(ctx, &row, Some("verified"), Some(backed_by), event, inverse)
         })),
@@ -198,13 +198,13 @@ pub fn unverify_claim_op() -> Op {
             let event = ctx
                 .events
                 .typed::<EffortClaimVerified>(&EffortClaimVerifiedV1 {
-                    claim: claim_ref(row.id),
+                    claim: claim_uri(row.id),
                     effort: effort_ref_of(row.effort),
                     evidence: None,
                 });
             let inverse = CommandCall {
                 name: VERIFY_CLAIM.into(),
-                input: json!({ "claim": claim_ref(row.id), "evidence": row.evidence }),
+                input: json!({ "claim": claim_uri(row.id), "evidence": row.evidence }),
             };
             set_review(ctx, &row, None, input.evidence, event, inverse)
         })),
@@ -236,13 +236,13 @@ fn claim_dismissal_op(op: &'static str, dismiss: bool) -> Op {
             let event = ctx
                 .events
                 .typed::<EffortClaimDismissed>(&EffortClaimDismissedV1 {
-                    claim: claim_ref(row.id),
+                    claim: claim_uri(row.id),
                     effort: effort_ref_of(row.effort),
                     dismissed: dismiss,
                 });
             let inverse = CommandCall {
                 name: if dismiss { REOPEN_CLAIM } else { DISMISS_CLAIM }.into(),
-                input: json!({ "claim": claim_ref(row.id) }),
+                input: json!({ "claim": claim_uri(row.id) }),
             };
             let evidence = row.evidence.clone();
             set_review(
@@ -295,12 +295,12 @@ fn review_decision(
         )
         .map_err(|e| CommandError::from(oxplow_db::map_sql_err(e)))?;
     let effort = effort_ref_of(effort);
-    let mut subject = vec![decision_ref(id)];
+    let mut subject = vec![decision_uri(id)];
     subject.extend(effort.clone());
     let event = ctx
         .events
         .typed::<EffortDecisionReviewed>(&EffortDecisionReviewedV1 {
-            decision: decision_ref(id),
+            decision: decision_uri(id),
             effort,
             outcome: to.into(),
         })
@@ -311,10 +311,10 @@ fn review_decision(
         _ => REOPEN_DECISION,
     };
     Ok(HandlerOutput {
-        result: json!({ "decision": decision_ref(id), "provenance": to }),
+        result: json!({ "decision": decision_uri(id), "provenance": to }),
         inverse: Some(CommandCall {
             name: inverse.into(),
-            input: json!({ "decision": decision_ref(id) }),
+            input: json!({ "decision": decision_uri(id) }),
         }),
         events: vec![event],
         after_commit: None,
@@ -454,7 +454,7 @@ mod tests {
     #[tokio::test]
     async fn verifying_a_claim_makes_it_verified_and_undo_takes_it_back() {
         let (fx, claim, _) = fixture().await;
-        let r = claim_ref(claim);
+        let r = claim_uri(claim);
         assert_eq!(claim_view(&fx, claim).await, None);
         let out = fx
             .svc
@@ -525,7 +525,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let r = claim_ref(claim);
+        let r = claim_uri(claim);
         let out = fx
             .svc
             .commands
@@ -552,7 +552,7 @@ mod tests {
     #[tokio::test]
     async fn a_dismissed_claim_is_reopened_by_undo() {
         let (fx, claim, _) = fixture().await;
-        let r = claim_ref(claim);
+        let r = claim_uri(claim);
         let out = fx
             .svc
             .commands
@@ -582,7 +582,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 REOPEN_CLAIM,
-                json!({ "claim": claim_ref(9999) }),
+                json!({ "claim": claim_uri(9999) }),
                 false,
             )
             .await
@@ -619,10 +619,10 @@ mod tests {
         };
         for actor in [agent, through_lens] {
             for (name, input) in [
-                (VERIFY_CLAIM, json!({ "claim": claim_ref(claim) })),
+                (VERIFY_CLAIM, json!({ "claim": claim_uri(claim) })),
                 (
                     CONFIRM_DECISION,
-                    json!({ "decision": decision_ref(decision) }),
+                    json!({ "decision": decision_uri(decision) }),
                 ),
             ] {
                 let err = fx
@@ -662,7 +662,7 @@ mod tests {
     #[tokio::test]
     async fn confirming_or_dismissing_an_inferred_decision_and_undoing_it() {
         let (fx, _, decision) = fixture().await;
-        let r = decision_ref(decision);
+        let r = decision_uri(decision);
         let inferred = || async {
             fx.svc
                 .db

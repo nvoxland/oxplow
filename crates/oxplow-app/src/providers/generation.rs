@@ -272,7 +272,7 @@ impl ProviderRegistry {
                 .bus
                 .upgrade()
                 .and_then(|bus| bus.namespace_owner(&resolved.id))
-                .filter(|owner| *owner != oxplow_domain::refs::build::provider_source(name))
+                .filter(|owner| *owner != oxplow_domain::uri::build::provider_source(name))
             {
                 refused(&format!(
                     "the command namespace `{}` is already {owner}'s — give the instance another id",

@@ -11,8 +11,8 @@ use crate::{
     events::{Anchors, EventId},
     extension_job::{AttemptFence, JobId},
     ids::{AgentSessionId, EffortId, StreamId, ThreadId},
-    refs::grammar::CanonicalRef,
     run::{RunContext, RunId},
+    uri::grammar::Uri,
 };
 
 const MAX_JSON_BYTES: usize = 64 * 1024;
@@ -208,7 +208,7 @@ impl JobExecutionIdentity {
     /// The run's ref (`job_run:<id>`): what its actor's events and audit
     /// rows name as their source.
     pub fn source(&self) -> String {
-        crate::refs::build::job_run_ref(self.job_id.as_str())
+        crate::uri::build::job_run_uri(self.job_id.as_str())
     }
 
     pub const fn may_confirm(&self) -> bool {
@@ -291,7 +291,7 @@ fn validate_subject(value: &str) -> Result<(), JobContextError> {
     if value.is_empty() || value.len() > MAX_SUBJECT_BYTES || value.chars().any(char::is_control) {
         return Err(JobContextError::Invalid);
     }
-    let parsed = CanonicalRef::parse(value).map_err(|_| JobContextError::Invalid)?;
+    let parsed = Uri::parse(value).map_err(|_| JobContextError::Invalid)?;
     if parsed.to_string() != value {
         return Err(JobContextError::Invalid);
     }

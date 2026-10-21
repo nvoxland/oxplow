@@ -345,7 +345,7 @@ pub async fn run_due_collectors(state: &crate::Services) -> Vec<(String, String)
     }
     for (owner, id) in &due {
         let input = serde_json::json!({
-            "collector": oxplow_domain::refs::build::collector_ref(owner, id),
+            "collector": oxplow_domain::uri::build::collector_uri(owner, id),
         });
         if let Err(e) = state
             .commands
@@ -1113,7 +1113,7 @@ async fn run_collector_once(
         last_event_id,
         run_id: Some(run.run().to_string()),
     };
-    let collector = oxplow_domain::refs::build::collector_ref(owner, id);
+    let collector = oxplow_domain::uri::build::collector_uri(owner, id);
     let event = Synced {
         source: source.clone(),
         cause: trigger.event().map(|e| (e.envelope.id.clone(), e.seq)),
@@ -1252,7 +1252,7 @@ fn plan_events(
             ));
         }
     }
-    let source = oxplow_domain::refs::build::collector_ref(owner, id);
+    let source = oxplow_domain::uri::build::collector_uri(owner, id);
     let envelopes = crate::extension_commands::own_events(vocabulary, owner, &source, events)
         .map_err(|e| format!("collector `{owner}/{id}`: {e}"))?;
     // What the append would refuse (a payload its schema doesn't take) is
@@ -1413,7 +1413,7 @@ impl RunLog {
         });
         let synced = Synced {
             source: r.source.to_string(),
-            collector: oxplow_domain::refs::build::collector_ref(r.owner, r.id),
+            collector: oxplow_domain::uri::build::collector_uri(r.owner, r.id),
             trigger: r.trigger,
             cause: r.cause,
         };
@@ -1482,7 +1482,7 @@ pub async fn run_for_event(
     // or one a chain of reactions already at the limit led to, runs
     // nothing — recorded as skipped (the last good counts stay), never as
     // a failure.
-    let own = oxplow_domain::refs::build::collector_ref(owner, id);
+    let own = oxplow_domain::uri::build::collector_uri(owner, id);
     if let Some(why) = crate::event_lineage::lineage(&ctx.db, &event, &own)
         .await?
         .refusal()
@@ -1710,7 +1710,7 @@ async fn produce(
         let run = run.clone();
         let mut sources = crate::services::Sources::default().with_ai(
             ctx.ai.clone(),
-            oxplow_domain::refs::build::collector_ref(&ext.name, &spec.id),
+            oxplow_domain::uri::build::collector_uri(&ext.name, &spec.id),
         );
         if let Some(trees) = &ctx.trees {
             sources = sources.with_tree(crate::services::Trees::From(trees.clone()));
@@ -1873,7 +1873,7 @@ fn collector_parts(collector: &str) -> Result<(String, String), oxplow_domain::C
         field: Some("/collector".into()),
         message,
     };
-    let id = oxplow_domain::refs::build::id_of(collector, oxplow_domain::refs::kind::COLLECTOR)
+    let id = oxplow_domain::uri::build::id_of(collector, oxplow_domain::uri::types::COLLECTOR)
         .map_err(|e| {
             invalid(format!(
                 "`{}` isn't a collector ref (collector:<extension>/<id>)",

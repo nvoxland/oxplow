@@ -39,13 +39,13 @@ impl After {
     pub fn to_ref(&self) -> String {
         match self {
             After::Contribution(r) => r.to_string(),
-            After::Consumer(name) => crate::refs::build::consumer_ref(name),
+            After::Consumer(name) => crate::uri::build::consumer_uri(name),
         }
     }
 
     /// Parse a ref: only the three kinds an `after:` may name.
     pub fn parse(text: &str) -> Result<After, String> {
-        let parsed = crate::refs::grammar::CanonicalRef::parse(text)
+        let parsed = crate::uri::grammar::Uri::parse(text)
             .map_err(|e| format!("`{text}` isn't a ref: {e}"))?;
         if parsed.kind == CONSUMER {
             return Ok(After::Consumer(parsed.id));

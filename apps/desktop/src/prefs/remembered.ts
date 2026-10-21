@@ -20,7 +20,7 @@ import { createContext, useCallback, useContext, useState, useSyncExternalStore 
 import { getUiPreferences, setUiPreference } from "../api.js";
 import { logUi } from "../logger.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
-import { refOf } from "../refs/ref.js";
+import { uriOf } from "../uri/uri.js";
 import { identityOf } from "../tabs/session.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { UiPreference } from "../tauri-bridge/generated/bindings.js";
@@ -186,4 +186,4 @@ export function usePanelMemory<T>(panel: string, key: string, initial: T): [T, (
 }
 
 /** The scope a panel's memory is kept under. */
-export const panelScope = (panel: string) => refOf("panel", panel);
+export const panelScope = (panel: string) => uriOf("panel", panel);

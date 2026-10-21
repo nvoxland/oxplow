@@ -352,8 +352,8 @@ Writes are the `knowledge.*` commands ([knowledge.md](./knowledge.md)).
 `oxplow.work_item.create` / `update` check the `[[…]]` links in the text
 they keep (`oxplow_app::link_check`) and return `link_warnings`, so the
 agent fixes them in the same turn; `knowledge.write_page` refuses
-instead. What counts as a link is `oxplow_domain::refs::classify_wikilinks`
-([refs.md](./refs.md)).
+instead. What counts as a link is `oxplow_domain::uri::classify_wikilinks`
+([resources.md](./resources.md)).
 
 **Id checks at the boundary.** A tool taking a thread or stream id calls
 `expect_id_kind(tool, param, value, expected)` (`IdPrefix`, `ID_STREAM`,
@@ -1283,7 +1283,7 @@ answers both as its `prompt` and `subagent` verbs (feature `subagents`).
 Recorded in `fixtures/claude/subagent.jsonl` and replayed
 (`a_recorded_claude_code_subagent_is_attributed`).
 
-**`v_subagent`** (`subagent:ses<n>/<id>`, `refs::kind::SUBAGENT`; its
+**`v_subagent`** (`subagent:ses<n>/<id>`, `uri::types::SUBAGENT`; its
 page is its session's tab for now) pairs the two events per `(session,
 subagent id)` and counts `v_tool_call.subagent_id` calls: `state` is
 `running` (started, not finished), `finished`, or `unknown` — only tool

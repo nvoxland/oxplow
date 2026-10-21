@@ -549,7 +549,7 @@ mod tests {
         std::fs::write(root.join("a.txt"), "one\n").unwrap();
         commit_all(&root, "base");
         let stream =
-            oxplow_domain::refs::build::stream_ref(svc.stream_store.list().await.unwrap()[0].id);
+            oxplow_domain::uri::build::stream_uri(svc.stream_store.list().await.unwrap()[0].id);
         let err = svc
             .commands
             .run(
@@ -612,7 +612,7 @@ mod tests {
         std::fs::write(root.join("a.txt"), "one\n").unwrap();
         commit_all(&root, "base");
         let own = svc.stream_store.list().await.unwrap()[0].id;
-        let stream = oxplow_domain::refs::build::stream_ref(own);
+        let stream = oxplow_domain::uri::build::stream_uri(own);
 
         let agent = |stream_id| Actor::Agent {
             session_id: None,

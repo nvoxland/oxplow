@@ -1,5 +1,5 @@
 //! Search kinds whose rows come from a model (P9.D3, tsk864;
-//! `.context/refs.md` "Searchable kinds"): every kind `ref_kind` lists
+//! `.context/resources.md` "Searchable kinds"): every kind `ref_kind` lists
 //! with a `searchable` view — core's (`oxplow_db::ref_models`) and an
 //! extension's (`searchable: <model>`) alike — has that view's rows
 //! (`ref`, `title`, `body`, `stream_id`) in the site-wide index
@@ -1052,9 +1052,9 @@ mod core_tests {
             .await
             .unwrap();
         assert_eq!(refs, vec![t.clone()]);
-        let kinds = oxplow_domain::refs::kind::core_kinds();
+        let kinds = oxplow_domain::uri::types::core_types();
         for r in &refs {
-            oxplow_domain::refs::validate_ref(&kinds, r).unwrap();
+            oxplow_domain::uri::validate_ref(&kinds, r).unwrap();
         }
         assert_eq!(
             entries(&svc, "work_item").await,
@@ -1258,8 +1258,8 @@ mod core_tests {
             &svc,
             crate::commands::handoff::SEND,
             serde_json::json!({
-                "from_thread": oxplow_domain::refs::build::thread_ref(from.id),
-                "to_thread": oxplow_domain::refs::build::thread_ref(to.id),
+                "from_thread": oxplow_domain::uri::build::thread_uri(from.id),
+                "to_thread": oxplow_domain::uri::build::thread_uri(to.id),
                 "body": "the sprocket half is yours",
             }),
         )
@@ -1280,7 +1280,7 @@ mod core_tests {
         let out = run(
             &svc,
             crate::commands::note::ADD,
-            serde_json::json!({ "thread": oxplow_domain::refs::build::thread_ref(thread.id), "body": "a note about the gadget" }),
+            serde_json::json!({ "thread": oxplow_domain::uri::build::thread_uri(thread.id), "body": "a note about the gadget" }),
         )
         .await;
         let note: oxplow_domain::NoteId =
@@ -1308,8 +1308,8 @@ mod core_tests {
             &svc,
             crate::commands::comment::ADD,
             serde_json::json!({
-                "stream": oxplow_domain::refs::build::stream_ref(stream.id),
-                "thread": oxplow_domain::refs::build::thread_ref(thread.id),
+                "stream": oxplow_domain::uri::build::stream_uri(stream.id),
+                "thread": oxplow_domain::uri::build::thread_uri(thread.id),
                 "target": CommentTarget { kind: "file".into(), id: "src/lib.rs".into() },
                 "quote": "quoted text", "body": "this mentions the doohickey",
             }),
@@ -1369,7 +1369,7 @@ mod core_tests {
             &svc,
             crate::commands::effort::OPEN,
             serde_json::json!({
-                "thread": oxplow_domain::refs::build::thread_ref(thread.id),
+                "thread": oxplow_domain::uri::build::thread_uri(thread.id),
                 "title": "Recalibrate the flux capacitor",
             }),
         )
@@ -1385,7 +1385,7 @@ mod core_tests {
         run(
             &svc,
             crate::commands::thread::CLOSE,
-            serde_json::json!({ "thread": oxplow_domain::refs::build::thread_ref(thread.id) }),
+            serde_json::json!({ "thread": oxplow_domain::uri::build::thread_uri(thread.id) }),
         )
         .await;
         oxplow_domain::stores::ThreadStore::archive(&*svc.thread_store, &thread.id)
@@ -1496,7 +1496,7 @@ mod core_tests {
             &svc,
             crate::commands::effort::OPEN,
             serde_json::json!({
-                "thread": oxplow_domain::refs::build::thread_ref(thread.id),
+                "thread": oxplow_domain::uri::build::thread_uri(thread.id),
                 "title": "Reticulate splines",
                 "work_item": item,
             }),

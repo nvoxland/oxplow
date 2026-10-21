@@ -314,7 +314,7 @@ pub(super) fn record_tx(
         },
     )
     .with_anchors(actor.anchors())
-    .with_subject([command_ref(&spec.id)]);
+    .with_subject([command_uri(&spec.id)]);
     executed.id = executed_id;
     executed.cause = cause;
     append_tx(tx, vocabulary, &executed)?;

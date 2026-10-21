@@ -177,7 +177,7 @@ mod tests {
             .await
             .unwrap();
         let item =
-            oxplow_domain::refs::build::work_item_id_of_ref(made.result["ref"].as_str().unwrap())
+            oxplow_domain::uri::build::work_item_id_of_uri(made.result["ref"].as_str().unwrap())
                 .unwrap();
         let out = crate::dispatch(
             "list_outbound",

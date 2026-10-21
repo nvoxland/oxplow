@@ -11,7 +11,7 @@ use std::sync::Arc;
 use oxplow_db::SqlCell;
 use oxplow_domain::agent::harness::AgentHarness;
 use oxplow_domain::agent_session::SessionCloseReason;
-use oxplow_domain::refs::build::agent_session_ref;
+use oxplow_domain::uri::build::agent_session_uri;
 use oxplow_domain::{AgentSessionId, ThreadId, Timestamp};
 
 use crate::test_fixtures::{conversation, listing_harness as harness, Listing};
@@ -179,7 +179,7 @@ async fn a_session_closed_here_and_its_conversation_are_one_reopen_row() {
     assert_eq!(rows[0].action, "reopen");
     assert_eq!(
         rows[0].session.as_deref(),
-        Some(agent_session_ref(s).as_str())
+        Some(agent_session_uri(s).as_str())
     );
     assert_eq!(rows[0].note, "closed here");
     assert_eq!(rows[0].conversation.as_deref(), Some("c1"));
@@ -316,7 +316,7 @@ async fn a_never_started_slot_is_left_out_and_a_used_one_counts_its_turns() {
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert_eq!(
         rows[0].session.as_deref(),
-        Some(agent_session_ref(used).as_str())
+        Some(agent_session_uri(used).as_str())
     );
     assert_eq!(rows[0].turns, Some(2));
     assert_eq!(rows[0].label, "second", "named by its last prompt");
@@ -405,7 +405,7 @@ async fn a_session_open_here_is_listed_without_a_conversation() {
     assert_eq!(rows[0].action, "show");
     assert_eq!(
         rows[0].session.as_deref(),
-        Some(agent_session_ref(here).as_str())
+        Some(agent_session_uri(here).as_str())
     );
 }
 

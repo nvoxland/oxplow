@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use oxplow_domain::refs::{grammar::CanonicalRef, kind};
+use oxplow_domain::uri::{grammar::Uri, types};
 use oxplow_domain::vcs::Revision;
 use oxplow_domain::{DomainError, StreamId};
 use serde::{Deserialize, Serialize};
@@ -37,9 +37,9 @@ pub async fn resolve(
     ws: &Path,
     r: &str,
 ) -> Result<Option<SymbolLocation>, DomainError> {
-    let parsed = CanonicalRef::parse(r)
-        .map_err(|e| DomainError::Invalid(format!("`{r}`: {}", e.reason())))?;
-    if parsed.kind != kind::SYMBOL {
+    let parsed =
+        Uri::parse(r).map_err(|e| DomainError::Invalid(format!("`{r}`: {}", e.reason())))?;
+    if parsed.kind != types::SYMBOL {
         return Err(DomainError::Invalid(format!("`{r}` isn't a symbol ref")));
     }
     let mut version_gone = false;
@@ -52,7 +52,7 @@ pub async fn resolve(
             None => version_gone = true,
         }
     }
-    let current = CanonicalRef::new(kind::SYMBOL, &parsed.id, None, None)
+    let current = Uri::new(types::SYMBOL, &parsed.id, None, None)
         .map_err(|e| DomainError::Invalid(e.reason().into()))?
         .to_string();
     let id = stream.value();

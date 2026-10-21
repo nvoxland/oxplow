@@ -21,8 +21,8 @@ use crate::page_ref_projections::finding_edges;
 use crate::snapshot_tree::{identities, manifest_hash, ContentHasher, SnapshotTree, TreeEntry};
 use oxplow_domain::events::schema::{SnapshotTaken, SnapshotTakenV2, VcsHeadMoved, VcsHeadMovedV1};
 use oxplow_domain::events::{Anchors, Envelope};
-use oxplow_domain::refs::build::{commit_ref, snapshot_ref, stream_ref};
 use oxplow_domain::snapshot::SnapshotTrigger;
+use oxplow_domain::uri::build::{commit_uri, snapshot_uri, stream_uri};
 use oxplow_domain::EffortId;
 
 // ---------------- Page visits ----------------
@@ -1211,13 +1211,13 @@ fn record_take_tx(
         .map_err(map_sql_err)?;
     }
     let over_budget = take.budget_ms.is_some_and(|b| take.elapsed_ms > b);
-    let stream = stream_ref(take.stream_id);
+    let stream = stream_uri(take.stream_id);
     let env = Envelope::typed::<SnapshotTaken>(
         take.source.clone(),
         &SnapshotTakenV2 {
             stream: stream.clone(),
-            snapshot: snapshot_ref(snapshot_id),
-            parent: parent.map(snapshot_ref),
+            snapshot: snapshot_uri(snapshot_id),
+            parent: parent.map(snapshot_uri),
             trigger: take.trigger,
             unchanged,
             file_count,
@@ -1234,7 +1234,7 @@ fn record_take_tx(
         snapshot_id: Some(snapshot_id),
         ..Anchors::default()
     })
-    .with_subject([stream, snapshot_ref(snapshot_id)]);
+    .with_subject([stream, snapshot_uri(snapshot_id)]);
     append_tx(tx, vocabulary, &env)?;
     Ok(Some(TakeOutcome {
         op_seq,
@@ -1283,16 +1283,16 @@ fn record_head_moved_tx(
         (None, true, None),
     )
     .map_err(map_sql_err)?;
-    let stream = stream_ref(stream_id);
+    let stream = stream_uri(stream_id);
     let env = Envelope::typed::<VcsHeadMoved>(
         source.to_string(),
         &VcsHeadMovedV1 {
             stream: stream.clone(),
-            snapshot: snapshot_ref(sid),
+            snapshot: snapshot_uri(sid),
             from: from
                 .and_then(|f| f.parse::<Revision>().ok())
-                .and_then(|f| f.vcs_rev().map(commit_ref)),
-            to: commit_ref(revision.vcs_rev().unwrap_or_default()),
+                .and_then(|f| f.vcs_rev().map(commit_uri)),
+            to: commit_uri(revision.vcs_rev().unwrap_or_default()),
         },
     )
     .with_anchors(Anchors {
@@ -1302,8 +1302,8 @@ fn record_head_moved_tx(
     })
     .with_subject([
         stream,
-        snapshot_ref(sid),
-        commit_ref(revision.vcs_rev().unwrap_or_default()),
+        snapshot_uri(sid),
+        commit_uri(revision.vcs_rev().unwrap_or_default()),
     ]);
     append_tx(tx, vocabulary, &env)?;
     Ok(Some(TakeOutcome {

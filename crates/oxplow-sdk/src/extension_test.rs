@@ -618,9 +618,11 @@ async fn job_example(
             return;
         }
     };
-    let Some(job) = queued.get("jobRun").and_then(Value::as_str).and_then(|r| {
-        oxplow_domain::refs::build::id_of(r, oxplow_domain::refs::kind::JOB_RUN).ok()
-    }) else {
+    let Some(job) = queued
+        .get("jobRun")
+        .and_then(Value::as_str)
+        .and_then(|r| oxplow_domain::uri::build::id_of(r, oxplow_domain::uri::types::JOB_RUN).ok())
+    else {
         report
             .errors
             .push(format!("{shown}:1: job `{id}`: {queued} names no job"));
@@ -642,7 +644,7 @@ async fn job_example(
                 .run(
                     &Actor::Human,
                     &snapshot,
-                    json!({ "job_run": oxplow_domain::refs::build::job_run_ref(&job) }),
+                    json!({ "job_run": oxplow_domain::uri::build::job_run_uri(&job) }),
                     false,
                 )
                 .await
@@ -665,7 +667,7 @@ async fn job_example(
             .run(
                 &asker,
                 &cancel,
-                json!({ "job_run": oxplow_domain::refs::build::job_run_ref(&job) }),
+                json!({ "job_run": oxplow_domain::uri::build::job_run_uri(&job) }),
                 false,
             )
             .await
@@ -684,7 +686,7 @@ async fn job_example(
             .run(
                 &Actor::Human,
                 &snapshot,
-                json!({ "job_run": oxplow_domain::refs::build::job_run_ref(&job) }),
+                json!({ "job_run": oxplow_domain::uri::build::job_run_uri(&job) }),
                 false,
             )
             .await
@@ -1450,13 +1452,13 @@ fn event_type_example(
 /// What a `[[…]]` names with the extension's ref kinds beside core's
 /// (`input: { wikilink: "pr:12" }`): `expect: { ref: "acme_pr:12" | null }`.
 fn ref_kind_example(ext: &Extension, ex: &Example<'_>, link: &str, report: &mut TestReport) {
-    let mut kinds = oxplow_domain::refs::kind::core_kinds();
+    let mut kinds = oxplow_domain::uri::types::core_types();
     for k in &ext.ref_kinds {
         if let Ok(spec) = oxplow_app::extension_ref_kinds::kind_spec(k) {
             let _ = kinds.register(spec);
         }
     }
-    let got = oxplow_domain::refs::canonical_wikilink(&kinds, link).map(|r| r.to_string());
+    let got = oxplow_domain::uri::canonical_wikilink(&kinds, link).map(|r| r.to_string());
     if let Some((path, want, got)) = first_mismatch(&ex.expect, &json!({ "ref": got })) {
         report.errors.push(format!(
             "{}:1: `[[{link}]]` names {got} at `{path}`, the example expects {want} — fix: the \
@@ -3046,7 +3048,7 @@ def transform(x):
     thread = e["anchors"].get("thread_id")
     if to == "in_progress" and thread != None:
         return {"commands": [{"name": "oxplow.effort.open",
-                              "input": {"thread": ref.build("thread", thread), "work_item": item}}]}
+                              "input": {"thread": uri.build("thread", thread), "work_item": item}}]}
     if to == "done" or to == "canceled":
         rows = scope("sql.read", {"sql": "SELECT ref FROM v_effort WHERE work_item = :w AND ended_at IS NULL",
                                   "params": {"w": item}})

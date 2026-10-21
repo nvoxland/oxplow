@@ -11,7 +11,7 @@ use crate::commands::ops::Op;
 use std::sync::Arc;
 
 use oxplow_db::stream_store::{get_tx, upsert_tx};
-use oxplow_domain::refs::build::stream_ref;
+use oxplow_domain::uri::build::stream_uri;
 use oxplow_domain::{CommandCall, CommandError, Confirm, Invokers, Stream, StreamId, Timestamp};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -125,7 +125,7 @@ fn load(ctx: &TxCtx<'_>, id: StreamId) -> Result<Stream, CommandError> {
     get_tx(ctx.conn, id)
         .map_err(sql)?
         .filter(|s| s.archived_at.is_none())
-        .ok_or_else(|| invalid("/stream", format!("no stream `{}`", stream_ref(id))))
+        .ok_or_else(|| invalid("/stream", format!("no stream `{}`", stream_uri(id))))
 }
 
 fn result(stream: &Stream) -> HandlerOutput {
@@ -379,7 +379,7 @@ pub fn rename_op() -> Op {
                     return Err(CommandError::Denied {
                         reason: format!(
                             "an agent renames only its own stream (`{}`)",
-                            stream_ref(own)
+                            stream_uri(own)
                         ),
                     });
                 }
@@ -463,7 +463,7 @@ mod tests {
     async fn rename_undoes_and_the_prompt_is_a_persons() {
         let fx = services_with_effort().await;
         let s = primary(&fx).await;
-        let r = stream_ref(s.id);
+        let r = stream_uri(s.id);
         let out = fx
             .svc
             .commands
@@ -540,7 +540,7 @@ mod tests {
     #[tokio::test]
     async fn archiving_asks_first_and_is_a_persons() {
         let fx = services_with_effort().await;
-        let r = stream_ref(primary(&fx).await.id);
+        let r = stream_uri(primary(&fx).await.id);
         let err = fx
             .svc
             .commands
@@ -753,7 +753,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 ARCHIVE,
-                json!({ "stream": stream_ref(side) }),
+                json!({ "stream": stream_uri(side) }),
                 true,
             )
             .await
@@ -811,7 +811,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 ARCHIVE,
-                json!({ "stream": stream_ref(side), "delete_worktree": true }),
+                json!({ "stream": stream_uri(side), "delete_worktree": true }),
                 true,
             )
             .await

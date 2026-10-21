@@ -69,7 +69,7 @@ pub async fn list_native_conversations(
                         host.as_deref(),
                         id,
                     )?
-                    .map(|s| oxplow_domain::refs::build::agent_session_ref(s.id)))
+                    .map(|s| oxplow_domain::uri::build::agent_session_uri(s.id)))
                 })
                 .collect()
         })
@@ -158,7 +158,7 @@ mod tests {
         let out = crate::dispatch(
             "run_command",
             json!({ "id": "oxplow.agent_session.open", "input": {
-                "thread": oxplow_domain::refs::build::thread_ref(thread),
+                "thread": oxplow_domain::uri::build::thread_uri(thread),
                 "harness": harness,
             }, "confirmed": false }),
             ctx,

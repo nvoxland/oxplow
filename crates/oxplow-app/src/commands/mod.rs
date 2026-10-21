@@ -70,7 +70,7 @@ use oxplow_domain::events::schema::{
     CommandApproved, CommandApprovedV1, CommandDeclined, CommandDeclinedV1, CommandExecuted,
     CommandExecutedV4, CommandOutcome as Outcome, CommandProposed, CommandProposedV2,
 };
-use oxplow_domain::refs::build::{command_ref, proposal_ref};
+use oxplow_domain::uri::build::{command_uri, proposal_uri};
 use oxplow_domain::{
     Actor, Atomicity, CommandCall, CommandError, CommandOutcome, CommandSpec, Envelope,
     InputValidator, Preview,
@@ -218,7 +218,7 @@ pub fn effect_step_key(
     let short: String = digest.iter().take(8).map(|b| format!("{b:02x}")).collect();
     format!(
         "{}:{}:{index}:{short}",
-        oxplow_domain::refs::build::effect_source(&run.effect),
+        oxplow_domain::uri::build::effect_source(&run.effect),
         run.event_id
     )
 }
@@ -544,7 +544,7 @@ pub const CORE_SOURCE: &str = "core";
 /// the extensions that ship with oxplow — nothing else.
 fn ships_with_oxplow(source: &str) -> bool {
     source == CORE_SOURCE
-        || oxplow_domain::refs::build::id_of(source, oxplow_domain::refs::kind::EXTENSION)
+        || oxplow_domain::uri::build::id_of(source, oxplow_domain::uri::types::EXTENSION)
             .is_ok_and(|name| crate::bundled_extensions::find(&name).is_some())
 }
 

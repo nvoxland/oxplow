@@ -183,7 +183,7 @@ collector's records of pages edited outside oxplow are restated by
 `providers::knowledge::KnowledgeRecords` while it is the active store.
 
 **The record is the active store's pages.** Page refs are bare
-(`wiki:<slug>`, `.context/refs.md`), so one record can't hold two
+(`wiki:<slug>`, `.context/resources.md`), so one record can't hold two
 stores' pages: `wiki_page`, its `page_ref` slices and the touches are
 whichever store is active. `v_knowledge_page.provider` is that store
 (the active `capability_provider` row). On `capability.switched` for

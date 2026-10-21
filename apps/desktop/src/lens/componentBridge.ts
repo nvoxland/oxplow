@@ -37,7 +37,7 @@
 /// (`/component-lib/oxplow-component.js`, `oxplow.connect()`); it checks
 /// `protocol` against the one it speaks.
 import { IpcCallError, needsConfirmation } from "../ipc-error.js";
-import { parseRef } from "../refs/ref.js";
+import { parseUri } from "../uri/uri.js";
 import type { CommandOutcome, LensRun, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 
 /// The protocol above, by number: bumped when a message's shape changes,
@@ -254,7 +254,7 @@ export function componentRefusal(e: unknown): string | null {
  *  carry whatever it put in the URL out). It opens where its kind's page
  *  says (`openRef`). */
 export function componentMayOpen(ref: string): boolean {
-  const parsed = parseRef(ref);
+  const parsed = parseUri(ref);
   return parsed !== null && !(parsed.kind === "page" && ref.startsWith("page:external-url"));
 }
 

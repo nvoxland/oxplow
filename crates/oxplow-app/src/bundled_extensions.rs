@@ -1121,8 +1121,8 @@ mod tests {
                 &oxplow_domain::Actor::Human,
                 crate::commands::handoff::SEND,
                 serde_json::json!({
-                    "from_thread": oxplow_domain::refs::build::thread_ref(f.thread),
-                    "to_thread": oxplow_domain::refs::build::thread_ref(to.id),
+                    "from_thread": oxplow_domain::uri::build::thread_uri(f.thread),
+                    "to_thread": oxplow_domain::uri::build::thread_uri(to.id),
                     "body": "the docs half is yours",
                 }),
                 false,
@@ -1870,7 +1870,7 @@ mod tests {
             "oxplow-foundation/thread-sessions",
             &[(
                 "thread",
-                Text(oxplow_domain::refs::build::thread_ref(f.thread)),
+                Text(oxplow_domain::uri::build::thread_uri(f.thread)),
             )],
         )
         .await;
@@ -1949,7 +1949,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let session_ref = Text(oxplow_domain::refs::build::agent_session_ref(f.session));
+        let session_ref = Text(oxplow_domain::uri::build::agent_session_uri(f.session));
         let col = |rows: &serde_json::Value, i: usize| -> Vec<String> {
             rows.as_array()
                 .unwrap()
@@ -2332,7 +2332,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 crate::commands::thread::CLOSE,
-                serde_json::json!({ "thread": oxplow_domain::refs::build::thread_ref(thread.id) }),
+                serde_json::json!({ "thread": oxplow_domain::uri::build::thread_uri(thread.id) }),
                 false,
             )
             .await
@@ -2719,7 +2719,7 @@ mod tests {
     async fn the_settings_lenses_start_from_the_saved_prompt() {
         use oxplow_db::SqlCell::Text;
         let f = crate::test_fixtures::services_with_effort().await;
-        let thread = oxplow_domain::refs::build::thread_ref(f.thread);
+        let thread = oxplow_domain::uri::build::thread_uri(f.thread);
         f.svc
             .commands
             .run(
@@ -3117,14 +3117,14 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 crate::commands::effort::OPEN,
-                serde_json::json!({ "thread": oxplow_domain::refs::build::thread_ref(beta.id), "work_item": item }),
+                serde_json::json!({ "thread": oxplow_domain::uri::build::thread_uri(beta.id), "work_item": item }),
                 false,
             )
             .await
             .unwrap();
         let beta_effort = opened.result["effort"]
             .as_str()
-            .and_then(oxplow_domain::refs::build::effort_of_ref)
+            .and_then(oxplow_domain::uri::build::effort_of_uri)
             .unwrap();
         for effort in [f.effort, beta_effort] {
             f.svc
@@ -3757,7 +3757,7 @@ mod tests {
     }
 
     fn effort_ref(f: &crate::test_fixtures::EffortFixture) -> String {
-        oxplow_domain::refs::build::effort_ref(f.effort)
+        oxplow_domain::uri::build::effort_uri(f.effort)
     }
 
     async fn review(
@@ -4926,11 +4926,7 @@ mod tests {
                 .await;
             assert_eq!(
                 outcome_facts(facts).await,
-                expected_outcome(
-                    &oxplow_domain::refs::build::effort_ref(f.effort),
-                    stats,
-                    ttg
-                )
+                expected_outcome(&oxplow_domain::uri::build::effort_uri(f.effort), stats, ttg)
             );
             let captures = facts.captures_for_effort(f.effort.value()).await.unwrap();
             let ours = captures

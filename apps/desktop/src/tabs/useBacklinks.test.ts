@@ -16,7 +16,7 @@ import {
 
 describe("canonicalIdForTarget", () => {
   // page_ref rows are a canonical ref's (kind, id): a work item is
-  // `work_item` / `<provider>:<id>` (.context/refs.md), whichever list.
+  // `work_item` / `<provider>:<id>` (.context/resources.md), whichever list.
   test("a work item is its ref's id, as the graph stores it", () => {
     expect(canonicalIdForTarget(workItemTabRef("work_item:oxplow:tsk42"))).toBe("oxplow:tsk42");
     expect(canonicalIdForTarget(workItemTabRef("work_item:fake:W-1"))).toBe("fake:W-1");

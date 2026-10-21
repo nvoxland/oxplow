@@ -585,7 +585,7 @@ mod tests {
                 &oxplow_domain::Actor::Human,
                 "oxplow.vcs.stage",
                 serde_json::json!({
-                    "stream": oxplow_domain::refs::build::stream_ref(
+                    "stream": oxplow_domain::uri::build::stream_uri(
                         f.svc.streams.list_streams().await.unwrap()[0].id
                     ),
                     "paths": ["src/new.rs"]
@@ -879,7 +879,7 @@ mod tests {
             "system",
             &oxplow_domain::events::schema::EffortFinishedV2 {
                 // The ref, as `effort.lifecycle` logs it.
-                effort: oxplow_domain::refs::build::effort_ref(f.effort),
+                effort: oxplow_domain::uri::build::effort_uri(f.effort),
                 work_item: Some("work_item:oxplow:tsk1".into()),
                 end_snapshot: Some(format!("snapshot:{end}")),
             },
@@ -916,7 +916,7 @@ mod tests {
         let finished = Envelope::typed::<oxplow_domain::events::schema::EffortFinished>(
             "system",
             &oxplow_domain::events::schema::EffortFinishedV2 {
-                effort: oxplow_domain::refs::build::effort_ref(f.effort),
+                effort: oxplow_domain::uri::build::effort_uri(f.effort),
                 work_item: None,
                 end_snapshot: None,
             },

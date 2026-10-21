@@ -1335,7 +1335,7 @@ pub fn check_subject(
 ) -> Result<(), String> {
     let own =
         oxplow_domain::capability::contract(capability).is_some_and(|c| owns(c, provider, subject));
-    if own || subject == oxplow_domain::refs::build::extension_ref(extension) {
+    if own || subject == oxplow_domain::uri::build::extension_uri(extension) {
         Ok(())
     } else {
         Err(format!(
@@ -1353,8 +1353,8 @@ pub(super) fn owns(
     id: &str,
     r: &str,
 ) -> bool {
-    static KINDS: std::sync::LazyLock<oxplow_domain::refs::kind::KindRegistry> =
-        std::sync::LazyLock::new(oxplow_domain::refs::kind::core_kinds);
+    static KINDS: std::sync::LazyLock<oxplow_domain::uri::types::TypeRegistry> =
+        std::sync::LazyLock::new(oxplow_domain::uri::types::core_types);
     let Some(kind) = contract.ref_kind else {
         return false;
     };

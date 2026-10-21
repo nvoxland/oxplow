@@ -464,7 +464,7 @@ impl TokenUsageService {
             for (model, agg) in by_model {
                 if agg.turns > 0 {
                     facts.push(NewFact {
-                        subject: Some(oxplow_domain::refs::build::ai_model_ref(model)),
+                        subject: Some(oxplow_domain::uri::build::ai_model_uri(model)),
                         // json! (not format!) — the model id comes verbatim from
                         // external session JSONL; a quote/backslash in it must
                         // not poison the dims JSON (tsk46).
@@ -535,7 +535,7 @@ impl TokenUsageService {
             };
             let Some(m) = measure else { continue };
             facts.push(NewFact {
-                subject: Some(oxplow_domain::refs::build::ai_model_ref(&c.model)),
+                subject: Some(oxplow_domain::uri::build::ai_model_uri(&c.model)),
                 dims_json: Some(kind_dims(&c.model, c.kind.as_str())),
                 ..NewFact::new(m.id, c.value as f64)
             });
@@ -563,7 +563,7 @@ impl TokenUsageService {
                     continue;
                 }
                 facts.push(NewFact {
-                    subject: Some(oxplow_domain::refs::build::ai_model_ref(model)),
+                    subject: Some(oxplow_domain::uri::build::ai_model_uri(model)),
                     numerator: Some(cache_read),
                     denominator: Some(den),
                     dims_json: Some(serde_json::json!({ "oxplow.model": model }).to_string()),

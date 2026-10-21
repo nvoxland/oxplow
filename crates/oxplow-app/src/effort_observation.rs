@@ -263,7 +263,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 crate::commands::effort::CLOSE,
-                serde_json::json!({ "effort": oxplow_domain::refs::build::effort_ref(f.effort) }),
+                serde_json::json!({ "effort": oxplow_domain::uri::build::effort_uri(f.effort) }),
                 false,
             )
             .await

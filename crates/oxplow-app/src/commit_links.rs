@@ -138,7 +138,7 @@ pub(crate) async fn link(
     let Some(work_item) = effort
         .work_item
         .as_deref()
-        .and_then(oxplow_domain::refs::build::work_item_id_of_ref)
+        .and_then(oxplow_domain::uri::build::work_item_id_of_uri)
     else {
         return Ok(());
     };

@@ -124,7 +124,7 @@ pub(super) fn lost_race(
         RunOrigin::Undo(audit_id) => format!("audit row {audit_id} was already undone"),
         RunOrigin::Approval(id) => format!(
             "{} was already decided",
-            oxplow_domain::refs::build::proposal_ref(*id)
+            oxplow_domain::uri::build::proposal_uri(*id)
         ),
         RunOrigin::Effect(key, _) => format!(
             "effect `{}` {} {}",

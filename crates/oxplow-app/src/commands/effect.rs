@@ -212,7 +212,7 @@ pub(crate) fn unreacted_tx(
     // Never started, it has nothing to backfill.
     let live_from = oxplow_db::effect_state_store::start_after_tx(tx, &decl.name())?.unwrap_or(-1);
     let to = range.to_seq.unwrap_or(i64::MAX).min(live_from);
-    let own = oxplow_domain::refs::build::effect_source(&decl.name());
+    let own = oxplow_domain::uri::build::effect_source(&decl.name());
     let mut st = tx.prepare(&sql).map_err(oxplow_db::map_sql_err)?;
     let mut out = Unreacted::default();
     let mut from = range.from_seq.unwrap_or(0);
@@ -453,9 +453,8 @@ pub fn retry_op(services: ServicesSlot) -> Op {
                 let RetryInput { effect, event } = parse(input)?;
                 let svc = services.get()?;
                 let (ext, decl, health) = ready(&svc, &effect).await?;
-                let id =
-                    oxplow_domain::refs::build::id_of(&event, oxplow_domain::refs::kind::EVENT)
-                        .map_err(|e| invalid("/event", e.to_string()))?;
+                let id = oxplow_domain::uri::build::id_of(&event, oxplow_domain::uri::types::EVENT)
+                    .map_err(|e| invalid("/event", e.to_string()))?;
                 let id = id.as_str();
                 let stored = svc
                     .event_log_store

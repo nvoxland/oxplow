@@ -78,7 +78,7 @@ pub struct Envelope {
     /// What emitted it: `agent:thr3`, `human`, `system:snapshot_capture`.
     pub source: String,
     pub anchors: Anchors,
-    /// The canonical refs (`.context/refs.md`) the event is about.
+    /// The canonical refs (`.context/resources.md`) the event is about.
     pub subject: Vec<String>,
     /// Validated against the type's JSON Schema on append (P1.5). Large or
     /// sensitive content is never inline: it is stored by content hash and

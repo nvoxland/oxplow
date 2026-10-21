@@ -1,12 +1,19 @@
-# Refs: one identity for everything
+# Resources and their URIs
 
-What this doc covers: the canonical ref grammar, the kind registry, and
-how refs replace tab ids, `page_ref` kinds and `[[…]]` wikilink shapes.
-Built so far: the grammar (P1.1, tsk403); the kind registry, the Rust
-`[[…]]` translation and the canonical `page_ref` vocabulary (P1.2,
-tsk404); the TS parser, tab ids, wikilink hrefs and comment anchors
-(P1.3, tsk405); shell routes as `page:<name>[?params]` and the
-`Record<PageKind, …>` render registry (P1.3b, tsk418).
+What this doc covers: how oxplow names the things in it, the grammar of
+those names, the type registry, and how they replace tab ids,
+`page_ref` kinds and `[[…]]` wikilink shapes.
+
+**The words.** A **resource** is a thing in oxplow: a file, a wiki page,
+an effort, a work item. Its **URI** is the string that names it (the
+code's `uri` module; older prose and the SQL columns still say "ref"),
+and its **type** is what kind of resource it is (`file`, `effort`,
+`acme_pr`; older prose says "kind"). The direction is the web's: a URI
+names the resource, a page that shows it is one **renderer** of it, and
+how that renderer shows it (a line, a filter) is its **view**, never part
+of the resource's identity. Today the grammar below is still
+`<kind>:<id>`; the change to literal `oxplow:<extension>/<type>?<params>#<view>`
+URIs is under way, and this doc follows it as it lands.
 
 ## Using refs (read this first)
 
@@ -33,10 +40,10 @@ readable identity, its **ref**, `<kind>:<id>[@rev][#frag]`
 
 | Where | Build | Read |
 |---|---|---|
-| Rust | `oxplow_domain::refs::build::{effort_ref, file_ref, wiki_ref, …}` — one per core kind; `of(kind, id)` / `at(kind, id, rev, frag)` for a kind known only at run time; a work list builds its own items' refs (`oxplow_tasks::work_item_ref`) | `build::parse_as::<T>(r, kind)` (typed id), `id_of(r, kind)` (decoded id), `parse_kind(r, kind)` (keeps rev and frag), `kind_of(r)`; kind names are `refs::kind::{EFFORT, FILE, …}` |
+| Rust | `oxplow_domain::uri::build::{effort_uri, file_uri, wiki_uri, …}` — one per core kind; `of(kind, id)` / `at(kind, id, rev, frag)` for a kind known only at run time; a work list builds its own items' refs (`oxplow_tasks::work_item_ref`) | `build::parse_as::<T>(r, kind)` (typed id), `id_of(r, kind)` (decoded id), `parse_type(r, kind)` (keeps rev and frag), `type_of(r)`; kind names are `uri::types::{EFFORT, FILE, …}` |
 | SQL (models, lenses, scripts' queries) | the owning model's `ref` column (`oxplow_db::ref_models::CORE_KINDS`: `v_effort.ref`, `v_decision.ref`, `v_thread.ref`, …) — the only SQL that spells a prefix | `SELECT ref`, `WHERE ref = :ref`, `JOIN … ON x.ref = y.subject`; never `'kind:' || id`, never `substr` on a ref |
-| Starlark (commands, effects, collectors, policies) | `ref.build(kind, id, rev=, frag=)` (`id` a string or an int) | `ref.parse(r)` → `{kind, id, rev, frag}`, `ref.id(r, kind=)`, `ref.kind(r)`, `ref.is_ref(v)` |
-| TS (desktop) | `refs/ref.ts` builders (`effortRef`, `wikiRef`, `pageRef`, `refOf`, …) | `parseRef`, `idOf`, `isRefOfKind` |
+| Starlark (commands, effects, collectors, policies) | `uri.build(kind, id, rev=, frag=)` (`id` a string or an int) | `uri.parse(r)` → `{kind, id, rev, frag}`, `uri.id(r, kind=)`, `uri.type(r)`, `uri.is_uri(v)` |
+| TS (desktop) | `uri/uri.ts` builders (`effortUri`, `wikiUri`, `pageUri`, `uriOf`, …) | `parseUri`, `idOf`, `isUriOfType` |
 
 **Resolving.** `ref_resolver::resolve_ref` names any ref: richer
 resolvers for `work_item`, `commit`, `file`, `dir`, `wiki` and
@@ -44,9 +51,9 @@ resolvers for `work_item`, `commit`, `file`, `dir`, `wiki` and
 (`ref_models::CORE_KINDS`); an extension's kind through the `resolve` view its
 `ref_kinds:` names. Nothing resolves it → `resolved: false`.
 
-**Guards.** `refs/refs.guard.test.ts` (TS), `source_guards::refs_are_built_and_parsed_through_the_grammar` (Rust) and `source_guards::scripts_and_sql_carry_refs_rather_than_spelling_them` (shipped `.star`, lens and model SQL, embedded Starlark templates; a kind's owning model in `ref_models::CORE_KINDS` is exempt) refuse a hand-built or hand-parsed ref outside the owning
+**Guards.** `uri/uri.guard.test.ts` (TS), `source_guards::refs_are_built_and_parsed_through_the_grammar` (Rust) and `source_guards::scripts_and_sql_carry_refs_rather_than_spelling_them` (shipped `.star`, lens and model SQL, embedded Starlark templates; a kind's owning model in `ref_models::CORE_KINDS` is exempt) refuse a hand-built or hand-parsed ref outside the owning
 place. When one fires, the fix is the builder or reader above — or, when
-a kind has none, adding it to `refs::build` / `ref_models` — never a
+a kind has none, adding it to `uri::build` / `ref_models` — never a
 string.
 
 ## The grammar (built)
@@ -81,23 +88,23 @@ characters the grammar itself uses need escaping.
 must know whose revision it is (`git:HEAD`, `snap:01J9…`). This is what
 makes snapshots and VCS independent capabilities (§6.1–6.2).
 
-**Code.** `crates/oxplow-domain/src/refs/grammar.rs`:
-`CanonicalRef { kind, id, rev, frag }` (decoded id), `parse`, `new`,
-`Display` (re-encodes), `RefParseError` with a stable `reason()` name per
+**Code.** `crates/oxplow-domain/src/uri/grammar.rs`:
+`Uri { kind, id, rev, frag }` (decoded id), `parse`, `new`,
+`Display` (re-encodes), `UriParseError` with a stable `reason()` name per
 variant. Pure, no IO.
 
 **The golden fixture** `crates/oxplow-domain/tests/fixtures/ref_grammar.json`
 pins the grammar. `tests/ref_grammar.rs` asserts it, and the TS parser
-(`apps/desktop/src/refs/ref.ts`: `parseRef`, `formatRef`, `ref`,
-`kindOf`; asserted by `ref.test.ts`) asserts the same file, so the two
+(`apps/desktop/src/uri/uri.ts`: `parseUri`, `formatUri`, `uri`,
+`typeOf`; asserted by `ref.test.ts`) asserts the same file, so the two
 parsers can't drift. Add a case there when you extend the grammar;
 never change an existing case's expectation without changing both parsers.
 
 ## The kind registry (built)
 
-**Contribution kinds are ref kinds.** `core_kinds()` registers one ref
+**Contribution kinds are ref kinds.** `core_types()` registers one ref
 kind per kind of contribution, from `contribution::KINDS`
-(`refs::kind::contribution_kind`): `<kind>:<extension>/<id>` (`job`,
+(`uri::types::contribution_kind`): `<kind>:<extension>/<id>` (`job`,
 `effect`, `collector`, `ai_profile`, `lens`, `page`, `model`, `panel`, …)
 or `<kind>:<name>` for the globally named ones (`command`, `measure`,
 `metric`, `dimension`, `event_type`, `ref_kind`). A page is also a shell
@@ -112,14 +119,14 @@ fragments `#request` and `#response`, read with `oxplow_read`);
 `human`, `system:<component>`, `agent:thr3`, `provider:<instance>`,
 `effect:<extension>/<id>`, `effect:effort_policy:<id>`, `job_run:<id>` —
 and some coincide with refs, but a provider instance or an effort policy
-isn't one. They are built beside the refs (`refs::build::{system_source,
+isn't one. They are built beside the refs (`uri::build::{system_source,
 effect_source, provider_source}`, `Actor::source()`) and read with
 `effect_of_source`, never spelled elsewhere.
 
-`crates/oxplow-domain/src/refs/kind.rs`: `KindSpec { kind, id_regex,
+`crates/oxplow-domain/src/uri/types.rs`: `TypeSpec { kind, id_regex,
 revisioned, provider_scoped, wikilink_prefixes }` and
-`KindRegistry` (`register` refuses a collision; `validate` checks a ref's
-kind, id shape and whether it may carry `@rev`). `core_kinds()` registers
+`TypeRegistry` (`register` refuses a collision; `validate` checks a ref's
+kind, id shape and whether it may carry `@rev`). `core_types()` registers
 the §4.2 vocabulary plus `finding`, `thread_note`, `handoff` (work
 handed between threads, `handoff:hnd<n>`, owned by `v_handoff.ref`; it
 opens its recipient thread) and `run` (a work
@@ -183,9 +190,9 @@ its `collector.synced@1` (P7.B3); `build::collector_ref`.
 ## Building refs in Rust (built, P2.4b)
 
 Producers never hand-format a ref, and readers never split one by hand.
-`oxplow_domain::refs::build` has one builder per core kind, each taking
+`oxplow_domain::uri::build` has one builder per core kind, each taking
 the id as the grammar escapes it, and the kind names are constants
-(`oxplow_domain::refs::kind::{EFFORT, FILE, WIKI, …}`):
+(`oxplow_domain::uri::types::{EFFORT, FILE, WIKI, …}`):
 
 - generic: `of(kind, id)` and `at(kind, id, rev, frag)` — for a kind only
   known at run time (an extension's);
@@ -201,8 +208,8 @@ the id as the grammar escapes it, and the kind names are constants
   `proposal_ref`, `claim_ref`, `decision_ref`.
 
 Readers: `parse_as::<T>(r, kind)` (the id parsed as `T`), `id_of(r, kind)`
-(the decoded id; refuses a revision or fragment), `parse_kind(r, kind)`
-(keeps them) and `kind_of(r)`; a string that isn't a ref of the kind is
+(the decoded id; refuses a revision or fragment), `parse_type(r, kind)`
+(keeps them) and `type_of(r)`; a string that isn't a ref of the kind is
 `NotA` (“`x` isn't a <kind> ref (<kind>:<id>)”). `work_item_id_of_ref`
 reads a work item's provider-scoped id. A work list builds its own items'
 refs (oxplow's tasks: `oxplow_tasks::{work_item_ref, work_item_id,
@@ -211,7 +218,7 @@ task_of_work_item_ref}`). `system_source(component)` gives the
 use `Actor::source()`.
 
 **The guard.** `source_guards::refs_are_built_and_parsed_through_the_grammar`
-scans production Rust in every crate (outside `oxplow-domain/src/refs/`
+scans production Rust in every crate (outside `oxplow-domain/src/uri/`
 and `oxplow-tasks/src/refs.rs`) and fails on a string literal that begins
 with a core kind's prefix (`format!("effort:…")`, `"wiki:"`,
 `strip_prefix("file:")`, a SQL `'work_item:' ||`) and on a ref-named value
@@ -219,13 +226,13 @@ split at its colon. Its kept list is empty. What only looks like a ref (an
 actor source, an approval key, a revision, a URL) is not one: spell it so
 the pattern doesn't match, don't add an exception.
 
-`refs::build::validate_work_item_ref` is stricter: efforts key on the
+`uri::build::validate_work_item_uri` is stricter: efforts key on the
 ref string (one open effort per work item is a unique index), so it
 accepts only the canonical spelling — no `@rev`, no `#frag`, no escaped
 spelling. What a list's own ids look like is that list's to say, not
 core's.
 
-**A work list's own ids in text.** The running `KindRegistry` carries
+**A work list's own ids in text.** The running `TypeRegistry` carries
 the active work list's id recognizer (`with_work_item_ids(provider,
 id_pattern)`; set from the capability registry when services are built
 and at every vocabulary rebuild, a `capability.switched` included —
@@ -246,7 +253,7 @@ vocabulary in; a writer takes `handle.current()` once per transaction, so
 a swap never changes what an open transaction validates against. Every
 function that reads kinds takes them: `refs::validate_ref(&kinds, r)`,
 `canonical_wikilink`, `classify_wikilinks`, `extract`, and the
-`page_ref_projections` edge builders. Tests build `core_kinds()` or their
+`page_ref_projections` edge builders. Tests build `core_types()` or their
 own handle; two handles in one process never share a kind. An extension's
 `ref_kinds:` (P8.D6, stable since P10 — extensions.md "Ref kinds") join
 the running kinds through the vocabulary reactor, and `v_ref_kind` lists
@@ -370,7 +377,7 @@ type in the message.
 ## `[[…]]` sugar → canonical refs (built)
 
 `refs::canonical_wikilink(interior)` turns a wikilink interior into a
-`CanonicalRef`: one of the active work list's ids → its work item
+`Uri`: one of the active work list's ids → its work item
 (`tsk42` → `work_item:oxplow:tsk42` with oxplow's tasks), `git:abc1234` and a
 bare sha → `commit:abc1234`, `dir:src/` → `dir:src`, `src/a.rs@HEAD:42` →
 `file:src/a.rs@git:HEAD#L42` (`@disk`/`@local` add no rev), a kebab slug
@@ -378,7 +385,7 @@ bare sha → `commit:abc1234`, `dir:src/` → `dir:src`, `src/a.rs@HEAD:42` →
 kind is registered. `word:tail` with an unknown kind is **not** a slug
 named `word`; it's a malformed ref and translates to nothing.
 `ClassifiedWikilink` carries both `canonical` and the typed `Reference`
-view (derived from it via `TryFrom<&CanonicalRef>`), so the graph writer
+view (derived from it via `TryFrom<&Uri>`), so the graph writer
 and the link checker never drift.
 
 ## Stored `page_ref` rows are canonical (built)
@@ -417,25 +424,25 @@ markdown hrefs (`MarkdownView` emits `commit:<sha>` and
 `[[tskN]]`; `InternalLink` allowlists the same schemes), comment anchors
 (`data-ref-kind="work_item" data-ref-id="oxplow:tskN"`, `commit`, `dir`,
 matching the backend's `CommentTarget`), and lens `link.kind` targets.
-`kindForTabId` and `refFromTabId` go through `parseRef` first, so a `:`
+`kindForTabId` and `refFromTabId` go through `parseUri` first, so a `:`
 inside an id never splits it.
 
 **One place spells a ref; one place reads it.** A ref's owner spells it
-and everyone else carries it. In the desktop, `apps/desktop/src/refs/ref.ts`
-is the only file that writes a kind prefix (`refOf(kind, id)` and a builder
-per kind the desktop names: `threadRef`, `streamRef`, `effortRef`,
-`commentRef`, `agentSessionRef`, `wikiRef`, `workItemRef(provider, id)`,
-`eventRef`, `proposalRef`, `configRef`, `pageRef(name, params?)`,
-`extPageRef`, `lensRef`), and `parseRef` / `kindOf` / `idOf(ref, kind)` are
+and everyone else carries it. In the desktop, `apps/desktop/src/uri/uri.ts`
+is the only file that writes a kind prefix (`uriOf(kind, id)` and a builder
+per kind the desktop names: `threadUri`, `streamUri`, `effortUri`,
+`commentUri`, `agentSessionUri`, `wikiUri`, `workItemUri(provider, id)`,
+`eventUri`, `proposalUri`, `configUri`, `pageUri(name, params?)`,
+`extPageUri`, `lensUri`), and `parseUri` / `typeOf` / `idOf(ref, kind)` are
 how a ref is read; everything else takes a ref from a builder or from data
 and passes it on. A revision (`git:`, `snap:`) is not a ref and stays
-`revision.ts`'s. `refs/refs.guard.test.ts` fails on a hand-built or
+`revision.ts`'s. `uri/uri.guard.test.ts` fails on a hand-built or
 hand-parsed prefix of any core kind anywhere else (a template
 `` `kind:${…}` ``, `"kind:" +`, `startsWith("kind:")`,
 `slice("kind:".length)`, `replace(/^kind:/…)`, or `indexOf(":")` on a
 ref-named variable); its list of kinds is `kinds` in
 `crates/oxplow-domain/tests/fixtures/ref_grammar.json`, which
-`ref_grammar.rs` asserts equals `core_kinds()`, so both languages read one
+`ref_grammar.rs` asserts equals `core_types()`, so both languages read one
 list. Its kept list is empty: use a builder.
 
 **A snapshot, an effort and an agent turn are entity pages** (P2.11):

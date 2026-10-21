@@ -544,7 +544,7 @@ pub(crate) async fn run_reaction(
     let lineage = crate::event_lineage::lineage(
         &svc.db,
         event,
-        &oxplow_domain::refs::build::effect_source(&key.effect),
+        &oxplow_domain::uri::build::effect_source(&key.effect),
     )
     .await?;
     // Its own run's events never trigger it, and aren't worth a record.
@@ -627,7 +627,7 @@ pub(crate) async fn run_reaction(
     let events = match own_events(
         &svc.vocabulary.current(),
         &ext.name,
-        &oxplow_domain::refs::build::effect_source(&key.effect),
+        &oxplow_domain::uri::build::effect_source(&key.effect),
         events,
     ) {
         Ok(events) => events,

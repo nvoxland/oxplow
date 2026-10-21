@@ -242,7 +242,7 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
                 serde_json::json!({
                     "name": m.name,
                     "id": m.id,
-                    "ref": oxplow_domain::refs::build::symbol_ref(path, &m.id),
+                    "ref": oxplow_domain::uri::build::symbol_uri(path, &m.id),
                     "container": (!m.container_path.is_empty()).then(|| m.container_path.join("::")),
                     "kind": m.kind.as_str(),
                     "complexity": m.complexity,
@@ -575,7 +575,7 @@ pub(crate) fn run_starlark_inner(
         .with(collect_helpers)
         .with(crate::ai::ai_builtins)
         .with(crate::scope::scope_builtins)
-        .with(crate::refs::ref_builtins)
+        .with(crate::uri::uri_builtins)
         .build();
 
     Module::with_temp_heap(|module| {

@@ -42,16 +42,16 @@ impl EventConsumer for UiPush {
         }
         let stream = env.anchors.stream_id.or_else(|| {
             payload["stream"].as_str().and_then(|r| {
-                oxplow_domain::refs::build::parse_as::<StreamId>(
+                oxplow_domain::uri::build::parse_as::<StreamId>(
                     r,
-                    oxplow_domain::refs::kind::STREAM,
+                    oxplow_domain::uri::types::STREAM,
                 )
                 .ok()
             })
         });
         let snapshot = env.anchors.snapshot_id.or_else(|| {
             payload["snapshot"].as_str().and_then(|r| {
-                oxplow_domain::refs::build::parse_as::<i64>(r, oxplow_domain::refs::kind::SNAPSHOT)
+                oxplow_domain::uri::build::parse_as::<i64>(r, oxplow_domain::uri::types::SNAPSHOT)
                     .ok()
             })
         });

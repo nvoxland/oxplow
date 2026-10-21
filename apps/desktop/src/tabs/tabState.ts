@@ -5,7 +5,7 @@
 
 /**
  * The kinds of content a tab renders. Every tab id is a canonical ref
- * (`.context/refs.md`). An **entity** page's id is the entity's own ref
+ * (`.context/resources.md`). An **entity** page's id is the entity's own ref
  * (`work_item:oxplow:tsk42`, `file:src/a.rs@git:HEAD`), and its kind is
  * the ref's kind. Every other page is a **declared page** — a `pages:`
  * entry of an extension's manifest, oxplow's own included — whose id is

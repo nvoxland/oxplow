@@ -25,8 +25,8 @@ fn note_event(id: i64, thread: i64, deleted: bool) -> oxplow_domain::Envelope {
     use oxplow_domain::events::schema::{
         KnowledgeNoteDeleted, KnowledgeNoteDeletedV2, KnowledgeNoteWritten, KnowledgeNoteWrittenV2,
     };
-    let note = oxplow_domain::refs::build::thread_note_ref(NoteId::new(id));
-    let thread = oxplow_domain::refs::build::thread_ref(ThreadId::new(thread));
+    let note = oxplow_domain::uri::build::thread_note_uri(NoteId::new(id));
+    let thread = oxplow_domain::uri::build::thread_uri(ThreadId::new(thread));
     const SOURCE: &str = "system:notes";
     let env = if deleted {
         oxplow_domain::Envelope::typed::<KnowledgeNoteDeleted>(
@@ -70,7 +70,7 @@ fn thread_note_event(
 /// `knowledge.note.written` to log.
 pub fn add_thread_note_tx(
     conn: &rusqlite::Connection,
-    kinds: &oxplow_domain::refs::kind::KindRegistry,
+    kinds: &oxplow_domain::uri::types::TypeRegistry,
     thread: ThreadId,
     body: &str,
     author: &str,
@@ -116,7 +116,7 @@ pub fn note_tx(conn: &rusqlite::Connection, id: NoteId) -> Result<Option<ThreadN
 /// Replace a note's body and its `page_ref` edges; the event to log.
 pub fn update_note_tx(
     conn: &rusqlite::Connection,
-    kinds: &oxplow_domain::refs::kind::KindRegistry,
+    kinds: &oxplow_domain::uri::types::TypeRegistry,
     id: NoteId,
     body: &str,
 ) -> Result<Option<oxplow_domain::Envelope>, DomainError> {
@@ -208,8 +208,8 @@ mod tests {
     use oxplow_domain::stores::{StreamStore, ThreadStore};
     use oxplow_domain::{Stream, StreamId, StreamKind, Thread};
 
-    fn kinds() -> oxplow_domain::refs::kind::KindRegistry {
-        oxplow_domain::refs::kind::core_kinds()
+    fn kinds() -> oxplow_domain::uri::types::TypeRegistry {
+        oxplow_domain::uri::types::core_types()
             .with_work_item_ids("oxplow", r"tsk\d+")
             .unwrap()
     }

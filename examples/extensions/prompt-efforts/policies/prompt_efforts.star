@@ -34,7 +34,7 @@ def _checkpoint(e):
     if current != None and current["started_at"] >= since:
         return {"skip": "an effort opened during this turn already covers it"}
     commands = []
-    opened = {"thread": ref.build("thread", thread), "adopt_since": since}
+    opened = {"thread": uri.build("thread", thread), "adopt_since": since}
     if current != None:
         # The previous prompt's effort ends where this turn began; this one
         # carries on its work item.
@@ -53,7 +53,7 @@ def _item_moved(e):
         current = _open_effort(thread)
         if current == None:
             return {"commands": [{"name": "oxplow.effort.open",
-                                  "input": {"thread": ref.build("thread", thread), "work_item": item}}]}
+                                  "input": {"thread": uri.build("thread", thread), "work_item": item}}]}
         if current["work_item"] == item:
             return {"skip": "the effort is already the item's"}
         return {"commands": [{"name": "oxplow.effort.link",

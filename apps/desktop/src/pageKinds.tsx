@@ -37,7 +37,7 @@ import { REF_KIND_ICONS, refKindIcon, refKindInfo } from "./refKinds.js";
 import { useExtensions } from "./extensionsStore.js";
 import { pageKindOf, recordedPageKind, refFromTabId } from "./tabs/pageRefs.js";
 import type { Extension, ExtensionPage } from "./tauri-bridge/generated/bindings.js";
-import { extPageRef, pageRef as corePageRef, parseRef } from "./refs/ref.js";
+import { extPageUri, pageUri as corePageRef, parseUri } from "./uri/uri.js";
 
 /**
  * Map a page-kind string to its icon component. Returns `null`
@@ -110,7 +110,7 @@ function declaredPageOf(extensions: Extension[] | null, kind: string): Extension
   if (!extensions) return null;
   // A page kind is the page's id, `<extension>/` first for any but oxplow's.
   const slash = kind.indexOf("/");
-  const pageRef = slash === -1 ? corePageRef(kind) : extPageRef(kind.slice(0, slash), kind.slice(slash + 1));
+  const pageRef = slash === -1 ? corePageRef(kind) : extPageUri(kind.slice(0, slash), kind.slice(slash + 1));
   for (const e of extensions) {
     const found = e.enabled ? e.pages.find((p) => p.pageRef === pageRef) : undefined;
     if (found) return found;
@@ -192,5 +192,5 @@ export function kindForTabId(tabId: string): string {
   if (kind === "page") return recordedPageKind(refFromTabId(tabId)!);
   if (kind) return kind;
   // A ref of a kind with no page of its own (`finding:…`) still has an icon.
-  return parseRef(tabId)?.kind ?? tabId;
+  return parseUri(tabId)?.kind ?? tabId;
 }

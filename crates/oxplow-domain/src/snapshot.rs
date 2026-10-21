@@ -91,7 +91,7 @@ impl SnapshotTrigger {
     ];
 }
 
-pub use crate::refs::build::snapshot_ref;
+pub use crate::uri::build::snapshot_uri;
 
 /// A take of a stream's worktree, as a caller asks for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -341,6 +341,6 @@ mod tests {
             );
         }
         assert_eq!(SnapshotTrigger::from_db_str("nope"), None);
-        assert_eq!(snapshot_ref(12), "snapshot:12");
+        assert_eq!(snapshot_uri(12), "snapshot:12");
     }
 }

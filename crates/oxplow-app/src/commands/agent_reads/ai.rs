@@ -58,7 +58,7 @@ fn ai_caller(actor: &Actor) -> Result<String, CommandError> {
         Actor::Agent {
             thread_id: Some(thread),
             ..
-        } => Ok(oxplow_domain::refs::build::thread_ref(*thread)),
+        } => Ok(oxplow_domain::uri::build::thread_uri(*thread)),
         _ => Err(CommandError::Invalid {
             field: None,
             message: "this connection carries no thread identity (it didn't come through an \

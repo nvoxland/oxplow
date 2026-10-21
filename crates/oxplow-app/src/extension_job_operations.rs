@@ -80,8 +80,8 @@ impl JobWork {
         validate_work_provenance(&run, &identity, &provenance)?;
         validate_request(&request)?;
         // The run's ref, its fragment the operation.
-        let idempotency_key = oxplow_domain::refs::build::at(
-            oxplow_domain::refs::kind::JOB_RUN,
+        let idempotency_key = oxplow_domain::uri::build::at(
+            oxplow_domain::uri::types::JOB_RUN,
             identity.job_id().as_str(),
             None,
             Some(key.operation.as_str()),

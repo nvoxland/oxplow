@@ -8,8 +8,8 @@
 //! mapping from existing rows.
 //!
 //! Every stored `(kind, id)` is a canonical ref's `(kind, id)`
-//! (`.context/refs.md`), so a row can be turned back into a ref by
-//! `refs::build::of(kind, id)` and nothing downstream needs a per-kind id
+//! (`.context/resources.md`), so a row can be turned back into a ref by
+//! `uri::build::of(kind, id)` and nothing downstream needs a per-kind id
 //! scheme:
 //! - wiki:      `"<slug>"`
 //! - work_item: `"oxplow:tsk<n>"` — a task, provider-scoped ([`work_item_id`])
@@ -19,14 +19,14 @@
 //! - commit:    `"<sha>"`
 //! - thread_note: `"not<n>"`
 
-use oxplow_domain::refs::kind::KindRegistry;
-use oxplow_domain::refs::{extract, RefVersion};
+use oxplow_domain::uri::types::TypeRegistry;
+use oxplow_domain::uri::{extract, RefVersion};
 use oxplow_domain::EffortImpact;
 
 use crate::effort_store::FileRefVersion;
 use crate::page_ref_store::PageRefEdge;
 
-pub use oxplow_domain::refs::kind::{
+pub use oxplow_domain::uri::types::{
     COMMIT as KIND_COMMIT, DIR as KIND_DIR, FILE as KIND_FILE, FINDING as KIND_FINDING,
     THREAD_NOTE as KIND_THREAD_NOTE, WIKI as KIND_WIKI, WORK_ITEM as KIND_WORK_ITEM,
 };
@@ -194,7 +194,7 @@ pub fn impact_kind(kind: &str) -> Option<&'static str> {
 /// `oxplow:tsk7` or `issues:ENG-12`). Self references are filtered out
 /// (an effort on tsk7 declaring it "completed" tsk7 is implicit).
 pub fn effort_impact_edges(
-    kinds: &KindRegistry,
+    kinds: &TypeRegistry,
     source: &str,
     impacts: &[EffortImpact],
 ) -> Vec<PageRefEdge> {
@@ -210,7 +210,7 @@ pub fn effort_impact_edges(
         // ref, or one of the active list's own ids.
         let target_id = if target_kind == KIND_WORK_ITEM {
             let id = imp.id.trim();
-            let Some(target) = oxplow_domain::refs::build::work_item_id_of_ref(id)
+            let Some(target) = oxplow_domain::uri::build::work_item_id_of_uri(id)
                 .map(str::to_string)
                 .or_else(|| kinds.work_item_id(id))
             else {
@@ -235,7 +235,7 @@ pub fn effort_impact_edges(
 }
 
 /// Edges contributed by a wiki page body. Owned by `wiki_pages` sync.
-pub fn wiki_edges(kinds: &KindRegistry, slug: &str, body: &str) -> Vec<PageRefEdge> {
+pub fn wiki_edges(kinds: &TypeRegistry, slug: &str, body: &str) -> Vec<PageRefEdge> {
     let refs = extract(kinds, body);
     let mut out = Vec::new();
     for fd in refs.files_detail {
@@ -318,7 +318,7 @@ pub fn stated_edges(slug: &str, refs: &[String]) -> Vec<PageRefEdge> {
 
 /// Edges contributed by a task-note body. Single-owner source.
 pub fn note_edges(
-    kinds: &KindRegistry,
+    kinds: &TypeRegistry,
     note_kind: &str,
     note_id: &str,
     body: &str,
@@ -385,7 +385,7 @@ pub fn note_edges(
 /// A work item's body-mention edges — what its title and body name — for
 /// any list's item; `id` is its `<provider>:<id>`.
 pub fn work_item_edges(
-    kinds: &KindRegistry,
+    kinds: &TypeRegistry,
     id: &str,
     title: &str,
     body: &str,
@@ -395,7 +395,7 @@ pub fn work_item_edges(
 
 /// A work item's comment-mention edges: what its comments' bodies name.
 pub fn work_item_comment_edges<'a>(
-    kinds: &KindRegistry,
+    kinds: &TypeRegistry,
     id: &str,
     bodies: impl IntoIterator<Item = &'a str>,
 ) -> Vec<PageRefEdge> {
@@ -421,7 +421,7 @@ pub fn work_item_link_edges(id: &str, links: &[(String, String)]) -> Vec<PageRef
         .iter()
         .filter_map(|(target, link_type)| {
             // Any ref: another item, or what the item is about.
-            let target = oxplow_domain::refs::grammar::CanonicalRef::parse(target).ok()?;
+            let target = oxplow_domain::uri::grammar::Uri::parse(target).ok()?;
             Some(PageRefEdge::new(
                 KIND_WORK_ITEM,
                 id,
@@ -436,7 +436,7 @@ pub fn work_item_link_edges(id: &str, links: &[(String, String)]) -> Vec<PageRef
 /// What `text` mentions, as edges from work item `id` under `types`; the
 /// item naming itself isn't one.
 fn mention_edges(
-    kinds: &KindRegistry,
+    kinds: &TypeRegistry,
     id: &str,
     text: &str,
     types: &MentionTypes,
@@ -509,7 +509,7 @@ pub fn effort_touched_file_edges(source: &str, entries: &[(String, String)]) -> 
 /// Owned slice = the `summary_*` ref_types above (paired with
 /// `RT_TOUCHED_FILE` under `effort_ref_types()`).
 pub fn effort_summary_edges(
-    kinds: &KindRegistry,
+    kinds: &TypeRegistry,
     source: &str,
     summaries: &[String],
 ) -> Vec<PageRefEdge> {
@@ -596,8 +596,8 @@ mod tests {
     use super::*;
 
     /// The core kinds with oxplow's tasks as the work list (`tsk<n>`).
-    fn tasks_kinds() -> oxplow_domain::refs::kind::KindRegistry {
-        oxplow_domain::refs::kind::core_kinds()
+    fn tasks_kinds() -> oxplow_domain::uri::types::TypeRegistry {
+        oxplow_domain::uri::types::core_types()
             .with_work_item_ids("oxplow", r"tsk\d+")
             .unwrap()
     }
@@ -617,7 +617,7 @@ mod tests {
         // Every stored (kind, id) is a canonical ref's (kind, id) (tsk404).
         for e in &edges {
             let text = format!("{}:{}", e.target_kind, e.target_id);
-            let r = oxplow_domain::refs::grammar::CanonicalRef::parse(&text)
+            let r = oxplow_domain::uri::grammar::Uri::parse(&text)
                 .unwrap_or_else(|err| panic!("{text}: {err}"));
             tasks_kinds()
                 .validate(&r)

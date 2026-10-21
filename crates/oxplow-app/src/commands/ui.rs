@@ -11,7 +11,7 @@ use std::sync::Arc;
 use oxplow_db::event_content_store::put_json_tx;
 use oxplow_db::event_log_store::anchors_for_thread_tx;
 use oxplow_domain::events::schema::{UiOpFailed, UiOpFailedV1};
-use oxplow_domain::refs::build::thread_ref;
+use oxplow_domain::uri::build::thread_uri;
 use oxplow_domain::{Anchors, CommandError, Invokers, StreamId, ThreadId};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -107,7 +107,7 @@ fn report(ctx: &TxCtx<'_>, input: ReportErrorInput) -> Result<HandlerOutput, Com
     if let Some(thread) = thread {
         event = event
             .with_anchors(anchors_for_thread_tx(ctx.conn, thread)?)
-            .with_subject([thread_ref(thread)]);
+            .with_subject([thread_uri(thread)]);
     } else if let Some(stream) = stream {
         event = event.with_anchors(Anchors {
             stream_id: Some(stream),
@@ -184,7 +184,7 @@ mod tests {
                     "command": "query_sql",
                     "message": "IpcCallError: query_sql: timed out after 5s",
                     "exit_code": 1,
-                    "thread": oxplow_domain::refs::build::thread_ref(fx.thread),
+                    "thread": oxplow_domain::uri::build::thread_uri(fx.thread),
                     "signal": "SIGTERM",
                     "duration_ms": 5012,
                     "stderr": "timed out after 5s",
@@ -272,7 +272,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 REPORT_ERROR,
-                json!({ "label": "List data", "stream": oxplow_domain::refs::build::stream_ref(stream), "stderr": "timed out" }),
+                json!({ "label": "List data", "stream": oxplow_domain::uri::build::stream_uri(stream), "stderr": "timed out" }),
                 false,
             )
             .await
@@ -295,8 +295,8 @@ mod tests {
                 REPORT_ERROR,
                 json!({
                     "label": "x",
-                    "thread": oxplow_domain::refs::build::thread_ref(fx.thread),
-                    "stream": oxplow_domain::refs::build::stream_ref(stream),
+                    "thread": oxplow_domain::uri::build::thread_uri(fx.thread),
+                    "stream": oxplow_domain::uri::build::stream_uri(stream),
                 }),
                 false,
             )
@@ -318,7 +318,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 REPORT_ERROR,
-                json!({ "label": "Push", "thread": oxplow_domain::refs::build::thread_ref(fx.thread), "stderr": "denied" }),
+                json!({ "label": "Push", "thread": oxplow_domain::uri::build::thread_uri(fx.thread), "stderr": "denied" }),
                 false,
             )
             .await

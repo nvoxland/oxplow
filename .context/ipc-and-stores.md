@@ -794,7 +794,7 @@ store's `new()`, and call the slice or full replace from its write
 methods.
 For body-text sources that should pick up the same wikilink rules
 the wiki + tasks use, route through
-`oxplow_domain::refs::extract` rather than re-implementing the
+`oxplow_domain::uri::extract` rather than re-implementing the
 parser.
 
 ## Exception: the shell surface
@@ -856,7 +856,7 @@ unchanged. File contents come from snapshot blobs, so the `search.index`
 pump consumer indexes them on `snapshot.taken` (durable, redelivered after
 a crash). Nothing reaches the index on the in-memory bus. Archiving a
 stream purges its file rows (`purge_stream_files`). See
-[refs.md](./refs.md) "Searchable kinds". Exposed identically on IPC
+[resources.md](./resources.md) "Searchable kinds". Exposed identically on IPC
 (`search`) and MCP (`oxplow_search`) — see the parity manifest
 (`crates/oxplow-surface-parity`).
 

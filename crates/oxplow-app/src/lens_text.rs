@@ -165,7 +165,7 @@ async fn pending_proposals(
             vec![
                 param("thread").map_or(SqlCell::Null(()), SqlCell::Text),
                 param("setting")
-                    .map(|key| oxplow_domain::refs::build::config_ref(&key))
+                    .map(|key| oxplow_domain::uri::build::config_uri(&key))
                     .map_or(SqlCell::Null(()), SqlCell::Text),
             ],
             None,

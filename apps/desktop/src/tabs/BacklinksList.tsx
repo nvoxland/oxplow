@@ -6,7 +6,7 @@ import type { MenuItem } from "../menu.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
 import { kindForTabId, PageKindIcon } from "../pageKinds.js";
-import { parseRef, refOf } from "../refs/ref.js";
+import { parseUri, uriOf } from "../uri/uri.js";
 import { openRefInWindow } from "./openRef.js";
 import { refTargetNow } from "./refOpener.js";
 import { setContextRefDrag } from "../agent-context-dnd.js";
@@ -79,7 +79,7 @@ export interface BacklinksListProps {
  * Pure — exported for tests.
  */
 export function refToContextRef(ref: string): ContextRef | null {
-  const parsed = parseRef(ref);
+  const parsed = parseUri(ref);
   if (parsed?.kind === "file") return { kind: "file", path: parsed.id };
   if (parsed?.kind === "wiki") return { kind: "wiki", slug: parsed.id };
   if (parsed?.kind === "work_item") {
@@ -134,7 +134,7 @@ export function BacklinksList({
     <div data-testid="backlinks-list" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       {snapshotEntries.map((entry) => (
         <button
-          key={refOf("snapshot", String(entry.snapshotId))}
+          key={uriOf("snapshot", String(entry.snapshotId))}
           type="button"
           data-testid={`backlinks-snapshot-${entry.snapshotId}`}
           onClick={() => onOpenSnapshot?.({
@@ -159,7 +159,7 @@ export function BacklinksList({
       ))}
       {commitEntries.map((entry) => (
         <button
-          key={refOf("commit", entry.sha)}
+          key={uriOf("commit", entry.sha)}
           type="button"
           data-testid={`backlinks-commit-${entry.sha}`}
           onClick={() => onOpenCommit?.({ sha: entry.sha, subject: entry.subject })}

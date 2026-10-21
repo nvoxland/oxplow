@@ -13,8 +13,8 @@ use oxplow_domain::events::schema::{
 };
 use oxplow_domain::events::Anchors;
 use oxplow_domain::hook::TurnOutcome;
-use oxplow_domain::refs::build::{thread_ref, turn_ref};
 use oxplow_domain::stores::{AgentStatusStore, AgentTurnStore};
+use oxplow_domain::uri::build::{thread_uri, turn_uri};
 use oxplow_domain::{
     AgentSessionId, AgentStatus, AgentTurn, AgentTurnId, DomainError, StreamId, ThreadId, Timestamp,
 };
@@ -317,15 +317,15 @@ pub fn open_turn_tx(
     }
     let env = ev
         .typed::<AgentTurnStarted>(&AgentTurnStartedV1 {
-            turn: turn_ref(id),
-            thread: thread_ref(thread),
+            turn: turn_uri(id),
+            thread: thread_uri(thread),
             session: session.map(str::to_string),
         })
         .with_anchors(Anchors {
             turn_id: Some(id.value()),
             ..anchors
         })
-        .with_subject([turn_ref(id), thread_ref(thread)]);
+        .with_subject([turn_uri(id), thread_uri(thread)]);
     ev.append(conn, &env)?;
     Ok(id)
 }
@@ -400,8 +400,8 @@ pub fn close_turn_tx(
     let (thread, session) = (ThreadId::new(thread), session.map(AgentSessionId::new));
     let env = ev
         .typed::<AgentTurnEnded>(&AgentTurnEndedV2 {
-            turn: turn_ref(id),
-            thread: thread_ref(thread),
+            turn: turn_uri(id),
+            thread: thread_uri(thread),
             outcome: end.outcome,
             transcript_path: end.transcript_path.map(str::to_string),
             usage: end.usage.clone(),
@@ -410,7 +410,7 @@ pub fn close_turn_tx(
             turn_id: Some(id.value()),
             ..activity_anchors_tx(conn, thread, session)?
         })
-        .with_subject([turn_ref(id), thread_ref(thread)]);
+        .with_subject([turn_uri(id), thread_uri(thread)]);
     ev.append(conn, &env)?;
     Ok(Some(thread))
 }
@@ -517,14 +517,14 @@ pub fn log_status_tx(
     }
     let env = ev
         .typed::<AgentStatusChanged>(&AgentStatusChangedV1 {
-            thread: thread_ref(thread),
+            thread: thread_uri(thread),
             state: LoggedAgentStatus::of(state).ok_or_else(|| {
                 DomainError::Invalid(format!("{state:?} is derived, never logged"))
             })?,
             detail,
         })
         .with_anchors(anchors)
-        .with_subject([thread_ref(thread)]);
+        .with_subject([thread_uri(thread)]);
     ev.append(conn, &env)?;
     Ok(())
 }
@@ -832,12 +832,12 @@ mod tests {
         let ev = EventCtx::system(vocabulary, "test");
         let env = ev
             .typed::<AgentStatusChanged>(&AgentStatusChangedV1 {
-                thread: thread_ref(thread),
+                thread: thread_uri(thread),
                 state: oxplow_domain::events::schema::LoggedAgentStatus::of(state).unwrap(),
                 detail: detail.map(str::to_string),
             })
             .with_anchors(anchors_for_thread_tx(&conn, thread).unwrap())
-            .with_subject([thread_ref(thread)]);
+            .with_subject([thread_uri(thread)]);
         ev.append(&conn, &env).unwrap();
     }
 
@@ -907,7 +907,7 @@ mod tests {
             let ev = EventCtx::system(&vocabulary, "test");
             let env = ev
                 .typed::<AgentStatusChanged>(&AgentStatusChangedV1 {
-                    thread: thread_ref(tid),
+                    thread: thread_uri(tid),
                     state: oxplow_domain::events::schema::LoggedAgentStatus::of(state).unwrap(),
                     detail: None,
                 })
@@ -915,7 +915,7 @@ mod tests {
                     agent_session_id: Some(session),
                     ..anchors_for_thread_tx(&conn, tid).unwrap()
                 })
-                .with_subject([thread_ref(tid)]);
+                .with_subject([thread_uri(tid)]);
             ev.append(&conn, &env).unwrap();
         };
         log(a, S::Running);
@@ -977,7 +977,7 @@ mod tests {
                     let ev = EventCtx::system(&vocabulary, "test");
                     let env = ev
                         .typed::<AgentStatusChanged>(&AgentStatusChangedV1 {
-                            thread: thread_ref(tid),
+                            thread: thread_uri(tid),
                             state: oxplow_domain::events::schema::LoggedAgentStatus::of(state)
                                 .unwrap(),
                             detail: None,
@@ -986,7 +986,7 @@ mod tests {
                             agent_session_id: Some(session),
                             ..anchors_for_thread_tx(&conn, tid).unwrap()
                         })
-                        .with_subject([thread_ref(tid)]);
+                        .with_subject([thread_uri(tid)]);
                     ev.append(&conn, &env).unwrap();
                 }
                 let rolled: String = conn

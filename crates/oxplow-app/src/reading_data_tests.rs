@@ -147,11 +147,11 @@ async fn efforts_per_thread() {
                 .unwrap()
         }
     };
-    let thread_ref = oxplow_domain::refs::build::thread_ref;
+    let thread_ref = oxplow_domain::uri::build::thread_uri;
     // thr1: its fixture effort is closed and a second one left open.
     run(
         crate::commands::effort::CLOSE,
-        json!({ "effort": oxplow_domain::refs::build::effort_ref(fx.effort) }),
+        json!({ "effort": oxplow_domain::uri::build::effort_uri(fx.effort) }),
     )
     .await;
     run(

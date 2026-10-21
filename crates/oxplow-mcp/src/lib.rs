@@ -1237,7 +1237,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             ext.join("files.star"),
-            "def transform(x):\n    return {\"facts\": [{\"measure\": \"work.files\", \"value\": len(files(\"**\")), \"subject\": ref.build(\"file\", \"src/a.rs\")}]}\n",
+            "def transform(x):\n    return {\"facts\": [{\"measure\": \"work.files\", \"value\": len(files(\"**\")), \"subject\": uri.build(\"file\", \"src/a.rs\")}]}\n",
         )
         .unwrap();
         deploy_sources(&svc).await;
@@ -1687,7 +1687,7 @@ mod tests {
                 &oxplow_domain::Actor::Human,
                 oxplow_app::commands::thread::CREATE,
                 serde_json::json!({
-                    "stream": oxplow_domain::refs::build::stream_ref(stream),
+                    "stream": oxplow_domain::uri::build::stream_uri(stream),
                     "title": title,
                 }),
                 false,
@@ -1732,7 +1732,7 @@ mod tests {
             "oxplow_read",
             serde_json::json!({
                 "ref": "file:who.txt",
-                "stream": oxplow_domain::refs::build::stream_ref(primary.id),
+                "stream": oxplow_domain::uri::build::stream_uri(primary.id),
             }),
         )
         .await
@@ -1905,7 +1905,7 @@ mod tests {
     async fn ai_tools_decide_and_summarize() {
         let (_proj, services, server) = boot().await;
         let me = as_primary_thread(&services).await;
-        let thread = oxplow_domain::refs::build::thread_ref(caller_of(&me).thread_id.unwrap());
+        let thread = oxplow_domain::uri::build::thread_uri(caller_of(&me).thread_id.unwrap());
         // Unassigned role: a clear error, not a crash.
         let err = call(
             &server,

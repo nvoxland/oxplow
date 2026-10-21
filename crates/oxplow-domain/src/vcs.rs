@@ -534,7 +534,7 @@ pub trait Vcs: Send + Sync {
 ///
 /// On the wire it is a string: `working`, `snap:<id>`, or the VCS's
 /// `<rev_kind>:<rev>` (`git:HEAD`, `git:4c44d4…`) — the ref grammar's
-/// `@rev` slot (`.context/refs.md`), where the working tree is the
+/// `@rev` slot (`.context/resources.md`), where the working tree is the
 /// omitted slot ([`Revision::rev_slot`]).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Revision {

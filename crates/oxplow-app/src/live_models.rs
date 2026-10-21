@@ -466,7 +466,7 @@ impl LiveSources {
             .iter()
             .map(|l| {
                 vec![
-                    text(oxplow_domain::refs::build::collector_ref(
+                    text(oxplow_domain::uri::build::collector_uri(
                         &l.owner, &l.spec.id,
                     )),
                     text(l.owner.clone()),
@@ -484,7 +484,7 @@ impl LiveSources {
             .await?
             .iter()
             .flat_map(|l| {
-                let collector = oxplow_domain::refs::build::collector_ref(&l.owner, &l.spec.id);
+                let collector = oxplow_domain::uri::build::collector_uri(&l.owner, &l.spec.id);
                 l.credentials
                     .iter()
                     .map(move |c| vec![text(collector.clone()), text(c.name.clone()), flag(c.set)])

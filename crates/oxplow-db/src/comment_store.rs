@@ -67,18 +67,18 @@ fn refs_to_json(refs: &[CommentTarget]) -> String {
 }
 
 /// Canonical `(kind,id)` refs mentioned *inside* `quote`, derived from
-/// the shared [`oxplow_domain::refs::extract`] so the kind/id vocabulary
+/// the shared [`oxplow_domain::uri::extract`] so the kind/id vocabulary
 /// matches the `page_ref` graph and tab ids exactly. Inline mentions
 /// like `tsk42`, `src/x.rs`, or `[[slug]]` become typed refs even
 /// when the surface never rendered them as links.
 fn refs_from_quote(
-    kinds: &oxplow_domain::refs::kind::KindRegistry,
+    kinds: &oxplow_domain::uri::types::TypeRegistry,
     quote: &str,
 ) -> Vec<CommentTarget> {
     use crate::page_ref_projections::{
         KIND_COMMIT, KIND_DIR, KIND_FILE, KIND_FINDING, KIND_WIKI, KIND_WORK_ITEM,
     };
-    let r = oxplow_domain::refs::extract(kinds, quote);
+    let r = oxplow_domain::uri::extract(kinds, quote);
     let mut out = Vec::new();
     let mut push = |kind: &str, id: String| {
         out.push(CommentTarget {
@@ -113,7 +113,7 @@ fn refs_from_quote(
 /// Centralizing this in the create path means no surface ever has to
 /// reimplement ref parsing.
 fn union_referenced_refs(
-    kinds: &oxplow_domain::refs::kind::KindRegistry,
+    kinds: &oxplow_domain::uri::types::TypeRegistry,
     provided: &[CommentTarget],
     quote: &str,
 ) -> Vec<CommentTarget> {
@@ -218,7 +218,7 @@ fn comment_event(id: i64, target_kind: &str, target_id: &str, deleted: bool) -> 
         KnowledgeCommentDeleted, KnowledgeCommentDeletedV1, KnowledgeCommentWritten,
         KnowledgeCommentWrittenV1,
     };
-    let comment = oxplow_domain::refs::build::comment_ref(CommentId::new(id));
+    let comment = oxplow_domain::uri::build::comment_uri(CommentId::new(id));
     let env = if deleted {
         Envelope::typed::<KnowledgeCommentDeleted>(
             SOURCE,
@@ -313,7 +313,7 @@ pub fn get_tx(
 /// Returns it and the `knowledge.comment.written` to log.
 pub fn create_tx(
     conn: &rusqlite::Connection,
-    kinds: &oxplow_domain::refs::kind::KindRegistry,
+    kinds: &oxplow_domain::uri::types::TypeRegistry,
     new: &NewComment,
 ) -> Result<(CommentThread, Vec<Envelope>), DomainError> {
     let referenced_refs = union_referenced_refs(kinds, &new.referenced_refs, &new.quote);

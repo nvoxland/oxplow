@@ -103,7 +103,7 @@ const MEASURE_COLS: &str = "id, key, title, unit, subject_kind, temporal_semanti
 /// CHECK can't be widened without rebuilding tables whose rows facts
 /// cascade from.
 fn stored_scope(scope: &str) -> (String, Option<String>) {
-    match oxplow_domain::refs::build::id_of(scope, oxplow_domain::refs::kind::EXTENSION) {
+    match oxplow_domain::uri::build::id_of(scope, oxplow_domain::uri::types::EXTENSION) {
         Ok(name) => ("global".to_string(), Some(name)),
         Err(_) => (scope.to_string(), None),
     }
@@ -112,7 +112,7 @@ fn stored_scope(scope: &str) -> (String, Option<String>) {
 /// The inverse of [`stored_scope`].
 fn read_scope(scope: String, extension: Option<String>) -> String {
     match extension {
-        Some(name) => oxplow_domain::refs::build::extension_ref(&name),
+        Some(name) => oxplow_domain::uri::build::extension_uri(&name),
         None => scope,
     }
 }
@@ -1402,7 +1402,7 @@ fn subject_id(conn: &rusqlite::Connection, subject: Option<&str>) -> rusqlite::R
     if found.is_some() {
         return Ok(found);
     }
-    let kind = oxplow_domain::refs::build::kind_of(subject).ok_or_else(|| {
+    let kind = oxplow_domain::uri::build::type_of(subject).ok_or_else(|| {
         rusqlite::Error::ToSqlConversionFailure(
             format!("a fact's subject must be a ref (`<kind>:<id>`), not `{subject}`").into(),
         )
@@ -1415,7 +1415,7 @@ fn subject_id(conn: &rusqlite::Connection, subject: Option<&str>) -> rusqlite::R
 /// Refuse a fact whose subject isn't a ref, naming the subject.
 fn check_subject(f: &NewFact) -> Result<(), DomainError> {
     match f.subject.as_deref() {
-        Some(s) if oxplow_domain::refs::build::kind_of(s).is_none() => {
+        Some(s) if oxplow_domain::uri::build::type_of(s).is_none() => {
             Err(DomainError::Invalid(format!(
                 "a fact's subject must be a ref (`<kind>:<id>`, like `file:src/a.rs`), not `{s}`"
             )))
@@ -3990,7 +3990,7 @@ mod tests {
     /// One scanned block: subject `id`, at `id.rs:1`, valued `value`.
     fn block(m: i64, id: &str, value: f64) -> NewFact {
         NewFact {
-            subject: Some(oxplow_domain::refs::build::of("block", id)),
+            subject: Some(oxplow_domain::uri::build::of("block", id)),
             path: Some(format!("{id}.rs")),
             line: Some(1),
             ..NewFact::new(m, value)
@@ -4270,7 +4270,7 @@ mod tests {
         let rows: Vec<NewFact> = facts
             .iter()
             .map(|(path, value)| NewFact {
-                subject: Some(oxplow_domain::refs::build::of("file", path)),
+                subject: Some(oxplow_domain::uri::build::of("file", path)),
                 path: Some((*path).to_string()),
                 ..NewFact::new(measure_id, *value)
             })
@@ -4338,7 +4338,7 @@ mod tests {
             let facts: Vec<NewFact> = fns
                 .iter()
                 .map(|(path, name, v)| NewFact {
-                    subject: Some(oxplow_domain::refs::build::of(
+                    subject: Some(oxplow_domain::uri::build::of(
                         "symbol",
                         &format!("{path}/{name}"),
                     )),
@@ -4538,7 +4538,7 @@ mod tests {
         let rows: Vec<NewFact> = facts
             .iter()
             .map(|(path, value)| NewFact {
-                subject: Some(oxplow_domain::refs::build::of("file", path)),
+                subject: Some(oxplow_domain::uri::build::of("file", path)),
                 path: Some((*path).to_string()),
                 ..NewFact::new(measure_id, *value)
             })
@@ -5016,7 +5016,7 @@ mod tests {
         capture.captured_at = Some(at("2026-06-30T11:00:00.000000Z"));
         capture.scan_kind = "asserted".into();
         let rows = vec![NewFact {
-            subject: Some(oxplow_domain::refs::build::of("file", "a.rs")),
+            subject: Some(oxplow_domain::uri::build::of("file", "a.rs")),
             path: Some("a.rs".into()),
             ..NewFact::new(m, 7.0)
         }];
@@ -7337,13 +7337,13 @@ mod tests {
         // Facts carry no capture_id — record_facts must backfill it.
         let facts = vec![
             NewFact {
-                subject: Some(oxplow_domain::refs::build::of("symbol", "src/a.rs::foo")),
+                subject: Some(oxplow_domain::uri::build::of("symbol", "src/a.rs::foo")),
                 path: Some("src/a.rs".into()),
                 line: Some(10),
                 ..NewFact::new(m, 14.0)
             },
             NewFact {
-                subject: Some(oxplow_domain::refs::build::of("symbol", "src/a.rs::bar")),
+                subject: Some(oxplow_domain::uri::build::of("symbol", "src/a.rs::bar")),
                 path: Some("src/a.rs".into()),
                 line: Some(40),
                 ..NewFact::new(m, 3.0)

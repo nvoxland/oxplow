@@ -69,7 +69,7 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
     let kinds = &svc.vocabulary.current().kinds;
     assert!(kinds.get("github_pr").is_some());
     assert_eq!(
-        oxplow_domain::refs::canonical_wikilink(kinds, "pr:12").map(|r| r.to_string()),
+        oxplow_domain::uri::canonical_wikilink(kinds, "pr:12").map(|r| r.to_string()),
         Some("github_pr:12".to_string())
     );
     let row = |sql: &str| {
@@ -772,7 +772,7 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
     as_person(
         &svc,
         "oxplow.job_run.cancel",
-        json!({ "job_run": oxplow_domain::refs::build::job_run_ref(&second) }),
+        json!({ "job_run": oxplow_domain::uri::build::job_run_uri(&second) }),
     )
     .await;
     until_row(

@@ -53,11 +53,11 @@ impl AsyncEventConsumer for SymbolCollector {
             return Ok(());
         }
         let stream = payload["stream"].as_str().and_then(|r| {
-            oxplow_domain::refs::build::parse_as::<StreamId>(r, oxplow_domain::refs::kind::STREAM)
+            oxplow_domain::uri::build::parse_as::<StreamId>(r, oxplow_domain::uri::types::STREAM)
                 .ok()
         });
         let snapshot = payload["snapshot"].as_str().and_then(|r| {
-            oxplow_domain::refs::build::parse_as::<i64>(r, oxplow_domain::refs::kind::SNAPSHOT).ok()
+            oxplow_domain::uri::build::parse_as::<i64>(r, oxplow_domain::uri::types::SNAPSHOT).ok()
         });
         let (Some(stream), Some(snapshot)) = (stream, snapshot) else {
             return Ok(());

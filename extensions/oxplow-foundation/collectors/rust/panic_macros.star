@@ -17,5 +17,5 @@ def transform(input):
             if m["text"] in panicky:
                 c += 1
         if c > 0:
-            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "panic_macro", "subject": ref.build("file", f["path"]), "path": f["path"], "dims": {"oxplow.language": "rust"}})
+            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "panic_macro", "subject": uri.build("file", f["path"]), "path": f["path"], "dims": {"oxplow.language": "rust"}})
     return {"facts": facts}

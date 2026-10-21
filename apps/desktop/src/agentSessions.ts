@@ -10,7 +10,7 @@ import { querySql } from "./api.js";
 import { recordOpError } from "./components/opErrorsStore.js";
 import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
 import { threadRowId } from "./modelIds.js";
-import { idOf } from "./refs/ref.js";
+import { idOf } from "./uri/uri.js";
 import type { Reads, SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
 /** One open agent session, under the UI's ids. */

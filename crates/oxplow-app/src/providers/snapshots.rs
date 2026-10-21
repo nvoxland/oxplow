@@ -27,11 +27,11 @@ use async_trait::async_trait;
 use base64::Engine as _;
 use oxplow_db::{FileSnapshot, SnapshotStorage, SnapshotTree, TakeRecord};
 use oxplow_domain::capability::SNAPSHOTS;
-use oxplow_domain::refs::build::{effort_ref, stream_ref, thread_ref};
 use oxplow_domain::snapshot::{
     MarkRequest, Marked, SnapshotError, SnapshotProvider, SnapshotRegistry,
 };
 use oxplow_domain::tree_diff::FileChange;
+use oxplow_domain::uri::build::{effort_uri, stream_uri, thread_uri};
 use oxplow_domain::vcs::Revision;
 use oxplow_domain::{InputValidator, StreamId, Timestamp};
 use serde::Deserialize;
@@ -371,19 +371,19 @@ impl SnapshotProvider for ExternalSnapshots {
             .next();
         let parent = newest.as_ref().and_then(|op| op.handle.clone());
         let mut input = json!({
-            "stream": stream_ref(request.stream),
+            "stream": stream_uri(request.stream),
             "worktree": capture.project_dir().to_string_lossy(),
             "trigger": request.trigger.as_db_str(),
             "parent": parent,
         });
         if let Some(t) = request.thread {
-            input["thread"] = json!(thread_ref(t));
+            input["thread"] = json!(thread_uri(t));
         }
         if let Some(t) = request.turn {
             input["turn"] = json!(t);
         }
         if let Some(e) = request.effort {
-            input["effort"] = json!(effort_ref(e));
+            input["effort"] = json!(effort_uri(e));
         }
         if let Some(b) = request.budget {
             input["budget_ms"] = json!(b.as_millis() as u64);
@@ -410,7 +410,7 @@ impl SnapshotProvider for ExternalSnapshots {
                 .call(
                     "changed",
                     json!({
-                        "stream": stream_ref(request.stream),
+                        "stream": stream_uri(request.stream),
                         "from": parent,
                         "to": marked.handle,
                     }),
@@ -445,7 +445,7 @@ impl SnapshotProvider for ExternalSnapshots {
                 revision,
                 elapsed_ms: started.elapsed().as_millis() as u64,
                 budget_ms: request.budget.map(|b| b.as_millis() as u64),
-                source: oxplow_domain::refs::build::provider_source(&self.instance.name),
+                source: oxplow_domain::uri::build::provider_source(&self.instance.name),
                 provider: Some(self.instance.id.clone()),
                 contents: self.contents,
                 handle: Some(marked.handle),

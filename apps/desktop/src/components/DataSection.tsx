@@ -23,7 +23,7 @@ import {
 } from "../api.js";
 import type { DataEntity, Reads } from "../tauri-bridge/generated/bindings.js";
 import { coalesce, extensionsChanged, readsChanged, useRerunOnChange } from "../lens/lensRerun.js";
-import { collectorRef } from "../refs/ref.js";
+import { collectorUri } from "../uri/uri.js";
 import { pageTabRef } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { enableAgain, type ContributionHealth } from "../contributionHealth.js";
@@ -169,7 +169,7 @@ export function DataSection() {
     const key = `${l.owner}/${l.spec.id}`;
     setBusy(key);
     try {
-      const report = await syncCollector(collectorRef(l.owner, l.spec.id));
+      const report = await syncCollector(collectorUri(l.owner, l.spec.id));
       const counts = Object.entries(report.rowCounts)
         .map(([e, n]) => `${n} ${e}`)
         .join(", ");

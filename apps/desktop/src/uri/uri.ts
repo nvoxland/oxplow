@@ -1,6 +1,6 @@
-// The canonical ref grammar: `<kind>:<id>[@<rev>][#<frag>]`.
-// See .context/refs.md. Rust (`oxplow-domain::refs::grammar`) is the
-// source of truth; `ref.test.ts` asserts this parser against the same
+// The canonical uri grammar: `<kind>:<id>[@<rev>][#<frag>]`.
+// See .context/resources.md. Rust (`oxplow_domain::uri::grammar`) is the
+// source of truth; `uri.test.ts` asserts this parser against the same
 // golden fixture so the two can't drift.
 //
 // Only `@`, `#` and `%` are reserved inside an id, so refs stay readable:
@@ -10,7 +10,7 @@
 // that starts the rev. A rev is always `<kind>:<value>` (`git:HEAD`,
 // `snap:01J9…`).
 
-export interface CanonicalRef {
+export interface Uri {
   kind: string;
   /** Decoded: an `@` in a file name is a real `@` here. */
   id: string;
@@ -21,7 +21,7 @@ export interface CanonicalRef {
 const KIND_RE = /^[a-z][a-z0-9_]*$/;
 const RESERVED = new Set(["@", "#", "%"]);
 
-export function isValidKind(kind: string): boolean {
+export function isValidType(kind: string): boolean {
   return KIND_RE.test(kind);
 }
 
@@ -58,16 +58,16 @@ export function escapeId(s: string): string {
 function isValidRev(rev: string): boolean {
   const colon = rev.indexOf(":");
   if (colon <= 0) return false;
-  return isValidKind(rev.slice(0, colon)) && rev.length > colon + 1;
+  return isValidType(rev.slice(0, colon)) && rev.length > colon + 1;
 }
 
-/** Parse a canonical ref; `null` when the text isn't one. */
-export function parseRef(text: string): CanonicalRef | null {
+/** Parse a canonical uri; `null` when the text isn't one. */
+export function parseUri(text: string): Uri | null {
   if (!text) return null;
   const colon = text.indexOf(":");
   if (colon === -1) return null;
   const kind = text.slice(0, colon);
-  if (!isValidKind(kind)) return null;
+  if (!isValidType(kind)) return null;
   const rest = text.slice(colon + 1);
   const hash = rest.indexOf("#");
   const beforeFrag = hash === -1 ? rest : rest.slice(0, hash);
@@ -89,7 +89,7 @@ export function parseRef(text: string): CanonicalRef | null {
 }
 
 /** The canonical string form; re-encodes the reserved characters. */
-export function formatRef(r: CanonicalRef): string {
+export function formatUri(r: Uri): string {
   let out = `${r.kind}:${escapeId(r.id)}`;
   if (r.rev !== null) out += `@${escapeId(r.rev)}`;
   if (r.frag !== null) out += `#${r.frag}`;
@@ -97,75 +97,75 @@ export function formatRef(r: CanonicalRef): string {
 }
 
 /** Build and format in one step. Throws on a bad kind, since a caller
- *  constructing a ref from a literal kind has a programming error. */
-export function ref(kind: string, id: string, rev: string | null = null, frag: string | null = null): string {
-  if (!isValidKind(kind)) throw new Error(`bad ref kind \`${kind}\``);
-  return formatRef({ kind, id, rev, frag });
+ *  constructing a uri from a literal kind has a programming error. */
+export function uri(kind: string, id: string, rev: string | null = null, frag: string | null = null): string {
+  if (!isValidType(kind)) throw new Error(`bad uri kind \`${kind}\``);
+  return formatUri({ kind, id, rev, frag });
 }
 
 /** A file's lines (`file:src/a.rs#L10-20`, `file:src/a.rs@git:abc#L3`
  *  at a revision): what Ask About This names for an editor or diff
  *  selection. */
-export function fileLinesRef(path: string, start: number, end: number, rev: string | null = null): string {
-  return ref("file", path, rev, start === end ? `L${start}` : `L${start}-${end}`);
+export function fileLinesUri(path: string, start: number, end: number, rev: string | null = null): string {
+  return uri("file", path, rev, start === end ? `L${start}` : `L${start}-${end}`);
 }
 
-/** The kind of a ref string, or null when it isn't a canonical ref. */
-export function kindOf(text: string): string | null {
-  return parseRef(text)?.kind ?? null;
+/** The kind of a uri string, or null when it isn't a canonical uri. */
+export function typeOf(text: string): string | null {
+  return parseUri(text)?.kind ?? null;
 }
 
 // ---------------------------------------------------------------------------
-// Builders. A ref's owner spells it and everyone else carries it: this file
+// Builders. A uri's owner spells it and everyone else carries it: this file
 // is the one place in the desktop that writes a kind prefix
 // (`refs.guard.test.ts` fails on a hand-built or hand-parsed one anywhere
-// else). A caller names the kind through a builder here, or `refOf`.
+// else). A caller names the kind through a builder here, or `uriOf`.
 // ---------------------------------------------------------------------------
 
 /** `<kind>:<id>` for any kind. */
-export function refOf(kind: string, id: string): string {
-  return ref(kind, id);
+export function uriOf(kind: string, id: string): string {
+  return uri(kind, id);
 }
 
-/** The id of `text` when it is a ref of `kind`, else null. */
+/** The id of `text` when it is a uri of `kind`, else null. */
 export function idOf(text: string, kind: string): string | null {
-  const parsed = parseRef(text);
+  const parsed = parseUri(text);
   return parsed !== null && parsed.kind === kind ? parsed.id : null;
 }
 
-/** Whether `text` is a ref of `kind`. */
-export function isRefOfKind(text: string, kind: string): boolean {
-  return kindOf(text) === kind;
+/** Whether `text` is a uri of `kind`. */
+export function isUriOfType(text: string, kind: string): boolean {
+  return typeOf(text) === kind;
 }
 
 /** A thread (`thr3` → `thread:thr3`). */
-export const threadRef = (id: string): string => refOf("thread", id);
+export const threadUri = (id: string): string => uriOf("thread", id);
 /** A stream (`str1` → `stream:str1`). */
-export const streamRef = (id: string): string => refOf("stream", id);
+export const streamUri = (id: string): string => uriOf("stream", id);
 /** An effort (`eff12` → `effort:eff12`). */
-export const effortRef = (id: string): string => refOf("effort", id);
+export const effortUri = (id: string): string => uriOf("effort", id);
 /** A wiki comment (`cmt12` → `comment:cmt12`). */
-export const commentRef = (id: string): string => refOf("comment", id);
+export const commentUri = (id: string): string => uriOf("comment", id);
 /** An agent session (`ses3` → `agent_session:ses3`). */
-export const agentSessionRef = (id: string): string => refOf("agent_session", id);
+export const agentSessionUri = (id: string): string => uriOf("agent_session", id);
 /** A wiki page (`architecture` → `wiki:architecture`). */
-export const wikiRef = (slug: string): string => refOf("wiki", slug);
+export const wikiUri = (slug: string): string => uriOf("wiki", slug);
 /** A logged event, by its id. */
-export const eventRef = (id: string): string => refOf("event", id);
+export const eventUri = (id: string): string => uriOf("event", id);
 /** A command proposal (`command_proposal.id`). */
-export const proposalRef = (id: string | number): string => refOf("proposal", String(id));
+export const proposalUri = (id: string | number): string => uriOf("proposal", String(id));
 /** A `.oxplow/project.yaml` key (`config:snapshotRetentionDays`). */
-export const configRef = (key: string): string => refOf("config", key);
+export const configUri = (key: string): string => uriOf("config", key);
 /** A work item, whichever list holds it (`work_item:<provider>:<id>`). */
-export const workItemRef = (provider: string, id: string): string => refOf("work_item", `${provider}:${id}`);
+export const workItemUri = (provider: string, id: string): string => uriOf("work_item", `${provider}:${id}`);
 
 // Query params after a route name or a lens id: `?k=v&k=v`. Values are
 // percent-encoded the way `URLSearchParams` reads them, but only the
 // characters that would break the id are escaped — the query syntax
 // (`&`, `=`, `+`, `%`) and the grammar's reserved `@` and `#` — so
-// `path=src/a.ts&left=ref:abc` stays readable. The encoded text is a valid
-// canonical ref of its kind (`page:` / `lens:`) as written, so it is parsed
-// from the RAW text after the kind, not from `parseRef`'s decoded id (which
+// `path=src/a.ts&left=uri:abc` stays readable. The encoded text is a valid
+// canonical uri of its kind (`page:` / `lens:`) as written, so it is parsed
+// from the RAW text after the kind, not from `parseUri`'s decoded id (which
 // would turn an escaped `&` back into a separator).
 
 export type ParamValue = string | number | null | undefined;
@@ -196,15 +196,15 @@ export function withParams(head: string, params: Record<string, ParamValue>): st
   return `${head}${head.includes("?") ? "&" : "?"}${qs}`;
 }
 
-/** The part of a `page:` / `lens:` ref's raw text after its kind, split
+/** The part of a `page:` / `lens:` uri's raw text after its kind, split
  *  into its (decoded) head and query. Null when `text` isn't of `kind`. */
-export function splitKindParams(text: string, kind: string): { head: string; params: URLSearchParams } | null {
-  const raw = rawAfterKind(text, kind);
+export function splitTypeParams(text: string, kind: string): { head: string; params: URLSearchParams } | null {
+  const raw = rawAfterType(text, kind);
   return raw === null ? null : splitParams(raw);
 }
 
 /** The raw text after `<kind>:`, undecoded; null when `text` isn't of `kind`. */
-export function rawAfterKind(text: string, kind: string): string | null {
+export function rawAfterType(text: string, kind: string): string | null {
   const colon = text.indexOf(":");
   return colon !== -1 && text.slice(0, colon) === kind ? text.slice(colon + 1) : null;
 }
@@ -217,31 +217,31 @@ export function splitParams(raw: string): { head: string; params: URLSearchParam
 }
 
 /** A shell route: `page:<name>[?params]`. */
-export function pageRef(name: string, params?: Record<string, ParamValue>): string {
+export function pageUri(name: string, params?: Record<string, ParamValue>): string {
   const head = `page:${name}`;
   return params ? withParams(head, params) : head;
 }
 
 /** An extension's collector: the contribution `collector:<extension>/<id>`. */
-export function collectorRef(extension: string, id: string): string {
-  return refOf("collector", `${extension}/${id}`);
+export function collectorUri(extension: string, id: string): string {
+  return uriOf("collector", `${extension}/${id}`);
 }
 
 /** An extension's page: the contribution `page:<extension>/<page>[?params]`
  *  (a shell route has no slash). */
-export function extPageRef(extension: string, page: string, params?: Record<string, ParamValue>): string {
-  return pageRef(`${extension}/${page}`, params);
+export function extPageUri(extension: string, page: string, params?: Record<string, ParamValue>): string {
+  return pageUri(`${extension}/${page}`, params);
 }
 
 /** The kinds of contribution named globally (a command's bus id, a metric
- *  key): their refs carry no extension. Every other contribution's ref is
+ *  key): their refs carry no extension. Every other contribution's uri is
  *  `<kind>:<extension>/<id>` (`contribution::ContributionKind::global_name`). */
 const GLOBAL_CONTRIBUTION_KINDS = new Set(["command", "measure", "metric", "dimension", "event_type", "ref_kind"]);
 
-/** A contribution's ref as its kind, its extension (null for a globally
+/** A contribution's uri as its kind, its extension (null for a globally
  *  named kind) and its id; null for a string that isn't one. */
 export function contributionOf(text: string): { kind: string; extension: string | null; id: string } | null {
-  const r = parseRef(text);
+  const r = parseUri(text);
   if (!r) return null;
   if (GLOBAL_CONTRIBUTION_KINDS.has(r.kind)) return { kind: r.kind, extension: null, id: r.id };
   const slash = r.id.indexOf("/");
@@ -251,14 +251,14 @@ export function contributionOf(text: string): { kind: string; extension: string 
 
 /** A metric's page: `metric:<key>[?params]` — its view (range, branch, …)
  *  as a query, the way a lens's params are. */
-export function metricRef(key: string, params?: Record<string, ParamValue>): string {
+export function metricUri(key: string, params?: Record<string, ParamValue>): string {
   const head = `metric:${escapeId(key)}`;
   return params ? withParams(head, params) : head;
 }
 
 /** A lens: `lens:<extension>/<slug>[?params]`; params are the caller's,
  *  in the order given. */
-export function lensRef(lensId: string, params?: Record<string, ParamValue>): string {
+export function lensUri(lensId: string, params?: Record<string, ParamValue>): string {
   const head = `lens:${escapeId(lensId)}`;
   return params ? withParams(head, params) : head;
 }

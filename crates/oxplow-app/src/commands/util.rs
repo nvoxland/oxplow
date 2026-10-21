@@ -47,7 +47,7 @@ pub fn failed(e: impl std::fmt::Display) -> CommandError {
 }
 
 /// The id a `<kind>:<id>` ref names (`thread:thr3` → `thr3`) — the one way
-/// a command's input names a record (`.context/refs.md`); anything else is
+/// a command's input names a record (`.context/resources.md`); anything else is
 /// refused at `field`, saying the form.
 pub fn ref_body<'a>(raw: &'a str, kind: &str, field: &str) -> Result<&'a str, CommandError> {
     raw.strip_prefix(kind)

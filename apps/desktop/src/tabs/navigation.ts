@@ -1,7 +1,7 @@
 /// Where `window.show/navigate` takes the person: the stream and thread to
 /// show and the page to open there. Pure over the window's thread lists;
 /// `App.tsx` does it (`clientHost.ts`).
-import { parseRef } from "../refs/ref.js";
+import { parseUri } from "../uri/uri.js";
 import { refTarget, type RefTarget } from "./refOpener.js";
 import type { TabRef } from "./tabState.js";
 
@@ -23,7 +23,7 @@ export interface NavigationPlan {
 
 /** `ref` as a stream id: `stream:str1` or `str1`. */
 function streamIdOf(ref: string): string {
-  const parsed = parseRef(ref);
+  const parsed = parseUri(ref);
   return parsed && parsed.kind === "stream" ? parsed.id : ref;
 }
 
