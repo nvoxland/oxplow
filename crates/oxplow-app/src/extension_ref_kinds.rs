@@ -240,7 +240,7 @@ fn escapable(c: char) -> bool {
 /// can't match (`^[A-Z]+-\d+$`), so a failing match gives each one back
 /// at most once. What is kept spells every set out — `\d` is `[0-9]`,
 /// never Rust's Unicode digits — so neither engine reads it its own way.
-fn id_pattern(pattern: &str) -> Result<String, String> {
+pub(crate) fn id_pattern(pattern: &str) -> Result<String, String> {
     if pattern.len() > MAX_ID_PATTERN {
         return Err(format!("it is longer than {MAX_ID_PATTERN} characters"));
     }

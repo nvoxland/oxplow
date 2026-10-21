@@ -2858,6 +2858,16 @@ export type ExtensionPanel = {
 	count: string | null,
 };
 
+/**
+ *  A resource an extension declares (valid ones; invalid ones are in its
+ *  `errors`).
+ */
+export type ExtensionResource = {
+	decl: ResourceDecl,
+	/**  `file:line` of the declaration. */
+	declaredAt: string,
+};
+
 /**  What an extension adds to the core UI (`ui:` in its manifest). */
 export type ExtensionUi = {
 	/**  Lenses mounted into core pages (valid ones). */
@@ -2913,6 +2923,11 @@ export type Extension_Deserialize = {
 	 *  them, `vocabulary_reactor`).
 	 */
 	refKinds: RefKindDecl[],
+	/**
+	 *  Resources it declares (valid ones — the vocabulary registers
+	 *  them, `vocabulary_reactor`).
+	 */
+	resources: ExtensionResource[],
 	/**
 	 *  Effects it declares (valid ones — each runs only once a person
 	 *  approves it, `effects`).
@@ -3066,6 +3081,11 @@ export type Extension_Serialize = {
 	 *  them, `vocabulary_reactor`).
 	 */
 	refKinds: RefKindDecl[],
+	/**
+	 *  Resources it declares (valid ones — the vocabulary registers
+	 *  them, `vocabulary_reactor`).
+	 */
+	resources: ExtensionResource[],
 	/**
 	 *  Effects it declares (valid ones — each runs only once a person
 	 *  approves it, `effects`).
@@ -5497,6 +5517,15 @@ export type PanelPlacement = {
  */
 export type PanelScope = "project" | "stream" | "thread";
 
+/**
+ *  One of a resource's params: whether every URI carries it, and the
+ *  pattern its (decoded) value matches, anchored by its author.
+ */
+export type ParamDecl = {
+	required?: boolean,
+	pattern?: string | null,
+};
+
 /**  What a lens param is to its page. */
 export type ParamRole = 
 /**  Narrows what the page shows; a control in the page's rail. */
@@ -5896,6 +5925,24 @@ export type ReportedTab = {
 	 *  Up and Down step through.
 	 */
 	origin?: string | null,
+};
+
+/**  A declared resource. */
+export type ResourceDecl = {
+	/**  `<extension>/<name>` (`oxplow/file`). */
+	name: string,
+	label: string,
+	params: { [key in string]: ParamDecl },
+	/**  It takes params beyond its own (a page's or a lens's). */
+	additional: boolean,
+	/**  The view whose rows name each one, by URI. */
+	resolve: string | null,
+	/**  The column of `resolve` that titles one (default `title`). */
+	title: string | null,
+	/**  The view whose `uri`, `title` and `body` search indexes. */
+	searchable: string | null,
+	icon: string | null,
+	wikilink: WikilinkDecl | null,
 };
 
 /**  How long a namespace's event payloads and large content are kept. */
@@ -6699,6 +6746,15 @@ export type VisitedPage = {
 	page_kind: string,
 	page_id: string,
 	visit_count: number,
+};
+
+/**
+ *  `[[<prefix>:<value>]]` sugar: a wikilink with this prefix names the
+ *  resource with `param` set to the value (`[[git:abc1234]]` → a commit).
+ */
+export type WikilinkDecl = {
+	prefix: string,
+	param: string,
 };
 
 export type Withheld = {

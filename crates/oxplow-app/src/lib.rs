@@ -118,6 +118,7 @@ pub mod extension_models;
 #[cfg(test)]
 mod extension_private_state_tests;
 pub mod extension_ref_kinds;
+pub mod extension_resources;
 #[cfg(test)]
 mod extension_run_health_tests;
 #[cfg(test)]

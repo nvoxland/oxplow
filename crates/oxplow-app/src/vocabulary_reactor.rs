@@ -35,6 +35,7 @@ use crate::extension_catalog::CatalogSnapshot;
 use crate::extension_event_types::EventTypes;
 use crate::extension_ref_kinds::RefKindDecl;
 use crate::extensions::Extension;
+use oxplow_domain::uri::resources::{ResourceDecl, ResourceRegistry};
 
 /// What the generation needs of the host to build a vocabulary: the
 /// active work list's id recognizer, asked at each build.
@@ -55,6 +56,8 @@ struct Declares {
     types: EventTypes,
     /// Its `ref_kinds:`.
     kinds: Vec<RefKindDecl>,
+    /// Its `resources:`.
+    resources: Vec<crate::extension_resources::ExtensionResource>,
     /// Its reactions to other extensions' types.
     subscriptions: Vec<crate::extensions::ForeignSubscription>,
 }
@@ -163,6 +166,7 @@ fn declarations(extensions: &[Extension]) -> Declared {
             extension: extension.name.clone(),
             types: extension.event_types.clone(),
             kinds: extension.ref_kinds.clone(),
+            resources: extension.resources.clone(),
             subscriptions: extension.subscriptions.clone(),
         })
         .collect()
@@ -274,8 +278,40 @@ fn build_tx(
     restate_tx(tx, &rows, now)?;
     let kinds = register_kinds(declared, &mut errors);
     oxplow_db::ref_kind_store::restate_tx(tx, &kind_rows(&kinds, declared))?;
+    let (resources, rows) = register_resources(declared, &mut errors);
+    oxplow_db::resource_store::restate_tx(tx, &rows)?;
     oxplow_db::replaceable_store::restate_tx(tx)?;
-    Ok((Vocabulary::new(events, kinds), errors))
+    Ok((
+        Vocabulary::new(events, kinds).with_resources(resources),
+        errors,
+    ))
+}
+
+/// Every extension's resources, in load order: one an earlier extension
+/// already declares is an error on the later one, and isn't registered.
+fn register_resources<'a>(
+    declared: &'a Declared,
+    errors: &mut BTreeMap<String, Vec<String>>,
+) -> (ResourceRegistry, Vec<(&'a ResourceDecl, &'a str)>) {
+    let mut registry = ResourceRegistry::default();
+    let mut rows = Vec::new();
+    for Declares {
+        extension,
+        resources,
+        ..
+    } in declared
+    {
+        for r in resources {
+            match registry.register(r.decl.clone()) {
+                Ok(()) => rows.push((&r.decl, extension.as_str())),
+                Err(e) => errors
+                    .entry(extension.clone())
+                    .or_default()
+                    .push(format!("{}: {e}", r.declared_at)),
+            }
+        }
+    }
+    (registry, rows)
 }
 
 /// Core's kinds plus every extension's. A kind two extensions both
@@ -627,6 +663,85 @@ mod tests {
                 ],
             ]
         );
+    }
+
+    // Every resource is an extension's, oxplow's included (foundation's
+    // `resources:`): the vocabulary registers them and publishes them as
+    // `v_resource`.
+    #[tokio::test]
+    async fn every_resource_is_an_extensions_and_is_listed() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        crate::test_fixtures::activate_with_problems(&f.svc).await;
+        let rows = f
+            .svc
+            .sql
+            .query_sql(
+                "SELECT resource, extension, resolve, title, searchable, json_extract(params, '$.id.required') \
+                 FROM v_resource WHERE resource IN ('oxplow/effort', 'oxplow/turn', 'oxplow/file') \
+                 ORDER BY resource",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap()
+            .rows;
+        let text = |s: &str| SqlCell::Text(s.into());
+        let null = SqlCell::Null(());
+        assert_eq!(
+            rows,
+            vec![
+                vec![
+                    text("oxplow/effort"),
+                    text("oxplow-foundation"),
+                    text("v_effort"),
+                    null.clone(),
+                    text("v_search_effort"),
+                    SqlCell::Int(1)
+                ],
+                vec![
+                    text("oxplow/file"),
+                    text("oxplow-foundation"),
+                    null.clone(),
+                    null.clone(),
+                    null.clone(),
+                    null.clone()
+                ],
+                vec![
+                    text("oxplow/turn"),
+                    text("oxplow-foundation"),
+                    text("v_agent_turn"),
+                    text("prompt"),
+                    text("v_search_turn"),
+                    SqlCell::Int(1)
+                ],
+            ]
+        );
+        let vocabulary = f.svc.vocabulary.current();
+        let effort =
+            oxplow_domain::uri::oxplow_uri::OxplowUri::parse("oxplow:oxplow/effort?id=eff1")
+                .unwrap();
+        assert_eq!(vocabulary.resources.validate(&effort), Ok(()));
+    }
+
+    // oxplow-foundation declares a resource for every kind of thing oxplow
+    // names today, so the switch to URIs loses none.
+    #[tokio::test]
+    async fn foundation_declares_a_resource_for_every_kind() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        crate::test_fixtures::activate_with_problems(&f.svc).await;
+        let vocabulary = f.svc.vocabulary.current();
+        let declared: Vec<String> = vocabulary
+            .resources
+            .resources()
+            .filter(|r| r.name.extension() == "oxplow")
+            .map(|r| r.name.name().to_string())
+            .collect();
+        let missing: Vec<String> = oxplow_domain::uri::types::core_types()
+            .kinds()
+            .map(|k| k.kind.clone())
+            .filter(|k| !declared.contains(k))
+            .collect();
+        assert!(missing.is_empty(), "no resource for {missing:?}");
     }
 
     #[tokio::test]

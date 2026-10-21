@@ -2014,6 +2014,9 @@ pub struct Extension {
     /// Ref kinds it declares (valid ones — the vocabulary registers
     /// them, `vocabulary_reactor`).
     pub ref_kinds: Vec<crate::extension_ref_kinds::RefKindDecl>,
+    /// Resources it declares (valid ones — the vocabulary registers
+    /// them, `vocabulary_reactor`).
+    pub resources: Vec<crate::extension_resources::ExtensionResource>,
     /// Effects it declares (valid ones — each runs only once a person
     /// approves it, `effects`).
     pub effects: Vec<crate::effects::EffectDecl>,
@@ -3149,6 +3152,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         custom_components: Vec::new(),
         event_types: Default::default(),
         ref_kinds: Vec::new(),
+        resources: Vec::new(),
         effects: Vec::new(),
         implementations: Vec::new(),
         skills: Vec::new(),
@@ -3307,6 +3311,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     let replacement_files = m.ui.replacements.clone();
     let page_files = m.pages.clone();
     let ref_kind_files = m.ref_kinds.clone();
+    let resource_files = m.resources.clone();
     let slot_files = {
         if let Some(v) = m.event_types.as_ref() {
             let (declared, errors) = crate::extension_event_types::parse_event_types(
@@ -3979,6 +3984,19 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             &manifest,
         );
         ext.ref_kinds = kinds;
+        ext.errors.extend(errors);
+    }
+    // After models: a resource is titled by one.
+    if let Some(v) = resource_files {
+        let (resources, errors) = crate::extension_resources::parse_resources(
+            name,
+            &ext.namespace,
+            &ext.models,
+            &v,
+            &file,
+            &manifest,
+        );
+        ext.resources = resources;
         ext.errors.extend(errors);
     }
     if let Some(v) = panel_files {
@@ -4960,6 +4978,7 @@ pub(super) fn clear_contributions(ext: &mut Extension) {
     ext.custom_components.clear();
     ext.event_types = Default::default();
     ext.ref_kinds.clear();
+    ext.resources.clear();
     ext.effects.clear();
     ext.implementations.clear();
     ext.skills.clear();

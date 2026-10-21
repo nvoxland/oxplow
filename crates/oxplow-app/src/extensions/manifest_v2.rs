@@ -251,6 +251,10 @@ pub struct ManifestV2 {
     #[serde(default)]
     #[schemars(with = "Option<Vec<crate::extension_ref_kinds::RefKindFile>>")]
     pub ref_kinds: Option<Value>,
+    /// What its URIs may name (`oxplow:<extension>/<resource>`).
+    #[serde(default)]
+    #[schemars(with = "Option<Vec<crate::extension_resources::ResourceFile>>")]
+    pub resources: Option<Value>,
     /// Capability implementations: built-ins of core's it declares.
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::implementations::ImplementationFile>>")]

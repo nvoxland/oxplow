@@ -191,6 +191,303 @@ pages:
   - { id: diff, title: Diff, icon: git-compare, params: [path, left, right, label], component: "oxplow:diff" }
   - { id: diff-view, title: Changes, icon: git-compare, params: [snapshot, effort, start, end], component: "oxplow:diff-view" }
   - { id: duplicate-block, title: Duplicate Block, icon: copy, params: [left, left_lines, left_at, right, right_lines, right_at], component: "oxplow:duplicate-block" }
+# What oxplow's URIs name (`oxplow:oxplow/<resource>?<params>`): declared
+# here like any extension's resources, so none is special
+# (.context/resources.md). A param's `pattern` matches its decoded value.
+resources:
+  - name: project
+    label: Project
+    params: { id: { required: true, pattern: '^[A-Za-z0-9._-]+$' } }
+    icon: package
+  - name: stream
+    label: Stream
+    params: { id: { required: true, pattern: '^str[0-9]+$' } }
+    resolve: stream
+    icon: git-branch
+  - name: thread
+    label: Thread
+    params: { id: { required: true, pattern: '^thr[0-9]+$' } }
+    resolve: thread
+    searchable: search_thread
+    icon: message-square
+  - name: effort
+    label: Effort
+    params: { id: { required: true, pattern: '^eff[0-9]+$' } }
+    resolve: effort
+    searchable: search_effort
+    icon: flag
+  - name: turn
+    label: Agent turn
+    params: { id: { required: true, pattern: '^trn[0-9]+$' } }
+    resolve: agent_turn
+    title: prompt
+    searchable: search_turn
+    icon: activity
+  - name: snapshot
+    label: Snapshot
+    params: { id: { required: true, pattern: '^[A-Za-z0-9]+$' } }
+    resolve: snapshot
+    title: created_at
+    icon: history
+  - name: commit
+    label: Commit
+    params: { sha: { required: true, pattern: '^[0-9a-f]{7,64}$' } }
+    resolve: commit
+    title: subject
+    searchable: search_commit
+    icon: git-commit
+    wikilink: { prefix: git, param: sha }
+  - name: branch
+    label: Branch
+    params: { name: { required: true } }
+    icon: git-branch
+  - name: file
+    label: File
+    params: { path: { required: true }, rev: { pattern: '^[a-z]+:[!-~]+$' } }
+    icon: file-text
+    wikilink: { prefix: file, param: path }
+  - name: dir
+    label: Directory
+    params: { path: { required: true }, rev: { pattern: '^[a-z]+:[!-~]+$' } }
+    icon: folder
+    wikilink: { prefix: dir, param: path }
+  - name: symbol
+    label: Symbol
+    params: { path: { required: true }, symbol: { required: true }, rev: { pattern: '^[a-z]+:[!-~]+$' } }
+    resolve: symbol
+    title: name
+    icon: list-tree
+  - name: work_item
+    label: Work item
+    params: { provider: { required: true, pattern: '^[a-z][a-z0-9_-]*$' }, id: { required: true } }
+    resolve: work_item
+    searchable: search_work_item
+    icon: check-square
+  - name: wiki
+    label: Wiki page
+    params: { slug: { required: true, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$' } }
+    resolve: knowledge_page
+    searchable: search_wiki
+    icon: book-open
+  - name: comment
+    label: Comment
+    params: { id: { required: true, pattern: '^cmt[0-9]+$' } }
+    resolve: comment
+    title: body
+    searchable: search_comment
+    icon: message-square
+  - name: event
+    label: Event
+    params: { id: { required: true, pattern: '^[0-9a-f-]{36}$' } }
+    resolve: event
+    title: type
+    icon: activity
+  - name: answer
+    label: Answer
+    params: { id: { required: true, pattern: '^[0-9]+$' } }
+    resolve: thread_answer
+    icon: message-square
+  - name: ai_model
+    label: Language model
+    params: { name: { required: true, pattern: '^[!-~]+$' } }
+    icon: server
+  - name: extension
+    label: Extension
+    params: { name: { required: true, pattern: '^[a-z0-9-]+$' } }
+    resolve: extension
+    title: name
+    icon: package
+  - name: extension_deployment
+    label: Extension deployment
+    params: { name: { required: true, pattern: '^[a-z0-9-]+$' }, hash: { required: true } }
+    icon: package
+  - name: config
+    label: Setting
+    params: { key: { required: true, pattern: '^[A-Za-z][A-Za-z0-9]*$' } }
+    icon: settings
+  - name: finding
+    label: Finding
+    params: { id: { required: true, pattern: '^[!-~]+$' } }
+    icon: triangle-alert
+    wikilink: { prefix: finding, param: id }
+  - name: thread_note
+    label: Thread note
+    params: { id: { required: true, pattern: '^not[0-9]+$' } }
+    resolve: thread_note
+    title: body
+    searchable: search_thread_note
+    icon: file-text
+  - name: agent_session
+    label: Agent session
+    params: { id: { required: true, pattern: '^ses[0-9]+$' } }
+    resolve: agent_session
+    title: display_name
+    searchable: search_agent_session
+    icon: terminal
+  - name: handoff
+    label: Handoff
+    params: { id: { required: true, pattern: '^hnd[0-9]+$' } }
+    resolve: handoff
+    title: body
+    searchable: search_handoff
+    icon: inbox
+  - name: dashboard
+    label: Dashboard
+    params: { id: { required: true, pattern: '^dsh[0-9]+$' } }
+    resolve: dashboard
+    searchable: search_dashboard
+    icon: layout-dashboard
+  - name: subagent
+    label: Subagent
+    params: { session: { required: true, pattern: '^ses[0-9]+$' }, agent: { required: true, pattern: '^[!-.0-~]+$' } }
+    resolve: subagent
+    title: id
+    icon: terminal
+  - name: run
+    label: Test run
+    params: { id: { required: true, pattern: '^[0-9]+$' } }
+    icon: circle-check
+  - name: proposal
+    label: Proposal
+    params: { id: { required: true, pattern: '^[0-9]+$' } }
+    resolve: command_proposal
+    title: command
+    icon: bell
+  - name: claim
+    label: Claim
+    params: { id: { required: true, pattern: '^[0-9]+$' } }
+    resolve: claim
+    title: statement
+    icon: circle-dot
+  - name: decision
+    label: Decision
+    params: { id: { required: true, pattern: '^[0-9]+$' } }
+    resolve: decision
+    title: question
+    searchable: search_decision
+    icon: circle-dot
+  - name: job_run
+    label: Job run
+    params: { id: { required: true, pattern: '^[0-9a-f-]{36}$' } }
+    resolve: job_run
+    title: intent_key
+    icon: activity
+  - name: ai_call
+    label: Model call
+    params: { id: { required: true, pattern: '^[0-9]+$' } }
+    resolve: ai_call
+    title: role
+    icon: server
+  - name: consumer
+    label: Event consumer
+    params: { name: { required: true } }
+    icon: zap
+  - name: block
+    label: Code block
+    params: { path: { required: true }, lines: { required: true, pattern: '^[0-9]+-[0-9]+$' } }
+    icon: copy
+  - name: test
+    label: Test
+    params: { class: { required: true }, name: { required: true } }
+    icon: bug
+  - name: nudge
+    label: Nudge
+    params: { kind: { required: true } }
+    icon: bell
+  - name: model
+    label: Model
+    params: { model: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    icon: database
+  - name: measure
+    label: Measure
+    params: { measure: { required: true } }
+    icon: bar-chart-3
+  - name: metric
+    label: Metric
+    params: { metric: { required: true } }
+    icon: bar-chart-3
+  - name: dimension
+    label: Dimension
+    params: { dimension: { required: true } }
+    icon: columns-3
+  - name: collector
+    label: Collector
+    params: { collector: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    resolve: collector_run
+    title: id
+    icon: database
+  - name: event_type
+    label: Event type
+    params: { event_type: { required: true } }
+    icon: zap
+  - name: ref_kind
+    label: Ref kind
+    params: { ref_kind: { required: true } }
+    icon: link
+  - name: command
+    label: Command
+    params: { command: { required: true } }
+    icon: zap
+  - name: job
+    label: Job
+    params: { job: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    icon: server
+  - name: ai_profile
+    label: AI profile
+    params: { ai_profile: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    icon: server
+  - name: effect
+    label: Effect
+    params: { effect: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    icon: zap
+  - name: advisory
+    label: Advisory
+    params: { advisory: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    icon: bell
+  - name: skill
+    label: Skill
+    params: { skill: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    icon: book-open
+  - name: implementation
+    label: Implementation
+    params: { implementation: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    icon: box
+  - name: provider
+    label: Provider
+    params: { provider: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    icon: server
+  - name: lens
+    label: Lens
+    params: { lens: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    additional: true
+    resolve: lens
+    searchable: search_lens
+    icon: list-tree
+  - name: page
+    label: Page
+    params: { page: { required: true } }
+    additional: true
+    icon: file-text
+  - name: panel
+    label: Panel
+    params: { panel: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    icon: layout-dashboard
+  - name: slot
+    label: Slot
+    params: { slot: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    icon: box
+  - name: decorator
+    label: Decorator
+    params: { decorator: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    icon: tag
+  - name: replacement
+    label: Replacement
+    params: { replacement: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    icon: copy
+  - name: custom_component
+    label: Custom component
+    params: { custom_component: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    icon: box
 ui:
   slots:
     # Settings → Extensions: the Extensions page's list and deployments,

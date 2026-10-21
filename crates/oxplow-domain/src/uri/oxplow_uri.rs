@@ -57,6 +57,20 @@ impl fmt::Display for ResourceName {
     }
 }
 
+impl serde::Serialize for ResourceName {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(self)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ResourceName {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        String::deserialize(d)?
+            .parse()
+            .map_err(serde::de::Error::custom)
+    }
+}
+
 impl FromStr for ResourceName {
     type Err = UriParseError;
 

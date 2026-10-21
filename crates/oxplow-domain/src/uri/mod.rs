@@ -32,6 +32,7 @@
 pub mod build;
 pub mod grammar;
 pub mod oxplow_uri;
+pub mod resources;
 pub mod types;
 
 use std::collections::BTreeSet;

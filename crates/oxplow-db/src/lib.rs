@@ -50,6 +50,7 @@ pub mod reasoning_store;
 pub mod ref_kind_store;
 pub mod ref_models;
 pub mod replaceable_store;
+pub mod resource_store;
 pub mod search_store;
 pub mod semantic_layer;
 pub mod snapshot_tree;

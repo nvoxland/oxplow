@@ -3425,6 +3425,15 @@ already counts every extension's runs.
 declaration is a load problem, like a model's contract drift, not a
 failing run that counts toward a disable.
 
+## Resources
+
+`resources:` declares what the extension's URIs name
+(`oxplow:<extension>/<resource>?<params>`): its params, the model that
+titles one, search, an icon and `[[prefix:…]]` sugar.
+oxplow-foundation declares oxplow's own the same way. The format, the
+checks and the registry are in `.context/resources.md` "oxplow URIs and
+declared resources"; `ref_kinds:` below is what it replaces.
+
 ## Ref kinds
 
 `ref_kinds:` (P8.D6; **stable since P10**; `extension_ref_kinds.rs`,

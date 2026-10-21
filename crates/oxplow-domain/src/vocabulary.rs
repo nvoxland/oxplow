@@ -23,11 +23,23 @@ use crate::DomainError;
 pub struct Vocabulary {
     pub events: EventSchemaRegistry,
     pub kinds: TypeRegistry,
+    /// Every declared resource (each extension's `resources:`,
+    /// oxplow-foundation's included).
+    pub resources: crate::uri::resources::ResourceRegistry,
 }
 
 impl Vocabulary {
     pub fn new(events: EventSchemaRegistry, kinds: TypeRegistry) -> Self {
-        Self { events, kinds }
+        Self {
+            events,
+            kinds,
+            resources: Default::default(),
+        }
+    }
+
+    /// The same vocabulary with `resources` registered.
+    pub fn with_resources(self, resources: crate::uri::resources::ResourceRegistry) -> Self {
+        Self { resources, ..self }
     }
 
     /// Core's event types and ref kinds, nothing more.

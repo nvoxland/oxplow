@@ -14828,5 +14828,64 @@
         "id"
       ]
     }
+  },
+  "resource": {
+    "1": {
+      "columns": [
+        {
+          "name": "resource",
+          "type": "TEXT",
+          "doc": "`<extension>/<name>`: `oxplow/file`, `acme/pr`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it (`oxplow-foundation` for oxplow's own)."
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "What one is called (`Pull request`)."
+        },
+        {
+          "name": "params",
+          "type": "TEXT",
+          "doc": "JSON object of its params by name, each `{ required, pattern }`: a URI carries every required one, and each value matches its pattern."
+        },
+        {
+          "name": "additional",
+          "type": "INTEGER",
+          "doc": "1 when a URI may carry params beyond its own (a page's or a lens's)."
+        },
+        {
+          "name": "resolve",
+          "type": "TEXT",
+          "doc": "The view whose rows name each one; NULL when no model holds it (a file, a page)."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The column of `resolve` that titles one; NULL means `title`."
+        },
+        {
+          "name": "searchable",
+          "type": "TEXT",
+          "doc": "The view search indexes it from; NULL when search doesn't."
+        },
+        {
+          "name": "icon",
+          "type": "TEXT",
+          "doc": "The icon it is drawn with."
+        },
+        {
+          "name": "wikilink",
+          "type": "TEXT",
+          "doc": "JSON `{ prefix, param }`: `[[<prefix>:<value>]]` names it with that param set; NULL when it has no sugar."
+        }
+      ],
+      "key": [
+        "resource"
+      ]
+    }
   }
 }

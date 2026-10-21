@@ -15,6 +15,44 @@ of the resource's identity. Today the grammar below is still
 `<kind>:<id>`; the change to literal `oxplow:<extension>/<type>?<params>#<view>`
 URIs is under way, and this doc follows it as it lands.
 
+## oxplow URIs and declared resources (built beside the refs; the switch follows)
+
+The grammar the refs move to is built and pinned, and nothing uses it yet:
+
+```
+oxplow:<extension>/<resource>[?<params>][#<view>]
+oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-20
+```
+
+- **Code.** Rust `oxplow_domain::uri::oxplow_uri` (`OxplowUri`,
+  `ResourceName`, `AnyUri` for a link that may be any scheme's); TS
+  `apps/desktop/src/uri/oxplowUri.ts` (a branded `OxplowUri` string,
+  `parseOxplowUri`, `formatUri`, `identityOf`, `paramOf`, `resourceOf`,
+  `isExternal`). Both split the string by hand (the URL standard reads `+`
+  as a space and normalizes paths, so the two languages would disagree)
+  and assert one golden fixture, `crates/oxplow-domain/tests/fixtures/uri.json`.
+- **Params are named, keys unique, order free.** The canonical form sorts
+  keys and leaves raw only ASCII letters, digits and `-._~/:?,@!$'()*;`;
+  everything else is `%XX`, uppercase hex. A raw `+` is a plus. So
+  `?id=4&group=5` and `?group=5&id=4` are one resource.
+- **The view is not the identity.** `identity()` / `identityOf` is the
+  canonical URI without its `#…`.
+- **Every resource is declared by an extension** — oxplow-foundation's
+  included, so none is special — in a `resources:` block:
+  `{ name, label, params: { <key>: { required, pattern } }, additional,
+  resolve, title, searchable, icon, wikilink: { prefix, param } }`
+  (`crates/oxplow-app/src/extension_resources.rs`). The extension segment
+  is the extension's name, or `oxplow` for the oxplow namespace (only a
+  bundled extension may take it). `resolve` names the extension's own
+  model (`v_<ext>_<model>`), or core's for the oxplow namespace
+  (`resolve: agent_turn`, `title: prompt`). A `pattern` is checked as an
+  id pattern is (anchored, no groups or negated classes, both engines read
+  it alike). The vocabulary registers them (`ResourceRegistry`, its
+  `validate` checks a URI's params) and publishes `v_resource`; a resource
+  two extensions declare is the later one's error.
+  `foundation_declares_a_resource_for_every_kind` pins that oxplow's
+  resources cover every kind the refs name today.
+
 ## Using refs (read this first)
 
 oxplow is a web of things that link to each other. Every thing has one

@@ -286,6 +286,17 @@
       },
       "default": null
     },
+    "resources": {
+      "description": "What its URIs may name (`oxplow:<extension>/<resource>`).",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/ResourceFile"
+      },
+      "default": null
+    },
     "implementations": {
       "description": "Capability implementations: built-ins of core's it declares.",
       "type": [
@@ -2872,6 +2883,109 @@
         "resolve",
         "page",
         "icon"
+      ]
+    },
+    "ResourceFile": {
+      "description": "A `resources:` entry as the manifest holds it.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/ParamDecl"
+          },
+          "default": {}
+        },
+        "additional": {
+          "type": "boolean",
+          "default": false
+        },
+        "resolve": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "title": {
+          "description": "The column of `resolve` that titles one (default `title`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "searchable": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "icon": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "wikilink": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/WikilinkDecl"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "label"
+      ]
+    },
+    "ParamDecl": {
+      "description": "One of a resource's params: whether every URI carries it, and the\npattern its (decoded) value matches, anchored by its author.",
+      "type": "object",
+      "properties": {
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "pattern": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "WikilinkDecl": {
+      "description": "`[[<prefix>:<value>]]` sugar: a wikilink with this prefix names the\nresource with `param` set to the value (`[[git:abc1234]]` → a commit).",
+      "type": "object",
+      "properties": {
+        "prefix": {
+          "type": "string"
+        },
+        "param": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "prefix",
+        "param"
       ]
     },
     "ImplementationFile": {
