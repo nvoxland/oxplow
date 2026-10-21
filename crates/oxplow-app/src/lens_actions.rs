@@ -169,7 +169,7 @@ pub struct FormStart {
     #[specta(type = oxplow_domain::Json)]
     pub values: Value,
     pub fixed: Vec<String>,
-    pub fields: Option<Vec<String>>,
+    pub fields: Option<Vec<crate::extensions::LensFormField>>,
     /// Fields picked from a list, with their choices.
     pub choices: BTreeMap<String, Vec<Choice>>,
 }
@@ -374,6 +374,22 @@ async fn form_start_unpinned(
                 );
             }
         }
+    }
+    // A secret is the command's to keep out of its record, and never
+    // starts with a value.
+    for field in form.fields.iter().flatten().filter(|f| f.secret()) {
+        let name = field.name();
+        let kept = command.unrecorded.iter().any(|k| k == name || k == "*");
+        if !kept {
+            return Err(CommandError::Invalid {
+                field: Some("/lens".into()),
+                message: format!(
+                    "`{name}` is secret but `{}` records it: the command must declare it `unrecorded`",
+                    command.id
+                ),
+            });
+        }
+        values.remove(name);
     }
     let choices = choices_for(svc, lens_root, &form.choices, &run.params, ctx).await?;
     Ok(FormStart {
@@ -1217,6 +1233,41 @@ actions:
         assert_eq!(items, vec![work_item_ref(fx.task)]);
     }
 
+    /// A secret field is one its command keeps out of its record: a form
+    /// whose command would record it is refused, and a secret never
+    /// starts with a value.
+    #[tokio::test]
+    async fn a_secret_field_is_one_its_command_doesnt_record() {
+        let (fx, root) = fixture().await;
+        let item = work_item_ref(fx.task);
+        std::fs::write(
+            root.join(".oxplow/extensions/acme/lenses/leaky.yaml"),
+            "title: Leaky\nviz: form\nparams: [{ name: ref }]\nquery: SELECT title FROM v_work_item WHERE ref = :ref\nform: { command: oxplow.work_item.update, defaults: { ref: '{{param.ref}}' }, fixed: [ref], fields: [{ name: title, secret: true }] }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join(".oxplow/extensions/acme/lenses/kept.yaml"),
+            "title: Kept\nviz: form\nquery: SELECT 'notes.txt' AS path, 'what was there' AS content\nform: { command: oxplow.file.create, fields: [path, { name: content, secret: true }] }\n",
+        )
+        .unwrap();
+        crate::test_fixtures::activate(&fx.svc).await;
+        let params = BTreeMap::from([("ref".to_string(), SqlCell::Text(item))]);
+        let ctx = extensions::LensContext::default();
+        let refused = form_start(&fx.svc, &root, "acme/leaky", params, &ctx)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            refused.contains("`title` is secret but `oxplow.work_item.update` records it"),
+            "{refused}"
+        );
+        let start = form_start(&fx.svc, &root, "acme/kept", BTreeMap::new(), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(start.values["path"], json!("notes.txt"));
+        assert!(start.values.get("content").is_none(), "{:?}", start.values);
+    }
+
     /// A form lens's fixed fields keep their `defaults` on submit, and its
     /// `fields` say which to show.
     #[tokio::test]
@@ -1240,7 +1291,10 @@ actions:
         .await
         .unwrap();
         assert_eq!(start.fixed, vec!["ref".to_string()]);
-        assert_eq!(start.fields, Some(vec!["title".to_string()]));
+        assert_eq!(
+            start.fields,
+            Some(vec![crate::extensions::LensFormField::Name("title".into())])
+        );
         assert_eq!(start.values["ref"], json!(item));
         submit_form(
             &fx.svc,

@@ -86,6 +86,8 @@ pub struct ExtensionCommand {
     /// The MCP tool it is also offered as (`tool:`), prefixed with its
     /// namespace: `oxplow_query_sql` ([`tool_name`]).
     pub tool: Option<String>,
+    /// The inputs kept out of its record (`CommandSpec::unrecorded`).
+    pub unrecorded: Vec<String>,
 }
 
 /// What runs an extension's command.
@@ -183,6 +185,10 @@ pub(crate) struct CommandFile {
     /// `<namespace>_<tool>` ([`tool_name`]).
     #[serde(default)]
     tool: Option<String>,
+    /// Its input's properties kept out of its record (a token, a key), or
+    /// `*` for all of it.
+    #[serde(default)]
+    unrecorded: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -567,9 +573,23 @@ fn command_of(
         .map(|t| tool_name(namespace, &t))
         .transpose()
         .map_err(at_name)?;
+    let properties = input_schema
+        .as_ref()
+        .and_then(|s| s.get("properties"))
+        .and_then(Value::as_object);
+    if let Some(name) = f
+        .unrecorded
+        .iter()
+        .find(|k| k.as_str() != "*" && !properties.is_some_and(|p| p.contains_key(k.as_str())))
+    {
+        return Err(at_name(format!(
+            "`unrecorded` names `{name}`, which isn't a property of its input"
+        )));
+    }
     Ok(ExtensionCommand {
         example,
         tool,
+        unrecorded: f.unrecorded,
         name,
         summary: f.summary,
         input_schema,
@@ -951,7 +971,7 @@ pub fn extension_command(
         needs: decl.needs.clone(),
         ui: decl.ui.clone(),
         op: None,
-        unrecorded: Vec::new(),
+        unrecorded: decl.unrecorded.clone(),
     };
     let script = match &decl.handler {
         CommandHandler::Scope { scope, op } => {
@@ -1657,6 +1677,38 @@ mod tests {
         let errors = project(d.path(), "my-review").errors.join("\n");
         assert!(
             errors.contains("`/ui/input`") && errors.contains("`{{tread}}` isn't a binding"),
+            "{errors}"
+        );
+    }
+
+    /// A command keeps the inputs it names out of its record (a token, a
+    /// key): each must be one of its input's properties, or `*`.
+    #[test]
+    fn a_command_keeps_named_inputs_out_of_its_record() {
+        let d = tempfile::tempdir().unwrap();
+        let schema = "    input_schema: { type: object, required: [ref], properties: { ref: { type: string } }, additionalProperties: false }";
+        let with_token = "    input_schema: { type: object, required: [ref], properties: { ref: { type: string }, token: { type: string } }, additionalProperties: false }";
+        write_ext(
+            d.path(),
+            "keeps",
+            &format!(
+                "{}    unrecorded: [token]\n",
+                GOOD.replace(schema, with_token)
+            ),
+            &[("handlers/finish_review.star", HANDLER)],
+        );
+        let ext = project(d.path(), "keeps");
+        assert_eq!(ext.errors, Vec::<String>::new());
+        assert_eq!(ext.commands[0].unrecorded, vec!["token".to_string()]);
+        write_ext(
+            d.path(),
+            "gone",
+            &format!("{GOOD}    unrecorded: [token]\n"),
+            &[("handlers/finish_review.star", HANDLER)],
+        );
+        let errors = project(d.path(), "gone").errors.join("\n");
+        assert!(
+            errors.contains("`unrecorded` names `token`, which isn't a property of its input"),
             "{errors}"
         );
     }

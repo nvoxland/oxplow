@@ -832,14 +832,23 @@
           },
           "default": []
         },
+        "mode": {
+          "description": "Whether it gathers something new (`create`) or edits what is saved\n(`edit`: Save when changed, Discard).",
+          "default": "create",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FormMode"
+            }
+          ]
+        },
         "fields": {
-          "description": "The fields to show, in order; the rest keep their starting values\nand are submitted with them. None: every field.",
+          "description": "The fields to show, in order: a name, or `{ name, visible_if,\nsecret }`. The rest keep their starting values and are submitted\nwith them. None: every field.",
           "type": [
             "array",
             "null"
           ],
           "items": {
-            "type": "string"
+            "$ref": "#/definitions/LensFormField"
           },
           "default": null
         },
@@ -861,6 +870,84 @@
         }
       },
       "additionalProperties": false
+    },
+    "FormMode": {
+      "description": "What a form is for.",
+      "oneOf": [
+        {
+          "description": "Gathers something new; after a submit it starts again.",
+          "type": "string",
+          "const": "create"
+        },
+        {
+          "description": "Edits what is saved: it starts from the saved values, Save is\noffered only when changed, and Discard puts them back.",
+          "type": "string",
+          "const": "edit"
+        }
+      ]
+    },
+    "LensFormField": {
+      "description": "One of a form's `fields`: its name, or its name and how it shows.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/definitions/LensFormFieldSpec"
+        }
+      ]
+    },
+    "LensFormFieldSpec": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "visible_if": {
+          "description": "Shown only while each named field's value is one of these; hidden,\nit is neither required nor submitted.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/FieldValues"
+          }
+        },
+        "secret": {
+          "description": "Masked, never kept in a draft, and blank leaves it out of the\ninput; the command must keep it out of its record (`unrecorded`).",
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ]
+    },
+    "FieldValues": {
+      "description": "A `visible_if` condition: one value or any of several.",
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FieldValue"
+          }
+        },
+        {
+          "$ref": "#/definitions/FieldValue"
+        }
+      ]
+    },
+    "FieldValue": {
+      "description": "A field's value a condition compares with.",
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number",
+          "format": "double"
+        },
+        {
+          "type": "string"
+        }
+      ]
     },
     "ActionThen": {
       "description": "What becomes of the page a lens is on after one of its actions (or its\nform) ran a command whose `ui.open_after` names a page.",

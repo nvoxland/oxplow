@@ -1916,6 +1916,14 @@
             "null"
           ],
           "default": null
+        },
+        "unrecorded": {
+          "description": "Its input's properties kept out of its record (a token, a key), or\n`*` for all of it.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
         }
       },
       "additionalProperties": false,

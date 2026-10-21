@@ -1923,7 +1923,18 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   with the form's params (those it declares), whose rows are the field's
   choices — `value`, `label`, optional `group` — shown as a select under
   group headings; a choices lens the extension doesn't have is a load
-  error) or
+  error. `mode: edit` edits what is saved: it starts from the saved
+  values, Save is enabled only when the form is changed, and Discard (or
+  Escape) puts them back; `create`, the default, gathers something new.
+  A `fields` entry is a name or `{ name, visible_if?, secret? }`:
+  `visible_if: { kind: [http, https] }` shows the field only while each
+  named field holds one of the values — hidden, it is neither required
+  nor submitted; `secret: true` masks it, keeps it out of any draft, and
+  leaves it out of the input when blank (the saved one stays). The form's
+  command must keep a secret out of its record (`unrecorded`), or the
+  form refuses to open (`form_start`). The load checks: a `visible_if`
+  names one of `fields` and not the field itself, a field isn't both
+  `fixed` and `secret`, and `mode: edit` lists its `fields`) or
   `custom` (`custom: {
   component, props? }`, one of the extension's `custom_components`; see
   "Custom components"). Each component names the columns it draws from in

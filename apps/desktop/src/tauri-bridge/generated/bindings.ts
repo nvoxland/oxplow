@@ -199,12 +199,12 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	lensForm: (id: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<FormStart, IpcError_Serialize>(__TAURI_INVOKE("lens_form", { id, params, streamId })),
+	lensForm: (id: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<FormStart_Serialize, IpcError_Serialize>(__TAURI_INVOKE("lens_form", { id, params, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	lensActionForm: (press: LensPress, streamId: string | null) => typedError<FormStart, IpcError_Serialize>(__TAURI_INVOKE("lens_action_form", { press, streamId })),
+	lensActionForm: (press: LensPress, streamId: string | null) => typedError<FormStart_Serialize, IpcError_Serialize>(__TAURI_INVOKE("lens_action_form", { press, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -234,7 +234,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	componentForm: (id: string, command: string, input: unknown | null, version: string) => typedError<FormStart, IpcError_Serialize>(__TAURI_INVOKE("component_form", { id, command, input, version })),
+	componentForm: (id: string, command: string, input: unknown | null, version: string) => typedError<FormStart_Serialize, IpcError_Serialize>(__TAURI_INVOKE("component_form", { id, command, input, version })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -2801,6 +2801,8 @@ export type ExtensionCommand = {
 	 *  namespace: `oxplow_query_sql` ([`tool_name`]).
 	 */
 	tool: string | null,
+	/**  The inputs kept out of its record (`CommandSpec::unrecorded`). */
+	unrecorded: string[],
 };
 
 /**  One instance of an extension's provider (`extensionInstances`). */
@@ -3235,6 +3237,12 @@ export type FieldKind =
 /**  One of `values`. */
 "enum" | "text" | "number";
 
+/**  A field's value a condition compares with. */
+export type FieldValue = boolean | number | null | string;
+
+/**  A `visible_if` condition: one value or any of several. */
+export type FieldValues = FieldValue[] | FieldValue;
+
 export type FileSnapshot = {
 	id: number,
 	stream_id: StreamId,
@@ -3331,16 +3339,47 @@ export type ForeignSubscription = {
 	declaredAt: string,
 };
 
+/**  What a form is for. */
+export type FormMode = 
+/**  Gathers something new; after a submit it starts again. */
+"create" | 
+/**
+ *  Edits what is saved: it starts from the saved values, Save is
+ *  offered only when changed, and Discard puts them back.
+ */
+"edit";
+
 /**
  *  What a form shows: its command (the fields come from its input
  *  schema), the values the fields start from, the fields shown but not
  *  editable, and which fields to show (none: all).
  */
-export type FormStart = {
+export type FormStart = FormStart_Serialize | FormStart_Deserialize;
+
+/**
+ *  What a form shows: its command (the fields come from its input
+ *  schema), the values the fields start from, the fields shown but not
+ *  editable, and which fields to show (none: all).
+ */
+export type FormStart_Deserialize = {
 	command: CommandSpec,
 	values: unknown,
 	fixed: string[],
-	fields: string[] | null,
+	fields: LensFormField_Deserialize[] | null,
+	/**  Fields picked from a list, with their choices. */
+	choices: { [key in string]: Choice[] },
+};
+
+/**
+ *  What a form shows: its command (the fields come from its input
+ *  schema), the values the fields start from, the fields shown but not
+ *  editable, and which fields to show (none: all).
+ */
+export type FormStart_Serialize = {
+	command: CommandSpec,
+	values: unknown,
+	fixed: string[],
+	fields: LensFormField_Serialize[] | null,
 	/**  Fields picked from a list, with their choices. */
 	choices: { [key in string]: Choice[] },
 };
@@ -3985,6 +4024,45 @@ export type LensCustom_Serialize = {
 /**  `form` viz: the command it submits and the values it starts from. */
 export type LensForm = LensForm_Serialize | LensForm_Deserialize;
 
+/**  One of a form's `fields`: its name, or its name and how it shows. */
+export type LensFormField = LensFormField_Serialize | LensFormField_Deserialize;
+
+export type LensFormFieldSpec = LensFormFieldSpec_Serialize | LensFormFieldSpec_Deserialize;
+
+export type LensFormFieldSpec_Deserialize = {
+	name: string,
+	/**
+	 *  Shown only while each named field's value is one of these; hidden,
+	 *  it is neither required nor submitted.
+	 */
+	visible_if?: { [key in string]: FieldValues },
+	/**
+	 *  Masked, never kept in a draft, and blank leaves it out of the
+	 *  input; the command must keep it out of its record (`unrecorded`).
+	 */
+	secret?: boolean,
+};
+
+export type LensFormFieldSpec_Serialize = {
+	name: string,
+	/**
+	 *  Shown only while each named field's value is one of these; hidden,
+	 *  it is neither required nor submitted.
+	 */
+	visible_if?: { [key in string]: FieldValues },
+	/**
+	 *  Masked, never kept in a draft, and blank leaves it out of the
+	 *  input; the command must keep it out of its record (`unrecorded`).
+	 */
+	secret?: boolean,
+};
+
+/**  One of a form's `fields`: its name, or its name and how it shows. */
+export type LensFormField_Deserialize = string | LensFormFieldSpec_Deserialize;
+
+/**  One of a form's `fields`: its name, or its name and how it shows. */
+export type LensFormField_Serialize = string | LensFormFieldSpec_Serialize;
+
 /**  `form` viz: the command it submits and the values it starts from. */
 export type LensForm_Deserialize = {
 	command: string | null,
@@ -3996,10 +4074,16 @@ export type LensForm_Deserialize = {
 	 */
 	fixed?: string[],
 	/**
-	 *  The fields to show, in order; the rest keep their starting values
-	 *  and are submitted with them. None: every field.
+	 *  Whether it gathers something new (`create`) or edits what is saved
+	 *  (`edit`: Save when changed, Discard).
 	 */
-	fields?: string[] | null,
+	mode?: FormMode,
+	/**
+	 *  The fields to show, in order: a name, or `{ name, visible_if,
+	 *  secret }`. The rest keep their starting values and are submitted
+	 *  with them. None: every field.
+	 */
+	fields?: LensFormField_Deserialize[] | null,
 	/**
 	 *  Fields picked from a list: each names a lens (`<extension>/<slug>`)
 	 *  run with the form's params, whose rows are the choices (`value`,
@@ -4021,10 +4105,16 @@ export type LensForm_Serialize = {
 	 */
 	fixed: string[],
 	/**
-	 *  The fields to show, in order; the rest keep their starting values
-	 *  and are submitted with them. None: every field.
+	 *  Whether it gathers something new (`create`) or edits what is saved
+	 *  (`edit`: Save when changed, Discard).
 	 */
-	fields: string[] | null,
+	mode: FormMode,
+	/**
+	 *  The fields to show, in order: a name, or `{ name, visible_if,
+	 *  secret }`. The rest keep their starting values and are submitted
+	 *  with them. None: every field.
+	 */
+	fields: LensFormField_Serialize[] | null,
 	/**
 	 *  Fields picked from a list: each names a lens (`<extension>/<slug>`)
 	 *  run with the form's params, whose rows are the choices (`value`,

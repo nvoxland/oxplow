@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
+import { useState } from "react";
 
 import { SchemaForm } from "./SchemaForm.js";
 
@@ -213,4 +214,119 @@ test("a field with choices is a select of their labels, under their groups", () 
   fireEvent.change(select, { target: { value: "thread:thr5" } });
   fireEvent.submit(getByTestId("f"));
   expect(submitted).toEqual([{ to_thread: "thread:thr5", body: "yours" }]);
+});
+
+const provider = {
+  type: "object",
+  required: ["kind", "url", "token"],
+  properties: {
+    kind: { type: "string", enum: ["file", "http", "https"] },
+    url: { type: "string" },
+    token: { type: "string" },
+    note: { type: ["string", "null"] },
+  },
+};
+const PROVIDER_FIELDS = ["kind", { name: "url", visible_if: { kind: ["http", "https"] } }, { name: "token", secret: true, visible_if: { kind: "https" } }];
+
+// A field shown only for some values of another: hidden, it is neither
+// drawn, required nor submitted.
+test("a field shows only while another holds one of its values", () => {
+  const submitted: unknown[] = [];
+  const { getByTestId, queryByTestId } = render(
+    <SchemaForm schema={provider} fields={PROVIDER_FIELDS} onSubmit={(v) => submitted.push(v)} testIdPrefix="f" />,
+  );
+  fireEvent.change(getByTestId("f-kind"), { target: { value: "file" } });
+  expect(queryByTestId("f-url")).toBeNull();
+  expect(queryByTestId("f-token")).toBeNull();
+  fireEvent.submit(getByTestId("f"));
+  fireEvent.change(getByTestId("f-kind"), { target: { value: "http" } });
+  fireEvent.change(getByTestId("f-url"), { target: { value: "http://x" } });
+  expect(queryByTestId("f-token")).toBeNull();
+  fireEvent.submit(getByTestId("f"));
+  expect(submitted).toEqual([{ kind: "file" }, { kind: "http", url: "http://x" }]);
+});
+
+// A secret is masked, never handed out as a draft, and blank keeps the
+// saved one: it is left out, not required.
+test("a secret field is masked, kept out of the draft, and left out when blank", () => {
+  const submitted: unknown[] = [];
+  const drafts: unknown[] = [];
+  const { getByTestId } = render(
+    <SchemaForm
+      schema={provider}
+      fields={PROVIDER_FIELDS}
+      initial={{ kind: "https", url: "https://x" }}
+      onDraft={(d) => drafts.push(d)}
+      onSubmit={(v) => submitted.push(v)}
+      testIdPrefix="f"
+    />,
+  );
+  const token = getByTestId("f-token") as HTMLInputElement;
+  expect(token.type).toBe("password");
+  fireEvent.submit(getByTestId("f"));
+  fireEvent.change(token, { target: { value: "s3cret" } });
+  fireEvent.submit(getByTestId("f"));
+  expect(submitted).toEqual([
+    { kind: "https", url: "https://x" },
+    { kind: "https", url: "https://x", token: "s3cret" },
+  ]);
+  expect(JSON.stringify(drafts)).not.toContain("s3cret");
+});
+
+// Editing what is saved: Save only when changed, Discard puts it back.
+test("an edit form saves only when changed, and Discard puts the saved value back", () => {
+  const saved: unknown[] = [];
+  const { getByTestId } = render(
+    <SchemaForm schema={schema} mode="edit" initial={{ title: "Start" }} onSubmit={(v) => saved.push(v)} testIdPrefix="f" />,
+  );
+  const save = getByTestId("f-submit") as HTMLButtonElement;
+  const discard = getByTestId("f-discard") as HTMLButtonElement;
+  expect(save.textContent).toBe("Save");
+  expect([save.disabled, discard.disabled]).toEqual([true, true]);
+  const title = getByTestId("f-title") as HTMLInputElement;
+  fireEvent.change(title, { target: { value: "Changed" } });
+  expect([save.disabled, discard.disabled]).toEqual([false, false]);
+  fireEvent.click(discard);
+  expect(title.value).toBe("Start");
+  expect(save.disabled).toBe(true);
+  fireEvent.change(title, { target: { value: "Changed" } });
+  fireEvent.submit(getByTestId("f"));
+  expect(saved).toEqual([{ title: "Changed" }]);
+});
+
+// Its edits can be kept by the host (a tab's history state): null is
+// untouched, so the form shows its starting value, whatever that is now.
+test("a kept draft is shown; untouched follows the starting value", () => {
+  const drafts: unknown[] = [];
+  const view = render(
+    <SchemaForm schema={schema} initial={{ title: "Start" }} draft={{ title: "Mine" }} onDraft={(d) => drafts.push(d)} testIdPrefix="f" />,
+  );
+  expect((view.getByTestId("f-title") as HTMLInputElement).value).toBe("Mine");
+  view.rerender(<SchemaForm schema={schema} initial={{ title: "Theirs" }} draft={{ title: "Mine" }} onDraft={(d) => drafts.push(d)} testIdPrefix="f" />);
+  expect((view.getByTestId("f-title") as HTMLInputElement).value).toBe("Mine");
+  view.rerender(<SchemaForm schema={schema} initial={{ title: "Theirs" }} draft={null} onDraft={(d) => drafts.push(d)} testIdPrefix="f" />);
+  expect((view.getByTestId("f-title") as HTMLInputElement).value).toBe("Theirs");
+  cleanup();
+  // A host keeping it: an edit back to the start is untouched again.
+  function Host() {
+    const [kept, setKept] = useState<Record<string, string> | null>(null);
+    return (
+      <SchemaForm
+        schema={schema}
+        initial={{ title: "Theirs" }}
+        draft={kept}
+        onDraft={(d) => {
+          drafts.push(d);
+          setKept(d);
+        }}
+        testIdPrefix="f"
+      />
+    );
+  }
+  const host = render(<Host />);
+  const title = host.getByTestId("f-title") as HTMLInputElement;
+  fireEvent.change(title, { target: { value: "New" } });
+  expect(title.value).toBe("New");
+  fireEvent.change(title, { target: { value: "Theirs" } });
+  expect(drafts).toEqual([{ title: "New" }, null]);
 });

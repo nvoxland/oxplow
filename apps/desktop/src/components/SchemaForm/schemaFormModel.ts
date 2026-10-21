@@ -216,3 +216,53 @@ export function valueOf(fields: Field[], drafts: Drafts): { value: Record<string
   const value = build(fields);
   return { value, errors };
 }
+
+/** A value a `visible_if` condition compares a field's with. */
+export type Scalar = string | number | boolean;
+
+/** One of the fields a form shows: its name, or its name and how it
+ *  shows (a lens form's `fields` entry). */
+export type FieldSpec = string | { name: string; visible_if?: Record<string, Scalar | Scalar[]>; secret?: boolean };
+
+export interface ShownField {
+  name: string;
+  /** Shown only while each named field holds one of these. */
+  visibleIf: Record<string, string[]>;
+  /** Masked, never in a draft; blank leaves it out. */
+  secret: boolean;
+}
+
+export function shownFields(specs: FieldSpec[]): ShownField[] {
+  return specs.map((s) =>
+    typeof s === "string"
+      ? { name: s, visibleIf: {}, secret: false }
+      : {
+          name: s.name,
+          visibleIf: Object.fromEntries(
+            Object.entries(s.visible_if ?? {}).map(([k, v]) => [k, (Array.isArray(v) ? v : [v]).map(String)]),
+          ),
+          secret: s.secret === true,
+        },
+  );
+}
+
+/** The shown fields hidden by their conditions over `drafts`: one whose
+ *  condition's field is itself hidden is hidden too. */
+export function hiddenOf(shown: ShownField[], drafts: Drafts): Set<string> {
+  const hidden = new Set<string>();
+  const byName = new Map(shown.map((f) => [f.name, f]));
+  const isHidden = (f: ShownField, seen: Set<string>): boolean =>
+    Object.entries(f.visibleIf).some(([on, values]) => {
+      const other = byName.get(on);
+      if (other && !seen.has(on) && isHidden(other, new Set(seen).add(on))) return true;
+      return !values.includes(drafts[on] ?? "");
+    });
+  for (const f of shown) if (isHidden(f, new Set([f.name]))) hidden.add(f.name);
+  return hidden;
+}
+
+/** Whether two drafts hold the same values (an emptied field is no value). */
+export function sameDrafts(a: Drafts, b: Drafts): boolean {
+  const filled = (d: Drafts) => Object.entries(d).filter(([, v]) => v !== "").sort(([x], [y]) => x.localeCompare(y));
+  return JSON.stringify(filled(a)) === JSON.stringify(filled(b));
+}

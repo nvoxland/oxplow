@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { draftsFrom, fieldsOf, valueOf } from "./schemaFormModel.js";
+import { draftsFrom, fieldsOf, hiddenOf, sameDrafts, shownFields, valueOf } from "./schemaFormModel.js";
 
 /** What schemars writes for a command input: `$defs`, `Option<T>`, an enum. */
 const schema = {
@@ -70,5 +70,24 @@ describe("valueOf", () => {
     const { value, errors } = valueOf(fields, draftsFrom(fields, existing));
     expect(errors).toEqual({});
     expect(value).toEqual(existing);
+  });
+});
+
+describe("shown fields", () => {
+  const shown = shownFields(["kind", { name: "url", visible_if: { kind: ["http", "https"] } }, { name: "token", secret: true, visible_if: { url: "x" } }]);
+  test("a name or a spec, conditions as lists of text", () => {
+    expect(shown.map((f) => [f.name, f.secret, f.visibleIf])).toEqual([
+      ["kind", false, {}],
+      ["url", false, { kind: ["http", "https"] }],
+      ["token", true, { url: ["x"] }],
+    ]);
+  });
+  test("a field is hidden by its condition, or by its condition's field being hidden", () => {
+    expect([...hiddenOf(shown, { kind: "http", url: "x" })]).toEqual([]);
+    expect([...hiddenOf(shown, { kind: "file", url: "x" })]).toEqual(["url", "token"]);
+  });
+  test("drafts are the same when they hold the same values", () => {
+    expect(sameDrafts({ a: "1", b: "" }, { a: "1" })).toBe(true);
+    expect(sameDrafts({ a: "1" }, { a: "2" })).toBe(false);
   });
 });

@@ -5,12 +5,26 @@
 /// Usability contract (.context/usability.md): Enter submits (when the form
 /// has a submit), Escape resets to the initial value, the submit is
 /// disabled while a field has a problem, and each problem shows under its
-/// field.
+/// field. An edit form (`mode: "edit"`) saves only when changed and has a
+/// Discard. A field may show only for some values of another
+/// (`visible_if`) and may be secret: masked, never in a draft, blank left
+/// out.
 
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
 
-import { draftsFrom, fieldsOf, valueOf, type Drafts, type Field, type Schema } from "./schemaFormModel.js";
+import {
+  draftsFrom,
+  fieldsOf,
+  hiddenOf,
+  sameDrafts,
+  shownFields,
+  valueOf,
+  type Drafts,
+  type Field,
+  type FieldSpec,
+  type Schema,
+} from "./schemaFormModel.js";
 
 /** One choice for a field picked from a list: what it submits, what the
  *  person reads, and the heading it sits under. */
@@ -31,10 +45,20 @@ export interface SchemaFormProps {
   submitLabel?: string;
   busy?: boolean;
   testIdPrefix?: string;
-  /** Show only these top-level fields, in this order. The others keep
-   *  their `initial` value and are still submitted; an unknown name is
-   *  ignored. */
-  fields?: string[];
+  /** Show only these top-level fields, in this order: a name, or `{ name,
+   *  visible_if, secret }`. The others keep their `initial` value and are
+   *  still submitted; an unknown name is ignored. A field hidden by its
+   *  `visible_if` is neither required nor submitted. */
+  fields?: FieldSpec[];
+  /** `edit`: it edits what is saved — Save only when changed, and a
+   *  Discard. Default `create`. */
+  mode?: "create" | "edit";
+  /** The person's edits, kept by the host (a tab's history state): null
+   *  is untouched, so the form shows `initial`. Without it the form keeps
+   *  its own. A secret is never in it. */
+  draft?: Drafts | null;
+  /** Each edit's draft: null once it is back to `initial`. */
+  onDraft?(draft: Drafts | null): void;
   /** These fields show their value as text: not inputs, submitted with
    *  their `initial` value. */
   fixed?: string[];
@@ -53,14 +77,18 @@ export function SchemaForm({
   initial,
   onChange,
   onSubmit,
-  submitLabel = "Submit",
+  submitLabel,
   busy = false,
   testIdPrefix = "schema-form",
   fields: shown,
   fixed,
   serverErrors,
   choices,
+  mode = "create",
+  draft,
+  onDraft,
 }: SchemaFormProps) {
+  const label = submitLabel ?? (mode === "edit" ? "Save" : "Submit");
   // Keyed on content: a host re-reading its data passes fresh copies of
   // the same schema and starting value, and that mustn't throw away what
   // the person typed (tsk1054). A different starting value does.
@@ -71,11 +99,13 @@ export function SchemaForm({
   const shownText = JSON.stringify(shown ?? null);
   const fixedText = JSON.stringify(fixed ?? []);
   const serverText = JSON.stringify(serverErrors ?? {});
-  const rendered = useMemo(() => {
-    if (!shown) return fields;
-    return shown.flatMap((name) => fields.find((f) => f.path === name) ?? []);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the content
-  }, [fields, shownText]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the content
+  const specs = useMemo(() => (shown ? shownFields(shown) : null), [shownText]);
+  const listed = useMemo(() => {
+    if (!specs) return fields;
+    return specs.flatMap((spec) => fields.find((f) => f.path === spec.name) ?? []);
+  }, [fields, specs]);
+  const secrets = useMemo(() => new Set((specs ?? []).filter((f) => f.secret).map((f) => f.name)), [specs]);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the content
   const fixedSet = useMemo(() => new Set(fixed ?? []), [fixedText]);
   // The fields edited since these server errors arrived: theirs are stale.
@@ -84,7 +114,12 @@ export function SchemaForm({
   useEffect(() => setEdited(new Set()), [serverText]);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the content
   const initialDrafts = useMemo(() => draftsFrom(fields, initial ?? {}), [fields, initialText]);
-  const [drafts, setDrafts] = useState<Drafts>(initialDrafts);
+  const [own, setOwn] = useState<Drafts>(initialDrafts);
+  const kept = draft !== undefined;
+  const publicDrafts = kept ? (draft ?? initialDrafts) : own;
+  // A secret's text is this form's alone: never a draft the host keeps.
+  const [secretDrafts, setSecretDrafts] = useState<Drafts>({});
+  const drafts = useMemo(() => ({ ...publicDrafts, ...secretDrafts }), [publicDrafts, secretDrafts]);
   // A different schema or starting value starts the drafts over — in the
   // render that sees it, not an effect after it: an effect on mount ran
   // after the person's first keystroke whenever the scheduler was behind,
@@ -93,24 +128,48 @@ export function SchemaForm({
   const [startedFrom, setStartedFrom] = useState(startKey);
   if (startedFrom !== startKey) {
     setStartedFrom(startKey);
-    setDrafts(initialDrafts);
+    setOwn(initialDrafts);
   }
-  const { value, errors } = valueOf(fields, drafts);
+  // What is submitted: every field but those hidden by their conditions;
+  // a secret is never required (blank keeps the saved one).
+  const submitted = (d: Drafts) => {
+    const hidden = specs ? hiddenOf(specs, d) : new Set<string>();
+    return fields.filter((f) => !hidden.has(f.path)).map((f) => (secrets.has(f.path) ? { ...f, required: false } : f));
+  };
+  const { value, errors } = valueOf(submitted(drafts), drafts);
   const valid = Object.keys(errors).length === 0;
+  const dirty = !sameDrafts(publicDrafts, initialDrafts) || Object.values(secretDrafts).some((v) => v !== "");
+  const report = (next: Drafts) => {
+    const out = valueOf(submitted(next), next);
+    onChange?.(Object.keys(out.errors).length === 0 ? out.value : null);
+  };
   const edit = (path: string, raw: string) => {
     const top = path.split(".")[0]!;
     if (serverErrors?.[top] !== undefined) setEdited((prev) => new Set(prev).add(top));
-    const next = { ...drafts, [path]: raw };
-    setDrafts(next);
-    const out = valueOf(fields, next);
-    onChange?.(Object.keys(out.errors).length === 0 ? out.value : null);
+    if (secrets.has(top)) {
+      const nextSecrets = { ...secretDrafts, [path]: raw };
+      setSecretDrafts(nextSecrets);
+      return report({ ...publicDrafts, ...nextSecrets });
+    }
+    const next = { ...publicDrafts, [path]: raw };
+    if (!kept) setOwn(next);
+    onDraft?.(sameDrafts(next, initialDrafts) ? null : next);
+    report({ ...next, ...secretDrafts });
   };
+  const discard = () => {
+    setOwn(initialDrafts);
+    setSecretDrafts({});
+    onDraft?.(null);
+    report(initialDrafts);
+  };
+  const hidden = specs ? hiddenOf(specs, drafts) : new Set<string>();
+  const rendered = listed.filter((f) => !hidden.has(f.path));
   const live = Object.entries(serverErrors ?? {}).filter(([name]) => !edited.has(name));
   const shownPaths = new Set(rendered.map((f) => f.path));
   const stray = live.filter(([name]) => !shownPaths.has(name));
   const firstEditable = rendered.findIndex((f) => !fixedSet.has(f.path));
   const submit = () => {
-    if (onSubmit && valid && !busy) onSubmit(value);
+    if (onSubmit && valid && !busy && (mode === "create" || dirty)) onSubmit(value);
   };
   return (
     <form
@@ -124,9 +183,7 @@ export function SchemaForm({
         if (e.key === "Escape") {
           // The form's own cancel: a container's Escape mustn't also fire.
           e.stopPropagation();
-          setDrafts(initialDrafts);
-          const out = valueOf(fields, initialDrafts);
-          onChange?.(Object.keys(out.errors).length === 0 ? out.value : null);
+          discard();
         }
       }}
     >
@@ -143,6 +200,7 @@ export function SchemaForm({
               testIdPrefix={testIdPrefix}
               fixed={fixedSet.has(f.path)}
               choices={choices?.[f.path]}
+              secret={secrets.has(f.path)}
               onSubmitShortcut={submit}
             />
             {server !== undefined && errors[f.path] === undefined ? (
@@ -161,10 +219,15 @@ export function SchemaForm({
         </div>
       ) : null}
       {onSubmit ? (
-        <div>
-          <button type="submit" data-testid={`${testIdPrefix}-submit`} disabled={!valid || busy}>
-            {busy ? `${submitLabel}…` : submitLabel}
+        <div style={{ display: "flex", gap: 8 }}>
+          <button type="submit" data-testid={`${testIdPrefix}-submit`} disabled={!valid || busy || (mode === "edit" && !dirty)}>
+            {busy ? `${label}…` : label}
           </button>
+          {mode === "edit" ? (
+            <button type="button" data-testid={`${testIdPrefix}-discard`} disabled={!dirty || busy} onClick={discard}>
+              Discard
+            </button>
+          ) : null}
         </div>
       ) : null}
     </form>
@@ -180,6 +243,7 @@ function FieldInput({
   testIdPrefix,
   fixed,
   choices,
+  secret = false,
   onSubmitShortcut,
 }: {
   field: Field;
@@ -190,6 +254,8 @@ function FieldInput({
   testIdPrefix: string;
   fixed: boolean;
   choices?: FieldChoice[];
+  /** Masked: a key, a token. */
+  secret?: boolean;
   onSubmitShortcut?(): void;
 }) {
   const id = `${testIdPrefix}-${f.path}`;
@@ -301,7 +367,8 @@ function FieldInput({
         <input
           id={id}
           data-testid={id}
-          type={f.kind === "integer" || f.kind === "number" ? "number" : "text"}
+          type={secret ? "password" : f.kind === "integer" || f.kind === "number" ? "number" : "text"}
+          autoComplete={secret ? "off" : undefined}
           step={f.kind === "integer" ? 1 : undefined}
           value={raw}
           autoFocus={autoFocus}

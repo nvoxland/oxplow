@@ -351,10 +351,15 @@ pub struct LensForm {
     /// again on submit (an item's `ref`).
     #[serde(default)]
     pub fixed: Vec<String>,
-    /// The fields to show, in order; the rest keep their starting values
-    /// and are submitted with them. None: every field.
+    /// Whether it gathers something new (`create`) or edits what is saved
+    /// (`edit`: Save when changed, Discard).
     #[serde(default)]
-    pub fields: Option<Vec<String>>,
+    pub mode: FormMode,
+    /// The fields to show, in order: a name, or `{ name, visible_if,
+    /// secret }`. The rest keep their starting values and are submitted
+    /// with them. None: every field.
+    #[serde(default)]
+    pub fields: Option<Vec<LensFormField>>,
     /// Fields picked from a list: each names a lens (`<extension>/<slug>`)
     /// run with the form's params, whose rows are the choices (`value`,
     /// `label`, optional `group`).
@@ -363,6 +368,88 @@ pub struct LensForm {
     /// What becomes of the page after a submit whose command opens one.
     #[serde(default)]
     pub then: ActionThen,
+}
+
+/// What a form is for.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    specta::Type,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum FormMode {
+    /// Gathers something new; after a submit it starts again.
+    #[default]
+    Create,
+    /// Edits what is saved: it starts from the saved values, Save is
+    /// offered only when changed, and Discard puts them back.
+    Edit,
+}
+
+/// One of a form's `fields`: its name, or its name and how it shows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum LensFormField {
+    Name(String),
+    Spec(LensFormFieldSpec),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LensFormFieldSpec {
+    pub name: String,
+    /// Shown only while each named field's value is one of these; hidden,
+    /// it is neither required nor submitted.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub visible_if: BTreeMap<String, FieldValues>,
+    /// Masked, never kept in a draft, and blank leaves it out of the
+    /// input; the command must keep it out of its record (`unrecorded`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub secret: bool,
+}
+
+/// A `visible_if` condition: one value or any of several.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum FieldValues {
+    Any(Vec<FieldValue>),
+    One(FieldValue),
+}
+
+/// A field's value a condition compares with.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum FieldValue {
+    Bool(bool),
+    Number(f64),
+    Text(String),
+}
+
+static NO_CONDITIONS: BTreeMap<String, FieldValues> = BTreeMap::new();
+
+impl LensFormField {
+    pub fn name(&self) -> &str {
+        match self {
+            LensFormField::Name(n) => n,
+            LensFormField::Spec(s) => &s.name,
+        }
+    }
+    pub fn secret(&self) -> bool {
+        matches!(self, LensFormField::Spec(s) if s.secret)
+    }
+    pub fn visible_if(&self) -> &BTreeMap<String, FieldValues> {
+        match self {
+            LensFormField::Name(_) => &NO_CONDITIONS,
+            LensFormField::Spec(s) => &s.visible_if,
+        }
+    }
 }
 
 /// Serialize a JSON value with its numbers as plain numbers, so a YAML
@@ -4321,6 +4408,32 @@ fn parts_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
         .map(|c| format!("part lens `{c}` isn't in this extension's lenses/"))
 }
 
+/// What's wrong with a form's `fields`, `mode` and their conditions.
+fn form_fields_problem(f: &LensForm) -> Option<String> {
+    let Some(fields) = &f.fields else {
+        return (f.mode == FormMode::Edit)
+            .then(|| "form: `mode: edit` needs `fields`: the ones it edits".to_string());
+    };
+    let names: Vec<&str> = fields.iter().map(|x| x.name()).collect();
+    fields.iter().find_map(|field| {
+        let name = field.name();
+        if field.secret() && f.fixed.iter().any(|k| k == name) {
+            return Some(format!("form: `{name}` can't be both fixed and secret"));
+        }
+        field.visible_if().keys().find_map(|on| {
+            if on == name {
+                Some(format!("form: `{name}` can't show by its own value"))
+            } else if !names.contains(&on.as_str()) {
+                Some(format!(
+                    "form: `{name}`'s `visible_if` names `{on}`, which isn't one of its `fields`"
+                ))
+            } else {
+                None
+            }
+        })
+    })
+}
+
 fn shape_problem(
     lens: &Lens,
     ids_in_extension: &[String],
@@ -4397,6 +4510,7 @@ fn shape_problem(
                         })
                         .map(|k| format!("form: fixed field `{k}` needs a value in `defaults`"))
                 })
+                .or_else(|| form_fields_problem(&f))
         }
         // A grid composes its children; it renders no rows of its own.
         LensViz::Document | LensViz::Dashboard => parts_problem(lens, ids_in_extension),
@@ -9294,6 +9408,85 @@ commands:
             "{:?}",
             ext.errors
         );
+    }
+
+    /// An edit form says so; a field may show only for some values of
+    /// another and may be secret; each refusal names the form's problem.
+    #[test]
+    fn a_form_edits_shows_fields_by_value_and_keeps_secrets() {
+        let (_d, ext) = load_x(
+            &[
+                (
+                    "e",
+                    "title: E\nquery: SELECT 1\nviz: form\nform:\n  command: a.b.c\n  mode: edit\n  fields:\n    - kind\n    - { name: url, visible_if: { kind: [http, https] } }\n    - { name: token, secret: true, visible_if: { kind: https } }\n",
+                ),
+                ("p", "title: P\nquery: SELECT 1\nviz: form\nform: { command: a.b.c, fields: [title] }\n"),
+                (
+                    "self",
+                    "title: S\nquery: SELECT 1\nviz: form\nform: { command: a.b.c, fields: [{ name: a, visible_if: { a: x } }] }\n",
+                ),
+                (
+                    "unknown",
+                    "title: U\nquery: SELECT 1\nviz: form\nform: { command: a.b.c, fields: [a, { name: b, visible_if: { gone: x } }] }\n",
+                ),
+                (
+                    "fixedsecret",
+                    "title: F\nquery: SELECT 1\nviz: form\nform: { command: a.b.c, defaults: { a: 1 }, fixed: [a], fields: [{ name: a, secret: true }] }\n",
+                ),
+                ("nofields", "title: N\nquery: SELECT 1\nviz: form\nform: { command: a.b.c, mode: edit }\n"),
+            ],
+            "",
+        );
+        let e = ext.lenses.iter().find(|l| l.slug == "e").expect("e loads");
+        let form = e.form.as_ref().expect("a form");
+        assert_eq!(form.mode, FormMode::Edit);
+        let fields = form.fields.as_ref().expect("fields");
+        assert_eq!(
+            fields
+                .iter()
+                .map(|f| (f.name(), f.secret()))
+                .collect::<Vec<_>>(),
+            vec![("kind", false), ("url", false), ("token", true)]
+        );
+        assert_eq!(
+            fields[1].visible_if().get("kind"),
+            Some(&FieldValues::Any(vec![
+                FieldValue::Text("http".into()),
+                FieldValue::Text("https".into())
+            ]))
+        );
+        let p = ext.lenses.iter().find(|l| l.slug == "p").expect("p loads");
+        assert_eq!(p.form.as_ref().map(|f| f.mode), Some(FormMode::Create));
+        let said = |slug: &str| {
+            ext.errors
+                .iter()
+                .find(|e| e.contains(&format!("{slug}.yaml")))
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert!(
+            said("self").contains("`a` can't show by its own value"),
+            "{:?}",
+            ext.errors
+        );
+        assert!(
+            said("unknown").contains("`visible_if` names `gone`, which isn't one of its `fields`"),
+            "{:?}",
+            ext.errors
+        );
+        assert!(
+            said("fixedsecret").contains("`a` can't be both fixed and secret"),
+            "{:?}",
+            ext.errors
+        );
+        assert!(
+            said("nofields").contains("`mode: edit` needs `fields`"),
+            "{:?}",
+            ext.errors
+        );
+        for slug in ["self", "unknown", "fixedsecret", "nofields"] {
+            assert!(ext.lenses.iter().all(|l| l.slug != slug), "{slug} loaded");
+        }
     }
 
     /// A row action's `{{row.x}}` must be a column the query returns.
