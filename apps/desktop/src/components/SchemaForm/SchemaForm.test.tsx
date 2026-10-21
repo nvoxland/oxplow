@@ -330,3 +330,43 @@ test("a kept draft is shown; untouched follows the starting value", () => {
   fireEvent.change(title, { target: { value: "Theirs" } });
   expect(drafts).toEqual([{ title: "New" }, null]);
 });
+
+test("a second submit sends the same value as its own, and Enter keeps the primary", () => {
+  const sent: string[] = [];
+  const { getByTestId } = render(
+    <SchemaForm
+      schema={schema}
+      onSubmit={(v) => sent.push(`save ${JSON.stringify(v)}`)}
+      again={{ label: "Save and Another", onSubmit: (v) => sent.push(`again ${JSON.stringify(v)}`) }}
+      submitLabel="Save"
+      testIdPrefix="f"
+    />,
+  );
+  const again = getByTestId("f-again") as HTMLButtonElement;
+  expect(again.textContent).toBe("Save and Another");
+  expect(again.disabled).toBe(true);
+  fireEvent.change(getByTestId("f-title"), { target: { value: "One" } });
+  expect(again.disabled).toBe(false);
+  fireEvent.click(again);
+  fireEvent.submit(getByTestId("f"));
+  expect(sent).toEqual(['again {"title":"One"}', 'save {"title":"One"}']);
+});
+
+test("an optional field whose list of choices is empty isn't shown", () => {
+  const { queryByTestId } = render(
+    <SchemaForm
+      schema={{ type: "object", properties: { title: { type: "string" }, parent: { type: ["string", "null"] } } }}
+      choices={{ parent: [] }}
+      testIdPrefix="f"
+    />,
+  );
+  expect(queryByTestId("f-title")).not.toBeNull();
+  expect(queryByTestId("f-parent")).toBeNull();
+});
+
+test("an object field with no children isn't shown", () => {
+  const { queryByText } = render(
+    <SchemaForm schema={{ type: "object", properties: { native: { type: "object", properties: {} } } }} testIdPrefix="f" />,
+  );
+  expect(queryByText("Native")).toBeNull();
+});

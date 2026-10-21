@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { draftsFrom, fieldsOf, hiddenOf, sameDrafts, shownFields, valueOf } from "./schemaFormModel.js";
+import { draftsFrom, fieldsOf, hiddenOf, sameDrafts, shownFields, valueOf, withSubfields } from "./schemaFormModel.js";
 
 /** What schemars writes for a command input: `$defs`, `Option<T>`, an enum. */
 const schema = {
@@ -89,5 +89,38 @@ describe("shown fields", () => {
   test("drafts are the same when they hold the same values", () => {
     expect(sameDrafts({ a: "1", b: "" }, { a: "1" })).toBe(true);
     expect(sameDrafts({ a: "1" }, { a: "2" })).toBe(false);
+  });
+});
+
+describe("withSubfields", () => {
+  const sub = [
+    { name: "priority", title: "Priority", kind: "enum", values: ["high", "low"], read_only: false },
+    { name: "points", title: "Story points", kind: "number", values: [], read_only: false },
+    { name: "label", title: "Label", kind: "text", values: [], read_only: false },
+    { name: "reporter", title: "Reporter", kind: "text", values: [], read_only: true },
+  ];
+
+  test("an open object field gets the rows as its children, read-only ones left out", () => {
+    const fields = fieldsOf(withSubfields(schema, { meta: sub }));
+    const meta = fields.find((f) => f.path === "meta")!;
+    expect(meta.kind).toBe("object");
+    expect(meta.children.map((c) => [c.path, c.kind, c.label, c.options])).toEqual([
+      ["meta.priority", "enum", "Priority", ["high", "low"]],
+      ["meta.points", "number", "Story points", []],
+      ["meta.label", "text", "Label", []],
+    ]);
+  });
+
+  test("its value is the object of what was filled in, and nothing when empty", () => {
+    const fields = fieldsOf(withSubfields(schema, { meta: sub })).filter((f) => f.path === "meta");
+    expect(valueOf(fields, {}).value).toEqual({});
+    expect(valueOf(fields, { "meta.priority": "high", "meta.points": "3" }).value).toEqual({
+      meta: { priority: "high", points: 3 },
+    });
+    expect(draftsFrom(fields, { meta: { priority: "low" } })).toEqual({ "meta.priority": "low" });
+  });
+
+  test("a field the schema doesn't have is left alone", () => {
+    expect(withSubfields(schema, { nope: sub })).toEqual(schema);
   });
 });

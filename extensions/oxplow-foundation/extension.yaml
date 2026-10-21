@@ -184,7 +184,7 @@ pages:
   - { id: custom-dashboard, title: Dashboard, icon: layout-dashboard, params: [id], component: "oxplow:custom-dashboard" }
   - { id: new-session, title: New Session, icon: plus, lens: new-session }
   - { id: new-stream, title: New Stream, icon: plus, lens: new-stream }
-  - { id: new-task, title: New Item, icon: plus, component: "oxplow:new-task" }
+  - { id: new-task, title: New Item, icon: plus, params: [parent], lens: new-task }
   - { id: stream-settings, title: Stream Settings, icon: settings, params: [stream], lens: stream-settings }
   - { id: thread-settings, title: Thread Settings, icon: settings, params: [thread], lens: thread-settings }
   - { id: external-url, title: Web Page, icon: external-link, params: [url], component: "oxplow:external-url" }

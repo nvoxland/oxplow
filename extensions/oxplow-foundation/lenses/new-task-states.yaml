@@ -1,0 +1,7 @@
+title: States of a new item
+description: The states a new item may start in; every work list takes them.
+hidden: true
+query: |
+  SELECT 'todo' AS value, 'Ready' AS label
+  UNION ALL
+  SELECT 'blocked', 'Blocked'

@@ -6,7 +6,6 @@ import {
   boardColumns,
   bucketWorkList,
   capabilityProvidersFromResult,
-  createWorkItemInput,
   effortDetailsFromResult,
   featuresFor,
   itemsFromResult,
@@ -164,28 +163,6 @@ test("capability providers read with their features and fields; an unknown provi
     fields: [{ name: "priority", title: "Priority", kind: "enum", values: ["high", "low"], read_only: false }],
     idPattern: null,
   });
-});
-
-// Every create files on the active list, so the input names none: the
-// thread, the canonical state and the list's own fields under `native`.
-test("a new item's input names no list and files on the thread", () => {
-  expect(
-    createWorkItemInput("thr2", {
-      title: "Fix it",
-      body: "why",
-      state: "blocked",
-      parentRef: "work_item:oxplow:tsk1",
-      native: { priority: "high" },
-    }),
-  ).toEqual({
-    title: "Fix it",
-    body: "why",
-    state: "blocked",
-    parent_ref: "work_item:oxplow:tsk1",
-    thread: "thr2",
-    native: { priority: "high" },
-  });
-  expect(createWorkItemInput(null, { title: "Later", native: {} })).toEqual({ title: "Later" });
 });
 
 test("the active work-items provider is the row marked active", () => {

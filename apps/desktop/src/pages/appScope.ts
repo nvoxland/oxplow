@@ -2,7 +2,7 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { AgentStatus, Stream, ThreadState } from "../api.js";
-import type { ItemChange, NewWorkItem, WorkList } from "../workItems.js";
+import type { ItemChange, WorkList } from "../workItems.js";
 import type { useAgentHarnesses } from "../useAgentHarnesses.js";
 import type { useWorkListProfile } from "../useWorkListProfile.js";
 import type { EditorNavigationTarget } from "../lsp.js";
@@ -66,7 +66,6 @@ export interface AppScope {
   handleRenamePath: (fromPath: string, toPath: string) => Promise<void>;
   handleDeletePath: (path: string) => Promise<void>;
   handleToggleGenerated: (entry: string, mark: boolean) => Promise<void>;
-  handleCreateTask: (input: NewWorkItem) => Promise<void>;
   handleUpdateTask: (ref: string, change: ItemChange) => Promise<void>;
   handleDeleteTask: (ref: string) => Promise<void>;
   handleReorderTasks: (orderedRefs: string[]) => Promise<void>;

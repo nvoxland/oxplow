@@ -45,12 +45,10 @@ import {
 } from "./api.js";
 import {
   applyItemChange,
-  createWorkItem,
   deleteWorkItem,
   readWorkList,
   reorderWorkItems,
   type ItemChange,
-  type NewWorkItem,
   type WorkList,
 } from "./workItems.js";
 import { useWorkListProfile } from "./useWorkListProfile.js";
@@ -856,11 +854,6 @@ export function App() {
       setError(String(e));
       throw e;
     }
-  }
-
-  async function handleCreateTask(input: NewWorkItem) {
-    if (!selectedThread) return;
-    await runTaskWrite(() => createWorkItem(selectedThread.id, input));
   }
 
   async function handleUpdateTask(ref: string, change: ItemChange) {
@@ -2103,7 +2096,6 @@ export function App() {
       handleRenamePath,
       handleDeletePath,
       handleToggleGenerated,
-      handleCreateTask,
       handleUpdateTask,
       handleDeleteTask,
       handleReorderTasks,

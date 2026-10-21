@@ -368,6 +368,22 @@ pub struct LensForm {
     /// What becomes of the page after a submit whose command opens one.
     #[serde(default)]
     pub then: ActionThen,
+    /// A second submit: it runs the same command, then the form starts
+    /// again with the `keep` fields' values carried over.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub again: Option<FormAgain>,
+}
+
+/// A form's second submit (Save and Another).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FormAgain {
+    /// Its button.
+    pub label: String,
+    /// The fields whose values the next entry starts with; the rest start
+    /// from the form's defaults.
+    #[serde(default)]
+    pub keep: Vec<String>,
 }
 
 /// What a form is for.
@@ -413,6 +429,13 @@ pub struct LensFormFieldSpec {
     /// input; the command must keep it out of its record (`unrecorded`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub secret: bool,
+    /// An object field whose children are the rows of this lens
+    /// (`<extension>/<slug>`: `name`, `title`, `kind` of `enum`, `text` or
+    /// `number`, `values`, `read_only`), run with the form's params. The
+    /// field's value is the object of those children; it is read again
+    /// when the lens's data changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
 }
 
 /// A `visible_if` condition: one value or any of several.
@@ -443,6 +466,13 @@ impl LensFormField {
     }
     pub fn secret(&self) -> bool {
         matches!(self, LensFormField::Spec(s) if s.secret)
+    }
+    /// The lens its children are read from, for an object field.
+    pub fn from(&self) -> Option<&str> {
+        match self {
+            LensFormField::Spec(s) => s.from.as_deref(),
+            LensFormField::Name(_) => None,
+        }
     }
     pub fn visible_if(&self) -> &BTreeMap<String, FieldValues> {
         match self {
@@ -4432,6 +4462,15 @@ fn choices_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
         .find(mine)
         .map(|c| format!("form: choices lens `{c}` isn't in this extension's lenses/"))
         .or_else(|| {
+            lens.form
+                .iter()
+                .flat_map(|f| f.fields.iter().flatten())
+                .filter_map(|field| field.from())
+                .map(str::to_string)
+                .find(|c| mine(&c))
+                .map(|c| format!("form: `from` lens `{c}` isn't in this extension's lenses/"))
+        })
+        .or_else(|| {
             lens.actions.iter().find_map(|a| {
                 a.choices.values().find(mine).map(|c| {
                     format!(
@@ -4461,6 +4500,16 @@ fn form_fields_problem(f: &LensForm) -> Option<String> {
             .then(|| "form: `mode: edit` needs `fields`: the ones it edits".to_string());
     };
     let names: Vec<&str> = fields.iter().map(|x| x.name()).collect();
+    if let Some(missing) = f
+        .again
+        .iter()
+        .flat_map(|a| &a.keep)
+        .find(|k| !names.contains(&k.as_str()))
+    {
+        return Some(format!(
+            "form: `again.keep` names `{missing}`, which isn't one of its `fields`"
+        ));
+    }
     fields.iter().find_map(|field| {
         let name = field.name();
         if field.secret() && f.fixed.iter().any(|k| k == name) {
@@ -9614,6 +9663,18 @@ commands:
                     "title: F\nquery: SELECT 1\nviz: form\nform: { command: a.b.c, defaults: { a: 1 }, fixed: [a], fields: [{ name: a, secret: true }] }\n",
                 ),
                 ("nofields", "title: N\nquery: SELECT 1\nviz: form\nform: { command: a.b.c, mode: edit }\n"),
+                (
+                    "again",
+                    "title: A\nquery: SELECT 1\nviz: form\nform: { command: a.b.c, fields: [a, { name: n, from: x/again }], again: { label: Again, keep: [a, n] } }\n",
+                ),
+                (
+                    "keepgone",
+                    "title: K\nquery: SELECT 1\nviz: form\nform: { command: a.b.c, fields: [a], again: { label: Again, keep: [gone] } }\n",
+                ),
+                (
+                    "fromgone",
+                    "title: G\nquery: SELECT 1\nviz: form\nform: { command: a.b.c, fields: [{ name: n, from: x/nothing }] }\n",
+                ),
             ],
             "",
         );
@@ -9664,9 +9725,30 @@ commands:
             "{:?}",
             ext.errors
         );
-        for slug in ["self", "unknown", "fixedsecret", "nofields"] {
+        assert!(
+            said("keepgone").contains("`again.keep` names `gone`"),
+            "{:?}",
+            ext.errors
+        );
+        assert!(
+            said("fromgone").contains("`from` lens `x/nothing` isn't in this extension"),
+            "{:?}",
+            ext.errors
+        );
+        for slug in [
+            "self",
+            "unknown",
+            "fixedsecret",
+            "nofields",
+            "keepgone",
+            "fromgone",
+        ] {
             assert!(ext.lenses.iter().all(|l| l.slug != slug), "{slug} loaded");
         }
+        let again = ext.lenses.iter().find(|l| l.slug == "again");
+        let form = again.and_then(|l| l.form.as_ref()).expect("again loads");
+        assert_eq!(form.again.as_ref().unwrap().keep, ["a", "n"]);
+        assert_eq!(form.fields.as_ref().unwrap()[1].from(), Some("x/again"));
     }
 
     /// A row action's `{{row.x}}` must be a column the query returns.

@@ -197,7 +197,19 @@ form:
 
 A secret is masked and never kept; left blank, the saved one stays. The
 command must keep it out of its record — `unrecorded: [token]` on its
-`commands:` entry — or the form won't open. For several forms on one
+`commands:` entry — or the form won't open.
+
+A field can be an object whose parts another lens lists: `{ name:
+native, from: acme/fields }`. That lens has a row per part — `name`,
+`title`, `kind` (`enum`, `text` or `number`), `values` (an enum's, a JSON
+array) and `read_only` (left out) — and the field's value is the object
+of what you filled in. The form reads the rows again when their data
+changes. `again: { label: Save and Another, keep: [state, native] }` adds
+a second submit: it runs the command, and the form starts again with the
+`keep` fields as they were and the rest from its defaults. Enter still
+runs the first submit.
+
+For several forms on one
 page, make a document whose parts are form lenses; each submits on its
 own.
 An action runs as the lens acting for you, so it can't do anything you

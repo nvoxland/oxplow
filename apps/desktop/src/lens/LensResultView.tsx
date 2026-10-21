@@ -2,7 +2,7 @@ import { useCollapsedSet, useDraft, type CollapsedSet } from "../tabs/useViewPar
 import { Approvals } from "../kit/Approvals.js";
 import type { PageAction } from "../kit/actions.js";
 import type { PickedRow } from "./LensRail.js";
-import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { commandOpenAfter, lensActionForm, lensForm, lensText, runLensAction, submitLensForm, undoCommand, type LensRun, type SqlCell } from "../api.js";
 import { Slideover } from "../components/Slideover.js";
 import type { CommandOutcome, FormStart } from "../tauri-bridge/generated/bindings.js";
@@ -16,7 +16,8 @@ import { DiffPane } from "../components/Diff/DiffPane.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { ResultCompleteness } from "./ResultCompleteness.js";
 import { SchemaForm } from "../components/SchemaForm/SchemaForm.js";
-import type { Drafts } from "../components/SchemaForm/schemaFormModel.js";
+import { withSubfields, type Drafts } from "../components/SchemaForm/schemaFormModel.js";
+import { NO_READS, useRerunOnChange } from "./lensRerun.js";
 import { fieldErrors, needsConfirmation } from "../ipc-error.js";
 import { RouteLink, routeDispatch } from "../tabs/RouteLink.js";
 import { linkOrigins } from "./linkOrigin.js";
@@ -786,12 +787,19 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
   const [start, setStart] = useState<FormStart | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [round, setRound] = useState(0);
+  // The form's start is read again (not the form restarted) when what its
+  // object fields were read from changes.
+  const [reload, setReload] = useState(0);
+  // What a second submit carries into the next entry (its `keep` fields).
+  const [carried, setCarried] = useState<Record<string, unknown>>({});
+  const againSubmitted = useRef<Record<string, unknown> | null>(null);
   // What the person typed is this step of the tab's (Back, Forward and a
   // restart give it back); null is untouched: the form shows the saved
   // values, whatever they are now. A secret is never in it.
   const [draft, setDraft, clearDraft] = useDraft<Drafts | null>(`form:${run.lens.id}`, null);
   const openAfter = useOpenAfter();
   const paramsKey = JSON.stringify(run.params);
+  const again = run.lens.form?.again ?? null;
   const form = useFormSubmit(
     run.lens.title,
     (input, confirmed) => submitLensForm(run.lens.id, input, run.params, streamId, confirmed),
@@ -800,7 +808,11 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
       // values: an edit form shows what it saved.
       clearDraft();
       setRound((r) => r + 1);
-      if (start) {
+      const second = againSubmitted.current;
+      againSubmitted.current = null;
+      // The second submit stays: it is for the next entry.
+      setCarried(second ?? {});
+      if (start && !second) {
         void openAfterAction({ label: run.lens.title, command: start.command.id, then: run.lens.form?.then ?? "open" }, outcome, openAfter);
       }
     },
@@ -819,9 +831,14 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
     };
     // paramsKey stands in for `run.params` (a fresh object each render).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run.lens.id, paramsKey, streamId, round]);
+  }, [run.lens.id, paramsKey, streamId, round, reload]);
+  useRerunOnChange(start?.reads ?? NO_READS, () => setReload((n) => n + 1));
+  const schema = useMemo(
+    () => (start ? withSubfields(start.command.input_schema as Record<string, unknown>, start.subfields ?? {}) : null),
+    [start],
+  );
   if (error) return <div style={{ color: "var(--severity-critical)", fontSize: "var(--text-sm)" }}>{error}</div>;
-  if (!start) return null;
+  if (!start || !schema) return null;
   const mode = run.lens.form?.mode ?? "create";
   return (
     <div data-testid="lens-form">
@@ -836,8 +853,8 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
       ) : null}
       <SchemaForm
         key={round}
-        schema={start.command.input_schema as Record<string, unknown>}
-        initial={start.values}
+        schema={schema}
+        initial={{ ...(start.values as Record<string, unknown>), ...carried }}
         fields={start.fields ?? undefined}
         fixed={start.fixed}
         choices={start.choices}
@@ -848,6 +865,17 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
         onDraft={setDraft}
         busy={form.busy}
         onSubmit={(input) => void form.submit(input, false)}
+        again={
+          again
+            ? {
+                label: again.label,
+                onSubmit: (input) => {
+                  againSubmitted.current = Object.fromEntries(again.keep.filter((k) => k in input).map((k) => [k, input[k]]));
+                  void form.submit(input, false);
+                },
+              }
+            : undefined
+        }
         testIdPrefix="lens-form-fields"
       />
     </div>

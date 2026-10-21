@@ -158,8 +158,8 @@ than open a blank tab. Any `page:` id rebuilds (`pageTabRef` /
 `extPageRef`); whether a page by that id exists is the declaration's
 business, and an undeclared one draws "No such page". The round-trip
 test in `pageRefs.test.ts` covers every constructor (a page's `state`
-aside). constructor. `newTaskRef(payload)`'s defaults deliberately aren't in the
-id (stable id → one form tab), so a history reopen starts empty.
+aside). constructor. `newTaskRef(payload)` names the `new-task` page (a
+foundation lens form, `new-task`) with its `parent` param.
 
 There are no sentinel tab ids (`HOME_TAB` in `App.tsx` means "nothing
 chosen", never a tab), and "is this the editor's working-tree file" is

@@ -19,6 +19,8 @@ const submits: unknown[] = [];
 // What the item's title is in the models: a form lens starts from it.
 let storedTitle = "Old";
 let formStarts = 0;
+// When set, a form lens always starts from these values (not what was stored).
+let fixedStart: Record<string, unknown> | null = null;
 // The page the command names after a run (`ui.open_after`), if any.
 let openAfterPage: string | null = null;
 
@@ -56,7 +58,7 @@ mock.module("../api.js", () => ({
     formStarts += 1;
     return {
     command: UPDATE,
-    values: { ref: "work_item:oxplow:tsk1", title: storedTitle },
+    values: fixedStart ?? { ref: "work_item:oxplow:tsk1", title: storedTitle },
     fixed: ["ref"],
     fields: ["title"],
     };
@@ -78,6 +80,7 @@ beforeEach(() => {
   invalidField = null;
   storedTitle = "Old";
   formStarts = 0;
+  fixedStart = null;
   openAfterPage = null;
 });
 afterEach(cleanup);
@@ -227,6 +230,52 @@ test("`then: replace` sends the form's page out of history", async () => {
 
 test("`then: stay` keeps the form for the next entry", async () => {
   expect(await submitOnPage("stay")).toEqual([]);
+});
+
+/** A form lens with a second submit that keeps `keep`'s values. */
+function againLens(keep: string[]): LensRun {
+  return {
+    lens: {
+      ...lens,
+      viz: "form",
+      form: { command: "oxplow.work_item.update", defaults: null, fixed: ["ref"], fields: ["title"], then: "open", again: { label: "Save and Another", keep } },
+      actions: [],
+    },
+    params: {},
+    result: { columns: [], rows: [], truncated: false },
+  } as unknown as LensRun;
+}
+
+// The second submit runs the command, stays on the page (whatever `then`
+// says), and starts the form again with the `keep` fields' values carried
+// over and the rest from the form's own start.
+test("a form's second submit starts again with the kept fields carried over", async () => {
+  fixedStart = { ref: "work_item:oxplow:tsk1", title: "Start" };
+  openAfterPage = "work_item:oxplow:tsk1";
+  const opened: unknown[] = [];
+  const nav = { openRef: (ref: string) => opened.push(ref) } as unknown as PageNavigation;
+  const view = render(
+    <PageNavigationContext.Provider value={nav}>
+      <LensResultView run={againLens(["title"])} onOpenPage={() => {}} />
+    </PageNavigationContext.Provider>,
+  );
+  const title = await waitFor(() => view.getByTestId("lens-form-fields-title") as HTMLInputElement);
+  fireEvent.change(title, { target: { value: "One" } });
+  fireEvent.click(view.getByTestId("lens-form-fields-again"));
+  await waitFor(() => expect(submits).toEqual([{ ref: "work_item:oxplow:tsk1", title: "One" }]));
+  await waitFor(() => expect(formStarts).toBe(2));
+  await waitFor(() => expect((view.getByTestId("lens-form-fields-title") as HTMLInputElement).value).toBe("One"));
+  expect(opened).toEqual([]);
+});
+
+test("a field not kept starts again from the form's own start", async () => {
+  fixedStart = { ref: "work_item:oxplow:tsk1", title: "Start" };
+  const view = render(<LensResultView run={againLens([])} onOpenPage={() => {}} />);
+  const title = await waitFor(() => view.getByTestId("lens-form-fields-title") as HTMLInputElement);
+  fireEvent.change(title, { target: { value: "One" } });
+  fireEvent.click(view.getByTestId("lens-form-fields-again"));
+  await waitFor(() => expect(formStarts).toBe(2));
+  await waitFor(() => expect((view.getByTestId("lens-form-fields-title") as HTMLInputElement).value).toBe("Start"));
 });
 
 /** A tab whose history state the form keeps its draft in: `state` is
