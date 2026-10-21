@@ -182,7 +182,7 @@ pages:
   # Opened from elsewhere
   - { id: alerts, title: Alerts, icon: bell, component: "oxplow:alerts" }
   - { id: custom-dashboard, title: Dashboard, icon: layout-dashboard, params: [id], component: "oxplow:custom-dashboard" }
-  - { id: new-session, title: New Session, icon: plus, component: "oxplow:new-session" }
+  - { id: new-session, title: New Session, icon: plus, lens: new-session }
   - { id: new-stream, title: New Stream, icon: plus, lens: new-stream }
   - { id: new-task, title: New Item, icon: plus, component: "oxplow:new-task" }
   - { id: stream-settings, title: Stream Settings, icon: settings, params: [stream], lens: stream-settings }
@@ -224,13 +224,14 @@ commands:
     scope: agent_sessions.write
     op: reopen
     invokers: { human: true, agent: true, lens: true }
+    ui: { label: "Reopen Session", group: Tasks, about: agent_session, input: { session: "{{ref}}" }, open_after: "agent_session:{{result.id}}" }
     example: {"session": "agent_session:ses3"}
   - name: agent_session.open
     summary: "Open an agent session on a thread (`thread:thr1`): a slot the person's UI starts an agent in. It only adds the slot — nothing is started or typed for it. `harness` (default: the project's first enabled agent), `acp_agent` for an ACP one, `title`, and a person's `resume`: a saved conversation of the harness to start on (refused when it is open in another session; an agent may not choose one). An agent opens one only in its own stream."
     scope: agent_sessions.write
     op: open
     invokers: { human: true, agent: true, lens: true }
-    ui: { label: "New Agent Session…", group: Tasks, keywords: [agent, session, start], form: "page:new-session", when: "threadShown" }
+    ui: { label: "New Agent Session…", group: Tasks, keywords: [agent, session, start], form: "page:new-session", open_after: "agent_session:{{result.id}}", when: "threadShown" }
     example: {"thread": "thread:thr3", "title": "Review pass"}
   - name: agent_session.open_claude
     summary: "Open a Claude terminal session on the thread shown; its tab starts the agent."

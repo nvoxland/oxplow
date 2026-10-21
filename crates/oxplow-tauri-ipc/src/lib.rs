@@ -142,7 +142,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::validate_extension,
             commands::generated::report_tabs,
             commands::generated::list_native_conversations,
-            commands::generated::list_earlier_sessions,
             commands::generated::rename_native_conversation,
             commands::generated::list_collectors,
             commands::generated::set_credential,

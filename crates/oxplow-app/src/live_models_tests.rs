@@ -587,3 +587,29 @@ fn a_change_names_the_live_models_that_follow_it() {
         vec!["v_agent_conversation".to_string()]
     );
 }
+
+/// The registered agent harnesses, the ones `agents:` names first (a new
+/// session's default is the first), each saying whether the project enables
+/// it: what New Session's agent choice lists.
+#[tokio::test]
+async fn agent_harnesses_are_the_registered_ones_enabled_ones_first() {
+    let fx = services_with_effort().await;
+    fx.svc
+        .harnesses
+        .register(crate::test_fixtures::listing_harness("zeta", vec![]));
+    fx.svc
+        .harnesses
+        .register(crate::test_fixtures::listing_harness("alpha", vec![]));
+    let found = rows(
+        &fx,
+        "SELECT id, enabled FROM v_agent_harness WHERE id IN ('alpha', 'zeta') ORDER BY position",
+    )
+    .await;
+    // With no `agents:`, every harness is enabled.
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(found.iter().all(|r| r[1] == json!(1)), "{found:?}");
+    assert_eq!(
+        rows(&fx, "SELECT title FROM v_agent_harness WHERE id = 'alpha'").await,
+        vec![vec![json!("alpha")]]
+    );
+}

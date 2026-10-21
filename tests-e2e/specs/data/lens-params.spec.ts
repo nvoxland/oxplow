@@ -29,7 +29,7 @@ test("the rail's params narrow a lens, a row click shows the next section its pi
   await page.goto("/");
   await searchLauncher(page, "Commit history");
   await page.getByTestId("launcher-page-lens:commit-history/history").click();
-  const lens = page.getByTestId("page-lens");
+  const lens = page.locator('[data-testid="page-lens"]:visible');
   const commits = lens.getByTestId("lens-part-commits");
   const files = lens.getByTestId("lens-part-files");
   // The rail is the page's one place for controls: its filters as rows
@@ -43,7 +43,7 @@ test("the rail's params narrow a lens, a row click shows the next section its pi
   await expect(rail.getByTestId("lens-rail-selection")).toContainText("Click a row to select it.");
   await expect(rail.getByTestId("lens-about-source")).toHaveText(".oxplow/extensions/commit-history/lenses/history.yaml");
   // Copy and Add to Agent Context are the page's, in its nav bar.
-  await expect(page.getByTestId("action-lens-copy")).toBeVisible();
+  await expect(page.getByTestId("action-lens-copy").filter({ visible: true })).toBeVisible();
   await expect(lens.getByTestId("lens-actions")).toHaveCount(0);
 
   await expect(commits).toContainText("Add the numbat");

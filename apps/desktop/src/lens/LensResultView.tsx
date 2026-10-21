@@ -3,7 +3,7 @@ import { Approvals } from "../kit/Approvals.js";
 import type { PageAction } from "../kit/actions.js";
 import type { PickedRow } from "./LensRail.js";
 import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { commandOpenAfter, lensActionForm, lensForm, lensText, runLensAction, submitLensForm, type LensRun, type SqlCell } from "../api.js";
+import { commandOpenAfter, lensActionForm, lensForm, lensText, runLensAction, submitLensForm, undoCommand, type LensRun, type SqlCell } from "../api.js";
 import { Slideover } from "../components/Slideover.js";
 import type { CommandOutcome, FormStart } from "../tauri-bridge/generated/bindings.js";
 import type { LensAction } from "../tauri-bridge/generated/bindings.js";
@@ -175,7 +175,9 @@ function useLensActions(run: LensRun, streamId: string | null) {
   const [form, setForm] = useState<{ action: LensAction; row: Record<string, SqlCell> | null } | null>(null);
   const deps = {
     runLensAction,
-    toast: (message: string) => showToast({ message }),
+    toast: (message: string, undo?: () => void) => showToast({ message, onUndo: undo }),
+    // The person's click on Undo is their confirmation of it.
+    undo: (auditId: number) => undoCommand(auditId, true),
     ...openAfter,
   };
   const press = async (action: LensAction, row: Record<string, SqlCell> | null, confirmed: boolean) => {
@@ -365,6 +367,12 @@ function RowsBody({
   );
   const rowActions0 = lens.actions.filter((a) => a.row);
   openRow = (row) => {
+    const record = rowRecord(result.columns, row);
+    const primary = rowActions0.find((a) => a.primary && actionOffered(a, record));
+    if (primary) {
+      actions?.run(primary, record);
+      return;
+    }
     for (const c of cols) {
       const target = c.link ? cellLinkRef(c.link, c.key, row, result.columns) : null;
       if (target !== null) {
@@ -372,7 +380,6 @@ function RowsBody({
         return;
       }
     }
-    const record = rowRecord(result.columns, row);
     const action = rowActions0.find((a) => actionOffered(a, record));
     if (action) actions?.run(action, record);
   };
@@ -451,6 +458,11 @@ function RowsBody({
   // right-click or the keyboard (Menu key / Shift+F10).
   // A row that picks: a click (not on a link or control in it) or Enter
   // sets the param its column selects.
+  // The row action a click or Enter runs: the lens's `primary`, where the row is offered it.
+  const primaryOf = (row: SqlCell[]) => {
+    const record = rowRecord(result.columns, row);
+    return rowActions.find((a) => a.primary && actionOffered(a, record)) ?? null;
+  };
   const rowMenu: RowMenu = (row) => ({
     tabIndex: 0,
     onContextMenu: (e) => ctxMenu.open(e, rowItems(row)),
@@ -458,6 +470,12 @@ function RowsBody({
       if (picks && e.key === "Enter" && e.target === e.currentTarget) {
         e.preventDefault();
         picks.pick(row);
+        return;
+      }
+      const primary = primaryOf(row);
+      if (primary && e.key === "Enter" && e.target === e.currentTarget) {
+        e.preventDefault();
+        actions?.run(primary, rowRecord(result.columns, row));
         return;
       }
       ctxMenu.openForKey(e, rowItems(row));
@@ -470,7 +488,15 @@ function RowsBody({
           },
           "aria-selected": picks.selected(row),
         }
-      : {}),
+      : primaryOf
+        ? {
+            onClick: (e: React.MouseEvent) => {
+              const primary = primaryOf(row);
+              if (!primary || (e.target as Element).closest("a, button, input, select, textarea")) return;
+              actions?.run(primary, rowRecord(result.columns, row));
+            },
+          }
+        : {}),
   });
   // A list, table or tree row: dragged into the agent's context when it
   // links somewhere, highlighted by `emphasis`, indented by `depth`.

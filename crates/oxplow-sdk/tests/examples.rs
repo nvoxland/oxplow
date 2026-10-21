@@ -1034,7 +1034,7 @@ async fn the_session_notes_example_adds_a_section_to_the_new_session_page() {
         .named(root, "session-notes")
         .unwrap();
     let mount = &ext.ui.slots[0];
-    assert_eq!(mount.slot, "new-session.sections");
+    assert_eq!(mount.slot, "oxplow-foundation/new-session.sections");
     assert_eq!(
         mount.at,
         Some(oxplow_app::extensions::SlotAt::After {

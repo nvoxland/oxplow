@@ -490,7 +490,8 @@ repo), what the zone table does to the worktree (`v_zone`,
 `v_zone_unmatched`: `project.yaml` edited by hand, and the files on disk),
 every setting's effective value (`v_config_value`), a worktree's files
 (`v_workspace_file`), the harnesses' saved conversations
-(`v_agent_conversation`: files the harness writes outside oxplow), and the
+(`v_agent_conversation`: files the harness writes outside oxplow), the
+registered agent harnesses (`v_agent_harness`: which `agents:` enables) and the
 repository's working copies (`v_vcs_workspace`). A restated table (as `v_lens` and `v_extension` are, in the
 extension-generation transaction) would be wrong between the change and the
 next restatement, and nothing says when that is. So these are **live

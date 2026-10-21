@@ -349,3 +349,28 @@ test("Enter runs the first row action of a row with no link", async () => {
   fireEvent.keyDown(table, { key: "Enter" });
   await waitFor(() => expect(actionRuns.map((r) => r.action)).toEqual(["open"]));
 });
+
+// A row action marked `primary` is what a click on the row runs (and Enter,
+// before a link): the pointer's way to take a row.
+test("a click on a row runs the primary action, but not from a link in it", async () => {
+  actionRuns.length = 0;
+  const view = render(
+    <LensResultView
+      run={runOf({
+        viz: "table",
+        columns: [{ key: "title", label: null, link: null, unit: null }],
+        actions: [
+          { id: "other", label: "Other", command: "oxplow.work_item.update", input: {}, row: true },
+          { id: "take", label: "Take", command: "oxplow.work_item.update", input: {}, row: true, primary: true },
+        ],
+      })}
+      onOpenPage={() => {}}
+    />,
+  );
+  fireEvent.click(view.getByTestId("lens-row-1"));
+  await waitFor(() => expect(actionRuns.map((r) => r.action)).toEqual(["take"]));
+  actionRuns.length = 0;
+  const table = view.getByTestId("lens-table");
+  fireEvent.keyDown(table, { key: "Enter" });
+  await waitFor(() => expect(actionRuns.map((r) => r.action)).toEqual(["take"]));
+});

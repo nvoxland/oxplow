@@ -17,4 +17,4 @@ intent:
 # (`start`, `earlier`), so it stays put as the page changes.
 ui:
   slots:
-    - { slot: new-session.sections, lens: thread-notes, title: Notes on this thread, at: { after: start } }
+    - { slot: oxplow-foundation/new-session.sections, lens: thread-notes, title: Notes on this thread, at: { after: start } }

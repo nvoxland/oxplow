@@ -14,7 +14,7 @@
 //! close — destructive — waits for a person as a proposal.
 
 use crate::commands::ops::Op;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use oxplow_config::OxplowConfig;
 use oxplow_db::agent_session_store::{
@@ -67,6 +67,10 @@ pub struct OpenInput {
     /// not pick the conversation it resumes.
     #[serde(default)]
     pub resume: Option<String>,
+    /// Also make this agent what new threads start with (the person's own
+    /// `newThreadSession`). A person's choice; undoing the open leaves it.
+    #[serde(default)]
+    pub remember: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -175,7 +179,7 @@ fn choose_agent(
 /// `agent_session.open { thread, kind?, harness?, title?, resume? }`:
 /// a new slot on the thread. It only inserts the row — it never starts a
 /// process and never sends a prompt. Undone by closing it.
-pub fn open_op(config: Arc<RwLock<OxplowConfig>>, harnesses: HarnessRegistry) -> Op {
+pub fn open_op(config: super::config_commands::ConfigTarget, harnesses: HarnessRegistry) -> Op {
     Op::new(
         "agent_sessions.write",
         "open",
@@ -195,8 +199,24 @@ pub fn open_op(config: Arc<RwLock<OxplowConfig>>, harnesses: HarnessRegistry) ->
                 ));
             }
             in_own_stream(ctx, thread)?;
-            let config = crate::config_service::read_config(&config);
-            let (harness, kind) = choose_agent(&config, &harnesses, &input)?;
+            let cfg = crate::config_service::read_config(&config.config);
+            let (harness, kind) = choose_agent(&cfg, &harnesses, &input)?;
+            let remembered = if input.remember {
+                if ctx.actor().is_agent_driven() {
+                    return Err(CommandError::Denied {
+                        reason: "what new threads start with is a person's to choose".into(),
+                    });
+                }
+                Some(super::config_commands::change(
+                    &config,
+                    ctx.actor(),
+                    "newThreadSession",
+                    Some(json!(harness)),
+                    super::config_commands::Layer::Personal,
+                )?)
+            } else {
+                None
+            };
             if input.resume.is_some() && ctx.actor().is_agent_driven() {
                 return Err(CommandError::Denied {
                     reason:
@@ -233,10 +253,17 @@ pub fn open_op(config: Arc<RwLock<OxplowConfig>>, harnesses: HarnessRegistry) ->
                         .ok_or_else(|| invalid("/resume", "the session vanished"))?
                 }
             };
-            Ok(HandlerOutput {
+            let mut out = HandlerOutput {
                 inverse: call(CLOSE, json!({ "session": agent_session_ref(session.id) })),
                 ..result(&session)
-            })
+            };
+            // Remembering what new threads start with lands with the open
+            // (its event, its file write after commit).
+            if let Some(remembered) = remembered {
+                out.events.extend(remembered.events);
+                out.after_commit = remembered.after_commit;
+            }
+            Ok(out)
         })),
     )
 }
@@ -593,7 +620,7 @@ pub fn fork_conversation_op(processes: crate::agent_sessions::SessionProcesses) 
 
 /// The agent-session commands, for the bus.
 pub fn ops(
-    config: Arc<RwLock<OxplowConfig>>,
+    config: super::config_commands::ConfigTarget,
     harnesses: HarnessRegistry,
     processes: crate::agent_sessions::SessionProcesses,
 ) -> Vec<Op> {
@@ -676,6 +703,53 @@ mod tests {
             .await
             .unwrap();
         assert!(!get(&fx, s.id).await.is_open());
+    }
+
+    /// `remember` makes the chosen agent what new threads start with (the
+    /// person's own `newThreadSession`), in the same call; it is a
+    /// person's, so an agent that asks is refused and nothing opens.
+    #[tokio::test]
+    async fn remember_sets_what_new_threads_start_with() {
+        let fx = services_with_effort().await;
+        let s = open(
+            &fx,
+            &Actor::Human,
+            json!({ "thread": thread_ref(fx.thread), "harness": "claude", "remember": true }),
+        )
+        .await;
+        assert_eq!(s.harness, "claude");
+        assert_eq!(
+            crate::config_service::read_config(&fx.svc.config)
+                .personal_new_thread_session
+                .as_deref(),
+            Some("claude")
+        );
+        let before = fx
+            .svc
+            .agent_session_store
+            .list_open_for_thread(&fx.thread)
+            .await
+            .unwrap()
+            .len();
+        let err = run(
+            &fx,
+            &agent(&fx),
+            OPEN,
+            json!({ "thread": thread_ref(fx.thread), "remember": true }),
+            false,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+        assert_eq!(
+            fx.svc
+                .agent_session_store
+                .list_open_for_thread(&fx.thread)
+                .await
+                .unwrap()
+                .len(),
+            before
+        );
     }
 
     /// A person's stop marks the session and keeps the slot; start clears

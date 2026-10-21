@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { installExample, ipc, run, searchable, until } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { searchLauncher } from "../../support/ui.js";
+import { newSessionPage, searchLauncher } from "../../support/ui.js";
 
 interface Opened {
   result: { id: string };
@@ -24,14 +24,14 @@ test("a closed session is listed on the New Session page and picking it reopens 
   await run(daemon, "oxplow.agent_session.close", { session: `agent_session:${id}` });
 
   await page.goto("/");
-  await expect(page.getByTestId("page-new-session")).toBeVisible();
-  const row = page.getByTestId(`earlier-row-agent_session:${id}`);
-  await expect(row).toContainText("Parser work");
-  await expect(row.locator("[data-status]")).toHaveAttribute("title", "closed here");
+  await expect(newSessionPage(page)).toBeVisible();
+  const row = newSessionPage(page).getByRole("row", { name: /Parser work/ });
+  await expect(row).toContainText("closed here");
+  // A click on the row takes it (its primary action).
   await row.click();
 
   await expect(page.getByTestId(`center-tab-agent_session:${id}`)).toBeVisible();
-  await expect(page.getByTestId("page-new-session")).toHaveCount(0);
+  await expect(newSessionPage(page)).toHaveCount(0);
   // Undo (the toast) closes it again.
   await page.getByTestId("undo-toast-undo").click();
   await expect(page.getByTestId(`center-tab-agent_session:${id}`)).toHaveCount(0);
@@ -74,12 +74,13 @@ test("picking a session open here shows it and keeps the New Session page", asyn
   await page.goto("/");
   await searchLauncher(page, "new agent session");
   await page.getByTestId("launcher-command-oxplow.agent_session.open").click();
-  const row = page.getByTestId(`earlier-row-agent_session:${id}`);
-  await expect(row.locator("[data-status]")).toHaveAttribute("title", "open in this thread");
-  await row.click();
+  const row = newSessionPage(page).getByRole("row", { name: /Lexer work/ });
+  await expect(row).toContainText("open in this thread");
+  // Its title is a link to the open session's tab.
+  await row.getByRole("button", { name: /Lexer work/ }).click();
 
   await expect(page.getByTestId(`center-tab-body-agent_session:${id}`)).toBeVisible();
-  await expect(page.getByTestId("page-new-session")).toBeHidden();
+  await expect(newSessionPage(page)).toHaveCount(0);
   await expect(page.getByTestId("center-tab-page:new-session")).toHaveCount(1);
 });
 
@@ -90,14 +91,24 @@ test("an extension's section lands where its `at` says on the New Session page",
   const { page, daemon } = fresh;
   await installExample(daemon, "session-notes");
 
+  // Sections with nothing to show fold into one line, so each has a row:
+  // an earlier session and a note.
+  const earlier = await run<Opened>(daemon, "oxplow.agent_session.open", {
+    thread: `thread:${daemon.thread}`,
+    resume: "conv-placed",
+    title: "Placed work",
+  });
+  await run(daemon, "oxplow.agent_session.close", { session: `agent_session:${earlier.result.id}` });
+  await run(daemon, "oxplow.knowledge.add_note", { thread: `thread:${daemon.thread}`, body: "Remember the lexer." });
+
   await page.goto("/");
-  const doc = page.getByTestId("page-new-session");
+  const doc = newSessionPage(page);
   await expect(doc.locator("section[data-section]")).toHaveCount(3);
   await expect
     .poll(() => doc.locator("section[data-section]").evaluateAll((s) => s.map((e) => e.getAttribute("data-section"))))
     .toEqual(["start", "session-notes/thread-notes", "earlier"]);
-  const notes = page.getByTestId("new-session.sections-session-notes/thread-notes");
+  const notes = doc.getByTestId("lens-part-session-notes/thread-notes");
   await expect(notes.locator("h2")).toContainText("Notes on this thread");
   await expect(notes.locator("[data-source]")).toHaveText("session-notes");
-  await expect(notes).toContainText("No notes on this thread yet.");
+  await expect(notes).toContainText("Remember the lexer.");
 });

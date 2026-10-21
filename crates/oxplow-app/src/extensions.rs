@@ -1169,6 +1169,11 @@ pub struct LensAction {
     /// A row action offered only on rows whose column of this name is
     /// truthy (not null, 0, `""` or false): an Enable on rows that are off.
     pub when: Option<String>,
+    /// The row action a click on the row (not on a link or control in it),
+    /// or Enter on it, runs: the one a person most often wants. The first
+    /// `primary` action a row is offered (`when`) is the one.
+    #[serde(default)]
+    pub primary: bool,
 }
 
 /// The `{{param.x}}` / `{{row.x}}` placeholders in `input`, as
@@ -1218,6 +1223,9 @@ struct ActionFile {
     /// A row action's column: offered only on rows where it is truthy.
     #[serde(default)]
     when: Option<String>,
+    /// The row action a click on the row runs.
+    #[serde(default)]
+    primary: bool,
 }
 
 /// Parse a lens's `actions:`: each `{ id, label, command, input?, row? }`.
@@ -1273,6 +1281,12 @@ fn parse_actions(
                 f.id
             ));
         }
+        if f.primary && !f.row {
+            return Err(format!(
+                "actions: `{}`: `primary` is for a row action (`row: true`)",
+                f.id
+            ));
+        }
         if !f.choices.is_empty() && !f.form {
             return Err(format!(
                 "actions: `{}`: `choices` is for a form action (`form: true`)",
@@ -1322,6 +1336,7 @@ fn parse_actions(
             choices: f.choices,
             then: f.then,
             when: f.when,
+            primary: f.primary,
         });
     }
     Ok(out)
@@ -1477,12 +1492,6 @@ pub const SLOTS: &[SlotSpec] = &[
         &["capabilities", "integrations"],
     ),
     SlotSpec::sections("settings.ai.sections", &[], &["ai"]),
-    // The New Session page's sections: starting one, then the earlier ones.
-    SlotSpec::sections(
-        "new-session.sections",
-        &["thread_id"],
-        &["start", "earlier"],
-    ),
 ];
 
 /// A place in a core page a lens can be mounted ([`SLOTS`]).
@@ -6210,6 +6219,26 @@ mod tests {
         assert!(err.contains("`when` is for a row action"), "{err}");
     }
 
+    /// `primary` marks a row action a click on the row (and Enter) runs: it
+    /// is a row action.
+    #[test]
+    fn primary_is_the_one_row_action_a_click_runs() {
+        let parse = |actions: &[&str]| {
+            parse_actions(
+                actions
+                    .iter()
+                    .map(|a| serde_yaml::from_str(a).unwrap())
+                    .collect(),
+                &[],
+                false,
+            )
+        };
+        let ok = parse(&["{ id: a, label: A, command: x.y.z, row: true, primary: true }"]).unwrap();
+        assert!(ok[0].primary);
+        let err = parse(&["{ id: a, label: A, command: x.y.z, primary: true }"]).unwrap_err();
+        assert!(err.contains("`primary` is for a row action"), "{err}");
+    }
+
     /// `acme` at `dir` with `manifest` (and the files it names): loaded as
     /// a deployment is, its permission errors alone.
     fn permission_errors(dir: &Path, manifest: &str) -> Vec<String> {
@@ -7895,12 +7924,12 @@ commands:
     fn a_parts_slot_places_its_mounts() {
         let (_d, ext) = load_x(
             &[
-                ("presets", "title: Presets\nparams: [{ name: thread_id }]\nquery: SELECT 1\n"),
-                ("stray", "title: Stray\nparams: [{ name: thread_id }]\nquery: SELECT 1\n"),
+                ("presets", "title: Presets\nquery: SELECT 1\n"),
+                ("stray", "title: Stray\nquery: SELECT 1\n"),
                 ("region", "title: R\nparams: [{ name: ref }]\nquery: SELECT 1\n"),
-                ("sized", "title: S\nparams: [{ name: thread_id }]\nquery: SELECT 1\n"),
+                ("sized", "title: S\nquery: SELECT 1\n"),
             ],
-            "ui:\n  slots:\n    - { slot: new-session.sections, lens: presets, title: Team presets, at: { after: start } }\n    - { slot: new-session.sections, lens: stray, at: { before: gone } }\n    - { slot: work_item.detail.body, lens: region, at: start }\n    - { slot: new-session.sections, lens: sized, size: wide }\n",
+            "ui:\n  slots:\n    - { slot: settings.agents.sections, lens: presets, title: Team presets, at: { after: agents } }\n    - { slot: settings.agents.sections, lens: stray, at: { before: gone } }\n    - { slot: work_item.detail.body, lens: region, at: start }\n    - { slot: settings.agents.sections, lens: sized, size: wide }\n",
         );
         let mounts: Vec<_> = ext
             .ui
@@ -7914,7 +7943,7 @@ commands:
                 (
                     "x/presets",
                     Some(SlotAt::After {
-                        after: "start".into()
+                        after: "agents".into()
                     }),
                     Some("Team presets")
                 ),
@@ -7932,7 +7961,7 @@ commands:
         assert!(errs.contains("`size` is a dashboard tile's"), "{errs}");
         let warns = ext.warnings.join("\n");
         assert!(
-            warns.contains("has no part `gone` (it has `start`, `earlier`)"),
+            warns.contains("has no part `gone` (it has `agents`, `new-threads`, `prompt`)"),
             "{warns}"
         );
     }

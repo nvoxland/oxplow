@@ -1,6 +1,6 @@
 import { ipc, run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { searchLauncher } from "../../support/ui.js";
+import { newSessionPage, searchLauncher } from "../../support/ui.js";
 
 /// Search offers New Agent Session…; choosing it opens the session picker
 /// rather than starting anything. On a fresh daemon: the picker is the home
@@ -9,14 +9,14 @@ import { searchLauncher } from "../../support/ui.js";
 test("search offers a new agent session, which opens the picker", async ({ fresh }) => {
   const { page } = fresh;
   await page.goto("/");
-  await expect(page.getByTestId("page-new-session")).toBeVisible();
-  await page.getByTestId("new-session-start").click();
+  await expect(newSessionPage(page)).toBeVisible();
+  await newSessionPage(page).getByTestId("lens-part-start").getByRole("button", { name: "New Session", exact: true }).click();
   const tab = page.locator('[data-testid^="center-tab-agent_session:"]').first();
   await expect(tab).toBeVisible();
-  await expect(page.getByTestId("page-new-session")).toBeHidden();
+  await expect(newSessionPage(page)).toHaveCount(0);
   await searchLauncher(page, "new agent session");
   await page.getByTestId("launcher-command-oxplow.agent_session.open").click();
-  await expect(page.getByTestId("page-new-session")).toBeVisible();
+  await expect(newSessionPage(page)).toBeVisible();
   // The session it started is still there: choosing it started nothing.
   await expect(tab).toBeVisible();
 });
@@ -29,9 +29,9 @@ test("an ended terminal session says so and its tab closes it", async ({ fresh }
   const { page, daemon } = fresh;
   await ipc(daemon, "set_agents", { agents: ["terminal", "claude"] });
   await page.goto("/");
-  await expect(page.getByTestId("page-new-session")).toBeVisible();
-  await page.getByTestId("new-session-agent").selectOption("claude");
-  await page.getByTestId("new-session-start").click();
+  await expect(newSessionPage(page)).toBeVisible();
+  await newSessionPage(page).getByTestId("lens-part-start").getByTestId("lens-form-fields-harness").selectOption("claude");
+  await newSessionPage(page).getByTestId("lens-part-start").getByRole("button", { name: "New Session", exact: true }).click();
   const tab = page.locator('[data-testid^="center-tab-agent_session:"]').first();
   await expect(tab).toBeVisible();
   await expect(page.getByTestId("terminal-ended")).toBeVisible();
@@ -48,9 +48,9 @@ test("a session that can't launch shows why and offers a retry", async ({ fresh 
   const { page, daemon } = fresh;
   await ipc(daemon, "set_agents", { agents: ["terminal", "codex"] });
   await page.goto("/");
-  await expect(page.getByTestId("page-new-session")).toBeVisible();
-  await page.getByTestId("new-session-agent").selectOption("codex");
-  await page.getByTestId("new-session-start").click();
+  await expect(newSessionPage(page)).toBeVisible();
+  await newSessionPage(page).getByTestId("lens-part-start").getByTestId("lens-form-fields-harness").selectOption("codex");
+  await newSessionPage(page).getByTestId("lens-part-start").getByRole("button", { name: "New Session", exact: true }).click();
   const ended = page.getByTestId("terminal-ended");
   await expect(ended).toContainText("Couldn't start the session");
   await expect(ended).toContainText("codex");
@@ -64,9 +64,9 @@ test("a session's tab shows its alias, and its fallback once the alias is cleare
   const { page, daemon } = fresh;
   await ipc(daemon, "set_agents", { agents: ["terminal", "claude"] });
   await page.goto("/");
-  await expect(page.getByTestId("page-new-session")).toBeVisible();
-  await page.getByTestId("new-session-agent").selectOption("claude");
-  await page.getByTestId("new-session-start").click();
+  await expect(newSessionPage(page)).toBeVisible();
+  await newSessionPage(page).getByTestId("lens-part-start").getByTestId("lens-form-fields-harness").selectOption("claude");
+  await newSessionPage(page).getByTestId("lens-part-start").getByRole("button", { name: "New Session", exact: true }).click();
   const tab = page.locator('[data-testid^="center-tab-agent_session:"]').first();
   await expect(tab).toBeVisible();
   await expect(tab).toContainText(/claude \d{4}-\d{2}-\d{2}/i);
@@ -91,7 +91,7 @@ test("search starts an enabled agent's session directly", async ({ fresh }) => {
   const { page, daemon } = fresh;
   await ipc(daemon, "set_agents", { agents: ["terminal", "codex"] });
   await page.goto("/");
-  await expect(page.getByTestId("page-new-session")).toBeVisible();
+  await expect(newSessionPage(page)).toBeVisible();
   await searchLauncher(page, "new claude session");
   await expect(page.getByTestId("launcher-command-oxplow.agent_session.open_claude")).toHaveCount(0);
   await page.keyboard.press("Escape");
@@ -99,7 +99,7 @@ test("search starts an enabled agent's session directly", async ({ fresh }) => {
   await page.getByTestId("launcher-command-oxplow.agent_session.open_codex").click();
   const tab = page.locator('[data-testid^="center-tab-agent_session:"]').first();
   await expect(tab).toBeVisible();
-  await expect(page.getByTestId("page-new-session")).toBeHidden();
+  await expect(newSessionPage(page)).toHaveCount(0);
 });
 
 const PICKER_CLOSE = "center-tab-close-page:new-session";
@@ -118,9 +118,9 @@ async function addThread(page: import("@playwright/test").Page, daemon: import("
 test("the picker closes, and stays closed", async ({ fresh }) => {
   const { page, daemon } = fresh;
   await page.goto("/");
-  await expect(page.getByTestId("page-new-session")).toBeVisible();
+  await expect(newSessionPage(page)).toBeVisible();
   await page.getByTestId(PICKER_CLOSE).click();
-  await expect(page.getByTestId("page-new-session")).toBeHidden();
+  await expect(newSessionPage(page)).toHaveCount(0);
   await page.reload();
   await expect(page.getByTestId("navigator-strip")).toBeVisible();
   await expect(page.getByTestId(PICKER_CLOSE)).toHaveCount(0);
@@ -131,10 +131,10 @@ test("a remembered choice is what new threads start with", async ({ fresh }) => 
   const { page, daemon } = fresh;
   await ipc(daemon, "set_agents", { agents: ["terminal", "claude"] });
   await page.goto("/");
-  await expect(page.getByTestId("page-new-session")).toBeVisible();
-  await page.getByTestId("new-session-agent").selectOption("claude");
-  await page.getByTestId("new-session-remember").check();
-  await page.getByTestId("new-session-start").click();
+  await expect(newSessionPage(page)).toBeVisible();
+  await newSessionPage(page).getByTestId("lens-part-start").getByTestId("lens-form-fields-harness").selectOption("claude");
+  await newSessionPage(page).getByTestId("lens-part-start").getByTestId("lens-form-fields-remember").check();
+  await newSessionPage(page).getByTestId("lens-part-start").getByRole("button", { name: "New Session", exact: true }).click();
   await expect(page.locator('[data-testid^="center-tab-agent_session:"]')).toHaveCount(1);
 
   await addThread(page, daemon, "Busy");

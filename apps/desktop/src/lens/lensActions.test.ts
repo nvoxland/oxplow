@@ -113,3 +113,25 @@ test("a row action with `when` is offered only on rows where that column is trut
   expect(actionOffered(enable, {})).toBe(false);
   expect(actionOffered({ ...action, row: true } as LensAction, {})).toBe(true);
 });
+
+// An action whose command can be undone says so: the toast offers Undo, as
+// it does for a command a person runs from the launcher.
+test("an undoable action's toast offers Undo, which undoes the run as the person", async () => {
+  const log: string[] = [];
+  const undoable = { result: {}, audit_id: 7, event_id: null, inverse: { name: "oxplow.agent_session.close", input: {} } } as never;
+  const d: LensActionDeps = {
+    runLensAction: async () => undoable,
+    toast: (m, undo) => {
+      log.push(`toast ${m} ${undo ? "with undo" : "without"}`);
+      undo?.();
+    },
+    undo: async (auditId) => {
+      log.push(`undo ${auditId}`);
+    },
+    recordError: () => {},
+    openAfter: async () => null,
+    openPage: () => {},
+  };
+  await performLensAction(action, run, null, null, false, d);
+  expect(log).toEqual(["toast Finish: done. with undo", "undo 7"]);
+});

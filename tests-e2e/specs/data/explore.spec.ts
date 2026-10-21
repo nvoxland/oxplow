@@ -24,7 +24,7 @@ test("explore a model, run SQL, and keep it as a lens through lens.keep", async 
   await page.getByTestId("explore-save-open").click();
   await page.getByTestId("explore-save-title").fill("Echidna tasks");
   await page.getByTestId("explore-save").click();
-  await expect(page.getByTestId("page-lens").getByTestId("lens-row-0")).toContainText("Echidna task");
+  await expect(page.locator('[data-testid="page-lens"]:visible').getByTestId("lens-row-0")).toContainText("Echidna task");
   // The save was one `oxplow.lens.keep`, whatever other specs kept before it.
   expect(await keeps(daemon)).toBe(before + 1);
 });

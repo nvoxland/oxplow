@@ -60,6 +60,8 @@ pub mod dashboard_tiles;
 mod dashboards_reference_tests;
 pub mod diagnostics;
 pub mod duplication_scan;
+#[cfg(test)]
+mod earlier_sessions_tests;
 pub mod effect_triggers;
 pub mod effective_config;
 pub mod effects;
@@ -190,7 +192,6 @@ pub mod services;
 #[cfg(test)]
 mod services_tests;
 pub mod session_auth;
-pub mod session_history;
 pub mod session_outcome;
 pub mod snapshot_capture;
 pub mod snapshot_capture_registry;
@@ -1503,6 +1504,13 @@ impl Services {
             catalog: extension_catalog.clone(),
             root: layout.project_dir.clone(),
         }));
+        let config_applied = Arc::new(tokio::sync::Notify::new());
+        let config_target = commands::config_commands::ConfigTarget {
+            config: config_arc.clone(),
+            project_dir: layout.project_dir.clone(),
+            events: event_bus.clone(),
+            applied: config_applied.clone(),
+        };
         for command in commands::vcs::ops(commands::vcs::VcsTarget {
             vcs: vcs.clone(),
             git: vcs::GitProvider,
@@ -1540,7 +1548,7 @@ impl Services {
         .chain(commands::review::ops())
         .chain(commands::thread::ops(session_processes.clone()))
         .chain(commands::agent_session::ops(
-            config_arc.clone(),
+            config_target.clone(),
             harnesses.clone(),
             session_processes.clone(),
         ))
@@ -1736,13 +1744,6 @@ impl Services {
         }) {
             commands.add_op(command).expect("knowledge ops register");
         }
-        let config_applied = Arc::new(tokio::sync::Notify::new());
-        let config_target = commands::config_commands::ConfigTarget {
-            config: config_arc.clone(),
-            project_dir: layout.project_dir.clone(),
-            events: event_bus.clone(),
-            applied: config_applied.clone(),
-        };
         for command in commands::config_commands::ops(config_target.clone())
             .into_iter()
             .chain(commands::metric::ops(commands::metric::MetricTarget {

@@ -1,10 +1,7 @@
-import { agentSessionRef, diffSpecOf, duplicateBlockOf, endpointsOf, fileRef, isPage, newTaskRef, workItemTabRef, type DiffViewPayload } from "../tabs/pageRefs.js";
+import { diffSpecOf, duplicateBlockOf, endpointsOf, fileRef, isPage, newTaskRef, workItemTabRef, type DiffViewPayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { idOf } from "../refs/ref.js";
 import type { Stream } from "../api.js";
-import { openAgentSession, openExternalUrl } from "../api.js";
-import { saveNewThreadSession } from "../newThreadSession.js";
-import { personCommands } from "../personCommands.js";
+import { openExternalUrl } from "../api.js";
 import type { CenterTab } from "../components/CenterTabs/CenterTabs.js";
 import type { BuiltInPageName } from "./declaredPages.js";
 import type { AppScope, SlotNav } from "./appScope.js";
@@ -15,7 +12,6 @@ import { settingsArea } from "./settingsAreas.js";
 import { DiffViewPage } from "./DiffViewPage.js";
 import { GitDashboardPage } from "./GitDashboardPage.js";
 import { UncommittedChangesPage } from "./UncommittedChangesPage.js";
-import { NewSessionPage } from "./NewSessionPage.js";
 import { TerminalPage } from "./TerminalPage.js";
 import { FilesPage } from "./FilesPage.js";
 import { TasksPage } from "./TasksPage.js";
@@ -101,53 +97,6 @@ export const diffViewTab = (ref: TabRef, payload: DiffViewPayload | null, nav: S
 };
 
 export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
-  "new-session": ({ ref, scope }) => ({
-    id: ref.id,
-    label: "New session",
-    closable: true,
-    render: () => (
-      <NewSessionPage
-        thread={scope.thread}
-        harnesses={scope.harnesses}
-        streamId={scope.stream?.id ?? null}
-        onOpenPage={scope.handleOpenPage}
-        onStart={async (harness, remember) => {
-          if (!scope.thread) return;
-          if (remember) await saveNewThreadSession(harness);
-          const opened = await openAgentSession(scope.thread.id, harness);
-          // The picker gives way to the session's tab (it follows the
-          // row once the model re-reads).
-          scope.closePageTab(ref.id);
-          scope.setCenterActive(agentSessionRef(opened.id).id);
-        }}
-        onTakeEarlier={async (row) => {
-          if (!scope.thread) return;
-          const sessionId = row.session ? idOf(row.session, "agent_session") : null;
-          if (row.action === "switch" && sessionId) {
-            // Already open: show it, and keep the picker for another pick.
-            scope.setCenterActive(agentSessionRef(sessionId).id);
-            return;
-          }
-          let tab: string | null = null;
-          if (row.action === "reopen" && sessionId) {
-            // Undoable: the toast offers Undo, which closes it again.
-            const reopened = await personCommands.run(`Reopen ${row.label}`, "oxplow.agent_session.reopen", {
-              session: row.session,
-            });
-            if (!reopened) return;
-            tab = agentSessionRef(sessionId).id;
-          } else if (row.action === "resume" && row.conversation) {
-            const opened = await openAgentSession(scope.thread.id, row.harness, undefined, row.conversation);
-            tab = agentSessionRef(opened.id).id;
-          }
-          if (!tab) return;
-          // The picker gives way to the session's tab.
-          scope.closePageTab(ref.id);
-          scope.setCenterActive(tab);
-        }}
-      />
-    ),
-  }),
   diff: ({ ref, params, nav, scope }) => {
     const spec = diffSpecOf(params);
     if (!spec) return null;

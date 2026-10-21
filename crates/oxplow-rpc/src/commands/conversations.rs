@@ -3,11 +3,10 @@
 //! choose one to resume or fork (`.context/terminal.md` "Choosing another
 //! conversation"). Read-only: choosing is `oxplow.agent_session.resume_conversation`.
 
-use oxplow_app::session_history::{self, EarlierSessions};
 use oxplow_app::Services;
 use oxplow_domain::agent::harness::{HarnessError, NativeConversation};
 use oxplow_domain::stores::{AgentSessionStore as _, StreamStore as _, ThreadStore as _};
-use oxplow_domain::{AgentSessionId, ThreadId};
+use oxplow_domain::AgentSessionId;
 use serde::Serialize;
 
 use crate::error::IpcError;
@@ -51,7 +50,7 @@ pub async fn list_native_conversations(
         .harnesses
         .get(session.harness.as_str())
         .map_err(|e| IpcError::invalid(e.to_string()))?;
-    let found = session_history::harness_conversations(harness.as_ref(), &stream)
+    let found = oxplow_app::live_models::harness_conversations(harness.as_ref(), &stream)
         .await
         .map_err(|e| match e {
             HarnessError::Unsupported { .. } => IpcError::invalid(e.to_string()),
@@ -84,25 +83,6 @@ pub async fn list_native_conversations(
             open_in,
         })
         .collect())
-}
-
-/// The thread's earlier sessions: its stream's closed ones and every
-/// harness's saved conversations for the worktree, with what taking each
-/// does (`oxplow_app::session_history`). Read-only; the person picks.
-pub async fn list_earlier_sessions(
-    svc: &Services,
-    thread_id: String,
-) -> Result<EarlierSessions, IpcError> {
-    let id = ThreadId::try_from_str(&thread_id)
-        .ok_or_else(|| IpcError::invalid(format!("{thread_id:?} is not a thread id")))?;
-    session_history::earlier_sessions(svc, id)
-        .await
-        .map_err(|e| match e {
-            oxplow_domain::DomainError::NotFound => {
-                IpcError::invalid(format!("no thread {thread_id}"))
-            }
-            other => other.into(),
-        })
 }
 
 /// Name the session's conversation in its harness's own UI (Codex's
@@ -165,20 +145,6 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.code, "INVALID");
-    }
-
-    /// An unknown thread, or text that isn't a thread id, is refused. (What
-    /// a real thread lists is `session_history`'s tests: this one would ask
-    /// the machine's own harnesses.)
-    #[tokio::test]
-    async fn earlier_sessions_are_listed_for_a_known_thread_only() {
-        let (ctx, _dir) = crate::test_support::services().await;
-        for bad in ["thr9999", "nonsense"] {
-            let err = crate::dispatch("list_earlier_sessions", json!({ "threadId": bad }), &ctx)
-                .await
-                .unwrap_err();
-            assert_eq!(err.code, "INVALID", "{bad}");
-        }
     }
 
     async fn session_of(ctx: &crate::RpcContext, harness: &str) -> String {

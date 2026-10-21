@@ -1,4 +1,5 @@
 import { expect, test } from "../../support/fixtures.js";
+import { newSessionPage } from "../../support/ui.js";
 
 // A fresh daemon: it expects a thread with no session (the picker), which a
 // shared daemon an earlier spec opened a session on doesn't have.
@@ -23,7 +24,7 @@ test("the app boots against its daemon: the shell renders and no call fails", as
   await page.goto("/");
   await expect(page.getByTestId("rail-hud")).toBeVisible();
   await expect(page.getByTestId("title-bar")).toBeVisible();
-  await expect(page.getByTestId("page-new-session")).toBeVisible();
+  await expect(newSessionPage(page)).toBeVisible();
   expect(replies.length, "the app made its calls").toBeGreaterThan(0);
   await Promise.all(replies);
   expect(failed).toEqual([]);

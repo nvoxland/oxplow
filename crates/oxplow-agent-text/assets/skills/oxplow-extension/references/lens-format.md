@@ -262,7 +262,8 @@ ui:
 - The target's params are the slot's params. The mounted lens must
   declare at least one of them (when the target has any).
 - The mounted part shows marked with the extension that added it.
-- Core pages have parts slots too: `new-session.sections` (part ids
-  `start` and `earlier`; binds `thread_id`).
+- Foundation pages are document lenses, so they have parts slots like any:
+  `oxplow-foundation/new-session.sections` (part ids `start` and
+  `earlier`; binds `thread_id`).
 - `at` is refused on a core region slot, such as `work_item.detail.body`.
   `size` is allowed only on a `.tiles` slot.

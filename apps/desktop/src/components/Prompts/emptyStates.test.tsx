@@ -22,7 +22,6 @@ mock.module("../../api.js", () => ({
 
 const { BacklinksList } = await import("../../tabs/BacklinksList.js");
 const { MetricsPage } = await import("../../pages/MetricsPage.js");
-const { NewSessionPage } = await import("../../pages/NewSessionPage.js");
 
 afterEach(cleanup);
 
@@ -39,26 +38,4 @@ test("no metrics recorded is an EmptyState", async () => {
   const { container } = render(<MetricsPage />);
   await waitFor(() => expect(container.textContent).toContain("No metrics recorded"));
   expect(emptyStates(container).length).toBe(1);
-});
-
-/** The session picker offers no prompts: there is no agent to hand one
- *  to yet. */
-test("a thread with no agent session shows the picker, with no prompts", () => {
-  const thread = { id: "thr1", title: "Fix the cart" } as unknown as Thread;
-  const { container, getByTestId } = render(
-    <NewSessionPage
-      thread={thread}
-      harnesses={[
-        { id: "claude", title: "Claude", enabled: true },
-        { id: "codex", title: "Codex", enabled: true },
-        { id: "opencode", title: "OpenCode", enabled: false },
-      ]}
-      onStart={async () => {}}
-    />,
-  );
-  expect(container.textContent).not.toContain("Ask the agent");
-  expect(Array.from((getByTestId("new-session-agent") as HTMLSelectElement).options).map((o) => o.value)).toEqual([
-    "claude",
-    "codex",
-  ]);
 });

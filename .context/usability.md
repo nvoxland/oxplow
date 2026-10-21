@@ -197,8 +197,7 @@ Things I keep forgetting. Read this before adding any UI.
   the person's own action) focuses its input only when nothing else has
   focus: one that mounts late — the New Session page as a thread loads —
   must not take the keystrokes of a launcher the person already opened
-  (`NewSessionPage`, an effect checking `document.activeElement`, not
-  `autoFocus`). The launcher starts a fresh query only when it opens, and
+  (the New Session form doesn't take focus at all). The launcher starts a fresh query only when it opens, and
   takes the focus whenever it shows (on a fresh window that's once its
   stream has loaded, just after it opened): what a person typed is never
   wiped by data arriving. And it keeps the focus while it is open: when
@@ -883,7 +882,7 @@ declaring *what it is* and mounting the generic layer.
   input and never sends. `compact` is the one-line form (rail sections). A loading state isn't an empty one: "Starting the
   agent…" is plain text, and only the empty transcript is an `EmptyState`. Don't offer prompts for what an agent can't do
   (AI providers, keys, permissions): say who does it instead. The session
-  picker (`NewSessionPage`, a thread with no agent session) offers **no**
+  picker (the New Session lens page, a thread with no agent session) offers **no**
   prompts — there is no agent here yet to hand one to — only the agent
   choice and Start, which opens the slot and nothing else. Its root
   carries `data-empty-state`, which is how a test tells an `EmptyState`

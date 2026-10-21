@@ -92,6 +92,11 @@
       SELECT harness, native_id, title, updated_at FROM v_agent_conversation
       WHERE native_id IS NOT NULL ORDER BY updated_at DESC
   shape: { columns: [harness, native_id, title, updated_at] }
+- question: Which agents does the project enable, and which is a new session's default?
+  skill: oxplow-extension
+  reaches:
+    sql: SELECT id, title FROM v_agent_harness WHERE enabled = 1 ORDER BY position
+  shape: { columns: [id, title] }
 - question: Which worktrees of this repository could a new stream adopt?
   skill: oxplow-extension
   reaches:

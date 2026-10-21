@@ -30,7 +30,7 @@ pages are THE shell.
   opened here) with no session opens as the person's `newThreadSession`
   says (`newThreadTabs` in `tabs/sessionTabs.ts`, applied by App's
   `openNewThread`): `ask` (the default) opens the **session picker**
-  (`page:new-session`, `NewSessionPage`), `none` opens nothing, and an
+  (`page:new-session`, the `new-session` lens), `none` opens nothing, and an
   agent starts its session — or asks, if it can't start any more. The
   picker is an ordinary tab after that: its × closes it for good, and
   closing a thread's last session leaves its other tabs (or home), not
@@ -237,7 +237,7 @@ oxplow's pages and their params:
   `comments`, `explore-data`, `metrics-recorded`,
   `terminal`, `alerts`, `settings` (view: `area`, `section` — another
   area is a pushed view change, never a page opened over it),
-  `custom-dashboard` (`id`), `new-session`, `new-task`
+  `custom-dashboard` (`id`), `new-task`
   (`parent`),
   `external-url` (`url`), `diff` (`path`, `left`, `right`, `label`,
   `base` — the left side's name when it isn't the version's own — and
@@ -248,14 +248,15 @@ oxplow's pages and their params:
   picked endpoint is a pushed view change), `duplicate-block` (`left`, `left_lines`,
   `left_at`, `right`, `right_lines`, `right_at`; `duplicateBlockOf`).
 
-New Session (`page:new-session`) is a Document page (`DocumentLayout`):
-**Start a new session**, then **Earlier sessions**, and what extensions
-mount in `new-session.sections` (ids `start`, `earlier`; it binds
-`thread_id`). Earlier sessions is a kit toolbar and table (a filter and
-the thread's closed sessions and saved conversations,
-`list_earlier_sessions`; ↑/↓/Enter/Escape from the filter; a row
-reopens, resumes or shows its session by the action the backend chose —
-`terminal.md` "Earlier sessions"). A diff's `revealLine` is not in its
+New Session (`page:new-session`) is a foundation document lens:
+**Start a new session** (a form over `oxplow.agent_session.open`: the agent
+from `v_agent_harness`, and "remember" — the person's `newThreadSession` —
+folded into the command) then **Earlier sessions**, and what extensions
+mount in `oxplow-foundation/new-session.sections` (ids `start`, `earlier`; it binds
+`thread_id`). Earlier sessions is a lens table (`new-session-earlier`,
+a `q` search in the rail; ↑/↓/Enter on the focused table; a row's
+Reopen/Resume action, `then: replace`, or its link to a session already
+open here — `terminal.md` "Earlier sessions"). A diff's `revealLine` is not in its
 id, so re-clicking reuses the tab.
 
 ## Left-nav panels (P6.G1)

@@ -21,7 +21,6 @@ pub const BUILT_IN_PAGES: &[&str] = &[
     "files",
     "git-dashboard",
     "metrics-recorded",
-    "new-session",
     "new-task",
     "settings",
     "tasks",

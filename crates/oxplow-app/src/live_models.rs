@@ -26,6 +26,9 @@
 use std::sync::{Arc, OnceLock};
 
 use oxplow_db::{SqlCell, TempTable, TempView};
+use oxplow_domain::agent::harness::{
+    AgentHarness, ConversationQuery, HarnessError, NativeConversation,
+};
 use oxplow_domain::{DomainError, Stream, StreamId, StreamKind};
 
 use crate::ai_service::AiService;
@@ -47,6 +50,7 @@ pub const NAMES: &[&str] = &[
     "agent_conversation",
     "vcs_workspace",
     "workspace_file",
+    "agent_harness",
 ];
 
 /// The columns a live model's rows have, in order.
@@ -108,6 +112,7 @@ pub fn columns(name: &str) -> &'static [&'static str] {
             "problem",
         ],
         "vcs_workspace" => &["path", "branch", "head", "is_main", "stream_id"],
+        "agent_harness" => &["id", "title", "enabled", "position"],
         "workspace_file" => &["stream_id", "path", "parent", "name", "kind", "status"],
         _ => &[],
     }
@@ -144,7 +149,9 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
                 event,
                 E::WorkspaceChanged { .. } | E::ConfigChanged | E::ExtensionsChanged
             ),
-            "config_value" => matches!(event, E::ConfigChanged | E::ExtensionsChanged),
+            "config_value" | "agent_harness" => {
+                matches!(event, E::ConfigChanged | E::ExtensionsChanged)
+            }
             "vcs_workspace" => matches!(event, E::VcsRefsChanged { .. }),
             "workspace_file" => matches!(
                 event,
@@ -181,6 +188,26 @@ pub struct LiveSources {
     pub streams: Arc<dyn oxplow_domain::stores::StreamStore>,
     pub harnesses: oxplow_domain::agent::registry::HarnessRegistry,
     pub vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
+}
+
+/// The most conversations listed per harness.
+const LIMIT: usize = 50;
+
+/// The saved conversations of `harness` begun in `stream`'s worktree.
+pub async fn harness_conversations(
+    harness: &dyn AgentHarness,
+    stream: &Stream,
+) -> Result<Vec<NativeConversation>, HarnessError> {
+    let query = ConversationQuery {
+        cwd: std::path::PathBuf::from(&stream.worktree_path),
+        // Its saved conversations are on the machine it runs on.
+        home: (stream.host == oxplow_domain::HostId::LOCAL)
+            .then(|| std::env::var_os("HOME").map(std::path::PathBuf::from))
+            .flatten(),
+        search_path: crate::agent_path::search_path(),
+        limit: LIMIT,
+    };
+    harness.conversations(&query).await
 }
 
 /// How many unmatched paths `v_zone_unmatched` lists: enough to see the
@@ -309,6 +336,7 @@ impl LiveModels {
             "agent_conversation" => sources.agent_conversations(stream).await,
             "vcs_workspace" => sources.vcs_workspaces().await,
             "workspace_file" => sources.workspace_files(stream).await,
+            "agent_harness" => Ok(sources.agent_harnesses()),
             other => Err(DomainError::Invalid(format!(
                 "`v_{other}` isn't a live model"
             ))),
@@ -615,7 +643,7 @@ impl LiveSources {
             async move {
                 (
                     h.id().to_string(),
-                    crate::session_history::harness_conversations(h.as_ref(), stream).await,
+                    harness_conversations(h.as_ref(), stream).await,
                 )
             }
         }))
@@ -656,6 +684,30 @@ impl LiveSources {
 
     /// The repository's working copies, primary first, each with the stream
     /// working in it (paths compared as the disk resolves them).
+    /// The registered harnesses in priority order: those `agents:` names, in
+    /// its order (the first is a new session's default), then the rest.
+    fn agent_harnesses(&self) -> Vec<Vec<SqlCell>> {
+        let agents = crate::config_service::read_config(&self.config).agents;
+        let mut all = self.harnesses.all();
+        all.sort_by_key(|h| {
+            agents
+                .iter()
+                .position(|a| a == h.id())
+                .unwrap_or(agents.len())
+        });
+        all.iter()
+            .enumerate()
+            .map(|(position, h)| {
+                vec![
+                    text(h.id().to_string()),
+                    text(h.title().to_string()),
+                    flag(agents.is_empty() || agents.iter().any(|a| a == h.id())),
+                    SqlCell::Int(position as i64),
+                ]
+            })
+            .collect()
+    }
+
     async fn vcs_workspaces(&self) -> Result<Vec<Vec<SqlCell>>, DomainError> {
         let canon = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.into());
         let project_dir = self.worktrees.project_dir();

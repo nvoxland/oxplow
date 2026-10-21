@@ -31,7 +31,7 @@ export interface DocumentLayoutProps {
   title: string;
   intro?: ReactNode;
   sections: readonly DocSection[];
-  /** The page's parts slot (`new-session.sections`): what extensions
+  /** The page's parts slot (`settings.agents.sections`): what extensions
    *  mount there goes among `sections` by each mount's `at`. */
   slot?: string;
   /** What the slot binds (its `SLOTS` params). */

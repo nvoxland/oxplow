@@ -16,7 +16,10 @@ export interface LensActionDeps {
     streamId: string | null,
     confirmed: boolean,
   ): Promise<CommandOutcome>;
-  toast(message: string): void;
+  /** A toast; with `undo`, it offers Undo. */
+  toast(message: string, undo?: () => void): void;
+  /** Undo the run recorded as `auditId`, as the person. */
+  undo(auditId: number): Promise<unknown>;
   recordError(label: string, message: string): void;
   /** The page the command opens after a run with `result` (its
    *  `ui.open_after`, bound by the server), or null. */
@@ -60,7 +63,9 @@ export async function performLensAction(
 ): Promise<LensActionOutcome> {
   try {
     const outcome = await deps.runLensAction(run.lens.id, action.id, run.params, row, streamId, confirmed);
-    deps.toast(`${action.label}: done.`);
+    // A run that came back undoable offers its Undo.
+    const auditId = outcome.inverse && outcome.audit_id != null ? outcome.audit_id : null;
+    deps.toast(`${action.label}: done.`, auditId === null ? undefined : () => void deps.undo(auditId).catch((e: unknown) => deps.recordError(`Undo ${action.label}`, e instanceof Error ? e.message : String(e))));
     await openAfterAction(action, outcome, deps);
     return "done";
   } catch (e) {

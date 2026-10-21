@@ -44,3 +44,8 @@ export async function openFromLauncher(page: Page, query: string): Promise<void>
   await expect(first).toHaveText(new RegExp(`(?:^|›)\\s*${title}`, "i"));
   await page.keyboard.press("Enter");
 }
+
+/** The New Session page (a lens document) the window shows. */
+export function newSessionPage(page: Page) {
+  return page.locator('[data-testid^="center-tab-body-page:new-session"]:visible');
+}

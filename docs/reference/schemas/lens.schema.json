@@ -1175,6 +1175,11 @@
             "null"
           ],
           "default": null
+        },
+        "primary": {
+          "description": "The row action a click on the row runs.",
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false,

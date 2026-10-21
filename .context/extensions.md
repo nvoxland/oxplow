@@ -1992,7 +1992,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   (`columns` entry for `tree.label`), so its `link`, `icon` and `tone`
   apply.
 - `actions`: commands the lens offers, `{ id, label, command, input?,
-  row?, group?, form?, fixed?, choices?, then? }`, with `{{param.x}}` / `{{row.x}}` placeholders; run as the lens
+  row?, group?, form?, fixed?, choices?, then?, when?, primary? }`, with `{{param.x}}` / `{{row.x}}` placeholders; run as the lens
   for whoever pressed, so they grant no power. `form: true` opens the
   command's form instead of running (a slideover: `lens_action_form`
   gives the command and the bound `input` as starting values); what the
@@ -2001,7 +2001,9 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   row action keeps the row's `ref`); a form action's `choices` are a
   form lens's (above). A refusal naming a field (`INVALID`
   with `field`, carried over IPC on `IpcError.field`) shows under that
-  field, in a form lens too. `group: <value>` puts the
+  field, in a form lens too. A run that came back undoable toasts with Undo (the person's click confirms it). `primary: true` (a row action) makes it what a click on the row, or Enter, runs — the first primary action
+  the row is offered (`when`); a click on a link or control in the row is
+  theirs. `group: <value>` puts the
   action in that group's heading (matched against the group's value as
   text) instead of the toolbar — also in a compact panel, where the
   toolbar is hidden. It needs the lens to have `group`, isn't a row
@@ -2126,7 +2128,6 @@ they live under `ui:`.
 | `vcs.status.details` | UncommittedChangesPage | `change_id` |
 | `diff.file.header` | a file diff (`DiffPane`), a strip under its header (P9.A2; `DiffFileHeaderSlot`) | `path`, `left_revision`, `right_revision` (each a revision in its wire form: `working`, `snap:<id>`, `git:<sha>`), `stream_id` |
 | `settings.<area>.sections` (parts per area: `overview` `every`; `agents` `agents`, `new-threads`, `prompt`; `lsp` `servers`; `extensions` `installed`; `data` `data`; `integrations` `capabilities`, `integrations`; `ai` `ai`) | each Settings area's page (`pages/settingsAreas.ts` lists the same ids; a TS test checks they match): an extension's status or setup views go beside the area they belong to | none |
-| `new-session.sections` (parts: `start`, `earlier`) | the New Session page's sections (`DocumentLayout`) | `thread_id` |
 
 The launcher isn't a slot: a lens lists itself with `launcher.category`.
 

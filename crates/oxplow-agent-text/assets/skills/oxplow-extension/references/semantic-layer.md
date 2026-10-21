@@ -22,7 +22,8 @@
   and folders, with each file's change; a folder's listing is `WHERE parent
   = 'src'`) and `v_agent_conversation` (every harness's saved conversations
   begun there; join `v_agent_session` on `resume_session_id = native_id`).
-  And for the project: `v_config_value` (every setting's value now and
+  And for the project: `v_agent_harness` (the registered agents, those
+  `agents:` names first, `enabled` and `position`), `v_config_value` (every setting's value now and
   where it comes from) and `v_vcs_workspace` (the repository's working
   copies and the stream in each; `stream_id IS NULL` is adoptable). A lens
   over a live model re-runs when what it reads changes.

@@ -1,7 +1,6 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
 import type {
   BackgroundTask,
-  EarlierSessions,
   ListedConversation,
   TabReport,
   SecretRef,
@@ -1238,14 +1237,6 @@ export async function startAgentSessionFresh(sessionId: string, confirmed: boole
 export async function listNativeConversations(sessionId: string): Promise<ListedConversation[]> {
   return unwrap(await commands.listNativeConversations(sessionId));
 }
-
-/// The thread's earlier sessions: its stream's closed sessions and every
-/// harness's saved conversations for the worktree, with what taking each
-/// does (`list_earlier_sessions`).
-export async function listEarlierSessions(threadId: string): Promise<EarlierSessions> {
-  return unwrap(await commands.listEarlierSessions(threadId));
-}
-
 /// Move an agent session to one of its harness's saved conversations.
 export async function resumeConversation(sessionId: string, conversation: string): Promise<void> {
   await runCommand("oxplow.agent_session.resume_conversation", { session: agentSessionRef(sessionId), conversation });

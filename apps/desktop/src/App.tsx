@@ -106,7 +106,7 @@ import { newThreadOpening } from "./newThreadSession.js";
 import { sessionLabel } from "./agentKinds.js";
 import { renameHint, renameSession } from "./sessionRename.js";
 import { useAgentHarnesses } from "./useAgentHarnesses.js";
-import { useThreadSessions } from "./agentSessions.js";
+import { readThreadSessions, useThreadSessions } from "./agentSessions.js";
 import { rollUpAgentStatus, threadStatuses } from "./agentStatusRollup.js";
 import { DirectoryPage } from "./pages/DirectoryPage.js";
 import { MetricDetailPage } from "./pages/MetricDetailPage.js";
@@ -907,6 +907,16 @@ export function App() {
   const selectedThread = currentThreadState.threads.find((thread) => thread.id === currentThreadState.selectedThreadId) ?? null;
   // The selected thread's open agent sessions: its session tabs follow them.
   const selectedThreadSessions = useThreadSessions(selectedThread?.id ?? null);
+  // A session just opened, to show once the window's list of sessions has it.
+  const pendingSessionRef = useRef<string | null>(null);
+  const [pendingSessionTick, setPendingSessionTick] = useState(0);
+  useEffect(() => {
+    const id = pendingSessionRef.current;
+    if (id && selectedThreadSessions?.some((candidate) => candidate.id === id)) {
+      pendingSessionRef.current = null;
+      setCenterActive(agentSessionRef(id).id);
+    }
+  }, [selectedThreadSessions, pendingSessionTick]);
   const selectedThreadId = selectedThread?.id ?? null;
   // Each thread's tabs as the pages they show now, in strip order.
   const threadPageTabs = useMemo(
@@ -1623,6 +1633,17 @@ export function App() {
         const sessionId = (ref.payload as { sessionId?: string } | null)?.sessionId;
         if (sessionId && selectedThreadSessions?.some((candidate) => candidate.id === sessionId)) {
           setCenterActive(ref.id);
+        } else if (sessionId && selectedThread) {
+          // A session opened a moment ago (a form's `open_after`) isn't in
+          // the window's list yet: read the model, and show its tab once the
+          // list has it; a closed one, or another thread's, shows its transcript.
+          void readThreadSessions(selectedThread.id).then(({ sessions: open }) => {
+            if (open.some((candidate) => candidate.id === sessionId)) {
+              pendingSessionRef.current = sessionId;
+              setPendingSessionTick((tick) => tick + 1);
+            }
+            else handleOpenPageRef.current?.(lensRef("oxplow-foundation/session-transcript", { session: ref.id }));
+          });
         } else {
           handleOpenPageRef.current?.(lensRef("oxplow-foundation/session-transcript", { session: ref.id }));
         }

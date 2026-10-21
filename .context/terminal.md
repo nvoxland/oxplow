@@ -154,12 +154,12 @@ opens the session again once that process has exited.
 **Earlier sessions: the same lists, with no session to ask.** The New
 Session page lists the thread's earlier sessions under its Start row, so a
 person can bring one back without first opening a session to switch. One
-listing (`list_earlier_sessions { thread_id }`,
-`oxplow_app::session_history::earlier_sessions`, UI-only) merges the
+listing (the `new-session-earlier` lens, oxplow-foundation's, over
+`v_agent_session` and `v_agent_conversation`) merges the
 stream's closed oxplow sessions with every harness's saved conversations
 for the worktree (`harness_conversations`, the query
 `list_native_conversations` also builds; each harness is asked at once, one
-that fails or answers `Unavailable` becomes a line in `unavailable` and the
+that fails or answers `Unavailable` becomes a row with its reason and the
 rest still list), on (harness, native id), newest activity first, and
 decides each row's action itself: **reopen** (this thread's session a
 person closed: `oxplow.agent_session.reopen`, whose toast offers Undo),
