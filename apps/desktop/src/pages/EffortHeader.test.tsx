@@ -30,13 +30,13 @@ test("renaming the effort runs effort.update; clearing it restores the default",
   const input = view.getByTestId("effort-title") as HTMLInputElement;
   fireEvent.change(input, { target: { value: "Rewrite the parser" } });
   fireEvent.keyDown(input, { key: "Enter" });
-  await waitFor(() => expect(ran).toEqual([["oxplow.effort.update", { effort: "effort:eff12", title: "Rewrite the parser" }]]));
+  await waitFor(() => expect(ran).toEqual([["oxplow.effort.update", { effort: "oxplow:oxplow/effort?id=eff12", title: "Rewrite the parser" }]]));
 
   fireEvent.click(await waitFor(() => view.getByText("Fix the parser")));
   const again = view.getByTestId("effort-title") as HTMLInputElement;
   fireEvent.change(again, { target: { value: "" } });
   fireEvent.keyDown(again, { key: "Enter" });
-  await waitFor(() => expect(ran[1]).toEqual(["oxplow.effort.update", { effort: "effort:eff12", title: null }]));
+  await waitFor(() => expect(ran[1]).toEqual(["oxplow.effort.update", { effort: "oxplow:oxplow/effort?id=eff12", title: null }]));
 });
 
 test("linking takes a work item; Escape cancels", async () => {
@@ -50,29 +50,29 @@ test("linking takes a work item; Escape cancels", async () => {
 
   fireEvent.click(view.getByTestId("effort-link"));
   const again = view.getByTestId("effort-link-prompt-item");
-  fireEvent.change(again, { target: { value: "work_item:oxplow:tsk42" } });
+  fireEvent.change(again, { target: { value: "oxplow:oxplow/work_item?id=tsk42&provider=oxplow" } });
   fireEvent.click(view.getByTestId("effort-link-prompt-submit"));
   await waitFor(() =>
-    expect(ran).toEqual([["oxplow.effort.link", { effort: "effort:eff12", work_item: "work_item:oxplow:tsk42" }]]),
+    expect(ran).toEqual([["oxplow.effort.link", { effort: "oxplow:oxplow/effort?id=eff12", work_item: "oxplow:oxplow/work_item?id=tsk42&provider=oxplow" }]]),
   );
   await waitFor(() => expect(view.queryByTestId("effort-link-prompt-item") === null).toBe(true));
 });
 
 test("a linked effort shows its item and unlinks", async () => {
-  const { deps, ran } = fake({ ...open, workItem: "work_item:oxplow:tsk7" });
+  const { deps, ran } = fake({ ...open, workItem: "oxplow:oxplow/work_item?id=tsk7&provider=oxplow" });
   const opened: unknown[] = [];
   const view = render(<EffortHeader effortId="eff12" onOpenPage={(r) => opened.push(r)} deps={deps} />);
   fireEvent.click(await waitFor(() => view.getByTestId("effort-linked-item")));
   expect(opened).toHaveLength(1);
   fireEvent.click(view.getByTestId("effort-unlink"));
-  await waitFor(() => expect(ran).toEqual([["oxplow.effort.link", { effort: "effort:eff12", work_item: null }]]));
+  await waitFor(() => expect(ran).toEqual([["oxplow.effort.link", { effort: "oxplow:oxplow/effort?id=eff12", work_item: null }]]));
 });
 
 test("an open effort closes; a closed one says how it closed", async () => {
   const { deps, ran } = fake(open);
   const view = render(<EffortHeader effortId="eff12" onOpenPage={() => {}} deps={deps} />);
   fireEvent.click(await waitFor(() => view.getByTestId("effort-close")));
-  await waitFor(() => expect(ran).toEqual([["oxplow.effort.close", { effort: "effort:eff12" }]]));
+  await waitFor(() => expect(ran).toEqual([["oxplow.effort.close", { effort: "oxplow:oxplow/effort?id=eff12" }]]));
   cleanup();
 
   const closed = fake({ ...open, endedAt: "2026-10-06T00:00:00Z", closedBy: "commit" });
@@ -83,8 +83,8 @@ test("an open effort closes; a closed one says how it closed", async () => {
 
 test("a typed item is the active list's id or a work item ref", () => {
   const ids = (id: string) => (/^tsk\d+$/.test(id) ? `work_item:oxplow:${id}` : null);
-  expect(normalizeWorkItemInput(" tsk42 ", ids)).toBe("work_item:oxplow:tsk42");
-  expect(normalizeWorkItemInput("work_item:issues:ENG-12", ids)).toBe("work_item:issues:ENG-12");
+  expect(normalizeWorkItemInput(" tsk42 ", ids)).toBe("oxplow:oxplow/work_item?id=tsk42&provider=oxplow");
+  expect(normalizeWorkItemInput("oxplow:oxplow/work_item?id=ENG-12&provider=issues", ids)).toBe("oxplow:oxplow/work_item?id=ENG-12&provider=issues");
   expect(normalizeWorkItemInput("fix it", ids)).toBeNull();
   expect(normalizeWorkItemInput("tsk42", () => null)).toBeNull();
   expect(closedByLabel("switch")).toBe("Closed when the thread moved on");

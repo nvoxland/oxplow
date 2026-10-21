@@ -36,12 +36,12 @@ describe("textContentRange", () => {
 
 describe("refFromHref", () => {
   test("maps typed hrefs to canonical refs", () => {
-    expect(refFromHref("file:src/app.rs")).toEqual({ kind: "file", id: "src/app.rs" });
-    expect(refFromHref("dir:src/components")).toEqual({
+    expect(refFromHref("oxplow:oxplow/file?path=src/app.rs")).toEqual({ kind: "file", id: "src/app.rs" });
+    expect(refFromHref("oxplow:oxplow/dir?path=src/components")).toEqual({
       kind: "dir",
       id: "src/components",
     });
-    expect(refFromHref("commit:abc1234")).toEqual({ kind: "commit", id: "abc1234" });
+    expect(refFromHref("oxplow:oxplow/commit?sha=abc1234")).toEqual({ kind: "commit", id: "abc1234" });
   });
 
   test("returns null for external links and anchors", () => {
@@ -54,7 +54,7 @@ describe("refFromHref", () => {
 describe("refsInRange", () => {
   test("collects deduped typed refs from links inside the selection", () => {
     const el = frag(
-      'see <a href="file:src/app.rs">app</a> and <a href="file:src/app.rs">app again</a> and <a href="commit:deadbee">that commit</a>',
+      'see <a href="oxplow:oxplow/file?path=src/app.rs">app</a> and <a href="oxplow:oxplow/file?path=src/app.rs">app again</a> and <a href="oxplow:oxplow/commit?sha=deadbee">that commit</a>',
     );
     document.body.appendChild(el);
     const range = document.createRange();

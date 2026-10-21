@@ -9,8 +9,8 @@ import { PageNavigationContext, type PageNavigation } from "./PageNavigationCont
 afterEach(cleanup);
 
 const collector: BacklinkEntry = {
-  open: "page:settings",
-  target: "collector:triage/todos",
+  open: "oxplow:oxplow/page?page=settings",
+  target: "oxplow:oxplow/collector?collector=triage/todos",
   label: "Triage todos",
   subtitle: "about",
   linkType: "about",
@@ -39,8 +39,8 @@ test("a link to a collector opens its page, in this tab or a new one", () => {
   fireEvent.click(getByTestId("backlinks-entry-page:settings"));
   fireEvent.click(getByTestId("backlinks-entry-page:settings"), { metaKey: true });
   expect(opened).toEqual([
-    ["page:settings", undefined],
-    ["page:settings", true],
+    ["oxplow:oxplow/page?page=settings", undefined],
+    ["oxplow:oxplow/page?page=settings", true],
   ]);
 });
 

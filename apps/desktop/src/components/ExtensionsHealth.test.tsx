@@ -34,7 +34,7 @@ const disabled: ContributionHealth = {
   meanMs: null,
   deadLetters: 0,
   fresh: true,
-  repairItem: "work_item:oxplow:tsk9",
+  repairItem: "oxplow:oxplow/work_item?id=tsk9&provider=oxplow",
 };
 
 test("a disabled contribution shows its reason", () => {

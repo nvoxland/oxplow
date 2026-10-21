@@ -8,7 +8,7 @@ import { openFromLauncher } from "../../support/ui.js";
 // The test extension's effect comments on each created task; a title with
 // "[fail]" makes it comment on an item that doesn't exist.
 
-const EFFECT = "effect:e2e/note-created";
+const EFFECT = "oxplow:oxplow/effect?effect=e2e/note-created";
 
 async function sql(daemon: Daemon, query: string): Promise<unknown[][]> {
   return (await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: query })).rows;

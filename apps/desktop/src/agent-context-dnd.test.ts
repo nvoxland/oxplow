@@ -6,22 +6,22 @@ import { decodeContextRef, decodeWorkItemDrag, workItemDragRefs } from "./agent-
 describe("decodeWorkItemDrag", () => {
   test("reads the refs, items, source list and epic", () => {
     const raw = JSON.stringify({
-      refs: ["work_item:oxplow:tsk1", "work_item:issues:ENG-2"],
+      refs: ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "oxplow:oxplow/work_item?id=ENG-2&provider=issues"],
       items: [
-        { ref: "work_item:oxplow:tsk1", title: "Alpha", state: "todo" },
-        { ref: "work_item:issues:ENG-2", title: "Beta", state: "in_progress" },
+        { ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "Alpha", state: "todo" },
+        { ref: "oxplow:oxplow/work_item?id=ENG-2&provider=issues", title: "Beta", state: "in_progress" },
       ],
       fromThreadId: "thr3",
-      parentEpicRef: "work_item:oxplow:tsk9",
+      parentEpicRef: "oxplow:oxplow/work_item?id=tsk9&provider=oxplow",
     });
     expect(decodeWorkItemDrag(raw)).toEqual({
-      refs: ["work_item:oxplow:tsk1", "work_item:issues:ENG-2"],
+      refs: ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "oxplow:oxplow/work_item?id=ENG-2&provider=issues"],
       items: [
-        { ref: "work_item:oxplow:tsk1", title: "Alpha", state: "todo" },
-        { ref: "work_item:issues:ENG-2", title: "Beta", state: "in_progress" },
+        { ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "Alpha", state: "todo" },
+        { ref: "oxplow:oxplow/work_item?id=ENG-2&provider=issues", title: "Beta", state: "in_progress" },
       ],
       fromThreadId: "thr3",
-      parentEpicRef: "work_item:oxplow:tsk9",
+      parentEpicRef: "oxplow:oxplow/work_item?id=tsk9&provider=oxplow",
     });
   });
 
@@ -35,9 +35,9 @@ describe("decodeWorkItemDrag", () => {
 
   test("each resolved item becomes a context ref", () => {
     const drag = decodeWorkItemDrag(
-      JSON.stringify({ refs: ["work_item:oxplow:tsk1"], items: [{ ref: "work_item:oxplow:tsk1", title: "Alpha", state: "todo" }] }),
+      JSON.stringify({ refs: ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow"], items: [{ ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "Alpha", state: "todo" }] }),
     );
-    expect(workItemDragRefs(drag)).toEqual([{ kind: "work_item", ref: "work_item:oxplow:tsk1", title: "Alpha", state: "todo" }]);
+    expect(workItemDragRefs(drag)).toEqual([{ kind: "work_item", ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "Alpha", state: "todo" }]);
     expect(workItemDragRefs(null)).toEqual([]);
   });
 });
@@ -50,11 +50,11 @@ describe("decodeContextRef", () => {
     expect(decodeContextRef(JSON.stringify({ kind: "file", path: "a.ts" }))).toEqual({ kind: "file", path: "a.ts" });
     expect(decodeContextRef(JSON.stringify({ kind: "wiki", slug: "s" }))).toEqual({ kind: "wiki", slug: "s" });
     expect(
-      decodeContextRef(JSON.stringify({ kind: "work_item", ref: "work_item:issues:ENG-1", title: "T", state: "todo" })),
-    ).toEqual({ kind: "work_item", ref: "work_item:issues:ENG-1", title: "T", state: "todo" });
-    expect(decodeContextRef(JSON.stringify({ kind: "ref", ref: "work_item:oxplow:tsk12" }))).toEqual({
+      decodeContextRef(JSON.stringify({ kind: "work_item", ref: "oxplow:oxplow/work_item?id=ENG-1&provider=issues", title: "T", state: "todo" })),
+    ).toEqual({ kind: "work_item", ref: "oxplow:oxplow/work_item?id=ENG-1&provider=issues", title: "T", state: "todo" });
+    expect(decodeContextRef(JSON.stringify({ kind: "ref", ref: "oxplow:oxplow/work_item?id=tsk12&provider=oxplow" }))).toEqual({
       kind: "ref",
-      ref: "work_item:oxplow:tsk12",
+      ref: "oxplow:oxplow/work_item?id=tsk12&provider=oxplow",
     });
   });
 

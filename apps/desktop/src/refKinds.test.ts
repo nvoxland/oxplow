@@ -14,7 +14,7 @@ const ACME_PR: RefKind = {
   idPattern: "^\\d+$",
   wikilinks: ["pr"],
   resolve: "v_acme_prs",
-  page: "page:acme/pr?ref={ref}",
+  page: "oxplow:oxplow/page?page=acme/pr&ref=%7Bref%7D",
   icon: "git-pull-request",
 };
 
@@ -36,7 +36,7 @@ describe("an extension's ref kind (P8.D7)", () => {
     const target = refTargetNow("acme_pr:12");
     const tab = target && "tab" in target ? target.tab : null;
     expect(tab).toEqual({
-      id: "page:acme/pr?ref=acme_pr:12",
+      id: "oxplow:oxplow/page?page=acme/pr&ref=acme_pr:12",
       kind: "page",
       payload: { extension: "acme", page: "pr", params: { ref: "acme_pr:12" } },
     });
@@ -87,7 +87,7 @@ describe("an extension's ref kind (P8.D7)", () => {
   test("reads v_ref_kind rows", () => {
     const kinds = refKindsFromResult({
       columns: ["kind", "extension", "label", "id_pattern", "wikilinks", "resolve", "page", "icon"],
-      rows: [["acme_pr", "acme", "Pull request", "^\\d+$", '["pr"]', "v_acme_prs", "page:acme/pr?ref={ref}", "git-pull-request"]],
+      rows: [["acme_pr", "acme", "Pull request", "^\\d+$", '["pr"]', "v_acme_prs", "oxplow:oxplow/page?page=acme/pr&ref=%7Bref%7D", "git-pull-request"]],
       truncated: false,
       reads: { models: [], tables: [] },
     } as never);

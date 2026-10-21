@@ -48,7 +48,7 @@ mock.module("../../api.js", () => ({
     if (sql.includes("FROM v_command_proposal")) {
       return {
         columns: ["id", "ref", "created_at", "command", "input", "actor_kind", "actor_id", "thread_id", "key", "preview", "dry_run"],
-        rows: [[7, "proposal:7", "t", "oxplow.config.set", '{"key":"zones","value":[]}', "agent", "thr3", 3, "config:zones", '{"command":"oxplow.config.set","summary":"Set zones","input":{},"destructive":false}', null]],
+        rows: [[7, "oxplow:oxplow/proposal?id=7", "t", "oxplow.config.set", '{"key":"zones","value":[]}', "agent", "thr3", 3, "oxplow:oxplow/config?key=zones", '{"command":"oxplow.config.set","summary":"Set zones","input":{},"destructive":false}', null]],
         truncated: false,
         reads: { models: ["v_command_proposal"], tables: [], measures: [] },
         freshness: {},
@@ -132,11 +132,11 @@ test("a toast once per new item, after the start-up settle, offering only Review
   const reviewed: number[] = [];
   const { rerender } = renderHook(
     ({ items }) => useAlertToasts(items, () => reviewed.push(1), () => clock),
-    { initialProps: { items: { ...none, proposals: [{ id: "proposal:1", title: "Already waiting" }] } } },
+    { initialProps: { items: { ...none, proposals: [{ id: "oxplow:oxplow/proposal?id=1", title: "Already waiting" }] } } },
   );
   const before = getToastStore().getSnapshot().length;
   clock = SETTLE_MS + 1;
-  const items = { ...none, proposals: [{ id: "proposal:1", title: "Already waiting" }, { id: "proposal:2", title: "New one" }] };
+  const items = { ...none, proposals: [{ id: "oxplow:oxplow/proposal?id=1", title: "Already waiting" }, { id: "oxplow:oxplow/proposal?id=2", title: "New one" }] };
   rerender({ items });
   rerender({ items: { ...items } });
   const toasts = getToastStore().getSnapshot().slice(before);

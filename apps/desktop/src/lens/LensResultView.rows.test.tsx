@@ -56,9 +56,9 @@ const base: Lens = {
 };
 const columns = ["bucket", "bucket_ref", "id", "title", "status", "hue", "on", "d", "ref"];
 const rows: SqlCell[][] = [
-  ["In progress", "page:tasks", 1, "Epic", "in_progress", null, 0, 0, "work_item:oxplow:tsk1"],
-  ["In progress", "page:tasks", 2, "Child", "done", "warning", 1, 1, "work_item:oxplow:tsk2"],
-  ["Ready", null, 3, "Next", "todo", null, 0, 0, "work_item:oxplow:tsk3"],
+  ["In progress", "oxplow:oxplow/page?page=tasks", 1, "Epic", "in_progress", null, 0, 0, "oxplow:oxplow/work_item?id=tsk1&provider=oxplow"],
+  ["In progress", "oxplow:oxplow/page?page=tasks", 2, "Child", "done", "warning", 1, 1, "oxplow:oxplow/work_item?id=tsk2&provider=oxplow"],
+  ["Ready", null, 3, "Next", "todo", null, 0, 0, "oxplow:oxplow/work_item?id=tsk3&provider=oxplow"],
 ];
 const runOf = (lens: Partial<Lens>): LensRun =>
   ({ lens: { ...base, ...lens }, params: {}, result: { columns, rows, truncated: false } }) as unknown as LensRun;
@@ -130,7 +130,7 @@ test("a row that links somewhere drags into the agent's context; one that doesn'
   const view = render(<LensResultView run={runOf(grouped)} compact onOpenPage={() => {}} />);
   const row = view.getByTestId("lens-row-2");
   expect(row.getAttribute("draggable")).toBe("true");
-  expect(JSON.parse(dragData(row)[CONTEXT_REF_MIME]!)).toEqual({ kind: "ref", ref: "work_item:oxplow:tsk3" });
+  expect(JSON.parse(dragData(row)[CONTEXT_REF_MIME]!)).toEqual({ kind: "ref", ref: "oxplow:oxplow/work_item?id=tsk3&provider=oxplow" });
   cleanup();
   const plain = render(<LensResultView run={runOf({})} onOpenPage={() => {}} />);
   expect(plain.getByTestId("lens-row-0").getAttribute("draggable")).toBeNull();
@@ -149,7 +149,7 @@ test("a tree's labels follow their column's link, and its rows drag", () => {
   // Its first button is the branch toggle; the label is the link.
   expect(nodes[0]!.querySelector("button:not([aria-expanded])")?.textContent).toContain("Epic");
   expect(nodes[0]!.querySelector("[data-testid=lens-icon]")).not.toBeNull();
-  expect(JSON.parse(dragData(nodes[0]!)[CONTEXT_REF_MIME]!)).toEqual({ kind: "ref", ref: "work_item:oxplow:tsk1" });
+  expect(JSON.parse(dragData(nodes[0]!)[CONTEXT_REF_MIME]!)).toEqual({ kind: "ref", ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" });
   expect(nodes.some((n) => n.getAttribute("data-emphasis") === "true")).toBe(true);
 });
 
@@ -179,8 +179,8 @@ test("a link to a ref of any kind opens through the page's openRef", () => {
   fireEvent.click(view.getByTestId("lens-row-2").querySelector("button")!);
   fireEvent.click(view.getAllByTestId("lens-group-link")[0]!, { metaKey: true });
   expect(opened).toEqual([
-    ["work_item:oxplow:tsk3", false],
-    ["page:tasks", true],
+    ["oxplow:oxplow/work_item?id=tsk3&provider=oxplow", false],
+    ["oxplow:oxplow/page?page=tasks", true],
   ]);
 });
 
@@ -302,7 +302,7 @@ test("a link opens with its column's pages as the origin", () => {
   );
   fireEvent.click(view.getByText("Child"));
   const [ref, origin] = opened[0]!;
-  expect(ref).toBe("work_item:oxplow:tsk2");
+  expect(ref).toBe("oxplow:oxplow/work_item?id=tsk2&provider=oxplow");
   expect((origin as { index: number; items: { label: string }[] }).index).toBe(1);
   expect((origin as { items: { label: string }[] }).items.map((i) => i.label)).toEqual(["Epic", "Child", "Next"]);
 });
@@ -328,7 +328,7 @@ test("↑/↓ and Enter open the row under the cursor", () => {
   fireEvent.keyDown(table, { key: "ArrowDown" });
   fireEvent.keyDown(table, { key: "ArrowUp" });
   fireEvent.keyDown(table, { key: "Enter" });
-  expect(opened).toEqual([["work_item:oxplow:tsk2", "origin"]]);
+  expect(opened).toEqual([["oxplow:oxplow/work_item?id=tsk2&provider=oxplow", "origin"]]);
   expect(view.getByTestId("lens-row-1").getAttribute("data-cursor")).toBe("true");
 });
 

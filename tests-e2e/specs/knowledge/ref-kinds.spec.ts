@@ -8,7 +8,7 @@ test("an extension's ref renders as a link and opens its page", async ({ page, d
     thread: daemon.thread,
   });
   const n = created.result.ref.split(":").pop()!.replace(/^tsk/, "");
-  // `[[item:<n>]]` is the test extension's wikilink for `e2e_item:<n>`.
+  // `[[item:<n>]]` is the test extension's wikilink for `oxplow:e2e/item?id=%3Cn%3E`.
   await run(daemon, "oxplow.knowledge.write_page", {
     slug: "platypus-notes",
     title: "Platypus notes",

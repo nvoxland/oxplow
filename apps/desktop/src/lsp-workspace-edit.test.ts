@@ -42,7 +42,7 @@ function makeIO(opts: {
     written,
     findModel: (uri) => opts.models?.[uri] ?? null,
     pathFromUri: (uri) =>
-      uri.startsWith("file:///wt/") ? uri.slice("file:///wt/".length) : null,
+      uri.startsWith("oxplow:oxplow/file?path=///wt/") ? uri.slice("oxplow:oxplow/file?path=///wt/".length) : null,
     readFile: async (path) => {
       const content = opts.files?.[path];
       if (content === undefined) throw new Error(`no such file: ${path}`);
@@ -56,18 +56,18 @@ function makeIO(opts: {
 
 describe("partitionByOpenModel", () => {
   test("splits files by model presence", () => {
-    const models = { "file:///wt/open.ts": fakeModel("x") };
+    const models = { "oxplow:oxplow/file?path=///wt/open.ts": fakeModel("x") };
     const io = makeIO({ models });
     const normalized = {
       files: [
-        { uri: "file:///wt/open.ts", edits: [] },
-        { uri: "file:///wt/closed.ts", edits: [] },
+        { uri: "oxplow:oxplow/file?path=///wt/open.ts", edits: [] },
+        { uri: "oxplow:oxplow/file?path=///wt/closed.ts", edits: [] },
       ],
       skippedFileOps: 0,
     };
     const { open, closed } = partitionByOpenModel(io, normalized.files);
-    expect(open.map((f) => f.uri)).toEqual(["file:///wt/open.ts"]);
-    expect(closed.map((f) => f.uri)).toEqual(["file:///wt/closed.ts"]);
+    expect(open.map((f) => f.uri)).toEqual(["oxplow:oxplow/file?path=///wt/open.ts"]);
+    expect(closed.map((f) => f.uri)).toEqual(["oxplow:oxplow/file?path=///wt/closed.ts"]);
   });
 });
 
@@ -75,14 +75,14 @@ describe("applyNormalizedWorkspaceEdit", () => {
   test("open files go through the model, closed files through read-modify-write", async () => {
     const model = fakeModel("let a = 1;\n");
     const io = makeIO({
-      models: { "file:///wt/open.ts": model },
+      models: { "oxplow:oxplow/file?path=///wt/open.ts": model },
       files: { "src/closed.ts": "use(a);\n" },
     });
     const result = await applyNormalizedWorkspaceEdit(fakeMonaco, io, {
       files: [
-        { uri: "file:///wt/open.ts", edits: [{ range: range(0, 4, 0, 5), newText: "b" }] },
+        { uri: "oxplow:oxplow/file?path=///wt/open.ts", edits: [{ range: range(0, 4, 0, 5), newText: "b" }] },
         {
-          uri: "file:///wt/src/closed.ts",
+          uri: "oxplow:oxplow/file?path=///wt/src/closed.ts",
           edits: [{ range: range(0, 4, 0, 5), newText: "b" }],
         },
       ],
@@ -100,9 +100,9 @@ describe("applyNormalizedWorkspaceEdit", () => {
     const io = makeIO({ files: { "ok.ts": "a\n" } });
     const result = await applyNormalizedWorkspaceEdit(fakeMonaco, io, {
       files: [
-        { uri: "file:///wt/missing.ts", edits: [{ range: range(0, 0, 0, 1), newText: "x" }] },
-        { uri: "file:///elsewhere/out.ts", edits: [{ range: range(0, 0, 0, 1), newText: "x" }] },
-        { uri: "file:///wt/ok.ts", edits: [{ range: range(0, 0, 0, 1), newText: "x" }] },
+        { uri: "oxplow:oxplow/file?path=///wt/missing.ts", edits: [{ range: range(0, 0, 0, 1), newText: "x" }] },
+        { uri: "oxplow:oxplow/file?path=///elsewhere/out.ts", edits: [{ range: range(0, 0, 0, 1), newText: "x" }] },
+        { uri: "oxplow:oxplow/file?path=///wt/ok.ts", edits: [{ range: range(0, 0, 0, 1), newText: "x" }] },
       ],
       skippedFileOps: 0,
     });

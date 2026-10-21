@@ -48,7 +48,7 @@ mock.module("../api.js", () => ({
     if (!sql.includes("FROM v_tracker_flags")) return (realQuerySql as (...a: unknown[]) => unknown)(sql, ...rest);
     return {
       columns: ["ref", "label"],
-      rows: [["work_item:oxplow:tsk1", "flaky"]],
+      rows: [["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "flaky"]],
       truncated: false,
       reads: { models: ["v_tracker_flags"], tables: [], measures: [] },
       freshness: {},
@@ -91,7 +91,7 @@ const lens: Lens = {
 const run: LensRun = {
   lens,
   params: {},
-  result: { columns: ["ref"], rows: [["work_item:oxplow:tsk1"]], truncated: false },
+  result: { columns: ["ref"], rows: [["oxplow:oxplow/work_item?id=tsk1&provider=oxplow"]], truncated: false },
 };
 
 // A row action that asks for confirmation must ask wherever the row is —
@@ -147,7 +147,7 @@ test("a row's linked ref gets its kind's commands", async () => {
   fireEvent.contextMenu(view.getByTestId("lens-row-0"));
   fireEvent.click(await waitFor(() => view.getByTestId("menu-item-ref-commands-Tracker")));
   fireEvent.click(view.getByTestId("menu-item-ref-command-tracker.item.flag"));
-  await waitFor(() => expect(commandRuns).toEqual([["tracker.item.flag", { ref: "work_item:oxplow:tsk1" }]]));
+  await waitFor(() => expect(commandRuns).toEqual([["tracker.item.flag", { ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }]]));
 });
 
 // P6b.C5: a decorator's label follows a cell that links to its ref.

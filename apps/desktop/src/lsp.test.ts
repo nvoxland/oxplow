@@ -26,17 +26,17 @@ const stream = {
 
 describe("streamFileUri helpers", () => {
   test("builds a real file URI inside the stream worktree", () => {
-    expect(streamFileUri(stream, "src/App.tsx")).toBe("file:///tmp/proj1/src/App.tsx");
+    expect(streamFileUri(stream, "src/App.tsx")).toBe("oxplow:oxplow/file?path=///tmp/proj1/src/App.tsx");
   });
 
   test("maps file URIs back to stream-relative paths", () => {
-    expect(relativePathFromFileUri(stream, "file:///tmp/proj1/src/App.tsx")).toBe("src/App.tsx");
-    expect(relativePathFromFileUri(stream, "file:///tmp/other/App.tsx")).toBeNull();
+    expect(relativePathFromFileUri(stream, "oxplow:oxplow/file?path=///tmp/proj1/src/App.tsx")).toBe("src/App.tsx");
+    expect(relativePathFromFileUri(stream, "oxplow:oxplow/file?path=///tmp/other/App.tsx")).toBeNull();
   });
 
   test("creates editor navigation targets from LSP locations", () => {
     expect(
-      toEditorNavigationTarget(stream, "file:///tmp/proj1/src/App.tsx", {
+      toEditorNavigationTarget(stream, "oxplow:oxplow/file?path=///tmp/proj1/src/App.tsx", {
         start: { line: 4, character: 2 },
       }),
     ).toEqual({
@@ -68,9 +68,9 @@ describe("LspClient session-event demux", () => {
         streamId: "s-1",
         language: "typescript",
         method: "textDocument/publishDiagnostics",
-        params: { uri: "file:///tmp/proj1/a.ts", diagnostics: [diag] },
+        params: { uri: "oxplow:oxplow/file?path=///tmp/proj1/a.ts", diagnostics: [diag] },
       });
-      expect(got).toEqual([{ client: "ts", uri: "file:///tmp/proj1/a.ts", count: 1 }]);
+      expect(got).toEqual([{ client: "ts", uri: "oxplow:oxplow/file?path=///tmp/proj1/a.ts", count: 1 }]);
     } finally {
       tsClient.dispose();
       rustClient.dispose();

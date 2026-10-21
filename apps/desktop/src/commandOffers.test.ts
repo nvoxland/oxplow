@@ -35,7 +35,7 @@ function deps() {
     // The server binds `open_after` from the result (`command_open_after`).
     openAfter: async (id, result) => {
       calls.push(`open_after ${id} ${JSON.stringify(result)}`);
-      return "page:custom-dashboard?id=7";
+      return "oxplow:oxplow/page?id=7&page=custom-dashboard";
     },
   };
   return { d, calls };
@@ -45,7 +45,7 @@ const ctx = { streamId: "str2", threadId: "thr5" };
 
 test("an input template binds the stream and thread; one that can't bind is unavailable", () => {
   expect(bindInput({ stream: "{{stream}}", thread: "{{thread}}", n: 3 }, ctx)).toEqual({
-    input: { stream: "stream:str2", thread: "thread:thr5", n: 3 },
+    input: { stream: "oxplow:oxplow/stream?id=str2", thread: "oxplow:oxplow/thread?id=thr5", n: 3 },
   });
   expect(bindInput(null, ctx)).toEqual({ input: {} });
   expect(bindInput({ stream: "{{stream}}" }, { streamId: null, threadId: null })).toBeNull();
@@ -72,12 +72,12 @@ test("a form opens its page; a background command runs in the background; anothe
   const { d, calls } = deps();
   const offers = commandOffers(
     [
-      spec("oxplow.work_item.create", { label: "New Task…", form: "page:new-task" }),
+      spec("oxplow.work_item.create", { label: "New Task…", form: "oxplow:oxplow/page?page=new-task" }),
       spec("oxplow.vcs.pull", { label: "Pull Changes", input: { stream: "{{stream}}" }, background: true }),
       spec("oxplow.dashboard.create", {
         label: "New Dashboard…",
         input: { title: "Untitled dashboard" },
-        open_after: "page:custom-dashboard?id={{result.id}}",
+        open_after: "oxplow:oxplow/page?id=%7B%7Bresult.id%7D%7D&page=custom-dashboard",
       }),
     ],
     ctx,
@@ -87,7 +87,7 @@ test("a form opens its page; a background command runs in the background; anothe
   await new Promise((r) => setTimeout(r, 0));
   expect(calls).toEqual([
     "open page:new-task",
-    'background oxplow.vcs.pull {"stream":"stream:str2"}',
+    'background oxplow.vcs.pull {"stream":"oxplow:oxplow/stream?id=str2"}',
     'run oxplow.dashboard.create {"title":"Untitled dashboard"}',
     'open_after oxplow.dashboard.create {"id":7}',
     "open page:custom-dashboard?id=7",
@@ -120,21 +120,21 @@ test("a ref's menus offer the commands about its kind, the ref bound into their 
     spec("tracker.item.flag", { label: "Flag", about: "work_item" }),
     spec("oxplow.vcs.pull", { label: "Pull" }),
   ];
-  const offers = refOffers(specs, "work_item:fake:W-1", ctx, d);
+  const offers = refOffers(specs, "oxplow:oxplow/work_item?id=W-1&provider=fake", ctx, d);
   expect(offers.map((o) => o.id)).toEqual(["tracker.item.estimate", "tracker.item.flag"]);
   for (const o of offers) o.run();
   await new Promise((r) => setTimeout(r, 0));
   expect(calls).toEqual([
-    'run tracker.item.estimate {"ref":"work_item:fake:W-1","points":3}',
-    'run tracker.item.flag {"ref":"work_item:fake:W-1"}',
+    'run tracker.item.estimate {"ref":"oxplow:oxplow/work_item?id=W-1&provider=fake","points":3}',
+    'run tracker.item.flag {"ref":"oxplow:oxplow/work_item?id=W-1&provider=fake"}',
   ]);
 });
 
 test("a form about a ref opens with that ref as its param; a form about nothing is unchanged", () => {
   const { d, calls } = deps();
   const specs = [
-    spec("triage.note.add", { label: "Add Note…", about: "triage", form: "page:triage/note-form" }),
-    spec("triage.note.tag", { label: "Tag…", about: "triage", form: "page:triage/tag-form?mode=quick" }),
+    spec("triage.note.add", { label: "Add Note…", about: "triage", form: "oxplow:oxplow/page?page=triage/note-form" }),
+    spec("triage.note.tag", { label: "Tag…", about: "triage", form: "oxplow:oxplow/page?mode=quick&page=triage/tag-form" }),
     spec("oxplow.thread.create", { label: "New Thread…", about: "triage", form: "new-thread" }),
   ];
   for (const o of refOffers(specs, "triage:item/7", { streamId: null, threadId: null }, d)) o.run();

@@ -41,14 +41,14 @@ afterEach(() => {
 test("v_prompt's rows are the catalog; prompts about a kind; asking about a ref leads with it", () => {
   expect(promptsOf(rows)).toEqual(catalog);
   expect(promptsAbout(catalog, "effort").map((p) => p.prompt)).toEqual(["Which files did this effort touch?"]);
-  expect(askText("Who has changed this file the most?", "file:src/a.rs")).toBe(
+  expect(askText("Who has changed this file the most?", "oxplow:oxplow/file?path=src/a.rs")).toBe(
     "[oxplow ref file:src/a.rs] Who has changed this file the most?",
   );
   expect(askText("Which PRs wait on me?", null)).toBe("Which PRs wait on me?");
 });
 
 test("a page for an effort suggests its prompts, asked about that effort", async () => {
-  const view = render(<SuggestedPrompts refId="effort:12" />);
+  const view = render(<SuggestedPrompts refId="oxplow:oxplow/effort?id=12" />);
   const ask = await waitFor(() => view.getByText("Which files did this effort touch?"));
   expect(view.queryByText("Who has changed this file the most?")).toBeNull();
   fireEvent.click(ask);

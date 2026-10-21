@@ -48,7 +48,7 @@ const lens = (viz: Lens["viz"]): Lens => ({
 
 const failed: SourceCoverage = {
   model: "v_my_gh_pull_request",
-  source: "collector:my-gh/gh",
+  source: "oxplow:oxplow/collector?collector=my-gh/gh",
   status: "failed",
   // Today, so the wording is the time alone.
   at: new Date(new Date().setHours(12, 0, 0, 0)).toISOString(),

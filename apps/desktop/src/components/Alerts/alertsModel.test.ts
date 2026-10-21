@@ -7,12 +7,12 @@ const none: AlertItems = { proposals: [], opErrors: [], undelivered: 0, failedRe
 // One bell for everything that needs the person.
 test("the bell counts every item, red for a problem, accent for a decision", () => {
   expect(alertsSummary(none)).toEqual({ count: 0, tone: "none" });
-  expect(alertsSummary({ ...none, proposals: [{ id: "proposal:1", title: "x" }] })).toEqual({ count: 1, tone: "accent" });
+  expect(alertsSummary({ ...none, proposals: [{ id: "oxplow:oxplow/proposal?id=1", title: "x" }] })).toEqual({ count: 1, tone: "accent" });
   expect(alertsSummary({ ...none, badges: [{ id: "x/b", title: "B", message: "2" }] })).toEqual({ count: 1, tone: "accent" });
   expect(
     alertsSummary({
       ...none,
-      proposals: [{ id: "proposal:1", title: "x" }],
+      proposals: [{ id: "oxplow:oxplow/proposal?id=1", title: "x" }],
       opErrors: [{ id: "oe-1", label: "Push" }],
       undelivered: 3,
       failedReactions: 1,
@@ -23,12 +23,12 @@ test("the bell counts every item, red for a problem, accent for a decision", () 
 // A toast once per new item: a proposal or a failed operation as it
 // arrives, delivery as it starts failing, a badge as it starts firing.
 test("new alerts are the items not seen before, once each", () => {
-  const before = alertKeys({ ...none, proposals: [{ id: "proposal:1", title: "a" }], undelivered: 2 });
+  const before = alertKeys({ ...none, proposals: [{ id: "oxplow:oxplow/proposal?id=1", title: "a" }], undelivered: 2 });
   const now: AlertItems = {
     ...none,
     proposals: [
-      { id: "proposal:1", title: "a" },
-      { id: "proposal:2", title: "Your agent wants to run oxplow.config.set" },
+      { id: "oxplow:oxplow/proposal?id=1", title: "a" },
+      { id: "oxplow:oxplow/proposal?id=2", title: "Your agent wants to run oxplow.config.set" },
     ],
     opErrors: [{ id: "oe-1", label: "Push failed" }],
     undelivered: 5,

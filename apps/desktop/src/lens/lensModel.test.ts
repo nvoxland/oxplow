@@ -71,9 +71,9 @@ describe("displayColumns", () => {
 describe("row groups and styling", () => {
   const cols = ["bucket", "title", "ref", "on", "d"];
   const rows = [
-    ["Ready", "a", "page:tasks", 0, 0],
+    ["Ready", "a", "oxplow:oxplow/page?page=tasks", 0, 0],
     ["Done", "b", null, 1, 1],
-    ["Ready", "c", "page:other", 0, "2"],
+    ["Ready", "c", "oxplow:oxplow/page?page=other", 0, "2"],
   ];
   const res = { columns: cols, rows, truncated: false } as never;
 
@@ -84,7 +84,7 @@ describe("row groups and styling", () => {
       ["Ready", "Ready", ["a", "c"]],
       ["Done", "Done", ["b"]],
     ]);
-    expect(groups[0]!.ref).toBe("page:tasks");
+    expect(groups[0]!.ref).toBe("oxplow:oxplow/page?page=tasks");
     expect(groups[1]!.ref).toBeNull();
   });
 
@@ -106,7 +106,7 @@ describe("row groups and styling", () => {
     const link = (kind: "wiki" | "file" | "page", from: string) => ({ kind, from, line: null, base: null, head: null });
     const at = (kind: "wiki" | "file" | "page", value: string | number) =>
       rowContextRef(lens({ columns: [{ key: "title", label: null, link: link(kind, "v"), unit: null }] }), ["title", "v"], ["T", value]);
-    expect(at("page", "page:comments")).toEqual({ kind: "ref", ref: "page:comments" });
+    expect(at("page", "oxplow:oxplow/page?page=comments")).toEqual({ kind: "ref", ref: "oxplow:oxplow/page?page=comments" });
     expect(at("wiki", "auth-flow")).toEqual({ kind: "wiki", slug: "auth-flow" });
     expect(at("file", "src/a.ts")).toEqual({ kind: "file", path: "src/a.ts" });
     expect(rowContextRef(lens(), ["title"], ["T"])).toBeNull();
@@ -115,15 +115,15 @@ describe("row groups and styling", () => {
 
 describe("cellLinkRef", () => {
   const cols = ["id", "title", "path", "slug", "effort"];
-  const row = [42, "Fix it", "src/a.ts", "auth-flow", "effort:eff7"];
+  const row = [42, "Fix it", "src/a.ts", "auth-flow", "oxplow:oxplow/effort?id=eff7"];
 
   test("a page link reads its ref from `from`", () => {
-    expect(cellLinkRef({ kind: "page", from: "ref", line: null, base: null, head: null }, "title", [...row, "work_item:issues:E-1"], [...cols, "ref"])).toBe("work_item:issues:E-1");
+    expect(cellLinkRef({ kind: "page", from: "ref", line: null, base: null, head: null }, "title", [...row, "oxplow:oxplow/work_item?id=E-1&provider=issues"], [...cols, "ref"])).toBe("oxplow:oxplow/work_item?id=E-1&provider=issues");
   });
   test("file / wiki / effort-diff links default to the column itself", () => {
-    expect(cellLinkRef({ kind: "file", from: null, line: null, base: null, head: null }, "path", row, cols)?.id).toBe("file:src/a.ts");
-    expect(cellLinkRef({ kind: "wiki", from: null, line: null, base: null, head: null }, "slug", row, cols)?.id).toBe("wiki:auth-flow");
-    expect(cellLinkRef({ kind: "effort-diff", from: null, line: null, base: null, head: null }, "effort", row, cols)?.id).toBe("effort:eff7");
+    expect(cellLinkRef({ kind: "file", from: null, line: null, base: null, head: null }, "path", row, cols)?.id).toBe("oxplow:oxplow/file?path=src/a.ts");
+    expect(cellLinkRef({ kind: "wiki", from: null, line: null, base: null, head: null }, "slug", row, cols)?.id).toBe("oxplow:oxplow/wiki?slug=auth-flow");
+    expect(cellLinkRef({ kind: "effort-diff", from: null, line: null, base: null, head: null }, "effort", row, cols)?.id).toBe("oxplow:oxplow/effort?id=eff7");
   });
   test("null or missing target gives no link", () => {
     expect(cellLinkRef({ kind: "file", from: "path", line: null, base: null, head: null }, "title", [null, "x", null, null, null], cols)).toBeNull();
@@ -164,7 +164,7 @@ describe("lensDirectoryEntries", () => {
     ];
     const entries = lensDirectoryEntries(exts);
     expect(entries).toHaveLength(1);
-    expect(entries[0]!.id).toBe("lens:review/waiting");
+    expect(entries[0]!.id).toBe("oxplow:oxplow/lens?lens=review/waiting");
     expect(entries[0]!.label).toBe("Waiting on me");
     expect(entries[0]!.category).toBe("Lenses");
     expect(entries[0]!.ref.kind).toBe("lens");
@@ -219,7 +219,7 @@ describe("changedParams", () => {
         { name: "range", label: null, default: "30d", type: "date_range" },
       ],
     });
-    expect(changedParams(l, { merges: 0, range: "30d", ref: "work_item:oxplow:tsk1" })).toEqual({ ref: "work_item:oxplow:tsk1" });
+    expect(changedParams(l, { merges: 0, range: "30d", ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" })).toEqual({ ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" });
     expect(changedParams(l, { merges: true, range: "7d" })).toEqual({ merges: true, range: "7d" });
   });
 });
@@ -281,13 +281,13 @@ describe("links added for extraction", () => {
   const row = [42, "src/a.rs", 7, "abc123", "oxplow.complexity"];
   test("file links can carry a line", () => {
     const ref = cellLinkRef({ kind: "file", from: "path", line: "ln", base: null, head: null }, "path", row, cols);
-    expect(ref?.id).toBe("file:src/a.rs");
+    expect(ref?.id).toBe("oxplow:oxplow/file?path=src/a.rs");
     expect((ref?.payload as { line?: number }).line).toBe(7);
   });
   test("commit and metric links", () => {
     expect(cellLinkRef({ kind: "commit", from: "sha", line: null, base: null, head: null }, "sha", row, cols)?.kind).toBe("commit");
     expect(cellLinkRef({ kind: "metric", from: "key", line: null, base: null, head: null }, "key", row, cols)?.id).toBe(
-      "metric:oxplow.complexity",
+      "oxplow:oxplow/metric?metric=oxplow.complexity",
     );
   });
 });
@@ -318,8 +318,8 @@ describe("launcher entries", () => {
       }),
     ]);
     expect(entries.map((e) => [e.ref.id, e.category])).toEqual([
-      ["lens:x/a", "Activity"],
-      ["lens:x/c", "Lenses"],
+      ["oxplow:oxplow/lens?lens=x/a", "Activity"],
+      ["oxplow:oxplow/lens?lens=x/c", "Lenses"],
     ]);
   });
 });
@@ -463,9 +463,9 @@ test("a slot can be narrowed to one extension, and lists who mounts there", () =
 });
 
 test("page links name any ref, which opens where its kind's page says", () => {
-  expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["work_item:oxplow:tsk3"], ["p"])).toBe("work_item:oxplow:tsk3");
-  expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["page:git-dashboard"], ["p"])).toBe("page:git-dashboard");
-  expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["handoff:hnd1"], ["p"])).toBe("handoff:hnd1");
+  expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["oxplow:oxplow/work_item?id=tsk3&provider=oxplow"], ["p"])).toBe("oxplow:oxplow/work_item?id=tsk3&provider=oxplow");
+  expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["oxplow:oxplow/page?page=git-dashboard"], ["p"])).toBe("oxplow:oxplow/page?page=git-dashboard");
+  expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["oxplow:oxplow/handoff?id=hnd1"], ["p"])).toBe("oxplow:oxplow/handoff?id=hnd1");
 });
 
 const result = (columns: string[], rows: (string | number | null)[][]) => ({
@@ -508,13 +508,13 @@ describe("structure components (P6.A2)", () => {
     const out = timelineEntries(
       l,
       result(["at", "w", "r"], [
-        ["2026-09-30", "shipped", "commit:abc"],
+        ["2026-09-30", "shipped", "oxplow:oxplow/commit?sha=abc"],
         ["2026-09-29", "started", null],
       ]),
     );
     expect(out.map((e) => [e.at, e.label, e.ref])).toEqual([
       ["2026-09-29", "started", null],
-      ["2026-09-30", "shipped", "commit:abc"],
+      ["2026-09-30", "shipped", "oxplow:oxplow/commit?sha=abc"],
     ]);
   });
 

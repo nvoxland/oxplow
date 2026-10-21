@@ -7,7 +7,7 @@ import { TaskDetailRail, type TaskDetailChanges } from "./TaskDetail.js";
 afterEach(cleanup);
 
 const item: WorkItem = {
-  ref: "work_item:oxplow:tsk1",
+  ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow",
   provider: "oxplow",
   title: "Fix it",
   body: "",
@@ -66,7 +66,7 @@ test("the rail shows the list's own fields and changes the editable ones", () =>
   expect(view.container.textContent).toContain("agent");
   fireEvent.change(view.getByLabelText("State"), { target: { value: "blocked" } });
   expect(changes).toEqual([
-    ["work_item:oxplow:tsk1", { native: { priority: "high" } }],
-    ["work_item:oxplow:tsk1", { state: "blocked" }],
+    ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", { native: { priority: "high" } }],
+    ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", { state: "blocked" }],
   ]);
 });

@@ -130,7 +130,7 @@ describe("buildQuickOpenResults", () => {
       files,
       siteHits: [hit("wiki", "gt")],
     });
-    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { ref: "wiki:gt" } });
+    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { ref: "oxplow:oxplow/wiki?slug=gt" } });
     expect(out.results.some((r) => r.kind === "page")).toBe(true);
   });
 
@@ -167,7 +167,7 @@ describe("buildQuickOpenResults", () => {
     const hits = Array.from({ length: 35 }, (_, i) => hit("wiki", i === 33 ? "meeting" : `w${i}`));
     const out = buildQuickOpenResults({ query: "meeting", pages, commands, files, siteHits: hits });
     // Pre-fix this exact hit was sliced away before the float ran.
-    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { ref: "wiki:meeting" } });
+    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { ref: "oxplow:oxplow/wiki?slug=meeting" } });
   });
 
   // tsk1031: "todo" ranked Planning, Recent Decisions and Unbacked Claims
@@ -175,15 +175,15 @@ describe("buildQuickOpenResults", () => {
   // A keyword matches at a word's start; a title match ranks first.
   test("a title match ranks first, and keywords match whole words", () => {
     const planning: PageDirectoryEntry = {
-      ...page("lens:a/planning", "Planning"),
+      ...page("oxplow:oxplow/lens?lens=a/planning", "Planning"),
       keywords: "lens oxplow-bundled planning what to do next, sorted by the oldest first",
     };
-    const todos: PageDirectoryEntry = { ...page("lens:t/todos", "TODO comments"), keywords: "lens todo-watch todos every comment" };
+    const todos: PageDirectoryEntry = { ...page("oxplow:oxplow/lens?lens=t/todos", "TODO comments"), keywords: "lens todo-watch todos every comment" };
     const symbols: PageDirectoryEntry = { ...page("symbols", "Symbols"), keywords: "outline go to definition" };
-    const stale: PageDirectoryEntry = { ...page("lens:b/stale", "Stale Work"), keywords: "lens review todo items left open" };
+    const stale: PageDirectoryEntry = { ...page("oxplow:oxplow/lens?lens=b/stale", "Stale Work"), keywords: "lens review todo items left open" };
     const out = buildQuickOpenResults({ query: "todo", pages: [planning, symbols, stale, todos], commands: [], files: [], siteHits: [] });
     const ids = out.results.filter((r) => r.kind === "page").map((r) => (r.kind === "page" ? r.entry.id : ""));
-    expect(ids).toEqual(["lens:t/todos", "lens:b/stale"]);
+    expect(ids).toEqual(["oxplow:oxplow/lens?lens=t/todos", "oxplow:oxplow/lens?lens=b/stale"]);
   });
 
   test("a page is found by its keywords, not just label/id", () => {
@@ -279,14 +279,14 @@ describe("nextSectionIndex", () => {
 describe("buildRecentEntries", () => {
   test("prefixes ids to avoid directory collisions, falls back label→refId, rebuilds the ref", () => {
     const entries = buildRecentEntries([
-      { refKind: "file", refId: "file:src/main.rs", label: "main.rs" },
-      { refKind: "wiki", refId: "wiki:architecture", label: "" },
+      { refKind: "file", refId: "oxplow:oxplow/file?path=src/main.rs", label: "main.rs" },
+      { refKind: "wiki", refId: "oxplow:oxplow/wiki?slug=architecture", label: "" },
     ]);
     expect(entries[0]!.id).toBe("recent:file:src/main.rs");
     expect(entries[0]!.label).toBe("main.rs");
     expect(entries[0]!.ref.kind).toBe("file");
     // Empty stored label falls back to the ref id.
-    expect(entries[1]!.label).toBe("wiki:architecture");
+    expect(entries[1]!.label).toBe("oxplow:oxplow/wiki?slug=architecture");
     expect(entries[1]!.ref.kind).toBe("wiki");
   });
 });

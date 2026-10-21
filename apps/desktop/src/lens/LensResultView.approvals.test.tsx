@@ -30,7 +30,7 @@ mock.module("../api.js", () => ({
     sql.includes("v_command_proposal")
       ? {
           columns,
-          rows: [row(7, 3, "config:agentPromptAppend"), row(8, 9, "config:other")],
+          rows: [row(7, 3, "oxplow:oxplow/config?key=agentPromptAppend"), row(8, 9, "oxplow:oxplow/config?key=other")],
           truncated: false,
           reads: { models: [], tables: [], measures: [] },
           freshness: {},
@@ -77,7 +77,7 @@ test("an approvals lens draws every pending proposal and decides through the per
 });
 
 test("its thread and setting params narrow the list", async () => {
-  const byThread = render(<LensResultView run={runWith({ thread: "thread:thr9" })} onOpenPage={() => {}} />);
+  const byThread = render(<LensResultView run={runWith({ thread: "oxplow:oxplow/thread?id=thr9" })} onOpenPage={() => {}} />);
   await waitFor(() => byThread.getByTestId("proposal-8"));
   expect(byThread.queryByTestId("proposal-7")).toBeNull();
   cleanup();

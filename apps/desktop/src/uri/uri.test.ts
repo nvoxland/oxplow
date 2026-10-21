@@ -48,7 +48,7 @@ test("its readers name the resource and a param", () => {
   expect(typeOf(u)).toBe("oxplow/work_item");
   expect(paramOf(u, "id")).toBe("tsk42");
   expect(paramOf(u, "gone")).toBeNull();
-  expect(typeOf("effort:eff1")).toBeNull();
+  expect(typeOf("oxplow:oxplow/effort?id=eff1")).toBeNull();
 });
 
 // A link may name any resource; oxplow's are the oxplow: ones.

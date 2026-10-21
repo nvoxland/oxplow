@@ -18,13 +18,13 @@ test("frame messages parse into the three requests and ready; anything else is r
     type: "request",
     request: { id: "2", method: "invoke", command: "oxplow.work_item.transition", input: { to: "done" } },
   });
-  expect(parseFrameMessage({ id: "3", method: "navigate", ref: "work_item:oxplow:tsk1" })).toEqual({
+  expect(parseFrameMessage({ id: "3", method: "navigate", ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" })).toEqual({
     type: "request",
-    request: { id: "3", method: "navigate", ref: "work_item:oxplow:tsk1", newTab: false },
+    request: { id: "3", method: "navigate", ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", newTab: false },
   });
-  expect(parseFrameMessage({ id: "4", method: "navigate", ref: "commit:abc", newTab: true })).toEqual({
+  expect(parseFrameMessage({ id: "4", method: "navigate", ref: "oxplow:oxplow/commit?sha=abc", newTab: true })).toEqual({
     type: "request",
-    request: { id: "4", method: "navigate", ref: "commit:abc", newTab: true },
+    request: { id: "4", method: "navigate", ref: "oxplow:oxplow/commit?sha=abc", newTab: true },
   });
   for (const bad of [
     null,
@@ -186,13 +186,13 @@ test("an invoke that asks is confirmed in the host, then runs confirmed; decline
 
 test("navigate opens the ref; a malformed request is answered with an error when it has an id", async () => {
   const h = harness();
-  h.send({ id: "n1", method: "navigate", ref: "work_item:oxplow:tsk1" });
-  h.send({ id: "n2", method: "navigate", ref: "commit:abc", newTab: true });
+  h.send({ id: "n1", method: "navigate", ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" });
+  h.send({ id: "n2", method: "navigate", ref: "oxplow:oxplow/commit?sha=abc", newTab: true });
   h.send({ id: "b1", method: "exec" });
   await h.settle();
   expect(h.calls).toEqual([
-    ["navigate", "work_item:oxplow:tsk1", { newTab: false }],
-    ["navigate", "commit:abc", { newTab: true }],
+    ["navigate", "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", { newTab: false }],
+    ["navigate", "oxplow:oxplow/commit?sha=abc", { newTab: true }],
   ]);
   expect(h.received).toEqual([
     { id: "n1", ok: true, result: null },
@@ -229,12 +229,12 @@ test("ready is heard once; an update posts only a result the frame hasn't seen",
 // A component reaches no network, so it may not open an outside URL by
 // navigating the host: only app pages, and a refused navigate is answered.
 test("a component navigates to app pages only", async () => {
-  expect(componentMayOpen("work_item:oxplow:tsk1")).toBe(true);
-  expect(componentMayOpen("handoff:hnd1")).toBe(true);
-  expect(componentMayOpen("page:external-url?url=https%3A%2F%2Fevil.example%2F%3Fd%3D1")).toBe(false);
+  expect(componentMayOpen("oxplow:oxplow/work_item?id=tsk1&provider=oxplow")).toBe(true);
+  expect(componentMayOpen("oxplow:oxplow/handoff?id=hnd1")).toBe(true);
+  expect(componentMayOpen("oxplow:oxplow/page?page=external-url&url=https://evil.example/?d%3D1")).toBe(false);
   expect(componentMayOpen("not a ref")).toBe(false);
   const h = harness({ navigate: (ref) => componentMayOpen(ref) });
-  h.send({ id: "n2", method: "navigate", ref: "page:external-url?url=https%3A%2F%2Fevil.example%2F" });
+  h.send({ id: "n2", method: "navigate", ref: "oxplow:oxplow/page?page=external-url&url=https://evil.example/" });
   await h.settle();
   expect(h.received).toEqual([
     { id: "n2", ok: false, error: { code: "INVALID", message: "A component may open oxplow's pages only." } },

@@ -11,7 +11,7 @@ describe("askAboutSelection", () => {
 
 describe("formatContextMention", () => {
   test("ref → [oxplow ref <ref>] with trailing space: Ask About This", () => {
-    expect(formatContextMention({ kind: "ref", ref: "commit:abc123" })).toBe("[oxplow ref commit:abc123] ");
+    expect(formatContextMention({ kind: "ref", ref: "oxplow:oxplow/commit?sha=abc123" })).toBe("[oxplow ref commit:abc123] ");
   });
 
   test("file → @<path> with trailing space", () => {
@@ -29,19 +29,19 @@ describe("formatContextMention", () => {
 
   test("a work item → bracketed reference with its ref, title, state, trailing space", () => {
     expect(formatContextMention({
-      kind: "work_item", ref: "work_item:issues:ENG-12", title: "Add to agent context", state: "in_progress",
+      kind: "work_item", ref: "oxplow:oxplow/work_item?id=ENG-12&provider=issues", title: "Add to agent context", state: "in_progress",
     })).toBe('[oxplow work_item:issues:ENG-12: "Add to agent context" (in_progress)] ');
   });
 
   test("a work item's title collapses whitespace", () => {
     expect(formatContextMention({
-      kind: "work_item", ref: "work_item:oxplow:tsk1", title: "Multi\nline\ttitle  here", state: "todo",
+      kind: "work_item", ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "Multi\nline\ttitle  here", state: "todo",
     })).toBe('[oxplow work_item:oxplow:tsk1: "Multi line title here" (todo)] ');
   });
 
   test("a work item's title keeps its quotes (plain text reference)", () => {
     expect(formatContextMention({
-      kind: "work_item", ref: "work_item:oxplow:tsk1", title: 'Fix "broken" thing', state: "todo",
+      kind: "work_item", ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: 'Fix "broken" thing', state: "todo",
     })).toBe('[oxplow work_item:oxplow:tsk1: "Fix "broken" thing" (todo)] ');
   });
 
@@ -49,7 +49,7 @@ describe("formatContextMention", () => {
     expect(formatContextMention({ kind: "file", path: "x" }).endsWith(" ")).toBe(true);
     expect(formatContextMention({ kind: "wiki", slug: "x" }).endsWith(" ")).toBe(true);
     expect(formatContextMention({
-      kind: "work_item", ref: "work_item:oxplow:tsk1", title: "x", state: "x",
+      kind: "work_item", ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "x", state: "x",
     }).endsWith(" ")).toBe(true);
   });
 

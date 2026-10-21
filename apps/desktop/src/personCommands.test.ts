@@ -69,7 +69,7 @@ test("an undoable command's toast offers Undo, which undoes that run", async () 
     toast: (m, undo) => toasts.push([m, undo]),
     recordError: () => {},
   });
-  await store.run("Move to Done", "oxplow.work_item.transition", { ref: "work_item:oxplow:tsk1", to: "done" });
+  await store.run("Move to Done", "oxplow.work_item.transition", { ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", to: "done" });
   await store.run("Comment", "oxplow.work_item.comment", {});
   expect(toasts.map(([m, u]) => [m, u !== undefined])).toEqual([
     ["Move to Done: done.", true],

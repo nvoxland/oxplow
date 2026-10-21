@@ -21,16 +21,16 @@ test("the launcher lists every declared page with a category, by its tab id", ()
     ext({
       name: "oxplow-foundation",
       pages: [
-        page({ id: "tasks", extension: "oxplow-foundation", pageRef: "page:tasks", title: "Tasks", category: "Work", keywords: "dashboard" }),
-        page({ id: "diff", extension: "oxplow-foundation", pageRef: "page:diff", title: "Diff" }),
+        page({ id: "tasks", extension: "oxplow-foundation", pageRef: "oxplow:oxplow/page?page=tasks", title: "Tasks", category: "Work", keywords: "dashboard" }),
+        page({ id: "diff", extension: "oxplow-foundation", pageRef: "oxplow:oxplow/page?page=diff", title: "Diff" }),
       ],
     } as never),
-    ext({ name: "gh", pages: [page({ id: "open-prs", extension: "gh", pageRef: "page:gh/open-prs", title: "Open PRs", category: "Work" })] } as never),
-    ext({ name: "off", enabled: false, pages: [page({ id: "x", extension: "off", pageRef: "page:off/x", title: "X", category: "Work" })] } as never),
+    ext({ name: "gh", pages: [page({ id: "open-prs", extension: "gh", pageRef: "oxplow:oxplow/page?page=gh/open-prs", title: "Open PRs", category: "Work" })] } as never),
+    ext({ name: "off", enabled: false, pages: [page({ id: "x", extension: "off", pageRef: "oxplow:oxplow/page?page=off/x", title: "X", category: "Work" })] } as never),
   ]);
   const rows = out.map((p) => [p.label, p.category, p.ref.id, p.ref.kind]);
-  expect(rows).toContainEqual(["Tasks", "Work", "page:tasks", "page"]);
-  expect(rows).toContainEqual(["Open PRs", "Work", "page:gh/open-prs", "page"]);
+  expect(rows).toContainEqual(["Tasks", "Work", "oxplow:oxplow/page?page=tasks", "page"]);
+  expect(rows).toContainEqual(["Open PRs", "Work", "oxplow:oxplow/page?page=gh/open-prs", "page"]);
   // No category: opened from elsewhere, not the launcher. A disabled extension's pages aren't there.
   expect(rows.map((r) => r[0])).not.toContain("Diff");
   expect(rows.map((r) => r[0])).not.toContain("X");
@@ -41,7 +41,7 @@ test("a page's count lens is its badge, and zero shows none", () => {
   const exts = [
     ext({
       name: "oxplow-foundation",
-      pages: [page({ id: "backlog", extension: "oxplow-foundation", pageRef: "page:backlog", title: "Backlog", category: "Work", count: "oxplow-foundation/backlog-count" })],
+      pages: [page({ id: "backlog", extension: "oxplow-foundation", pageRef: "oxplow:oxplow/page?page=backlog", title: "Backlog", category: "Work", count: "oxplow-foundation/backlog-count" })],
     } as never),
   ];
   expect(launcherPages(exts, { "oxplow-foundation/backlog-count": 4 })[0]?.badge).toBe(4);
@@ -52,7 +52,7 @@ test("until the extensions load, the launcher lists no pages rather than some of
   const settingsArea = { id: "settings-agents", label: "Settings: Agents", ref: settingsRef("agents"), category: "System" as const };
   expect(launcherDirectory(null, {}, [settingsArea])).toEqual([]);
   const loaded = launcherDirectory(
-    [ext({ name: "oxplow-foundation", pages: [page({ id: "settings", extension: "oxplow-foundation", pageRef: "page:settings", title: "Settings", category: "System" })] } as never)],
+    [ext({ name: "oxplow-foundation", pages: [page({ id: "settings", extension: "oxplow-foundation", pageRef: "oxplow:oxplow/page?page=settings", title: "Settings", category: "System" })] } as never)],
     {},
     [settingsArea],
   );

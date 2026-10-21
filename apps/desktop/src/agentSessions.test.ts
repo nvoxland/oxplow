@@ -7,8 +7,8 @@ test("a v_agent_session row reads as a session under the UI's ids", () => {
   const result = {
     columns: ["ref", "thread_ref", "kind", "harness", "title", "native_title", "display_name", "opened_at", "stopped_by_user_at"],
     rows: [
-      ["agent_session:ses3", "thread:thr1", "terminal", "claude", "", "", "claude 2026-10-08", "2026-10-08T00:00:00Z", null],
-      ["agent_session:ses4", "thread:thr1", "terminal", "codex", "review", "Login fix", "review", "2026-10-08T00:01:00Z", "2026-10-08T00:02:00Z"],
+      ["oxplow:oxplow/agent_session?id=ses3", "oxplow:oxplow/thread?id=thr1", "terminal", "claude", "", "", "claude 2026-10-08", "2026-10-08T00:00:00Z", null],
+      ["oxplow:oxplow/agent_session?id=ses4", "oxplow:oxplow/thread?id=thr1", "terminal", "codex", "review", "Login fix", "review", "2026-10-08T00:01:00Z", "2026-10-08T00:02:00Z"],
     ],
   } as unknown as SqlQueryResult;
   expect(agentSessionsFromResult(result)).toEqual([

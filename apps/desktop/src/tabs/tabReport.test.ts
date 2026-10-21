@@ -23,7 +23,7 @@ test("a window's report lists every thread's tabs, selection and history", () =>
     visible: true,
     shownThread: "thr1",
     sessions: { thr1, thr2: emptySession() },
-    titleOf: (tab) => (tab.id === "wiki:start" ? "Start" : null),
+    titleOf: (tab) => (tab.id === "oxplow:oxplow/wiki?slug=start" ? "Start" : null),
     detail: { path: "src/a.rs" },
   });
   expect(report).toEqual({
@@ -35,10 +35,10 @@ test("a window's report lists every thread's tabs, selection and history", () =>
       {
         thread: "thr1",
         tabs: [
-          { id: "wiki:start", kind: "wiki", title: "Start", back: ["wiki:home"], forward: ["wiki:next"], origin: null },
-          { id: "file:src/a.rs", kind: "file", title: "file", back: [], forward: [], origin: "Files in src" },
+          { id: "oxplow:oxplow/wiki?slug=start", kind: "wiki", title: "Start", back: ["oxplow:oxplow/wiki?slug=home"], forward: ["oxplow:oxplow/wiki?slug=next"], origin: null },
+          { id: "oxplow:oxplow/file?path=src/a.rs", kind: "file", title: "file", back: [], forward: [], origin: "Files in src" },
         ],
-        active: "file:src/a.rs",
+        active: "oxplow:oxplow/file?path=src/a.rs",
       },
       { thread: "thr2", tabs: [], active: null },
     ],

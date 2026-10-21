@@ -39,16 +39,16 @@ describe("open", () => {
   test("a new page is a new tab, made active and most recent", () => {
     let s = open(emptySession(), e(a));
     s = open(s, e(b));
-    expect(ids(s)).toEqual(["wiki:a", "wiki:b"]);
-    expect(s.active).toBe(slotOf(s, "wiki:b"));
-    expect(s.mru[0]).toBe(slotOf(s, "wiki:b"));
+    expect(ids(s)).toEqual(["oxplow:oxplow/wiki?slug=a", "oxplow:oxplow/wiki?slug=b"]);
+    expect(s.active).toBe(slotOf(s, "oxplow:oxplow/wiki?slug=b"));
+    expect(s.mru[0]).toBe(slotOf(s, "oxplow:oxplow/wiki?slug=b"));
   });
 
   test("a page already showing in a tab activates that tab", () => {
     let s = open(open(emptySession(), e(a)), e(b));
     s = open(s, e(a));
-    expect(ids(s)).toEqual(["wiki:a", "wiki:b"]);
-    expect(s.active).toBe(slotOf(s, "wiki:a"));
+    expect(ids(s)).toEqual(["oxplow:oxplow/wiki?slug=a", "oxplow:oxplow/wiki?slug=b"]);
+    expect(s.active).toBe(slotOf(s, "oxplow:oxplow/wiki?slug=a"));
   });
 
   test("opening a page that is showing refreshes its ref, keeping its state", () => {
@@ -67,7 +67,7 @@ describe("open", () => {
     const identity = (ref: Entry["ref"]) => identityOf(ref.id);
     let s = open(emptySession(), e(at(1), { historyState: { scroll: 4 } }));
     s = open(s, e(at(9)), { identity });
-    expect(ids(s)).toEqual(["page:diff?path=a.ts&line=9"]);
+    expect(ids(s)).toEqual(["oxplow:oxplow/page?line=9&page=diff&path=a.ts"]);
     expect(current(s.tabs[0]!).historyState).toEqual({ scroll: 4 });
     // Without one, another view is another page.
     s = open(s, e(at(3)));
@@ -87,14 +87,14 @@ describe("history", () => {
     const slot = s.active!;
     s = navigate(s, slot, e(b));
     s = navigate(s, slot, e(c));
-    expect(ids(s)).toEqual(["wiki:c"]);
+    expect(ids(s)).toEqual(["oxplow:oxplow/wiki?slug=c"]);
     s = back(s, slot);
-    expect(ids(s)).toEqual(["wiki:b"]);
+    expect(ids(s)).toEqual(["oxplow:oxplow/wiki?slug=b"]);
     s = back(s, slot);
-    expect(ids(s)).toEqual(["wiki:a"]);
+    expect(ids(s)).toEqual(["oxplow:oxplow/wiki?slug=a"]);
     expect(back(s, slot)).toBe(s);
     s = forward(s, slot);
-    expect(ids(s)).toEqual(["wiki:b"]);
+    expect(ids(s)).toEqual(["oxplow:oxplow/wiki?slug=b"]);
   });
 
   test("navigate after going back drops what was forward", () => {
@@ -103,7 +103,7 @@ describe("history", () => {
     s = back(navigate(s, slot, e(b)), slot);
     s = navigate(s, slot, e(c));
     expect(forward(s, slot)).toBe(s);
-    expect(s.tabs[0]!.entries.map((x) => x.ref.id)).toEqual(["wiki:a", "wiki:c"]);
+    expect(s.tabs[0]!.entries.map((x) => x.ref.id)).toEqual(["oxplow:oxplow/wiki?slug=a", "oxplow:oxplow/wiki?slug=c"]);
   });
 
   test("replace takes the current entry's place: Back skips it", () => {
@@ -111,8 +111,8 @@ describe("history", () => {
     const slot = s.active!;
     s = navigate(s, slot, e(b));
     s = navigate(s, slot, e(c), { replace: true });
-    expect(ids(s)).toEqual(["wiki:c"]);
-    expect(ids(back(s, slot))).toEqual(["wiki:a"]);
+    expect(ids(s)).toEqual(["oxplow:oxplow/wiki?slug=c"]);
+    expect(ids(back(s, slot))).toEqual(["oxplow:oxplow/wiki?slug=a"]);
   });
 
   test("navigating to the page already shown changes nothing", () => {
@@ -122,8 +122,8 @@ describe("history", () => {
 
   test("navigating to a page another tab shows closes that tab", () => {
     let s = open(open(emptySession(), e(a)), e(b));
-    s = navigate(s, slotOf(s, "wiki:a"), e(b));
-    expect(ids(s)).toEqual(["wiki:b"]);
+    s = navigate(s, slotOf(s, "oxplow:oxplow/wiki?slug=a"), e(b));
+    expect(ids(s)).toEqual(["oxplow:oxplow/wiki?slug=b"]);
   });
 });
 
@@ -136,9 +136,9 @@ describe("setView: a page changes its own view", () => {
     s = back(s, slot);
     s = setView(s, slot, lensRef("x/y", { range: "7d" }));
     const tab = s.tabs[0]!;
-    expect(current(tab).ref.id).toBe("lens:x/y?range=7d");
+    expect(current(tab).ref.id).toBe("oxplow:oxplow/lens?lens=x/y&range=7d");
     expect(current(tab).historyState).toEqual({ scroll: 40 });
-    expect(tab.entries.map((x) => x.ref.id)).toEqual(["wiki:a", "lens:x/y?range=7d", "wiki:c"]);
+    expect(tab.entries.map((x) => x.ref.id)).toEqual(["oxplow:oxplow/wiki?slug=a", "oxplow:oxplow/lens?lens=x/y&range=7d", "oxplow:oxplow/wiki?slug=c"]);
   });
 
   test("a selection's entry starts with the page's state, so open sections stay open", () => {
@@ -151,8 +151,8 @@ describe("setView: a page changes its own view", () => {
     let s = open(emptySession(), e(lensRef("x/y")));
     const slot = s.active!;
     s = setView(s, slot, lensRef("x/y", { commit: "abc" }), { push: true });
-    expect(ids(s)).toEqual(["lens:x/y?commit=abc"]);
-    expect(ids(back(s, slot))).toEqual(["lens:x/y"]);
+    expect(ids(s)).toEqual(["oxplow:oxplow/lens?commit=abc&lens=x/y"]);
+    expect(ids(back(s, slot))).toEqual(["oxplow:oxplow/lens?lens=x/y"]);
   });
 });
 
@@ -184,7 +184,7 @@ describe("origin: the collection a page was opened from", () => {
     expect(now.ref.id).toBe(fileRef("src/c.ts").id);
     expect(now.from?.index).toBe(2);
     expect(s.tabs[0]!.entries).toHaveLength(2);
-    expect(ids(back(s, slot))).toEqual(["wiki:a"]);
+    expect(ids(back(s, slot))).toEqual(["oxplow:oxplow/wiki?slug=a"]);
   });
 
   test("a step out of range changes nothing", () => {
@@ -205,21 +205,21 @@ describe("bodies: what stays mounted", () => {
     const out = bodies(s.tabs[0]!);
     expect(out.map((x) => x.key)).toEqual([`${slot}/lens:x/y`, `${slot}/wiki:a`]);
     // The lens body shows its nearest entry: the one with the commit.
-    expect(out[0]!.entry.ref.id).toBe("lens:x/y?commit=abc");
+    expect(out[0]!.entry.ref.id).toBe("oxplow:oxplow/lens?commit=abc&lens=x/y");
     expect(out.map((x) => x.current)).toEqual([false, true]);
     s = back(s, slot);
-    expect(bodies(s.tabs[0]!)[0]!).toMatchObject({ current: true, entry: { ref: { id: "lens:x/y?commit=abc" } } });
+    expect(bodies(s.tabs[0]!)[0]!).toMatchObject({ current: true, entry: { ref: { id: "oxplow:oxplow/lens?commit=abc&lens=x/y" } } });
   });
 
   test("a built-in page is one body across its view params too", () => {
     let s = open(emptySession(), e(pageTabRef("settings", { area: "agents" })));
     const slot = s.active!;
     s = navigate(s, slot, e(pageTabRef("settings", { area: "data" })));
-    expect(bodies(s.tabs[0]!)).toMatchObject([{ key: `${slot}/page:settings`, current: true, entry: { ref: { id: "page:settings?area=data" } } }]);
+    expect(bodies(s.tabs[0]!)).toMatchObject([{ key: `${slot}/page:settings`, current: true, entry: { ref: { id: "oxplow:oxplow/page?area=data&page=settings" } } }]);
   });
 
   test("identityOf is the ref without its view", () => {
-    expect(identityOf("lens:x/y?range=7d&q=a")).toBe("lens:x/y");
+    expect(identityOf("oxplow:oxplow/lens?lens=x/y&q=a&range=7d")).toBe("oxplow:oxplow/lens?lens=x/y");
     expect(identityOf("file:src/a.ts@HEAD")).toBe("file:src/a.ts@HEAD");
   });
 });
@@ -227,7 +227,7 @@ describe("bodies: what stays mounted", () => {
 describe("closing, ordering, eviction", () => {
   test("closing the active tab activates the most recent other one, as a browser does; closing another keeps it", () => {
     let s = open(open(open(emptySession(), e(a)), e(b)), e(c));
-    const [sa, sb, sc] = [slotOf(s, "wiki:a"), slotOf(s, "wiki:b"), slotOf(s, "wiki:c")];
+    const [sa, sb, sc] = [slotOf(s, "oxplow:oxplow/wiki?slug=a"), slotOf(s, "oxplow:oxplow/wiki?slug=b"), slotOf(s, "oxplow:oxplow/wiki?slug=c")];
     expect(close(s, sa).active).toBe(sc);
     s = activate(s, sa);
     s = close(s, sa);
@@ -239,21 +239,21 @@ describe("closing, ordering, eviction", () => {
 
   test("reorder puts tabs in the given order; slots it doesn't name keep their place after", () => {
     const s = open(open(open(emptySession(), e(a)), e(b)), e(c));
-    expect(ids(reorder(s, [slotOf(s, "wiki:c"), slotOf(s, "wiki:a")]))).toEqual(["wiki:c", "wiki:a", "wiki:b"]);
+    expect(ids(reorder(s, [slotOf(s, "oxplow:oxplow/wiki?slug=c"), slotOf(s, "oxplow:oxplow/wiki?slug=a")]))).toEqual(["oxplow:oxplow/wiki?slug=c", "oxplow:oxplow/wiki?slug=a", "oxplow:oxplow/wiki?slug=b"]);
   });
 
   test("activate makes a tab most recent", () => {
     let s = open(open(emptySession(), e(a)), e(b));
-    s = activate(s, slotOf(s, "wiki:a"));
-    expect(s.mru[0]).toBe(slotOf(s, "wiki:a"));
+    s = activate(s, slotOf(s, "oxplow:oxplow/wiki?slug=a"));
+    expect(s.mru[0]).toBe(slotOf(s, "oxplow:oxplow/wiki?slug=a"));
   });
 
   test("evictions are the least recent beyond the cap, never the active, pinned or protected", () => {
     let s = emptySession();
     for (const n of ["p", "q", "r", "t", "u"]) s = open(s, e(wikiPageRef(n)));
-    s = { ...s, tabs: s.tabs.map((t) => (current(t).ref.id === "wiki:p" ? { ...t, pinned: true as const } : t)) };
-    const out = evictions(s, 2, (t) => current(t).ref.id === "wiki:q");
-    expect(out.map((slot) => current(s.tabs.find((t) => t.slot === slot)!).ref.id).sort()).toEqual(["wiki:r", "wiki:t"]);
+    s = { ...s, tabs: s.tabs.map((t) => (current(t).ref.id === "oxplow:oxplow/wiki?slug=p" ? { ...t, pinned: true as const } : t)) };
+    const out = evictions(s, 2, (t) => current(t).ref.id === "oxplow:oxplow/wiki?slug=q");
+    expect(out.map((slot) => current(s.tabs.find((t) => t.slot === slot)!).ref.id).sort()).toEqual(["oxplow:oxplow/wiki?slug=r", "oxplow:oxplow/wiki?slug=t"]);
   });
 });
 
@@ -268,7 +268,7 @@ describe("persistence", () => {
   test("state that isn't JSON is dropped, not the entry", () => {
     const s = open(emptySession(), e(a, { historyState: { at: 1, node: { f: () => 1 } } }));
     const out = parseSession(serializeSession(s))!;
-    expect(current(out.tabs[0]!).ref.id).toBe("wiki:a");
+    expect(current(out.tabs[0]!).ref.id).toBe("oxplow:oxplow/wiki?slug=a");
     expect(current(out.tabs[0]!).historyState).toBeUndefined();
   });
 
@@ -281,10 +281,10 @@ describe("persistence", () => {
 describe("setStrip: the strip as a list of pages", () => {
   test("keeps the tabs still listed with their history, opens the new ones and drops the rest, in the list's order", () => {
     let s = open(open(emptySession(), e(a)), e(b));
-    const sa = slotOf(s, "wiki:a");
+    const sa = slotOf(s, "oxplow:oxplow/wiki?slug=a");
     s = navigate(s, sa, e(c));
     s = setStrip(s, [wikiPageRef("d"), c]);
-    expect(ids(s)).toEqual(["wiki:d", "wiki:c"]);
+    expect(ids(s)).toEqual(["oxplow:oxplow/wiki?slug=d", "oxplow:oxplow/wiki?slug=c"]);
     expect(s.tabs[1]!.slot).toBe(sa);
     expect(s.tabs[1]!.entries).toHaveLength(2);
   });
@@ -294,13 +294,13 @@ describe("setStrip: the strip as a list of pages", () => {
     const s = setStrip(emptySession(), [pinned, b]);
     expect(s.tabs[0]!.pinned).toBe(true);
     expect(setStrip(s, refsOf(s))).toBe(s);
-    expect(refsOf(s).map((r) => r.id)).toEqual(["wiki:a", "wiki:b"]);
+    expect(refsOf(s).map((r) => r.id)).toEqual(["oxplow:oxplow/wiki?slug=a", "oxplow:oxplow/wiki?slug=b"]);
   });
 
   test("dropping the active tab activates the most recent one left", () => {
     let s = open(open(emptySession(), e(a)), e(b));
     s = setStrip(s, [a]);
-    expect(s.active).toBe(slotOf(s, "wiki:a"));
+    expect(s.active).toBe(slotOf(s, "oxplow:oxplow/wiki?slug=a"));
   });
 });
 
@@ -311,8 +311,8 @@ describe("dropCurrent: the page's record is gone", () => {
     s = navigate(navigate(s, slot, e(b)), slot, e(c));
     s = back(s, slot);
     s = dropCurrent(s, slot);
-    expect(ids(s)).toEqual(["wiki:a"]);
-    expect(s.tabs[0]!.entries.map((x) => x.ref.id)).toEqual(["wiki:a", "wiki:c"]);
+    expect(ids(s)).toEqual(["oxplow:oxplow/wiki?slug=a"]);
+    expect(s.tabs[0]!.entries.map((x) => x.ref.id)).toEqual(["oxplow:oxplow/wiki?slug=a", "oxplow:oxplow/wiki?slug=c"]);
   });
 
   test("with nothing to go back to, closes the tab", () => {

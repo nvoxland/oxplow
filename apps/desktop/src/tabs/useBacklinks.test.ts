@@ -18,8 +18,8 @@ describe("canonicalIdForTarget", () => {
   // page_ref rows are a canonical ref's (kind, id): a work item is
   // `work_item` / `<provider>:<id>` (.context/resources.md), whichever list.
   test("a work item is its ref's id, as the graph stores it", () => {
-    expect(canonicalIdForTarget(workItemTabRef("work_item:oxplow:tsk42"))).toBe("oxplow:tsk42");
-    expect(canonicalIdForTarget(workItemTabRef("work_item:fake:W-1"))).toBe("fake:W-1");
+    expect(canonicalIdForTarget(workItemTabRef("oxplow:oxplow/work_item?id=tsk42&provider=oxplow"))).toBe("oxplow:tsk42");
+    expect(canonicalIdForTarget(workItemTabRef("oxplow:oxplow/work_item?id=W-1&provider=fake"))).toBe("fake:W-1");
   });
 
   test("wikiPageRef returns slug", () => {
@@ -118,13 +118,13 @@ describe("humanRefType", () => {
 describe("dedupeEntriesByTarget", () => {
   test("collapses wiki + on-disk file shadow into a single wiki row", () => {
     const entries: BacklinkEntry[] = [
-      { open: "file:.oxplow/wiki/local-snapshots.md", target: "file:.oxplow/wiki/local-snapshots.md", label: ".oxplow/wiki/local-snapshots.md", subtitle: "modified" },
-      { open: "wiki:local-snapshots", target: "wiki:local-snapshots", label: "Local Snapshots", subtitle: "created" },
-      { open: "wiki:local-snapshots", target: "wiki:local-snapshots", label: "Local Snapshots", subtitle: "mention" },
+      { open: "oxplow:oxplow/file?path=.oxplow/wiki/local-snapshots.md", target: "oxplow:oxplow/file?path=.oxplow/wiki/local-snapshots.md", label: ".oxplow/wiki/local-snapshots.md", subtitle: "modified" },
+      { open: "oxplow:oxplow/wiki?slug=local-snapshots", target: "oxplow:oxplow/wiki?slug=local-snapshots", label: "Local Snapshots", subtitle: "created" },
+      { open: "oxplow:oxplow/wiki?slug=local-snapshots", target: "oxplow:oxplow/wiki?slug=local-snapshots", label: "Local Snapshots", subtitle: "mention" },
     ];
     const out = dedupeEntriesByTarget(entries);
     expect(out).toHaveLength(1);
-    expect(out[0].open).toBe("wiki:local-snapshots");
+    expect(out[0].open).toBe("oxplow:oxplow/wiki?slug=local-snapshots");
     expect(out[0].label).toBe("Local Snapshots");
     // Subtitles merged in first-seen order, deduped.
     expect(out[0].subtitle).toBe("modified · created · mention");
@@ -132,9 +132,9 @@ describe("dedupeEntriesByTarget", () => {
 
   test("preserves rows that point at different targets", () => {
     const entries: BacklinkEntry[] = [
-      { open: "wiki:a", target: "wiki:a", label: "A", subtitle: "mention" },
-      { open: "wiki:b", target: "wiki:b", label: "B", subtitle: "mention" },
-      { open: "file:src/x.ts", target: "file:src/x.ts", label: "src/x.ts", subtitle: "modified" },
+      { open: "oxplow:oxplow/wiki?slug=a", target: "oxplow:oxplow/wiki?slug=a", label: "A", subtitle: "mention" },
+      { open: "oxplow:oxplow/wiki?slug=b", target: "oxplow:oxplow/wiki?slug=b", label: "B", subtitle: "mention" },
+      { open: "oxplow:oxplow/file?path=src/x.ts", target: "oxplow:oxplow/file?path=src/x.ts", label: "src/x.ts", subtitle: "modified" },
     ];
     const out = dedupeEntriesByTarget(entries);
     expect(out).toHaveLength(3);
@@ -142,8 +142,8 @@ describe("dedupeEntriesByTarget", () => {
 
   test("collapses two ref_types pointing at the same wiki page", () => {
     const entries: BacklinkEntry[] = [
-      { open: "wiki:url-schemes", target: "wiki:url-schemes", label: "URL Schemes", subtitle: "created" },
-      { open: "wiki:url-schemes", target: "wiki:url-schemes", label: "URL Schemes", subtitle: "mention" },
+      { open: "oxplow:oxplow/wiki?slug=url-schemes", target: "oxplow:oxplow/wiki?slug=url-schemes", label: "URL Schemes", subtitle: "created" },
+      { open: "oxplow:oxplow/wiki?slug=url-schemes", target: "oxplow:oxplow/wiki?slug=url-schemes", label: "URL Schemes", subtitle: "mention" },
     ];
     const out = dedupeEntriesByTarget(entries);
     expect(out).toHaveLength(1);
@@ -152,19 +152,19 @@ describe("dedupeEntriesByTarget", () => {
 
   test("file path that doesn't look like a wiki shadow stays a file row", () => {
     const entries: BacklinkEntry[] = [
-      { open: "file:src/foo.rs", target: "file:src/foo.rs", label: "src/foo.rs", subtitle: "modified" },
-      { open: "file:src/foo.rs", target: "file:src/foo.rs", label: "src/foo.rs", subtitle: "mention" },
+      { open: "oxplow:oxplow/file?path=src/foo.rs", target: "oxplow:oxplow/file?path=src/foo.rs", label: "src/foo.rs", subtitle: "modified" },
+      { open: "oxplow:oxplow/file?path=src/foo.rs", target: "oxplow:oxplow/file?path=src/foo.rs", label: "src/foo.rs", subtitle: "mention" },
     ];
     const out = dedupeEntriesByTarget(entries);
     expect(out).toHaveLength(1);
-    expect(out[0].open).toBe("file:src/foo.rs");
+    expect(out[0].open).toBe("oxplow:oxplow/file?path=src/foo.rs");
     expect(out[0].subtitle).toBe("modified · mention");
   });
 
   test("drops blank subtitles cleanly", () => {
     const entries: BacklinkEntry[] = [
-      { open: "wiki:a", target: "wiki:a", label: "A", subtitle: "" },
-      { open: "wiki:a", target: "wiki:a", label: "A", subtitle: "mention" },
+      { open: "oxplow:oxplow/wiki?slug=a", target: "oxplow:oxplow/wiki?slug=a", label: "A", subtitle: "" },
+      { open: "oxplow:oxplow/wiki?slug=a", target: "oxplow:oxplow/wiki?slug=a", label: "A", subtitle: "mention" },
     ];
     const out = dedupeEntriesByTarget(entries);
     expect(out[0].subtitle).toBe("mention");
@@ -195,21 +195,21 @@ describe("edges to any ref", () => {
       edge({ target_kind: "collector", target_id: "triage/todos", source_label: "Triage todos" }),
     );
     expect(entry.dead).toBe(false);
-    expect(entry.open).toBe("page:settings");
+    expect(entry.open).toBe("oxplow:oxplow/page?page=settings");
     expect(entry.label).toBe("Triage todos");
     expect(entry.subtitle).toBe("about");
     expect(entry.linkType).toBe("about");
-    expect(entry.target).toBe("collector:triage/todos");
+    expect(entry.target).toBe("oxplow:oxplow/collector?collector=triage/todos");
   });
 
   test("a link to a core kind with a page opens it", () => {
     const entry = edgeToOutboundEntry(edge({ target_kind: "effort", target_id: "eff12", source_label: "An effort" }));
-    expect(entry.open).toBe("effort:eff12");
+    expect(entry.open).toBe("oxplow:oxplow/effort?id=eff12");
   });
 
   test("a link to an extension's kind opens the page its ref_kinds names", () => {
     setRefKinds([
-      { kind: "acme_pr", extension: "acme", label: "PR", idPattern: ".*", wikilinks: [], resolve: "", page: "page:acme/pr?ref={ref}", icon: "" },
+      { kind: "acme_pr", extension: "acme", label: "PR", idPattern: ".*", wikilinks: [], resolve: "", page: "oxplow:oxplow/page?page=acme/pr&ref=%7Bref%7D", icon: "" },
     ]);
     try {
       const entry = edgeToOutboundEntry(edge({ target_kind: "acme_pr", target_id: "12", source_label: "PR 12" }));
@@ -232,7 +232,7 @@ describe("edges to any ref", () => {
 
   test("an inbound edge reads the source side", () => {
     const entry = edgeToInboundEntry(edge({ source_label: "Fix it" }));
-    expect(entry.open).toBe("work_item:oxplow:tsk1");
+    expect(entry.open).toBe("oxplow:oxplow/work_item?id=tsk1&provider=oxplow");
     expect(entry.label).toBe("Fix it");
   });
 });

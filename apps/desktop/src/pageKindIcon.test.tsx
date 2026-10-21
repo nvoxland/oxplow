@@ -5,7 +5,7 @@ const realApi = await import("./api.js");
 mock.module("./api.js", () => ({
   ...realApi,
   listExtensions: async () => [
-    { name: "oxplow-foundation", enabled: true, pages: [{ id: "problems", pageRef: "page:problems", title: "Problems", icon: "triangle-alert" }] },
+    { name: "oxplow-foundation", enabled: true, pages: [{ id: "problems", pageRef: "oxplow:oxplow/page?page=problems", title: "Problems", icon: "triangle-alert" }] },
   ],
 }));
 

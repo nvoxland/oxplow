@@ -50,11 +50,11 @@ test("parseMarkdownLink: internal that resolves to empty slug", () => {
 });
 
 test("parseMarkdownLink: file: scheme with plain path", () => {
-  expect(parseMarkdownLink("file:src/foo.ts")).toEqual({ kind: "file", path: "src/foo.ts", version: null });
+  expect(parseMarkdownLink("oxplow:oxplow/file?path=src/foo.ts")).toEqual({ kind: "file", path: "src/foo.ts", version: null });
 });
 
 test("parseMarkdownLink: file: scheme with line suffix", () => {
-  expect(parseMarkdownLink("file:src/foo.ts:42")).toEqual({ kind: "file", path: "src/foo.ts", line: 42, version: null });
+  expect(parseMarkdownLink("oxplow:oxplow/file?path=src/foo.ts:42")).toEqual({ kind: "file", path: "src/foo.ts", line: 42, version: null });
 });
 
 test("parseMarkdownLink: file: scheme with @disk version", () => {
@@ -193,7 +193,7 @@ test("preprocessWikilinks: hex with non-hex chars is a slug", () => {
 });
 
 test("parseMarkdownLink: commit: scheme", () => {
-  expect(parseMarkdownLink("commit:abc1234")).toEqual({ kind: "commit", sha: "abc1234" });
+  expect(parseMarkdownLink("oxplow:oxplow/commit?sha=abc1234")).toEqual({ kind: "commit", sha: "abc1234" });
 });
 
 test("parseMarkdownLink: commit: with empty target", () => {
@@ -201,8 +201,8 @@ test("parseMarkdownLink: commit: with empty target", () => {
 });
 
 test("parseMarkdownLink: dir: scheme strips trailing slash", () => {
-  expect(parseMarkdownLink("dir:src/components")).toEqual({ kind: "directory", path: "src/components" });
-  expect(parseMarkdownLink("dir:src/components/")).toEqual({ kind: "directory", path: "src/components" });
+  expect(parseMarkdownLink("oxplow:oxplow/dir?path=src/components")).toEqual({ kind: "directory", path: "src/components" });
+  expect(parseMarkdownLink("oxplow:oxplow/dir?path=src/components/")).toEqual({ kind: "directory", path: "src/components" });
 });
 
 test("parseMarkdownLink: dir: with empty target", () => {
@@ -311,7 +311,7 @@ test("postprocessWikilinks ∘ preprocessWikilinks is identity for supported for
 
 // Work item wikilinks: a bare id of the active list's (`[[tsk42]]` with
 // oxplow's tasks, by its declared id pattern) or a full ref → the item's
-// `work_item:<provider>:<id>` href; the renderer swaps the
+// `oxplow:oxplow/work_item?id=%3Cid%3E&provider=%3Cprovider%3E` href; the renderer swaps the
 // `tsk<id>` token for the task title at display time. The backend ref
 // extractor (refs.rs) already recognizes the same form for backlinks.
 
@@ -339,8 +339,8 @@ test("preprocessWikilinks: what isn't the active list's id is a wiki slug", () =
 });
 
 test("parseMarkdownLink: work_item: scheme, any list", () => {
-  expect(parseMarkdownLink("work_item:oxplow:tsk42")).toEqual({ kind: "work_item", ref: "work_item:oxplow:tsk42" });
-  expect(parseMarkdownLink("work_item:issues:ENG-1")).toEqual({ kind: "work_item", ref: "work_item:issues:ENG-1" });
+  expect(parseMarkdownLink("oxplow:oxplow/work_item?id=tsk42&provider=oxplow")).toEqual({ kind: "work_item", ref: "oxplow:oxplow/work_item?id=tsk42&provider=oxplow" });
+  expect(parseMarkdownLink("oxplow:oxplow/work_item?id=ENG-1&provider=issues")).toEqual({ kind: "work_item", ref: "oxplow:oxplow/work_item?id=ENG-1&provider=issues" });
 });
 
 test("parseMarkdownLink: work_item: with empty target", () => {
@@ -403,7 +403,7 @@ test("linkRef: a wiki link targets its page", () => {
 });
 
 test("linkRef: a work item link targets its page", () => {
-  expect(linkRef({ kind: "work_item", ref: "work_item:oxplow:tsk42" })).toBe("work_item:oxplow:tsk42");
+  expect(linkRef({ kind: "work_item", ref: "oxplow:oxplow/work_item?id=tsk42&provider=oxplow" })).toBe("oxplow:oxplow/work_item?id=tsk42&provider=oxplow");
 });
 
 test("linkRef: a directory link targets its directory", () => {

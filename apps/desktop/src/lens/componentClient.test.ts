@@ -91,7 +91,7 @@ test("query, invoke and navigate resolve with the host's replies", async () => {
   expect(answer.lens.id).toBe("open-tasks");
   expect(answer.params).toEqual({ n: 1 });
   expect(await c.invoke("oxplow.work_item.transition", { to: "done" })).toEqual({ done: true });
-  expect(await c.navigate("work_item:oxplow:tsk1")).toBeNull();
+  expect(await c.navigate("oxplow:oxplow/work_item?id=tsk1&provider=oxplow")).toBeNull();
   h.close();
 });
 
@@ -106,11 +106,11 @@ test("navigate can ask for a new tab", async () => {
   const connecting = connect({ target: h.frame });
   h.init();
   const c = await connecting;
-  await c.navigate("commit:abc", { newTab: true });
-  await c.navigate("commit:def");
+  await c.navigate("oxplow:oxplow/commit?sha=abc", { newTab: true });
+  await c.navigate("oxplow:oxplow/commit?sha=def");
   expect(opened).toEqual([
-    ["commit:abc", { newTab: true }],
-    ["commit:def", { newTab: false }],
+    ["oxplow:oxplow/commit?sha=abc", { newTab: true }],
+    ["oxplow:oxplow/commit?sha=def", { newTab: false }],
   ]);
   h.close();
 });
@@ -141,7 +141,7 @@ test("an invalid input's refusal names its field", async () => {
   const connecting = connect({ target: h.frame });
   h.init();
   const c = await connecting;
-  await expect(c.invoke("oxplow.work_item.update", { ref: "work_item:oxplow:tsk1", title: "" })).rejects.toEqual({
+  await expect(c.invoke("oxplow.work_item.update", { ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "" })).rejects.toEqual({
     code: "INVALID",
     message: "a title can't be empty",
     field: "/title",

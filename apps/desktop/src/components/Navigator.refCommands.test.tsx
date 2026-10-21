@@ -79,7 +79,7 @@ test("a thread's menu offers the commands about that thread", async () => {
   fireEvent.click(item);
   await waitFor(() =>
     expect(ran).toEqual([
-      ["oxplow.handoff.send", { from_thread: "thread:thr2" }],
+      ["oxplow.handoff.send", { from_thread: "oxplow:oxplow/thread?id=thr2" }],
     ]),
   );
 });

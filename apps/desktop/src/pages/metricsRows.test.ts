@@ -96,9 +96,9 @@ describe("metricOrigin", () => {
       (key) => ({ id: `metric:${key}`, kind: "metric", payload: null }),
     );
     expect(sibs.items.map((e) => e.ref.id)).toEqual([
-      "metric:a",
-      "metric:b",
-      "metric:c",
+      "oxplow:oxplow/metric?metric=a",
+      "oxplow:oxplow/metric?metric=b",
+      "oxplow:oxplow/metric?metric=c",
     ]);
     // Labels are the row titles — they feed the prev/next hover tooltips.
     expect(sibs.items.map((e) => e.label)).toEqual(["A", "B", "C"]);

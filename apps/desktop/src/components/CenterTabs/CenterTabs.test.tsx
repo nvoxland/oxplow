@@ -8,10 +8,10 @@ afterEach(cleanup);
 
 function makeTabs(): CenterTab[] {
   return [
-    { id: "page:agent", label: "Agent", closable: false, render: () => null },
-    { id: "file:a.ts", label: "a.ts", closable: true, render: () => null },
-    { id: "file:b.ts", label: "b.ts", closable: true, render: () => null },
-    { id: "page:diff?path=c&left=disk&right=disk", label: "c", closable: true, render: () => null },
+    { id: "oxplow:oxplow/page?page=agent", label: "Agent", closable: false, render: () => null },
+    { id: "oxplow:oxplow/file?path=a.ts", label: "a.ts", closable: true, render: () => null },
+    { id: "oxplow:oxplow/file?path=b.ts", label: "b.ts", closable: true, render: () => null },
+    { id: "oxplow:oxplow/page?left=disk&page=diff&path=c&right=disk", label: "c", closable: true, render: () => null },
   ];
 }
 
@@ -25,7 +25,7 @@ function renderTabs(opts: {
   return render(
     <CenterTabs
       tabs={makeTabs()}
-      activeId={opts.activeId ?? "file:b.ts"}
+      activeId={opts.activeId ?? "oxplow:oxplow/file?path=b.ts"}
       onActivate={onActivate}
       onClose={onClose}
       onReorder={() => {}}
@@ -45,7 +45,7 @@ test("Close Other Tabs closes every closable tab except the anchor", () => {
   const { getByTestId } = renderTabs({ onClose: (id) => closed.push(id) });
   fireEvent.contextMenu(getByTestId("center-tab-file:b.ts"), { clientX: 10, clientY: 10 });
   fireEvent.click(getByTestId("menu-item-tab.close-others"));
-  expect(closed).toEqual(["file:a.ts", "page:diff?path=c&left=disk&right=disk"]);
+  expect(closed).toEqual(["oxplow:oxplow/file?path=a.ts", "oxplow:oxplow/page?left=disk&page=diff&path=c&right=disk"]);
 });
 
 test("Close Tabs to the Right closes only tabs after the anchor", () => {
@@ -53,7 +53,7 @@ test("Close Tabs to the Right closes only tabs after the anchor", () => {
   const { getByTestId } = renderTabs({ onClose: (id) => closed.push(id) });
   fireEvent.contextMenu(getByTestId("center-tab-file:a.ts"), { clientX: 10, clientY: 10 });
   fireEvent.click(getByTestId("menu-item-tab.close-right"));
-  expect(closed).toEqual(["file:b.ts", "page:diff?path=c&left=disk&right=disk"]);
+  expect(closed).toEqual(["oxplow:oxplow/file?path=b.ts", "oxplow:oxplow/page?left=disk&page=diff&path=c&right=disk"]);
 });
 
 test("Close Tabs to the Right is disabled on the last tab", () => {
@@ -67,15 +67,15 @@ test("closing a batch that swept the active tab refocuses the anchor", () => {
   const activated: string[] = [];
   // Active is file:a.ts; right-click file:b.ts and Close Other Tabs (closes a + c).
   const { getByTestId } = renderTabs({
-    activeId: "file:a.ts",
+    activeId: "oxplow:oxplow/file?path=a.ts",
     onClose: (id) => closed.push(id),
     onActivate: (id) => activated.push(id),
   });
   fireEvent.contextMenu(getByTestId("center-tab-file:b.ts"), { clientX: 10, clientY: 10 });
   fireEvent.click(getByTestId("menu-item-tab.close-others"));
-  expect(closed).toEqual(["file:a.ts", "page:diff?path=c&left=disk&right=disk"]);
+  expect(closed).toEqual(["oxplow:oxplow/file?path=a.ts", "oxplow:oxplow/page?left=disk&page=diff&path=c&right=disk"]);
   // The active tab (a.ts) was closed → selection falls back to the anchor.
-  expect(activated).toEqual(["file:b.ts"]);
+  expect(activated).toEqual(["oxplow:oxplow/file?path=b.ts"]);
 });
 
 test("closing tabs that leave the active tab open does not refocus", () => {
@@ -83,7 +83,7 @@ test("closing tabs that leave the active tab open does not refocus", () => {
   // Active is file:a.ts (left of anchor); Close Tabs to the Right of b closes
   // only c, so a stays active and we must not steal focus.
   const { getByTestId } = renderTabs({
-    activeId: "file:a.ts",
+    activeId: "oxplow:oxplow/file?path=a.ts",
     onActivate: (id) => activated.push(id),
   });
   fireEvent.contextMenu(getByTestId("center-tab-file:b.ts"), { clientX: 10, clientY: 10 });
@@ -96,20 +96,20 @@ test("closing tabs that leave the active tab open does not refocus", () => {
 test("a session's tab closes on one click of its ×", () => {
   const closed: string[] = [];
   const tabs: CenterTab[] = [
-    { id: "agent_session:ses7", label: "Claude", closable: true, pinned: true, render: () => null },
-    { id: "file:a.ts", label: "a.ts", closable: true, render: () => null },
+    { id: "oxplow:oxplow/agent_session?id=ses7", label: "Claude", closable: true, pinned: true, render: () => null },
+    { id: "oxplow:oxplow/file?path=a.ts", label: "a.ts", closable: true, render: () => null },
   ];
   const { getByTestId, queryByTestId } = render(
     <CenterTabs
       tabs={tabs}
-      activeId="agent_session:ses7"
+      activeId="oxplow:oxplow/agent_session?id=ses7"
       onActivate={() => {}}
       onClose={(id) => closed.push(id)}
       onReorder={() => {}}
     />,
   );
   fireEvent.click(getByTestId("center-tab-close-agent_session:ses7"));
-  expect(closed).toEqual(["agent_session:ses7"]);
+  expect(closed).toEqual(["oxplow:oxplow/agent_session?id=ses7"]);
   expect(queryByTestId("center-tab-close-agent_session:ses7-confirm")).toBeNull();
 });
 
@@ -117,18 +117,18 @@ test("a session's tab closes on one click of its ×", () => {
 test("an agent session's tab draws its harness's declared logo", () => {
   const mark = "data:image/svg+xml;base64,PHN2Zy8+";
   const tabs: CenterTab[] = [
-    { id: "agent_session:ses1", label: "Claude", closable: true, icon: mark, render: () => null },
-    { id: "agent_session:ses2", label: "Other", closable: true, render: () => null },
-    { id: "file:a.ts", label: "a.ts", closable: true, icon: mark, render: () => null },
+    { id: "oxplow:oxplow/agent_session?id=ses1", label: "Claude", closable: true, icon: mark, render: () => null },
+    { id: "oxplow:oxplow/agent_session?id=ses2", label: "Other", closable: true, render: () => null },
+    { id: "oxplow:oxplow/file?path=a.ts", label: "a.ts", closable: true, icon: mark, render: () => null },
   ];
   const { getByTestId } = render(
-    <CenterTabs tabs={tabs} activeId="file:a.ts" onActivate={() => {}} onClose={() => {}} onReorder={() => {}} />,
+    <CenterTabs tabs={tabs} activeId="oxplow:oxplow/file?path=a.ts" onActivate={() => {}} onClose={() => {}} onReorder={() => {}} />,
   );
   const within = (id: string) => getByTestId(`center-tab-${id}`).querySelector('[data-testid="agent-icon"]');
-  expect(within("agent_session:ses1")?.getAttribute("data-icon")).toBe("declared");
-  expect(within("agent_session:ses2")?.getAttribute("data-icon")).toBe("fallback");
+  expect(within("oxplow:oxplow/agent_session?id=ses1")?.getAttribute("data-icon")).toBe("declared");
+  expect(within("oxplow:oxplow/agent_session?id=ses2")?.getAttribute("data-icon")).toBe("fallback");
   // Only a session's tab: another kind keeps its own kind icon.
-  expect(within("file:a.ts")).toBeNull();
+  expect(within("oxplow:oxplow/file?path=a.ts")).toBeNull();
 });
 
 // A page whose params changed is the same page: with the same `key` its
@@ -143,9 +143,9 @@ test("a body with the same key keeps its state when its id changes", () => {
     );
   }
   const tab = (id: string): CenterTab => ({ id, key: "t1/lens:x/y", label: "Lens", closable: true, render: () => <Counter /> });
-  const view = render(<CenterTabs tabs={[tab("lens:x/y")]} activeId="lens:x/y" onActivate={() => {}} onClose={() => {}} onReorder={() => {}} />);
+  const view = render(<CenterTabs tabs={[tab("oxplow:oxplow/lens?lens=x/y")]} activeId="oxplow:oxplow/lens?lens=x/y" onActivate={() => {}} onClose={() => {}} onReorder={() => {}} />);
   fireEvent.click(view.getByTestId("count"));
-  view.rerender(<CenterTabs tabs={[tab("lens:x/y?range=7d")]} activeId="lens:x/y?range=7d" onActivate={() => {}} onClose={() => {}} onReorder={() => {}} />);
+  view.rerender(<CenterTabs tabs={[tab("oxplow:oxplow/lens?lens=x/y&range=7d")]} activeId="oxplow:oxplow/lens?lens=x/y&range=7d" onActivate={() => {}} onClose={() => {}} onReorder={() => {}} />);
   expect(view.getByTestId("count").textContent).toBe("1");
   expect(view.getByTestId("center-tab-body-lens:x/y?range=7d")).not.toBeNull();
 });

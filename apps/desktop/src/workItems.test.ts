@@ -25,10 +25,10 @@ test("effort rows join to their files: one detail per effort, counts by change k
   const res = {
     columns: ["id", "work_item", "started_at", "ended_at", "start_snapshot_id", "end_snapshot_id", "summary", "path", "change_kind"],
     rows: [
-      [7, "work_item:oxplow:tsk4", "t2", null, 10, null, null, "src/a.rs", "updated"],
-      [7, "work_item:oxplow:tsk4", "t2", null, 10, null, null, "src/b.rs", "created"],
-      [7, "work_item:oxplow:tsk4", "t2", null, 10, null, null, "old.rs", "deleted"],
-      [5, "work_item:oxplow:tsk4", "t0", "t1", 8, 9, "did it", null, null],
+      [7, "oxplow:oxplow/work_item?id=tsk4&provider=oxplow", "t2", null, 10, null, null, "src/a.rs", "updated"],
+      [7, "oxplow:oxplow/work_item?id=tsk4&provider=oxplow", "t2", null, 10, null, null, "src/b.rs", "created"],
+      [7, "oxplow:oxplow/work_item?id=tsk4&provider=oxplow", "t2", null, 10, null, null, "old.rs", "deleted"],
+      [5, "oxplow:oxplow/work_item?id=tsk4&provider=oxplow", "t0", "t1", 8, 9, "did it", null, null],
     ],
     truncated: false,
     reads: { models: ["v_effort", "v_effort_file"], tables: [], measures: [] },
@@ -37,7 +37,7 @@ test("effort rows join to their files: one detail per effort, counts by change k
   const details = effortDetailsFromResult(res);
   expect(details.map((d) => d.effort.id)).toEqual(["eff7", "eff5"]);
   expect(details[0]).toEqual({
-    effort: { id: "eff7", work_item: "work_item:oxplow:tsk4", started_at: "t2", ended_at: null, start_snapshot_id: "10", end_snapshot_id: null, summary: null },
+    effort: { id: "eff7", work_item: "oxplow:oxplow/work_item?id=tsk4&provider=oxplow", started_at: "t2", ended_at: null, start_snapshot_id: "10", end_snapshot_id: null, summary: null },
     start_snapshot: null,
     end_snapshot: null,
     changed_paths: ["src/a.rs", "src/b.rs", "old.rs"],
@@ -64,12 +64,12 @@ const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
 test("rows read as work items: the interface's columns and the list's own fields", () => {
   const items = itemsFromResult(
     result([
-      ["work_item:oxplow:tsk4", "oxplow", "Fix it", "", "in_progress", null, 2, 1.5, null, "t0", "t1", '{"priority":"high","author":"agent"}', 3],
-      ["work_item:issues:ENG-1", "issues", "Theirs", "b", "done", "work_item:issues:ENG-0", null, null, "t2", "t0", "t1", null, 0],
+      ["oxplow:oxplow/work_item?id=tsk4&provider=oxplow", "oxplow", "Fix it", "", "in_progress", null, 2, 1.5, null, "t0", "t1", '{"priority":"high","author":"agent"}', 3],
+      ["oxplow:oxplow/work_item?id=ENG-1&provider=issues", "issues", "Theirs", "b", "done", "oxplow:oxplow/work_item?id=ENG-0&provider=issues", null, null, "t2", "t0", "t1", null, 0],
     ]),
   );
   expect(items[0]).toEqual({
-    ref: "work_item:oxplow:tsk4",
+    ref: "oxplow:oxplow/work_item?id=tsk4&provider=oxplow",
     provider: "oxplow",
     title: "Fix it",
     body: "",
@@ -83,7 +83,7 @@ test("rows read as work items: the interface's columns and the list's own fields
     native: { priority: "high", author: "agent" },
     commentCount: 3,
   });
-  expect(items[1]).toMatchObject({ threadId: null, rank: null, closedAt: "t2", native: {}, parentRef: "work_item:issues:ENG-0" });
+  expect(items[1]).toMatchObject({ threadId: null, rank: null, closedAt: "t2", native: {}, parentRef: "oxplow:oxplow/work_item?id=ENG-0&provider=issues" });
 });
 
 test("a query scoped to a thread, the backlog, or everything; states filter; list order", () => {
@@ -185,9 +185,9 @@ test("the active work-items provider is the row marked active", () => {
 // says what its ids look like (none says nothing).
 test("a mention resolves through the active list's id pattern", () => {
   const profile = { provider: "oxplow", features: NO_FEATURES, fields: [], idPattern: "tsk\\d+" };
-  expect(workItemRefOfMention(profile, "tsk42")).toBe("work_item:oxplow:tsk42");
+  expect(workItemRefOfMention(profile, "tsk42")).toBe("oxplow:oxplow/work_item?id=tsk42&provider=oxplow");
   expect(workItemRefOfMention(profile, "tsk42x")).toBeNull();
   expect(workItemRefOfMention(profile, "ENG-1")).toBeNull();
-  expect(workItemRefOfMention({ ...profile, provider: "issues", idPattern: "[A-Z]+-\\d+" }, "ENG-1")).toBe("work_item:issues:ENG-1");
+  expect(workItemRefOfMention({ ...profile, provider: "issues", idPattern: "[A-Z]+-\\d+" }, "ENG-1")).toBe("oxplow:oxplow/work_item?id=ENG-1&provider=issues");
   expect(workItemRefOfMention({ ...profile, idPattern: null }, "tsk42")).toBeNull();
 });

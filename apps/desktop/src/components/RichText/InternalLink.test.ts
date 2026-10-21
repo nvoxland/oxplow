@@ -19,7 +19,7 @@ test("every scheme the editor registers with linkify is one linkify accepts", ()
 
 test("internal links are allowed and a script url isn't", () => {
   const ctx = { defaultValidate: (u: string) => /^(https?|mailto):/i.test(u), protocols: [] };
-  for (const url of ["work_item:oxplow:tsk1", "file:src/a.ts", "dir:src", "commit:abc123", "https://example.com"]) {
+  for (const url of ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "oxplow:oxplow/file?path=src/a.ts", "oxplow:oxplow/dir?path=src", "oxplow:oxplow/commit?sha=abc123", "https://example.com"]) {
     expect(options.isAllowedUri(url, ctx)).toBe(true);
   }
   expect(options.isAllowedUri("javascript:alert(1)", ctx)).toBe(false);

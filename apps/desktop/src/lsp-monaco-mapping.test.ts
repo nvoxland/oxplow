@@ -200,28 +200,28 @@ describe("normalizeWorkspaceEdit", () => {
   };
 
   test("flattens changes map", () => {
-    const out = normalizeWorkspaceEdit({ changes: { "file:///a.ts": [textEdit] } });
-    expect(out.files).toEqual([{ uri: "file:///a.ts", edits: [textEdit] }]);
+    const out = normalizeWorkspaceEdit({ changes: { "oxplow:oxplow/file?path=///a.ts": [textEdit] } });
+    expect(out.files).toEqual([{ uri: "oxplow:oxplow/file?path=///a.ts", edits: [textEdit] }]);
     expect(out.skippedFileOps).toBe(0);
   });
 
   test("flattens documentChanges and counts file operations", () => {
     const out = normalizeWorkspaceEdit({
       documentChanges: [
-        { textDocument: { uri: "file:///a.ts", version: 3 }, edits: [textEdit] },
-        { kind: "rename", oldUri: "file:///a.ts", newUri: "file:///b.ts" },
-        { kind: "create", uri: "file:///c.ts" },
+        { textDocument: { uri: "oxplow:oxplow/file?path=///a.ts", version: 3 }, edits: [textEdit] },
+        { kind: "rename", oldUri: "oxplow:oxplow/file?path=///a.ts", newUri: "oxplow:oxplow/file?path=///b.ts" },
+        { kind: "create", uri: "oxplow:oxplow/file?path=///c.ts" },
       ],
     });
     expect(out.files).toHaveLength(1);
-    expect(out.files[0].uri).toBe("file:///a.ts");
+    expect(out.files[0].uri).toBe("oxplow:oxplow/file?path=///a.ts");
     expect(out.skippedFileOps).toBe(2);
   });
 
   test("merges changes + documentChanges for the same uri", () => {
     const out = normalizeWorkspaceEdit({
-      changes: { "file:///a.ts": [textEdit] },
-      documentChanges: [{ textDocument: { uri: "file:///a.ts" }, edits: [textEdit] }],
+      changes: { "oxplow:oxplow/file?path=///a.ts": [textEdit] },
+      documentChanges: [{ textDocument: { uri: "oxplow:oxplow/file?path=///a.ts" }, edits: [textEdit] }],
     });
     expect(out.files).toHaveLength(1);
     expect(out.files[0].edits).toHaveLength(2);
@@ -233,10 +233,10 @@ describe("normalizeWorkspaceEdit", () => {
   });
 
   test("toMonacoWorkspaceEdit produces resource/textEdit rows", () => {
-    const normalized = normalizeWorkspaceEdit({ changes: { "file:///a.ts": [textEdit] } });
+    const normalized = normalizeWorkspaceEdit({ changes: { "oxplow:oxplow/file?path=///a.ts": [textEdit] } });
     const monacoEdit = toMonacoWorkspaceEdit(fakeMonaco, normalized);
     expect(monacoEdit.edits).toHaveLength(1);
-    expect(monacoEdit.edits[0].resource.toString()).toBe("file:///a.ts");
+    expect(monacoEdit.edits[0].resource.toString()).toBe("oxplow:oxplow/file?path=///a.ts");
     expect(monacoEdit.edits[0].textEdit.text).toBe("new");
     expect(monacoEdit.edits[0].textEdit.range.startLineNumber).toBe(1);
   });
@@ -312,7 +312,7 @@ describe("document symbols", () => {
         name: "fn_a",
         kind: 12,
         location: {
-          uri: "file:///a.rs",
+          uri: "oxplow:oxplow/file?path=///a.rs",
           range: { start: { line: 4, character: 0 }, end: { line: 6, character: 1 } },
         },
       },
@@ -338,18 +338,18 @@ describe("hover + definition passthroughs", () => {
 
   test("definitionResultToMonacoLocations handles single and LocationLink forms", () => {
     const single = definitionResultToMonacoLocations(fakeMonaco, {
-      uri: "file:///a.ts",
+      uri: "oxplow:oxplow/file?path=///a.ts",
       range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
     });
     expect(single).toHaveLength(1);
     const links = definitionResultToMonacoLocations(fakeMonaco, [
       {
-        targetUri: "file:///b.ts",
+        targetUri: "oxplow:oxplow/file?path=///b.ts",
         targetRange: { start: { line: 1, character: 0 }, end: { line: 2, character: 0 } },
         targetSelectionRange: { start: { line: 1, character: 4 }, end: { line: 1, character: 9 } },
       },
     ]);
-    expect(links[0].uri.toString()).toBe("file:///b.ts");
+    expect(links[0].uri.toString()).toBe("oxplow:oxplow/file?path=///b.ts");
     expect(links[0].range.startColumn).toBe(5); // selection range wins
   });
 });

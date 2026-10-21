@@ -37,7 +37,7 @@ test("an action runs its command with the run's params and row", async () => {
 });
 
 test("an action whose command names a page to open opens it once it ran", async () => {
-  const { d, log } = deps(undefined, "wiki:lib");
+  const { d, log } = deps(undefined, "oxplow:oxplow/wiki?slug=lib");
   expect(await performLensAction(action, run, null, null, false, d)).toBe("done");
   expect(log.slice(-2)).toEqual([`open_after oxplow.work_item.transition {}`, "open wiki:lib"]);
 });
@@ -45,13 +45,13 @@ test("an action whose command names a page to open opens it once it ran", async 
 const done = { result: {}, audit_id: 1, event_id: null, inverse: null };
 
 test("`then: replace` opens the page in place of the lens's page", async () => {
-  const { d, log } = deps(undefined, "work_item:oxplow:tsk9");
+  const { d, log } = deps(undefined, "oxplow:oxplow/work_item?id=tsk9&provider=oxplow");
   await openAfterAction({ ...action, then: "replace" }, done, d);
   expect(log.at(-1)).toBe("replace with work_item:oxplow:tsk9");
 });
 
 test("`then: stay` opens nothing, without asking where", async () => {
-  const { d, log } = deps(undefined, "work_item:oxplow:tsk9");
+  const { d, log } = deps(undefined, "oxplow:oxplow/work_item?id=tsk9&provider=oxplow");
   await openAfterAction({ ...action, then: "stay" }, done, d);
   expect(log).toEqual([]);
 });

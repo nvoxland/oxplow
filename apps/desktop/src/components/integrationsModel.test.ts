@@ -68,10 +68,10 @@ test("a missing instance says why, and what to add", () => {
     view({
       instance: "tracker/acme",
       instanceId: "acme",
-      health: { ...view({}).health, state: { state: "missing", reason: "`tracker/acme`: add `provider: issues`" } },
+      health: { ...view({}).health, state: { state: "missing", reason: "`tracker/acme`: add `oxplow:oxplow/provider?provider=%20issues`" } },
     }),
   );
-  expect(missing.status).toBe("`tracker/acme`: add `provider: issues`");
+  expect(missing.status).toBe("`tracker/acme`: add `oxplow:oxplow/provider?provider=%20issues`");
   expect(missing.problem).toBe(true);
 });
 

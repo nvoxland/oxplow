@@ -10,12 +10,12 @@ describe("leadingPinnedCount", () => {
 });
 
 describe("reorderToAfterPinned", () => {
-  const ids = ["agent", "local-history", "uncommitted", "snapshot:112", "tasks"];
+  const ids = ["agent", "local-history", "uncommitted", "oxplow:oxplow/snapshot?id=112", "tasks"];
 
   test("promotes an overflowed tab to right after the pinned agent", () => {
-    expect(reorderToAfterPinned(ids, 1, "snapshot:112")).toEqual([
+    expect(reorderToAfterPinned(ids, 1, "oxplow:oxplow/snapshot?id=112")).toEqual([
       "agent",
-      "snapshot:112",
+      "oxplow:oxplow/snapshot?id=112",
       "local-history",
       "uncommitted",
       "tasks",

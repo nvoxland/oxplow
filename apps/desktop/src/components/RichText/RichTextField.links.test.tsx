@@ -16,7 +16,7 @@ const ACME_PR: RefKind = {
   idPattern: "^\\d+$",
   wikilinks: [],
   resolve: "pull_request",
-  page: "page:acme/pr?ref={ref}",
+  page: "oxplow:oxplow/page?page=acme/pr&ref=%7Bref%7D",
   icon: "git-pull-request",
 };
 
@@ -37,10 +37,10 @@ test("a work item link and an extension's ref open their pages", async () => {
   await act(async () => {
     await new Promise((r) => setTimeout(r, 0));
   });
-  for (const href of ["work_item:oxplow:tsk1", "acme_pr:12"]) {
+  for (const href of ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "acme_pr:12"]) {
     const anchor = view.container.querySelector(`a[href="${href}"]`);
     expect(anchor).not.toBeNull();
     fireEvent.click(anchor!);
   }
-  expect(opened).toEqual(["work_item:oxplow:tsk1", "acme_pr:12"]);
+  expect(opened).toEqual(["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "acme_pr:12"]);
 });

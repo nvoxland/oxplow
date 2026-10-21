@@ -14,7 +14,7 @@ const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
 
 const proposal = (over: Partial<Proposal>): Proposal => ({
   id: 1,
-  ref: "proposal:1",
+  ref: "oxplow:oxplow/proposal?id=1",
   createdAt: "t",
   command: "oxplow.config.set",
   input: {},
@@ -22,7 +22,7 @@ const proposal = (over: Partial<Proposal>): Proposal => ({
   actorId: "thr3",
   threadId: 3,
   threadTitle: "Fix the cart",
-  key: "config:x",
+  key: "oxplow:oxplow/config?key=x",
   preview: { command: "oxplow.config.set", summary: "Set one key.", input: {}, destructive: false },
   dryRun: null,
   decision: "pending",
@@ -36,7 +36,7 @@ test("rows read as proposals, JSON columns parsed", () => {
     result([
       [
         4,
-        "proposal:4",
+        "oxplow:oxplow/proposal?id=4",
         "2026-10-01T00:00:00Z",
         "oxplow.config.set",
         '{"key":"agentPromptAppend","value":"be brief"}',
@@ -44,7 +44,7 @@ test("rows read as proposals, JSON columns parsed", () => {
         "thr3",
         3,
         "Thread",
-        "config:agentPromptAppend",
+        "oxplow:oxplow/config?key=agentPromptAppend",
         '{"command":"oxplow.config.set","summary":"Set one key.","input":{},"destructive":false}',
         '{"key":"agentPromptAppend","before":null,"after":"be brief","changed":true}',
       ],
@@ -52,7 +52,7 @@ test("rows read as proposals, JSON columns parsed", () => {
   );
   expect(p).toEqual({
     id: 4,
-    ref: "proposal:4",
+    ref: "oxplow:oxplow/proposal?id=4",
     createdAt: "2026-10-01T00:00:00Z",
     command: "oxplow.config.set",
     input: { key: "agentPromptAppend", value: "be brief" },
@@ -60,7 +60,7 @@ test("rows read as proposals, JSON columns parsed", () => {
     actorId: "thr3",
     threadId: 3,
     threadTitle: "Thread",
-    key: "config:agentPromptAppend",
+    key: "oxplow:oxplow/config?key=agentPromptAppend",
     preview: { command: "oxplow.config.set", summary: "Set one key.", input: {}, destructive: false },
     dryRun: { key: "agentPromptAppend", before: null, after: "be brief", changed: true },
     decision: "pending",
@@ -119,7 +119,7 @@ test("a deploy's proposal lists what it adds", () => {
 });
 
 test("a setting's pending proposal is the one keyed on it", () => {
-  const list = [proposal({ id: 1, key: "config:zones" }), proposal({ id: 2, key: "config:ai" })];
+  const list = [proposal({ id: 1, key: "oxplow:oxplow/config?key=zones" }), proposal({ id: 2, key: "oxplow:oxplow/config?key=ai" })];
   expect(proposalForSetting(list, "ai")?.id).toBe(2);
   expect(proposalForSetting(list, "lsp")).toBeUndefined();
 });
@@ -130,9 +130,9 @@ test("a row's decision reads through; a read that doesn't select it is pending",
   const withDecision = {
     ...result([]),
     columns: ["id", "ref", "command", "preview", "decision", "decided_at"],
-    rows: [[4, "proposal:4", "oxplow.work_item.delete", "{}", "approved", "2026-10-03T00:00:00Z"]],
+    rows: [[4, "oxplow:oxplow/proposal?id=4", "oxplow.work_item.delete", "{}", "approved", "2026-10-03T00:00:00Z"]],
   } as unknown as SqlQueryResult;
   expect(proposalsFromResult(withDecision)[0]).toMatchObject({ id: 4, decision: "approved", decidedAt: "2026-10-03T00:00:00Z" });
-  const pendingOnly = { ...result([]), rows: [[5, "proposal:5", "t", "oxplow.config.set", "{}", "agent", null, null, "k", "{}", null]] } as unknown as SqlQueryResult;
+  const pendingOnly = { ...result([]), rows: [[5, "oxplow:oxplow/proposal?id=5", "t", "oxplow.config.set", "{}", "agent", null, null, "k", "{}", null]] } as unknown as SqlQueryResult;
   expect(proposalsFromResult(pendingOnly)[0]).toMatchObject({ id: 5, decision: "pending", decidedAt: null });
 });

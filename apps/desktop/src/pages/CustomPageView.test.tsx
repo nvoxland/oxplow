@@ -30,7 +30,7 @@ afterEach(() => {
 const declared = {
   id: "board",
   extension: "acme",
-  pageRef: "page:acme/board",
+  pageRef: "oxplow:oxplow/page?page=acme/board",
   title: "Board",
   icon: null,
   category: "Work",

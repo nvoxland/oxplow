@@ -27,7 +27,7 @@ const { DeclaredPageView } = await import("./DeclaredPageView.js");
 const declared = {
   id: "open-prs",
   extension: "acme",
-  pageRef: "page:acme/open-prs",
+  pageRef: "oxplow:oxplow/page?page=acme/open-prs",
   title: "Open Pull Requests",
   icon: null,
   category: "Work",
