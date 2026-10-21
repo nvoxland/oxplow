@@ -1,50 +1,67 @@
-// The canonical ref grammar (.context/resources.md), asserted against the same
-// golden fixture the Rust parser uses, so the two can't drift.
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { formatUri, parseUri, type Uri, fileLinesUri } from "./uri.js";
+import { join } from "node:path";
 
-interface Fixture {
-  valid: Array<Uri & { text: string }>;
+import { fileLinesUri, formatUri, identityOf, isExternal, paramOf, parseUri, resourceUri, typeOf, uriProblem } from "./uri.js";
+
+// oxplow's URI grammar against the golden fixture the Rust parser asserts
+// too (crates/oxplow-domain/tests/oxplow_uri.rs), so the two can't drift.
+const fixture = JSON.parse(
+  readFileSync(join(import.meta.dir, "../../../../crates/oxplow-domain/tests/fixtures/uri.json"), "utf8"),
+) as {
+  valid: Array<{ text: string; resource: { extension: string; name: string }; params: Record<string, string>; view: Record<string, string>; canonical: string; identity: string }>;
   invalid: Array<{ text: string; reason: string }>;
-  format: Array<Uri & { text: string }>;
-}
+  build: Array<{ resource: string; params: Record<string, string>; view: Record<string, string>; canonical: string }>;
+};
 
-const here = dirname(fileURLToPath(import.meta.url));
-const fixture: Fixture = JSON.parse(
-  readFileSync(join(here, "../../../../crates/oxplow-domain/tests/fixtures/ref_grammar.json"), "utf8"),
-);
-
-describe("canonical ref grammar (shared fixture)", () => {
-  test("valid refs parse to their components and round-trip", () => {
+describe("the fixture", () => {
+  test("every valid case parses to its parts and its canonical form", () => {
     for (const c of fixture.valid) {
-      const r = parseUri(c.text);
-      expect(r, c.text).toEqual({ kind: c.kind, id: c.id, rev: c.rev, frag: c.frag });
-      expect(formatUri(r!), c.text).toBe(c.text);
+      const u = parseUri(c.text);
+      expect(u, c.text).not.toBeNull();
+      expect(u!.resource, c.text).toEqual(c.resource);
+      expect(u!.params, c.text).toEqual(c.params);
+      expect(u!.view, c.text).toEqual(c.view);
+      expect(formatUri(u!), c.text).toBe(c.canonical);
+      expect(identityOf(c.text), c.text).toBe(c.identity);
+      // The canonical form is a fixed point.
+      expect(formatUri(parseUri(c.canonical)!), c.text).toBe(c.canonical);
     }
   });
 
-  test("invalid refs are rejected", () => {
+  test("every invalid case is refused for its reason", () => {
     for (const c of fixture.invalid) {
-      expect(parseUri(c.text), `${JSON.stringify(c.text)} (${c.reason})`).toBeNull();
+      expect(parseUri(c.text), c.text).toBeNull();
+      expect(uriProblem(c.text), c.text).toBe(c.reason);
     }
   });
 
-  test("formatting escapes only the reserved characters", () => {
-    for (const c of fixture.format) {
-      const r: Uri = { kind: c.kind, id: c.id, rev: c.rev, frag: c.frag };
-      expect(formatUri(r)).toBe(c.text);
-      expect(parseUri(c.text)).toEqual(r);
+  test("a built URI is canonical", () => {
+    for (const c of fixture.build) {
+      expect(resourceUri(c.resource, c.params, c.view)).toBe(c.canonical);
     }
   });
 });
 
-describe("fileLinesUri", () => {
-  test("a file's lines as a ref: one line, or a range", () => {
-    expect(fileLinesUri("src/a.rs", 10, 10)).toBe("file:src/a.rs#L10");
-    expect(fileLinesUri("src/a.rs", 10, 20)).toBe("file:src/a.rs#L10-20");
-    expect(fileLinesUri("src/a.rs", 3, 3, "git:abc123")).toBe("file:src/a.rs@git:abc123#L3");
-  });
+test("its readers name the resource and a param", () => {
+  const u = resourceUri("oxplow/work_item", { provider: "oxplow", id: "tsk42" });
+  expect(typeOf(u)).toBe("oxplow/work_item");
+  expect(paramOf(u, "id")).toBe("tsk42");
+  expect(paramOf(u, "gone")).toBeNull();
+  expect(typeOf("effort:eff1")).toBeNull();
+});
+
+// A link may name any resource; oxplow's are the oxplow: ones.
+test("an external URI is a URL of another scheme", () => {
+  expect(isExternal("https://example.com/a")).toBe(true);
+  expect(isExternal("mailto:a@example.com")).toBe(true);
+  expect(isExternal("oxplow:oxplow/effort?id=eff1")).toBe(false);
+  expect(isExternal("oxplow:effort")).toBe(false);
+  expect(isExternal("not a uri")).toBe(false);
+});
+
+test("a file's lines are the view, never the identity", () => {
+  expect(fileLinesUri("src/a.rs", 10, 20)).toBe("oxplow:oxplow/file?path=src/a.rs#lines=10-20");
+  expect(fileLinesUri("src/a.rs", 3, 3, "git:abc123")).toBe("oxplow:oxplow/file?path=src/a.rs&rev=git:abc123#lines=3-3");
+  expect(identityOf(fileLinesUri("src/a.rs", 10, 20))).toBe("oxplow:oxplow/file?path=src/a.rs");
 });

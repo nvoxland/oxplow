@@ -20,7 +20,7 @@ import { createContext, useCallback, useContext, useState, useSyncExternalStore 
 import { getUiPreferences, setUiPreference } from "../api.js";
 import { logUi } from "../logger.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
-import { uriOf } from "../uri/uri.js";
+import { panelUri } from "../uri/uri.js";
 import { identityOf } from "../tabs/session.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { UiPreference } from "../tauri-bridge/generated/bindings.js";
@@ -144,7 +144,7 @@ export function useRememberedStore(): RememberedStore {
 }
 
 /** The page-memory scope of a page: its own ref without its view params
- *  (`page:tasks`, `page:acme/pulls`, `lens:x/y`), or `kind:<kind>` for an
+ *  (`oxplow/page?page=tasks`, `oxplow/lens?lens=x/y`), or `kind:<kind>` for an
  *  entity page (every file page shares one). */
 export function pageMemoryScope(ref: TabRef): string {
   return ref.kind === "page" || ref.kind === "lens" ? identityOf(ref.id) : `kind:${ref.kind}`;
@@ -186,4 +186,4 @@ export function usePanelMemory<T>(panel: string, key: string, initial: T): [T, (
 }
 
 /** The scope a panel's memory is kept under. */
-export const panelScope = (panel: string) => uriOf("panel", panel);
+export const panelScope = (panel: string) => panelUri(panel);
