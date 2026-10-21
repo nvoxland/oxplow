@@ -19,6 +19,7 @@ import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef } from "../../tabs/pageRefs.js";
 import { useHistoryState } from "../../tabs/useHistoryState.js";
 import type { WikiPageController } from "./useWikiPageController.js";
+import { wikiUri } from "../../uri/uri.js";
 
 const FRESHNESS_LABEL: Record<WikiFreshnessLevel, string> = {
   "fresh": "fresh",
@@ -119,9 +120,9 @@ export function WikiPageTab({
         }}
         style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}
         // The body is a wiki context node so any plain-DOM selection in
-        // it (and the page_ref graph) resolves to `wiki:<slug>`; the
+        // it (and the page_ref graph) resolves to its wiki URI; the
         // Tiptap surface inside carries its own comment affordance.
-        {...contextNodeProps("wiki", slug)}
+        {...contextNodeProps(wikiUri(slug))}
       >
         {notFound ? (
           <div style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
@@ -141,8 +142,7 @@ export function WikiPageTab({
             comments={{
               streamId: stream.id,
               threadId: null,
-              targetKind: "wiki",
-              targetId: slug,
+              target: wikiUri(slug),
             }}
             onCommit={(markdown) => {
               const next = postprocessWikilinks(markdown);

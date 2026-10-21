@@ -2,6 +2,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 import { createComment, relinkComment, relocateComment } from "../../api.js";
+import { fileUri } from "../../uri/uri.js";
 import {
   clearCommentReveal,
   peekPendingCommentReveal,
@@ -73,7 +74,7 @@ export const MonacoCommentLayer = forwardRef<
     filePath: string;
   }
 >(function MonacoCommentLayer({ editor, monaco, ready, streamId, threadId, filePath }, ref) {
-  const { threads } = useCommentsForTarget("file", filePath);
+  const { threads } = useCommentsForTarget(fileUri(filePath));
   const threadsRef = useRef(threads);
   threadsRef.current = threads;
   const decoIdsRef = useRef<string[]>([]);
@@ -291,16 +292,15 @@ export const MonacoCommentLayer = forwardRef<
 
   const handleCreate = async (input: { body: string; intent: CommentIntent }) => {
     if (!pending) return;
-    // No explicit context_chain/referenced_refs: a file editor has no
+    // No explicit context_chain/referenced: a file editor has no
     // typed ancestors above the file itself, and the backend already
     // unions any refs it can parse out of the quoted code (paths,
-    // `task:N`, …) into referenced_refs at create time — so we don't
+    // work items, …) into `referenced` at create time — so we don't
     // reimplement ref parsing here.
     await createComment({
       streamId,
       threadId,
-      targetKind: "file",
-      targetId: filePath,
+      target: fileUri(filePath),
       quote: pending.quote,
       selectorsJson: pending.anchorJson,
       intent: input.intent,

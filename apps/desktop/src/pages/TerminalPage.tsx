@@ -133,8 +133,8 @@ export function TerminalPage({ stream, visible, onOpenFile }: TerminalPageProps)
                   comments={{
                     streamId: stream.id,
                     threadId: null,
-                    targetKind: "terminal",
-                    targetId: commentTargetFor(stream.id, tab.id),
+                    // URI-SWITCH: a terminal has no resource of its own yet.
+                    target: commentTargetFor(stream.id, tab.id),
                   }}
                 />
               </div>

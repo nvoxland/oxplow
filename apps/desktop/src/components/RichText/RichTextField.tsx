@@ -15,7 +15,6 @@ import type { CommentIntent } from "../../tauri-bridge/generated/bindings.js";
 import { extractContext } from "../Comments/anchor.js";
 import { partitionPageComments, stepComment } from "../Comments/pageCommentNav.js";
 import { refsInRange } from "../Comments/domAnchor.js";
-import type { RefNode } from "../Comments/contextNodes.js";
 import { useCommentsForTarget } from "../Comments/useCommentsForTarget.js";
 import {
   clearCommentReveal,
@@ -37,14 +36,13 @@ import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 /// selection toolbar (mirroring the plain-DOM surfaces, which this
 /// contenteditable region is carved out of) and the right-click menu;
 /// "Open comment" stays right-click-only so existing comments don't
-/// fight selection/cursor. `targetId` identifies the
+/// fight selection/cursor. `target` (a URI) identifies the
 /// page (wiki slug / task id); `streamId` is the hard scope and
 /// `threadId` the origin thread (null for non-thread-bound surfaces).
 export interface RichTextCommentConfig {
   streamId: string;
   threadId: string | null;
-  targetKind: string;
-  targetId: string;
+  target: string;
 }
 
 /// Build the enriched `anchor_json` for a resolved `[from, to)` doc
@@ -74,7 +72,7 @@ interface PendingSelection {
   /// the live DOM selection at compose time so the agent sees typed
   /// context for what the highlighted prose links to. The backend
   /// additionally unions refs it can parse out of the quote text itself.
-  referencedRefs: RefNode[];
+  referenced: string[];
 }
 
 /**
@@ -142,7 +140,7 @@ export function RichTextField({
   };
 
   // Comment state. The hook is always called (empty target → no fetch).
-  const { threads } = useCommentsForTarget(comments?.targetKind ?? "", comments?.targetId ?? "");
+  const { threads } = useCommentsForTarget(comments?.target ?? "");
   const [activeComment, setActiveComment] = useState<{ id: string; rect: DOMRect } | null>(null);
   const [pendingSel, setPendingSel] = useState<PendingSelection | null>(null);
   const [commentMenu, setCommentMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(
@@ -410,7 +408,7 @@ export function RichTextField({
     // (e.g. an internal [[wikilink]]) from the live DOM selection, before
     // the composer steals focus and collapses it.
     const domSel = window.getSelection();
-    const referencedRefs =
+    const referenced =
       domSel && domSel.rangeCount > 0 ? refsInRange(domSel.getRangeAt(0)) : [];
     let rect: DOMRect;
     try {
@@ -421,7 +419,7 @@ export function RichTextField({
       rect = domSel.getRangeAt(0).getBoundingClientRect();
     }
     setActiveComment(null);
-    setPendingSel({ quote: captured.quote, from, to, rect, anchorJson: captured.anchorJson, referencedRefs });
+    setPendingSel({ quote: captured.quote, from, to, rect, anchorJson: captured.anchorJson, referenced });
   };
 
   // Right-click menu. Always shown (the native webview menu is never
@@ -511,11 +509,10 @@ export function RichTextField({
     await createComment({
       streamId: comments.streamId,
       threadId: comments.threadId,
-      targetKind: comments.targetKind,
-      targetId: comments.targetId,
+      target: comments.target,
       quote: pendingSel.quote,
       selectorsJson: pendingSel.anchorJson,
-      referencedRefs: pendingSel.referencedRefs,
+      referenced: pendingSel.referenced,
       intent: input.intent,
       body: input.body,
     });

@@ -5,6 +5,7 @@ import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { useRouteDispatch } from "../../tabs/RouteLink.js";
 import { fileRef } from "../../tabs/pageRefs.js";
 import type { Origin } from "../../tabs/session.js";
+import { dirUri, fileUri } from "../../uri/uri.js";
 
 /**
  * Mirror of the Rust `WorkspaceFilter` matching semantics for the
@@ -217,8 +218,7 @@ function TreeEntryRow({
       // Typed context node so the right-click "Comment" action (rows are
       // draggable, so a drag-select can't start here) can anchor to this
       // file/directory, under the canonical ref kinds (`file` / `dir`).
-      data-ref-kind={entry.kind === "directory" ? "dir" : "file"}
-      data-ref-id={entry.path}
+      data-ref={entry.kind === "directory" ? dirUri(entry.path) : fileUri(entry.path)}
       title={entry.path}
       draggable={isFile}
       onDragStart={isFile

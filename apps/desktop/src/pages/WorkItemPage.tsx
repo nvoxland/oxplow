@@ -22,7 +22,7 @@ import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import type { BacklinkEntry } from "../tabs/backlinkTypes.js";
 import type { MenuItem } from "../menu.js";
 import type { Reads } from "../tauri-bridge/generated/bindings.js";
-import { workItemId, workItemLabel } from "../workItemRef.js";
+import { workItemLabel } from "../workItemRef.js";
 import {
   applyItemChange,
   deleteWorkItem,
@@ -213,7 +213,7 @@ export function WorkItemPage({
   // The newest effort (they come newest first) is the one to review.
   const latestEffort = efforts[0]?.effort.id;
   const review = onShowEffortDiff && latestEffort ? () => onShowEffortDiff(latestEffort) : undefined;
-  const commentTarget = workItemId(item.ref) ?? item.ref;
+  const commentTarget = item.ref;
 
   const rail = (
     <>
@@ -265,7 +265,7 @@ export function WorkItemPage({
       rightRail={rail}
       backlinks={backlinks}
       outbound={outbound}
-      commentsNav={stream ? <CommentNavigator targetKind="work_item" targetId={commentTarget} /> : undefined}
+      commentsNav={stream ? <CommentNavigator target={commentTarget} /> : undefined}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
         {/* The editor (title and body) is replaceable (`work_item.detail`);
@@ -282,7 +282,7 @@ export function WorkItemPage({
               onUpdateTask={update}
               comments={
                 stream
-                  ? { streamId: stream.id, threadId: item.threadId, targetKind: "work_item", targetId: commentTarget }
+                  ? { streamId: stream.id, threadId: item.threadId, target: commentTarget }
                   : undefined
               }
             />

@@ -168,7 +168,7 @@ export function TerminalPane({
   /// When set, the pane becomes comment-enabled: a selection on terminal
   /// output can be commented, anchored to the buffer text and targeted at
   /// this page ref. `threadId` is null for the shell terminal.
-  comments?: { streamId: string; threadId: string | null; targetKind: string; targetId: string };
+  comments?: { streamId: string; threadId: string | null; target: string };
   /// When set, unmounting kills the PTY (`terminateTerminalSession`)
   /// instead of merely detaching (`closeTerminalSession`). The Terminal
   /// page sets this so removing a terminal tab terminates its shell;
@@ -704,8 +704,7 @@ export function TerminalPane({
           term={term}
           streamId={comments.streamId}
           threadId={comments.threadId}
-          targetKind={comments.targetKind}
-          targetId={comments.targetId}
+          target={comments.target}
         />
       ) : null}
       {isStoppedNow ? (

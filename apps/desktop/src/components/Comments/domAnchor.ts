@@ -7,9 +7,8 @@
 //! `[start, length)` char span (via the shared `resolveAnchor`) and turn
 //! that span back into a DOM `Range` to paint, without mutating the DOM.
 
-import { workItemId } from "../../workItemRef.js";
+import { commitUri, dirUri, fileUri, wikiUri } from "../../uri/uri.js";
 import { parseMarkdownLink } from "../Wiki/MarkdownView.js";
-import type { RefNode } from "./contextNodes.js";
 
 /// Convert a character span of `root.textContent` into a DOM `Range` by
 /// walking the element's text nodes in document order (the same order
@@ -52,40 +51,39 @@ export function textContentRange(root: Element, start: number, length: number): 
   return range;
 }
 
-/// Map a rendered link href to a canonical [`RefNode`], or `null` for
-/// hrefs that don't point at a first-class page (external, anchors).
-export function refFromHref(href: string): RefNode | null {
+/// Map a rendered link href to the URI it names, or `null` for hrefs that
+/// don't point at a first-class page (external, anchors).
+export function refFromHref(href: string): string | null {
   const parsed = parseMarkdownLink(href);
   switch (parsed.kind) {
     case "internal":
-      return { kind: "wiki", id: parsed.slug };
+      return wikiUri(parsed.slug);
     case "file":
-      return { kind: "file", id: parsed.path };
+      return fileUri(parsed.path);
     case "directory":
-      return { kind: "dir", id: parsed.path };
+      return dirUri(parsed.path);
     case "commit":
-      return { kind: "commit", id: parsed.sha };
+      return commitUri(parsed.sha);
     case "work_item":
-      return { kind: "work_item", id: workItemId(parsed.ref) ?? parsed.ref };
+      return parsed.ref;
     default:
       return null;
   }
 }
 
-/// The canonical refs pointed at by any `<a>` links inside `range` —
+/// The URIs pointed at by any `<a>` links inside `range` —
 /// "text that is *about* a thing is a link to that thing", so a link in
 /// the selection becomes typed context. Deduped, in document order.
 /// Partially-selected links count (their typed target is still relevant).
-export function refsInRange(range: Range): RefNode[] {
-  const refs: RefNode[] = [];
+export function refsInRange(range: Range): string[] {
+  const refs: string[] = [];
   const seen = new Set<string>();
   const frag = range.cloneContents();
   for (const a of Array.from(frag.querySelectorAll("a[href]"))) {
     const ref = refFromHref(a.getAttribute("href") ?? "");
     if (!ref) continue;
-    const key = `${ref.kind} ${ref.id}`;
-    if (!seen.has(key)) {
-      seen.add(key);
+    if (!seen.has(ref)) {
+      seen.add(ref);
       refs.push(ref);
     }
   }

@@ -13,7 +13,7 @@ def transform(x):
     item = rows[0]
     if "[delete]" in item["title"]:
         return {"commands": [{"name": "oxplow.work_item.delete", "input": {"ref": item["ref"]}}]}
-    target = "work_item:oxplow:tsk999999" if "[fail]" in item["title"] else item["ref"]
+    target = uri.build("oxplow/work_item", provider="oxplow", id="tsk999999") if "[fail]" in item["title"] else item["ref"]
     return {"commands": [{
         "name": "oxplow.work_item.comment",
         "input": {"ref": target, "body": "Noted by the suite's effect."},

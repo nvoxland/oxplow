@@ -1402,26 +1402,26 @@ export async function deleteWikiPage(slug: string, confirmed: boolean): Promise<
 export async function createComment(input: {
   streamId: string;
   threadId: string | null;
-  targetKind: string;
-  targetId: string;
+  /** The URI the comment is on. */
+  target: string;
   quote: string;
   /** W3C selectors array, serialized. */
   selectorsJson: string;
-  /** Ancestor regions (innermost→outermost, excluding the target). */
-  contextChain?: { kind: string; id: string }[];
-  /** Canonical refs found inside the selection. */
-  referencedRefs?: { kind: string; id: string }[];
+  /** Ancestor regions' URIs (innermost→outermost, excluding the target). */
+  contextChain?: string[];
+  /** URIs found inside the selection. */
+  referenced?: string[];
   intent: CommentIntent;
   body: string;
 }): Promise<CommentThread> {
   const outcome = await runCommand("oxplow.knowledge.add_comment", {
     stream: streamUri(input.streamId),
     ...(input.threadId ? { thread: threadUri(input.threadId) } : {}),
-    target: { kind: input.targetKind, id: input.targetId },
+    target: input.target,
     quote: input.quote,
     selectors_json: input.selectorsJson,
     context_chain: input.contextChain ?? [],
-    referenced_refs: input.referencedRefs ?? [],
+    referenced: input.referenced ?? [],
     intent: input.intent,
     body: input.body,
   });
@@ -1432,11 +1432,8 @@ export async function addCommentMessage(commentId: string, body: string): Promis
   return (await runCommand("oxplow.knowledge.reply_comment", { comment: commentUri(commentId), body })).result as CommentMessage;
 }
 
-export async function listCommentsForTarget(
-  targetKind: string,
-  targetId: string,
-): Promise<CommentThread[]> {
-  return unwrap(await commands.listCommentsForTarget(targetKind, targetId));
+export async function listCommentsForTarget(target: string): Promise<CommentThread[]> {
+  return unwrap(await commands.listCommentsForTarget(target));
 }
 
 export async function listCommentsForStream(streamId: string): Promise<CommentThread[]> {
@@ -2624,13 +2621,9 @@ export async function openExternalUrl(url: string): Promise<{ ok: boolean; reaso
 
 export type BacklinkEdge = import("./tauri-bridge/generated/bindings.js").BacklinkEdge;
 
-/** Pages pointing AT (target_kind, target_id). */
-export async function listBacklinks(
-  targetKind: string,
-  targetId: string,
-  limit: number | null = null,
-): Promise<BacklinkEdge[]> {
-  return unwrap(await commands.listBacklinks(targetKind, targetId, limit));
+/** Pages pointing AT the URI `target`. */
+export async function listBacklinks(target: string, limit: number | null = null): Promise<BacklinkEdge[]> {
+  return unwrap(await commands.listBacklinks(target, limit));
 }
 
 // ----------------------------------------------------------------------
@@ -2654,10 +2647,6 @@ export async function discardDeadLetter(id: number): Promise<{ state: string }> 
 }
 
 /** Pages this source points AT. Inverse of `listBacklinks`. */
-export async function listPageOutbound(
-  sourceKind: string,
-  sourceId: string,
-  limit: number | null = null,
-): Promise<BacklinkEdge[]> {
-  return unwrap(await commands.listOutbound(sourceKind, sourceId, limit));
+export async function listPageOutbound(source: string, limit: number | null = null): Promise<BacklinkEdge[]> {
+  return unwrap(await commands.listOutbound(source, limit));
 }

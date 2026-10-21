@@ -10,32 +10,29 @@ import { Page } from "../tabs/Page.js";
 import { useViewParam } from "../tabs/useViewParam.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { agentSessionRef, fileRef, wikiPageRef, workItemTabRef } from "../tabs/pageRefs.js";
+import { refFromTabId } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
-import { workItemLabel, workItemUriOfId } from "../workItemRef.js";
+import { idOf, typeOf, workItemOf } from "../uri/uri.js";
+import { workItemLabel } from "../workItemRef.js";
 import { EmptyState } from "../components/Prompts/EmptyState.js";
 
-/// Map a comment's target back to the page that owns it.
-function targetRef(kind: string, id: string): TabRef | null {
-  if (kind === "file") return fileRef(id);
-  if (kind === "wiki") return wikiPageRef(id);
-  if (kind === "work_item") {
-    const uri = workItemUriOfId(id);
-    return uri === null ? null : workItemTabRef(uri);
-  }
-  // An agent session's terminal (its tab while the session is open).
-  if (kind === "agent_session") return agentSessionRef(id);
-  return null;
+/// Map a comment's target back to the page that owns it: a file, a wiki
+/// page, a work item or an agent session's terminal (its tab while the
+/// session is open) is a tab id.
+function targetRef(target: string): TabRef | null {
+  return refFromTabId(target);
 }
 
 /// How a comment's target reads in the inbox: a work item by its own id
 /// (`tsk42`, `ENG-12`), whichever list holds it.
-export function targetLabel(kind: string, id: string): string {
-  if (kind === "file") return id;
-  if (kind === "wiki") return `wiki/${id}`;
-  if (kind === "work_item") return workItemLabel(workItemUriOfId(id) ?? id);
-  if (kind === "agent_session") return "an agent session's terminal";
-  return `${kind}:${id}`;
+export function targetLabel(target: string): string {
+  const path = idOf(target, "oxplow/file");
+  if (path !== null) return path;
+  const slug = idOf(target, "oxplow/wiki");
+  if (slug !== null) return `wiki/${slug}`;
+  if (workItemOf(target) !== null) return workItemLabel(target);
+  if (typeOf(target) === "oxplow/agent_session") return "an agent session's terminal";
+  return target;
 }
 
 /// Global Comments inbox — every comment in the current stream, grouped
@@ -90,21 +87,20 @@ export function CommentsInboxPage({
   );
 
   const groups = useMemo(() => {
-    const byTarget = new Map<string, { kind: string; id: string; threads: CommentThread[] }>();
+    const byTarget = new Map<string, { target: string; threads: CommentThread[] }>();
     for (const t of visible) {
-      const key = `${t.comment.target_kind}:${t.comment.target_id}`;
-      let g = byTarget.get(key);
+      let g = byTarget.get(t.comment.target);
       if (!g) {
-        g = { kind: t.comment.target_kind, id: t.comment.target_id, threads: [] };
-        byTarget.set(key, g);
+        g = { target: t.comment.target, threads: [] };
+        byTarget.set(t.comment.target, g);
       }
       g.threads.push(t);
     }
     return [...byTarget.values()];
   }, [visible]);
 
-  const navigate = (kind: string, id: string) => {
-    const ref = targetRef(kind, id);
+  const navigate = (target: string) => {
+    const ref = targetRef(target);
     if (!ref) return;
     if (ctxNav) ctxNav.navigate(ref, { newTab: false });
     else onOpenPage(ref);
@@ -119,7 +115,7 @@ export function CommentsInboxPage({
     // open the target page (where the user can re-select the text and
     // relink). Anchored ones also request a reveal to scroll/open inline.
     if (!t.comment.orphaned) requestCommentReveal(t.comment.id);
-    navigate(t.comment.target_kind, t.comment.target_id);
+    navigate(t.comment.target);
   };
 
   return (
@@ -172,15 +168,15 @@ export function CommentsInboxPage({
           />
         ) : (
           groups.map((g) => (
-            <section key={`${g.kind}:${g.id}`} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <section key={g.target} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <button
                 type="button"
-                data-testid={`comments-group-${g.kind}-${g.id}`}
+                data-testid={`comments-group-${g.target}`}
                 onClick={(e) => {
-                  const ref = targetRef(g.kind, g.id);
+                  const ref = targetRef(g.target);
                   if (e.metaKey || e.ctrlKey) {
                     if (ref) onOpenPage(ref);
-                  } else navigate(g.kind, g.id);
+                  } else navigate(g.target);
                 }}
                 style={{
                   textAlign: "left",
@@ -194,7 +190,7 @@ export function CommentsInboxPage({
                   padding: "4px 0",
                 }}
               >
-                {targetLabel(g.kind, g.id)} · {g.threads.length}
+                {targetLabel(g.target)} · {g.threads.length}
               </button>
               {g.threads.map((t) => {
                 const lastMsg = t.messages[t.messages.length - 1];

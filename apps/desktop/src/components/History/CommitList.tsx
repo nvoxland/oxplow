@@ -7,6 +7,7 @@ import { gitCommitRef } from "../../tabs/pageRefs.js";
 import type { OriginItem } from "../../tabs/session.js";
 import { RefBadge } from "../RefBadge.js";
 import { EmptyState } from "../Prompts/EmptyState.js";
+import { commitUri } from "../../uri/uri.js";
 
 const ROW_HEIGHT = 36;
 
@@ -199,8 +200,7 @@ function CommitRow({
       onClick={onClick}
       data-testid="commit-list-row"
       data-sha={commit.id}
-      data-ref-kind="commit"
-      data-ref-id={commit.id}
+      data-ref={commitUri(commit.id)}
       style={{
         display: "flex",
         alignItems: "center",
