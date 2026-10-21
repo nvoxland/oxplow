@@ -28,7 +28,7 @@ import { useWorkListProfile } from "../../useWorkListProfile.js";
 import { workItemRefOfMention } from "../../workItems.js";
 import { workItemId, workItemLabel } from "../../workItemRef.js";
 import { dirUri, fileLinesUri, fileUri, identityOf, isOxplowScheme, linkTarget, commitUri, parseUri, typeOf } from "../../uri/uri.js";
-import { extensionWikilinkRef, refKindInfo, useExtensionRefTitle, useRefKinds } from "../../refKinds.js";
+import { extensionWikilinkRef, resourceInfo, useExtensionRefTitle, useResources } from "../../resources.js";
 import { attachPanZoom, loadMermaid } from "./mermaidRender.js";
 
 // Mermaid + svg-pan-zoom load lazily inside mermaidRender, so this module
@@ -140,7 +140,7 @@ export function parseMarkdownLink(rawHref: string): ParsedLink {
       default: {
         // URI-SWITCH: the registry is keyed by resource name (`v_resource`).
         const resource = typeOf(rawHref);
-        if (resource && refKindInfo(resource)) return { kind: "ref", ref: rawHref };
+        if (resource && resourceInfo(resource)) return { kind: "ref", ref: rawHref };
       }
     }
   }
@@ -601,7 +601,7 @@ export function MarkdownView({
   className,
 }: MarkdownViewProps) {
   // Extensions' ref kinds change what a `[[…]]` names.
-  const refKinds = useRefKinds();
+  const refKinds = useResources();
   // …and the active work list's ids do too.
   const profile = useWorkListProfile();
   const processedBody = useMemo(

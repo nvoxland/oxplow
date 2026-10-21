@@ -3,11 +3,11 @@ import { GitPullRequest } from "lucide-react";
 
 import { linkRef, parseMarkdownLink, preprocessWikilinks } from "./components/Wiki/MarkdownView.js";
 import { pageKindIconComponent, pageKindLabel } from "./pageKinds.js";
-import { extensionWikilinkRef, refKindsFromResult, setRefKinds, type RefKind } from "./refKinds.js";
+import { extensionWikilinkRef, resourcesFromResult, setResources, type Resource } from "./resources.js";
 import { refFromTabId } from "./tabs/pageRefs.js";
 import { refTargetNow } from "./tabs/refOpener.js";
 
-const ACME_PR: RefKind = {
+const ACME_PR: Resource = {
   kind: "acme_pr",
   extension: "acme",
   label: "Pull request",
@@ -18,12 +18,12 @@ const ACME_PR: RefKind = {
   icon: "git-pull-request",
 };
 
-afterEach(() => setRefKinds([]));
+afterEach(() => setResources([]));
 
 describe("an extension's ref kind (P8.D7)", () => {
   test("draws with its declared icon and label", () => {
     expect(pageKindIconComponent("acme_pr")).toBeNull();
-    setRefKinds([ACME_PR]);
+    setResources([ACME_PR]);
     expect(pageKindIconComponent("acme_pr")).toBe(GitPullRequest);
     expect(pageKindLabel("acme_pr")).toBe("Pull request");
   });
@@ -31,7 +31,7 @@ describe("an extension's ref kind (P8.D7)", () => {
   test("opens its extension's page with the ref", () => {
     // A ref of another kind is no tab id: the opener says where it opens.
     expect(refFromTabId("acme_pr:12")).toBeNull();
-    setRefKinds([ACME_PR]);
+    setResources([ACME_PR]);
     expect(refFromTabId("acme_pr:12")).toBeNull();
     const target = refTargetNow("acme_pr:12");
     const tab = target && "tab" in target ? target.tab : null;
@@ -45,7 +45,7 @@ describe("an extension's ref kind (P8.D7)", () => {
   });
 
   test("a wikilink names one by its kind or its prefix, while installed", () => {
-    setRefKinds([ACME_PR]);
+    setResources([ACME_PR]);
     expect(extensionWikilinkRef("pr:12")).toBe("acme_pr:12");
     expect(extensionWikilinkRef("acme_pr:12")).toBe("acme_pr:12");
     expect(extensionWikilinkRef("pr:twelve")).toBeNull();
@@ -54,19 +54,19 @@ describe("an extension's ref kind (P8.D7)", () => {
     const parsed = parseMarkdownLink("acme_pr:12");
     expect(parsed).toEqual({ kind: "ref", ref: "acme_pr:12" });
     expect(linkRef(parsed)).toBe("acme_pr:12");
-    setRefKinds([]);
+    setResources([]);
     expect(extensionWikilinkRef("pr:12")).toBeNull();
     expect(preprocessWikilinks("see [[pr:12]]")).toContain("oxplow-invalid:");
   });
 
   test("a sugar is read before a kind's own name, as the backend reads it (tsk933)", () => {
-    const beta: RefKind = { ...ACME_PR, kind: "beta_pr", extension: "beta", wikilinks: [] };
-    setRefKinds([{ ...ACME_PR, wikilinks: ["beta_pr"] }, beta]);
+    const beta: Resource = { ...ACME_PR, kind: "beta_pr", extension: "beta", wikilinks: [] };
+    setResources([{ ...ACME_PR, wikilinks: ["beta_pr"] }, beta]);
     expect(extensionWikilinkRef("beta_pr:1")).toBe("acme_pr:1");
   });
 
   test("a long id matches as the backend's does (tsk917)", () => {
-    setRefKinds([ACME_PR]);
+    setResources([ACME_PR]);
     expect(extensionWikilinkRef(`pr:${"1".repeat(300)}`)).toBe(`acme_pr:${"1".repeat(300)}`);
   });
 
@@ -85,7 +85,7 @@ describe("an extension's ref kind (P8.D7)", () => {
   });
 
   test("reads v_ref_kind rows", () => {
-    const kinds = refKindsFromResult({
+    const kinds = resourcesFromResult({
       columns: ["kind", "extension", "label", "id_pattern", "wikilinks", "resolve", "page", "icon"],
       rows: [["acme_pr", "acme", "Pull request", "^\\d+$", '["pr"]', "v_acme_prs", "oxplow:oxplow/page?page=acme/pr&ref=%7Bref%7D", "git-pull-request"]],
       truncated: false,
@@ -97,7 +97,7 @@ describe("an extension's ref kind (P8.D7)", () => {
 
 // Core's kinds come in the same list, with no extension, label or icon.
 test("a core kind's row reads as one", () => {
-  const kinds = refKindsFromResult({
+  const kinds = resourcesFromResult({
     columns: ["kind", "extension", "label", "id_pattern", "wikilinks", "resolve", "page", "icon"],
     rows: [["thread_note", null, null, "^not\\d+$", "[]", "v_thread_note", "{thread_ref}", null]],
     truncated: false,

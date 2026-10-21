@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { LENS_ICON_NAMES, LENS_TONES, lensIcon, toneColor } from "./lensIcons.js";
 import { pageKindIconComponent } from "../pageKinds.js";
-import { REF_KIND_ICONS } from "../refKinds.js";
+import { REF_KIND_ICONS } from "../resources.js";
 import type { Extension } from "../tauri-bridge/generated/bindings.js";
 
 // A column's `icon` names one from a fixed vocabulary — the work

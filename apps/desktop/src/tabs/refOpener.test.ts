@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
 
-import { setRefKinds, type RefKind } from "../refKinds.js";
+import { setResources, type Resource } from "../resources.js";
 import { commentsRef, extPageRef, fileRef, wikiPageRef, workItemTabRef } from "./pageRefs.js";
 import { refTarget, refTargetNow } from "./refOpener.js";
 
-const core = (kind: string, page: string | null, resolve: string | null = null): RefKind => ({
+const core = (kind: string, page: string | null, resolve: string | null = null): Resource => ({
   kind,
   extension: null,
   label: null,
@@ -15,7 +15,7 @@ const core = (kind: string, page: string | null, resolve: string | null = null):
   icon: null,
 });
 
-const KINDS: RefKind[] = [
+const KINDS: Resource[] = [
   core("work_item", "{ref}", "v_work_item"),
   core("wiki", "{ref}", "v_knowledge_page"),
   core("file", "{ref}"),
@@ -36,13 +36,13 @@ const KINDS: RefKind[] = [
   },
 ];
 
-afterEach(() => setRefKinds([]));
+afterEach(() => setResources([]));
 
 // Every ref opens where its kind's page template says: the ref itself, a
 // shell page, an extension's page given the ref — read from the registry,
 // core kinds and an extension's alike.
 test("a ref opens where its kind's template says, with no row to read", () => {
-  setRefKinds(KINDS);
+  setResources(KINDS);
   expect(refTargetNow("oxplow:oxplow/work_item?id=tsk1&provider=oxplow")).toEqual({ tab: workItemTabRef("oxplow:oxplow/work_item?id=tsk1&provider=oxplow") });
   expect(refTargetNow("oxplow:oxplow/wiki?slug=home")).toEqual({ tab: wikiPageRef("home") });
   expect(refTargetNow("oxplow:oxplow/file?path=src/a.ts")).toEqual({ tab: fileRef("src/a.ts") });
@@ -54,7 +54,7 @@ test("a ref opens where its kind's template says, with no row to read", () => {
 // A template that names columns needs its kind's row: the sync path says
 // so, the async one reads it (one query on the kind's `resolve` view).
 test("a template that reads a column opens through its row", async () => {
-  setRefKinds(KINDS);
+  setResources(KINDS);
   expect(refTargetNow("oxplow:oxplow/thread_note?id=not3")).toBeNull();
   const asked: Array<{ view: string; columns: string[]; ref: string }> = [];
   const read = (rows: Record<string, Record<string, unknown>>) => async (view: string, columns: string[], ref: string) => {
@@ -74,7 +74,7 @@ test("a template that reads a column opens through its row", async () => {
 });
 
 test("a kind with no page, or one nobody declares, opens nothing", async () => {
-  setRefKinds(KINDS);
+  setResources(KINDS);
   expect("unopenable" in (await refTarget("oxplow:oxplow/event?id=00000000-0000-0000-0000-000000000000", async () => null))).toBe(true);
   expect("unopenable" in (await refTarget("gone_kind:1", async () => null))).toBe(true);
 });

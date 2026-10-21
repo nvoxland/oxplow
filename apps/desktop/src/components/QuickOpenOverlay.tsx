@@ -3,7 +3,7 @@ import { useAppPreference } from "../prefs/remembered.js";
 import { commandUri, fileUri, pageUri } from "../uri/uri.js";
 import { SEARCH_TRIGGER_TESTID } from "./TitleBar.js";
 import type { CSSProperties } from "react";
-import { useRefKinds } from "../refKinds.js";
+import { useResources } from "../resources.js";
 import { useListNav } from "../kit/index.js";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useExtensions } from "../extensionsStore.js";
@@ -90,7 +90,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
   const [siteHits, setSiteHits] = useState<SearchHit[]>([]);
   // A hit of an extension's ref kind is drawn with that kind's icon and
   // label: redraw when the kinds change.
-  useRefKinds();
+  useResources();
   const [recentEntries, setRecentEntries] = useState<LauncherPageEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

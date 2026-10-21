@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 
-import { setRefKinds, type RefKind } from "../../refKinds.js";
+import { setResources, type Resource } from "../../resources.js";
 import { PageNavigationContext, type PageNavigation } from "../../tabs/PageNavigationContext.js";
 import { RichTextField } from "./RichTextField.js";
 
@@ -9,7 +9,7 @@ import { RichTextField } from "./RichTextField.js";
 // a task, an extension's ref — as it does in a read-only one (both through
 // `linkRef` and `openRef`).
 
-const ACME_PR: RefKind = {
+const ACME_PR: Resource = {
   kind: "acme_pr",
   extension: "acme",
   label: "Pull request",
@@ -22,11 +22,11 @@ const ACME_PR: RefKind = {
 
 afterEach(() => {
   cleanup();
-  setRefKinds([]);
+  setResources([]);
 });
 
 test("a work item link and an extension's ref open their pages", async () => {
-  setRefKinds([ACME_PR]);
+  setResources([ACME_PR]);
   const opened: string[] = [];
   const nav = { navigate: () => {}, openRef: (ref: string) => opened.push(ref) } as unknown as PageNavigation;
   const view = render(

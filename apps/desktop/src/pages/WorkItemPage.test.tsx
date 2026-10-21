@@ -69,10 +69,10 @@ mock.module("../api.js", () => ({
 const { WorkItemPage } = await import("./WorkItemPage.js");
 const { PageNavigationContext } = await import("../tabs/PageNavigationContext.js");
 
-const { setRefKinds } = await import("../refKinds.js");
+const { setResources } = await import("../resources.js");
 // The kinds are read, as in the app: a collector has no page of its own.
 beforeEach(() =>
-  setRefKinds(
+  setResources(
     [["work_item", "{ref}"], ["collector", null]].map(([kind, page]) => ({
       kind: kind!, extension: null, label: null, idPattern: ".*", wikilinks: [], resolve: null, page, icon: null,
     })),
@@ -80,7 +80,7 @@ beforeEach(() =>
 );
 
 afterEach(() => {
-  setRefKinds([]);
+  setResources([]);
   parent = "oxplow:oxplow/work_item?id=W-0&provider=fake";
   ran.length = 0;
   outbound = [];

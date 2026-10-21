@@ -10,7 +10,7 @@ import type { CSSProperties, ReactElement } from "react";
 
 import { pageKindIconComponent, pageKindLabel } from "../pageKinds.js";
 import type { Extension } from "../tauri-bridge/generated/bindings.js";
-import { REF_KIND_ICONS } from "../refKinds.js";
+import { REF_KIND_ICONS } from "../resources.js";
 
 /** A semantic tone, drawn with a theme variable (`.context/theming.md`). */
 export type LensTone = "accent" | "success" | "warning" | "danger" | "muted";

@@ -33,7 +33,7 @@ import {
   StickyNote,
 } from "lucide-react";
 import type { ComponentProps, ReactElement } from "react";
-import { REF_KIND_ICONS, refKindIcon, refKindInfo } from "./refKinds.js";
+import { REF_KIND_ICONS, resourceIcon, resourceInfo } from "./resources.js";
 import { useExtensions } from "./extensionsStore.js";
 import { pageKindOf, recordedPageKind, refFromTabId } from "./tabs/pageRefs.js";
 import type { Extension, ExtensionPage } from "./tauri-bridge/generated/bindings.js";
@@ -101,7 +101,7 @@ export function pageKindIconComponent(kind: string, extensions: Extension[] | nu
     // An extension's ref kind (`ref_kinds:`, P8.D7) draws its declared icon.
     // A declared page draws the icon its `pages:` entry names.
     default:
-      return refKindIcon(kind) ?? declaredPageIcon(extensions, kind);
+      return resourceIcon(kind) ?? declaredPageIcon(extensions, kind);
   }
 }
 
@@ -175,7 +175,7 @@ export function pageKindLabel(kind: string, extensions: Extension[] | null = nul
     case "thread_note":
       return "note";
     default:
-      return refKindInfo(kind)?.label ?? declaredPageOf(extensions, kind)?.title.toLowerCase() ?? kind;
+      return resourceInfo(kind)?.label ?? declaredPageOf(extensions, kind)?.title.toLowerCase() ?? kind;
   }
 }
 

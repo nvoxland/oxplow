@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { canonicalIdForTarget, dedupeEntriesByTarget, edgeToInboundEntry, edgeToOutboundEntry, humanRefTypeForTest } from "./useBacklinks.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
 import type { BacklinkEdge } from "../api.js";
-import { setRefKinds, type RefKind } from "../refKinds.js";
+import { setResources, type Resource } from "../resources.js";
 import {
   directoryRef,
   effortDiffRef,
@@ -173,11 +173,11 @@ describe("dedupeEntriesByTarget", () => {
 
 describe("edges to any ref", () => {
   // The kinds are read: core's, as the registry lists them.
-  const coreKind = (kind: string, page: string | null): RefKind => ({
+  const coreKind = (kind: string, page: string | null): Resource => ({
     kind, extension: null, label: null, idPattern: ".*", wikilinks: [], resolve: null, page, icon: null,
   });
-  beforeEach(() => setRefKinds([coreKind("effort", "{ref}"), coreKind("work_item", "{ref}"), coreKind("collector", null)]));
-  afterEach(() => setRefKinds([]));
+  beforeEach(() => setResources([coreKind("effort", "{ref}"), coreKind("work_item", "{ref}"), coreKind("collector", null)]));
+  afterEach(() => setResources([]));
   const edge = (over: Partial<BacklinkEdge>): BacklinkEdge => ({
     source_kind: "work_item",
     source_id: "oxplow:tsk1",
@@ -208,7 +208,7 @@ describe("edges to any ref", () => {
   });
 
   test("a link to an extension's kind opens the page its ref_kinds names", () => {
-    setRefKinds([
+    setResources([
       { kind: "acme_pr", extension: "acme", label: "PR", idPattern: ".*", wikilinks: [], resolve: "", page: "oxplow:oxplow/page?page=acme/pr&ref=%7Bref%7D", icon: "" },
     ]);
     try {
@@ -216,7 +216,7 @@ describe("edges to any ref", () => {
       expect(entry.open).toBe("acme_pr:12");
       expect(entry.dead).toBe(false);
     } finally {
-      setRefKinds([coreKind("effort", "{ref}"), coreKind("work_item", "{ref}"), coreKind("collector", null)]);
+      setResources([coreKind("effort", "{ref}"), coreKind("work_item", "{ref}"), coreKind("collector", null)]);
     }
   });
 

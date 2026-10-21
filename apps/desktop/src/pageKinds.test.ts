@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { REF_KIND_ICONS } from "./refKinds.js";
+import { REF_KIND_ICONS } from "./resources.js";
 import type { Extension } from "./tauri-bridge/generated/bindings.js";
 import { declaredPageIcon, kindForTabId, pageKindIconComponent, pageKindLabel } from "./pageKinds.js";
 

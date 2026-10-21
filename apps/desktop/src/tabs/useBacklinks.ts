@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { listBacklinks, listPageOutbound, type BacklinkEdge } from "../api.js";
 import { lensRef } from "./pageRefs.js";
-import { refKindInfo, refKindsLoaded } from "../refKinds.js";
+import { refTargetNow } from "./refOpener.js";
 import { workItemId, workItemUriOfId } from "../workItemRef.js";
 import { contributionOf, idOf, keyOf, keyedUri, typeOf, pageUri, wikiUri } from "../uri/uri.js";
 import type { TabRef } from "./tabState.js";
@@ -232,8 +232,8 @@ function canonicalEntryKey(entry: BacklinkEntry): string {
 }
 
 /**
- * The ref a `(kind, id)` row opens: itself, where its kind's page says
- * (the registry, `openRef`) when the kind has one. A contribution
+ * The ref a `(kind, id)` row opens: itself, or where its resource's page
+ * says (the registry, `refTargetNow`) when it has one. A contribution
  * (`collector:<ext>/<id>`, `job:…`) something resolves, with no page of
  * its own, opens Settings, where extensions are managed. Anything else
  * yields null: a dead link when nothing resolves it.
@@ -242,9 +242,8 @@ function openFor(kind: string, id: string, resolved: boolean): string | null {
   // Findings are listed by the oxplow-bundled Findings lens.
   if (kind === "finding") return lensRef("oxplow-bundled/findings").id;
   const canonical = edgeUri(kind, id);
-  const info = refKindInfo(kind);
-  // Before the kinds are read, a ref is taken to open as itself.
-  if (info ? info.page !== null : !refKindsLoaded()) return canonical;
+  // Where it opens by the registry, or as itself when the window shows it.
+  if (!("unopenable" in refTargetNow(canonical))) return canonical;
   return resolved && contributionOf(canonical) !== null ? pageUri("settings") : null;
 }
 

@@ -1,4 +1,4 @@
-import { useRefKindsLoader } from "./refKinds.js";
+import { useResourcesLoader } from "./resources.js";
 import { useOpenHandoffs } from "./handoffs.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -1061,7 +1061,7 @@ export function App() {
   // events, followup/thread/stream changes, config, agent status) lives
   // in this hook so App doesn't carry ~10 inline subscription effects.
   // Extensions' ref kinds (P8.D7): icons, labels, routes and wikilinks.
-  useRefKindsLoader();
+  useResourcesLoader();
   useBackendSubscriptions({
     threadWorkStatesRef,
     threadStatesRef,
