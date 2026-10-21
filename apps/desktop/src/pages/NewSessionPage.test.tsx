@@ -212,3 +212,31 @@ test("the agent picked is page memory: a new tab of the page starts at it", () =
   const second = render(page());
   expect((second.getByTestId("new-session-agent") as HTMLSelectElement).value).toBe("codex");
 });
+
+// The filter on the earlier sessions is the page's view (`q`): in the tab's
+// address, so Back and a restart keep it; whether to remember the choice is
+// an unsaved form, the step's history state.
+test("the filter is the tab's `q`, and Remember This is the step's draft", async () => {
+  const patches: Array<Record<string, unknown>> = [];
+  const states: Array<Record<string, unknown>> = [];
+  const nav = {
+    ref: pageTabRef("new-session"),
+    viewParams: { q: "billing" },
+    patchViewParams: (p: Record<string, unknown>) => patches.push(p),
+    historyState: { remember: true },
+    setHistoryState: (p: Record<string, unknown>) => states.push(p),
+  } as unknown as PageNavigation;
+  const view = render(
+    <PageNavigationContext.Provider value={nav}>
+      <NewSessionPage thread={thread} harnesses={harnesses} onStart={async () => {}} loadEarlier={async () => earlier} />
+    </PageNavigationContext.Provider>,
+  );
+  const filter = (await view.findByTestId("new-session-earlier-filter")) as HTMLInputElement;
+  expect(filter.value).toBe("billing");
+  expect(view.queryByTestId("earlier-row-agent_session:ses3")).toBeNull();
+  expect((view.getByTestId("new-session-remember") as HTMLInputElement).checked).toBe(true);
+  fireEvent.change(filter, { target: { value: "parser" } });
+  expect(patches).toEqual([{ q: "parser" }]);
+  fireEvent.click(view.getByTestId("new-session-remember"));
+  expect(states).toEqual([{ remember: false }]);
+});

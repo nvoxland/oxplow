@@ -14,6 +14,7 @@ import { Loading } from "../kit/Loading.js";
 import { Toolbar } from "../kit/Toolbar.js";
 import { useListNav } from "../kit/useListNav.js";
 import type { TabRef } from "../tabs/tabState.js";
+import { useDraft, useViewParam } from "../tabs/useViewParam.js";
 
 interface NewSessionPageProps {
   thread: Thread | null;
@@ -52,7 +53,7 @@ export function NewSessionPage({
 }: NewSessionPageProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [remember, setRemember] = useState(false);
+  const [remember, setRemember] = useDraft("remember", false);
   const choices = agentChoices(harnesses);
   // The agent last chosen is this page's memory, kept for the person.
   const [choice, setChoice] = usePageMemory<string>("agent", choices[0]?.value ?? "");
@@ -68,7 +69,7 @@ export function NewSessionPage({
   // in the client, driving the list from its input.
   const [earlier, setEarlier] = useState<EarlierSessions | null>(null);
   const [earlierError, setEarlierError] = useState<string | null>(null);
-  const [filter, setFilter] = useState("");
+  const [filter, setFilter] = useViewParam("q", "");
   const threadId = thread?.id ?? null;
   useEffect(() => {
     if (!threadId) return;

@@ -29,6 +29,7 @@ test("the search pages' filters are view, so a change re-renders them", () => {
   expect(pageIdentity(pageTabRef("comments", { days: 7 }))).toBe("page:comments");
   expect(pageIdentity(pageTabRef("settings", { q: "model" }))).toBe("page:settings");
   expect(pageIdentity(pageTabRef("explore-data", { model: "v_effort", sql: "SELECT 1", viz: "bar", raw: true }))).toBe("page:explore-data");
+  expect(pageIdentity(pageTabRef("new-session", { q: "billing" }))).toBe("page:new-session");
 });
 
 test("a mode or a pick is view: the Files filter and the open Alerts row", () => {

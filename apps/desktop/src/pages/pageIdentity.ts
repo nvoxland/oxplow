@@ -17,7 +17,7 @@
 import { isTasksViewParam } from "../components/Plan/tasksView.js";
 import { isDashboardViewParam, isMetricsViewParam, isMetricViewParam } from "./metricsView.js";
 import { isAlertsViewParam, isBoardViewParam, isFilesViewParam } from "./modeViews.js";
-import { isCommentsViewParam, isExploreViewParam, isGitHistoryViewParam, isSettingsViewParam } from "./searchViews.js";
+import { isCommentsViewParam, isExploreViewParam, isGitHistoryViewParam, isNewSessionViewParam, isSettingsViewParam } from "./searchViews.js";
 import { identityOf } from "../tabs/session.js";
 import { extPageRef, pagePayload, pageTabRef, viewParamsOf, withViewParams } from "../tabs/pageRefs.js";
 import type { SqlCell } from "../tauri-bridge/generated/bindings.js";
@@ -38,6 +38,7 @@ const BUILT_IN_VIEW: Record<string, (key: string) => boolean> = {
   alerts: isAlertsViewParam,
   board: isBoardViewParam,
   "explore-data": isExploreViewParam,
+  "new-session": isNewSessionViewParam,
   // The line it lands on: the same diff, somewhere else in it.
   diff: (key) => key === "line",
   // A pair of endpoints: the same diff view, rescoped.

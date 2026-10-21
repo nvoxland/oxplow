@@ -892,6 +892,12 @@ outside a tab each is the component's own state:
 | `useCollapsedSet(key, initial?)` | open/closed groups (`ids`, `has`, `toggle`, `set`) | history state |
 | `useDraft(key, initial)` | an unsaved form | history state; `clear` on submit |
 
+A filter inside a part that many pages host (the changed-files tree's
+search, `HierarchyView`) is history state, not a view param: it is a small
+narrowing inside the page, and the commit and work-item pages are entity
+kinds with no view. New Session's `q` is a view param because it is a
+built-in page whose list is the page.
+
 They write through `nav.patchViewParams(patch, { push })`, which merges
 into the tab's *current* entry inside the session update (`undefined`
 drops a key), so two changes in one tick both land. Every write goes
@@ -957,7 +963,7 @@ body `PageNavigation.historyState` and, to the tab's current page only,
 a write that changes nothing). Outside a tab it is local state. Used by the editor
 and the diff pane (Monaco's view state, `useMonacoViewState`), a wiki page (scroll, and its unsaved edit: `editing`, `draft`), the collapsed sections
 (`CollapsibleSections`) and a lens's "More" params and the rows it picked (`picked`); and the unsaved forms (`useDraft`): New item,
-New stream, the stream and thread prompt, the Agents settings form, the
+New stream, the stream and thread prompt, the Agents settings form, the changed-files search, the
 uncommitted commit message and a task's title. Keep values JSON: one
 value that isn't drops the entry's whole state from storage.
 

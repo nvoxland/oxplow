@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
+import { useHistoryState } from "../../tabs/useHistoryState.js";
 import { useCollapsedSet } from "../../tabs/useViewParam.js";
 import type { ReactNode } from "react";
 
@@ -86,7 +87,9 @@ export function HierarchyView({
   testIdPrefix = "hierarchy",
   emptyLabel = "Nothing to show.",
 }: HierarchyViewProps) {
-  const [search, setSearch] = useState("");
+  // The search is a small narrowing inside a part many pages host, so it is
+  // this step's history state, not the page's address.
+  const [search, setSearch] = useHistoryState(`${testIdPrefix}.search`, "");
   // Collapse-state is stored as user *overrides* on top of the
   // computed default. The default collapses every branch deeper than
   // the first nested layer (top-level nodes are expanded so their
