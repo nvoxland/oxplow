@@ -459,7 +459,7 @@ mod tests {
                 set(
                     "INSERT INTO effort (work_item, thread_id, started_at) VALUES (?1, ?2, ?3)",
                     vec![
-                        "work_item:oxplow:tsk999".into(),
+                        "oxplow:oxplow/work_item?id=tsk999&provider=oxplow".into(),
                         thread.to_string(),
                         at(11).to_string(),
                     ],

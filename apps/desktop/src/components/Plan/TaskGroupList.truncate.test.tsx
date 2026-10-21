@@ -1,3 +1,4 @@
+import { workItemUri } from "../../uri/uri.js";
 import { afterEach, expect, test } from "bun:test";
 import { cleanup, render } from "@testing-library/react";
 
@@ -19,7 +20,7 @@ const LONG = "In progress task with an extremely long title ".repeat(12);
 
 function inProgressTask(): WorkItem {
   return {
-    ref: "work_item:oxplow:tsk9",
+    ref: "oxplow:oxplow/work_item?id=tsk9&provider=oxplow",
     title: LONG,
     state: "in_progress",
     native: { priority: "medium" },
@@ -51,7 +52,7 @@ function renderRow() {
 
 test("in-progress row shrinks and truncates its title (never overflows the column)", () => {
   const view = renderRow();
-  const row = view.getByTestId("tasks-row-work_item:oxplow:tsk9");
+  const row = view.getByTestId(`tasks-row-${workItemUri("oxplow", "tsk9")}`);
   // The row must be allowed to shrink below its content width.
   expect(["0", "0px"]).toContain(row.style.minWidth);
 

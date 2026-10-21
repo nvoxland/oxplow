@@ -86,13 +86,13 @@ async fn rows(fx: &TaskEffortFixture, sql: &str) -> Vec<Vec<Value>> {
 async fn fresh(fx: &TaskEffortFixture) -> Vec<Vec<Value>> {
     rows(
         fx,
-        "SELECT fresh, state FROM v_contribution_health WHERE ref = 'collector:acme/sync'",
+        "SELECT fresh, state FROM v_contribution_health WHERE ref = 'oxplow:oxplow/collector?collector=acme/sync'",
     )
     .await
 }
 
 const RUNS: &str = "SELECT outcome, error, version, generation, actor, latest, mode, run_id
-                      FROM v_extension_run WHERE contribution = 'collector:acme/sync'
+                      FROM v_extension_run WHERE contribution = 'oxplow:oxplow/collector?collector=acme/sync'
                      ORDER BY started_at, run_id";
 
 /// A run that failed and one that came after it: each is its own row, with
@@ -206,7 +206,7 @@ async fn a_cancelled_run_is_recorded_as_cancelled_and_publishes_nothing() {
     assert_eq!(seen, vec![vec![json!(0)]]);
     let health = rows(
         &fx,
-        "SELECT consecutive_failures FROM v_contribution_health WHERE ref = 'collector:acme/sync'",
+        "SELECT consecutive_failures FROM v_contribution_health WHERE ref = 'oxplow:oxplow/collector?collector=acme/sync'",
     )
     .await;
     assert!(
@@ -234,7 +234,7 @@ async fn a_refused_caller_is_a_denied_run_not_a_failure() {
     let runs = rows(
         &fx,
         "SELECT outcome, version, kind, error FROM v_extension_run
-          WHERE contribution = 'command:acme.human.only'",
+          WHERE contribution = 'oxplow:oxplow/command?command=acme.human.only'",
     )
     .await;
     assert_eq!(runs.len(), 1, "{runs:?}");
@@ -298,7 +298,7 @@ async fn disabling_an_extension_stops_a_collector_script_that_is_computing() {
     );
     let runs = rows(
         &fx,
-        "SELECT outcome FROM v_extension_run WHERE contribution = 'collector:acme/spin'",
+        "SELECT outcome FROM v_extension_run WHERE contribution = 'oxplow:oxplow/collector?collector=acme/spin'",
     )
     .await;
     assert_eq!(runs, vec![vec![json!("cancelled")]]);

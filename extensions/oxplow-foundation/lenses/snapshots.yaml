@@ -1,7 +1,7 @@
 title: Snapshots
 description: The newest snapshots of a stream's working tree (every stream's when none is named), each with its parent, what triggered it and whether it ran over its time budget.
 params:
-  - { name: stream, label: Stream (`stream:str1`), default: "" }
+  - { name: stream, label: Stream (`oxplow:oxplow/stream?id=str1`), default: "" }
   - { name: limit, label: Snapshots, default: 20 }
 query: |
   SELECT o.snapshot_id, o.at, o.parent_snapshot_id, o.trigger, o.over_budget, o.elapsed_ms, o.file_count

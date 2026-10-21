@@ -1,7 +1,7 @@
 //! What a person's oxplow remembers for them outside any one tab
 //! (`ui_preference`): a page's **page memory** (scoped by the page's own
-//! ref, whatever its params — `page:tasks`, `page:acme/pulls`,
-//! `lens:acme/board` — or `kind:<kind>` for every page of an entity kind),
+//! ref, whatever its params — `oxplow:oxplow/page?page=tasks`, `oxplow:oxplow/page?page=acme/pulls`,
+//! `oxplow:oxplow/lens?lens=acme/board` — or `kind:<kind>` for every page of an entity kind),
 //! a panel's (its `panel:` ref), a custom component's own
 //! (`component:<ext>/<id>`), and the app's **app preferences** (`app`).
 //! A tab's own view and history state live in its tab session, not here.
@@ -22,8 +22,9 @@ pub const MAX_COMPONENT_BYTES: usize = 1024 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct UiPreference {
-    /// `app`; a page's ref (`page:…`, `lens:…`) or `kind:<kind>`; a
-    /// panel's ref (`panel:…`); or `component:<ext>/<id>`.
+    /// `app`; a page's URI (`oxplow:oxplow/page?…`, `oxplow:oxplow/lens?…`)
+    /// or `resource:<extension>/<resource>`; a panel's URI
+    /// (`oxplow:oxplow/panel?…`); or `component:<ext>/<id>`.
     pub scope: String,
     pub key: String,
     /// Its value, as JSON text.
@@ -31,25 +32,22 @@ pub struct UiPreference {
 }
 
 /// Why `scope` isn't one a preference may have. A page's or panel's scope
-/// is its ref, read by the grammar; `kind:` and `component:` scopes aren't
-/// refs.
+/// is its URI; `resource:` and `component:` scopes aren't URIs.
 fn scope_problem(scope: &str) -> Option<String> {
-    use oxplow_domain::contribution::ContributionKind;
-    use oxplow_domain::uri::grammar::Uri;
-    use oxplow_domain::uri::types;
-    let a_ref = Uri::parse(scope).is_ok_and(|r| {
-        [types::PAGE, types::LENS, ContributionKind::Panel.segment()].contains(&r.kind.as_str())
-    });
+    use oxplow_domain::uri::resources::{LENS, PAGE, PANEL};
+    use oxplow_domain::uri::OxplowUri;
+    let a_uri = OxplowUri::parse(scope)
+        .is_ok_and(|u| [PAGE, LENS, PANEL].contains(&u.resource().to_string().as_str()));
     let named = |prefix: &str| {
         scope
             .strip_prefix(prefix)
             .is_some_and(|rest| !rest.is_empty())
     };
-    if scope == "app" || a_ref || named("kind:") || named("component:") {
+    if scope == "app" || a_uri || named("resource:") || named("component:") {
         None
     } else {
         Some(format!(
-            "`{scope}` isn't a preference scope: `app`, a page's ref (`page:…`, `lens:…`) or `kind:<kind>`, a panel's ref (`panel:…`), or `component:<extension>/<id>`"
+            "`{scope}` isn't a preference scope: `app`, a page's URI (`oxplow:oxplow/page?…`, `oxplow:oxplow/lens?…`) or `resource:<extension>/<resource>`, a panel's URI (`oxplow:oxplow/panel?…`), or `component:<extension>/<id>`"
         ))
     }
 }
@@ -176,7 +174,7 @@ mod tests {
             .unwrap();
         store
             .set(
-                "page:git-dashboard".into(),
+                "oxplow:oxplow/page?page=git-dashboard".into(),
                 "mergeMode".into(),
                 Some("\"rebase\"".into()),
             )
@@ -190,7 +188,11 @@ mod tests {
             store.all().await.unwrap(),
             vec![
                 pref("app", "railWidth", "400"),
-                pref("page:git-dashboard", "mergeMode", "\"rebase\"")
+                pref(
+                    "oxplow:oxplow/page?page=git-dashboard",
+                    "mergeMode",
+                    "\"rebase\""
+                )
             ]
         );
         store
@@ -199,7 +201,11 @@ mod tests {
             .unwrap();
         assert_eq!(
             store.all().await.unwrap(),
-            vec![pref("page:git-dashboard", "mergeMode", "\"rebase\"")]
+            vec![pref(
+                "oxplow:oxplow/page?page=git-dashboard",
+                "mergeMode",
+                "\"rebase\""
+            )]
         );
     }
 
@@ -216,7 +222,11 @@ mod tests {
                 .set("page:".into(), "k".into(), Some("1".into()))
                 .await
         ));
-        for scope in ["lens:acme/board", "kind:file", "panel:core:work"] {
+        for scope in [
+            "oxplow:oxplow/lens?lens=acme/board",
+            "resource:oxplow/file",
+            "oxplow:oxplow/panel?panel=core:work",
+        ] {
             store
                 .set(scope.into(), "k".into(), Some("1".into()))
                 .await

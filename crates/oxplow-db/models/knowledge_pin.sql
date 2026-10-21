@@ -1,5 +1,5 @@
-SELECT pr.source_id AS slug,
-       pr.target_id AS path,
+SELECT CAST(uri_param(pr.source_uri, 'slug') AS TEXT) AS slug,
+       CAST(uri_param(pr.target_uri, 'path') AS TEXT) AS path,
        pr.local_snapshot_id AS pinned_snapshot_id,
        pr.closest_vcs_rev AS pinned_vcs_rev,
        CAST(pr.vcs_rev_exact AS INTEGER) AS pinned_vcs_rev_exact,
@@ -12,5 +12,5 @@ LEFT JOIN (SELECT fs.path, MAX(fs.snapshot_id) AS snapshot_id
              FROM source('file_snapshot') fs
              JOIN source('streams') st ON st.id = fs.stream_id AND st.kind = 'primary'
             GROUP BY fs.path) latest
-       ON latest.path = pr.target_id
-WHERE pr.source_kind = 'wiki' AND pr.target_kind = 'file'
+       ON latest.path = uri_param(pr.target_uri, 'path')
+WHERE pr.source_resource = 'oxplow/wiki' AND pr.target_resource = 'oxplow/file'

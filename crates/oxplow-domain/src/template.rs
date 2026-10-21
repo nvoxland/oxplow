@@ -120,8 +120,10 @@ mod tests {
         assert_eq!(nested.len(), 1);
         assert_eq!(nested[0].scope, "{{row");
         assert_eq!(
-            splice::<()>("page:x?id={{result.id}}", |p| Ok(format!("<{}>", p.key()))),
-            Ok("page:x?id=<result.id>".to_string())
+            splice::<()>("oxplow:oxplow/page?id={{result.id}}&page=x", |p| Ok(
+                format!("<{}>", p.key())
+            )),
+            Ok("oxplow:oxplow/page?id=<result.id>&page=x".to_string())
         );
         assert_eq!(
             strings(&serde_json::json!({ "a": ["x", { "b": "y" }], "n": 1 })),

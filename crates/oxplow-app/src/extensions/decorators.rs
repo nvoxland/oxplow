@@ -7,7 +7,7 @@
 //! ```yaml
 //! ui:
 //!   decorators:
-//!     - { model: flags, kind: work_item, placement: ref-chip, label: label, color: color }
+//!     - { model: flags, resource: oxplow/work_item, placement: ref-chip, label: label, color: color }
 //! ```
 //!
 //! The model is `v_<extension>_<model>`; it must declare a `ref` column
@@ -38,8 +38,8 @@ pub struct UiDecorator {
     pub extension: String,
     /// The model's view (`v_<extension>_<model>`), which has a `ref` column.
     pub view: String,
-    /// The ref kind it decorates (`work_item`).
-    pub kind: String,
+    /// The resource it decorates (`oxplow/work_item`).
+    pub resource: String,
     pub placement: DecoratorPlacement,
     /// The view's column holding the text shown.
     pub label: String,
@@ -52,7 +52,7 @@ pub struct UiDecorator {
 #[serde(deny_unknown_fields)]
 pub(crate) struct DecoratorFile {
     model: String,
-    kind: String,
+    resource: String,
     placement: DecoratorPlacement,
     label: String,
     #[serde(default)]
@@ -82,7 +82,6 @@ pub fn parse_decorators(
             vec![at(file, block, "`ui.decorators` must be a list")],
         );
     };
-    let kinds = oxplow_domain::uri::types::core_types();
     let mut out = Vec::new();
     let mut errors = Vec::new();
     let lines = item_lines(manifest, "ui.decorators");
@@ -102,11 +101,8 @@ pub fn parse_decorators(
             .into_iter()
             .chain(d.color.as_deref())
             .collect();
-        let problem = if kinds.get(&d.kind).is_none() {
-            Some(format!(
-                "`kind: {}` isn't a kind of ref (`work_item`, `commit`, …)",
-                d.kind
-            ))
+        let problem = if let Some(why) = crate::extension_resources::resource_problem(&d.resource) {
+            Some(format!("`resource: {}`: {why}", d.resource))
         } else if model.is_none() {
             Some(format!(
                 "`model: {}` isn't one of this extension's models (`models:`)",
@@ -131,7 +127,7 @@ pub fn parse_decorators(
             id: format!("{extension}/{i}"),
             extension: extension.to_string(),
             view: oxplow_db::models::extension_view(extension, &d.model),
-            kind: d.kind,
+            resource: d.resource,
             placement: d.placement,
             label: d.label,
             color: d.color,
@@ -164,7 +160,7 @@ mod tests {
         write(
             d.path(),
             ".oxplow/extensions/flags/models/flags.sql",
-            "SELECT 'work_item:oxplow:tsk1' AS ref, 'urgent' AS label, '#f00' AS color\n",
+            "SELECT 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' AS ref, 'urgent' AS label, '#f00' AS color\n",
         );
         load_extensions(d.path())
             .into_iter()
@@ -174,7 +170,7 @@ mod tests {
 
     #[test]
     fn a_decorator_names_one_of_its_models_columns() {
-        let ext = load("    - { model: flags, kind: work_item, placement: ref-chip, label: label, color: color }\n",
+        let ext = load("    - { model: flags, resource: oxplow/work_item, placement: ref-chip, label: label, color: color }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         let d = &ext.ui.decorators[0];
@@ -183,23 +179,23 @@ mod tests {
         assert_eq!(d.color.as_deref(), Some("color"));
         for (entry, says) in [
             (
-                "{ model: nope, kind: work_item, placement: ref-chip, label: label }",
+                "{ model: nope, resource: oxplow/work_item, placement: ref-chip, label: label }",
                 "isn't one of this extension's models",
             ),
             (
-                "{ model: flags, kind: nope, placement: ref-chip, label: label }",
-                "isn't a kind of ref",
+                "{ model: flags, resource: oxplow/nope, placement: ref-chip, label: label }",
+                "oxplow declares no such resource",
             ),
             (
-                "{ model: flags, kind: work_item, placement: ref-chip, label: title }",
+                "{ model: flags, resource: oxplow/work_item, placement: ref-chip, label: title }",
                 "has no `title` column",
             ),
             (
-                "{ model: flags, kind: work_item, placement: ref-chip, label: \"x; DROP\" }",
+                "{ model: flags, resource: oxplow/work_item, placement: ref-chip, label: \"x; DROP\" }",
                 "isn't a column name",
             ),
             (
-                "{ model: flags, kind: work_item, placement: sidebar, label: label }",
+                "{ model: flags, resource: oxplow/work_item, placement: sidebar, label: label }",
                 "unknown variant",
             ),
         ] {
@@ -218,7 +214,7 @@ mod tests {
     #[test]
     fn a_shared_extension_may_declare_decorators() {
         let ext =
-            load("    - { model: flags, kind: work_item, placement: ref-chip, label: label }\n");
+            load("    - { model: flags, resource: oxplow/work_item, placement: ref-chip, label: label }\n");
         assert_eq!(ext.errors, Vec::<String>::new());
         assert_eq!(ext.ui.decorators.len(), 1);
     }

@@ -1,28 +1,28 @@
 import { describe, expect, test } from "bun:test";
 
-import { REF_KIND_ICONS } from "./refKinds.js";
+import { RESOURCE_ICONS } from "./resources.js";
 import type { Extension } from "./tauri-bridge/generated/bindings.js";
 import { declaredPageIcon, kindForTabId, pageKindIconComponent, pageKindLabel } from "./pageKinds.js";
 
 describe("kindForTabId", () => {
   test("scheme-prefixed ids return the prefix", () => {
-    expect(kindForTabId("file:src/foo.ts")).toBe("file");
-    expect(kindForTabId("wiki:url-schemes")).toBe("wiki");
-    expect(kindForTabId("work_item:oxplow:tsk42")).toBe("work_item");
-    expect(kindForTabId("lens:acme/x?stream_id=2")).toBe("lens");
-    expect(kindForTabId("metric:oxplow.todos")).toBe("metric");
-    expect(kindForTabId("dir:src/components")).toBe("dir");
-    expect(kindForTabId("commit:abcdef0")).toBe("commit");
-    expect(kindForTabId("finding:fnd-1")).toBe("finding");
-    expect(kindForTabId("agent_session:ses3")).toBe("agent_session");
+    expect(kindForTabId("oxplow:oxplow/file?path=src/foo.ts")).toBe("file");
+    expect(kindForTabId("oxplow:oxplow/wiki?slug=url-schemes")).toBe("wiki");
+    expect(kindForTabId("oxplow:oxplow/work_item?id=tsk42&provider=oxplow")).toBe("work_item");
+    expect(kindForTabId("oxplow:oxplow/lens?lens=acme/x&stream_id=2")).toBe("lens");
+    expect(kindForTabId("oxplow:oxplow/metric?metric=oxplow.todos")).toBe("metric");
+    expect(kindForTabId("oxplow:oxplow/dir?path=src/components")).toBe("dir");
+    expect(kindForTabId("oxplow:oxplow/commit?sha=abcdef0")).toBe("commit");
+    expect(kindForTabId("oxplow:oxplow/finding?id=fnd-1")).toBe("finding");
+    expect(kindForTabId("oxplow:oxplow/agent_session?id=ses3")).toBe("agent_session");
   });
 
   test("a declared page's id is its kind, with or without params", () => {
-    expect(kindForTabId("page:new-session")).toBe("new-session");
-    expect(kindForTabId("page:tasks")).toBe("tasks");
-    expect(kindForTabId("page:gh/open-prs")).toBe("gh/open-prs");
-    expect(kindForTabId("page:external-url?url=https://example.com")).toBe("external-url");
-    expect(kindForTabId("page:diff?path=a/b.ts&left=disk&right=ref:x")).toBe("diff");
+    expect(kindForTabId("oxplow:oxplow/page?page=new-session")).toBe("new-session");
+    expect(kindForTabId("oxplow:oxplow/page?page=tasks")).toBe("tasks");
+    expect(kindForTabId("oxplow:oxplow/page?page=gh/open-prs")).toBe("gh/open-prs");
+    expect(kindForTabId("oxplow:oxplow/page?page=external-url&url=https://example.com")).toBe("external-url");
+    expect(kindForTabId("oxplow:oxplow/page?left=disk&page=diff&path=a/b.ts&right=ref:x")).toBe("diff");
   });
 
   test("text that is not a ref returns itself rather than null", () => {
@@ -96,18 +96,18 @@ describe("a declared page", () => {
       name: "oxplow-foundation",
       enabled: true,
       pages: [
-        { id: "local-history", pageRef: "page:local-history", title: "Local History", icon: "history" },
-        { id: "plain", pageRef: "page:plain", title: "Plain", icon: null },
+        { id: "local-history", pageRef: "oxplow:oxplow/page?page=local-history", title: "Local History", icon: "history" },
+        { id: "plain", pageRef: "oxplow:oxplow/page?page=plain", title: "Plain", icon: null },
       ],
     },
-    { name: "gh", enabled: true, pages: [{ id: "open-prs", pageRef: "page:gh/open-prs", title: "Open PRs", icon: "git-merge" }] },
-    { name: "off", enabled: false, pages: [{ id: "x", pageRef: "page:off/x", title: "X", icon: "bell" }] },
+    { name: "gh", enabled: true, pages: [{ id: "open-prs", pageRef: "oxplow:oxplow/page?page=gh/open-prs", title: "Open PRs", icon: "git-merge" }] },
+    { name: "off", enabled: false, pages: [{ id: "x", pageRef: "oxplow:oxplow/page?page=off/x", title: "X", icon: "bell" }] },
   ] as unknown as Extension[];
 
   test("draws the icon its declaration names, by its page id", () => {
-    expect(declaredPageIcon(extensions, "local-history")).toBe(REF_KIND_ICONS.history!);
-    expect(declaredPageIcon(extensions, "gh/open-prs")).toBe(REF_KIND_ICONS["git-merge"]!);
-    expect(pageKindIconComponent("gh/open-prs", extensions)).toBe(REF_KIND_ICONS["git-merge"]!);
+    expect(declaredPageIcon(extensions, "local-history")).toBe(RESOURCE_ICONS.history!);
+    expect(declaredPageIcon(extensions, "gh/open-prs")).toBe(RESOURCE_ICONS["git-merge"]!);
+    expect(pageKindIconComponent("gh/open-prs", extensions)).toBe(RESOURCE_ICONS["git-merge"]!);
   });
 
   test("has no icon when it names none, isn't declared, or its extension is off", () => {

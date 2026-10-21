@@ -28,7 +28,7 @@ effects:
 - `review.ask` takes `{ job, intentKey, request: { schemaVersion: 1,
   role, messages } }` — no model: the role's is used. The `intentKey` is
   the job's **subject**, one job per key: put what it's about in it
-  (`review:effort:eff12`), and read it back as the snapshot's `intentKey`
+  (`review:eff12`), and read it back as the snapshot's `intentKey`
   (or `v_job_run.intent_key`) in the effect that publishes the answer.
 - To start one on an event, an effect composes your own `ask` command
   (give it `invokers.agent: true`: an effect acts as an agent). Keep the
@@ -51,7 +51,7 @@ effects:
   and comments the answer on the work item.
 - Your command namespace is your name with `-` as `_`: extension
   `effort-review` has commands `effort_review.review.ask`, while its
-  its contributions' refs keep the dash (`job:effort-review/review`).
+  its contributions' refs keep the dash (`oxplow:oxplow/job?job=effort-review/review`).
 
 ## AI profiles
 

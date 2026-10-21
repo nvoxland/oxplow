@@ -10,11 +10,11 @@ test("a lens re-runs when its model changes, and pins to a new dashboard", async
   });
   await page.goto("/");
   await searchLauncher(page, "Numbat tasks");
-  await page.getByTestId("launcher-page-lens:mine/numbat-tasks").click();
+  await page.getByTestId("launcher-page-oxplow:oxplow/lens?lens=mine/numbat-tasks").click();
   const lens = page.locator('[data-testid="page-lens"]:visible');
   await expect(lens).toContainText("No rows.");
   // A write elsewhere changes `v_work_item`: the open lens runs again by itself.
-  await run(daemon, "oxplow.work_item.create", { title: "Numbat one", thread: daemon.thread });
+  await run(daemon, "oxplow.work_item.create", { title: "Numbat one", thread: daemon.threadUri });
   await expect(lens).toContainText("Numbat one");
   await page.getByTestId("page-pin").filter({ visible: true }).click();
   await page.getByTestId("page-pin-new").click();

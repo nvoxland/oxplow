@@ -19,6 +19,7 @@ import type { TabRef } from "../tabs/tabState.js";
 import { ChangedFilesTree } from "../components/ChangedFiles/ChangedFilesTree.js";
 import { commitBase } from "../components/ChangedFiles/useChangedFiles.js";
 import { gitRevision } from "../revision.js";
+import { commitUri } from "../uri/uri.js";
 
 export interface GitCommitPageProps {
   stream: Stream | null;
@@ -217,8 +218,7 @@ function CommitMeta({ detail, collapsedMaxHeight, onRunOp }: CommitMetaProps) {
   return (
     <section
       ref={sectionRef}
-      data-ref-kind="commit"
-      data-ref-id={info.id}
+      data-ref={commitUri(info.id)}
       style={{
         ...card,
         position: "relative",

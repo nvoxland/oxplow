@@ -3,9 +3,8 @@
 //!
 //! - `uri(resource, key, value, …)` is the one way SQL spells an oxplow
 //!   URI, canonical and escaped (`.context/resources.md`); `uri_param(uri,
-//!   key)` reads one param back. A NULL value leaves its param out.
-//! - `lens_ref(id, key1, value1, …)` spells a link to a lens in the old
-//!   grammar, until the switch to URIs removes it.
+//!   key)` reads one param back, `uri_resource(uri)` its resource. A NULL
+//!   value leaves its param out.
 //! - `ref_to_uri(text[, extension])`, `ref_kind_of(text)` and
 //!   `ref_to_uri_in_json(json, field, …)` are the migration's: an old ref
 //!   as its URI (`uri_migration`), anything else as it was.
@@ -17,9 +16,9 @@ use rusqlite::{Connection, Error};
 /// Register the functions on a connection.
 pub(crate) fn register(c: &Connection) -> rusqlite::Result<()> {
     let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC;
-    c.create_scalar_function("lens_ref", -1, flags, lens_ref)?;
     c.create_scalar_function("uri", -1, flags, uri)?;
     c.create_scalar_function("uri_param", 2, flags, uri_param)?;
+    c.create_scalar_function("uri_resource", 1, flags, uri_resource)?;
     c.create_scalar_function("ref_to_uri", -1, flags, ref_to_uri)?;
     c.create_scalar_function("ref_kind_of", 1, flags, ref_kind_of)?;
     c.create_scalar_function("ref_to_uri_in_json", -1, flags, ref_to_uri_in_json)
@@ -75,6 +74,12 @@ fn uri_param(ctx: &Context<'_>) -> rusqlite::Result<Option<String>> {
         .and_then(|u| u.param(&key).map(str::to_string)))
 }
 
+/// `uri_resource(uri)`: the resource a URI names (`oxplow/work_item`);
+/// NULL when it isn't an oxplow URI.
+fn uri_resource(ctx: &Context<'_>) -> rusqlite::Result<Option<String>> {
+    Ok(text(ctx, 0)?.and_then(|t| oxplow_domain::uri::build::resource_of(&t)))
+}
+
 /// `ref_to_uri(text[, extension])`: an old ref as its URI
 /// (`uri_migration`), anything else as it was. `extension` declared the
 /// ref's kind, when an extension did.
@@ -93,11 +98,7 @@ fn ref_to_uri(ctx: &Context<'_>) -> rusqlite::Result<Option<String>> {
 
 /// `ref_kind_of(text)`: an old ref's kind, or NULL.
 fn ref_kind_of(ctx: &Context<'_>) -> rusqlite::Result<Option<String>> {
-    Ok(text(ctx, 0)?.and_then(|t| {
-        oxplow_domain::uri::grammar::Uri::parse(&t)
-            .ok()
-            .map(|r| r.kind)
-    }))
+    Ok(text(ctx, 0)?.and_then(|t| crate::uri_migration::v1_kind_of(&t)))
 }
 
 /// `ref_to_uri_in_json(json, field, …)`: `json` with each named top-level
@@ -159,32 +160,6 @@ fn text(ctx: &Context<'_>, i: usize) -> rusqlite::Result<Option<String>> {
     })
 }
 
-fn lens_ref(ctx: &Context<'_>) -> rusqlite::Result<Option<String>> {
-    let n = ctx.len();
-    if n == 0 || n.is_multiple_of(2) {
-        return Err(Error::UserFunctionError(
-            "lens_ref(id, key, value, …) takes a lens id then key/value pairs".into(),
-        ));
-    }
-    let Some(id) = text(ctx, 0)? else {
-        return Ok(None);
-    };
-    let mut params = Vec::new();
-    for i in (1..n).step_by(2) {
-        let key = text(ctx, i)?.ok_or_else(|| {
-            Error::UserFunctionError("lens_ref() param names can't be NULL".into())
-        })?;
-        params.push((key, text(ctx, i + 1)?));
-    }
-    let borrowed: Vec<(&str, Option<&str>)> = params
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_deref()))
-        .collect();
-    oxplow_domain::uri::build::lens_uri_with(&id, &borrowed)
-        .map(Some)
-        .map_err(|e| Error::UserFunctionError(e.to_string().into()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,29 +170,6 @@ mod tests {
         c.query_row(sql, [], |r| r.get(0))
     }
 
-    #[test]
-    fn lens_ref_builds_a_lens_ref_with_escaped_params() {
-        assert_eq!(
-            run("SELECT lens_ref('oxplow-bundled/job-run-output', 'job_run', 'job_run:ab&c')")
-                .unwrap()
-                .as_deref(),
-            Some("lens:oxplow-bundled/job-run-output?job_run=job_run:ab%26c")
-        );
-        assert_eq!(
-            run("SELECT lens_ref('a/b', 'thread_id', 7, 'x', NULL)")
-                .unwrap()
-                .as_deref(),
-            Some("lens:a/b?thread_id=7")
-        );
-        assert_eq!(
-            run("SELECT lens_ref('a/b')").unwrap().as_deref(),
-            Some("lens:a/b")
-        );
-        assert_eq!(run("SELECT lens_ref(NULL, 'k', 'v')").unwrap(), None);
-    }
-
-    // `uri(resource, key, value, …)` is how SQL spells a URI: canonical,
-    // escaped, a NULL value leaving its param out.
     #[test]
     fn uri_builds_a_canonical_uri() {
         assert_eq!(
@@ -258,6 +210,18 @@ mod tests {
         );
         assert_eq!(run("SELECT uri_param('effort:eff1', 'id')").unwrap(), None);
         assert_eq!(run("SELECT uri_param(NULL, 'id')").unwrap(), None);
+    }
+
+    #[test]
+    fn uri_resource_reads_the_resource() {
+        assert_eq!(
+            run("SELECT uri_resource('oxplow:oxplow/work_item?id=tsk1&provider=oxplow')")
+                .unwrap()
+                .as_deref(),
+            Some("oxplow/work_item")
+        );
+        assert_eq!(run("SELECT uri_resource('effort:eff1')").unwrap(), None);
+        assert_eq!(run("SELECT uri_resource(NULL)").unwrap(), None);
     }
 
     // The migration's: an old ref as a URI, anything else as it was.
@@ -315,13 +279,5 @@ mod tests {
             Some("not json")
         );
         assert_eq!(run("SELECT ref_to_uri_in_json(NULL, 'ref')").unwrap(), None);
-    }
-
-    #[test]
-    fn lens_ref_refuses_a_dangling_key_or_no_arguments() {
-        assert!(run("SELECT lens_ref('a/b', 'k')").is_err());
-        assert!(run("SELECT lens_ref()").is_err());
-        assert!(run("SELECT lens_ref('a/b', NULL, 'v')").is_err());
-        assert!(run("SELECT lens_ref('', 'k', 'v')").is_err());
     }
 }

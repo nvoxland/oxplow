@@ -19,7 +19,6 @@ import { resolveQuoteOffset } from "./anchor.js";
 import {
   collectContextChain,
   nearestContextElement,
-  type RefNode,
   refOfElement,
 } from "./contextNodes.js";
 import { refsInRange } from "./domAnchor.js";
@@ -29,18 +28,17 @@ import { buildSelectorsJson } from "./selectors.js";
 /// selection time so it survives the user clicking the toolbar (which
 /// would otherwise collapse the live selection).
 export interface PendingComment {
-  /// Primary anchor — the nearest context node `(kind,id)`.
-  targetKind: string;
-  targetId: string;
+  /// Primary anchor — the nearest context node's URI.
+  target: string;
   /// The durable selected text.
   quote: string;
   /// W3C selectors array (TextQuote + TextPosition) over the primary
   /// element's `textContent`.
   selectorsJson: string;
   /// Ancestor regions the selection sat inside (excluding the primary).
-  contextChain: RefNode[];
-  /// Canonical refs linked inside the selection.
-  referencedRefs: RefNode[];
+  contextChain: string[];
+  /// URIs linked inside the selection.
+  referenced: string[];
   /// Viewport rect of the selection — where to anchor the toolbar/composer.
   rect: DOMRect;
 }
@@ -94,12 +92,11 @@ export function captureSelection(): PendingComment | null {
   const selectorsJson = buildSelectorsJson(text, start, start + quote.length);
 
   return {
-    targetKind: primary.kind,
-    targetId: primary.id,
+    target: primary,
     quote,
     selectorsJson,
     contextChain,
-    referencedRefs: refsInRange(range),
+    referenced: refsInRange(range),
     rect: range.getBoundingClientRect(),
   };
 }
@@ -121,19 +118,18 @@ export function composeForElement(
   if (start < 0) return null;
   const selectorsJson = buildSelectorsJson(text, start, start + quote.length);
   const doc = el.ownerDocument;
-  let referencedRefs: RefNode[] = [];
+  let referenced: string[] = [];
   if (doc) {
     const range = doc.createRange();
     range.selectNodeContents(el);
-    referencedRefs = refsInRange(range);
+    referenced = refsInRange(range);
   }
   return {
-    targetKind: primary.kind,
-    targetId: primary.id,
+    target: primary,
     quote,
     selectorsJson,
     contextChain: collectContextChain(el.parentElement),
-    referencedRefs,
+    referenced,
     rect,
   };
 }

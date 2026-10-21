@@ -47,9 +47,10 @@ import { Slideover } from "../Slideover.js";
 import { TreeEntries } from "../LeftPanel/FileTree.js";
 import { GitSummary } from "../LeftPanel/GitSummary.js";
 import { copyText, dirname, joinChildPath, type ContextMenuTarget } from "../LeftPanel/shared.js";
+import { dirUri, fileUri } from "../../uri/uri.js";
 
 /// Escape a value for use inside a double-quoted attribute selector
-/// (`[data-ref-id="…"]`). Repo paths can carry `.` / `/` (fine quoted)
+/// (`[data-ref="…"]`). Repo paths can carry `.` / `/` (fine quoted)
 /// but a stray `"` or `\` would break the selector.
 function cssEscapeAttr(value: string): string {
   return value.replace(/["\\]/g, "\\$&");
@@ -515,7 +516,7 @@ export function ProjectPanel({
           // Rows are draggable, so a drag-select can't start here — anchor
           // the comment to the row's name via its data-ref node instead.
           const el = document.querySelector(
-            `[data-ref-kind="${contextMenu.kind === "directory" ? "dir" : "file"}"][data-ref-id="${cssEscapeAttr(contextMenu.path)}"]`,
+            `[data-ref="${cssEscapeAttr(contextMenu.kind === "directory" ? dirUri(contextMenu.path) : fileUri(contextMenu.path))}"]`,
           );
           setContextMenu(null);
           if (el) {

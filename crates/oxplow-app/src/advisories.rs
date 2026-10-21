@@ -499,11 +499,11 @@ mod tests {
                  INSERT INTO threads (id, stream_id, title, created_at, updated_at)
                    VALUES (1, 1, 't', '2026-01-01', '2026-01-01');
                  INSERT INTO effort (id, work_item, thread_id, started_at, ended_at) VALUES
-                   (1, 'work_item:issues:A-1', 1, '2026-01-01', '2026-01-01'),
-                   (2, 'work_item:issues:A-2', 1, '2026-01-01', '2026-01-01'),
-                   (3, 'work_item:issues:A-3', 1, '2026-01-01', '2026-01-01'),
-                   (4, 'work_item:issues:A-4', 1, '2026-01-01', '2026-01-01'),
-                   (5, 'work_item:issues:A-5', 1, '2026-01-01', '2026-01-01');",
+                   (1, 'oxplow:oxplow/work_item?id=A-1&provider=issues', 1, '2026-01-01', '2026-01-01'),
+                   (2, 'oxplow:oxplow/work_item?id=A-2&provider=issues', 1, '2026-01-01', '2026-01-01'),
+                   (3, 'oxplow:oxplow/work_item?id=A-3&provider=issues', 1, '2026-01-01', '2026-01-01'),
+                   (4, 'oxplow:oxplow/work_item?id=A-4&provider=issues', 1, '2026-01-01', '2026-01-01'),
+                   (5, 'oxplow:oxplow/work_item?id=A-5&provider=issues', 1, '2026-01-01', '2026-01-01');",
             )
             .map_err(oxplow_db::map_sql_err)
         })

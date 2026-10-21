@@ -122,7 +122,7 @@ const PROPS = { scope: "all", thread_id: null };
 const board = () => (
   <Replaceable target="work_item.board" props={PROPS} streamId="str1" fallback={<div data-testid="core-board">oxplow's board</div>} />
 );
-const STATE_PROPS = { ref: "work_item:fake:1" };
+const STATE_PROPS = { ref: "oxplow:oxplow/work_item?id=1&provider=fake" };
 const state = (provider: string) => (
   <Replaceable
     target="work_item.detail.state"

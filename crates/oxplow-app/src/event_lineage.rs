@@ -44,7 +44,7 @@ impl Lineage {
 }
 
 /// Walk `event`'s causes for a reaction whose own events carry `source`
-/// (`effect:<extension>/<id>`, `collector:<owner>/<id>`).
+/// (`effect:<extension>/<id>`, `oxplow:oxplow/collector?collector=<owner>/<id>`).
 pub async fn lineage(
     db: &Database,
     event: &StoredEvent,

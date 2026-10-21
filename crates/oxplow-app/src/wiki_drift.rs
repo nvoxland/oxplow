@@ -12,7 +12,6 @@
 
 use std::path::Path;
 
-use oxplow_db::page_ref_projections::{KIND_FILE, KIND_WIKI};
 use oxplow_db::{SqlitePageRefStore, SqliteSnapshotStore};
 use oxplow_domain::DomainError;
 use serde::Serialize;
@@ -66,11 +65,11 @@ pub async fn compute_wiki_ref_drift(
     path: &str,
 ) -> Result<WikiRefDrift, DomainError> {
     // Locate the wiki → file edge and its pin.
-    let edges = page_refs.list_outbound(KIND_WIKI, slug, None).await?;
-    let Some(edge) = edges
-        .into_iter()
-        .find(|e| e.target_kind == KIND_FILE && e.target_id == path)
-    else {
+    let edges = page_refs
+        .list_outbound(&oxplow_domain::uri::build::wiki_uri(slug), None)
+        .await?;
+    let file = oxplow_domain::uri::build::file_uri(path);
+    let Some(edge) = edges.into_iter().find(|e| e.target == file) else {
         return Ok(WikiRefDrift::bare(slug, path, None, "not_a_ref"));
     };
     let Some(pin) = edge.local_snapshot_id else {
@@ -273,8 +272,12 @@ mod tests {
         // Pin the wiki→file edge at that snapshot.
         page_refs
             .upsert_edge(
-                PageRefEdge::new("wiki", "intro", "file", "src/x.rs", "wiki_file_ref")
-                    .with_version(snap, None, false),
+                PageRefEdge::new(
+                    oxplow_domain::uri::build::wiki_uri("intro"),
+                    oxplow_domain::uri::build::file_uri("src/x.rs"),
+                    "wiki_file_ref",
+                )
+                .with_version(snap, None, false),
             )
             .await
             .unwrap();
@@ -373,8 +376,12 @@ mod tests {
         .unwrap();
         page_refs
             .upsert_edge(
-                PageRefEdge::new("wiki", "intro", "file", "src/x.rs", "wiki_file_ref")
-                    .with_version(snap, None, false),
+                PageRefEdge::new(
+                    oxplow_domain::uri::build::wiki_uri("intro"),
+                    oxplow_domain::uri::build::file_uri("src/x.rs"),
+                    "wiki_file_ref",
+                )
+                .with_version(snap, None, false),
             )
             .await
             .unwrap();
@@ -403,10 +410,8 @@ mod tests {
         // Edge with no version pin.
         page_refs
             .upsert_edge(PageRefEdge::new(
-                "wiki",
-                "intro",
-                "file",
-                "src/x.rs",
+                oxplow_domain::uri::build::wiki_uri("intro"),
+                oxplow_domain::uri::build::file_uri("src/x.rs"),
                 "wiki_file_ref",
             ))
             .await

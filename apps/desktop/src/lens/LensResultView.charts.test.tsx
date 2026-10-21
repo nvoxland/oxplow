@@ -98,7 +98,7 @@ test("treemap lenses draw a tile per positive item and link through the lens's c
     }
   }
   (tiles[0] as SVGElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
-  expect(opened).toEqual(["file:a.rs"]);
+  expect(opened).toEqual(["oxplow:oxplow/file?path=a.rs"]);
 });
 
 test("every lens has Copy and Add to Agent Context; declared actions are buttons, row actions aren't", () => {

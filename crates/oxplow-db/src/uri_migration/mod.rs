@@ -6,8 +6,32 @@
 
 use std::collections::BTreeMap;
 
-use oxplow_domain::uri::grammar::Uri as OldRef;
+mod v1;
+
 use oxplow_domain::uri::oxplow_uri::{OxplowUri, ResourceName};
+use v1::Uri as OldRef;
+
+/// The kind of the old ref `text`, or `None` when it isn't one.
+pub fn v1_kind_of(text: &str) -> Option<String> {
+    if text.starts_with("oxplow:") {
+        return None;
+    }
+    OldRef::parse(text).ok().map(|r| r.kind)
+}
+
+/// An old symbol id's path and symbol: `<path>/<symbol>` as the builder
+/// spelled it, or `<path>::<name>` as the metric scans did — told apart by
+/// what comes before the first `::`, a file name (`uses.rs`) for the
+/// scans' form.
+fn symbol_parts(id: &str) -> Option<(&str, &str)> {
+    if let Some((path, name)) = id.split_once("::") {
+        let file = path.rsplit('/').next().unwrap_or(path);
+        if file.contains('.') && !name.is_empty() {
+            return Some((path, name));
+        }
+    }
+    id.rsplit_once('/')
+}
 
 /// The URI `text` names, or `None` when `text` isn't an old ref this can
 /// read (left as it was by the caller). `extension` is the extension that
@@ -63,7 +87,7 @@ pub fn v1_to_uri(text: &str, extension: Option<&str>) -> Option<String> {
         "nudge" => one("kind"),
         "file" | "dir" => one("path"),
         "symbol" => {
-            let (path, symbol) = id.rsplit_once('/')?;
+            let (path, symbol) = symbol_parts(id)?;
             ours_owned("symbol", with(&[("path", path), ("symbol", symbol)]), &view)
         }
         "work_item" => {
@@ -88,7 +112,7 @@ pub fn v1_to_uri(text: &str, extension: Option<&str>) -> Option<String> {
         }
         kind if is_contribution(kind) => {
             // A lens's, page's or metric's own params rode in its id.
-            let (head, params) = oxplow_domain::uri::build::view_of(id);
+            let (head, params) = v1::view_of(id);
             let mut all: Vec<(String, String)> = vec![(kind.to_string(), head)];
             for (k, v) in params {
                 // A param that is itself an old ref is rewritten too.
@@ -113,12 +137,34 @@ pub fn v1_to_uri(text: &str, extension: Option<&str>) -> Option<String> {
     }
 }
 
-/// A kind of contribution (`lens`, `page`, `collector`, …): its id is
-/// the resource's key param, named for it.
+/// A kind of contribution (`lens`, `page`, `collector`, …) as the old
+/// grammar named it: its id is the resource's key param, named for it.
+/// (`ref_kind` is left out: no stored ref names one.)
 fn is_contribution(kind: &str) -> bool {
-    oxplow_domain::contribution::KINDS
-        .iter()
-        .any(|k| k.kind.segment() == kind)
+    const KINDS: &[&str] = &[
+        "model",
+        "measure",
+        "metric",
+        "dimension",
+        "collector",
+        "event_type",
+        "command",
+        "job",
+        "ai_profile",
+        "effect",
+        "advisory",
+        "skill",
+        "implementation",
+        "provider",
+        "lens",
+        "page",
+        "panel",
+        "slot",
+        "decorator",
+        "replacement",
+        "custom_component",
+    ];
+    KINDS.contains(&kind)
 }
 
 fn ours(name: &str, params: &[(&str, &str)], view: &[(&str, &str)]) -> Option<String> {
@@ -146,7 +192,9 @@ fn build(
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
-    Some(OxplowUri::new(resource, params, view).to_string())
+    OxplowUri::build(resource, params, view)
+        .ok()
+        .map(|u| u.to_string())
 }
 
 #[cfg(test)]
@@ -194,6 +242,15 @@ mod tests {
             (
                 "symbol:src/lib.rs/Widget::spin",
                 "oxplow:oxplow/symbol?path=src/lib.rs&symbol=Widget::spin",
+            ),
+            // The metric scans spelled a function `<path>::<name>`.
+            (
+                "symbol:crates/x/src/uses.rs::builtins_used",
+                "oxplow:oxplow/symbol?path=crates/x/src/uses.rs&symbol=builtins_used",
+            ),
+            (
+                "symbol:README.md/w.py/Widget::value~2",
+                "oxplow:oxplow/symbol?path=README.md/w.py&symbol=Widget::value~2",
             ),
             (
                 "subagent:ses3/agent-7f",
@@ -261,6 +318,13 @@ mod tests {
         ] {
             assert_eq!(to(old).as_deref(), Some(new), "{old}");
         }
+    }
+
+    /// A param no URI can carry (a key that isn't one) leaves the old ref
+    /// as it was rather than failing the migration.
+    #[test]
+    fn a_ref_whose_param_cant_be_a_uris_is_left_as_it_was() {
+        assert_eq!(to("page:acme/x?a]b=1"), None);
     }
 
     #[test]

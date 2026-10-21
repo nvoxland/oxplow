@@ -16,7 +16,7 @@
 
 use std::path::Path;
 
-use oxplow_db::page_ref_projections::{KIND_COMMIT, KIND_WORK_ITEM, RT_COMMITTED};
+use oxplow_db::page_ref_projections::RT_COMMITTED;
 use oxplow_db::{Effort, EffortStore as _, PageRefEdge};
 use oxplow_domain::stores::ThreadStore as _;
 use oxplow_domain::vcs::ObjectId;
@@ -135,15 +135,15 @@ pub(crate) async fn link(
     sha: &str,
     effort: &Effort,
 ) -> Result<(), DomainError> {
-    let Some(work_item) = effort
-        .work_item
-        .as_deref()
-        .and_then(oxplow_domain::uri::build::work_item_id_of_uri)
-    else {
+    let Some(work_item) = effort.work_item.as_deref() else {
         return Ok(());
     };
-    let edge = PageRefEdge::new(KIND_WORK_ITEM, work_item, KIND_COMMIT, sha, RT_COMMITTED)
-        .with_extra(serde_json::json!({ "effort": effort.id.to_string() }).to_string());
+    let edge = PageRefEdge::new(
+        work_item,
+        oxplow_domain::uri::build::commit_uri(sha),
+        RT_COMMITTED,
+    )
+    .with_extra(serde_json::json!({ "effort": effort.id.to_string() }).to_string());
     svc.page_ref_store.upsert_edge(edge).await
 }
 
@@ -286,7 +286,10 @@ mod tests {
         index_and_link(&f.svc, &sha).await;
         assert_eq!(
             items_of(&f.svc, &sha).await,
-            serde_json::json!([[format!("work_item:oxplow:{}", f.task)]])
+            serde_json::json!([[oxplow_domain::uri::build::work_item_uri(
+                "oxplow",
+                &format!("{}", f.task)
+            )]])
         );
         // Edited again and committed: not the effort's version.
         std::fs::write(root.join("src/a.rs"), "fn a() { 2 }\n").unwrap();
@@ -322,7 +325,10 @@ mod tests {
         index_and_link(&f.svc, &sha).await;
         assert_eq!(
             items_of(&f.svc, &sha).await,
-            serde_json::json!([[format!("work_item:oxplow:{}", f.task)]])
+            serde_json::json!([[oxplow_domain::uri::build::work_item_uri(
+                "oxplow",
+                &format!("{}", f.task)
+            )]])
         );
     }
 
@@ -357,7 +363,10 @@ mod tests {
         index_and_link(&f.svc, &sha).await;
         assert_eq!(
             items_of(&f.svc, &sha).await,
-            serde_json::json!([[format!("work_item:oxplow:{}", f.task)]])
+            serde_json::json!([[oxplow_domain::uri::build::work_item_uri(
+                "oxplow",
+                &format!("{}", f.task)
+            )]])
         );
     }
 
@@ -374,7 +383,10 @@ mod tests {
         link_effort(&f.svc, &f.effort).await.unwrap();
         assert_eq!(
             items_of(&f.svc, &sha).await,
-            serde_json::json!([[format!("work_item:oxplow:{}", f.task)]])
+            serde_json::json!([[oxplow_domain::uri::build::work_item_uri(
+                "oxplow",
+                &format!("{}", f.task)
+            )]])
         );
     }
 }

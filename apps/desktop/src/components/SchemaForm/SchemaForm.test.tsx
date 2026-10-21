@@ -176,7 +176,7 @@ test("a markdown field is a text area: Enter adds a line, Cmd/Ctrl+Enter submits
   const { getByTestId } = render(
     <SchemaForm
       schema={handoff}
-      initial={{ to_thread: "thread:thr2" }}
+      initial={{ to_thread: "oxplow:oxplow/thread?id=thr2" }}
       onSubmit={(v) => submitted.push(v)}
       testIdPrefix="f"
     />,
@@ -187,7 +187,7 @@ test("a markdown field is a text area: Enter adds a line, Cmd/Ctrl+Enter submits
   fireEvent.keyDown(body, { key: "Enter" });
   expect(submitted).toEqual([]);
   fireEvent.keyDown(body, { key: "Enter", metaKey: true });
-  expect(submitted).toEqual([{ to_thread: "thread:thr2", body: "line one" }]);
+  expect(submitted).toEqual([{ to_thread: "oxplow:oxplow/thread?id=thr2", body: "line one" }]);
 });
 
 test("a field with choices is a select of their labels, under their groups", () => {
@@ -198,8 +198,8 @@ test("a field with choices is a select of their labels, under their groups", () 
       initial={{ body: "yours" }}
       choices={{
         to_thread: [
-          { value: "thread:thr2", label: "Parser", group: "oxplow" },
-          { value: "thread:thr5", label: "Docs", group: "Bugfixes" },
+          { value: "oxplow:oxplow/thread?id=thr2", label: "Parser", group: "oxplow" },
+          { value: "oxplow:oxplow/thread?id=thr5", label: "Docs", group: "Bugfixes" },
         ],
       }}
       onSubmit={(v) => submitted.push(v)}
@@ -211,9 +211,9 @@ test("a field with choices is a select of their labels, under their groups", () 
   const groups = Array.from(select.querySelectorAll("optgroup")).map((g) => g.label);
   expect(groups).toEqual(["oxplow", "Bugfixes"]);
   expect(Array.from(select.options).map((o) => o.textContent)).toEqual(["Choose…", "Parser", "Docs"]);
-  fireEvent.change(select, { target: { value: "thread:thr5" } });
+  fireEvent.change(select, { target: { value: "oxplow:oxplow/thread?id=thr5" } });
   fireEvent.submit(getByTestId("f"));
-  expect(submitted).toEqual([{ to_thread: "thread:thr5", body: "yours" }]);
+  expect(submitted).toEqual([{ to_thread: "oxplow:oxplow/thread?id=thr5", body: "yours" }]);
 });
 
 const provider = {

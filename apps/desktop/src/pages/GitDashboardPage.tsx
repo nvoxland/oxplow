@@ -38,6 +38,7 @@ import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { Card, cardLinkButton } from "../components/Card.js";
 import { CommitList, indexRefsBySha, type CommitStats } from "../components/History/CommitList.js";
 import { FileStatusCountsForSummary } from "../components/FileStatusCounts.js";
+import { pageUri } from "../uri/uri.js";
 
 export interface GitDashboardPageProps {
   stream: Stream | null;
@@ -354,8 +355,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
     <Page testId="page-git-dashboard" title={dashboardTitle}>
       <div
         style={{ display: "flex", flexDirection: "column", gap: 16, padding: 16, overflow: "auto" }}
-        data-ref-kind="git-dashboard"
-        data-ref-id="git-dashboard"
+        data-ref={pageUri("git-dashboard")}
       >
         {error ? <div style={errorBanner}>{error}</div> : null}
         {loading && !data ? <div style={muted}>Loading…</div> : null}

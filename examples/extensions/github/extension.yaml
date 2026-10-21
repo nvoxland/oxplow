@@ -15,7 +15,7 @@ intent:
       expect: the PR's number, title and author on that stream's row
     - name: pr-link
       input: { wikilink: "pr:12" }
-      expect: the pull request's ref, `github_pr:12`
+      expect: the pull request's URI, `oxplow:github/pr?id=12`
 permissions:
   commands: [oxplow.collector.sync]
   network: [api.github.com]
@@ -52,14 +52,14 @@ collectors:
           url: text
         relations:
           - { to: v_stream, on: "v_github_pr.head_branch = v_stream.branch" }
-          - { to: v_work_item, on: "v_github_pr.title LIKE '%' || substr(v_work_item.ref, length('work_item:' || v_work_item.provider || ':') + 1) || '%'" }
+          - { to: v_work_item, on: "v_github_pr.title LIKE '%' || v_work_item.native_id || '%'" }
 models:
   - name: pull_request
     version: 1
     key: [ref]
-    description: "Each synced pull request as a ref oxplow can name (`github_pr:<number>`): its title, which a ref to it shows, and its description, which search finds."
+    description: "Each synced pull request as a URI oxplow can name (`oxplow:github/pr?id=<number>`): its title, which a link to it shows, and its description, which search finds."
     columns:
-      - { name: ref, type: TEXT, doc: "`github_pr:<number>`." }
+      - { name: ref, type: TEXT, doc: "`oxplow:github/pr?id=<number>`." }
       - { name: title, type: TEXT, doc: "Its title." }
       - { name: body, type: TEXT, doc: "Its description ('' for none)." }
 pages:
@@ -74,14 +74,14 @@ custom_components:
     title: PR lifetimes
     assets: [pr-lifetimes]
     commands: [oxplow.collector.sync]
-# A pull request is a kind of thing a ref can name: `github_pr:12`, or
+# A pull request is a resource a URI can name: `oxplow:github/pr?id=12`, or
 # `[[pr:12]]` in any text oxplow renders. It links to its `pr` page.
-ref_kinds:
-  - kind: github_pr
+resources:
+  - name: pr
     label: Pull request
-    id: '^\d+$'
+    params: { id: { required: true, pattern: '^\d+$' } }
     resolve: pull_request
     searchable: pull_request
     page: pr
-    wikilink: pr
+    wikilink: { prefix: pr, param: id }
     icon: git-pull-request

@@ -3,8 +3,9 @@
 //! One standalone FTS5 table (`search_fts`) holds the searchable text for
 //! every kind of entity — tasks, comments, notes, wiki pages, file contents
 //! — paired with a `search_entry` identity table that maps
-//! `(kind, ref_id, stream_id)` to the FTS rowid so an entity can be updated
-//! or removed in place. Ranking is FTS5's built-in `bm25()` (title weighted
+//! `(kind, ref_id, stream_id)` — the entity's resource (`oxplow/file`), its
+//! URI and stream — to the FTS rowid so an entity can be updated or
+//! removed in place. Ranking is FTS5's built-in `bm25()` (title weighted
 //! above body); snippets via `snippet()`.
 //!
 //! Two writers drive it from `oxplow-app`: a kind indexed from a model
@@ -23,15 +24,15 @@ use oxplow_domain::DomainError;
 
 use crate::database::Database;
 
-/// One ranked search result: the ref it found (`work_item:oxplow:tsk7`,
-/// `file:src/a.rs`), which the caller opens the way it opens any ref.
-/// `stream_id` is `None` for project-global entities (wiki pages);
-/// `score` is the BM25 score (lower = better match).
+/// One ranked search result: the URI it found
+/// (`oxplow:oxplow/work_item?id=tsk7&provider=oxplow`), which the caller
+/// opens the way it opens any URI, and its resource. `stream_id` is `None`
+/// for project-global entities (wiki pages); `score` is the BM25 score
+/// (lower = better match).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct SearchHit {
-    pub kind: String,
-    #[serde(rename = "ref")]
-    pub reference: String,
+    pub resource: String,
+    pub uri: String,
     pub stream_id: Option<String>,
     pub title: String,
     pub snippet: String,
@@ -317,12 +318,12 @@ impl SqliteSearchStore {
             .transaction(move |tx| {
                 tx.execute(
                     "DELETE FROM search_fts WHERE rowid IN \
-                     (SELECT rowid FROM search_entry WHERE kind = 'file' AND stream_id = ?1)",
+                     (SELECT rowid FROM search_entry WHERE kind = 'oxplow/file' AND stream_id = ?1)",
                     params![stream_id],
                 )
                 .map_err(crate::database::map_sql_err)?;
                 tx.execute(
-                    "DELETE FROM search_entry WHERE kind = 'file' AND stream_id = ?1",
+                    "DELETE FROM search_entry WHERE kind = 'oxplow/file' AND stream_id = ?1",
                     params![stream_id],
                 )
                 .map_err(crate::database::map_sql_err)?;
@@ -333,7 +334,7 @@ impl SqliteSearchStore {
 
     /// BM25-ranked search. `stream_id = Some(s)` returns rows scoped to `s`
     /// plus project-global rows; `None` searches everything. `kinds`, when
-    /// non-empty, restricts to those entity kinds.
+    /// non-empty, restricts to those resources (`oxplow/file`).
     pub async fn search(
         &self,
         query: &str,
@@ -375,11 +376,9 @@ impl SqliteSearchStore {
 
                 let mut stmt = conn.prepare(&sql)?;
                 let rows = stmt.query_map(params_from_iter(values), |row| {
-                    let kind: String = row.get(0)?;
-                    let id: String = row.get(1)?;
                     Ok(SearchHit {
-                        reference: format!("{kind}:{id}"),
-                        kind,
+                        resource: row.get(0)?,
+                        uri: row.get(1)?,
                         stream_id: row.get(2)?,
                         title: row.get(3)?,
                         snippet: row.get(4)?,
@@ -423,8 +422,8 @@ mod tests {
         .unwrap();
         let hits = s.search("login", Some("s-a"), &[], 10).await.unwrap();
         assert_eq!(hits.len(), 2, "both task and global wiki match");
-        assert!(hits.iter().any(|h| h.reference == "task:1"));
-        assert!(hits.iter().any(|h| h.reference == "wiki:auth"));
+        assert!(hits.iter().any(|h| h.uri == "1"));
+        assert!(hits.iter().any(|h| h.uri == "auth"));
     }
 
     #[tokio::test]
@@ -447,7 +446,7 @@ mod tests {
     async fn stream_filter_scopes_file_rows_but_keeps_global() {
         let s = store().await;
         s.upsert(
-            "file",
+            "oxplow/file",
             "src/a.rs",
             Some("s-a"),
             "src/a.rs",
@@ -456,7 +455,7 @@ mod tests {
         .await
         .unwrap();
         s.upsert(
-            "file",
+            "oxplow/file",
             "src/b.rs",
             Some("s-b"),
             "src/b.rs",
@@ -468,10 +467,7 @@ mod tests {
             .await
             .unwrap();
         let hits = s.search("widget", Some("s-a"), &[], 10).await.unwrap();
-        let ids: Vec<&str> = hits
-            .iter()
-            .map(|h| h.reference.as_str().split_once(':').unwrap().1)
-            .collect();
+        let ids: Vec<&str> = hits.iter().map(|h| h.uri.as_str()).collect();
         assert!(ids.contains(&"src/a.rs"), "stream a's file is in scope");
         assert!(
             !ids.contains(&"src/b.rs"),
@@ -493,7 +489,7 @@ mod tests {
         .await
         .unwrap();
         s.upsert(
-            "file",
+            "oxplow/file",
             "src/a.rs",
             Some("s-a"),
             "src/a.rs",
@@ -502,11 +498,11 @@ mod tests {
         .await
         .unwrap();
         let hits = s
-            .search("widget", Some("s-a"), &["file".to_string()], 10)
+            .search("widget", Some("s-a"), &["oxplow/file".to_string()], 10)
             .await
             .unwrap();
         assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].kind, "file");
+        assert_eq!(hits[0].resource, "oxplow/file");
     }
 
     #[tokio::test]
@@ -552,10 +548,10 @@ mod tests {
     #[tokio::test]
     async fn purge_stream_files_drops_only_that_streams_files() {
         let s = store().await;
-        s.upsert("file", "a.rs", Some("s-a"), "a.rs", "widget")
+        s.upsert("oxplow/file", "a.rs", Some("s-a"), "a.rs", "widget")
             .await
             .unwrap();
-        s.upsert("file", "b.rs", Some("s-b"), "b.rs", "widget")
+        s.upsert("oxplow/file", "b.rs", Some("s-b"), "b.rs", "widget")
             .await
             .unwrap();
         // A model-derived kind's rows follow its model, not the purge.
@@ -566,10 +562,13 @@ mod tests {
         let hits = s.search("widget", None, &[], 10).await.unwrap();
         let mut got: Vec<(&str, Option<&str>)> = hits
             .iter()
-            .map(|h| (h.kind.as_str(), h.stream_id.as_deref()))
+            .map(|h| (h.resource.as_str(), h.stream_id.as_deref()))
             .collect();
         got.sort();
-        assert_eq!(got, vec![("file", Some("s-b")), ("task", Some("s-a"))]);
+        assert_eq!(
+            got,
+            vec![("oxplow/file", Some("s-b")), ("task", Some("s-a"))]
+        );
     }
 
     /// A feed with versions is planned from them alone: the same versions
@@ -664,10 +663,7 @@ mod tests {
         assert_eq!(restate(entries("gadget")).await, r(0, 1, 0));
         let hits = s.search("gadget", Some("str1"), &[], 10).await.unwrap();
         assert_eq!(
-            (
-                hits[0].kind.as_str(),
-                hits[0].reference.as_str().split_once(':').unwrap().1
-            ),
+            (hits[0].resource.as_str(), hits[0].uri.as_str()),
             ("task", "tsk2")
         );
         assert!(s.search("cog", None, &[], 10).await.unwrap().is_empty());
@@ -695,7 +691,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(hits.len(), 1, "both words present → match");
-        assert_eq!(hits[0].reference, "wiki:architecture-overview");
+        assert_eq!(hits[0].uri, "architecture-overview");
         // Words may be non-adjacent too (AND, not phrase).
         assert_eq!(
             s.search("workspace invariant", None, &[], 10)

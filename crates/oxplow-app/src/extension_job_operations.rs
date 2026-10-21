@@ -79,12 +79,11 @@ impl JobWork {
         validate_run_owner(&run, &key.owner)?;
         validate_work_provenance(&run, &identity, &provenance)?;
         validate_request(&request)?;
-        // The run's ref, its fragment the operation.
-        let idempotency_key = oxplow_domain::uri::build::at(
-            oxplow_domain::uri::types::JOB_RUN,
-            identity.job_id().as_str(),
-            None,
-            Some(key.operation.as_str()),
+        // The run's URI, its view the operation.
+        let idempotency_key = oxplow_domain::uri::build::of_with_view(
+            oxplow_domain::uri::resources::JOB_RUN,
+            &[("id", identity.job_id().as_str())],
+            &[("operation", key.operation.as_str())],
         );
         Ok(Self {
             identity,

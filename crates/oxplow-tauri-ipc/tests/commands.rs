@@ -353,8 +353,7 @@ async fn comment_and_note_reads_over_fresh_project() {
     );
     assert!(commands::generated::list_comments_for_target(
         app.state(),
-        "wiki".into(),
-        "some-page".into()
+        oxplow_domain::uri::build::wiki_uri("some-page")
     )
     .await
     .unwrap()
@@ -372,18 +371,22 @@ async fn comment_and_note_reads_over_fresh_project() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn page_ref_reads_empty_for_fresh_project() {
     let app = TestApp::build().await;
-    assert!(
-        commands::generated::list_backlinks(app.state(), "wiki".into(), "slug".into(), None)
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    assert!(
-        commands::generated::list_outbound(app.state(), "task".into(), "1".into(), Some(10))
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    assert!(commands::generated::list_backlinks(
+        app.state(),
+        oxplow_domain::uri::build::wiki_uri("slug"),
+        None
+    )
+    .await
+    .unwrap()
+    .is_empty());
+    assert!(commands::generated::list_outbound(
+        app.state(),
+        oxplow_domain::uri::build::work_item_uri("oxplow", "tsk1"),
+        Some(10)
+    )
+    .await
+    .unwrap()
+    .is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

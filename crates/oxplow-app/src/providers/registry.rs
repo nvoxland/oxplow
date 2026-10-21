@@ -348,7 +348,7 @@ struct Live {
 pub struct Instance {
     /// `<extension>/<instance id>`.
     pub name: String,
-    /// The instance's id: its refs' segment (`work_item:<id>:…`), its
+    /// The instance's id: its refs' segment (`oxplow:oxplow/work_item?id=…&provider=<id>`), its
     /// commands' namespace, its capability provider's id. A provider's
     /// default instance has the provider's.
     pub id: String,
@@ -1325,8 +1325,8 @@ impl Instance {
 }
 
 /// Whether an instance of `capability` may name `subject` in an event:
-/// only its own refs, of its capability's kind (`work_item:<instance
-/// id>:…`), and its extension (`extension:<ext>`).
+/// only its own URIs, of its capability's resource (its `provider` param the
+/// instance), and its extension's URI.
 pub fn check_subject(
     capability: &str,
     provider: &str,
@@ -1344,33 +1344,27 @@ pub fn check_subject(
     }
 }
 
-/// Whether `r` is one of instance `id`'s own refs under `contract`: a
-/// provider-scoped kind's carries the instance (`<kind>:<id>:<native
-/// id>`); a bare kind's (`wiki:<slug>`) is the active implementation's,
-/// so any well-formed one is.
+/// Whether `r` is one of instance `id`'s own URIs under `contract`: a
+/// URI with a `provider` param (`oxplow:oxplow/work_item?id=ENG-12&provider=issues`)
+/// is that instance's; one without (`oxplow:oxplow/wiki?slug=x`) is the
+/// active implementation's, so any well-formed one is.
 pub(super) fn owns(
     contract: &oxplow_domain::capability::ProviderContract,
     id: &str,
     r: &str,
 ) -> bool {
-    static KINDS: std::sync::LazyLock<oxplow_domain::uri::types::TypeRegistry> =
-        std::sync::LazyLock::new(oxplow_domain::uri::types::core_types);
-    let Some(kind) = contract.ref_kind else {
+    let Some(resource) = contract.resource else {
         return false;
     };
-    if KINDS.get(kind).is_some_and(|k| k.provider_scoped) {
-        instance_in(kind, r).is_some_and(|instance| instance == id)
-    } else {
-        r.strip_prefix(kind)
-            .and_then(|rest| rest.strip_prefix(':'))
-            .is_some_and(|rest| !rest.is_empty())
+    match oxplow_domain::uri::build::parse_resource(r, resource) {
+        Ok(uri) => uri.param("provider").is_none_or(|instance| instance == id),
+        Err(_) => false,
     }
 }
 
-/// The instance segment of a ref of `kind` (`work_item:<instance>:ENG-12`).
-fn instance_in<'r>(kind: &str, r: &'r str) -> Option<&'r str> {
-    let (instance, native) = r.strip_prefix(kind)?.strip_prefix(':')?.split_once(':')?;
-    (!instance.is_empty() && !native.is_empty()).then_some(instance)
+/// The instance a URI of `resource` is of: its `provider` param.
+fn instance_in(resource: &str, r: &str) -> Option<String> {
+    oxplow_domain::uri::build::param_of(r, resource, "provider").ok()
 }
 
 /// One capability's side of the host: what turns a started instance into
@@ -3395,14 +3389,13 @@ impl crate::commands::ProviderRouter for ProviderRegistry {
     }
 }
 
-/// The instance a ref is of: one of the refs a capability's instances
-/// own (`work_item:<instance>:ENG-12`).
+/// The instance a URI is of: one of the URIs a capability's instances
+/// own (`oxplow:oxplow/work_item?id=ENG-12&provider=issues`).
 fn instance_of_ref(r: &str) -> Option<String> {
     oxplow_domain::capability::CAPABILITIES
         .iter()
-        .filter_map(|c| c.provider?.ref_kind)
-        .find_map(|kind| instance_in(kind, r))
-        .map(str::to_string)
+        .filter_map(|c| c.provider?.resource)
+        .find_map(|resource| instance_in(resource, r))
 }
 
 impl HostError {

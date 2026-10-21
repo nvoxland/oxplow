@@ -47,8 +47,6 @@ pub mod panel_layout_store;
 pub mod proposal_store;
 pub mod provider_collector_store;
 pub mod reasoning_store;
-pub mod ref_kind_store;
-pub mod ref_models;
 pub mod replaceable_store;
 pub mod resource_store;
 pub mod search_store;

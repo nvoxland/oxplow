@@ -61,7 +61,7 @@ SELECT CAST(j.id AS TEXT) AS id, CAST(j.kind AS TEXT) AS kind, j.agent_session_i
                  WHEN j.started_at IS NOT NULL THEN 'running'
                  ELSE 'unknown' END AS TEXT) AS state,
        j.finished_event_id,
-       CAST('agent_session:ses' || j.agent_session_id AS TEXT) AS session_ref,
-       CAST('subagent:ses' || j.agent_session_id || '/' || j.id AS TEXT) AS ref
+       CAST(uri('oxplow/agent_session', 'id', 'ses' || j.agent_session_id) AS TEXT) AS session_ref,
+       CAST(uri('oxplow/subagent', 'session', 'ses' || j.agent_session_id, 'agent', j.id) AS TEXT) AS ref
 FROM joined j
 JOIN source('agent_session') s ON s.id = j.agent_session_id

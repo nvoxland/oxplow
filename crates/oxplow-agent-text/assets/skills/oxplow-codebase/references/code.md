@@ -9,7 +9,7 @@
   languages that overload by them (Java, C#, C++), else NULL. Where
   something is defined: `SELECT path, line, kind, container FROM
   v_symbol WHERE name = 'main'`; what a file declares: `WHERE path = …
-  ORDER BY line`. `ref` is `symbol:<path>/<id>` (no revision); no language
+  ORDER BY line`. `ref` is `oxplow:oxplow/symbol?path=<path>&symbol=<id>` (no revision); no language
   server is needed. `v_symbol_capture` says what each snapshot's collection
   covered (`files_collected`, `files_failed`).
 - **`v_diagnostic`** — what the language servers report now (`path`,

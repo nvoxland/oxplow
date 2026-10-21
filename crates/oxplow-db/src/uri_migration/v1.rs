@@ -1,30 +1,11 @@
-//! The canonical ref grammar (`.context/resources.md`):
-//!
-//! ```text
-//! ref  := kind ":" id [ "@" rev ] [ "#" frag ]
-//! kind := [a-z][a-z0-9_]*
-//! id   := 1+ chars; `@` `#` `%` percent-encoded; `:` `/` `?` `=` `&` legal raw
-//! rev  := rev_kind ":" value          e.g. snap:01J9…, git:HEAD
-//! frag := kind-defined                 e.g. L10-20
-//! ```
-//!
-//! A ref names one thing (`effort:eff362`, `work_item:issues:ENG-12`,
-//! `file:src/a.rs@git:HEAD#L10-20`). Tabs, links, backlinks and agent
-//! context all use this one string identity. Only `@`, `#` and `%` are
-//! reserved in an id, so `work_item:oxplow:tsk42` and
-//! `lens:acme/blocked?stream_id=2` stay readable; the first `:` ends the
-//! kind, the first unescaped `#` ends the id (or rev), and the first
-//! unescaped `@` before that starts the rev.
-//!
-//! Pure: no IO. The golden fixture `tests/fixtures/ref_grammar.json` pins
-//! this grammar for both this parser and the TS one.
-
-use std::fmt;
+//! The old ref grammar, `<kind>:<id>[@<rev>][#<frag>]`, kept only so
+//! the migration can read what was stored in it (`super::v1_to_uri`).
+//! Nothing else parses or builds one.
 
 /// A parsed canonical ref. `id` is decoded (an `@` in a file name is a
 /// real `@` here); `Display` re-encodes it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Uri {
+pub(crate) struct Uri {
     pub kind: String,
     pub id: String,
     /// `<rev_kind>:<value>`, e.g. `git:HEAD`; `None` means the working tree.
@@ -33,7 +14,7 @@ pub struct Uri {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum UriParseError {
+pub(crate) enum UriParseError {
     #[error("empty ref")]
     Empty,
     #[error("ref `{0}` has no `:` between kind and id")]
@@ -56,65 +37,16 @@ pub enum UriParseError {
     BadEscape(String),
 }
 
-impl UriParseError {
-    /// A stable snake_case name for the fixture to assert on.
-    pub fn reason(&self) -> &'static str {
-        match self {
-            Self::Empty => "empty",
-            Self::MissingColon(_) => "missing_colon",
-            Self::EmptyKind => "empty_kind",
-            Self::EmptyId => "empty_id",
-            Self::BadKind(_) => "bad_kind",
-            Self::EmptyRev => "empty_rev",
-            Self::BadRev(_) => "bad_rev",
-            Self::EmptyFrag => "empty_frag",
-            Self::Unescaped(..) => "unescaped",
-            Self::BadEscape(_) => "bad_escape",
-        }
-    }
-}
-
 /// The characters an id or revision must percent-encode.
 const RESERVED: [char; 3] = ['@', '#', '%'];
 
-pub fn is_valid_type(kind: &str) -> bool {
+fn is_valid_type(kind: &str) -> bool {
     let mut chars = kind.chars();
     matches!(chars.next(), Some(c) if c.is_ascii_lowercase())
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
 impl Uri {
-    /// Build from decoded parts, validating the kind and the revision shape.
-    pub fn new(
-        kind: &str,
-        id: &str,
-        rev: Option<&str>,
-        frag: Option<&str>,
-    ) -> Result<Self, UriParseError> {
-        if !is_valid_type(kind) {
-            return Err(if kind.is_empty() {
-                UriParseError::EmptyKind
-            } else {
-                UriParseError::BadKind(kind.to_string())
-            });
-        }
-        if id.is_empty() {
-            return Err(UriParseError::EmptyId);
-        }
-        if let Some(r) = rev {
-            check_rev(r)?;
-        }
-        if frag.is_some_and(str::is_empty) {
-            return Err(UriParseError::EmptyFrag);
-        }
-        Ok(Self {
-            kind: kind.to_string(),
-            id: id.to_string(),
-            rev: rev.map(str::to_string),
-            frag: frag.map(str::to_string),
-        })
-    }
-
     pub fn parse(text: &str) -> Result<Self, UriParseError> {
         if text.is_empty() {
             return Err(UriParseError::Empty);
@@ -199,37 +131,43 @@ fn decode(s: &str) -> Result<String, UriParseError> {
     Ok(out)
 }
 
-fn encode(s: &str, out: &mut String) {
-    for c in s.chars() {
-        if RESERVED.contains(&c) {
-            out.push_str(&format!("%{:02X}", c as u8));
-        } else {
-            out.push(c);
-        }
-    }
+/// An old lens's, page's or metric's id as its head and the params that
+/// rode in it after `?` (decoded: `+` a space, `%XX` a byte).
+pub(crate) fn view_of(id: &str) -> (String, Vec<(String, String)>) {
+    let Some((head, query)) = id.split_once('?') else {
+        return (id.to_string(), Vec::new());
+    };
+    let params = query
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .map(|pair| {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            (query_unescape(key), query_unescape(value))
+        })
+        .collect();
+    (head.to_string(), params)
 }
 
-impl fmt::Display for Uri {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut s = String::with_capacity(self.kind.len() + self.id.len() + 8);
-        s.push_str(&self.kind);
-        s.push(':');
-        encode(&self.id, &mut s);
-        if let Some(rev) = &self.rev {
-            s.push('@');
-            encode(rev, &mut s);
+fn query_unescape(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'+' => out.push(b' '),
+            b'%' if i + 2 < bytes.len() => {
+                let hex = |b: u8| (b as char).to_digit(16);
+                match (hex(bytes[i + 1]), hex(bytes[i + 2])) {
+                    (Some(hi), Some(lo)) => {
+                        out.push((hi * 16 + lo) as u8);
+                        i += 2;
+                    }
+                    _ => out.push(b'%'),
+                }
+            }
+            b => out.push(b),
         }
-        if let Some(frag) = &self.frag {
-            s.push('#');
-            s.push_str(frag);
-        }
-        f.write_str(&s)
+        i += 1;
     }
-}
-
-impl std::str::FromStr for Uri {
-    type Err = UriParseError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::parse(s)
-    }
+    String::from_utf8_lossy(&out).into_owned()
 }

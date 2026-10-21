@@ -18,10 +18,10 @@
 //! Beyond the quote, a comment carries the *typed* context it was made
 //! in: `context_chain` is the nesting of page regions the selection sat
 //! inside (innermost→outermost, e.g. a file row under a commit), and
-//! `referenced_refs` are the canonical refs found inside the selection
-//! itself (links + inline mentions). Both reuse the [`CommentTarget`]
-//! `(kind,id)` shape — the same canonical `page_ref` vocabulary — so the
-//! agent can hydrate them into typed summaries when answering.
+//! `referenced` are the URIs found inside the selection
+//! itself (links + inline mentions). Both are URIs — what `page_ref`
+//! holds — so the agent can hydrate them into typed summaries when
+//! answering.
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -47,21 +47,6 @@ pub enum CommentStatus {
     Resolved,
 }
 
-/// A canonical cross-page reference: `kind` is the page-kind scheme
-/// (`"wiki" | "file" | "dir" | "work_item" | "commit" | "finding"`,
-/// extensible) and `id` is the canonical id for that kind — wiki slug,
-/// worktree-relative path, task id as a string, commit sha, etc. This is
-/// the same `(kind,id)` vocabulary the `page_ref` graph and tab ids use.
-///
-/// Used as a comment's primary anchor target and, in `Vec` form, as the
-/// `context_chain` (ancestor regions) and `referenced_refs` (refs inside
-/// the selection).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
-pub struct CommentTarget {
-    pub kind: String,
-    pub id: String,
-}
-
 /// The thread anchor + metadata. The conversation lives in
 /// [`CommentMessage`] rows keyed by `id`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -73,16 +58,18 @@ pub struct Comment {
     /// The agent thread the comment was first added in. Nullable so a
     /// content comment survives the thread being archived.
     pub thread_id: Option<ThreadId>,
-    pub target_kind: String,
-    pub target_id: String,
+    /// What the comment is on: a URI (`oxplow:oxplow/wiki?slug=intro`,
+    /// a file's, a work item's) — the same the `page_ref` graph and tabs
+    /// use.
+    pub target: String,
     pub quote: String,
     /// W3C selectors array (opaque to the store; the renderer parses it).
     pub selectors_json: String,
     /// Ancestor regions the selection sat inside, innermost→outermost,
     /// EXCLUDING the primary target. Empty for a top-level selection.
-    pub context_chain: Vec<CommentTarget>,
-    /// Canonical refs found inside the selection (links + mentions).
-    pub referenced_refs: Vec<CommentTarget>,
+    pub context_chain: Vec<String>,
+    /// The URIs found inside the selection (links + mentions).
+    pub referenced: Vec<String>,
     pub intent: CommentIntent,
     pub status: CommentStatus,
     pub orphaned: bool,

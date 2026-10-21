@@ -9,7 +9,7 @@ use rusqlite::{params, OptionalExtension};
 use oxplow_domain::stores::CommentStore;
 use oxplow_domain::{
     Comment, CommentId, CommentIntent, CommentMessage, CommentMessageId, CommentStatus,
-    CommentTarget, CommentThread, DomainError, StreamId, ThreadId, Timestamp,
+    CommentThread, DomainError, StreamId, ThreadId, Timestamp,
 };
 
 use crate::database::Database;
@@ -58,68 +58,47 @@ fn map_err(e: DomainError) -> rusqlite::Error {
 /// carry `DEFAULT '[]'` so this is always valid JSON in practice; a
 /// malformed value degrades to an empty list rather than failing the
 /// whole row load (the refs are typed context, not load-bearing state).
-fn parse_refs(json: &str) -> Vec<CommentTarget> {
+fn parse_refs(json: &str) -> Vec<String> {
     serde_json::from_str(json).unwrap_or_default()
 }
 
-fn refs_to_json(refs: &[CommentTarget]) -> String {
+fn refs_to_json(refs: &[String]) -> String {
     serde_json::to_string(refs).unwrap_or_else(|_| "[]".to_string())
 }
 
-/// Canonical `(kind,id)` refs mentioned *inside* `quote`, derived from
-/// the shared [`oxplow_domain::uri::extract`] so the kind/id vocabulary
-/// matches the `page_ref` graph and tab ids exactly. Inline mentions
-/// like `tsk42`, `src/x.rs`, or `[[slug]]` become typed refs even
-/// when the surface never rendered them as links.
+/// The URIs mentioned *inside* `quote`, from the shared
+/// [`oxplow_domain::uri::extract`] so they match the `page_ref` graph
+/// and tab ids exactly. Inline mentions like `tsk42`, `src/x.rs`, or
+/// `[[slug]]` become URIs even when the surface never rendered them as
+/// links.
 fn refs_from_quote(
-    kinds: &oxplow_domain::uri::types::TypeRegistry,
+    kinds: &oxplow_domain::uri::resources::ResourceRegistry,
     quote: &str,
-) -> Vec<CommentTarget> {
-    use crate::page_ref_projections::{
-        KIND_COMMIT, KIND_DIR, KIND_FILE, KIND_FINDING, KIND_WIKI, KIND_WORK_ITEM,
-    };
+) -> Vec<String> {
+    use oxplow_domain::uri::build;
     let r = oxplow_domain::uri::extract(kinds, quote);
     let mut out = Vec::new();
-    let mut push = |kind: &str, id: String| {
-        out.push(CommentTarget {
-            kind: kind.to_string(),
-            id,
-        })
-    };
-    for f in r.files {
-        push(KIND_FILE, f);
-    }
-    for d in r.dirs {
-        push(KIND_DIR, d);
-    }
-    for w in r.wikis {
-        push(KIND_WIKI, w);
-    }
-    for t in r.work_items {
-        push(KIND_WORK_ITEM, t);
-    }
-    for f in r.findings {
-        push(KIND_FINDING, f);
-    }
-    for c in r.commits {
-        push(KIND_COMMIT, c);
-    }
+    out.extend(r.files.iter().map(|f| build::file_uri(f)));
+    out.extend(r.dirs.iter().map(|d| build::dir_uri(d)));
+    out.extend(r.wikis.iter().map(|w| build::wiki_uri(w)));
+    out.extend(r.work_items);
+    out.extend(r.findings.iter().map(|f| build::finding_uri(f)));
+    out.extend(r.commits.iter().map(|c| build::commit_uri(c)));
     out
 }
 
-/// Union the frontend-supplied `referenced_refs` (DOM links inside the
-/// selection) with the refs the backend extracts from `quote`,
-/// deduplicating on `(kind,id)` and preserving the provided refs first.
-/// Centralizing this in the create path means no surface ever has to
-/// reimplement ref parsing.
-fn union_referenced_refs(
-    kinds: &oxplow_domain::uri::types::TypeRegistry,
-    provided: &[CommentTarget],
+/// Union the frontend-supplied `referenced` (DOM links inside the
+/// selection) with the URIs the backend extracts from `quote`,
+/// deduplicated, the provided ones first. Centralizing this in the create
+/// path means no surface ever has to reimplement link parsing.
+fn union_referenced(
+    kinds: &oxplow_domain::uri::resources::ResourceRegistry,
+    provided: &[String],
     quote: &str,
-) -> Vec<CommentTarget> {
+) -> Vec<String> {
     let mut out = provided.to_vec();
     for r in refs_from_quote(kinds, quote) {
-        if !out.iter().any(|e| e.kind == r.kind && e.id == r.id) {
+        if !out.contains(&r) {
             out.push(r);
         }
     }
@@ -138,12 +117,11 @@ fn row_to_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<Comment> {
         id: CommentId::new(row.get("id")?),
         stream_id: StreamId::new(row.get::<_, i64>("stream_id")?),
         thread_id: thread_id.map(ThreadId::new),
-        target_kind: row.get("target_kind")?,
-        target_id: row.get("target_id")?,
+        target: row.get("target_uri")?,
         quote: row.get("quote")?,
         selectors_json: row.get("selectors_json")?,
         context_chain: parse_refs(&row.get::<_, String>("context_chain_json")?),
-        referenced_refs: parse_refs(&row.get::<_, String>("referenced_refs_json")?),
+        referenced: parse_refs(&row.get::<_, String>("referenced_json")?),
         intent: str_to_intent(&intent).map_err(map_err)?,
         status: str_to_status(&status).map_err(map_err)?,
         orphaned: row.get::<_, i64>("orphaned")? != 0,
@@ -211,30 +189,28 @@ pub struct SqliteCommentStore {
 /// What a comment's event is logged as.
 const SOURCE: &str = "system:comments";
 
-/// `knowledge.comment.written@1` / `deleted@1` for comment `id` on
-/// `target_kind` / `target_id` (P7.B6: how the search index hears of it).
-fn comment_event(id: i64, target_kind: &str, target_id: &str, deleted: bool) -> Envelope {
+/// `knowledge.comment.written` / `deleted` for comment `id` on `target`
+/// (how the search index hears of it).
+fn comment_event(id: i64, target: &str, deleted: bool) -> Envelope {
     use oxplow_domain::events::schema::{
-        KnowledgeCommentDeleted, KnowledgeCommentDeletedV1, KnowledgeCommentWritten,
-        KnowledgeCommentWrittenV1,
+        KnowledgeCommentDeleted, KnowledgeCommentDeletedV2, KnowledgeCommentWritten,
+        KnowledgeCommentWrittenV2,
     };
     let comment = oxplow_domain::uri::build::comment_uri(CommentId::new(id));
     let env = if deleted {
         Envelope::typed::<KnowledgeCommentDeleted>(
             SOURCE,
-            &KnowledgeCommentDeletedV1 {
+            &KnowledgeCommentDeletedV2 {
                 comment: comment.clone(),
-                target_kind: target_kind.into(),
-                target_id: target_id.into(),
+                target: target.into(),
             },
         )
     } else {
         Envelope::typed::<KnowledgeCommentWritten>(
             SOURCE,
-            &KnowledgeCommentWrittenV1 {
+            &KnowledgeCommentWrittenV2 {
                 comment: comment.clone(),
-                target_kind: target_kind.into(),
-                target_id: target_id.into(),
+                target: target.into(),
             },
         )
     };
@@ -249,30 +225,24 @@ fn deleted(
     args: impl rusqlite::Params,
 ) -> rusqlite::Result<Vec<Envelope>> {
     let mut st = conn.prepare(&format!(
-        "SELECT id, target_kind, target_id FROM comment WHERE {filter}"
+        "SELECT id, target_uri FROM comment WHERE {filter}"
     ))?;
-    let rows = st.query_map(args, |r| {
-        Ok((
-            r.get::<_, i64>(0)?,
-            r.get::<_, String>(1)?,
-            r.get::<_, String>(2)?,
-        ))
-    })?;
-    rows.map(|r| r.map(|(id, kind, tid)| comment_event(id, &kind, &tid, true)))
+    let rows = st.query_map(args, |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+    rows.map(|r| r.map(|(id, target)| comment_event(id, &target, true)))
         .collect()
 }
 
 /// The event for a change to comment `id`, from its row.
 fn written(conn: &rusqlite::Connection, id: i64) -> rusqlite::Result<Vec<Envelope>> {
-    let target: Option<(String, String)> = conn
+    let target: Option<String> = conn
         .query_row(
-            "SELECT target_kind, target_id FROM comment WHERE id = ?1",
+            "SELECT target_uri FROM comment WHERE id = ?1",
             params![id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| r.get(0),
         )
         .optional()?;
     Ok(target
-        .map(|(kind, tid)| comment_event(id, &kind, &tid, false))
+        .map(|target| comment_event(id, &target, false))
         .into_iter()
         .collect())
 }
@@ -282,11 +252,12 @@ fn written(conn: &rusqlite::Connection, id: i64) -> rusqlite::Result<Vec<Envelop
 pub struct NewComment {
     pub stream: StreamId,
     pub thread: Option<ThreadId>,
-    pub target: CommentTarget,
+    /// What it is on: a URI.
+    pub target: String,
     pub quote: String,
     pub selectors_json: String,
-    pub context_chain: Vec<CommentTarget>,
-    pub referenced_refs: Vec<CommentTarget>,
+    pub context_chain: Vec<String>,
+    pub referenced: Vec<String>,
     pub intent: CommentIntent,
     pub author: String,
     pub body: String,
@@ -313,27 +284,27 @@ pub fn get_tx(
 /// Returns it and the `knowledge.comment.written` to log.
 pub fn create_tx(
     conn: &rusqlite::Connection,
-    kinds: &oxplow_domain::uri::types::TypeRegistry,
+    kinds: &oxplow_domain::uri::resources::ResourceRegistry,
     new: &NewComment,
 ) -> Result<(CommentThread, Vec<Envelope>), DomainError> {
-    let referenced_refs = union_referenced_refs(kinds, &new.referenced_refs, &new.quote);
+    let referenced = union_referenced(kinds, &new.referenced, &new.quote);
     let now = Timestamp::now();
     let now_s = ts_to_string(now);
     conn.execute(
         "INSERT INTO comment
-               (stream_id, thread_id, target_kind, target_id, quote, selectors_json,
-                context_chain_json, referenced_refs_json,
+               (stream_id, thread_id, target_resource, target_uri, quote, selectors_json,
+                context_chain_json, referenced_json,
                 intent, status, orphaned, author, created_at, updated_at, last_activity_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'open', 0, ?10, ?11, ?11, ?11)",
         params![
             new.stream.value(),
             new.thread.as_ref().map(|t| t.value()),
-            new.target.kind,
-            new.target.id,
+            oxplow_domain::uri::build::resource_of(&new.target).unwrap_or_default(),
+            new.target,
             new.quote,
             new.selectors_json,
             refs_to_json(&new.context_chain),
-            refs_to_json(&referenced_refs),
+            refs_to_json(&referenced),
             intent_to_str(new.intent),
             new.author,
             now_s,
@@ -351,12 +322,11 @@ pub fn create_tx(
         id: CommentId::new(comment_id),
         stream_id: new.stream,
         thread_id: new.thread,
-        target_kind: new.target.kind.clone(),
-        target_id: new.target.id.clone(),
+        target: new.target.clone(),
         quote: new.quote.clone(),
         selectors_json: new.selectors_json.clone(),
         context_chain: new.context_chain.clone(),
-        referenced_refs,
+        referenced,
         intent: new.intent,
         status: CommentStatus::Open,
         orphaned: false,
@@ -367,7 +337,7 @@ pub fn create_tx(
         resolved_at: None,
     };
     let messages = load_messages(conn, comment_id).map_err(sql)?;
-    let event = comment_event(comment_id, &new.target.kind, &new.target.id, false);
+    let event = comment_event(comment_id, &new.target, false);
     Ok((CommentThread { comment, messages }, vec![event]))
 }
 
@@ -532,19 +502,10 @@ impl CommentStore for SqliteCommentStore {
             .await
     }
 
-    async fn list_for_target(
-        &self,
-        target: &CommentTarget,
-    ) -> Result<Vec<CommentThread>, DomainError> {
-        let target = target.clone();
+    async fn list_for_target(&self, target: &str) -> Result<Vec<CommentThread>, DomainError> {
+        let target = target.to_string();
         self.db
-            .call(move |conn| {
-                list_threads(
-                    conn,
-                    "target_kind = ?1 AND target_id = ?2",
-                    &[&target.kind, &target.id],
-                )
-            })
+            .call(move |conn| list_threads(conn, "target_uri = ?1", &[&target]))
             .await
     }
 
@@ -607,11 +568,11 @@ impl SqliteCommentStore {
         &self,
         stream: &StreamId,
         thread: Option<&ThreadId>,
-        target: &CommentTarget,
+        target: &str,
         quote: &str,
         selectors_json: &str,
-        context_chain: &[CommentTarget],
-        referenced_refs: &[CommentTarget],
+        context_chain: &[String],
+        referenced: &[String],
         intent: CommentIntent,
         author: &str,
         body: &str,
@@ -619,17 +580,17 @@ impl SqliteCommentStore {
         let new = NewComment {
             stream: *stream,
             thread: thread.copied(),
-            target: target.clone(),
+            target: target.to_string(),
             quote: quote.into(),
             selectors_json: selectors_json.into(),
             context_chain: context_chain.to_vec(),
-            referenced_refs: referenced_refs.to_vec(),
+            referenced: referenced.to_vec(),
             intent,
             author: author.into(),
             body: body.into(),
         };
         let vocabulary = self.vocabulary.current();
-        self.run(move |c| create_tx(c, &vocabulary.kinds, &new))
+        self.run(move |c| create_tx(c, &vocabulary.resources, &new))
             .await
     }
 
@@ -669,10 +630,12 @@ impl SqliteCommentStore {
 mod tests {
     use super::*;
 
-    /// Core's vocabulary with oxplow's tasks as the work list (`tsk<n>`).
+    use oxplow_domain::uri::build::{commit_uri, file_uri, page_uri, wiki_uri, work_item_uri};
+
+    /// Foundation's vocabulary with oxplow's tasks as the work list (`tsk<n>`).
     fn tasks_vocabulary() -> oxplow_domain::vocabulary::VocabularyHandle {
         let mut v = oxplow_domain::vocabulary::Vocabulary::core();
-        v.kinds = v.kinds.with_work_item_ids("oxplow", r"tsk\d+").unwrap();
+        v.resources = v.resources.with_work_item_ids("oxplow", r"tsk\d+").unwrap();
         oxplow_domain::vocabulary::VocabularyHandle::new(v)
     }
     use crate::stream_store::SqliteStreamStore;
@@ -735,11 +698,8 @@ mod tests {
         (db, s.id, t.id)
     }
 
-    fn target() -> CommentTarget {
-        CommentTarget {
-            kind: "wiki".into(),
-            id: "some-page".into(),
-        }
+    fn target() -> String {
+        wiki_uri("some-page")
     }
 
     #[tokio::test]
@@ -775,35 +735,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_round_trips_context_chain_and_referenced_refs() {
+    async fn create_round_trips_context_chain_and_referenced() {
         let (db, stream, thread) = fixture().await;
         let store = SqliteCommentStore::new(db, tasks_vocabulary());
-        let context_chain = vec![
-            CommentTarget {
-                kind: "commit".into(),
-                id: "abc1234".into(),
-            },
-            CommentTarget {
-                kind: "page".into(),
-                id: "git-dashboard".into(),
-            },
-        ];
-        let referenced_refs = vec![CommentTarget {
-            kind: "file".into(),
-            id: "src/app.rs".into(),
-        }];
+        let context_chain = vec![commit_uri("abc1234"), page_uri("git-dashboard", &[])];
+        let referenced = vec![file_uri("src/app.rs")];
         let created = store
             .create(
                 &stream,
                 Some(&thread),
-                &CommentTarget {
-                    kind: "file".into(),
-                    id: "src/app.rs".into(),
-                },
+                &file_uri("src/app.rs"),
                 "fn main",
                 "[{\"type\":\"TextQuoteSelector\",\"exact\":\"fn main\"}]",
                 &context_chain,
-                &referenced_refs,
+                &referenced,
                 CommentIntent::Followup,
                 "user",
                 "why is this here?",
@@ -812,12 +757,12 @@ mod tests {
             .unwrap();
         // The create return value carries the typed context…
         assert_eq!(created.comment.context_chain, context_chain);
-        assert_eq!(created.comment.referenced_refs, referenced_refs);
+        assert_eq!(created.comment.referenced, referenced);
         // …and so does a fresh load from the DB (proves the JSON columns
         // serialize + parse round-trip).
         let loaded = store.get(created.comment.id).await.unwrap().unwrap();
         assert_eq!(loaded.comment.context_chain, context_chain);
-        assert_eq!(loaded.comment.referenced_refs, referenced_refs);
+        assert_eq!(loaded.comment.referenced, referenced);
         assert_eq!(
             loaded.comment.selectors_json,
             "[{\"type\":\"TextQuoteSelector\",\"exact\":\"fn main\"}]"
@@ -825,15 +770,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_unions_refs_extracted_from_quote_into_referenced_refs() {
+    async fn create_unions_refs_extracted_from_quote_into_referenced() {
         let (db, stream, thread) = fixture().await;
         let store = SqliteCommentStore::new(db, tasks_vocabulary());
         // The frontend captured one DOM-link ref; the quote *also* names
         // `tsk42` and `src/app.rs` inline (not rendered as links).
-        let provided = vec![CommentTarget {
-            kind: "wiki".into(),
-            id: "architecture".into(),
-        }];
+        let provided = vec![wiki_uri("architecture")];
         let created = store
             .create(
                 &stream,
@@ -849,27 +791,24 @@ mod tests {
             )
             .await
             .unwrap();
-        let refs = &created.comment.referenced_refs;
+        let refs = &created.comment.referenced;
         // FE-provided ref is preserved…
         assert!(
-            refs.iter()
-                .any(|r| r.kind == "wiki" && r.id == "architecture"),
+            refs.iter().any(|r| *r == wiki_uri("architecture")),
             "provided ref dropped: {refs:?}",
         );
         // …and the quote's inline mentions are unioned in as typed refs.
         assert!(
-            refs.iter()
-                .any(|r| r.kind == "work_item" && r.id == "oxplow:tsk42"),
+            refs.iter().any(|r| *r == work_item_uri("oxplow", "tsk42")),
             "task ref not extracted: {refs:?}",
         );
         assert!(
-            refs.iter()
-                .any(|r| r.kind == "file" && r.id == "src/app.rs"),
+            refs.iter().any(|r| *r == file_uri("src/app.rs")),
             "file ref not extracted: {refs:?}",
         );
         // And it round-trips from the DB, not just the create return value.
         let loaded = store.get(created.comment.id).await.unwrap().unwrap();
-        assert_eq!(&loaded.comment.referenced_refs, refs);
+        assert_eq!(&loaded.comment.referenced, refs);
     }
 
     #[tokio::test]
@@ -878,10 +817,7 @@ mod tests {
         let store = SqliteCommentStore::new(db, tasks_vocabulary());
         // FE already supplied tsk42; the quote names it again. It must
         // appear exactly once.
-        let provided = vec![CommentTarget {
-            kind: "work_item".into(),
-            id: "oxplow:tsk42".into(),
-        }];
+        let provided = vec![work_item_uri("oxplow", "tsk42")];
         let created = store
             .create(
                 &stream,
@@ -899,15 +835,11 @@ mod tests {
             .unwrap();
         let n = created
             .comment
-            .referenced_refs
+            .referenced
             .iter()
-            .filter(|r| r.kind == "work_item" && r.id == "oxplow:tsk42")
+            .filter(|r| **r == work_item_uri("oxplow", "tsk42"))
             .count();
-        assert_eq!(
-            n, 1,
-            "tsk42 duplicated: {:?}",
-            created.comment.referenced_refs
-        );
+        assert_eq!(n, 1, "tsk42 duplicated: {:?}", created.comment.referenced);
     }
 
     #[tokio::test]
@@ -1138,10 +1070,7 @@ mod tests {
             .create(
                 &stream,
                 Some(&thread),
-                &CommentTarget {
-                    kind: "file".into(),
-                    id: "src/x.rs".into(),
-                },
+                &file_uri("src/x.rs"),
                 "q2",
                 "{}",
                 &[],

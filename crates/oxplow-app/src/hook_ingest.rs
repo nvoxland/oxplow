@@ -1516,7 +1516,10 @@ mod tests {
         assert_eq!(compacted.len(), 2);
         let first = &compacted[0].envelope.payload;
         assert_eq!(first["trigger"], "auto");
-        assert!(first["turn"].as_str().unwrap().starts_with("turn:trn"));
+        assert!(first["turn"]
+            .as_str()
+            .unwrap()
+            .starts_with("oxplow:oxplow/turn?id=trn"));
         assert_eq!(first["summary"]["size"], 25);
         let bare = &compacted[1].envelope.payload;
         assert!(bare.get("trigger").is_none() && bare.get("summary").is_none());
@@ -2033,7 +2036,7 @@ mod tests {
             .transaction(|c| {
                 c.execute(
                     "INSERT INTO effort (work_item, thread_id, started_at)
-                       VALUES ('work_item:issues:ENG-1', 1, '2026-01-01T00:00:00.000000Z')",
+                       VALUES ('oxplow:oxplow/work_item?id=ENG-1&provider=issues', 1, '2026-01-01T00:00:00.000000Z')",
                     [],
                 )
                 .map_err(|e| DomainError::Storage(e.to_string()))?;
@@ -2183,7 +2186,7 @@ mod tests {
         assert_eq!(
             started,
             vec![
-                json!({"session": "s1", "thread": "thread:thr1", "harness": "claude", "resumed": false})
+                json!({"session": "s1", "thread": "oxplow:oxplow/thread?id=thr1", "harness": "claude", "resumed": false})
             ]
         );
         let resume = || async {

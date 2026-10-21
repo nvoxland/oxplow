@@ -54,7 +54,7 @@ pub struct SqlQueryResult {
 pub struct SourceCoverage {
     /// The model it feeds (`v_acme_pull_request`).
     pub model: String,
-    /// `collector:<owner>/<id>`.
+    /// `oxplow:oxplow/collector?collector=<owner>/<id>`.
     pub source: String,
     /// `current`, `stale` (past its next due run), `failed` (its last run
     /// errored), `disabled` or `never` (it hasn't run).
@@ -1164,9 +1164,9 @@ mod tests {
                    VALUES (1, 1, 'Thread', '2026-01-01', '2026-01-01');
                  INSERT INTO capability_provider (capability, provider) VALUES ('work_items', 'oxplow');
                  INSERT INTO work_item (ref, provider, title, body, state, native_state, thread_id, created_at, updated_at)
-                   VALUES ('work_item:oxplow:a', 'oxplow', 'Live item', '', 'in_progress', 'in_progress', 1, '2026-01-01', '2026-01-01');
+                   VALUES ('oxplow:oxplow/work_item?id=a&provider=oxplow', 'oxplow', 'Live item', '', 'in_progress', 'in_progress', 1, '2026-01-01', '2026-01-01');
                  INSERT INTO work_item (ref, provider, title, body, state, native_state, thread_id, created_at, updated_at, deleted_at)
-                   VALUES ('work_item:oxplow:b', 'oxplow', 'Deleted item', '', 'todo', 'ready', 1, '2026-01-01', '2026-01-01', '2026-01-02');",
+                   VALUES ('oxplow:oxplow/work_item?id=b&provider=oxplow', 'oxplow', 'Deleted item', '', 'todo', 'ready', 1, '2026-01-01', '2026-01-01', '2026-01-02');",
             )
         })
         .await
@@ -1194,8 +1194,8 @@ mod tests {
         .to_string();
         db.call(move |c| {
             c.execute_batch(
-                "INSERT INTO effort (id, work_item, thread_id, started_at, ended_at) VALUES (7, 'work_item:oxplow:tsk1', 1, '2026-01-01', '2026-01-02');
-                 INSERT INTO effort (id, work_item, thread_id, started_at) VALUES (8, 'work_item:oxplow:tsk1', 1, '2026-01-01');
+                "INSERT INTO effort (id, work_item, thread_id, started_at, ended_at) VALUES (7, 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 1, '2026-01-01', '2026-01-02');
+                 INSERT INTO effort (id, work_item, thread_id, started_at) VALUES (8, 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 1, '2026-01-01');
                  INSERT INTO metric_capture (id, stream_id, effort_id, producer, provenance, source, captured_at)
                    VALUES (40, 1, 7, 'coverage', 'observed', 'hook', '2026-01-01T00:00:00Z');",
             )?;
@@ -1457,7 +1457,7 @@ mod tests {
         // A refusal leaves the connection writable.
         db.call(|c| {
             c.execute(
-                "UPDATE work_item SET title = 'x' WHERE ref = 'work_item:oxplow:a'",
+                "UPDATE work_item SET title = 'x' WHERE ref = 'oxplow:oxplow/work_item?id=a&provider=oxplow'",
                 [],
             )
         })
@@ -1503,7 +1503,7 @@ mod tests {
         assert_eq!(left, 0);
         db.call(|c| {
             c.execute(
-                "UPDATE work_item SET title = 'w' WHERE ref = 'work_item:oxplow:a'",
+                "UPDATE work_item SET title = 'w' WHERE ref = 'oxplow:oxplow/work_item?id=a&provider=oxplow'",
                 [],
             )
         })
@@ -1525,7 +1525,12 @@ mod tests {
         assert_eq!(out.columns, vec!["ref", "title", "state", "thread_id"]);
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
-            json!([["work_item:oxplow:a", "Live item", "in_progress", 1]])
+            json!([[
+                "oxplow:oxplow/work_item?id=a&provider=oxplow",
+                "Live item",
+                "in_progress",
+                1
+            ]])
         );
         assert!(!out.truncated);
     }
@@ -1619,7 +1624,7 @@ mod tests {
         // query_only was reset.
         db.call(|c| {
             c.execute(
-                "UPDATE work_item SET title = 'renamed' WHERE ref = 'work_item:oxplow:a'",
+                "UPDATE work_item SET title = 'renamed' WHERE ref = 'oxplow:oxplow/work_item?id=a&provider=oxplow'",
                 [],
             )
         })

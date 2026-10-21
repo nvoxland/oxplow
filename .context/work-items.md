@@ -23,8 +23,8 @@ publish no model of their own — `v_task`, `v_task_link` and
 `native`. The views show **the active work list's items only**: one
 list at a time, whichever implementation it is, and nothing with none.
 
-`v_work_item` (table `work_item`, V115) holds the items by ref,
-`work_item:<provider>:<id>`: `title`, `body`, a canonical `state`
+`v_work_item` (table `work_item`, V115) holds the items by URI,
+`oxplow:oxplow/work_item?id=<id>&provider=<provider>`: `title`, `body`, a canonical `state`
 (`todo`, `in_progress`, `blocked`, `done`, `canceled`), the list's own
 `native_state` and `native` JSON, `parent_ref` (NULL when the parent is
 deleted: a deleted item isn't a live one, so the model's parent
@@ -32,10 +32,10 @@ relationship holds; tsk572), and (V17) `thread_id` — the list it's on, a
 thread's or the backlog (NULL) — `rank` on that list and `closed_at`.
 `v_work_item_link` is its links (`to_ref`, its `to_kind`, `link_type`):
 to another item of the list (`blocks`, `discovered_from`, `relates_to`,
-`duplicates`, `supersedes`, `replies_to`), or `about` any ref — what the
-item is about (`collector:triage/hot`, `effort:eff12`). A link's target
-needn't resolve; it may name something deleted or an extension's kind
-since uninstalled (resources.md "Using refs"),
+`duplicates`, `supersedes`, `replies_to`), or `about` any URI — what the
+item is about (`oxplow:oxplow/collector?collector=triage/hot`, `oxplow:oxplow/effort?id=eff12`). A link's target
+needn't resolve; it may name something deleted or an extension's resource
+since uninstalled (resources.md "Using URIs"),
 `v_work_item_comment` its comments. Core reads work items only through
 these: a thread's items (`v_work_item`), a work item's ref summary
 (`ref_resolver`), a `[[…]]` link's check (`link_check`) and search
@@ -96,7 +96,7 @@ the crate's) when services are built and at every `capabilities::refresh`,
 and unregisters it when nothing declares it — the task data stays, and
 nothing reaches it. A built-in whose items' refs carry a provider id
 (`BuiltIn.provider`: `oxplow:tasks` is `oxplow`, as every
-`work_item:oxplow:tsk<n>` says) is declared under that id and no other;
+`oxplow:oxplow/work_item?id=tsk<n>&provider=oxplow` says) is declared under that id and no other;
 `implementations.rs` refuses another, which would register a list that
 refuses its own items.
 
@@ -112,7 +112,7 @@ boot repair. A list writes no page refs of its own.
 The desktop reads **only the interface**, whichever list is active —
 never oxplow's task tables, ids or refs; a guard test
 (`apps/desktop/src/workItemInterface.guard.test.ts`) fails on a `v_task`
-name, a built `work_item:oxplow:` ref or `tsk` id parsing in desktop code.
+name, a built `oxplow/work_item` URI or `tsk` id parsing in desktop code.
 
 `apps/desktop/src/workItems.ts` is the one read and write path:
 
@@ -156,11 +156,10 @@ changes. With **none** active every read is empty and the screens show
 their empty states.
 
 **One page for every item** (`pages/WorkItemPage.tsx`, routed from any
-`work_item:<provider>:<id>` tab, payload `ref`): title and body edited
+`oxplow/work_item` tab, payload `ref`): title and body edited
 in place, the rail's state pill and declared fields, activity (its
-efforts), backlinks and outbound (`canonicalIdForTarget` maps the ref to
-the graph's `<provider>:<id>`), comments targeting `work_item` /
-`<provider>:<id>`, and the feature-gated actions above. The item's own
+efforts), backlinks and outbound (the graph is keyed on the item's URI), comments targeting
+the item's URI, and the feature-gated actions above. The item's own
 list's extension may add its state view (`work_item.detail.state`,
 `Replaceable`), beside the state pill — never instead of it, so an item
 can always move. **Custom views** need no provider: any extension may
@@ -171,8 +170,8 @@ interface commands, so it works with whichever list is active; the person
 picks whose shows (`replacements`, Settings → Integrations).
 [extensions.md](./extensions.md) "Replacements" has the contracts. The `work_item.detail.body` / `.sidebar` slots get
 `{ ref }`. Link…'s link type is free text (default `relates_to`): the
-provider names its own types, and `about` fits any ref. Its target is
-**any ref** (`work_item:…`, `effort:eff12`, `collector:x/y`); a link row
+provider names its own types, and `about` fits any URI. Its target is
+**any URI** (a work item's, `oxplow:oxplow/effort?id=eff12`, `oxplow:oxplow/collector?collector=x/y`); a link row
 in Outbound has **Unlink** on its right-click menu (`oxplow.work_item.unlink`,
 the link's input, undoable like Link). Link rows render through the
 generic ref → page mapping (`useBacklinks.ts` `openFor` → `openRef`): a
@@ -182,7 +181,7 @@ link** — its raw text, muted, tooltip "nothing resolves this ref; its
 extension may be gone" — that still unlinks. `BacklinkEdge.resolved` (the
 IPC's `ref_resolver::resolve_ref`) says which.
 
-The **Board** (`page:board`, `components/Board/WorkBoard.tsx`) shows
+The **Board** (the `board` page, `components/Board/WorkBoard.tsx`) shows
 items as cards in one column per canonical state. Drag a card to a
 column, or right-click → Move To, to transition it through
 `personCommands` (one person path: its confirmation and its error
@@ -197,9 +196,9 @@ list's editable fields and — with `hierarchy` — a parent.
 The agent reads work items through the interface too, with no tool of
 its own: `oxplow_query_sql` over `v_work_item` for a list in order (`WHERE
 thread_id = … ORDER BY rank IS NULL, rank, created_at`), `oxplow_read` on a
-`work_item:` ref for one item with its `links` and `comments`, and the
+work item's URI for one item with its `links` and `comments`, and the
 foundation lens `oxplow-foundation/work-next` (the tool `oxplow_work_next`,
-param `thread: "thread:thr3"`) for what to pick up next (an epic with its ready
+param `thread: "oxplow:oxplow/thread?id=thr3"`) for what to pick up next (an epic with its ready
 descendants, or every ready non-epic item; open `blocks` links hold an
 item). None of them belongs to an implementation, so the tool list never
 changes with a switch; with none they read empty. A source
@@ -362,7 +361,7 @@ available falls to `none` (the work list is optional), listed with
 registry's `active()` resolves from the config as it is now, so a
 person's choice applies to the very next `create`. **Every verb goes to
 the active work list**, never another: a ref of another list's item is
-refused (`` `work_item:issues:ENG-12` is issues's, which isn't the active
+refused (`` `oxplow:oxplow/work_item?id=ENG-12&provider=issues` is issues's, which isn't the active
 work list (`oxplow`) ``), as it isn't visible either.
 
 **None is a sink** (`work_items::none_provider`, registered by core
@@ -378,7 +377,7 @@ like (`WorkItemsProvider::id_pattern`, a regex matched whole: oxplow's
 tasks `tsk\d+`, an external one its `providers:` entry's `id_pattern`).
 A work-item field (`ref`, `parent_ref`, `target`, `work_item`, and
 `reorder` / `move`'s refs) holding a loose id that matches the active
-list's is that list's item — `tsk12` is `work_item:oxplow:tsk12` while
+list's is that list's item — `tsk12` is `oxplow:oxplow/work_item?id=tsk12&provider=oxplow` while
 oxplow's tasks are active (`commands/work_item.rs` `with_loose_refs`,
 before routing, over `WorkItemsRegistry::loose_ref`, which compiles each
 list's pattern once; also `oxplow.effort.link` / `oxplow.effort.open`).

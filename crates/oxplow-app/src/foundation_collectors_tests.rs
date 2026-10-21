@@ -32,14 +32,14 @@ fn report_over(key: &str, files: HashMap<String, String>) -> Vec<oxplow_script::
 }
 
 /// Run a foundation idiom collector and return its repo total — the sum of its
-/// per-file facts — asserting each is a `file:<path>` fact on its path.
+/// per-file facts — asserting each is a `oxplow:oxplow/file?path=<path>` fact on its path.
 fn run_over(key: &str, files: HashMap<String, String>) -> f64 {
     let facts = report_over(key, files);
     for f in &facts {
         let path = f.path.as_deref().unwrap_or_default();
         assert_eq!(
             f.subject.as_deref(),
-            Some(format!("file:{path}").as_str()),
+            Some(oxplow_domain::uri::build::file_uri(path).as_str()),
             "{key}: a per-file fact"
         );
     }
@@ -437,7 +437,10 @@ fn duplicate_lines_restates_both_sides_of_every_duplicate_block() {
                     (
                         "oxplow.duplicate_lines".to_string(),
                         b.line_count as f64,
-                        Some(format!("block:{path}:{start}-{end}")),
+                        Some(oxplow_domain::uri::build::block_uri(
+                            &path,
+                            &format!("{start}-{end}"),
+                        )),
                         Some(start as i64),
                     )
                 })
@@ -536,7 +539,7 @@ pub(crate) async fn seed_test_runs(
             .cases
             .iter()
             .map(|(name, status)| oxplow_db::NewFact {
-                subject: Some(format!("test:mod::{name}")),
+                subject: Some(oxplow_domain::uri::build::test_uri("mod", name)),
                 dims_json: Some(format!(r#"{{"oxplow.status":"{status}"}}"#)),
                 ..oxplow_db::NewFact::new(case.id, 1.0)
             })
@@ -652,7 +655,7 @@ fn outcome_over(rows: &[(i64, i64, i64, i64, Option<&str>)]) -> Vec<(String, f64
         .map(|(run, failed, cases, at_ms, case)| {
             serde_json::json!({
                 "run": run, "failed": failed, "cases": cases, "at_ms": at_ms,
-                "case": case, "effort": "effort:eff1"
+                "case": case, "effort": "oxplow:oxplow/effort?id=eff1"
             })
         })
         .collect();
@@ -665,7 +668,7 @@ fn outcome_over(rows: &[(i64, i64, i64, i64, Option<&str>)]) -> Vec<(String, f64
     .expect("script runs")
     .into_iter()
     .map(|f| {
-        assert_eq!(f.subject.as_deref(), Some("effort:eff1"));
+        assert_eq!(f.subject.as_deref(), Some("oxplow:oxplow/effort?id=eff1"));
         assert_eq!(f.den, Some(1.0), "non-additive, denominator 1");
         assert_eq!(f.num, Some(f.value));
         let stat = f
@@ -713,8 +716,8 @@ fn red_then_green_closes_clean_but_went_red() {
     want.push(time_to_green(300.0));
     assert_eq!(
         outcome_over(&[
-            (1, 2, 2, 100, Some("test:mod::a")),
-            (1, 2, 2, 100, Some("test:mod::b")),
+            (1, 2, 2, 100, Some("oxplow:oxplow/test?class=mod&name=a")),
+            (1, 2, 2, 100, Some("oxplow:oxplow/test?class=mod&name=b")),
             (2, 0, 2, 400, None),
         ]),
         want
@@ -725,15 +728,15 @@ fn red_then_green_closes_clean_but_went_red() {
 fn the_same_test_red_twice_is_one_distinct_test() {
     assert_eq!(
         outcome_over(&[
-            (1, 1, 1, 100, Some("test:mod::a")),
-            (2, 1, 1, 200, Some("test:mod::a")),
+            (1, 1, 1, 100, Some("oxplow:oxplow/test?class=mod&name=a")),
+            (2, 1, 1, 200, Some("oxplow:oxplow/test?class=mod&name=a")),
         ]),
         outcome([1.0, 1.0, 1.0, 2.0])
     );
     assert_eq!(
         outcome_over(&[
-            (1, 1, 1, 100, Some("test:mod::a")),
-            (2, 1, 1, 200, Some("test:mod::b")),
+            (1, 1, 1, 100, Some("oxplow:oxplow/test?class=mod&name=a")),
+            (2, 1, 1, 200, Some("oxplow:oxplow/test?class=mod&name=b")),
         ]),
         outcome([1.0, 1.0, 2.0, 2.0])
     );
@@ -747,7 +750,10 @@ fn asserted_failures_have_no_identity_so_distinct_falls_back_to_the_peak() {
         outcome([3.0, 3.0, 3.0, 1.0])
     );
     // One known and one anonymous in a run is two, not one.
-    let want = outcome_over(&[(1, 2, 1, 100, Some("test:mod::a")), (2, 0, 1, 200, None)]);
+    let want = outcome_over(&[
+        (1, 2, 1, 100, Some("oxplow:oxplow/test?class=mod&name=a")),
+        (2, 0, 1, 200, None),
+    ]);
     assert_eq!(
         want[1].1, 1.0,
         "a report that lists its failures needs no fallback"
@@ -760,7 +766,10 @@ fn a_run_with_no_case_rows_still_counts() {
     let mut want = outcome([0.0, 1.0, 1.0, 1.0]);
     want.push(time_to_green(5.0));
     assert_eq!(
-        outcome_over(&[(1, 1, 2, 100, Some("test:mod::a")), (2, 0, 0, 105, None)]),
+        outcome_over(&[
+            (1, 1, 2, 100, Some("oxplow:oxplow/test?class=mod&name=a")),
+            (2, 0, 0, 105, None)
+        ]),
         want
     );
 }
@@ -773,10 +782,10 @@ fn time_to_green_is_the_first_red_to_the_first_green_after_it() {
     assert_eq!(
         outcome_over(&[
             (1, 0, 1, 0, None),
-            (2, 1, 1, 100, Some("test:mod::a")),
-            (3, 1, 1, 250, Some("test:mod::a")),
+            (2, 1, 1, 100, Some("oxplow:oxplow/test?class=mod&name=a")),
+            (3, 1, 1, 250, Some("oxplow:oxplow/test?class=mod&name=a")),
             (4, 0, 1, 400, None),
-            (5, 1, 1, 500, Some("test:mod::b")),
+            (5, 1, 1, 500, Some("oxplow:oxplow/test?class=mod&name=b")),
         ]),
         want
     );
@@ -797,8 +806,8 @@ fn time_to_green_needs_a_red_then_a_green() {
     );
     assert_eq!(
         only_outcome(&[
-            (1, 1, 1, 5, Some("test:mod::a")),
-            (2, 1, 1, 9, Some("test:mod::a"))
+            (1, 1, 1, 5, Some("oxplow:oxplow/test?class=mod&name=a")),
+            (2, 1, 1, 9, Some("oxplow:oxplow/test?class=mod&name=a"))
         ]),
         0,
         "never recovered"

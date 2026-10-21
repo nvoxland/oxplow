@@ -15,13 +15,13 @@ mock.module("../api.js", () => ({
     personSpec("oxplow.handoff.send", {
       label: "Hand Off Work…",
       group: "Threads",
-      about: "thread",
+      about: "oxplow/thread",
       input: { from_thread: "{{ref}}" },
     }),
     personSpec("tracker.item.estimate", {
       label: "Estimate",
       group: "Tracker",
-      about: "work_item",
+      about: "oxplow/work_item",
     }),
   ],
 }));
@@ -79,7 +79,7 @@ test("a thread's menu offers the commands about that thread", async () => {
   fireEvent.click(item);
   await waitFor(() =>
     expect(ran).toEqual([
-      ["oxplow.handoff.send", { from_thread: "thread:thr2" }],
+      ["oxplow.handoff.send", { from_thread: "oxplow:oxplow/thread?id=thr2" }],
     ]),
   );
 });

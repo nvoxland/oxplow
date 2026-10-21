@@ -37,10 +37,10 @@ pub struct ReportErrorInput {
     /// The process's exit code.
     #[serde(default)]
     pub exit_code: Option<i64>,
-    /// The thread it was started from (`thread:thr3`); absent, none.
+    /// The thread it was started from (`oxplow:oxplow/thread?id=thr3`); absent, none.
     #[serde(default)]
     pub thread: Option<String>,
-    /// The stream the app was showing (`stream:str1`), for an error from no
+    /// The stream the app was showing (`oxplow:oxplow/stream?id=str1`), for an error from no
     /// thread: its agent reads the output. A thread names its own stream,
     /// so not with `thread` (tsk1079).
     #[serde(default)]
@@ -68,7 +68,7 @@ fn report(ctx: &TxCtx<'_>, input: ReportErrorInput) -> Result<HandlerOutput, Com
     let thread = input
         .thread
         .as_deref()
-        .map(|raw| ref_id::<ThreadId>(raw, "thread", "/thread"))
+        .map(|raw| ref_id::<ThreadId>(raw, oxplow_domain::uri::resources::THREAD, "/thread"))
         .transpose()?;
     let stream = match input.stream.as_deref() {
         Some(_) if thread.is_some() => {
@@ -77,7 +77,11 @@ fn report(ctx: &TxCtx<'_>, input: ReportErrorInput) -> Result<HandlerOutput, Com
                 message: "a thread names its own stream: give one or the other".into(),
             });
         }
-        Some(raw) => Some(ref_id::<StreamId>(raw, "stream", "/stream")?),
+        Some(raw) => Some(ref_id::<StreamId>(
+            raw,
+            oxplow_domain::uri::resources::STREAM,
+            "/stream",
+        )?),
         None => None,
     };
     let mut body = Map::new();

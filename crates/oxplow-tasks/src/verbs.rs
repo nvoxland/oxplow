@@ -53,7 +53,7 @@ pub fn task_ref(item_ref: &str, field: &str) -> Result<TaskId, CommandError> {
     task_of_work_item_ref(item_ref).ok_or_else(|| {
         invalid_at(
             field,
-            format!("`{item_ref}` names no oxplow task (work_item:oxplow:tsk<n>)"),
+            format!("`{item_ref}` names no oxplow task (oxplow:oxplow/work_item?id=tsk<n>&provider=oxplow)"),
         )
     })
 }
@@ -324,12 +324,12 @@ fn link_target_tx(
     conn: &rusqlite::Connection,
     target: &str,
 ) -> Result<Option<TaskId>, CommandError> {
-    match oxplow_domain::uri::build::type_of(target) {
+    match oxplow_domain::uri::build::resource_of(target) {
         None => Err(invalid_at(
             "/target",
-            format!("`{target}` isn't a ref (<kind>:<id>)"),
+            format!("`{target}` isn't a URI (oxplow:<extension>/<resource>?…)"),
         )),
-        Some(kind) if kind == oxplow_domain::uri::types::WORK_ITEM => {
+        Some(kind) if kind == oxplow_domain::uri::resources::WORK_ITEM => {
             let to = task_ref(target, "/target")?;
             live_task_tx(conn, to, target, "/target")?;
             Ok(Some(to))

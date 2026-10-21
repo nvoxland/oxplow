@@ -18,7 +18,7 @@ const now = new Date(2026, 9, 9, 15, 0);
 
 const entry = (over: Partial<SourceCoverage> = {}): SourceCoverage => ({
   model: "v_my_gh_pull_request",
-  source: "collector:my-gh/gh",
+  source: "oxplow:oxplow/collector?collector=my-gh/gh",
   status: "current",
   at: at(12),
   error: null,
@@ -61,8 +61,8 @@ describe("completeness", () => {
       result({
         coverage: [
           entry(),
-          entry({ model: "v_my_gh_issue", source: "collector:my-gh/issues", status: "never", at: null }),
-          entry({ model: "v_other_thing", source: "collector:other/thing", status: "failed", error: null }),
+          entry({ model: "v_my_gh_issue", source: "oxplow:oxplow/collector?collector=my-gh/issues", status: "never", at: null }),
+          entry({ model: "v_other_thing", source: "oxplow:oxplow/collector?collector=other/thing", status: "failed", error: null }),
         ],
       }),
       now,

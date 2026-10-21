@@ -11,6 +11,7 @@ import type { SnapshotBacklinkEntry } from "../tabs/BacklinksList.js";
 import { listFileSnapshotsForPath } from "../api.js";
 import { logUi } from "../logger.js";
 import { formatShortDateTime } from "../components/format.js";
+import { fileUri } from "../uri/uri.js";
 
 export interface FilePageProps extends ComponentProps<typeof EditorPane> {
   /** True when the file's draft differs from saved content. Drives the
@@ -119,7 +120,7 @@ export function FilePage({ dirty, ...editorProps }: FilePageProps) {
       backlinks={backlinks}
       outbound={outbound}
       snapshots={snapshots}
-      commentsNav={path ? <CommentNavigator targetKind="file" targetId={path} /> : undefined}
+      commentsNav={path ? <CommentNavigator target={fileUri(path)} /> : undefined}
     >
       <EditorPane {...editorProps} />
     </Page>

@@ -168,9 +168,9 @@ pub fn scaffold_with(
         )));
     }
     if let Some(o) = origin {
-        oxplow_domain::uri::grammar::Uri::parse(o).map_err(|e| {
+        oxplow_domain::uri::OxplowUri::parse(o).map_err(|e| {
             SdkError::Invalid(format!(
-                "--origin `{o}` is not a canonical ref (`effort:eff42`, `thread:thr3`): {}",
+                "--origin `{o}` is not a canonical ref (`oxplow:oxplow/effort?id=eff42`, `oxplow:oxplow/thread?id=thr3`): {}",
                 e.reason()
             ))
         })?;
@@ -216,9 +216,10 @@ pub fn scaffold_with(
     // An identifier from the name: a provider's or a policy's id.
     let provider_id = oxplow_domain::contribution::extension_namespace(name);
     // The intent example, and its fixture (what `extension test` runs).
-    // The refs the examples name, spelled by the grammar like every other.
-    let rb = |kind: &str, id: &str| oxplow_domain::uri::build::of(kind, id);
-    let work_item = rb("work_item", "oxplow:tsk1");
+    // The URIs the examples name, built like every other.
+    use oxplow_domain::uri::build::{keyed, work_item_uri};
+    use oxplow_domain::uri::resources as r;
+    let work_item = work_item_uri("oxplow", "tsk1");
     let (example_input, example_expect, fixture_expect) = match kind {
         Kind::Lens | Kind::Component | Kind::Page | Kind::Panel => (
             format!("{{ lens: {name}, params: {{ stream_id: 1 }} }}"),
@@ -231,9 +232,9 @@ pub fn scaffold_with(
         Kind::Policy => (
             format!(
                 "{{ implementation: {provider_id}, event: {{ type: thread.checkpoint, payload: {{ thread: \"{thread}\", turn: \"{turn}\", reason: turn_end, snapshot: \"{snapshot}\", changed: false, writing_tools: 0 }}, anchors: {{ thread_id: thr1, turn_id: 1 }} }} }}",
-                thread = rb("thread", "thr1"),
-                turn = rb("turn", "trn1"),
-                snapshot = rb("snapshot", "1"),
+                thread = keyed(r::THREAD, "thr1"),
+                turn = keyed(r::TURN, "trn1"),
+                snapshot = keyed(r::SNAPSHOT, "1"),
             ),
             "nothing to do: a checkpoint opens or closes no effort",
             Some("{ skip: $any }".to_string()),
@@ -245,8 +246,8 @@ pub fn scaffold_with(
         Kind::Collector => (
             format!(
                 "{{ collector: items, rows: [{{ ref: \"{}\", title: First, state: todo }}, {{ ref: \"{}\", title: Second, state: done }}] }}",
-                rb("work_item", "demo:1"),
-                rb("work_item", "demo:2"),
+                work_item_uri("demo", "1"),
+                work_item_uri("demo", "2"),
             ),
             "one item per work item that isn't done",
             Some("{ entities: { item: 1 } }".to_string()),
@@ -328,7 +329,7 @@ pub fn scaffold_with(
              \x20   version: 1\n\
              \x20   description: \"TODO: what these rows are.\"\n\
              \x20   columns:\n\
-             \x20     - {{ name: ref, type: TEXT, doc: \"The work item (work_item:<provider>:<id>).\" }}\n\
+             \x20     - {{ name: ref, type: TEXT, doc: \"The work item (oxplow:oxplow/work_item?id=<id>&provider=<provider>).\" }}\n\
              \x20     - {{ name: title, type: TEXT, doc: \"Its title.\" }}\n"
         )),
         Kind::Command => manifest.push_str(&format!(
@@ -343,13 +344,13 @@ pub fn scaffold_with(
              \x20     type: object\n\
              \x20     required: [ref]\n\
              \x20     properties:\n\
-             \x20       ref: {{ type: string, description: \"The work item (work_item:<provider>:<id>).\" }}\n\
+             \x20       ref: {{ type: string, description: \"The work item (oxplow:oxplow/work_item?id=<id>&provider=<provider>).\" }}\n\
              \x20     additionalProperties: false\n\
              \x20   entry: handlers/note.star\n\
              \x20   # Who may run it: a person, an agent, a lens (each child command checks its own too).\n\
              \x20   invokers: {{ human: true, agent: true, lens: true }}\n\
              \x20   # On a work item's page (Commands) and a row's right-click.\n\
-             \x20   ui: {{ label: Add Note, about: work_item, input: {{ ref: \"{{{{ref}}}}\" }} }}\n\
+             \x20   ui: {{ label: Add Note, about: oxplow/work_item, input: {{ ref: \"{{{{ref}}}}\" }} }}\n\
              \x20   examples:\n\
              \x20     - {{ name: happy, input: {{ ref: \"{work_item}\" }}, expect_commands: [oxplow.work_item.comment] }}\n"
         )),
@@ -668,12 +669,12 @@ def transform(x):
     thread = e["anchors"].get("thread_id")
     if to == "in_progress" and thread != None:
         return {"commands": [{"name": "oxplow.effort.open",
-                              "input": {"thread": uri.build("thread", thread), "work_item": item}}]}
+                              "input": {"thread": uri.build("oxplow/thread", id = thread), "work_item": item}}]}
     if to == "done" or to == "canceled":
         rows = scope("sql.read", {"sql": "SELECT id FROM v_effort WHERE work_item = :w AND ended_at IS NULL",
                                   "params": {"w": item}})
         return {"commands": [{"name": "oxplow.effort.close",
-                              "input": {"effort": uri.build("effort", "eff" + str(r["id"])), "reason": "switch"}}
+                              "input": {"effort": uri.build("oxplow/effort", id = "eff" + str(r["id"])), "reason": "switch"}}
                              for r in rows]}
     return {"skip": "a move that changes no effort"}
 "#
@@ -739,7 +740,7 @@ fn provider_starter(capability: &str) -> ProviderStarter {
             // A small tree beside the fixtures (`fixtures/tree`) stands in for a worktree.
             input: format!(
                 "{{ command: mark, input: {{ stream: '{}', worktree: fixtures/tree, trigger: manual, parent: null }} }}",
-                oxplow_domain::uri::build::of("stream", "str1")
+                oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::STREAM, "str1")
             ),
             expect: "a handle for the marked state",
             fixture: "{ handle: $any, unchanged: false, file_count: 1 }".to_string(),
@@ -851,8 +852,8 @@ fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
                     "properties": { "handle": str_prop, "path": str_prop } }),
         ),
         ("knowledge", "write_page") => (
-            "Write a page, creating it or replacing its body: { page } (`wiki:<slug>`), and answer its \
-             `knowledge.page.recorded` event with its `refs` (`file:…` / `wiki:…`)."
+            "Write a page, creating it or replacing its body: { page } (`oxplow:oxplow/wiki?slug=<slug>`), and answer its \
+             `knowledge.page.recorded` event with its `refs` (`oxplow:oxplow/file?path=…` / `oxplow:oxplow/wiki?slug=…`)."
                 .into(),
             json!({ "type": "object", "required": ["slug", "body", "verified_refs", "removed_refs"],
                     "additionalProperties": false,
@@ -1661,7 +1662,13 @@ mod tests {
     #[tokio::test]
     async fn new_lens_then_check_is_clean() {
         let dir = tempfile::tempdir().unwrap();
-        let made = scaffold(dir.path(), Kind::Lens, "demo", Some("effort:eff42")).unwrap();
+        let made = scaffold(
+            dir.path(),
+            Kind::Lens,
+            "demo",
+            Some("oxplow:oxplow/effort?id=eff42"),
+        )
+        .unwrap();
         assert_eq!(made.dir, ".oxplow/extensions/demo");
         assert_eq!(
             made.files,
@@ -1688,7 +1695,7 @@ mod tests {
         assert_eq!(report.extension.manifest_version, 2);
         assert_eq!(
             report.extension.intent.as_ref().unwrap().origin.as_deref(),
-            Some("effort:eff42")
+            Some("oxplow:oxplow/effort?id=eff42")
         );
         assert_eq!(report.extension.lenses.len(), 1);
         assert_eq!(report.extension.lenses[0].title, "Demo");
@@ -1812,7 +1819,7 @@ mod tests {
         let text = render_findings(&report, Format::Text);
         assert!(
             text.contains(
-                "order effect:ord/second → level 1, after effect:ord/first, consumer:change.analyze\n"
+                "order oxplow:oxplow/effect?effect=ord/second → level 1, after oxplow:oxplow/effect?effect=ord/first, oxplow:oxplow/consumer?name=change.analyze\n"
             ),
             "{text}"
         );

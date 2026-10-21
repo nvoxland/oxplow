@@ -57,7 +57,7 @@ empty: Nothing is blocked.
 - A param named `stream_id` or `thread_id` is filled in with the stream
   you're on and its selected thread, so "my stream" needs no hardcoded
   id. Type a value to look at another one.
-- `link.kind` is `page` (any oxplow page by its ref, such as a work
+- `link.kind` is `page` (any oxplow page by its URI, such as a work
   item's), `file` (add `line: <column>` to open at a line), `wiki`,
   `effort-diff`, `commit`, `metric`, `diff-at` or `compare`.
   - `diff-at` opens a file's diff within a change:
@@ -310,7 +310,7 @@ action with `group:` is a button in that group's heading. `icon` names a
 column whose value picks an icon: `ready`, `todo`, `in_progress`,
 `blocked`, `done`, `canceled`, `archived`, `epic`, `task`, `wiki`,
 `file`, `folder`, `commit`, `diff`, `lens`, `metric`, `dashboard`,
-`comment`, or a ref-kind icon such as `bug`. `tone` names a column whose
+`comment`, or a resource icon such as `bug`. `tone` names a column whose
 value colours the cell: `accent`, `success`, `warning`, `danger` or
 `muted`. Values outside those lists are ignored.
 
@@ -465,7 +465,7 @@ oxplow.connect().then((component) => {
 // Elsewhere, with `component` in hand:
 //   await component.query("open-tasks", {})
 //   await component.invoke("oxplow.work_item.transition", { ref, to: "done" })
-//   await component.navigate("work_item:oxplow:tsk42")   // oxplow pages only
+//   await component.navigate("oxplow:oxplow/work_item?id=tsk42&provider=oxplow")   // oxplow pages only
 ```
 
 `oxplow extension new component <name>` writes all of this for you.

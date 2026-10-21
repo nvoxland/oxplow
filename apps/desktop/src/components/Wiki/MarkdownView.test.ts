@@ -13,6 +13,7 @@ import {
   wikiPageRef,
 } from "../../tabs/pageRefs.js";
 import { WORKING } from "../../revision.js";
+import { commitUri, dirUri, fileLinesUri, fileUri, workItemUri } from "../../uri/uri.js";
 
 // parseMarkdownLink is shared by WikiPageTab and TaskDetail. WikiPageTab needs
 // to distinguish wiki-internal links (`./foo`, `bar.md`) from external
@@ -50,23 +51,23 @@ test("parseMarkdownLink: internal that resolves to empty slug", () => {
 });
 
 test("parseMarkdownLink: file: scheme with plain path", () => {
-  expect(parseMarkdownLink("file:src/foo.ts")).toEqual({ kind: "file", path: "src/foo.ts", version: null });
+  expect(parseMarkdownLink("oxplow:oxplow/file?path=src/foo.ts")).toEqual({ kind: "file", path: "src/foo.ts", version: null });
 });
 
 test("parseMarkdownLink: file: scheme with line suffix", () => {
-  expect(parseMarkdownLink("file:src/foo.ts:42")).toEqual({ kind: "file", path: "src/foo.ts", line: 42, version: null });
+  expect(parseMarkdownLink(fileLinesUri("src/foo.ts", 42, 42))).toEqual({ kind: "file", path: "src/foo.ts", line: 42, version: null });
 });
 
 test("parseMarkdownLink: file: scheme with @disk version", () => {
-  expect(parseMarkdownLink("file:src/foo.ts@disk")).toEqual({
+  expect(parseMarkdownLink(fileUri("src/foo.ts"))).toEqual({
     kind: "file",
     path: "src/foo.ts",
-    version: "working",
+    version: null,
   });
 });
 
 test("parseMarkdownLink: file: scheme with @<sha> version", () => {
-  expect(parseMarkdownLink("file:src/foo.ts@abc1234")).toEqual({
+  expect(parseMarkdownLink(fileUri("src/foo.ts", "git:abc1234"))).toEqual({
     kind: "file",
     path: "src/foo.ts",
     version: "git:abc1234",
@@ -74,7 +75,7 @@ test("parseMarkdownLink: file: scheme with @<sha> version", () => {
 });
 
 test("parseMarkdownLink: file: scheme with @HEAD version + line", () => {
-  expect(parseMarkdownLink("file:src/foo.ts@HEAD:42")).toEqual({
+  expect(parseMarkdownLink(fileLinesUri("src/foo.ts", 42, 42, "git:HEAD"))).toEqual({
     kind: "file",
     path: "src/foo.ts",
     line: 42,
@@ -82,40 +83,40 @@ test("parseMarkdownLink: file: scheme with @HEAD version + line", () => {
   });
 });
 
-test("parseMarkdownLink: file: scheme with @local alias", () => {
-  expect(parseMarkdownLink("file:src/foo.ts@local")).toEqual({
+test("parseMarkdownLink: file: scheme without a rev is the working tree", () => {
+  expect(parseMarkdownLink("oxplow:oxplow/file?path=src/foo.ts")).toEqual({
     kind: "file",
     path: "src/foo.ts",
-    version: "working",
+    version: null,
   });
 });
 
 test("parseMarkdownLink: file: scheme with empty target", () => {
-  expect(parseMarkdownLink("file:")).toEqual({ kind: "empty" });
+  expect(parseMarkdownLink("oxplow:oxplow/file")).toEqual({ kind: "empty" });
 });
 
 test("preprocessWikilinks: rewrites file path target to file: link", () => {
   expect(preprocessWikilinks("see [[src/foo.ts]] for context"))
-    .toBe("see [src/foo.ts](file:src/foo.ts) for context");
+    .toBe(`see [src/foo.ts](${fileUri("src/foo.ts")}) for context`);
 });
 
 test("preprocessWikilinks: file path with line suffix", () => {
   expect(preprocessWikilinks("see [[src/foo.ts:88]]"))
-    .toBe("see [src/foo.ts:88](file:src/foo.ts:88)");
+    .toBe(`see [src/foo.ts:88](${fileLinesUri("src/foo.ts", 88, 88)})`);
 });
 
 test("preprocessWikilinks: file path with @version is preserved verbatim", () => {
-  // The version segment passes through to the file: URL; the click
-  // handler decodes it back into a Revision via parseMarkdownLink.
+  // The version becomes the file URI's `rev` (none for disk/local); the
+  // click handler decodes it back into a Revision via parseMarkdownLink.
   expect(preprocessWikilinks("see [[src/foo.ts@HEAD]]"))
-    .toBe("see [src/foo.ts@HEAD](file:src/foo.ts@HEAD)");
+    .toBe(`see [src/foo.ts@HEAD](${fileUri("src/foo.ts", "git:HEAD")})`);
   expect(preprocessWikilinks("see [[src/foo.ts@disk:42]]"))
-    .toBe("see [src/foo.ts@disk:42](file:src/foo.ts@disk:42)");
+    .toBe(`see [src/foo.ts@disk:42](${fileLinesUri("src/foo.ts", 42, 42)})`);
 });
 
 test("preprocessWikilinks: |display syntax", () => {
   expect(preprocessWikilinks("the [[src/foo.ts|foo helper]] does X"))
-    .toBe("the [foo helper](file:src/foo.ts) does X");
+    .toBe(`the [foo helper](${fileUri("src/foo.ts")}) does X`);
 });
 
 test("preprocessWikilinks: bare slug routes to wiki note", () => {
@@ -127,7 +128,7 @@ test("preprocessWikilinks: leaves wikilinks inside fenced code untouched", () =>
   const input = "Use this:\n```\n[[src/foo.ts]]\n```\nbut [[src/bar.ts]] is rewritten.";
   const out = preprocessWikilinks(input);
   expect(out).toContain("```\n[[src/foo.ts]]\n```");
-  expect(out).toContain("[src/bar.ts](file:src/bar.ts)");
+  expect(out).toContain(`[src/bar.ts](${fileUri("src/bar.ts")})`);
 });
 
 test("preprocessWikilinks: leaves wikilinks inside inline backticks untouched", () => {
@@ -137,7 +138,7 @@ test("preprocessWikilinks: leaves wikilinks inside inline backticks untouched", 
 
 test("preprocessWikilinks: handles multiple wikilinks on one line", () => {
   expect(preprocessWikilinks("[[src/a.ts]] and [[src/b.ts]] interact"))
-    .toBe("[src/a.ts](file:src/a.ts) and [src/b.ts](file:src/b.ts) interact");
+    .toBe(`[src/a.ts](${fileUri("src/a.ts")}) and [src/b.ts](${fileUri("src/b.ts")}) interact`);
 });
 
 test("preprocessWikilinks: a target with no extension and no slash is a slug", () => {
@@ -156,30 +157,30 @@ test("preprocessWikilinks: bare 7-char hex resolves to a commit link", () => {
   // The display text shrinks to the canonical short SHA so a 40-char raw
   // target doesn't blow up inline prose.
   expect(preprocessWikilinks("introduced in [[abc1234]]"))
-    .toBe("introduced in [abc1234](commit:abc1234)");
+    .toBe(`introduced in [abc1234](${commitUri("abc1234")})`);
 });
 
 test("preprocessWikilinks: full 40-char SHA renders short display, full target", () => {
   const sha = "0123456789abcdef0123456789abcdef01234567";
   expect(preprocessWikilinks(`see [[${sha}]]`))
-    .toBe(`see [0123456](commit:${sha})`);
+    .toBe(`see [0123456](${commitUri(sha)})`);
 });
 
 test("preprocessWikilinks: explicit git: prefix", () => {
   expect(preprocessWikilinks("[[git:deadbeef]]"))
-    .toBe("[deadbee](commit:deadbeef)");
+    .toBe(`[deadbee](${commitUri("deadbeef")})`);
 });
 
 test("preprocessWikilinks: |display label overrides short-sha shrinking", () => {
   expect(preprocessWikilinks("[[abc1234|the migration commit]]"))
-    .toBe("[the migration commit](commit:abc1234)");
+    .toBe(`[the migration commit](${commitUri("abc1234")})`);
 });
 
 test("preprocessWikilinks: SHA detection is case-insensitive and normalizes to lowercase", () => {
   // Display text + href both normalize to lowercase so two notes spelling
   // the same sha differently render identically and hit the same tab.
   expect(preprocessWikilinks("[[ABC1234]]"))
-    .toBe("[abc1234](commit:abc1234)");
+    .toBe(`[abc1234](${commitUri("abc1234")})`);
 });
 
 test("preprocessWikilinks: 6-char hex is too short to be a SHA — treated as slug", () => {
@@ -193,35 +194,35 @@ test("preprocessWikilinks: hex with non-hex chars is a slug", () => {
 });
 
 test("parseMarkdownLink: commit: scheme", () => {
-  expect(parseMarkdownLink("commit:abc1234")).toEqual({ kind: "commit", sha: "abc1234" });
+  expect(parseMarkdownLink("oxplow:oxplow/commit?sha=abc1234")).toEqual({ kind: "commit", sha: "abc1234" });
 });
 
 test("parseMarkdownLink: commit: with empty target", () => {
-  expect(parseMarkdownLink("commit:")).toEqual({ kind: "empty" });
+  expect(parseMarkdownLink("oxplow:oxplow/commit")).toEqual({ kind: "empty" });
 });
 
 test("parseMarkdownLink: dir: scheme strips trailing slash", () => {
-  expect(parseMarkdownLink("dir:src/components")).toEqual({ kind: "directory", path: "src/components" });
-  expect(parseMarkdownLink("dir:src/components/")).toEqual({ kind: "directory", path: "src/components" });
+  expect(parseMarkdownLink("oxplow:oxplow/dir?path=src/components")).toEqual({ kind: "directory", path: "src/components" });
+  expect(parseMarkdownLink("oxplow:oxplow/dir?path=src/components/")).toEqual({ kind: "directory", path: "src/components" });
 });
 
 test("parseMarkdownLink: dir: with empty target", () => {
-  expect(parseMarkdownLink("dir:")).toEqual({ kind: "empty" });
+  expect(parseMarkdownLink("oxplow:oxplow/dir")).toEqual({ kind: "empty" });
 });
 
 test("preprocessWikilinks: dir: prefix rewrites to dir: href", () => {
   expect(preprocessWikilinks("see [[dir:src/components]] for the buttons"))
-    .toBe("see [src/components](dir:src/components) for the buttons");
+    .toBe(`see [src/components](${dirUri("src/components")}) for the buttons`);
 });
 
 test("preprocessWikilinks: dir: prefix tolerates trailing slash on the path", () => {
   expect(preprocessWikilinks("[[dir:src/components/]]"))
-    .toBe("[src/components](dir:src/components)");
+    .toBe(`[src/components](${dirUri("src/components")})`);
 });
 
 test("preprocessWikilinks: dir: prefix with custom display label", () => {
   expect(preprocessWikilinks("[[dir:src/components|the components folder]]"))
-    .toBe("[the components folder](dir:src/components)");
+    .toBe(`[the components folder](${dirUri("src/components")})`);
 });
 
 // postprocessWikilinks is the inverse used on RichTextField → disk.
@@ -229,29 +230,29 @@ test("preprocessWikilinks: dir: prefix with custom display label", () => {
 // into `[[ ]]` wikilink form so wiki pages keep their authored shape.
 
 test("postprocessWikilinks: file link with matching label collapses to bare wikilink", () => {
-  expect(postprocessWikilinks("see [src/foo.ts](file:src/foo.ts) here"))
+  expect(postprocessWikilinks(`see [src/foo.ts](${fileUri("src/foo.ts")}) here`))
     .toBe("see [[src/foo.ts]] here");
 });
 
 test("postprocessWikilinks: file link with distinct label preserves the label", () => {
-  expect(postprocessWikilinks("see [the helper](file:src/foo.ts) here"))
+  expect(postprocessWikilinks(`see [the helper](${fileUri("src/foo.ts")}) here`))
     .toBe("see [[src/foo.ts|the helper]] here");
 });
 
 test("postprocessWikilinks: dir link", () => {
-  expect(postprocessWikilinks("[src/components](dir:src/components)"))
+  expect(postprocessWikilinks(`[src/components](${dirUri("src/components")})`))
     .toBe("[[dir:src/components]]");
-  expect(postprocessWikilinks("[the components folder](dir:src/components)"))
+  expect(postprocessWikilinks(`[the components folder](${dirUri("src/components")})`))
     .toBe("[[dir:src/components|the components folder]]");
 });
 
 test("postprocessWikilinks: gitcommit link with short-sha label drops the label", () => {
-  expect(postprocessWikilinks("see [abc1234](commit:abc1234deadbeef) here"))
+  expect(postprocessWikilinks(`see [abc1234](${commitUri("abc1234deadbeef")}) here`))
     .toBe("see [[git:abc1234deadbeef]] here");
 });
 
 test("postprocessWikilinks: gitcommit link with custom label preserves it", () => {
-  expect(postprocessWikilinks("see [the fix](commit:abc1234deadbeef) here"))
+  expect(postprocessWikilinks(`see [the fix](${commitUri("abc1234deadbeef")}) here`))
     .toBe("see [[git:abc1234deadbeef|the fix]] here");
 });
 
@@ -261,14 +262,14 @@ test("postprocessWikilinks: leaves plain http/https/internal-slug links alone", 
 });
 
 test("postprocessWikilinks: skips image links and inline code", () => {
-  const src = "![alt](file:foo.png) and `[label](file:foo.ts)` literal";
+  const src = `![alt](${fileUri("foo.png")}) and \`[label](${fileUri("foo.ts")})\` literal`;
   expect(postprocessWikilinks(src)).toBe(src);
 });
 
 test("postprocessWikilinks: skips fenced code blocks", () => {
-  const src = "before\n```\n[label](file:foo.ts)\n```\nafter [label](file:foo.ts)";
+  const src = `before\n\`\`\`\n[label](${fileUri("foo.ts")})\n\`\`\`\nafter [label](${fileUri("foo.ts")})`;
   expect(postprocessWikilinks(src))
-    .toBe("before\n```\n[label](file:foo.ts)\n```\nafter [[foo.ts|label]]");
+    .toBe(`before\n\`\`\`\n[label](${fileUri("foo.ts")})\n\`\`\`\nafter [[foo.ts|label]]`);
 });
 
 // markdown-it's default validateLink rejects file:/data: URLs, so when
@@ -301,9 +302,9 @@ test("postprocessWikilinks ∘ preprocessWikilinks is identity for supported for
     "see [[dir:src/components|the folder]] for buttons",
     "see [[tsk42]] for the work",
     "see [[tsk42|fix the parser]] for the work",
-    "see [[work_item:issues:ENG-1]] for theirs",
+    `see [[${workItemUri("issues", "ENG-1")}]] for theirs`,
   ];
-  const ids = (id: string) => (/^tsk\d+$/.test(id) ? `work_item:oxplow:${id}` : null);
+  const ids = (id: string) => (/^tsk\d+$/.test(id) ? workItemUri("oxplow", id) : null);
   for (const sample of samples) {
     expect(postprocessWikilinks(preprocessWikilinks(sample, ids))).toBe(sample);
   }
@@ -311,24 +312,25 @@ test("postprocessWikilinks ∘ preprocessWikilinks is identity for supported for
 
 // Work item wikilinks: a bare id of the active list's (`[[tsk42]]` with
 // oxplow's tasks, by its declared id pattern) or a full ref → the item's
-// `work_item:<provider>:<id>` href; the renderer swaps the
+// `oxplow:oxplow/work_item?id=<id>&provider=<provider>` href; the renderer swaps the
 // `tsk<id>` token for the task title at display time. The backend ref
 // extractor (refs.rs) already recognizes the same form for backlinks.
 
-const oxplowIds = (id: string) => (/^tsk\d+$/.test(id) ? `work_item:oxplow:${id}` : null);
+const oxplowIds = (id: string) => (/^tsk\d+$/.test(id) ? workItemUri("oxplow", id) : null);
 
 test("preprocessWikilinks: an id of the active list rewrites to its work_item href", () => {
   expect(preprocessWikilinks("see [[tsk42]] for context", oxplowIds))
-    .toBe("see [tsk42](work_item:oxplow:tsk42) for context");
+    .toBe(`see [tsk42](${workItemUri("oxplow", "tsk42")}) for context`);
 });
 
 test("preprocessWikilinks: a work item with a custom display label", () => {
   expect(preprocessWikilinks("[[tsk42|fix the parser]]", oxplowIds))
-    .toBe("[fix the parser](work_item:oxplow:tsk42)");
+    .toBe(`[fix the parser](${workItemUri("oxplow", "tsk42")})`);
 });
 
 test("preprocessWikilinks: a full work item ref links whichever list", () => {
-  expect(preprocessWikilinks("[[work_item:issues:ENG-1]]")).toBe("[work_item:issues:ENG-1](work_item:issues:ENG-1)");
+  const eng1 = workItemUri("issues", "ENG-1");
+  expect(preprocessWikilinks(`[[${eng1}]]`)).toBe(`[${eng1}](${eng1})`);
 });
 
 test("preprocessWikilinks: what isn't the active list's id is a wiki slug", () => {
@@ -339,21 +341,21 @@ test("preprocessWikilinks: what isn't the active list's id is a wiki slug", () =
 });
 
 test("parseMarkdownLink: work_item: scheme, any list", () => {
-  expect(parseMarkdownLink("work_item:oxplow:tsk42")).toEqual({ kind: "work_item", ref: "work_item:oxplow:tsk42" });
-  expect(parseMarkdownLink("work_item:issues:ENG-1")).toEqual({ kind: "work_item", ref: "work_item:issues:ENG-1" });
+  expect(parseMarkdownLink("oxplow:oxplow/work_item?id=tsk42&provider=oxplow")).toEqual({ kind: "work_item", ref: "oxplow:oxplow/work_item?id=tsk42&provider=oxplow" });
+  expect(parseMarkdownLink("oxplow:oxplow/work_item?id=ENG-1&provider=issues")).toEqual({ kind: "work_item", ref: "oxplow:oxplow/work_item?id=ENG-1&provider=issues" });
 });
 
 test("parseMarkdownLink: work_item: with empty target", () => {
-  expect(parseMarkdownLink("work_item:")).toEqual({ kind: "empty" });
+  expect(parseMarkdownLink("oxplow:oxplow/work_item")).toEqual({ kind: "empty" });
 });
 
 test("postprocessWikilinks: task link with matching label collapses to bare wikilink", () => {
-  expect(postprocessWikilinks("see [tsk42](work_item:oxplow:tsk42) here"))
+  expect(postprocessWikilinks(`see [tsk42](${workItemUri("oxplow", "tsk42")}) here`))
     .toBe("see [[tsk42]] here");
 });
 
 test("postprocessWikilinks: task link with distinct label preserves the label", () => {
-  expect(postprocessWikilinks("see [fix the parser](work_item:oxplow:tsk42) here"))
+  expect(postprocessWikilinks(`see [fix the parser](${workItemUri("oxplow", "tsk42")}) here`))
     .toBe("see [[tsk42|fix the parser]] here");
 });
 
@@ -403,7 +405,7 @@ test("linkRef: a wiki link targets its page", () => {
 });
 
 test("linkRef: a work item link targets its page", () => {
-  expect(linkRef({ kind: "work_item", ref: "work_item:oxplow:tsk42" })).toBe("work_item:oxplow:tsk42");
+  expect(linkRef({ kind: "work_item", ref: "oxplow:oxplow/work_item?id=tsk42&provider=oxplow" })).toBe("oxplow:oxplow/work_item?id=tsk42&provider=oxplow");
 });
 
 test("linkRef: a directory link targets its directory", () => {

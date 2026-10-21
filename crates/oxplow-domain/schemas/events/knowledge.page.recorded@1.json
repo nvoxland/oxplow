@@ -2,7 +2,7 @@
   "$defs": {
     "KnowledgePageRecord": {
       "additionalProperties": false,
-      "description": "A knowledge page as a store records it: what a provider's write verb\nanswers and its collector streams. The body is what it keeps; the refs\nare what the page links, in oxplow's grammar (`file:src/lib.rs`,\n`wiki:other`), which core pins and links from — never parsed out of a\nbody in the store's own grammar.",
+      "description": "A knowledge page as a store records it: what a provider's write verb\nanswers and its collector streams. The body is what it keeps; the refs\nare what the page links, in oxplow's grammar (`oxplow:oxplow/file?path=src/lib.rs`,\n`oxplow:oxplow/wiki?slug=other`), which core pins and links from — never parsed out of a\nbody in the store's own grammar.",
       "properties": {
         "body": {
           "type": "string"
@@ -12,7 +12,7 @@
           "type": "boolean"
         },
         "ref": {
-          "description": "`wiki:<slug>`.",
+          "description": "`oxplow:oxplow/wiki?slug=<slug>`.",
           "type": "string"
         },
         "refs": {

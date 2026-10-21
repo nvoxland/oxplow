@@ -3,7 +3,7 @@ name: e2e
 intent:
   purpose: >-
     The browser suite's extension: a fake work-item tracker, an effect, a
-    lens with its page, and a ref kind, so specs drive each through the UI, and a scripted model
+    lens with its page, and a resource, so specs drive each through the UI, and a scripted model
     provider that sorts text by its words.
   origin: null
   examples: []
@@ -49,17 +49,17 @@ models:
   - name: item
     version: 1
     key: [ref]
-    description: "Each oxplow task as an `e2e_item:<id>` ref: what the ref kind resolves."
+    description: "Each oxplow task as an `e2e/item` URI: what the resource resolves."
     columns:
-      - { name: ref, type: TEXT, doc: "`e2e_item:<id>`." }
+      - { name: ref, type: TEXT, doc: "`oxplow:e2e/item?id=<n>`." }
       - { name: title, type: TEXT, doc: "The item's title." }
 pages:
   - { id: item, title: Item, category: Work, lens: item }
-ref_kinds:
-  - kind: e2e_item
+resources:
+  - name: item
     label: Item
-    id: '^\d+$'
+    params: { id: { required: true, pattern: '^[0-9]+$' } }
     resolve: item
     page: item
-    wikilink: item
+    wikilink: { prefix: item, param: id }
     icon: box

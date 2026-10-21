@@ -2141,7 +2141,7 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        assert_eq!((owner.as_str(), version), ("core", 4));
+        assert_eq!((owner.as_str(), version), ("core", 5));
         let mut inputs: Vec<(String, String)> = conn
             .prepare("SELECT input, kind FROM model_input WHERE view = 'v_stream'")
             .unwrap()
@@ -2782,7 +2782,7 @@ mod tests {
         );
 
         conn.execute(
-            "INSERT INTO m_v_t_busy VALUES ('work_item:oxplow:a', 'kept')",
+            "INSERT INTO m_v_t_busy VALUES ('oxplow:oxplow/work_item?id=a&provider=oxplow', 'kept')",
             [],
         )
         .unwrap();

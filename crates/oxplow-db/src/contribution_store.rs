@@ -100,7 +100,7 @@ mod tests {
         assert_eq!(
             rows,
             [(
-                "metric:acme.todos".to_string(),
+                "oxplow:oxplow/metric?metric=acme.todos".to_string(),
                 "metric".to_string(),
                 Some("1.0.0".to_string())
             )]

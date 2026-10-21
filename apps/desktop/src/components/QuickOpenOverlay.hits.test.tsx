@@ -24,8 +24,8 @@ mock.module("../api.js", () => ({
   listExtensions: async () => [],
   searchSite: async () =>
     KINDS.map(([kind]) => ({
-      ref: `${kind}:x1`,
-      kind,
+      uri: `oxplow:oxplow/${kind}?id=x1`,
+      resource: `oxplow/${kind}`,
       title: `A ${kind}`,
       snippet: "found it",
       stream_id: null,
@@ -54,7 +54,7 @@ test("each hit row shows its kind's icon and label", async () => {
   );
   fireEvent.change(view.getByPlaceholderText(/Search everything/), { target: { value: "found" } });
   for (const [kind, label] of KINDS) {
-    const row = await waitFor(() => view.getByTestId(`launcher-hit-${kind}:x1`));
+    const row = await waitFor(() => view.getByTestId(`launcher-hit-oxplow:oxplow/${kind}?id=x1`));
     expect(row.querySelector("svg"), `${kind} icon`).not.toBeNull();
     expect(row.textContent, kind).toContain(`found it${label}`);
   }

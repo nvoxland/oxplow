@@ -21,7 +21,7 @@
       "description": "The canonical state it was filed in."
     },
     "work_item": {
-      "description": "`work_item:<list>:<id>`.",
+      "description": "`oxplow:oxplow/work_item?id=<id>&provider=<list>`.",
       "type": "string"
     }
   },

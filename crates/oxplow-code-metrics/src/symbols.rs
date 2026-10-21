@@ -132,7 +132,7 @@ pub struct Definition {
     /// parentheses; only in languages that tell overloads apart by them.
     pub signature: Option<String>,
     /// What oxplow names it by within its file: `Parser::parse(String,int)`,
-    /// `main~2`. The symbol's ref is `symbol:<path>/<id>`.
+    /// `main~2`. The symbol's ref is `oxplow:oxplow/symbol?path=<path>&symbol=<id>`.
     pub id: String,
     pub name_line: u32,
     pub name_col: u32,

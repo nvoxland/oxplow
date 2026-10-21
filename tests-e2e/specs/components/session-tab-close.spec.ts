@@ -9,7 +9,7 @@ test("a session's tab closes the session at once, and Undo brings it back", asyn
   await openFromLauncher(page, "New Agent Session");
   await expect(newSessionPage(page)).toBeVisible();
   await newSessionPage(page).getByTestId("lens-part-start").getByRole("button", { name: "New Session", exact: true }).click();
-  const tab = page.locator('[data-testid^="center-tab-agent_session:"]').first();
+  const tab = page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]').first();
   await expect(tab).toBeVisible();
   const tabTestId = (await tab.getAttribute("data-testid")) ?? "";
   const id = tabTestId.slice("center-tab-".length);

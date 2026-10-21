@@ -19,7 +19,7 @@ test("rows name each conversation and say which can be taken", () => {
     [
       listed("c1", { title: "Login fix", size_bytes: 2048, updated_at: "2026-10-15T10:00:00.000000Z" }, { current: true }),
       listed("c2", { first_prompt: "Speed up the build" }),
-      listed("c3", {}, { open_in: "agent_session:ses4" }),
+      listed("c3", {}, { open_in: "oxplow:oxplow/agent_session?id=ses4" }),
     ],
     "resume",
   );

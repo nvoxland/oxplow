@@ -219,7 +219,7 @@ mod tests {
             HookKind::UserPromptSubmit => (
                 "agent.prompt.submitted",
                 1,
-                serde_json::json!({"thread": "thread:thr1", "reprompt": false}),
+                serde_json::json!({"thread": "oxplow:oxplow/thread?id=thr1", "reprompt": false}),
             ),
             HookKind::PreToolUse => (
                 "agent.tool.requested",
@@ -230,7 +230,7 @@ mod tests {
             HookKind::Stop => (
                 "agent.turn.ended",
                 2,
-                serde_json::json!({"turn": "turn:trn1", "thread": "thread:thr1", "outcome": "completed"}),
+                serde_json::json!({"turn": "oxplow:oxplow/turn?id=trn1", "thread": "oxplow:oxplow/thread?id=thr1", "outcome": "completed"}),
             ),
             other => panic!("{other:?} is not logged in these tests"),
         };
@@ -255,7 +255,7 @@ mod tests {
         session: oxplow_domain::AgentSessionId,
         state: AgentStatusState,
     ) {
-        let body = serde_json::json!({"thread": "thread:thr1", "state": state});
+        let body = serde_json::json!({"thread": "oxplow:oxplow/thread?id=thr1", "state": state});
         let mut env = oxplow_domain::Envelope::new("agent.status.changed", 1, "test", body)
             .unwrap()
             .with_anchors(oxplow_domain::Anchors {

@@ -102,7 +102,7 @@ where
             let op = op.clone();
             Box::pin(async move {
                 let input: I = parse(input)?;
-                let stream: StreamId = ref_id(input.stream(), "stream", "/stream")?;
+                let stream: StreamId = ref_id(input.stream(), oxplow_domain::uri::resources::STREAM, "/stream")?;
                 // Isolation: an agent, or an effect in its event's stream,
                 // works in its own stream's worktree only.
                 if invocation.actor().confined_to_own_stream()
@@ -212,7 +212,7 @@ fn done() -> Result<Value, CommandError> {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CommitInput {
-    /// The stream whose workspace to commit (`stream:str1`).
+    /// The stream whose workspace to commit (`oxplow:oxplow/stream?id=str1`).
     pub stream: String,
     pub message: String,
     /// Commit untracked files too (default), not only changes to tracked
@@ -719,7 +719,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 "oxplow.vcs.commit",
-                json!({ "stream": "stream:str999", "message": "m" }),
+                json!({ "stream": "oxplow:oxplow/stream?id=str999", "message": "m" }),
                 false,
             )
             .await

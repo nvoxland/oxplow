@@ -2,16 +2,15 @@
 //! reference graph reader.
 //!
 //! Both directions of the edge are exposed:
-//! - `list_backlinks(target_kind, target_id)` — what points AT this
-//!   page. Drives the Backlinks dropdown / panel for every page kind.
-//! - `list_outbound(source_kind, source_id)` — what this page points
-//!   to. Drives the new Outbound dropdown.
+//! - `list_backlinks(target)` — what points AT this page (its URI).
+//!   Drives the Backlinks dropdown / panel for every page.
+//! - `list_outbound(source)` — what this page points to. Drives the
+//!   Outbound dropdown.
 //!
-//! The reader joins source labels (wiki title, task title,
-//! commit subject) at read time so the renderer doesn't need to do
-//! a second round-trip per row. Labels are best-effort — when the
-//! source is gone (e.g. a deleted task) the label is `None`
-//! and the renderer falls back to `source_id`.
+//! The reader joins labels (wiki title, task title, commit subject) at
+//! read time so the renderer doesn't need a second round-trip per row.
+//! Labels are best-effort — when the other end is gone (e.g. a deleted
+//! task) the label is `None` and the renderer falls back to its URI.
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -21,104 +20,72 @@ use oxplow_db::PageRefEdge;
 
 use crate::error::IpcError;
 
-/// Edge plus a best-effort renderer label for the source.
+/// Edge plus a best-effort renderer label for its other end.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct BacklinkEdge {
-    pub source_kind: String,
-    pub source_id: String,
-    pub target_kind: String,
-    pub target_id: String,
+    /// The URI that refers.
+    pub source: String,
+    /// The URI it refers to.
+    pub target: String,
     pub ref_type: String,
     pub source_extra: Option<String>,
-    /// Human label for the source (wiki title, task title,
-    /// commit subject, …). Falls back to `source_id` in the
-    /// renderer when None.
+    /// Human label for the other end (the source of a backlink, the
+    /// target of an outbound edge): wiki title, task title, commit
+    /// subject, …. The renderer falls back to the URI when None.
     pub source_label: Option<String>,
-    /// Whether anything resolves the row the label belongs to (the
-    /// source for a backlink, the target for an outbound edge). A link
-    /// to a ref nothing resolves — an extension gone, a record deleted —
-    /// is a dead link the renderer shows as its raw text.
+    /// Whether anything resolves the row the label belongs to. A link to
+    /// a URI nothing resolves — an extension gone, a record deleted — is
+    /// a dead link the renderer shows as its raw text.
     pub resolved: bool,
 }
 
 pub async fn list_backlinks(
     svc: &Services,
-    target_kind: String,
-    target_id: String,
+    target: String,
     limit: Option<u32>,
 ) -> Result<Vec<BacklinkEdge>, IpcError> {
     let edges = svc
         .page_ref_store
-        .list_backlinks(&target_kind, &target_id, limit.map(i64::from))
+        .list_backlinks(&target, limit.map(i64::from))
         .await?;
-    Ok(decorate_with_labels(svc, edges).await)
+    Ok(decorate(svc, edges, |e| &e.source).await)
 }
 
 pub async fn list_outbound(
     svc: &Services,
-    source_kind: String,
-    source_id: String,
+    source: String,
     limit: Option<u32>,
 ) -> Result<Vec<BacklinkEdge>, IpcError> {
     let edges = svc
         .page_ref_store
-        .list_outbound(&source_kind, &source_id, limit.map(i64::from))
+        .list_outbound(&source, limit.map(i64::from))
         .await?;
-    // For outbound, the "label" we want is for the *target*. We
-    // keep the same struct shape, but populate `source_label` with
-    // the target's label so the renderer can be kind-agnostic. When
-    // the target kind has no first-class label (files, directories),
-    // leave `source_label` as None — the frontend falls back to
-    // `target_id`, which IS the meaningful display for those kinds.
-    // Folding in the source's label here would stamp the current
-    // page's own title on every file/dir row.
-    Ok(decorate_outbound_targets(svc, edges).await)
+    // For outbound, the label is the *target's*, in the same field, so
+    // the renderer stays resource-agnostic. A target with no first-class
+    // label (a file, a directory) leaves it None — the renderer shows
+    // its path, the meaningful display for those.
+    Ok(decorate(svc, edges, |e| &e.target).await)
 }
 
-async fn decorate_with_labels(svc: &Services, edges: Vec<PageRefEdge>) -> Vec<BacklinkEdge> {
+/// Each edge with the label of the end `labelled` picks.
+async fn decorate(
+    svc: &Services,
+    edges: Vec<PageRefEdge>,
+    labelled: fn(&PageRefEdge) -> &String,
+) -> Vec<BacklinkEdge> {
     let mut out = Vec::with_capacity(edges.len());
     for e in edges {
-        let (label, resolved) = resolve(svc, &e.source_kind, &e.source_id).await;
+        let summary = oxplow_app::ref_resolver::resolve_ref(svc, labelled(&e)).await;
         out.push(BacklinkEdge {
-            source_kind: e.source_kind,
-            source_id: e.source_id,
-            target_kind: e.target_kind,
-            target_id: e.target_id,
+            source: e.source,
+            target: e.target,
             ref_type: e.ref_type,
             source_extra: e.source_extra,
-            source_label: label,
-            resolved,
+            source_label: summary.title,
+            resolved: summary.resolved,
         });
     }
     out
-}
-
-async fn decorate_outbound_targets(svc: &Services, edges: Vec<PageRefEdge>) -> Vec<BacklinkEdge> {
-    let mut out = Vec::with_capacity(edges.len());
-    for e in edges {
-        let (label, resolved) = resolve(svc, &e.target_kind, &e.target_id).await;
-        out.push(BacklinkEdge {
-            source_kind: e.source_kind,
-            source_id: e.source_id,
-            target_kind: e.target_kind,
-            target_id: e.target_id,
-            ref_type: e.ref_type,
-            source_extra: e.source_extra,
-            source_label: label,
-            resolved,
-        });
-    }
-    out
-}
-
-/// The label and whether anything resolves a `(kind, id)` ref, through
-/// the shared [`ref_resolver`] (the single source of truth for hydrating
-/// a ref). The label is `None` when the row doesn't exist (deleted) or
-/// the kind carries no first-class label (files and directories use the
-/// path itself).
-async fn resolve(svc: &Services, kind: &str, id: &str) -> (Option<String>, bool) {
-    let summary = oxplow_app::ref_resolver::resolve_ref(svc, kind, id).await;
-    (summary.title, summary.resolved)
 }
 
 #[cfg(test)]
@@ -128,7 +95,7 @@ mod tests {
         let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "list_backlinks",
-            serde_json::json!({ "targetKind": "wiki", "targetId": "some-slug" }),
+            serde_json::json!({ "target": "oxplow:oxplow/wiki?slug=some-slug" }),
             &svc,
         )
         .await
@@ -141,7 +108,7 @@ mod tests {
         let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "list_outbound",
-            serde_json::json!({ "sourceKind": "wiki", "sourceId": "some-slug", "limit": 5 }),
+            serde_json::json!({ "source": "oxplow:oxplow/wiki?slug=some-slug", "limit": 5 }),
             &svc,
         )
         .await
@@ -169,28 +136,25 @@ mod tests {
                 "oxplow.work_item.create",
                 serde_json::json!({
                     "title": "Fix it",
-                    "thread": thread.to_string(),
-                    "links": [{ "target": "collector:ghost/none", "link_type": "about" }],
+                    "thread": oxplow_domain::uri::build::thread_uri(thread),
+                    "links": [{ "target": "oxplow:oxplow/collector?collector=ghost/none", "link_type": "about" }],
                 }),
                 false,
             )
             .await
             .unwrap();
-        let item =
-            oxplow_domain::uri::build::work_item_id_of_uri(made.result["ref"].as_str().unwrap())
-                .unwrap();
-        let out = crate::dispatch(
-            "list_outbound",
-            serde_json::json!({ "sourceKind": "work_item", "sourceId": item }),
-            &svc,
-        )
-        .await
-        .unwrap();
+        let item = made.result["ref"].as_str().unwrap().to_string();
+        let out = crate::dispatch("list_outbound", serde_json::json!({ "source": item }), &svc)
+            .await
+            .unwrap();
         let edge = out
             .as_array()
             .unwrap()
             .iter()
-            .find(|e| e["target_kind"] == "collector")
+            .find(|e| {
+                oxplow_domain::uri::build::resource_of(e["target"].as_str().unwrap()).as_deref()
+                    == Some("oxplow/collector")
+            })
             .unwrap_or_else(|| panic!("no collector edge in {out}"));
         assert_eq!(edge["resolved"], false);
         assert!(edge["source_label"].is_null());

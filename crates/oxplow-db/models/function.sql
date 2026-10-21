@@ -1,6 +1,6 @@
 -- One row per function in the current tree (per stream): its latest
 -- complexity, length and parameter count from the code gauges (facts whose
--- subject is the function's `symbol:<path>/<id>` ref), named by the symbol
+-- subject is the function's symbol URI), named by the symbol
 -- index (`v_symbol`) those refs come from.
 SELECT t.stream_id,
        t.subject AS symbol,
@@ -16,6 +16,6 @@ SELECT t.stream_id,
        max(t.captured_at) AS captured_at
   FROM ref('tree_fact') t
   JOIN ref('symbol') s ON s.stream_id = t.stream_id AND s.ref = t.subject
- WHERE t.subject_kind = 'symbol'
+ WHERE t.subject_kind = 'oxplow/symbol'
    AND t.measure_key IN ('oxplow.complexity', 'oxplow.fn_length', 'oxplow.parameter_count')
  GROUP BY t.stream_id, t.subject

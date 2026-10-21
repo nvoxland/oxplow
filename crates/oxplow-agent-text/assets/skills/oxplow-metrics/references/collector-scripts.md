@@ -15,8 +15,8 @@ shape** — one atomic fact per subject, NOT a pre-aggregated total:
   (`oxplow.language`), one of your own `<namespace>.<name>`. A bare key
   (`language`) is refused, and the error names the conformed one.
 - `value` is the atomic number for this subject.
-- `subject` is one ref, built with `ref.build` (`file:src/a.rs`, `symbol:src/a.rs/foo`). A
-  subject that is not a ref is refused (the run fails, naming the measure and the string).
+- `subject` is one URI, built with `uri.build` (`oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/symbol?path=src/a.rs&symbol=foo`). A
+  subject that is not a URI is refused (the run fails, naming the measure and the string).
 - `rule` is a conformed slice value read as the `oxplow.rule` dimension (so a spec
   can `filter: { dimEq: [oxplow.rule, …] }` or slice by it).
 - `num`/`den` (optional) are ratio components — supply them when the measure is a
@@ -38,7 +38,7 @@ the return (an old `samples` / `findings` shape) is refused.
 - `code_metrics(text, language, path)` → per-function `[{name, id, ref,
   container, kind, complexity, length, parameter_count, start_line,
   end_line, visibility, has_doc}]`. `ref` is the function's
-  `symbol:<path>/<id>` ref: use it as a per-function fact's `subject`.
+  `oxplow:oxplow/symbol?path=<path>&symbol=<id>` URI: use it as a per-function fact's `subject`.
 - `duplicate_blocks(min_lines)` → every duplicated block pair among the
   snapshot files `[{a_path, a_start_line, a_end_line, b_path, b_start_line,
   b_end_line, line_count}]` (see oxplow-foundation's `oxplow.duplicate_lines`).
@@ -56,7 +56,7 @@ def transform(input):
             c += len(regex_find(r"(?i)\b(TODO|FIXME)\b", cm["text"]))
         if c > 0:
             facts.append({"measure": "repo.todo_count", "value": c,
-                          "subject": uri.build("file", f["path"]), "path": f["path"],
+                          "subject": uri.build("oxplow/file", path = f["path"]), "path": f["path"],
                           "dims": {"oxplow.language": "rust"}})
     return {"facts": facts}
 ```

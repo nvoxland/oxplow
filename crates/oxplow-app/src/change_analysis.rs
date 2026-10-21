@@ -1275,12 +1275,12 @@ mod tests {
             refs,
             vec![
                 (
-                    "symbol:src/P.java/P::parse(String)".to_string(),
+                    "oxplow:oxplow/symbol?path=src/P.java&symbol=P::parse(String)".to_string(),
                     "modified".to_string(),
                     Some(3)
                 ),
                 (
-                    "symbol:src/P.java/P::parse(int)".to_string(),
+                    "oxplow:oxplow/symbol?path=src/P.java&symbol=P::parse(int)".to_string(),
                     "modified".to_string(),
                     Some(3)
                 ),
@@ -1873,7 +1873,11 @@ mod tests {
         let effort = f
             .svc
             .effort_store
-            .start("work_item:issues:A-1", &f.thread, start)
+            .start(
+                "oxplow:oxplow/work_item?id=A-1&provider=issues",
+                &f.thread,
+                start,
+            )
             .await
             .unwrap();
         let root = f.svc.layout.project_dir.clone();

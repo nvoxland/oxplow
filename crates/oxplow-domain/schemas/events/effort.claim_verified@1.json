@@ -4,18 +4,18 @@
   "description": "`effort.claim_verified@1` (P7.C4): a reviewer verified one of an\neffort's claims (`oxplow.effort.verify_claim`), naming what backs it — or\ntook that back (`oxplow.effort.unverify_claim`, `evidence` absent).",
   "properties": {
     "claim": {
-      "description": "`claim:<id>`.",
+      "description": "`oxplow:oxplow/claim?id=<id>`.",
       "type": "string"
     },
     "effort": {
-      "description": "`effort:<id>`, when the claim was made in one.",
+      "description": "`oxplow:oxplow/effort?id=<id>`, when the claim was made in one.",
       "type": [
         "string",
         "null"
       ]
     },
     "evidence": {
-      "description": "What backs it now (`reviewer`, `run:12`); absent once unverified.",
+      "description": "What backs it now (`reviewer`, `oxplow:oxplow/run?id=12`); absent once unverified.",
       "type": [
         "string",
         "null"

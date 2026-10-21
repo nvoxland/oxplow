@@ -3,6 +3,6 @@ input:
   effect: review-on-finish
   event:
     type: effort.finished
-    payload: { effort: "effort:eff8" }
+    payload: { effort: "oxplow:oxplow/effort?id=eff8" }
 expect:
   skip: $any

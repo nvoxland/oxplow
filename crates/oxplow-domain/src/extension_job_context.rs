@@ -12,7 +12,7 @@ use crate::{
     extension_job::{AttemptFence, JobId},
     ids::{AgentSessionId, EffortId, StreamId, ThreadId},
     run::{RunContext, RunId},
-    uri::grammar::Uri,
+    uri::OxplowUri,
 };
 
 const MAX_JSON_BYTES: usize = 64 * 1024;
@@ -205,7 +205,7 @@ impl JobExecutionIdentity {
         self.token
     }
 
-    /// The run's ref (`job_run:<id>`): what its actor's events and audit
+    /// The run's ref (`oxplow:oxplow/job_run?id=<id>`): what its actor's events and audit
     /// rows name as their source.
     pub fn source(&self) -> String {
         crate::uri::build::job_run_uri(self.job_id.as_str())
@@ -291,7 +291,7 @@ fn validate_subject(value: &str) -> Result<(), JobContextError> {
     if value.is_empty() || value.len() > MAX_SUBJECT_BYTES || value.chars().any(char::is_control) {
         return Err(JobContextError::Invalid);
     }
-    let parsed = Uri::parse(value).map_err(|_| JobContextError::Invalid)?;
+    let parsed = OxplowUri::parse(value).map_err(|_| JobContextError::Invalid)?;
     if parsed.to_string() != value {
         return Err(JobContextError::Invalid);
     }

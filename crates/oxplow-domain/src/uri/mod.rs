@@ -3,7 +3,7 @@
 //! Given a free-text body (wiki page, task description, commit
 //! message, task-note, …) extracts the references it makes to other
 //! pages: file paths, directory paths, wiki slugs, task ids
-//! (`tsk<n>`), finding ids (`finding:…`), and git commit shas.
+//! (`tsk<n>`), finding ids (`oxplow:oxplow/finding?id=…`), and git commit shas.
 //!
 //! Lives in `oxplow-domain` because it has zero IO and no async — it
 //! takes a `&str` and returns plain data. Every writer that mirrors
@@ -12,9 +12,9 @@
 //! Two ref shapes are recognised:
 //!
 //! 1. **`[[wikilinks]]`** — preferred form. The interior matches:
-//!    - `dir:<path>` → directory ref
+//!    - `oxplow:oxplow/dir?path=<path>` → directory ref
 //!    - `git:<sha>` → commit ref (also `[[<sha>]]` if 7-40 hex)
-//!    - `finding:<id>` → finding ref
+//!    - `oxplow:oxplow/finding?id=<id>` → finding ref
 //!    - `tsk<digits>` → task ref
 //!    - `path/with/slash.ext[@version][:line]` → file ref
 //!    - `bare-slug` (kebab-case, no slash, no extension) → wiki slug
@@ -23,22 +23,21 @@
 //!
 //! 2. **Inline mentions** — fallback for free-text:
 //!    - bare `tsk<digits>` task ids
-//!    - bare `finding:<id>` (with the prefix to disambiguate from words)
+//!    - bare `oxplow:oxplow/finding?id=<id>` (with the prefix to disambiguate from words)
 //!    - bare file-shaped paths (slash + 1–6 char extension)
 //!
 //! URLs are stripped before the inline scan so
 //! `https://example.com/path.json` doesn't masquerade as a file ref.
 
 pub mod build;
-pub mod grammar;
 pub mod oxplow_uri;
 pub mod resources;
-pub mod types;
 
-use std::collections::BTreeSet;
+pub use oxplow_uri::{AnyUri, OxplowUri, ResourceName, UriParseError};
 
-use grammar::Uri;
-use types::TypeRegistry;
+use std::collections::{BTreeMap, BTreeSet};
+
+use resources::ResourceRegistry;
 
 /// Tree version a file ref is pinned to. `Disk` = working tree (the
 /// default, also `@disk` / `@local` literal). `Ref(s)` = a git ref
@@ -69,15 +68,15 @@ pub struct ExtractedRefs {
     pub files_detail: Vec<FileRefDetail>,
     pub dirs: Vec<String>,
     pub wikis: Vec<String>,
-    /// The active work list's items it names, as work-item ids
-    /// (`oxplow:tsk42`): `[[…]]` or loose, as the list declares its ids.
+    /// The active work list's items it names, as their URIs: `[[…]]` or
+    /// loose, as the list declares its ids.
     pub work_items: Vec<String>,
     pub findings: Vec<String>,
     pub commits: Vec<String>,
 }
 
-/// A single classified reference — the recognized kind + payload of one
-/// `[[…]]` wikilink interior. The typed counterpart of the buckets in
+/// A single classified reference — the recognized resource + payload of
+/// one `[[…]]` wikilink interior. The typed counterpart of the buckets in
 /// [`ExtractedRefs`]; used by the link checker to existence-check each
 /// recognized target.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,84 +84,113 @@ pub enum Reference {
     File(FileRefDetail),
     Dir(String),
     Wiki(String),
-    /// A work item, by its id (`oxplow:tsk42`, `issues:ENG-12`).
+    /// A work item, by its URI.
     WorkItem(String),
     Finding(String),
     Commit(String),
 }
 
 /// One `[[…]]` wikilink found in a body: its raw interior (the target,
-/// before any `|label`) and the reference it resolves to — or `None`
-/// when the interior matches no known ref shape (e.g. `#13`, the GitHub
-/// form). The link checker turns `reference: None` into an
-/// "unrecognized reference" warning.
+/// before any `|label`) and the resource it names — or `None` when the
+/// interior matches no known shape (e.g. `#13`, the GitHub form). The link
+/// checker turns `reference: None` into an "unrecognized reference"
+/// warning.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassifiedWikilink {
     pub raw: String,
-    /// The canonical ref the interior names, or `None` when it matches no
-    /// known shape.
-    pub canonical: Option<Uri>,
-    /// The typed view of `canonical` for the kinds the link checker and
-    /// graph writers understand today; `None` for other kinds.
+    /// The URI the interior names, or `None` when it matches no known
+    /// shape.
+    pub canonical: Option<OxplowUri>,
+    /// The typed view of `canonical` for the resources the link checker and
+    /// graph writers understand today; `None` for others.
     pub reference: Option<Reference>,
 }
 
-/// `r` is a canonical ref of a kind `kinds` has, whose id fits that kind.
-/// The kinds are the running vocabulary's (`vocabulary::Vocabulary`):
-/// core's, and the running extensions' `ref_kinds`.
-pub fn validate_ref(kinds: &TypeRegistry, r: &str) -> Result<Uri, crate::DomainError> {
-    let parsed = Uri::parse(r).map_err(|e| {
-        crate::DomainError::Invalid(format!("`{r}` is not a canonical ref: {}", e.reason()))
-    })?;
-    kinds
+/// `text` is a URI of a resource `resources` declares, with the params it
+/// takes. The resources are the running vocabulary's
+/// (`vocabulary::Vocabulary`): every enabled extension's, oxplow-foundation's
+/// included.
+pub fn validate_uri(
+    resources: &ResourceRegistry,
+    text: &str,
+) -> Result<OxplowUri, crate::DomainError> {
+    let parsed = OxplowUri::parse(text)
+        .map_err(|e| crate::DomainError::Invalid(format!("`{text}` is not a URI: {e}")))?;
+    resources
         .validate(&parsed)
-        .map_err(|e| crate::DomainError::Invalid(format!("`{r}`: {e}")))?;
+        .map_err(|e| crate::DomainError::Invalid(format!("`{text}`: {e}")))?;
     Ok(parsed)
 }
 
+fn named(resource: &str, params: &[(&str, &str)], view: &[(&str, &str)]) -> Option<OxplowUri> {
+    let map = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    };
+    Some(OxplowUri::new(
+        resource.parse().ok()?,
+        map(params),
+        map(view),
+    ))
+}
+
 /// Translate one `[[…]]` interior (already `|`-split and trimmed) into
-/// the canonical ref it names, or `None` when it matches no known shape.
-/// Accepts the canonical form itself (`[[commit:abc1234]]`,
-/// `[[work_item:issues:ENG-12]]`) and the human sugar:
-/// - `tsk<digits>` → `work_item:oxplow:tsk<digits>`
-/// - `git:<sha>` or a bare 7–40 hex sha → `commit:<sha>`
-/// - `dir:<path>` → `dir:<path>`
-/// - `finding:<id>` → `finding:<id>`
-/// - `path/file.ext[@version][:line]` → `file:<path>[@git:<version>][#L<line>]`
-///   (`@disk` / `@local` mean the working tree and add no revision)
-/// - `bare-slug` → `wiki:<slug>`
-pub fn canonical_wikilink(kinds: &TypeRegistry, interior: &str) -> Option<Uri> {
+/// the URI it names, or `None` when it matches no known shape. Accepts a
+/// URI itself and the authoring sugar:
+/// - a declared `<prefix>:<value>` (`git:<sha>`, `oxplow:oxplow/dir?path=<path>`,
+///   `oxplow:oxplow/finding?id=<id>`, an extension's `pr:12`)
+/// - one of the active work list's ids (`tsk42`)
+/// - `path/file.ext[@version][:line]` → a file (`@disk` / `@local` mean
+///   the working tree and add no revision)
+/// - a bare 7–40 hex sha → a commit; `bare-slug` → a wiki page
+pub fn canonical_wikilink(resources: &ResourceRegistry, interior: &str) -> Option<OxplowUri> {
     let interior = interior.trim();
     if interior.is_empty() {
         return None;
     }
-    let reg = kinds;
-    // Sugar with a registered `[[prefix:…]]` (today only `git:`).
-    if let Some((prefix, rest)) = interior.split_once(':') {
-        if let Some(spec) = reg.kind_for_wikilink_prefix(&prefix.to_ascii_lowercase()) {
-            let r = Uri::new(&spec.kind, rest.trim(), None, None).ok()?;
-            return reg.validate(&r).is_ok().then_some(r);
-        }
+    // A URI itself, of a declared resource.
+    if interior.starts_with("oxplow:") {
+        let u = OxplowUri::parse(interior).ok()?;
+        return resources.validate(&u).is_ok().then_some(u);
     }
     // dir:<path> keeps its own cleaning (trailing slash, no leading slash).
     if let Some(rest) = strip_prefix_ci(interior, "dir:") {
-        let d = clean_dir(rest)?;
-        return Uri::new("dir", &d, None, None).ok();
+        return named(resources::DIR, &[("path", &clean_dir(rest)?)], &[]);
     }
     if let Some(rest) = strip_prefix_ci(interior, "finding:") {
-        let f = clean_finding(rest)?;
-        return Uri::new("finding", &f, None, None).ok();
+        return named(resources::FINDING, &[("id", &clean_finding(rest)?)], &[]);
+    }
+    // Declared `[[prefix:…]]` sugar, else `[[<name>:<key>]]`: one of
+    // oxplow's resources by its name, its one key param set. A prefix that
+    // is neither falls through (`src/a.rs@HEAD:42` is a file).
+    if let Some((prefix, rest)) = interior.split_once(':') {
+        let prefix = prefix.to_ascii_lowercase();
+        let named = match resources.for_wikilink(&prefix) {
+            Some(decl) => decl
+                .wikilink
+                .as_ref()
+                .map(|w| (decl.name.clone(), w.param.clone())),
+            None => None,
+        };
+        let u = match named {
+            Some((name, param)) => Some(OxplowUri::new(
+                name,
+                [(param, rest.trim().to_string())].into(),
+                BTreeMap::new(),
+            )),
+            None => build::expand_short(&format!("{prefix}:{}", rest.trim()))
+                .and_then(|u| OxplowUri::parse(&u).ok()),
+        };
+        if let Some(u) = u {
+            return resources.validate(&u).is_ok().then_some(u);
+        }
     }
     // One of the active work list's own ids (`tsk42`, `ENG-12`), as it
     // declares them; anything else falls through (a slug or path).
-    if let Some(id) = reg.work_item_id(interior) {
-        return Uri::new("work_item", &id, None, None).ok();
-    }
-    // The canonical form itself, for a registered kind.
-    if let Ok(r) = Uri::parse(interior) {
-        if reg.validate(&r).is_ok() {
-            return Some(r);
-        }
+    if let Some(uri) = resources.work_item_uri_of(interior) {
+        return OxplowUri::parse(&uri).ok();
     }
     // path/file.ext[@version][:line]
     if let Some(detail) = parse_file_ref(interior) {
@@ -170,52 +198,56 @@ pub fn canonical_wikilink(kinds: &TypeRegistry, interior: &str) -> Option<Uri> {
             RefVersion::Disk => None,
             RefVersion::Ref(v) => Some(format!("git:{v}")),
         };
-        let frag = detail.line.map(|l| format!("L{l}"));
-        return Uri::new("file", &detail.path, rev.as_deref(), frag.as_deref()).ok();
+        let line = detail.line.map(|l| l.to_string());
+        let mut params = vec![("path", detail.path.as_str())];
+        params.extend(rev.as_deref().map(|r| ("rev", r)));
+        let view: Vec<(&str, &str)> = line.as_deref().map(|l| ("lines", l)).into_iter().collect();
+        return named(resources::FILE, &params, &view);
     }
-    // bare commit sha or wiki slug. `word:tail` is an attempted `kind:id`
-    // with an unknown or malformed kind, not a slug named `word`.
+    // A bare commit sha or wiki slug. `word:tail` is an attempted
+    // `prefix:value` with an unknown prefix, not a slug named `word`.
     if interior.contains(':') {
         return None;
     }
     if looks_like_commit_sha(interior) {
-        return Uri::new("commit", interior, None, None).ok();
+        return named(resources::COMMIT, &[("sha", interior)], &[]);
     }
     if looks_like_slug(interior) {
-        return Uri::new("wiki", interior, None, None).ok();
+        return named(resources::WIKI, &[("slug", interior)], &[]);
     }
     None
 }
 
-/// The first line of an `L<n>` or `L<n>-<m>` fragment.
-fn line_from_frag(frag: &str) -> Option<u32> {
-    frag.strip_prefix('L')?.split('-').next()?.parse().ok()
+/// The first line of a `lines` view (`10` or `10-20`).
+fn first_line(lines: &str) -> Option<u32> {
+    lines.split('-').next()?.parse().ok()
 }
 
-impl TryFrom<&Uri> for Reference {
+impl TryFrom<&OxplowUri> for Reference {
     type Error = ();
 
-    /// The typed view for the six kinds the link checker and graph
-    /// writers handle; other kinds (`effort`, `lens`, …) have no view yet.
-    fn try_from(r: &Uri) -> Result<Self, ()> {
-        match r.kind.as_str() {
-            "dir" => Ok(Reference::Dir(r.id.clone())),
-            "wiki" => Ok(Reference::Wiki(r.id.clone())),
-            "finding" => Ok(Reference::Finding(r.id.clone())),
-            "commit" => Ok(Reference::Commit(r.id.clone())),
-            "work_item" => Ok(Reference::WorkItem(r.id.clone())),
-            "file" => {
-                let version = match r.rev.as_deref().and_then(|v| v.strip_prefix("git:")) {
-                    Some(v) => RefVersion::Ref(v.to_string()),
-                    None if r.rev.is_some() => return Err(()),
+    /// The typed view for the six resources the link checker and graph
+    /// writers handle; others (`effort`, `lens`, …) have no view yet.
+    fn try_from(u: &OxplowUri) -> Result<Self, ()> {
+        let param = |name: &str| u.param(name).map(str::to_string).ok_or(());
+        match u.resource().to_string().as_str() {
+            resources::DIR => Ok(Reference::Dir(param("path")?)),
+            resources::WIKI => Ok(Reference::Wiki(param("slug")?)),
+            resources::FINDING => Ok(Reference::Finding(param("id")?)),
+            resources::COMMIT => Ok(Reference::Commit(param("sha")?)),
+            resources::WORK_ITEM => Ok(Reference::WorkItem(u.identity())),
+            resources::FILE => {
+                let version = match u.param("rev").map(|v| v.strip_prefix("git:")) {
+                    Some(Some(v)) => RefVersion::Ref(v.to_string()),
+                    Some(None) => return Err(()),
                     None => RefVersion::Disk,
                 };
-                let line = match r.frag.as_deref() {
-                    Some(f) => Some(line_from_frag(f).ok_or(())?),
+                let line = match u.view().get("lines") {
+                    Some(l) => Some(first_line(l).ok_or(())?),
                     None => None,
                 };
                 Ok(Reference::File(FileRefDetail {
-                    path: r.id.clone(),
+                    path: param("path")?,
                     version,
                     line,
                 }))
@@ -226,18 +258,18 @@ impl TryFrom<&Uri> for Reference {
 }
 
 /// The typed [`Reference`] a `[[…]]` interior names, if it names one of
-/// the kinds that have a typed view. Shared by [`extract`] and
+/// the resources that have a typed view. Shared by [`extract`] and
 /// [`classify_wikilinks`] so the graph writer and the link checker never
 /// drift; both go through [`canonical_wikilink`].
-fn classify_interior(kinds: &TypeRegistry, interior: &str) -> Option<Reference> {
-    Reference::try_from(&canonical_wikilink(kinds, interior)?).ok()
+fn classify_interior(resources: &ResourceRegistry, interior: &str) -> Option<Reference> {
+    Reference::try_from(&canonical_wikilink(resources, interior)?).ok()
 }
 
 /// Classify every `[[…]]` wikilink in `body`. Code spans / fenced
 /// blocks are masked first (via [`mask_code_regions`]) so illustrative
 /// links inside them are skipped, mirroring [`extract`]. Interiors that
-/// match no known ref shape come back with `reference: None`.
-pub fn classify_wikilinks(kinds: &TypeRegistry, body: &str) -> Vec<ClassifiedWikilink> {
+/// match no known shape come back with `reference: None`.
+pub fn classify_wikilinks(resources: &ResourceRegistry, body: &str) -> Vec<ClassifiedWikilink> {
     if body.is_empty() {
         return Vec::new();
     }
@@ -248,7 +280,7 @@ pub fn classify_wikilinks(kinds: &TypeRegistry, body: &str) -> Vec<ClassifiedWik
         if interior.is_empty() {
             continue;
         }
-        let canonical = canonical_wikilink(kinds, interior);
+        let canonical = canonical_wikilink(resources, interior);
         let reference = canonical.as_ref().and_then(|c| Reference::try_from(c).ok());
         out.push(ClassifiedWikilink {
             raw: interior.to_string(),
@@ -260,7 +292,7 @@ pub fn classify_wikilinks(kinds: &TypeRegistry, body: &str) -> Vec<ClassifiedWik
 }
 
 /// Parse `body` into [`ExtractedRefs`]. Pure; never errors.
-pub fn extract(kinds: &TypeRegistry, body: &str) -> ExtractedRefs {
+pub fn extract(resources: &ResourceRegistry, body: &str) -> ExtractedRefs {
     if body.is_empty() {
         return ExtractedRefs::default();
     }
@@ -279,7 +311,7 @@ pub fn extract(kinds: &TypeRegistry, body: &str) -> ExtractedRefs {
 
     for cap in find_wikilinks(body) {
         let interior = cap.split('|').next().unwrap_or(cap).trim();
-        match classify_interior(kinds, interior) {
+        match classify_interior(resources, interior) {
             Some(Reference::Dir(d)) => {
                 dirs.insert(d);
             }
@@ -289,8 +321,8 @@ pub fn extract(kinds: &TypeRegistry, body: &str) -> ExtractedRefs {
             Some(Reference::Finding(id)) => {
                 findings.insert(id);
             }
-            Some(Reference::WorkItem(id)) => {
-                work_items.insert(id);
+            Some(Reference::WorkItem(uri)) => {
+                work_items.insert(uri);
             }
             Some(Reference::File(detail)) => {
                 if files.insert(detail.path.clone()) {
@@ -326,7 +358,7 @@ pub fn extract(kinds: &TypeRegistry, body: &str) -> ExtractedRefs {
             }
         }
     }
-    work_items.extend(kinds.find_work_item_ids(&stripped));
+    work_items.extend(resources.find_work_item_uris(&stripped));
     for f in find_inline_findings(&stripped) {
         findings.insert(f);
     }
@@ -727,9 +759,11 @@ fn mask_inline_code(out: &mut String, line: &str) {
 mod tests {
     use super::*;
 
-    /// The core kinds with oxplow's tasks as the work list (`tsk<n>`).
-    fn tasks_kinds() -> TypeRegistry {
-        types::core_types()
+    /// oxplow-foundation's resources with oxplow's tasks as the work list
+    /// (`tsk<n>`).
+    fn tasks_kinds() -> ResourceRegistry {
+        resources::foundation()
+            .clone()
             .with_work_item_ids("oxplow", r"tsk\d+")
             .unwrap()
     }
@@ -738,23 +772,27 @@ mod tests {
     /// whole tokens and in `[[…]]`; told of none, it recognizes none.
     #[test]
     fn a_work_lists_ids_are_recognized_as_it_declares_them() {
-        let issues = types::core_types()
+        let issues = resources::foundation()
+            .clone()
             .with_work_item_ids("issues", r"[A-Z]+-\d+")
             .unwrap();
         assert_eq!(
-            issues.work_item_id("ENG-12").as_deref(),
-            Some("issues:ENG-12")
+            issues.work_item_uri_of("ENG-12").as_deref(),
+            Some("oxplow:oxplow/work_item?id=ENG-12&provider=issues")
         );
-        assert_eq!(issues.work_item_id("ENG-12x"), None);
+        assert_eq!(issues.work_item_uri_of("ENG-12x"), None);
         let r = extract(
             &issues,
             "Fixes ENG-12 (see [[ENG-7]]); not XENG-7a or tsk42.",
         );
         assert_eq!(
             r.work_items,
-            vec!["issues:ENG-12".to_string(), "issues:ENG-7".to_string()]
+            vec![
+                "oxplow:oxplow/work_item?id=ENG-12&provider=issues".to_string(),
+                "oxplow:oxplow/work_item?id=ENG-7&provider=issues".to_string()
+            ]
         );
-        let none = extract(&types::core_types(), "tsk42 [[tsk7]] ENG-12");
+        let none = extract(resources::foundation(), "tsk42 [[tsk7]] ENG-12");
         assert!(none.work_items.is_empty(), "{none:?}");
     }
 
@@ -779,7 +817,10 @@ mod tests {
         let r = extract(&tasks_kinds(), body);
         assert_eq!(r.dirs, vec!["src/components"]);
         assert_eq!(r.wikis, vec!["architecture"]);
-        assert_eq!(r.work_items, vec!["oxplow:tsk42".to_string()]);
+        assert_eq!(
+            r.work_items,
+            vec!["oxplow:oxplow/work_item?id=tsk42&provider=oxplow".to_string()]
+        );
         assert_eq!(r.findings, vec!["fnd-1"]);
         assert_eq!(r.commits, vec!["abcdef0"]);
     }
@@ -806,7 +847,10 @@ mod tests {
     #[test]
     fn inline_task_and_finding_mention() {
         let r = extract(&tasks_kinds(), "blocked by tsk42 see finding:fnd-2");
-        assert_eq!(r.work_items, vec!["oxplow:tsk42".to_string()]);
+        assert_eq!(
+            r.work_items,
+            vec!["oxplow:oxplow/work_item?id=tsk42&provider=oxplow".to_string()]
+        );
         assert_eq!(r.findings, vec!["fnd-2"]);
     }
 
@@ -821,7 +865,10 @@ mod tests {
         let r = extract(&tasks_kinds(), "tsk42 fixes issue. also tsk7, see");
         assert_eq!(
             r.work_items,
-            vec!["oxplow:tsk42".to_string(), "oxplow:tsk7".to_string()]
+            vec![
+                "oxplow:oxplow/work_item?id=tsk42&provider=oxplow".to_string(),
+                "oxplow:oxplow/work_item?id=tsk7&provider=oxplow".to_string()
+            ]
         );
     }
 
@@ -848,7 +895,10 @@ mod tests {
     fn wikilink_task_form_does_not_become_slug() {
         let r = extract(&tasks_kinds(), "[[tsk7]]");
         assert!(r.wikis.is_empty());
-        assert_eq!(r.work_items, vec!["oxplow:tsk7".to_string()]);
+        assert_eq!(
+            r.work_items,
+            vec!["oxplow:oxplow/work_item?id=tsk7&provider=oxplow".to_string()]
+        );
     }
 
     #[test]
@@ -859,7 +909,12 @@ mod tests {
              [[git:abc1234]] [[finding:fnd-1]]",
         );
         let refs: Vec<Option<Reference>> = links.into_iter().map(|l| l.reference).collect();
-        assert_eq!(refs[0], Some(Reference::WorkItem("oxplow:tsk7".into())));
+        assert_eq!(
+            refs[0],
+            Some(Reference::WorkItem(
+                "oxplow:oxplow/work_item?id=tsk7&provider=oxplow".into()
+            ))
+        );
         assert_eq!(refs[1], Some(Reference::Wiki("architecture".into())));
         assert!(matches!(refs[2], Some(Reference::File(_))));
         assert_eq!(refs[3], Some(Reference::Dir("src".into())));
@@ -885,7 +940,9 @@ mod tests {
         assert_eq!(links[0].raw, "tsk7");
         assert_eq!(
             links[0].reference,
-            Some(Reference::WorkItem("oxplow:tsk7".into()))
+            Some(Reference::WorkItem(
+                "oxplow:oxplow/work_item?id=tsk7&provider=oxplow".into()
+            ))
         );
     }
 
@@ -895,7 +952,10 @@ mod tests {
         // dead link (since SQLite never assigns 0), but the extractor
         // itself does not gatekeep — that's the renderer's job.
         let r = extract(&tasks_kinds(), "[[tsk0]] inline tsk0");
-        assert_eq!(r.work_items, vec!["oxplow:tsk0".to_string()]);
+        assert_eq!(
+            r.work_items,
+            vec!["oxplow:oxplow/work_item?id=tsk0&provider=oxplow".to_string()]
+        );
     }
 
     #[test]
@@ -913,12 +973,12 @@ mod tests {
         let r = extract(&tasks_kinds(), "see tsk99999999999999999999 in passing");
         assert_eq!(
             r.work_items,
-            vec!["oxplow:tsk99999999999999999999".to_string()]
+            vec!["oxplow:oxplow/work_item?id=tsk99999999999999999999&provider=oxplow".to_string()]
         );
         let r = extract(&tasks_kinds(), "[[tsk99999999999999999999]]");
         assert_eq!(
             r.work_items,
-            vec!["oxplow:tsk99999999999999999999".to_string()]
+            vec!["oxplow:oxplow/work_item?id=tsk99999999999999999999&provider=oxplow".to_string()]
         );
     }
 

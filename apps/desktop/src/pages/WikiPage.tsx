@@ -17,6 +17,7 @@ import { wikiFreshnessRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import { usePageTitle, useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
+import { wikiUri } from "../uri/uri.js";
 
 export interface WikiPageProps {
   stream: Stream | null;
@@ -155,7 +156,7 @@ function WikiPageBody({
       chips={freshness ? [freshnessChip(freshness, openFreshness)] : undefined}
       backlinks={backlinks}
       outbound={outbound}
-      commentsNav={<CommentNavigator targetKind="wiki" targetId={slug} />}
+      commentsNav={<CommentNavigator target={wikiUri(slug)} />}
       width="reading"
       rightRail={rail}
     >

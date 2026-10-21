@@ -14,7 +14,7 @@
       "type": "string"
     },
     "end_snapshot": {
-      "description": "`snapshot:N`, when the close already had its end snapshot.",
+      "description": "`oxplow:oxplow/snapshot?id=N`, when the close already had its end snapshot.",
       "type": [
         "string",
         "null"

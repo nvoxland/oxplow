@@ -101,7 +101,7 @@ harness only delivers them.
 
 | Piece | What | Where it comes from |
 |---|---|---|
-| Preamble | How to work in oxplow: nothing to file, end with the question, reading the errors a person saw, the references oxplow puts in a prompt (`@<path>`, `[oxplow ref …]`, `[oxplow work_item: …]`, `[oxplow lens …]`) | `oxplow_agent_text::WORKING_IN_OXPLOW` (`crates/oxplow-agent-text/assets/working-in-oxplow.md`) |
+| Preamble | How to work in oxplow: nothing to file, end with the question, reading the errors a person saw, the references oxplow puts in a prompt (`@<path>`, `[oxplow ref <uri>]`, `[oxplow <work item uri>: …]`, `[oxplow lens …]`) | `oxplow_agent_text::WORKING_IN_OXPLOW` (`crates/oxplow-agent-text/assets/working-in-oxplow.md`) |
 | Launch prompt | The preamble; the session context only for a harness without `prompt_context`; the thread's and stream's custom prompts; `agentPromptAppend`; the testing hint (`testing.agentHint`); the skill index only for a harness without `runtime_text` | `agent_prompt::assemble_system_prompt(config, stream, thread, around, harness, skills)`, given the session's declared harness (`crates/oxplow-app/src/agent_prompt.rs`) |
 | Skills | Core's (`oxplow-runtime`, `-wiki-capture`, `-mermaid`, `-collection`, `-metrics`, `-extension`, `-codebase`) and the active extensions' | `AgentText` (`oxplow_agent_text::core_text` + `capabilities::agent_text`) |
 | Slash commands | Core's (`review-comments`, `configure`, `new-metric`) and the active extensions' | Same |
@@ -269,18 +269,18 @@ revision content, live language-server answers, site search, a lens's
 rendering, a dry run.
 
 **`oxplow_read { ref }`** (`oxplow_app::ref_read`) reads anything a ref names and
-returns `{ ref, kind, row, related, content, truncated }`: the owning
+returns `{ uri, resource, row, related, content, truncated }`: the owning
 model's row, `related` lists (a work item's links and comments, a
-commit's or an effort's files), and `content` for the kinds whose body no
-model holds — a file at a revision (`file:src/a.rs` is the working tree;
-`file:src/a.rs@git:HEAD#L10-40`; `@snap:<id>` a local-history snapshot),
-an event's stored body (`event:<id>#input`, `#output`, `#prompt`, `#summary`; the
+commit's or an effort's files), and `content` for the resources whose body no
+model holds — a file at a revision (`oxplow:oxplow/file?path=src/a.rs` is the working tree;
+`oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40`; `rev=snap:<id>` a local-history snapshot),
+an event's stored body (`oxplow:oxplow/event?id=<id>#part=input`, `part=output`, `part=prompt`, `part=summary`; the
 caller's own stream's events only), a recorded model call's bodies
-(`ai_call:<id>#request`, `#response`; any call but one another agent's
+(`oxplow:oxplow/ai_call?id=<id>#part=request`, `part=response`; any call but one another agent's
 thread asked for — an extension's, a collector's or a job's are the
-project's), a lens's definition (`lens:<ext>/<slug>`). A file or lens is
+project's), a lens's definition (`oxplow:oxplow/lens?lens=<ext>/<slug>`). A file or lens is
 read in the caller's stream's worktree, or another's named by `stream`
-(`stream:str2`). Content stops at 64 KB with `truncated: true`; ask for
+(`oxplow:oxplow/stream?id=str2`). Content stops at 64 KB with `truncated: true`; ask for
 lines to read further. A captured file's row comes from
 `v_snapshot_file`; restoring it is the destructive
 `oxplow.snapshot.restore_file` (an agent's is a proposal), which writes
@@ -317,8 +317,8 @@ printing a table. They ship to users' projects, so they never name this
 repo's docs.
 
 **Tools read the interface.** No tool belongs to one implementation:
-work-item reads (`oxplow_query_sql` over `v_work_item`, `oxplow_read` of a `work_item:`
-ref, the work-next lens) go through whichever list is active (empty with
+work-item reads (`oxplow_query_sql` over `v_work_item`, `oxplow_read` of a work item's
+URI, the work-next lens) go through whichever list is active (empty with
 none), so the tool list never changes with a switch. What an
 implementation owns is commands, offered only while it's active
 (`capabilities::Active::refusal`).
@@ -328,10 +328,10 @@ implementation owns is commands, offered only while it's active
 (`resolve_comment_scope`; pass it only to assert the kind); `status` is
 `all`, `open` or `needs_response`. Each row is an `EnrichedCommentThread
 { thread, primary, context_chain, referenced }` — the anchor target, the
-page regions it sat inside (innermost first) and the refs inside the
+page regions it sat inside (innermost first) and the URIs inside the
 selection, each resolved by `oxplow_app::ref_resolver` — so the agent
 gets what the highlighted thing is in one call. Replies and resolution
-are `oxplow.knowledge.reply_comment` / `update_comment` (`comment:cmt12`);
+are `oxplow.knowledge.reply_comment` / `update_comment` (`oxplow:oxplow/comment?id=cmt12`);
 a reply is authored by the actor and clears `needs_response`. oxplow
 never prompts for comments: the person runs the `review-comments`
 command.
@@ -344,7 +344,7 @@ what's configured, installed and running.
 
 **The wiki and links.** Wiki reads are `oxplow_query_sql` over
 `v_knowledge_page` / `v_knowledge_ref` (stale pins) and `v_page_ref` (the
-backlinks graph, both directions), plus `oxplow_search` with `kinds: ["wiki"]`;
+backlinks graph, both directions), plus `oxplow_search` with `resources: ["oxplow/wiki"]`;
 `oxplow_wiki_ref_drift({ slug, path })` returns one stale ref's unified diff
 (`status` drifted, unchanged, not_a_ref, no_pin, binary or no_contents).
 Writes are the `knowledge.*` commands ([knowledge.md](./knowledge.md)).
@@ -1301,7 +1301,7 @@ with their subagents beneath each.
 turns from `v_agent_turn` oldest first with the thread's notes where
 they fall, a subagent's hand-back marked (a turn with no prompt), each
 row a turn ref. A turn ref opens it at that turn (`v_agent_turn
-.transcript_page`, built with `lens_ref`). Its action **Resume in a new session**
+.transcript_page`, built with `uri('oxplow/lens', …)`). Its action **Resume in a new session**
 runs `oxplow.agent_session.open` with `resume`: a saved conversation of
 the harness, bound `chosen` in the same transaction, refused when it is
 open in another session. A person's: an agent may open a session but not
@@ -1314,7 +1314,7 @@ a thread note (`oxplow.knowledge.add_note`, read back from
 `v_thread_note`).
 
 **What to pick up next** is the foundation lens `oxplow-foundation/work-next`
-(the tool `oxplow_work_next` with `thread: "thread:thr3"`) over `v_work_item`, whichever
+(the tool `oxplow_work_next` with `thread: "oxplow:oxplow/thread?id=thr3"`) over `v_work_item`, whichever
 list is active: an epic with its ready descendants, or every ready
 non-epic item, open `blocks` links holding an item back; empty with
 nothing ready or no list. The bundled `work-next` command calls that tool and

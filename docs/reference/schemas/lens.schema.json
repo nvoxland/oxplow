@@ -585,12 +585,12 @@
       "description": "A page a column value can link to.",
       "oneOf": [
         {
-          "description": "`file:<path>`; the value is a repo-relative path.",
+          "description": "`oxplow:oxplow/file?path=<path>`; the value is a repo-relative path.",
           "type": "string",
           "const": "file"
         },
         {
-          "description": "`wiki:<slug>`.",
+          "description": "`oxplow:oxplow/wiki?slug=<slug>`.",
           "type": "string",
           "const": "wiki"
         },
@@ -610,7 +610,7 @@
           "const": "metric"
         },
         {
-          "description": "Any oxplow page by its tab id (`work_item:oxplow:<id>`,\n`commit:<sha>`, `page:git-dashboard`, …),\ne.g. `v_page_visit.page_id`.",
+          "description": "Any oxplow page by its tab id (`oxplow:oxplow/work_item?id=<id>&provider=oxplow`,\n`oxplow:oxplow/commit?sha=<sha>`, `oxplow:oxplow/page?page=git-dashboard`, …),\ne.g. `v_page_visit.page_id`.",
           "type": "string",
           "const": "page"
         },

@@ -3,6 +3,6 @@ input:
   effect: review-on-finish
   event:
     type: effort.finished
-    payload: { effort: "effort:eff7", work_item: "work_item:oxplow:tsk1", end_snapshot: "snapshot:3" }
+    payload: { effort: "oxplow:oxplow/effort?id=eff7", work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", end_snapshot: "oxplow:oxplow/snapshot?id=3" }
 expect:
   commands: [effort_review.effort.review]

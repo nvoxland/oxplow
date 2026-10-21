@@ -4,7 +4,7 @@
   "description": "`work_item.deleted@2`: an item was deleted from its work list.",
   "properties": {
     "work_item": {
-      "description": "`work_item:<list>:<id>`.",
+      "description": "`oxplow:oxplow/work_item?id=<id>&provider=<list>`.",
       "type": "string"
     }
   },

@@ -42,3 +42,5 @@ hex = { workspace = true }
 
 [lints]
 workspace = true
+
+[dev-dependencies]

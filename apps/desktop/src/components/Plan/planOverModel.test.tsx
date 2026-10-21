@@ -1,3 +1,4 @@
+import { workItemUri } from "../../uri/uri.js";
 import { afterEach, expect, test } from "bun:test";
 import { cleanup, render } from "@testing-library/react";
 
@@ -15,9 +16,9 @@ test("the list renders a thread's work read from v_work_item", () => {
   const result = {
     columns: ["ref", "provider", "title", "body", "state", "parent_ref", "thread_id", "rank", "closed_at", "created_at", "updated_at", "native", "comment_count"],
     rows: [
-      ["work_item:issues:E-1", "issues", "Epic", "", "todo", null, 1, 0, null, "t", "t", null, 0],
-      ["work_item:issues:E-2", "issues", "Child step", "", "in_progress", "work_item:issues:E-1", 1, 1, null, "t", "t", null, 1],
-      ["work_item:issues:E-3", "issues", "Loose item", "", "todo", null, 1, 2, null, "t", "t", null, 0],
+      ["oxplow:oxplow/work_item?id=E-1&provider=issues", "issues", "Epic", "", "todo", null, 1, 0, null, "t", "t", null, 0],
+      ["oxplow:oxplow/work_item?id=E-2&provider=issues", "issues", "Child step", "", "in_progress", "oxplow:oxplow/work_item?id=E-1&provider=issues", 1, 1, null, "t", "t", null, 1],
+      ["oxplow:oxplow/work_item?id=E-3&provider=issues", "issues", "Loose item", "", "todo", null, 1, 2, null, "t", "t", null, 0],
     ],
     truncated: false,
     reads: { models: ["v_work_item"], tables: [], measures: [] },
@@ -48,5 +49,5 @@ test("the list renders a thread's work read from v_work_item", () => {
   );
   expect(view.container.textContent).toContain("Epic");
   expect(view.container.textContent).toContain("Loose item");
-  expect(view.getByTestId("tasks-row-work_item:issues:E-3")).not.toBeNull();
+  expect(view.getByTestId(`tasks-row-${workItemUri("issues", "E-3")}`)).not.toBeNull();
 });

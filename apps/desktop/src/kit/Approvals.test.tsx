@@ -10,7 +10,7 @@ afterEach(cleanup);
 
 const proposal: Proposal = {
   id: 7,
-  ref: "proposal:7",
+  ref: "oxplow:oxplow/proposal?id=7",
   createdAt: "2026-10-01T00:00:00Z",
   command: "oxplow.config.set",
   input: { key: "agentPromptAppend", value: "be brief" },
@@ -18,7 +18,7 @@ const proposal: Proposal = {
   actorId: "thr3",
   threadId: 3,
   threadTitle: "Fix the cart",
-  key: "config:agentPromptAppend",
+  key: "oxplow:oxplow/config?key=agentPromptAppend",
   preview: { command: "oxplow.config.set", summary: "Set one key.", input: {}, destructive: false },
   dryRun: { key: "agentPromptAppend", before: null, after: "be brief", changed: true },
 };
@@ -68,7 +68,7 @@ test("a failed decision shows its error on the card", async () => {
     <ProposalCard
       proposal={proposal}
       onDecide={async () => {
-        throw new Error("proposal:7 is already declined");
+        throw new Error("proposal 7 is already declined");
       }}
     />,
   );
@@ -106,10 +106,10 @@ test("a setting's row shows its pending proposal", async () => {
 });
 
 test("a list narrows to a thread and to a setting, and draws nothing when empty", () => {
-  const other: Proposal = { ...proposal, id: 8, threadId: 9, key: "config:other" };
+  const other: Proposal = { ...proposal, id: 8, threadId: 9, key: "oxplow:oxplow/config?key=other" };
   const all = [proposal, other];
   expect(narrow(all).map((p) => p.id)).toEqual([7, 8]);
-  expect(narrow(all, "thread:thr3").map((p) => p.id)).toEqual([7]);
+  expect(narrow(all, "oxplow:oxplow/thread?id=thr3").map((p) => p.id)).toEqual([7]);
   expect(narrow(all, "thr9").map((p) => p.id)).toEqual([8]);
   expect(narrow(all, null, "other").map((p) => p.id)).toEqual([8]);
   expect(narrow(all, "thr3", "other")).toEqual([]);

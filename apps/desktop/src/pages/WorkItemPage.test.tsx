@@ -7,7 +7,7 @@ const realApi = await import("../api.js");
 const realQuerySql = realApi.querySql;
 const realRunCommand = realApi.runCommand;
 let features: Record<string, boolean> = {};
-let parent: string | null = "work_item:fake:W-0";
+let parent: string | null = "oxplow:oxplow/work_item?id=W-0&provider=fake";
 let outbound: unknown[] = [];
 const ran: Array<[string, unknown]> = [];
 const lensRuns: Array<[string, unknown]> = [];
@@ -29,7 +29,7 @@ mock.module("../api.js", () => ({
     if (sql.includes("FROM v_work_item w")) {
       return {
         columns: ["ref", "provider", "title", "body", "state", "parent_ref", "thread_id", "rank", "closed_at", "created_at", "updated_at", "native", "comment_count"],
-        rows: [["work_item:fake:W-1", "fake", "Their bug", "It breaks.", "todo", parent, null, null, null, "t", "t", null, 0]],
+        rows: [["oxplow:oxplow/work_item?id=W-1&provider=fake", "fake", "Their bug", "It breaks.", "todo", parent, null, null, null, "t", "t", null, 0]],
         truncated: false,
         reads: { models: ["v_work_item"], tables: [], measures: [] },
         freshness: {},
@@ -66,22 +66,24 @@ mock.module("../api.js", () => ({
     return { lens: { id, title: id, columns: [], viz: "table", actions: [] }, params, result: { columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] } }, alert: null };
   },
 }));
+const { collectorUri, pageUri, resourceUri, workItemUri } = await import("../uri/uri.js");
 const { WorkItemPage } = await import("./WorkItemPage.js");
 const { PageNavigationContext } = await import("../tabs/PageNavigationContext.js");
 
-const { setRefKinds } = await import("../refKinds.js");
+const { setResources } = await import("../resources.js");
 // The kinds are read, as in the app: a collector has no page of its own.
 beforeEach(() =>
-  setRefKinds(
-    [["work_item", "{ref}"], ["collector", null]].map(([kind, page]) => ({
-      kind: kind!, extension: null, label: null, idPattern: ".*", wikilinks: [], resolve: null, page, icon: null,
+  setResources(
+    ["work_item", "collector"].map((name) => ({
+      resource: `oxplow/${name}`, extension: "oxplow", label: name, params: {}, additional: false, resolve: null,
+      title: null, searchable: null, icon: null, wikilink: null, page: null,
     })),
   ),
 );
 
 afterEach(() => {
-  setRefKinds([]);
-  parent = "work_item:fake:W-0";
+  setResources([]);
+  parent = "oxplow:oxplow/work_item?id=W-0&provider=fake";
   ran.length = 0;
   outbound = [];
   lensRuns.length = 0;
@@ -89,7 +91,7 @@ afterEach(() => {
 });
 
 const page = () =>
-  render(<WorkItemPage workItemRef="work_item:fake:W-1" stream={null} thread={null} onOpenPage={() => {}} />);
+  render(<WorkItemPage workItemRef="oxplow:oxplow/work_item?id=W-1&provider=fake" stream={null} thread={null} onOpenPage={() => {}} />);
 
 test("a provider without comments, links or hierarchy offers none of them", async () => {
   features = {};
@@ -109,7 +111,7 @@ test("Delete shows with the provider's delete feature and runs work_item.delete 
   const view = page();
   fireEvent.click(await waitFor(() => view.getByTestId("task-rail-delete-trigger")));
   fireEvent.click(view.getByTestId("task-rail-delete-confirm"));
-  await waitFor(() => expect(ran).toEqual([["oxplow.work_item.delete", { ref: "work_item:fake:W-1", confirmed: true }]]));
+  await waitFor(() => expect(ran).toEqual([["oxplow.work_item.delete", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake", confirmed: true }]]));
 });
 
 // P7.A1: every write is a `work_item.*` command, whatever the provider.
@@ -123,7 +125,7 @@ test("comments, links and a parent show when the provider declares them; Comment
   fireEvent.change(view.getByTestId("work-item-comment-body"), { target: { value: "Seen it too." } });
   fireEvent.keyDown(view.getByTestId("work-item-comment-body"), { key: "Enter", metaKey: true });
   await waitFor(() =>
-    expect(ran).toEqual([["oxplow.work_item.comment", { ref: "work_item:fake:W-1", body: "Seen it too." }]]),
+    expect(ran).toEqual([["oxplow.work_item.comment", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake", body: "Seen it too." }]]),
   );
   await waitFor(() => expect(view.queryByTestId("work-item-comment-body") === null).toBe(true));
 });
@@ -134,10 +136,10 @@ test("Link… takes any link type the provider names, not oxplow's list", async 
   fireEvent.click(await waitFor(() => view.getByTestId("work-item-link-open")));
   expect((view.getByTestId("work-item-link-link_type") as HTMLInputElement).value).toBe("relates_to");
   fireEvent.change(view.getByTestId("work-item-link-link_type"), { target: { value: "caused_by" } });
-  fireEvent.change(view.getByTestId("work-item-link-target"), { target: { value: "work_item:fake:W-9" } });
+  fireEvent.change(view.getByTestId("work-item-link-target"), { target: { value: "oxplow:oxplow/work_item?id=W-9&provider=fake" } });
   fireEvent.click(view.getByTestId("work-item-link-submit"));
   await waitFor(() =>
-    expect(ran).toEqual([["oxplow.work_item.link", { ref: "work_item:fake:W-1", target: "work_item:fake:W-9", link_type: "caused_by" }]]),
+    expect(ran).toEqual([["oxplow.work_item.link", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake", target: "oxplow:oxplow/work_item?id=W-9&provider=fake", link_type: "caused_by" }]]),
   );
 });
 
@@ -147,7 +149,7 @@ test("the tab is titled with the item's title", async () => {
   const nav = { goBack() {}, goForward() {}, canGoBack: false, canGoForward: false, setTitle: (t: string) => titles.push(t) };
   render(
     <PageNavigationContext.Provider value={nav as never}>
-      <WorkItemPage workItemRef="work_item:fake:W-1" stream={null} thread={null} onOpenPage={() => {}} />
+      <WorkItemPage workItemRef="oxplow:oxplow/work_item?id=W-1&provider=fake" stream={null} thread={null} onOpenPage={() => {}} />
     </PageNavigationContext.Provider>,
   );
   await waitFor(() => expect(titles).toContain("Their bug"));
@@ -157,12 +159,12 @@ test("a state change runs the provider's transition; the item's slots get its re
   features = {};
   const view = page();
   fireEvent.change(await waitFor(() => view.getByLabelText("State")), { target: { value: "done" } });
-  await waitFor(() => expect(ran).toEqual([["oxplow.work_item.transition", { ref: "work_item:fake:W-1", to: "done" }]]));
+  await waitFor(() => expect(ran).toEqual([["oxplow.work_item.transition", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake", to: "done" }]]));
   await waitFor(() =>
     expect(lensRuns.map(([id, p]) => [id, p])).toEqual(
       expect.arrayContaining([
-        ["x/body", { ref: "work_item:fake:W-1" }],
-        ["x/side", { ref: "work_item:fake:W-1" }],
+        ["x/body", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake" }],
+        ["x/side", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake" }],
       ]),
     ),
   );
@@ -181,16 +183,17 @@ const pageWithNav = () => {
   const nav = { goBack() {}, goForward() {}, navigate() {}, canGoBack: false, canGoForward: false, setTitle() {} };
   return render(
     <PageNavigationContext.Provider value={nav as never}>
-      <WorkItemPage workItemRef="work_item:fake:W-1" stream={null} thread={null} onOpenPage={() => {}} />
+      <WorkItemPage workItemRef="oxplow:oxplow/work_item?id=W-1&provider=fake" stream={null} thread={null} onOpenPage={() => {}} />
     </PageNavigationContext.Provider>,
   );
 };
 
-const aboutEdge = (kind: string, id: string, resolved: boolean, label: string | null) => ({
-  source_kind: "work_item",
-  source_id: "fake:W-1",
-  target_kind: kind,
-  target_id: id,
+// An edge names its ends by URI; one no resource claims is unresolved.
+const DEAD = resourceUri("oxplow/acme_pr", { id: 12 });
+
+const aboutEdge = (target: string, resolved: boolean, label: string | null) => ({
+  source: workItemUri("fake", "W-1"),
+  target,
   ref_type: "work_item_link:about",
   source_extra: null,
   source_label: label,
@@ -202,39 +205,39 @@ test("Link… takes any ref: its placeholder says so, and an `about` link to an 
   const view = page();
   fireEvent.click(await waitFor(() => view.getByTestId("work-item-link-open")));
   expect((view.getByTestId("work-item-link-target") as HTMLInputElement).placeholder).toBe(
-    "a ref: work_item:…, effort:eff12, collector:x/y",
+    "a URI, e.g. oxplow:oxplow/effort?id=eff12",
   );
   fireEvent.change(view.getByTestId("work-item-link-link_type"), { target: { value: "about" } });
-  fireEvent.change(view.getByTestId("work-item-link-target"), { target: { value: "effort:eff12" } });
+  fireEvent.change(view.getByTestId("work-item-link-target"), { target: { value: "oxplow:oxplow/effort?id=eff12" } });
   fireEvent.click(view.getByTestId("work-item-link-submit"));
   await waitFor(() =>
-    expect(ran).toEqual([["oxplow.work_item.link", { ref: "work_item:fake:W-1", target: "effort:eff12", link_type: "about" }]]),
+    expect(ran).toEqual([["oxplow.work_item.link", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake", target: "oxplow:oxplow/effort?id=eff12", link_type: "about" }]]),
   );
 });
 
 test("a link row's right-click menu has Unlink, which runs work_item.unlink with the link's input", async () => {
   features = { links: true };
-  outbound = [aboutEdge("collector", "triage/todos", true, "Triage todos")];
+  outbound = [aboutEdge(collectorUri("triage", "todos"), true, "Triage todos")];
   const view = pageWithNav();
   fireEvent.click(await waitFor(() => view.getByTestId("page-nav-outbound-toggle")));
-  const row = await waitFor(() => view.getByTestId("backlinks-entry-page:settings"));
+  const row = await waitFor(() => view.getByTestId(`backlinks-entry-${pageUri("settings")}`));
   expect(row.textContent).toContain("Triage todos");
   fireEvent.contextMenu(row, { clientX: 3, clientY: 3 });
   fireEvent.click(view.getByTestId("menu-item-unlink"));
   await waitFor(() =>
     expect(ran).toEqual([
-      ["oxplow.work_item.unlink", { ref: "work_item:fake:W-1", target: "collector:triage/todos", link_type: "about" }],
+      ["oxplow.work_item.unlink", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake", target: "oxplow:oxplow/collector?collector=triage/todos", link_type: "about" }],
     ]),
   );
 });
 
 test("a link to a ref nothing resolves is a dead link: raw text, and it still unlinks", async () => {
   features = { links: true };
-  outbound = [aboutEdge("acme_pr", "12", false, null)];
+  outbound = [aboutEdge(DEAD, false, null)];
   const view = pageWithNav();
   fireEvent.click(await waitFor(() => view.getByTestId("page-nav-outbound-toggle")));
-  const row = await waitFor(() => view.getByTestId("backlinks-dead-acme_pr:12"));
-  expect(row.textContent).toContain("acme_pr:12");
+  const row = await waitFor(() => view.getByTestId(`backlinks-dead-${DEAD}`));
+  expect(row.textContent).toContain(DEAD);
   fireEvent.contextMenu(row, { clientX: 3, clientY: 3 });
   expect(view.getByTestId("menu-item-unlink")).toBeTruthy();
 });

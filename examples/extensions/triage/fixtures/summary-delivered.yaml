@@ -16,4 +16,4 @@ expect:
   effects:
     - { id: triage/publish-summary, state: ok }
   commands: [oxplow.command.sequence]
-  pages: ["wiki:triage-summary"]
+  pages: ["oxplow:oxplow/wiki?slug=triage-summary"]

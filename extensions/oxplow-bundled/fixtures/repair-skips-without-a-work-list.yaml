@@ -3,7 +3,7 @@ input:
   effect: repair-disabled
   event:
     type: contribution.disabled
-    payload: { contribution: "collector:work/hot", reason: boom }
+    payload: { contribution: "oxplow:oxplow/collector?collector=work/hot", reason: boom }
   answers:
     sql.read:
       - [{ provider: null, open_item: null }]

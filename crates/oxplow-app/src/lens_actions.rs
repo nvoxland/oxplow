@@ -1079,7 +1079,7 @@ actions:
     }
 
     /// P6.B1's red: a person's click runs the command as the lens, acting
-    /// for them — audited as `lens:<id>`.
+    /// for them — audited as `oxplow:oxplow/lens?lens=<id>`.
     #[tokio::test]
     async fn an_action_runs_its_command_as_the_lens() {
         let (fx, root) = fixture().await;
@@ -1242,7 +1242,9 @@ actions:
         assert_eq!(start.fixed, vec!["ref".to_string()]);
 
         let mut press = call("retitle", BTreeMap::new(), Some(row), Actor::Human, false);
-        press.input = Some(json!({ "ref": "work_item:oxplow:tsk999999", "title": "New title" }));
+        press.input = Some(
+            json!({ "ref": "oxplow:oxplow/work_item?id=tsk999999&provider=oxplow", "title": "New title" }),
+        );
         run_lens_action(&fx.svc, &root, press, &extensions::LensContext::default())
             .await
             .unwrap();
@@ -1496,7 +1498,7 @@ actions:
             &root,
             FormSubmission {
                 lens_id: "acme/edit".into(),
-                input: json!({ "ref": "work_item:oxplow:tsk999999", "title": "Edited" }),
+                input: json!({ "ref": "oxplow:oxplow/work_item?id=tsk999999&provider=oxplow", "title": "Edited" }),
                 params,
                 on_behalf_of: Actor::Human,
                 confirmed: false,
@@ -1959,7 +1961,7 @@ actions:
         for sql in [
             "SELECT 'effort', ref, COALESCE(NULLIF(title, ''), ref), started_at, ended_at FROM v_effort WHERE started_at < ?2 AND COALESCE(ended_at, ?2) > ?1 AND (?3 IS NULL OR thread_id = ?3) ORDER BY started_at",
             "SELECT 'commit', ref, subject, committed_at, NULL FROM v_commit WHERE committed_at >= ?1 AND committed_at < ?2 AND ?3 IS NULL ORDER BY committed_at",
-            "SELECT 'thread', ref, title, created_at, closed_at FROM v_thread WHERE created_at < ?2 AND COALESCE(closed_at, ?2) > ?1 AND (?3 IS NULL OR ref = 'thread:thr' || ?3) ORDER BY created_at",
+            "SELECT 'thread', ref, title, created_at, closed_at FROM v_thread WHERE created_at < ?2 AND COALESCE(closed_at, ?2) > ?1 AND (?3 IS NULL OR ref = 'oxplow:oxplow/thread?id=thr' || ?3) ORDER BY created_at",
         ] {
             let direct = fx.svc.sql.query_sql(sql, window.clone(), None).await.unwrap();
             let out = run_component_sql(

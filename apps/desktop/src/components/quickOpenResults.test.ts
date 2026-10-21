@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { keyOf, keyedUri, wikiUri } from "../uri/uri.js";
 import type { SearchHit, WorkspaceIndexedFile } from "../api.js";
 import type { PageDirectoryEntry } from "./RailHud/sections.js";
 import type { PageCategory } from "./RailHud/sections.js";
@@ -17,8 +18,8 @@ import {
 
 function hit(kind: string, refId: string): SearchHit {
   return {
-    kind,
-    ref: `${kind}:${refId}`,
+    resource: `oxplow/${kind}`,
+    uri: keyedUri(`oxplow/${kind}`, refId),
     stream_id: null,
     title: refId,
     snippet: "…",
@@ -44,7 +45,7 @@ describe("dedupeSiteHits", () => {
       [hit("wiki", "architecture-overview"), hit("file", "src/other.rs"), hit("work_item", "12")],
       new Set(["src/main.rs"]),
     );
-    expect(out.map((h) => h.ref.slice(h.kind.length + 1))).toEqual(["architecture-overview", "src/other.rs", "12"]);
+    expect(out.map((h) => keyOf(h.uri))).toEqual(["architecture-overview", "src/other.rs", "12"]);
   });
 
   test("drops file hits whose path already matched by filename", () => {
@@ -52,7 +53,7 @@ describe("dedupeSiteHits", () => {
       [hit("file", "src/main.rs"), hit("wiki", "w")],
       new Set(["src/main.rs"]),
     );
-    expect(out.map((h) => h.ref.slice(h.kind.length + 1))).toEqual(["w"]);
+    expect(out.map((h) => keyOf(h.uri))).toEqual(["w"]);
   });
 
   test("non-file kinds are never deduped against paths", () => {
@@ -117,7 +118,7 @@ describe("buildQuickOpenResults", () => {
       files,
       siteHits: [hit("wiki", "w"), hit("work_item", "tsk30")],
     });
-    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { kind: "work_item", ref: "work_item:tsk30" } });
+    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { resource: "oxplow/work_item", uri: keyedUri("oxplow/work_item", "tsk30") } });
   });
 
   test("an exact content match floats above a fuzzy page/file match", () => {
@@ -130,7 +131,7 @@ describe("buildQuickOpenResults", () => {
       files,
       siteHits: [hit("wiki", "gt")],
     });
-    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { ref: "wiki:gt" } });
+    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { uri: wikiUri("gt") } });
     expect(out.results.some((r) => r.kind === "page")).toBe(true);
   });
 
@@ -144,7 +145,7 @@ describe("buildQuickOpenResults", () => {
       siteHits: [fileHit("a.rs", "str1"), fileHit("b.rs", "str2"), fileHit("c.rs", null)],
       currentStreamId: "str1",
     });
-    const hitIds = out.results.flatMap((r) => (r.kind === "hit" ? [r.hit.ref.slice(r.hit.kind.length + 1)] : []));
+    const hitIds = out.results.flatMap((r) => (r.kind === "hit" ? [keyOf(r.hit.uri)] : []));
     expect(hitIds).toEqual(["a.rs", "c.rs"]); // b.rs (str2) dropped, global c.rs kept
   });
 
@@ -167,7 +168,7 @@ describe("buildQuickOpenResults", () => {
     const hits = Array.from({ length: 35 }, (_, i) => hit("wiki", i === 33 ? "meeting" : `w${i}`));
     const out = buildQuickOpenResults({ query: "meeting", pages, commands, files, siteHits: hits });
     // Pre-fix this exact hit was sliced away before the float ran.
-    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { ref: "wiki:meeting" } });
+    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { uri: wikiUri("meeting") } });
   });
 
   // tsk1031: "todo" ranked Planning, Recent Decisions and Unbacked Claims
@@ -175,15 +176,15 @@ describe("buildQuickOpenResults", () => {
   // A keyword matches at a word's start; a title match ranks first.
   test("a title match ranks first, and keywords match whole words", () => {
     const planning: PageDirectoryEntry = {
-      ...page("lens:a/planning", "Planning"),
+      ...page("oxplow:oxplow/lens?lens=a/planning", "Planning"),
       keywords: "lens oxplow-bundled planning what to do next, sorted by the oldest first",
     };
-    const todos: PageDirectoryEntry = { ...page("lens:t/todos", "TODO comments"), keywords: "lens todo-watch todos every comment" };
+    const todos: PageDirectoryEntry = { ...page("oxplow:oxplow/lens?lens=t/todos", "TODO comments"), keywords: "lens todo-watch todos every comment" };
     const symbols: PageDirectoryEntry = { ...page("symbols", "Symbols"), keywords: "outline go to definition" };
-    const stale: PageDirectoryEntry = { ...page("lens:b/stale", "Stale Work"), keywords: "lens review todo items left open" };
+    const stale: PageDirectoryEntry = { ...page("oxplow:oxplow/lens?lens=b/stale", "Stale Work"), keywords: "lens review todo items left open" };
     const out = buildQuickOpenResults({ query: "todo", pages: [planning, symbols, stale, todos], commands: [], files: [], siteHits: [] });
     const ids = out.results.filter((r) => r.kind === "page").map((r) => (r.kind === "page" ? r.entry.id : ""));
-    expect(ids).toEqual(["lens:t/todos", "lens:b/stale"]);
+    expect(ids).toEqual(["oxplow:oxplow/lens?lens=t/todos", "oxplow:oxplow/lens?lens=b/stale"]);
   });
 
   test("a page is found by its keywords, not just label/id", () => {
@@ -279,14 +280,14 @@ describe("nextSectionIndex", () => {
 describe("buildRecentEntries", () => {
   test("prefixes ids to avoid directory collisions, falls back label→refId, rebuilds the ref", () => {
     const entries = buildRecentEntries([
-      { refKind: "file", refId: "file:src/main.rs", label: "main.rs" },
-      { refKind: "wiki", refId: "wiki:architecture", label: "" },
+      { refKind: "file", refId: "oxplow:oxplow/file?path=src/main.rs", label: "main.rs" },
+      { refKind: "wiki", refId: "oxplow:oxplow/wiki?slug=architecture", label: "" },
     ]);
-    expect(entries[0]!.id).toBe("recent:file:src/main.rs");
+    expect(entries[0]!.id).toBe("recent:oxplow:oxplow/file?path=src/main.rs");
     expect(entries[0]!.label).toBe("main.rs");
     expect(entries[0]!.ref.kind).toBe("file");
     // Empty stored label falls back to the ref id.
-    expect(entries[1]!.label).toBe("wiki:architecture");
+    expect(entries[1]!.label).toBe("oxplow:oxplow/wiki?slug=architecture");
     expect(entries[1]!.ref.kind).toBe("wiki");
   });
 });

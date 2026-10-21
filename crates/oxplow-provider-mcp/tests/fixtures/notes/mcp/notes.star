@@ -6,13 +6,14 @@ STATES = {"todo": "open", "in_progress": "doing", "blocked": "stuck", "done": "c
 CANONICAL = {v: k for k, v in STATES.items()}
 
 def ref(x, id):
-    return "work_item:" + x["provider"] + ":" + id
+    return uri.build("oxplow/work_item", provider = x["provider"], id = id)
 
 def note_id(x, r):
-    prefix = "work_item:" + x["provider"] + ":"
-    if not r.startswith(prefix):
+    if not uri.is_uri(r) or uri.resource(r) != "oxplow/work_item":
         return None
-    return r[len(prefix):]
+    if uri.param(r, "provider") != x["provider"]:
+        return None
+    return uri.param(r, "id")
 
 def record(x, note):
     return {

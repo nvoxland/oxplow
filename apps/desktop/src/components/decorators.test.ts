@@ -11,12 +11,13 @@ import {
   REFS_PER_QUERY,
   safeColor,
 } from "./decorators.js";
+import { workItemUri } from "../uri/uri.js";
 
 const decorator = (over: Partial<UiDecorator>): UiDecorator => ({
   id: "flags/0",
   extension: "flags",
   view: "v_flags_flags",
-  kind: "work_item",
+  resource: "oxplow/work_item",
   placement: "ref-chip",
   label: "label",
   color: "color",
@@ -34,23 +35,23 @@ test("the enabled extensions' decorators for a placement", () => {
 });
 
 test("one query per decorator, over the refs of its kind", () => {
-  expect(decorationQueries(decorator({}), ["work_item:oxplow:tsk1", "commit:abc1234", "work_item:fake:W-1"])).toEqual([
+  expect(decorationQueries(decorator({}), ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "oxplow:oxplow/commit?sha=abc1234", "oxplow:oxplow/work_item?id=W-1&provider=fake"])).toEqual([
     {
       sql: 'SELECT ref, "label" AS label, "color" AS color FROM v_flags_flags WHERE ref IN (?1, ?2)',
-      params: ["work_item:oxplow:tsk1", "work_item:fake:W-1"],
+      params: ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "oxplow:oxplow/work_item?id=W-1&provider=fake"],
       limit: 2 * MAX_DECORATIONS_PER_REF,
     },
   ]);
-  expect(decorationQueries(decorator({ color: null }), ["work_item:oxplow:tsk1"])[0]?.sql).toBe(
+  expect(decorationQueries(decorator({ color: null }), ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow"])[0]?.sql).toBe(
     'SELECT ref, "label" AS label FROM v_flags_flags WHERE ref IN (?1)',
   );
-  expect(decorationQueries(decorator({}), ["commit:abc1234"])).toEqual([]);
+  expect(decorationQueries(decorator({}), ["oxplow:oxplow/commit?sha=abc1234"])).toEqual([]);
 });
 
 // tsk934: a large table's row badges aren't cut off by one row limit —
 // the refs go in chunks, each with room for every ref's decorations.
 test("many refs are asked in chunks, each with room for all its decorations", () => {
-  const refs = Array.from({ length: 2 * REFS_PER_QUERY + 50 }, (_, i) => `work_item:oxplow:tsk${i}`);
+  const refs = Array.from({ length: 2 * REFS_PER_QUERY + 50 }, (_, i) => workItemUri("oxplow", `tsk${i}`));
   const queries = decorationQueries(decorator({}), refs);
   expect(queries.map((q) => q.params.length)).toEqual([REFS_PER_QUERY, REFS_PER_QUERY, 50]);
   expect(queries.flatMap((q) => q.params)).toEqual(refs);
@@ -61,7 +62,7 @@ test("many refs are asked in chunks, each with room for all its decorations", ()
 test("an extension's decorations on one ref are few and short", () => {
   const res = {
     columns: ["ref", "label"],
-    rows: Array.from({ length: 10 }, (_, i) => ["work_item:oxplow:tsk1", `${i}${"x".repeat(100)}`]),
+    rows: Array.from({ length: 10 }, (_, i) => ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", `${i}${"x".repeat(100)}`]),
     truncated: false,
   } as unknown as SqlQueryResult;
   const decorations = decorationsFromResult(res, "flags");
@@ -75,7 +76,7 @@ test("an extension's decorations on one ref are few and short", () => {
 // query with anything else in it.
 test("a decorator naming anything but identifiers builds no query", () => {
   for (const bad of [{ label: 'x" ; DROP TABLE task; --' }, { color: "c)" }, { view: "v_x; DELETE FROM task" }]) {
-    expect(decorationQueries(decorator(bad), ["work_item:oxplow:tsk1"])).toEqual([]);
+    expect(decorationQueries(decorator(bad), ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow"])).toEqual([]);
   }
 });
 
@@ -83,14 +84,14 @@ test("decorations become chips for their ref; a color that isn't a plain color i
   const res = {
     columns: ["ref", "label", "color"],
     rows: [
-      ["work_item:oxplow:tsk1", "urgent", "#ff0000"],
-      ["work_item:oxplow:tsk1", "flaky", "url(https://x)"],
-      ["work_item:oxplow:tsk2", "other", null],
+      ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "urgent", "#ff0000"],
+      ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "flaky", "url(https://x)"],
+      ["oxplow:oxplow/work_item?id=tsk2&provider=oxplow", "other", null],
     ],
     truncated: false,
   } as unknown as SqlQueryResult;
   const decorations = decorationsFromResult(res, "flags");
-  expect(chipsFor(decorations, "work_item:oxplow:tsk1")).toEqual([
+  expect(chipsFor(decorations, "oxplow:oxplow/work_item?id=tsk1&provider=oxplow")).toEqual([
     { label: "urgent", color: "#ff0000", title: "from flags" },
     { label: "flaky", title: "from flags" },
   ]);

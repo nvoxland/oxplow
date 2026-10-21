@@ -175,7 +175,7 @@ mod tests {
         spec.filter_json = Some(r#"{"min_value":5.0}"#.into());
         facts.upsert_spec(spec).await.unwrap();
         let fact = |path: &str, value: f64| NewFact {
-            subject: Some(format!("file:{path}")),
+            subject: Some(oxplow_domain::uri::build::file_uri(path)),
             path: Some(path.into()),
             line: Some(3),
             ..NewFact::new(measure, value)

@@ -52,7 +52,7 @@ async function titled(daemon: Daemon, title: string): Promise<boolean> {
  *  refusal under its input. `scope` is
  *  the Board's scope that shows the items. */
 async function swimlanes(page: Page, daemon: Workspace, scope: string) {
-  await run(daemon, "oxplow.work_item.create", { title: "Card one", thread: daemon.thread });
+  await run(daemon, "oxplow.work_item.create", { title: "Card one", thread: daemon.threadUri });
   // A tracker's items reach oxplow's models through its collector's read.
   if (scope === "all") await run(daemon, "oxplow.provider.sync", { instance: "e2e/fake", collector: "work_items" });
   await until("the item to be in the models", 30_000, () => titled(daemon, "Card one"));
@@ -125,7 +125,7 @@ test("the editor, the list and oxplow's own, each chosen from Settings", async (
   test.setTimeout(180_000);
   const { page, daemon } = fresh;
   await install(daemon);
-  await run(daemon, "oxplow.work_item.create", { title: "Item to edit", thread: daemon.thread });
+  await run(daemon, "oxplow.work_item.create", { title: "Item to edit", thread: daemon.threadUri });
   await searchable(daemon, "Item to edit", "work_item");
   await page.goto("/");
   for (const target of TARGETS) await choose(page, target, "task-views");

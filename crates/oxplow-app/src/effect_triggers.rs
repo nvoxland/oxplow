@@ -1131,7 +1131,7 @@ mod tests {
                 "SELECT json_extract(payload, '$.outcome'), json_extract(payload, '$.event'), cause FROM v_event WHERE type = 'effect.result'",
             )
             .await,
-            json!([["ok", format!("event:{}", ev.envelope.id), executed[0][0]]])
+            json!([["ok", oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::EVENT, &format!("{}", ev.envelope.id)), executed[0][0]]])
         );
     }
 
@@ -1475,7 +1475,7 @@ mod tests {
             .run(
                 actor,
                 crate::commands::effect::RETRY,
-                json!({ "effect": "acme/mark-done", "event": format!("event:{}", ev.envelope.id) }),
+                json!({ "effect": "acme/mark-done", "event": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::EVENT, &format!("{}", ev.envelope.id)) }),
                 confirmed,
             )
             .await
@@ -1524,7 +1524,7 @@ mod tests {
         let out = retry(svc, &human, &ev, true).await.unwrap();
         assert_eq!(
             out.result,
-            json!({ "effect": "acme/mark-done", "event": format!("event:{}", ev.envelope.id), "attempt": 2, "outcome": "ok" })
+            json!({ "effect": "acme/mark-done", "event": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::EVENT, &format!("{}", ev.envelope.id)), "attempt": 2, "outcome": "ok" })
         );
         assert_eq!(
             title(&fx).await,
@@ -1598,7 +1598,7 @@ mod tests {
             .run(
                 &human,
                 crate::commands::effect::RETRY,
-                json!({ "effect": "acme/nope", "event": format!("event:{}", ev.envelope.id) }),
+                json!({ "effect": "acme/nope", "event": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::EVENT, &format!("{}", ev.envelope.id)) }),
                 true,
             )
             .await
@@ -1763,7 +1763,7 @@ mod tests {
         assert!(
             disabled.envelope.payload["contribution"]
                 .as_str()
-                .is_some_and(|c| c.starts_with("effect:")),
+                .is_some_and(|c| c.starts_with("oxplow:oxplow/effect?")),
             "{}",
             disabled.envelope.payload
         );
@@ -1795,7 +1795,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT outcome FROM v_extension_run WHERE contribution = 'effect:acme/mark-done'"
+                "SELECT outcome FROM v_extension_run WHERE contribution = 'oxplow:oxplow/effect?effect=acme/mark-done'"
             )
             .await,
             json!([["cancelled"]])
@@ -1845,7 +1845,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT outcome FROM v_extension_run WHERE contribution = 'effect:acme/mark-done'"
+                "SELECT outcome FROM v_extension_run WHERE contribution = 'oxplow:oxplow/effect?effect=acme/mark-done'"
             )
             .await,
             json!([["cancelled"]])

@@ -724,6 +724,11 @@ const SPECIAL_CASES: &[(&str, &str, &str)] = &[
     // Reserving the name, so no provider takes oxplow's refs: no decision
     // about how to call one.
     ("crates/oxplow-domain/src/capability.rs", "== OXPLOW", "the reserved provider id"),
+    // The URI grammar: a contribution's resource is oxplow's own
+    // (`oxplow/model`), whichever extension implements it — a fact of the
+    // naming, not a decision about how to treat an implementation.
+    ("crates/oxplow-domain/src/contribution.rs", "== \"oxplow\"", "a contribution's resource is oxplow's"),
+    ("crates/oxplow-domain/src/uri/build.rs", "!= \"oxplow\"", "a contribution's key param is its kind's name"),
     // What a project that names no extensions runs: the one that ships.
     ("crates/oxplow-config/src/lib.rs", "\"oxplow-bundled\"", "the default team list"),
 ];
@@ -1061,9 +1066,10 @@ fn without_comments(text: &str) -> String {
 /// hand, as `path:line text`.
 fn hand_made_refs() -> Vec<String> {
     use regex::Regex;
-    let kinds: Vec<String> = oxplow_domain::uri::types::core_types()
-        .kinds()
-        .map(|k| k.kind.clone())
+    let kinds: Vec<String> = oxplow_domain::uri::resources::foundation()
+        .clone()
+        .resources()
+        .map(|r| r.name.name().to_string())
         .collect();
     let alternation = kinds.join("|");
     // A string literal that begins with `<kind>:` and goes on (`"file:{p}"`,
@@ -1078,8 +1084,12 @@ fn hand_made_refs() -> Vec<String> {
     let mut out = Vec::new();
     for (path, text) in production_sources() {
         // A work list builds its own items' refs; the grammar module is the
-        // one place a prefix is written.
+        // one place a prefix is written. The migration reads the frozen old
+        // grammar by design, and a preference scope's `resource:` and
+        // `component:` prefixes name a scope, not a URI.
         if path.starts_with("crates/oxplow-domain/src/uri/")
+            || path.starts_with("crates/oxplow-db/src/uri_migration/")
+            || path == "crates/oxplow-db/src/ui_preference_store.rs"
             || path == "crates/oxplow-tasks/src/refs.rs"
         {
             continue;
@@ -1096,7 +1106,7 @@ fn hand_made_refs() -> Vec<String> {
 /// A ref's owner spells it and everyone else carries it: production code
 /// builds a ref with `oxplow_domain::uri::build` and reads one with
 /// `parse_as` / `id_of` / `parse_kind` / `Uri::parse`, never with
-/// `format!("effort:…")`, `strip_prefix("wiki:")` or a split at the colon
+/// `format!("oxplow:oxplow/effort?id=…")`, `strip_prefix("wiki:")` or a split at the colon
 /// (`.context/resources.md`, "Using refs"). The kept list is empty.
 #[test]
 fn refs_are_built_and_parsed_through_the_grammar() {
@@ -1154,29 +1164,33 @@ fn script_and_sql_sources() -> Vec<(String, String)> {
 
 /// Every place a script, lens query or model SQL spells or takes apart a
 /// ref of a core kind by hand, as `path:line text`. A kind's owning model
-/// (`oxplow_db::ref_models::owners`) spells its prefix in its `ref`
+/// (a resource's `resolve` view) spells its prefix in its `ref`
 /// column and is exempt.
 fn hand_made_script_refs() -> Vec<String> {
     use regex::Regex;
-    let kinds: Vec<String> = oxplow_domain::uri::types::core_types()
-        .kinds()
-        .map(|k| k.kind.clone())
+    let kinds: Vec<String> = oxplow_domain::uri::resources::foundation()
+        .clone()
+        .resources()
+        .map(|r| r.name.name().to_string())
         .collect();
     let alt = kinds.join("|");
     let patterns = [
-        // `"file:" + path`, `'effort:eff' || id`, `"lens:x?a=" || ref`.
+        // `"file:" + path`, `'oxplow:oxplow/effort?id=eff' || id`, `"oxplow:oxplow/lens?a=&lens=x" || ref`.
         format!(r#"["'](?:{alt}):[^"'\s]*["']\s*(?:\+|\|\|)"#),
         // `x + "file:"`, `x || 'wiki:'`.
         format!(r#"(?:\+|\|\|)\s*["'](?:{alt}):"#),
-        // `startswith("effort:eff")`, `len("effort:eff")`, `length('work_item:' || …)`.
+        // `startswith("oxplow:oxplow/effort?id=eff")`, `len("oxplow:oxplow/effort?id=eff")`, `length('work_item:' || …)`.
         format!(r#"(?i)(?:startswith|endswith|len|length)\(\s*["'](?:{alt}):"#),
     ]
     .map(|p| Regex::new(&p).expect("a fixed pattern"));
-    let owners: BTreeSet<String> = oxplow_db::ref_models::owners()
-        .map(|m| {
+    let owners: BTreeSet<String> = oxplow_domain::uri::resources::foundation()
+        .clone()
+        .resources()
+        .filter_map(|r| r.resolve.as_ref())
+        .map(|view| {
             format!(
                 "crates/oxplow-db/models/{}.sql",
-                m.view.trim_start_matches("v_")
+                view.trim_start_matches("v_")
             )
         })
         .collect();
@@ -1197,7 +1211,7 @@ fn hand_made_script_refs() -> Vec<String> {
 /// A ref's owner spells it and everyone else carries it: scripts build a
 /// ref with `ref.build` and read one with `ref.id` / `ref.parse`, and SQL
 /// selects or joins on the owning model's `ref` column — never
-/// `"file:" + path`, `'effort:eff' || id`, `startswith("effort:eff")`
+/// `"file:" + path`, `'oxplow:oxplow/effort?id=eff' || id`, `startswith("oxplow:oxplow/effort?id=eff")`
 /// (`.context/resources.md`, "Using refs"). The kept list is empty.
 #[test]
 fn scripts_and_sql_carry_refs_rather_than_spelling_them() {

@@ -1,21 +1,21 @@
 import { run, searchable } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher, searchLauncher } from "../../support/ui.js";
+import { openFromLauncher, searchLauncher, workItemIdOf } from "../../support/ui.js";
 
 test("a written page renders, and a task link in it opens the task", async ({ page, daemon }) => {
   const created = await run<{ result: { ref: string } }>(daemon, "oxplow.work_item.create", {
     title: "Wombat follow-up",
-    thread: daemon.thread,
+    thread: daemon.threadUri,
   });
   await run(daemon, "oxplow.knowledge.write_page", {
     slug: "wombat-plan",
     title: "Wombat plan",
-    body: `# Wombat plan\n\nFirst do [[${created.result.ref.split(":").pop()}]].\n`,
+    body: `# Wombat plan\n\nFirst do [[${workItemIdOf(created.result.ref)}]].\n`,
   });
   await searchable(daemon, "wombat", "wiki");
   await page.goto("/");
   await searchLauncher(page, "wombat plan");
-  await page.getByTestId("launcher-hit-wiki:wombat-plan").click();
+  await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=wombat-plan").click();
   const wiki = page.getByTestId("page-wiki");
   await expect(wiki).toContainText("First do");
   await wiki.locator(`a[href="${created.result.ref}"]`).click();

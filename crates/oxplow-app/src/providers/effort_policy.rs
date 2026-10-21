@@ -137,12 +137,12 @@ mod tests {
     #[test]
     fn a_react_answer_is_commands_or_a_skip() {
         let calls = calls_of(json!({
-            "commands": [{ "name": "oxplow.effort.open", "input": { "thread": "thread:thr1" } }]
+            "commands": [{ "name": "oxplow.effort.open", "input": { "thread": "oxplow:oxplow/thread?id=thr1" } }]
         }))
         .unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].name, "oxplow.effort.open");
-        assert_eq!(calls[0].input["thread"], "thread:thr1");
+        assert_eq!(calls[0].input["thread"], "oxplow:oxplow/thread?id=thr1");
         assert!(calls_of(json!({ "skip": "not mine" })).unwrap().is_empty());
         let err = calls_of(json!({
             "commands": [],

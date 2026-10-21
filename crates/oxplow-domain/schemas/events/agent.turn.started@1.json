@@ -11,11 +11,11 @@
       ]
     },
     "thread": {
-      "description": "`thread:thr3`.",
+      "description": "`oxplow:oxplow/thread?id=thr3`.",
       "type": "string"
     },
     "turn": {
-      "description": "`turn:trn12`.",
+      "description": "`oxplow:oxplow/turn?id=trn12`.",
       "type": "string"
     }
   },

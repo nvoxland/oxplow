@@ -2,7 +2,7 @@ import type { CSSProperties } from "react";
 import { useState } from "react";
 
 import { InlineConfirm } from "../components/InlineConfirm.js";
-import { configUri } from "../uri/uri.js";
+import { configUri, idOf } from "../uri/uri.js";
 import { decide, summarizeProposal, useProposals, type Proposal } from "../proposals.js";
 
 /** The pending proposals an agent raised, read here and decided through
@@ -26,7 +26,7 @@ export function Approvals({
 
 /** The proposals of `all` a `thread` and/or `setting` filter leaves. */
 export function narrow(all: Proposal[], thread?: string | null, setting?: string | null): Proposal[] {
-  const row = thread ? Number(thread.replace(/^(thread:)?thr/, "")) : null;
+  const row = thread ? Number((idOf(thread, "oxplow/thread") ?? thread).replace(/^thr/, "")) : null;
   return all.filter(
     (p) => (row === null || p.threadId === row) && (!setting || p.key === configUri(setting)),
   );

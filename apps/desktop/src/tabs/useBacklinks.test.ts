@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
-import { canonicalIdForTarget, dedupeEntriesByTarget, edgeToInboundEntry, edgeToOutboundEntry, humanRefTypeForTest } from "./useBacklinks.js";
+import { dedupeEntriesByTarget, edgeToInboundEntry, edgeToOutboundEntry, graphUriOf, humanRefTypeForTest } from "./useBacklinks.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
 import type { BacklinkEdge } from "../api.js";
-import { setRefKinds, type RefKind } from "../refKinds.js";
+import { setResources, type Resource } from "../resources.js";
+import { collectorUri, commitUri, dirUri, effortUri, fileUri, lensUri, pageUri, resourceUri, wikiUri, workItemUri } from "../uri/uri.js";
 import {
   directoryRef,
   effortDiffRef,
@@ -11,40 +12,34 @@ import {
   gitCommitRef,
   lensRef,
   wikiPageRef,
+  pageTabRef,
   workItemTabRef,
 } from "./pageRefs.js";
 
-describe("canonicalIdForTarget", () => {
-  // page_ref rows are a canonical ref's (kind, id): a work item is
-  // `work_item` / `<provider>:<id>` (.context/resources.md), whichever list.
-  test("a work item is its ref's id, as the graph stores it", () => {
-    expect(canonicalIdForTarget(workItemTabRef("work_item:oxplow:tsk42"))).toBe("oxplow:tsk42");
-    expect(canonicalIdForTarget(workItemTabRef("work_item:fake:W-1"))).toBe("fake:W-1");
+describe("graphUriOf", () => {
+  // page_ref rows hang on a resource's URI (.context/resources.md), whichever list.
+  test("a work item is its own URI", () => {
+    const item = workItemUri("fake", "W-1");
+    expect(graphUriOf(workItemTabRef(item))).toBe(item);
   });
 
-  test("wikiPageRef returns slug", () => {
-    expect(canonicalIdForTarget(wikiPageRef("url-schemes"))).toBe("url-schemes");
+  test("a wiki page, a file and a directory are theirs, a file without its revision", () => {
+    expect(graphUriOf(wikiPageRef("url-schemes"))).toBe(wikiUri("url-schemes"));
+    expect(graphUriOf(fileRef("src/app.ts"))).toBe(fileUri("src/app.ts"));
+    expect(graphUriOf(directoryRef("src/components"))).toBe(dirUri("src/components"));
   });
 
-  test("fileRef returns the workspace-relative path", () => {
-    expect(canonicalIdForTarget(fileRef("src/app.ts"))).toBe("src/app.ts");
+  test("gitCommitRef is the commit's", () => {
+    expect(graphUriOf(gitCommitRef("abc1234"))).toBe(commitUri("abc1234"));
   });
 
-  test("directoryRef returns the path", () => {
-    expect(canonicalIdForTarget(directoryRef("src/components"))).toBe("src/components");
+  test("any other kind with a page is its own URI, without its view params", () => {
+    expect(graphUriOf(lensRef("oxplow-bundled/findings", { range: "7d" }))).toBe(lensUri("oxplow-bundled/findings"));
+    expect(graphUriOf(effortDiffRef("eff12"))).toBe(effortUri("eff12"));
   });
 
-  test("gitCommitRef returns the sha", () => {
-    expect(canonicalIdForTarget(gitCommitRef("abc1234"))).toBe("abc1234");
-  });
-
-  test("any other kind with a page is its canonical ref's id", () => {
-    expect(canonicalIdForTarget(lensRef("oxplow-bundled/findings"))).toBe("oxplow-bundled/findings");
-    expect(canonicalIdForTarget(effortDiffRef("eff12"))).toBe("eff12");
-  });
-
-  test("untracked kinds return null", () => {
-    expect(canonicalIdForTarget({ id: "settings", kind: "settings", payload: null })).toBeNull();
+  test("a shell route has none", () => {
+    expect(graphUriOf(pageTabRef("settings"))).toBeNull();
   });
 });
 
@@ -118,13 +113,13 @@ describe("humanRefType", () => {
 describe("dedupeEntriesByTarget", () => {
   test("collapses wiki + on-disk file shadow into a single wiki row", () => {
     const entries: BacklinkEntry[] = [
-      { open: "file:.oxplow/wiki/local-snapshots.md", target: "file:.oxplow/wiki/local-snapshots.md", label: ".oxplow/wiki/local-snapshots.md", subtitle: "modified" },
-      { open: "wiki:local-snapshots", target: "wiki:local-snapshots", label: "Local Snapshots", subtitle: "created" },
-      { open: "wiki:local-snapshots", target: "wiki:local-snapshots", label: "Local Snapshots", subtitle: "mention" },
+      { open: "oxplow:oxplow/file?path=.oxplow/wiki/local-snapshots.md", target: "oxplow:oxplow/file?path=.oxplow/wiki/local-snapshots.md", label: ".oxplow/wiki/local-snapshots.md", subtitle: "modified" },
+      { open: "oxplow:oxplow/wiki?slug=local-snapshots", target: "oxplow:oxplow/wiki?slug=local-snapshots", label: "Local Snapshots", subtitle: "created" },
+      { open: "oxplow:oxplow/wiki?slug=local-snapshots", target: "oxplow:oxplow/wiki?slug=local-snapshots", label: "Local Snapshots", subtitle: "mention" },
     ];
     const out = dedupeEntriesByTarget(entries);
     expect(out).toHaveLength(1);
-    expect(out[0].open).toBe("wiki:local-snapshots");
+    expect(out[0].open).toBe("oxplow:oxplow/wiki?slug=local-snapshots");
     expect(out[0].label).toBe("Local Snapshots");
     // Subtitles merged in first-seen order, deduped.
     expect(out[0].subtitle).toBe("modified · created · mention");
@@ -132,9 +127,9 @@ describe("dedupeEntriesByTarget", () => {
 
   test("preserves rows that point at different targets", () => {
     const entries: BacklinkEntry[] = [
-      { open: "wiki:a", target: "wiki:a", label: "A", subtitle: "mention" },
-      { open: "wiki:b", target: "wiki:b", label: "B", subtitle: "mention" },
-      { open: "file:src/x.ts", target: "file:src/x.ts", label: "src/x.ts", subtitle: "modified" },
+      { open: "oxplow:oxplow/wiki?slug=a", target: "oxplow:oxplow/wiki?slug=a", label: "A", subtitle: "mention" },
+      { open: "oxplow:oxplow/wiki?slug=b", target: "oxplow:oxplow/wiki?slug=b", label: "B", subtitle: "mention" },
+      { open: "oxplow:oxplow/file?path=src/x.ts", target: "oxplow:oxplow/file?path=src/x.ts", label: "src/x.ts", subtitle: "modified" },
     ];
     const out = dedupeEntriesByTarget(entries);
     expect(out).toHaveLength(3);
@@ -142,8 +137,8 @@ describe("dedupeEntriesByTarget", () => {
 
   test("collapses two ref_types pointing at the same wiki page", () => {
     const entries: BacklinkEntry[] = [
-      { open: "wiki:url-schemes", target: "wiki:url-schemes", label: "URL Schemes", subtitle: "created" },
-      { open: "wiki:url-schemes", target: "wiki:url-schemes", label: "URL Schemes", subtitle: "mention" },
+      { open: "oxplow:oxplow/wiki?slug=url-schemes", target: "oxplow:oxplow/wiki?slug=url-schemes", label: "URL Schemes", subtitle: "created" },
+      { open: "oxplow:oxplow/wiki?slug=url-schemes", target: "oxplow:oxplow/wiki?slug=url-schemes", label: "URL Schemes", subtitle: "mention" },
     ];
     const out = dedupeEntriesByTarget(entries);
     expect(out).toHaveLength(1);
@@ -152,19 +147,19 @@ describe("dedupeEntriesByTarget", () => {
 
   test("file path that doesn't look like a wiki shadow stays a file row", () => {
     const entries: BacklinkEntry[] = [
-      { open: "file:src/foo.rs", target: "file:src/foo.rs", label: "src/foo.rs", subtitle: "modified" },
-      { open: "file:src/foo.rs", target: "file:src/foo.rs", label: "src/foo.rs", subtitle: "mention" },
+      { open: "oxplow:oxplow/file?path=src/foo.rs", target: "oxplow:oxplow/file?path=src/foo.rs", label: "src/foo.rs", subtitle: "modified" },
+      { open: "oxplow:oxplow/file?path=src/foo.rs", target: "oxplow:oxplow/file?path=src/foo.rs", label: "src/foo.rs", subtitle: "mention" },
     ];
     const out = dedupeEntriesByTarget(entries);
     expect(out).toHaveLength(1);
-    expect(out[0].open).toBe("file:src/foo.rs");
+    expect(out[0].open).toBe("oxplow:oxplow/file?path=src/foo.rs");
     expect(out[0].subtitle).toBe("modified · mention");
   });
 
   test("drops blank subtitles cleanly", () => {
     const entries: BacklinkEntry[] = [
-      { open: "wiki:a", target: "wiki:a", label: "A", subtitle: "" },
-      { open: "wiki:a", target: "wiki:a", label: "A", subtitle: "mention" },
+      { open: "oxplow:oxplow/wiki?slug=a", target: "oxplow:oxplow/wiki?slug=a", label: "A", subtitle: "" },
+      { open: "oxplow:oxplow/wiki?slug=a", target: "oxplow:oxplow/wiki?slug=a", label: "A", subtitle: "mention" },
     ];
     const out = dedupeEntriesByTarget(entries);
     expect(out[0].subtitle).toBe("mention");
@@ -173,16 +168,25 @@ describe("dedupeEntriesByTarget", () => {
 
 describe("edges to any ref", () => {
   // The kinds are read: core's, as the registry lists them.
-  const coreKind = (kind: string, page: string | null): RefKind => ({
-    kind, extension: null, label: null, idPattern: ".*", wikilinks: [], resolve: null, page, icon: null,
+  const coreKind = (name: string, page: string | null): Resource => ({
+    resource: `oxplow/${name}`,
+    extension: "oxplow",
+    label: name,
+    params: { id: { required: true, pattern: null } },
+    additional: false,
+    resolve: null,
+    title: null,
+    searchable: null,
+    icon: null,
+    wikilink: null,
+    page,
   });
-  beforeEach(() => setRefKinds([coreKind("effort", "{ref}"), coreKind("work_item", "{ref}"), coreKind("collector", null)]));
-  afterEach(() => setRefKinds([]));
+  const CORE = () => [coreKind("effort", null), coreKind("work_item", null), coreKind("collector", null)];
+  beforeEach(() => setResources(CORE()));
+  afterEach(() => setResources([]));
   const edge = (over: Partial<BacklinkEdge>): BacklinkEdge => ({
-    source_kind: "work_item",
-    source_id: "oxplow:tsk1",
-    target_kind: "wiki",
-    target_id: "x",
+    source: workItemUri("oxplow", "tsk1"),
+    target: wikiUri("x"),
     ref_type: "work_item_link:about",
     source_extra: null,
     source_label: null,
@@ -192,47 +196,59 @@ describe("edges to any ref", () => {
 
   test("an about link to a collector resolves and opens a page", () => {
     const entry = edgeToOutboundEntry(
-      edge({ target_kind: "collector", target_id: "triage/todos", source_label: "Triage todos" }),
+      edge({ target: collectorUri("triage", "todos"), source_label: "Triage todos" }),
     );
     expect(entry.dead).toBe(false);
-    expect(entry.open).toBe("page:settings");
+    expect(entry.open).toBe(pageUri("settings"));
     expect(entry.label).toBe("Triage todos");
     expect(entry.subtitle).toBe("about");
     expect(entry.linkType).toBe("about");
-    expect(entry.target).toBe("collector:triage/todos");
+    expect(entry.target).toBe(collectorUri("triage", "todos"));
   });
 
   test("a link to a core kind with a page opens it", () => {
-    const entry = edgeToOutboundEntry(edge({ target_kind: "effort", target_id: "eff12", source_label: "An effort" }));
-    expect(entry.open).toBe("effort:eff12");
+    const entry = edgeToOutboundEntry(edge({ target: effortUri("eff12"), source_label: "An effort" }));
+    expect(entry.open).toBe(effortUri("eff12"));
   });
 
-  test("a link to an extension's kind opens the page its ref_kinds names", () => {
-    setRefKinds([
-      { kind: "acme_pr", extension: "acme", label: "PR", idPattern: ".*", wikilinks: [], resolve: "", page: "page:acme/pr?ref={ref}", icon: "" },
+  test("a link to an extension's resource opens the page its registry row names", () => {
+    setResources([
+      {
+        resource: "acme/pr",
+        extension: "acme",
+        label: "PR",
+        params: { id: { required: true, pattern: null } },
+        additional: false,
+        resolve: null,
+        title: null,
+        searchable: null,
+        icon: null,
+        wikilink: null,
+        page: pageUri("acme/pr"),
+      },
     ]);
     try {
-      const entry = edgeToOutboundEntry(edge({ target_kind: "acme_pr", target_id: "12", source_label: "PR 12" }));
-      expect(entry.open).toBe("acme_pr:12");
+      const entry = edgeToOutboundEntry(edge({ target: resourceUri("acme/pr", { id: 12 }), source_label: "PR 12" }));
+      expect(entry.open).toBe(resourceUri("acme/pr", { id: 12 }));
       expect(entry.dead).toBe(false);
     } finally {
-      setRefKinds([coreKind("effort", "{ref}"), coreKind("work_item", "{ref}"), coreKind("collector", null)]);
+      setResources(CORE());
     }
   });
 
-  test("a link to an uninstalled extension's kind is dead, with its raw text, and does not throw", () => {
+  test("a link to an uninstalled extension's resource is dead, with its raw text, and does not throw", () => {
     const entry = edgeToOutboundEntry(
-      edge({ target_kind: "acme_pr", target_id: "12", resolved: false, source_label: null }),
+      edge({ target: resourceUri("oxplow/acme_pr", { id: 12 }), resolved: false, source_label: null }),
     );
     expect(entry.open).toBeNull();
     expect(entry.dead).toBe(true);
-    expect(entry.label).toBe("acme_pr:12");
+    expect(entry.label).toBe(resourceUri("oxplow/acme_pr", { id: 12 }));
     expect(dedupeEntriesByTarget([entry, entry])).toHaveLength(1);
   });
 
   test("an inbound edge reads the source side", () => {
     const entry = edgeToInboundEntry(edge({ source_label: "Fix it" }));
-    expect(entry.open).toBe("work_item:oxplow:tsk1");
+    expect(entry.open).toBe("oxplow:oxplow/work_item?id=tsk1&provider=oxplow");
     expect(entry.label).toBe("Fix it");
   });
 });

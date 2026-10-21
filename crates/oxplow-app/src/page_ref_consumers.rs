@@ -59,13 +59,13 @@ impl EventConsumer for PageRefWorkItemConsumer {
             .and_then(|v| v.as_str())
             .ok_or_else(|| DomainError::Invalid("payload names no work item".into()))?;
         let vocabulary = self.vocabulary.current();
-        let r = oxplow_domain::uri::validate_ref(&vocabulary.kinds, subject)?;
-        if r.kind != "work_item" {
+        let r = oxplow_domain::uri::validate_uri(&vocabulary.resources, subject)?;
+        if r.resource().to_string() != oxplow_domain::uri::resources::WORK_ITEM {
             return Err(DomainError::Invalid(format!(
                 "subject `{subject}` is not a work_item"
             )));
         }
-        oxplow_db::work_item_refs::restate_tx(conn, &vocabulary.kinds, subject)
+        oxplow_db::work_item_refs::restate_tx(conn, &vocabulary.resources, subject)
     }
 }
 
@@ -102,16 +102,16 @@ mod tests {
             .transaction(move |conn| {
                 conn.execute(
                     "INSERT INTO work_item (ref, provider, title, body, state, native_state, created_at, updated_at)
-                     VALUES ('work_item:issues:ENG-1', 'issues', 'Fix it', 'see [[src/app.rs]]', 'todo', 'Todo', 't', 't')",
+                     VALUES ('oxplow:oxplow/work_item?id=ENG-1&provider=issues', 'issues', 'Fix it', 'see [[src/app.rs]]', 'todo', 'Todo', 't', 't')",
                     [],
                 )
                 .map_err(oxplow_db::map_sql_err)?;
-                consumer.handle(conn, &edited("work_item:issues:ENG-1"))?;
+                consumer.handle(conn, &edited("oxplow:oxplow/work_item?id=ENG-1&provider=issues"))?;
                 // A deleted (unknown) item has nothing to project.
-                consumer.handle(conn, &edited("work_item:issues:GONE"))?;
-                assert!(consumer.handle(conn, &edited("commit:abc")).is_err());
+                consumer.handle(conn, &edited("oxplow:oxplow/work_item?id=GONE&provider=issues"))?;
+                assert!(consumer.handle(conn, &edited("oxplow:oxplow/commit?sha=abc")).is_err());
                 conn.query_row(
-                    "SELECT source_id, target_kind, target_id FROM page_ref WHERE source_kind = 'work_item'",
+                    "SELECT source_uri, target_resource, target_uri FROM page_ref WHERE source_resource = 'oxplow/work_item'",
                     [],
                     |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)),
                 )
@@ -121,7 +121,11 @@ mod tests {
             .unwrap();
         assert_eq!(
             edges,
-            ("issues:ENG-1".into(), "file".into(), "src/app.rs".into())
+            (
+                "oxplow:oxplow/work_item?id=ENG-1&provider=issues".into(),
+                "oxplow/file".into(),
+                "oxplow:oxplow/file?path=src/app.rs".into()
+            )
         );
     }
 
@@ -147,21 +151,20 @@ mod tests {
         let consumer = PageRefWorkItemConsumer {
             vocabulary: VocabularyHandle::core(),
         };
-        let item = "work_item:issues:ENG-1";
+        let item = "oxplow:oxplow/work_item?id=ENG-1&provider=issues";
         let edges = |conn: &rusqlite::Connection| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT ref_type, target_kind, target_id FROM page_ref
-                     WHERE source_kind = 'work_item' AND source_id = 'issues:ENG-1'
-                     ORDER BY ref_type, target_id",
+                    "SELECT ref_type, target_uri FROM page_ref
+                     WHERE source_uri = 'oxplow:oxplow/work_item?id=ENG-1&provider=issues'
+                     ORDER BY ref_type, target_uri",
                 )
                 .unwrap();
             stmt.query_map([], |r| {
                 Ok(format!(
-                    "{} {}:{}",
+                    "{} {}",
                     r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?
+                    r.get::<_, String>(1)?
                 ))
             })
             .unwrap()
@@ -171,20 +174,20 @@ mod tests {
         db.transaction(move |conn| {
             let run = |sql: &str| conn.execute(sql, []).map(|_| ()).map_err(oxplow_db::map_sql_err);
             run("INSERT INTO work_item (ref, provider, title, body, state, native_state, created_at, updated_at)
-                 VALUES ('work_item:issues:ENG-1', 'issues', 'Fix it', 'see [[src/app.rs]]', 'todo', 'Todo', 't', 't')")?;
+                 VALUES ('oxplow:oxplow/work_item?id=ENG-1&provider=issues', 'issues', 'Fix it', 'see [[src/app.rs]]', 'todo', 'Todo', 't', 't')")?;
             // A list's own link type.
             run("INSERT INTO work_item_link (from_ref, to_ref, link_type, created_at)
-                 VALUES ('work_item:issues:ENG-1', 'work_item:issues:ENG-2', 'parent_of', 't')")?;
+                 VALUES ('oxplow:oxplow/work_item?id=ENG-1&provider=issues', 'oxplow:oxplow/work_item?id=ENG-2&provider=issues', 'parent_of', 't')")?;
             consumer.handle(
                 conn,
                 &event::<WorkItemLinked>(&WorkItemLinkedV2 {
                     work_item: item.into(),
-                    target: "work_item:issues:ENG-2".into(),
+                    target: "oxplow:oxplow/work_item?id=ENG-2&provider=issues".into(),
                     link_type: "parent_of".into(),
                 }),
             )?;
             run("INSERT INTO work_item_comment (id, ref, body, created_at)
-                 VALUES ('work_item:issues:ENG-1#c1', 'work_item:issues:ENG-1', 'and [[src/b.rs]]', 't')")?;
+                 VALUES ('oxplow:oxplow/work_item?id=ENG-1&provider=issues#part=c1', 'oxplow:oxplow/work_item?id=ENG-1&provider=issues', 'and [[src/b.rs]]', 't')")?;
             consumer.handle(
                 conn,
                 &event::<WorkItemCommented>(&WorkItemCommentedV2 {
@@ -195,9 +198,9 @@ mod tests {
             assert_eq!(
                 edges(conn),
                 vec![
-                    "comment_file_ref file:src/b.rs",
-                    "wiki_file_ref file:src/app.rs",
-                    "work_item_link:parent_of work_item:issues:ENG-2",
+                    "comment_file_ref oxplow:oxplow/file?path=src/b.rs",
+                    "wiki_file_ref oxplow:oxplow/file?path=src/app.rs",
+                    "work_item_link:parent_of oxplow:oxplow/work_item?id=ENG-2&provider=issues",
                 ]
             );
             // A read back restating the item without its link.
@@ -216,8 +219,8 @@ mod tests {
             assert_eq!(
                 edges(conn),
                 vec![
-                    "comment_file_ref file:src/b.rs",
-                    "wiki_file_ref file:src/app.rs",
+                    "comment_file_ref oxplow:oxplow/file?path=src/b.rs",
+                    "wiki_file_ref oxplow:oxplow/file?path=src/app.rs",
                 ]
             );
             run("UPDATE work_item SET deleted_at = 't'")?;

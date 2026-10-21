@@ -1,7 +1,7 @@
 title: Thread notes
 description: The notes left on a thread, newest first.
 params:
-  - { name: thread, label: Thread (`thread:thr3`) }
+  - { name: thread, label: Thread (`oxplow:oxplow/thread?id=thr3`) }
 query: |
   SELECT n.ref, n.created_at, n.author, n.body
   FROM v_thread_note n

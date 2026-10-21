@@ -4,7 +4,7 @@
   "description": "`collector.synced@1` (P7.B3): a collector ran — by hand\n(`oxplow.collector.sync`), on its schedule, or for an event its `on:` trigger\nnames (then the envelope's `cause` is that event). Logged in the\ntransaction that wrote what it collected; a run that failed logs one\ntoo, with what went wrong.",
   "properties": {
     "collector": {
-      "description": "`collector:<owner>/<id>`.",
+      "description": "`oxplow:oxplow/collector?collector=<owner>/<id>`.",
       "type": "string"
     },
     "elapsed_ms": {

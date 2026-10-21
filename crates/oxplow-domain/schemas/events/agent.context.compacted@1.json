@@ -38,7 +38,7 @@
           "type": "null"
         }
       ],
-      "description": "The summary the context was replaced with (Claude's\n`compact_summary`), stored in `event_content`; read as\n`event:<id>#summary`."
+      "description": "The summary the context was replaced with (Claude's\n`compact_summary`), stored in `event_content`; read as\n`oxplow:oxplow/event?id=<id>#part=summary`."
     },
     "thread": {
       "type": "string"

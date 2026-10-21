@@ -48,7 +48,7 @@ async fn lenses_and_extensions_are_models_that_follow_the_catalog() {
         .await,
         vec![
             vec![
-                json!("lens:acme/counts"),
+                json!("oxplow:oxplow/lens?lens=acme/counts"),
                 json!("acme"),
                 json!("counts"),
                 json!("Acme counts"),
@@ -61,7 +61,7 @@ async fn lenses_and_extensions_are_models_that_follow_the_catalog() {
                 )
             ],
             vec![
-                json!("lens:acme/detail"),
+                json!("oxplow:oxplow/lens?lens=acme/detail"),
                 json!("acme"),
                 json!("detail"),
                 json!("Detail"),
@@ -81,7 +81,7 @@ async fn lenses_and_extensions_are_models_that_follow_the_catalog() {
         )
         .await,
         vec![vec![
-            json!("extension:acme"),
+            json!("oxplow:oxplow/extension?name=acme"),
             json!("acme"),
             json!("2.1.0"),
             json!("project"),
@@ -147,10 +147,13 @@ async fn page_ref_edges_are_a_model_in_both_directions() {
         .db
         .transaction(|tx| {
             tx.execute(
-                "INSERT INTO page_ref (source_kind, source_id, target_kind, target_id, ref_type)
-                 VALUES ('wiki', 'intro', 'file', 'src/app.rs', 'mention'),
-                        ('wiki', 'intro', 'wiki', 'other', 'link'),
-                        ('commit', 'abc1234', 'file', 'src/app.rs', 'touches')",
+                "INSERT INTO page_ref (source_uri, target_uri, source_resource, target_resource, ref_type)
+                 VALUES (uri('oxplow/wiki', 'slug', 'intro'), uri('oxplow/file', 'path', 'src/app.rs'),
+                         'oxplow/wiki', 'oxplow/file', 'mention'),
+                        (uri('oxplow/wiki', 'slug', 'intro'), uri('oxplow/wiki', 'slug', 'other'),
+                         'oxplow/wiki', 'oxplow/wiki', 'link'),
+                        (uri('oxplow/commit', 'sha', 'abc1234'), uri('oxplow/file', 'path', 'src/app.rs'),
+                         'oxplow/commit', 'oxplow/file', 'touches')",
                 [],
             )
             .map_err(oxplow_db::map_sql_err)?;
@@ -162,22 +165,22 @@ async fn page_ref_edges_are_a_model_in_both_directions() {
     assert_eq!(
         rows(
             &fx,
-            "SELECT source_ref, ref_type FROM v_page_ref WHERE target_ref = 'file:src/app.rs' ORDER BY source_ref"
+            "SELECT source_uri, ref_type FROM v_page_ref WHERE target_uri = 'oxplow:oxplow/file?path=src/app.rs' ORDER BY source_uri"
         )
         .await,
         vec![
-            vec![json!("commit:abc1234"), json!("touches")],
-            vec![json!("wiki:intro"), json!("mention")],
+            vec![json!("oxplow:oxplow/commit?sha=abc1234"), json!("touches")],
+            vec![json!("oxplow:oxplow/wiki?slug=intro"), json!("mention")],
         ]
     );
     // What a page points at.
     assert_eq!(
         rows(
             &fx,
-            "SELECT target_ref FROM v_page_ref WHERE source_ref = 'wiki:intro' ORDER BY target_ref"
+            "SELECT target_uri FROM v_page_ref WHERE source_uri = 'oxplow:oxplow/wiki?slug=intro' ORDER BY target_uri"
         )
         .await,
-        vec![vec![json!("file:src/app.rs")], vec![json!("wiki:other")]]
+        vec![vec![json!("oxplow:oxplow/file?path=src/app.rs")], vec![json!("oxplow:oxplow/wiki?slug=other")]]
     );
 }
 
@@ -191,7 +194,7 @@ async fn prompts_and_config_keys_are_models() {
     write(
         &root,
         "extension.yaml",
-        "manifest: 2\nname: acme\nintent:\n  purpose: Count things.\n  prompts:\n    - { prompt: Which acme things changed?, about: file }\n",
+        "manifest: 2\nname: acme\nintent:\n  purpose: Count things.\n  prompts:\n    - { prompt: Which acme things changed?, about: oxplow/file }\n",
     );
     crate::test_fixtures::activate(&fx.svc).await;
 
@@ -205,7 +208,7 @@ async fn prompts_and_config_keys_are_models() {
             json!("extension"),
             json!("acme"),
             json!("Which acme things changed?"),
-            json!("file")
+            json!("oxplow/file")
         ]]
     );
     // Core's areas come first, in the catalog's order.

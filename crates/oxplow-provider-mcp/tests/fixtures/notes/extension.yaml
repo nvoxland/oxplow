@@ -11,7 +11,7 @@ intent:
   examples:
     - name: create
       input: { command: create, input: { title: First note } }
-      expect: the new note's ref (work_item:notes:N-<n>)
+      expect: the new note's URI (oxplow:oxplow/work_item?id=N-<n>&provider=notes)
 permissions:
   process: true
 providers:

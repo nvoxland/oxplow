@@ -357,7 +357,7 @@ mod tests {
             let k = k.clone();
             move |tx| {
                 set_next_due_tx(tx, &k, Some("2000-01-01T00:00:00.000000Z"), "t1")?;
-                for (seq, subject) in [(1, "[\"provider:tracker/fake\"]"), (2, "[]"), (3, "[]")] {
+                for (seq, subject) in [(1, "[\"oxplow:oxplow/provider?provider=tracker/fake\"]"), (2, "[]"), (3, "[]")] {
                     tx.execute(
                         "INSERT INTO event_log (seq, id, type, v, at, source, subject, payload)
                          VALUES (?1, 'e' || ?1, 'x.y', 1, 't', 's', ?2, '{}')",
@@ -367,8 +367,8 @@ mod tests {
                 }
                 for (consumer, seq, state) in [
                     ("some.consumer", 1, "pending"),
-                    ("provider:tracker/fake", 2, "pending"),
-                    ("provider:tracker/fake", 3, "discarded"),
+                    ("oxplow:oxplow/provider?provider=tracker/fake", 2, "pending"),
+                    ("oxplow:oxplow/provider?provider=tracker/fake", 3, "discarded"),
                 ] {
                     tx.execute(
                         "INSERT INTO event_dead_letter (consumer, event_seq, error, first_failed_at, last_failed_at, state)

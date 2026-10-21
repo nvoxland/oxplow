@@ -200,7 +200,7 @@ which is the useful action.
 
 `MonacoCommentLayer` (`apps/desktop/src/components/Comments/MonacoCommentLayer.tsx`)
 is mounted inside `EditorPane`'s relative container once `monacoReady`
-and `filePath` are set (target `file:<repo-relative path>`, stream-scoped
+and `filePath` are set (target `oxplow:oxplow/file?path=<repo-relative path>`, stream-scoped
 — files aren't thread-bound, so `threadId` is null). It mirrors the
 rich-text integration:
 

@@ -628,7 +628,7 @@ fn command_error(err: oxplow_domain::CommandError) -> McpError {
     }
 }
 
-/// What an agent is told when its run waits for a person (`proposal:N`).
+/// What an agent is told when its run waits for a person (`oxplow:oxplow/proposal?id=N`).
 fn proposed_message(command: &str, proposal: &str, supersedes: &[String]) -> String {
     let replaces = if supersedes.is_empty() {
         String::new()
@@ -819,14 +819,14 @@ mod tests {
                 threads: vec![oxplow_app::client_reports::ThreadTabs {
                     thread,
                     tabs: vec![oxplow_app::client_reports::ReportedTab {
-                        id: "lens:demo/kinds".into(),
+                        id: "oxplow:oxplow/lens?lens=demo/kinds".into(),
                         kind: "lens".into(),
                         title: "Kinds".into(),
                         back: Vec::new(),
                         forward: Vec::new(),
                         origin: None,
                     }],
-                    active: Some("lens:demo/kinds".into()),
+                    active: Some("oxplow:oxplow/lens?lens=demo/kinds".into()),
                 }],
                 detail_json: Some(r#"{"lensId":"demo/kinds","params":{"kind":"primary"}}"#.into()),
             },
@@ -843,7 +843,7 @@ mod tests {
             .unwrap(),
         ))
         .unwrap();
-        assert_eq!(open["open"]["pageId"], "lens:demo/kinds");
+        assert_eq!(open["open"]["pageId"], "oxplow:oxplow/lens?lens=demo/kinds");
         assert_eq!(open["open"]["detail"]["params"]["kind"], "primary");
         // The lens is re-run with the human's params, not the defaults,
         // and read as its text.
@@ -893,7 +893,7 @@ mod tests {
                 &server,
                 &rmcp::model::Extensions::new(),
                 "oxplow_read",
-                serde_json::json!({ "ref": "lens:demo/streams" }),
+                serde_json::json!({ "ref": "oxplow:oxplow/lens?lens=demo/streams" }),
             )
             .await
             .unwrap(),
@@ -941,11 +941,14 @@ mod tests {
             &server,
             &rmcp::model::Extensions::new(),
             "oxplow_read",
-            serde_json::json!({ "ref": "lens:demo/nope" }),
+            serde_json::json!({ "ref": "oxplow:oxplow/lens?lens=demo/nope" }),
         )
         .await
         .unwrap_err();
-        assert!(err.message.contains("lens:demo/nope"), "{err:?}");
+        assert!(
+            err.message.contains("oxplow:oxplow/lens?lens=demo/nope"),
+            "{err:?}"
+        );
 
         let v: serde_json::Value = serde_json::from_str(&text_payload(
             call(
@@ -1048,12 +1051,12 @@ mod tests {
                 &oxplow_domain::Actor::Human,
                 "oxplow.knowledge.add_comment",
                 serde_json::json!({
-                    "stream": format!("stream:{stream}"),
-                    "target": { "kind": "work_item", "id": format!("oxplow:{primary_task}") },
+                    "stream": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::STREAM, &stream.to_string()),
+                    "target": oxplow_domain::uri::build::work_item_uri("oxplow", &primary_task.to_string()),
                     "quote": "the highlighted text",
                     "selectors_json": "[]",
-                    "context_chain": [{ "kind": "work_item", "id": format!("oxplow:{parent_task}") }],
-                    "referenced_refs": [{ "kind": "file", "id": "src/app.rs" }],
+                    "context_chain": [oxplow_domain::uri::build::work_item_uri("oxplow", &parent_task.to_string())],
+                    "referenced": [oxplow_domain::uri::build::file_uri("src/app.rs")],
                     "intent": "followup",
                     "body": "what about this?",
                 }),
@@ -1075,13 +1078,16 @@ mod tests {
         let row = &parsed.as_array().unwrap()[0];
 
         // Primary target resolved to the task title.
-        assert_eq!(row["primary"]["kind"], "work_item");
+        assert_eq!(row["primary"]["resource"], "oxplow/work_item");
         assert_eq!(row["primary"]["title"], "Primary item");
         // Context chain ancestor resolved.
         assert_eq!(row["context_chain"][0]["title"], "Parent epic");
         // Referenced file ref present but bare (no first-class label).
-        assert_eq!(row["referenced"][0]["kind"], "file");
-        assert_eq!(row["referenced"][0]["id"], "src/app.rs");
+        assert_eq!(row["referenced"][0]["resource"], "oxplow/file");
+        assert_eq!(
+            row["referenced"][0]["uri"],
+            oxplow_domain::uri::build::file_uri("src/app.rs")
+        );
         assert!(row["referenced"][0]["title"].is_null());
         // The raw thread still travels under `thread`.
         assert_eq!(row["thread"]["comment"]["quote"], "the highlighted text");
@@ -1237,7 +1243,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             ext.join("files.star"),
-            "def transform(x):\n    return {\"facts\": [{\"measure\": \"work.files\", \"value\": len(files(\"**\")), \"subject\": uri.build(\"file\", \"src/a.rs\")}]}\n",
+            "def transform(x):\n    return {\"facts\": [{\"measure\": \"work.files\", \"value\": len(files(\"**\")), \"subject\": uri.build(\"oxplow/file\", path = \"src/a.rs\")}]}\n",
         )
         .unwrap();
         deploy_sources(&svc).await;
@@ -1269,7 +1275,10 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&text_payload(r)).unwrap();
         assert_eq!(v["facts"][0]["measure"], "work.files", "{v}");
         assert_eq!(v["facts"][0]["value"], 1, "{v}");
-        assert_eq!(v["facts"][0]["subject"], "file:src/a.rs", "{v}");
+        assert_eq!(
+            v["facts"][0]["subject"], "oxplow:oxplow/file?path=src/a.rs",
+            "{v}"
+        );
         assert!(svc.collector_store.list_runs().await.unwrap().is_empty());
     }
 
@@ -1286,7 +1295,7 @@ mod tests {
                     &server,
                     &rmcp::model::Extensions::new(),
                     "oxplow_read",
-                    serde_json::json!({ "ref": format!("work_item:oxplow:{id}") }),
+                    serde_json::json!({ "ref": oxplow_domain::uri::build::work_item_uri("oxplow", &format!("{id}")) }),
                 )
                 .await
                 .map(|r| serde_json::from_str::<serde_json::Value>(&text_payload(r)).unwrap())
@@ -1456,11 +1465,13 @@ mod tests {
         }
         let size = serde_json::to_string(&index).unwrap().len();
         // Fetched on demand, not every turn: ~4K tokens (every full spec was 164 KB).
-        assert!(size < 17_500, "the index is {size} bytes");
+        assert!(size < 18_000, "the index is {size} bytes");
         // A summary is cut at its first sentence; the command shows it whole.
         assert_eq!(
-            first_sentence("Open a slot (`thread:thr1`). It starts nothing, e.g. no process."),
-            "Open a slot (`thread:thr1`)."
+            first_sentence(
+                "Open a slot (`oxplow:oxplow/thread?id=thr1`). It starts nothing, e.g. no process."
+            ),
+            "Open a slot (`oxplow:oxplow/thread?id=thr1`)."
         );
         assert_eq!(first_sentence("One sentence"), "One sentence");
 
@@ -1656,7 +1667,10 @@ mod tests {
         let proposed: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(proposed["kind"], "proposed");
         let proposal = proposed["proposal"].as_str().unwrap().to_string();
-        assert!(proposal.starts_with("proposal:"), "{proposed}");
+        assert!(
+            proposal.starts_with("oxplow:oxplow/proposal?"),
+            "{proposed}"
+        );
         let message = proposed["message"].as_str().unwrap();
         assert!(message.contains(&proposal), "{message}");
         assert!(message.contains("Alerts"), "{message}");
@@ -1719,7 +1733,7 @@ mod tests {
             &server,
             &extensions_for(parts_as(thread.id, other_id, &[])),
             "oxplow_read",
-            serde_json::json!({ "ref": "file:who.txt" }),
+            serde_json::json!({ "ref": "oxplow:oxplow/file?path=who.txt" }),
         )
         .await
         .unwrap();
@@ -1731,7 +1745,7 @@ mod tests {
             &extensions_for(parts_as(thread.id, other_id, &[])),
             "oxplow_read",
             serde_json::json!({
-                "ref": "file:who.txt",
+                "ref": "oxplow:oxplow/file?path=who.txt",
                 "stream": oxplow_domain::uri::build::stream_uri(primary.id),
             }),
         )
@@ -1743,11 +1757,15 @@ mod tests {
             &server,
             &extensions_for(parts_as(thread.id, other_id, &[])),
             "oxplow_read",
-            serde_json::json!({ "ref": "file:who.txt", "stream": "str1" }),
+            serde_json::json!({ "ref": "oxplow:oxplow/file?path=who.txt", "stream": "str1" }),
         )
         .await
         .unwrap_err();
-        assert!(bad.message.contains("stream:str2"), "{}", bad.message);
+        assert!(
+            bad.message.contains("oxplow:oxplow/stream?id=str2"),
+            "{}",
+            bad.message
+        );
     }
 
     /// The extension and lens tools without a `stream_id` read
@@ -1807,7 +1825,10 @@ mod tests {
         ))
         .unwrap();
         assert!(
-            out["answer"].as_str().unwrap().starts_with("answer:"),
+            out["answer"]
+                .as_str()
+                .unwrap()
+                .starts_with("oxplow:oxplow/answer?"),
             "{out}"
         );
         assert!(

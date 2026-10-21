@@ -202,25 +202,37 @@ mod tests {
         db.transaction(|conn| {
             let (one, two) = seed(conn);
             assert_eq!(
-                set_tx(conn, one, &bookmark("page:git", BookmarkScope::Thread))?,
+                set_tx(
+                    conn,
+                    one,
+                    &bookmark("oxplow:oxplow/page?page=git", BookmarkScope::Thread)
+                )?,
                 None
             );
-            assert_eq!(visible_tx(conn, two, "page:git")?, None);
-            let before = set_tx(conn, one, &bookmark("page:git", BookmarkScope::Stream))?;
+            assert_eq!(visible_tx(conn, two, "oxplow:oxplow/page?page=git")?, None);
+            let before = set_tx(
+                conn,
+                one,
+                &bookmark("oxplow:oxplow/page?page=git", BookmarkScope::Stream),
+            )?;
             assert_eq!(before.map(|b| b.scope), Some(BookmarkScope::Thread));
             assert_eq!(
-                visible_tx(conn, one, "page:git")?.map(|b| b.scope),
+                visible_tx(conn, one, "oxplow:oxplow/page?page=git")?.map(|b| b.scope),
                 Some(BookmarkScope::Stream)
             );
-            assert_eq!(visible_tx(conn, two, "page:git")?, None);
-            set_tx(conn, one, &bookmark("page:git", BookmarkScope::Project))?;
+            assert_eq!(visible_tx(conn, two, "oxplow:oxplow/page?page=git")?, None);
+            set_tx(
+                conn,
+                one,
+                &bookmark("oxplow:oxplow/page?page=git", BookmarkScope::Project),
+            )?;
             assert_eq!(
-                visible_tx(conn, two, "page:git")?.map(|b| b.scope),
+                visible_tx(conn, two, "oxplow:oxplow/page?page=git")?.map(|b| b.scope),
                 Some(BookmarkScope::Project)
             );
-            let removed = remove_tx(conn, two, "page:git")?;
+            let removed = remove_tx(conn, two, "oxplow:oxplow/page?page=git")?;
             assert_eq!(removed.map(|b| b.scope), Some(BookmarkScope::Project));
-            assert_eq!(visible_tx(conn, one, "page:git")?, None);
+            assert_eq!(visible_tx(conn, one, "oxplow:oxplow/page?page=git")?, None);
             Ok(())
         })
         .await
@@ -236,7 +248,7 @@ mod tests {
                 set_tx(
                     conn,
                     Viewer::default(),
-                    &bookmark("page:git", BookmarkScope::Thread),
+                    &bookmark("oxplow:oxplow/page?page=git", BookmarkScope::Thread),
                 )
             })
             .await

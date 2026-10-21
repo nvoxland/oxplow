@@ -10,6 +10,53 @@ use serde::{Deserialize, Serialize};
 
 use super::oxplow_uri::{OxplowUri, ResourceName};
 
+// oxplow's own resources, by name (oxplow-foundation declares each in its
+// manifest's `resources:`).
+pub const PROJECT: &str = "oxplow/project";
+pub const STREAM: &str = "oxplow/stream";
+pub const THREAD: &str = "oxplow/thread";
+pub const EFFORT: &str = "oxplow/effort";
+pub const TURN: &str = "oxplow/turn";
+pub const SNAPSHOT: &str = "oxplow/snapshot";
+pub const COMMIT: &str = "oxplow/commit";
+pub const BRANCH: &str = "oxplow/branch";
+pub const FILE: &str = "oxplow/file";
+pub const DIR: &str = "oxplow/dir";
+pub const SYMBOL: &str = "oxplow/symbol";
+pub const WORK_ITEM: &str = "oxplow/work_item";
+pub const WIKI: &str = "oxplow/wiki";
+pub const COMMENT: &str = "oxplow/comment";
+pub const EVENT: &str = "oxplow/event";
+pub const LENS: &str = "oxplow/lens";
+pub const ANSWER: &str = "oxplow/answer";
+pub const PAGE: &str = "oxplow/page";
+pub const METRIC: &str = "oxplow/metric";
+pub const MODEL: &str = "oxplow/model";
+pub const AI_MODEL: &str = "oxplow/ai_model";
+pub const EXTENSION: &str = "oxplow/extension";
+pub const COMMAND: &str = "oxplow/command";
+pub const CONFIG: &str = "oxplow/config";
+pub const FINDING: &str = "oxplow/finding";
+pub const THREAD_NOTE: &str = "oxplow/thread_note";
+pub const AGENT_SESSION: &str = "oxplow/agent_session";
+pub const HANDOFF: &str = "oxplow/handoff";
+pub const DASHBOARD: &str = "oxplow/dashboard";
+pub const SUBAGENT: &str = "oxplow/subagent";
+pub const RUN: &str = "oxplow/run";
+pub const PROPOSAL: &str = "oxplow/proposal";
+pub const CLAIM: &str = "oxplow/claim";
+pub const DECISION: &str = "oxplow/decision";
+pub const COLLECTOR: &str = "oxplow/collector";
+pub const JOB_RUN: &str = "oxplow/job_run";
+pub const AI_CALL: &str = "oxplow/ai_call";
+pub const CONSUMER: &str = "oxplow/consumer";
+pub const BLOCK: &str = "oxplow/block";
+pub const TEST: &str = "oxplow/test";
+pub const NUDGE: &str = "oxplow/nudge";
+pub const EXTENSION_DEPLOYMENT: &str = "oxplow/extension_deployment";
+pub const PANEL: &str = "oxplow/panel";
+pub const JOB: &str = "oxplow/job";
+
 /// One of a resource's params: whether every URI carries it, and the
 /// pattern its (decoded) value matches, anchored by its author.
 #[derive(
@@ -53,6 +100,89 @@ pub struct ResourceDecl {
     pub searchable: Option<String>,
     pub icon: Option<String>,
     pub wikilink: Option<WikilinkDecl>,
+    /// The page one opens on (its page URI), given `ref=<uri>`: an
+    /// extension's resource until a renderer opens a URI as itself.
+    pub page: Option<String>,
+}
+
+/// A `resources:` entry as a manifest holds it. `resolve` and `searchable`
+/// name models as the manifest does; the app's loader turns them into the
+/// views they publish as and checks them (`extension_resources`).
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ResourceEntry {
+    pub name: String,
+    pub label: String,
+    #[serde(default)]
+    pub params: BTreeMap<String, ParamDecl>,
+    #[serde(default)]
+    pub additional: bool,
+    #[serde(default)]
+    pub resolve: Option<String>,
+    /// The column of `resolve` that titles one (default `title`).
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub searchable: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub wikilink: Option<WikilinkDecl>,
+    /// One of the extension's pages (its id), which opens one given
+    /// `ref=<uri>`.
+    #[serde(default)]
+    pub page: Option<String>,
+}
+
+impl ResourceEntry {
+    /// This entry as the resource `extension` declares (`resolve` and
+    /// `searchable` left as written), or why its name isn't one.
+    pub fn into_decl(self, extension: &str) -> Result<ResourceDecl, String> {
+        let name = ResourceName::new(extension, &self.name).map_err(|_| {
+            format!(
+                "resource `{}`: a name is lowercase letters, digits and `_`, starting with a letter",
+                self.name
+            )
+        })?;
+        Ok(ResourceDecl {
+            name,
+            label: self.label,
+            params: self.params,
+            additional: self.additional,
+            resolve: self.resolve,
+            title: self.title,
+            searchable: self.searchable,
+            icon: self.icon,
+            wikilink: self.wikilink,
+            page: self.page,
+        })
+    }
+}
+
+impl ResourceDecl {
+    /// A resource named by one required param `key` and nothing else:
+    /// what a test or a small registry declares.
+    pub fn keyed(name: &str, key: &str) -> Self {
+        Self {
+            name: name.parse().expect("a resource name"),
+            label: name.to_string(),
+            params: [(
+                key.to_string(),
+                ParamDecl {
+                    required: true,
+                    pattern: None,
+                },
+            )]
+            .into(),
+            additional: false,
+            resolve: None,
+            title: None,
+            searchable: None,
+            icon: None,
+            wikilink: None,
+            page: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -107,9 +237,73 @@ struct Entry {
 pub struct ResourceRegistry {
     resources: BTreeMap<ResourceName, Entry>,
     wikilinks: BTreeMap<String, ResourceName>,
+    /// The active work list's own ids, when it declares them: what makes a
+    /// loose `tsk42` (or `ENG-12`) in text one of its items.
+    work_item_ids: Option<WorkItemIds>,
+}
+
+/// A work list's ids, as it declares them (`WorkItemsProvider::id_pattern`).
+#[derive(Debug, Clone)]
+struct WorkItemIds {
+    provider: String,
+    /// The pattern, matched whole.
+    whole: Regex,
 }
 
 impl ResourceRegistry {
+    /// This registry recognizing `provider`'s ids (`pattern`, a regex
+    /// matched whole): the active work list's, set by the app.
+    pub fn with_work_item_ids(
+        mut self,
+        provider: &str,
+        pattern: &str,
+    ) -> Result<Self, ResourceError> {
+        let whole =
+            Regex::new(&format!("^(?:{pattern})$")).map_err(|e| ResourceError::BadPattern {
+                resource: WORK_ITEM.into(),
+                param: "id".into(),
+                error: e.to_string(),
+            })?;
+        self.work_item_ids = Some(WorkItemIds {
+            provider: provider.into(),
+            whole,
+        });
+        Ok(self)
+    }
+
+    /// This registry recognizing no work list's ids (none is active, or the
+    /// active one declares none).
+    pub fn without_work_item_ids(mut self) -> Self {
+        self.work_item_ids = None;
+        self
+    }
+
+    /// `text`, whole, as one of the active work list's ids: that item's URI.
+    pub fn work_item_uri_of(&self, text: &str) -> Option<String> {
+        let ids = self.work_item_ids.as_ref()?;
+        ids.whole
+            .is_match(text)
+            .then(|| super::build::work_item_uri(&ids.provider, text))
+    }
+
+    /// Every token of `text` that is one of the active work list's ids — a
+    /// token being a run of letters, digits, `_` and `-` — as its item's
+    /// URI, in order, each once.
+    pub fn find_work_item_uris(&self, text: &str) -> Vec<String> {
+        if self.work_item_ids.is_none() {
+            return Vec::new();
+        }
+        let mut out: Vec<String> = Vec::new();
+        for token in text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-')) {
+            if let Some(uri) = self.work_item_uri_of(token) {
+                if !out.contains(&uri) {
+                    out.push(uri);
+                }
+            }
+        }
+        out
+    }
+
     pub fn register(&mut self, decl: ResourceDecl) -> Result<(), ResourceError> {
         if self.resources.contains_key(&decl.name) {
             return Err(ResourceError::Collision(decl.name.to_string()));
@@ -201,6 +395,32 @@ impl ResourceRegistry {
     }
 }
 
+/// oxplow-foundation's resources, as its manifest declares them
+/// (`resources:`): what a process names things with before the first
+/// vocabulary rebuild registers every enabled extension's (foundation's
+/// among them, from the same manifest).
+pub fn foundation() -> &'static ResourceRegistry {
+    static REGISTRY: std::sync::LazyLock<ResourceRegistry> = std::sync::LazyLock::new(|| {
+        let manifest: serde_yaml::Value = serde_yaml::from_str(include_str!(
+            "../../../../extensions/oxplow-foundation/extension.yaml"
+        ))
+        .expect("oxplow-foundation's manifest is YAML");
+        let mut registry = ResourceRegistry::default();
+        for entry in manifest["resources"]
+            .as_sequence()
+            .expect("oxplow-foundation declares resources")
+        {
+            let entry: ResourceEntry =
+                serde_yaml::from_value(entry.clone()).expect("a resources: entry");
+            registry
+                .register(entry.into_decl("oxplow").expect("a resource name"))
+                .expect("oxplow-foundation's resources register");
+        }
+        registry
+    });
+    &REGISTRY
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,6 +447,7 @@ mod tests {
             searchable: None,
             icon: None,
             wikilink: None,
+            page: None,
         }
     }
 

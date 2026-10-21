@@ -15,13 +15,11 @@ function quoteSnippet(quote: string): string {
 /// comments that have no inline highlight — in a dropdown. Renders
 /// nothing when the page has no comments.
 export function CommentNavigator({
-  targetKind,
-  targetId,
+  target,
 }: {
-  targetKind: string;
-  targetId: string;
+  target: string;
 }) {
-  const { threads } = useCommentsForTarget(targetKind, targetId);
+  const { threads } = useCommentsForTarget(target);
   const [open, setOpen] = useState(false);
   const [idx, setIdx] = useState(0);
   // Default to unresolved only (mirrors the Comments Dashboard); the

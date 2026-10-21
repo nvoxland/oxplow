@@ -9,11 +9,11 @@
 
 use std::sync::Arc;
 
+use oxplow_domain::uri::build::file_uri;
+use oxplow_domain::uri::resources::FILE;
 use oxplow_domain::StreamId;
 
 use crate::Services;
-
-pub const KIND_FILE: &str = "file";
 
 /// The pump consumer's name.
 pub const SEARCH_INDEX: &str = "search.index";
@@ -52,11 +52,15 @@ impl crate::event_pump::AsyncEventConsumer for SearchIndexConsumer {
         };
         let payload = &event.envelope.payload;
         let stream = payload["stream"].as_str().and_then(|r| {
-            oxplow_domain::uri::build::parse_as::<StreamId>(r, oxplow_domain::uri::types::STREAM)
-                .ok()
+            oxplow_domain::uri::build::parse_as::<StreamId>(
+                r,
+                oxplow_domain::uri::resources::STREAM,
+            )
+            .ok()
         });
         let snapshot = payload["snapshot"].as_str().and_then(|r| {
-            oxplow_domain::uri::build::parse_as::<i64>(r, oxplow_domain::uri::types::SNAPSHOT).ok()
+            oxplow_domain::uri::build::parse_as::<i64>(r, oxplow_domain::uri::resources::SNAPSHOT)
+                .ok()
         });
         let files = payload["file_count"].as_u64().unwrap_or(0);
         if let (Some(stream), Some(snapshot), true) = (stream, snapshot, files > 0) {
@@ -123,7 +127,7 @@ impl Indexer {
                 let _ = self
                     .services
                     .search_store
-                    .remove(KIND_FILE, &f.path, Some(&stream_key))
+                    .remove(FILE, &file_uri(&f.path), Some(&stream_key))
                     .await;
                 continue;
             };
@@ -148,7 +152,13 @@ impl Indexer {
             let _ = self
                 .services
                 .search_store
-                .upsert(KIND_FILE, &f.path, Some(&stream_key), &f.path, &content)
+                .upsert(
+                    FILE,
+                    &file_uri(&f.path),
+                    Some(&stream_key),
+                    &f.path,
+                    &content,
+                )
                 .await;
         }
     }
@@ -225,8 +235,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].kind, KIND_FILE);
-        assert_eq!(hits[0].reference, "file:src/frob.rs");
+        assert_eq!(hits[0].resource, oxplow_domain::uri::resources::FILE);
+        assert_eq!(hits[0].uri, "oxplow:oxplow/file?path=src/frob.rs");
 
         // A later capture with no blob = deletion → index row removed.
         let snap2 = capture_file(&svc, &stream.id, "src/frob.rs", None).await;

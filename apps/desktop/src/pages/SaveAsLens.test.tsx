@@ -41,7 +41,7 @@ test("Save as Lens keeps the spec with lens.keep and opens the lens", async () =
   fireEvent.click(view.getByTestId("explore-save-open"));
   fireEvent.change(view.getByTestId("explore-save-title"), { target: { value: "Busy Tasks" } });
   fireEvent.keyDown(view.getByTestId("explore-save-title"), { key: "Enter" });
-  await waitFor(() => expect(opened.map((r) => r.id)).toEqual(["lens:mine/busy-tasks"]));
+  await waitFor(() => expect(opened.map((r) => r.id)).toEqual(["oxplow:oxplow/lens?lens=mine/busy-tasks"]));
   expect(ran).toEqual([
     [
       "oxplow.lens.keep",
@@ -49,7 +49,7 @@ test("Save as Lens keeps the spec with lens.keep and opens the lens", async () =
         spec: { title: "Busy Tasks", description: "", query: "SELECT title FROM v_work_item", viz: "table" },
         extension: "mine",
         slug: "busy-tasks",
-        stream: "stream:str2",
+        stream: "oxplow:oxplow/stream?id=str2",
       },
     ],
   ]);

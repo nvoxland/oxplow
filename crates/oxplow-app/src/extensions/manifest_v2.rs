@@ -37,7 +37,7 @@ pub struct IntentExample {
 pub struct Intent {
     /// The question it answers, or the job it does.
     pub purpose: String,
-    /// The thread or effort ref that created it (`effort:eff42`), when known.
+    /// The thread or effort ref that created it (`oxplow:oxplow/effort?id=eff42`), when known.
     #[serde(default)]
     pub origin: Option<String>,
     #[serde(default)]
@@ -247,10 +247,6 @@ pub struct ManifestV2 {
     #[serde(default)]
     #[schemars(with = "Option<crate::extension_event_types::EventTypesFile>")]
     pub event_types: Option<Value>,
-    /// Kinds of thing a ref can name.
-    #[serde(default)]
-    #[schemars(with = "Option<Vec<crate::extension_ref_kinds::RefKindFile>>")]
-    pub ref_kinds: Option<Value>,
     /// What its URIs may name (`oxplow:<extension>/<resource>`).
     #[serde(default)]
     #[schemars(with = "Option<Vec<crate::extension_resources::ResourceFile>>")]
@@ -608,15 +604,14 @@ pub fn check(m: &ManifestV2, file: &str, text: &str) -> (Vec<String>, Vec<String
                 errors.push(at(file, key_line(text, "intent"), "`intent.purpose` is empty"));
             }
             if let Some(origin) = &intent.origin {
-                if oxplow_domain::uri::grammar::Uri::parse(origin).is_err() {
+                if oxplow_domain::uri::OxplowUri::parse(origin).is_err() {
                     errors.push(at(
                         file,
                         key_line(text, "intent"),
-                        format!("`intent.origin` `{origin}` is not a canonical ref (`effort:eff42`, `thread:thr3`)"),
+                        format!("`intent.origin` `{origin}` is not an oxplow URI (`oxplow:oxplow/effort?id=eff42`, `oxplow:oxplow/thread?id=thr3`)"),
                     ));
                 }
             }
-            let kinds = oxplow_domain::uri::types::core_types();
             for p in &intent.prompts {
                 let line = line_under(text, "intent", &p.prompt).or(key_line(text, "intent"));
                 if p.prompt.trim().is_empty() {
@@ -626,11 +621,11 @@ pub fn check(m: &ManifestV2, file: &str, text: &str) -> (Vec<String>, Vec<String
                     errors.push(at(file, line, format!("`intent.prompts`: {problem}")));
                 }
                 if let Some(about) = &p.about {
-                    if kinds.get(about).is_none() {
+                    if let Some(why) = crate::extension_resources::resource_problem(about) {
                         errors.push(at(
                             file,
                             line,
-                            format!("`intent.prompts`: `{about}` isn't a kind of ref (`commit`, `file`, `effort`, `work_item`, …)"),
+                            format!("`intent.prompts`: `about: {about}`: {why}"),
                         ));
                     }
                 }
@@ -771,14 +766,14 @@ mod tests {
         );
         let text = "manifest: 2\nname: acme\nintent: { purpose: x, origin: nope, examples: [{ name: a }] }\n";
         let (errors, _) = check(&parse(text), "e/extension.yaml", text);
-        assert!(errors[0].contains("not a canonical ref"), "{errors:?}");
+        assert!(errors[0].contains("is not an oxplow URI"), "{errors:?}");
     }
 
     /// P6.D2: `intent.prompts` are questions the extension helps answer,
     /// each optionally about a kind of ref (what page offers it).
     #[test]
-    fn intent_prompts_are_questions_about_a_ref_kind() {
-        let text = "manifest: 2\nname: acme\nintent:\n  purpose: x\n  examples: [{ name: a }]\n  prompts:\n    - { prompt: 'Which PRs are waiting on me?' }\n    - { prompt: 'Who reviews this commit?', about: commit }\n";
+    fn intent_prompts_are_questions_about_a_resource() {
+        let text = "manifest: 2\nname: acme\nintent:\n  purpose: x\n  examples: [{ name: a }]\n  prompts:\n    - { prompt: 'Which PRs are waiting on me?' }\n    - { prompt: 'Who reviews this commit?', about: oxplow/commit }\n";
         let m = parse(text);
         let (errors, _) = check(&m, "e/extension.yaml", text);
         assert!(errors.is_empty(), "{errors:?}");
@@ -787,7 +782,7 @@ mod tests {
             prompts[1],
             IntentPrompt {
                 prompt: "Who reviews this commit?".into(),
-                about: Some("commit".into())
+                about: Some("oxplow/commit".into())
             }
         );
 
@@ -795,7 +790,10 @@ mod tests {
             ("{ prompt: '  ' }", "an empty prompt"),
             // A line break pasted into a terminal is Enter: it would send.
             ("{ prompt: \"Why?\\nAnd how?\" }", "one line"),
-            ("{ prompt: x, about: nope }", "`nope` isn't a kind of ref"),
+            (
+                "{ prompt: x, about: nope }",
+                "a resource is `<extension>/<name>`",
+            ),
         ] {
             let text = format!("manifest: 2\nname: acme\nintent:\n  purpose: x\n  examples: [{{ name: a }}]\n  prompts:\n    - {entry}\n");
             let (errors, _) = check(&parse(&text), "e/extension.yaml", &text);

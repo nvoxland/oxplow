@@ -488,14 +488,15 @@ export async function listStreams(): Promise<Stream[]> {
 
 /// Site-wide BM25 search. `streamId` scopes file/stream-bound hits to one
 /// worktree (project-global hits like wiki always included); `null` searches
-/// everything. `kinds` optionally restricts to searchable kinds (`v_ref_kind`) or `file`.
+/// everything. `resources` optionally restricts to searchable resources
+/// (`v_resource.searchable`: `oxplow/wiki`) or `oxplow/file`.
 export async function searchSite(
   query: string,
   streamId: string | null,
-  kinds: string[] | null = null,
+  resources: string[] | null = null,
   limit = 50,
 ): Promise<SearchHit[]> {
-  return unwrap(await commands.search(query, streamId, kinds, limit));
+  return unwrap(await commands.search(query, streamId, resources, limit));
 }
 
 /// Run one read-only `SELECT`/`WITH` over the semantic layer's `v_*`
@@ -1402,26 +1403,26 @@ export async function deleteWikiPage(slug: string, confirmed: boolean): Promise<
 export async function createComment(input: {
   streamId: string;
   threadId: string | null;
-  targetKind: string;
-  targetId: string;
+  /** The URI the comment is on. */
+  target: string;
   quote: string;
   /** W3C selectors array, serialized. */
   selectorsJson: string;
-  /** Ancestor regions (innermost→outermost, excluding the target). */
-  contextChain?: { kind: string; id: string }[];
-  /** Canonical refs found inside the selection. */
-  referencedRefs?: { kind: string; id: string }[];
+  /** Ancestor regions' URIs (innermost→outermost, excluding the target). */
+  contextChain?: string[];
+  /** URIs found inside the selection. */
+  referenced?: string[];
   intent: CommentIntent;
   body: string;
 }): Promise<CommentThread> {
   const outcome = await runCommand("oxplow.knowledge.add_comment", {
     stream: streamUri(input.streamId),
     ...(input.threadId ? { thread: threadUri(input.threadId) } : {}),
-    target: { kind: input.targetKind, id: input.targetId },
+    target: input.target,
     quote: input.quote,
     selectors_json: input.selectorsJson,
     context_chain: input.contextChain ?? [],
-    referenced_refs: input.referencedRefs ?? [],
+    referenced: input.referenced ?? [],
     intent: input.intent,
     body: input.body,
   });
@@ -1432,11 +1433,8 @@ export async function addCommentMessage(commentId: string, body: string): Promis
   return (await runCommand("oxplow.knowledge.reply_comment", { comment: commentUri(commentId), body })).result as CommentMessage;
 }
 
-export async function listCommentsForTarget(
-  targetKind: string,
-  targetId: string,
-): Promise<CommentThread[]> {
-  return unwrap(await commands.listCommentsForTarget(targetKind, targetId));
+export async function listCommentsForTarget(target: string): Promise<CommentThread[]> {
+  return unwrap(await commands.listCommentsForTarget(target));
 }
 
 export async function listCommentsForStream(streamId: string): Promise<CommentThread[]> {
@@ -2000,7 +1998,7 @@ export async function effortTitles(effortIds: string[]): Promise<Map<string, str
     [JSON.stringify(effortIds.map(effortUri))],
     10_000,
   );
-  return new Map(res.rows.map((r) => [idOf(String(r[0]), "effort") ?? "", String(r[1])] as [string, string]));
+  return new Map(res.rows.map((r) => [idOf(String(r[0]), "oxplow/effort") ?? "", String(r[1])] as [string, string]));
 }
 
 export async function listEffortsAtSnapshots(
@@ -2624,13 +2622,9 @@ export async function openExternalUrl(url: string): Promise<{ ok: boolean; reaso
 
 export type BacklinkEdge = import("./tauri-bridge/generated/bindings.js").BacklinkEdge;
 
-/** Pages pointing AT (target_kind, target_id). */
-export async function listBacklinks(
-  targetKind: string,
-  targetId: string,
-  limit: number | null = null,
-): Promise<BacklinkEdge[]> {
-  return unwrap(await commands.listBacklinks(targetKind, targetId, limit));
+/** Pages pointing AT the URI `target`. */
+export async function listBacklinks(target: string, limit: number | null = null): Promise<BacklinkEdge[]> {
+  return unwrap(await commands.listBacklinks(target, limit));
 }
 
 // ----------------------------------------------------------------------
@@ -2654,10 +2648,6 @@ export async function discardDeadLetter(id: number): Promise<{ state: string }> 
 }
 
 /** Pages this source points AT. Inverse of `listBacklinks`. */
-export async function listPageOutbound(
-  sourceKind: string,
-  sourceId: string,
-  limit: number | null = null,
-): Promise<BacklinkEdge[]> {
-  return unwrap(await commands.listOutbound(sourceKind, sourceId, limit));
+export async function listPageOutbound(source: string, limit: number | null = null): Promise<BacklinkEdge[]> {
+  return unwrap(await commands.listOutbound(source, limit));
 }

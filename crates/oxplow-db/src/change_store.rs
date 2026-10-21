@@ -58,7 +58,7 @@ pub struct ChangeFileRow {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ChangeFunctionRow {
     pub path: String,
-    /// The function's symbol ref (`symbol:<path>/<id>`), which keys the row.
+    /// The function's symbol ref (`oxplow:oxplow/symbol?path=<path>&symbol=<id>`), which keys the row.
     pub symbol_ref: String,
     pub container: String,
     pub name: String,

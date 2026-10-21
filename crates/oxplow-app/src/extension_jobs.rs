@@ -35,7 +35,7 @@ pub struct EnqueueInput {
     pub request: Value,
 }
 
-/// A job run, by its ref (`job_run:<id>`).
+/// A job run, by its ref (`oxplow:oxplow/job_run?id=<id>`).
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct JobInput {
@@ -528,9 +528,9 @@ fn job_problem() -> crate::vocabulary_reactor::VocabularyErrors {
         vec!["job operation registry candidate is invalid".into()],
     )])
 }
-/// The run a `job_run:<id>` ref names.
+/// The run a `oxplow:oxplow/job_run?id=<id>` ref names.
 fn job_id(job_run: &str) -> Result<JobId, CommandError> {
-    let id = oxplow_domain::uri::build::id_of(job_run, oxplow_domain::uri::types::JOB_RUN)
+    let id = oxplow_domain::uri::build::id_of(job_run, oxplow_domain::uri::resources::JOB_RUN)
         .map_err(|e| invalid(&e.to_string()))?;
     if id.len() > 64 {
         return Err(invalid("invalid job run identity"));

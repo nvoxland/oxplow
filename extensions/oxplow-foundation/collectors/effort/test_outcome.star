@@ -5,7 +5,7 @@
 # Gets {"rows": [...]} — one row per (run, failed case) of the effort's
 # measured test runs, oldest first, a run with no failed case on a row of its
 # own: {run, failed, cases, at_ms, case, effort}. `case` is the failed test's
-# subject (`test:<classname>::<name>`); `cases` how many cases the run's report
+# subject (`oxplow:oxplow/test?class=<classname>&name=<name>`); `cases` how many cases the run's report
 # listed (0 for a run that only asserted counts, whose `failed` failures have
 # no identity); `at_ms` when it was recorded. Returns {"facts": [...]}.
 # No runs is no facts.

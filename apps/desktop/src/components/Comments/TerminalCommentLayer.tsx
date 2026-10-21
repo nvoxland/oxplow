@@ -80,16 +80,14 @@ export function TerminalCommentLayer({
   term,
   streamId,
   threadId,
-  targetKind,
-  targetId,
+  target,
 }: {
   term: Terminal | null;
   streamId: string;
   threadId: string | null;
-  targetKind: string;
-  targetId: string;
+  target: string;
 }) {
-  const { threads } = useCommentsForTarget(targetKind, targetId);
+  const { threads } = useCommentsForTarget(target);
   const threadsRef = useRef(threads);
   threadsRef.current = threads;
 
@@ -241,8 +239,7 @@ export function TerminalCommentLayer({
     await createComment({
       streamId,
       threadId,
-      targetKind,
-      targetId,
+      target,
       quote: pending.quote,
       selectorsJson: pending.selectorsJson,
       intent: input.intent,

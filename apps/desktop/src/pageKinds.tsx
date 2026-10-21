@@ -33,11 +33,11 @@ import {
   StickyNote,
 } from "lucide-react";
 import type { ComponentProps, ReactElement } from "react";
-import { REF_KIND_ICONS, refKindIcon, refKindInfo } from "./refKinds.js";
+import { RESOURCE_ICONS, resourceIcon, resourceInfo } from "./resources.js";
 import { useExtensions } from "./extensionsStore.js";
 import { pageKindOf, recordedPageKind, refFromTabId } from "./tabs/pageRefs.js";
 import type { Extension, ExtensionPage } from "./tauri-bridge/generated/bindings.js";
-import { extPageUri, pageUri as corePageRef, parseUri } from "./uri/uri.js";
+import { extPageUri, pageUri as corePageRef, shortResource, typeOf } from "./uri/uri.js";
 
 /**
  * Map a page-kind string to its icon component. Returns `null`
@@ -98,10 +98,10 @@ export function pageKindIconComponent(kind: string, extensions: Extension[] | nu
     case "metric":
       return Gauge;
 
-    // An extension's ref kind (`ref_kinds:`, P8.D7) draws its declared icon.
+    // An extension's resource (`resources:`) draws its declared icon.
     // A declared page draws the icon its `pages:` entry names.
     default:
-      return refKindIcon(kind) ?? declaredPageIcon(extensions, kind);
+      return resourceIcon(kind) ?? declaredPageIcon(extensions, kind);
   }
 }
 
@@ -122,7 +122,7 @@ function declaredPageOf(extensions: Extension[] | null, kind: string): Extension
  *  page has that id or it names none. */
 export function declaredPageIcon(extensions: Extension[] | null, kind: string): LucideIcon | null {
   const icon = declaredPageOf(extensions, kind)?.icon;
-  return icon ? (REF_KIND_ICONS[icon] ?? null) : null;
+  return icon ? (RESOURCE_ICONS[icon] ?? null) : null;
 }
 
 export interface PageKindIconProps extends Omit<ComponentProps<LucideIcon>, "ref"> {
@@ -175,7 +175,7 @@ export function pageKindLabel(kind: string, extensions: Extension[] | null = nul
     case "thread_note":
       return "note";
     default:
-      return refKindInfo(kind)?.label ?? declaredPageOf(extensions, kind)?.title.toLowerCase() ?? kind;
+      return resourceInfo(kind)?.label ?? declaredPageOf(extensions, kind)?.title.toLowerCase() ?? kind;
   }
 }
 
@@ -191,6 +191,8 @@ export function kindForTabId(tabId: string): string {
   const kind = pageKindOf(tabId);
   if (kind === "page") return recordedPageKind(refFromTabId(tabId)!);
   if (kind) return kind;
-  // A ref of a kind with no page of its own (`finding:…`) still has an icon.
-  return parseUri(tabId)?.kind ?? tabId;
+  // A resource with no page of its own (a finding) still has an icon.
+  // URI-SWITCH: the icon table is keyed by resource name (`v_resource`).
+  const resource = typeOf(tabId);
+  return resource === null ? tabId : shortResource(resource);
 }

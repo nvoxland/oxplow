@@ -11,6 +11,7 @@ import type { PickerMode } from "../components/conversationRows.js";
 import { useState } from "react";
 import { AgentIcon } from "../components/AgentIcon.js";
 import type { PageAction } from "../kit/actions.js";
+import { agentSessionUri } from "../uri/uri.js";
 
 interface AgentSessionPageProps {
   thread: Thread | null;
@@ -119,8 +120,7 @@ export function AgentSessionPage({
                 ? {
                     streamId: stream.id,
                     threadId: thread.id,
-                    targetKind: "agent_session",
-                    targetId: session.id,
+                    target: agentSessionUri(session.id),
                   }
                 : undefined
             }

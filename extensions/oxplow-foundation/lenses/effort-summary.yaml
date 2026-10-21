@@ -1,7 +1,7 @@
 title: Effort summary
 description: One effort at a glance — its title and summary, its work item, the files it changed, the test runs, the claims and the decisions recorded in it.
 params:
-  - { name: effort, label: Effort (`effort:eff9`) }
+  - { name: effort, label: Effort (`oxplow:oxplow/effort?id=eff9`) }
 query: |
   WITH e AS (SELECT * FROM v_effort WHERE ref = :effort)
   SELECT 0 AS ord, 'effort' AS section, coalesce(title, '') AS text, coalesce(summary, '') AS detail FROM e

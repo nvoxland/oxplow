@@ -160,9 +160,12 @@ pub(super) async fn ask(fx: &Fixture, intent: &str) -> String {
         }),
     )
     .await;
-    oxplow_domain::uri::build::id_of(queued["jobRun"].as_str().unwrap(), "job_run")
-        .unwrap()
-        .to_owned()
+    oxplow_domain::uri::build::id_of(
+        queued["jobRun"].as_str().unwrap(),
+        oxplow_domain::uri::resources::JOB_RUN,
+    )
+    .unwrap()
+    .to_owned()
 }
 
 pub(super) async fn until(fx: &Fixture, id: &str, done: impl Fn(&Value) -> bool) -> Value {
@@ -270,7 +273,7 @@ async fn a_job_streams_its_reply_as_output_rows() {
             json!("succeeded"),
             json!(1),
             json!("triage"),
-            json!("job:triage/review"),
+            json!("oxplow:oxplow/job?job=triage/review"),
             json!("stream")
         ]
     );
@@ -310,7 +313,7 @@ async fn cancelling_a_running_job_stops_its_stream() {
 
     let call = rows(
         &fx,
-        "SELECT ok, error FROM v_ai_call WHERE caller LIKE 'job_run:%' ORDER BY id DESC LIMIT 1",
+        "SELECT ok, error FROM v_ai_call WHERE caller LIKE 'oxplow:oxplow/job_run?%' ORDER BY id DESC LIMIT 1",
         vec![],
     )
     .await;
@@ -370,7 +373,7 @@ async fn a_tool_call_runs_the_extensions_command_and_answers_the_model() {
     let ran = rows(
         &fx,
         "SELECT actor_kind, actor, parent_run_id IS NOT NULL FROM v_extension_run
-          WHERE contribution = 'command:triage.todos.lookup'",
+          WHERE contribution = 'oxplow:oxplow/command?command=triage.todos.lookup'",
         vec![],
     )
     .await;
@@ -386,7 +389,7 @@ async fn a_tool_call_runs_the_extensions_command_and_answers_the_model() {
     let run_ref = oxplow_domain::uri::build::job_run_uri(&id);
     let jobs = lens(&fx, "oxplow-bundled/job-runs", vec![]).await;
     assert_eq!(jobs[0][0], json!(run_ref), "{jobs}");
-    assert_eq!(jobs[0][2], json!("job:triage/review"));
+    assert_eq!(jobs[0][2], json!("oxplow:oxplow/job?job=triage/review"));
     assert_eq!(jobs[0][3], json!("tools"), "what it was about");
     assert_eq!(jobs[0][4], json!("succeeded"));
     let output = lens(
@@ -463,7 +466,7 @@ async fn a_job_that_reads_sql_answers_query_sql() {
     let answer = serde_json::to_value(&asked[1].messages.last().unwrap().parts).unwrap();
     assert_eq!(
         answer[0]["result"]["rows"],
-        json!([["job:triage/review"]]),
+        json!([["oxplow:oxplow/job?job=triage/review"]]),
         "{answer}"
     );
 }

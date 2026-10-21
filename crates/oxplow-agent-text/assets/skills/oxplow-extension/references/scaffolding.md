@@ -36,9 +36,9 @@ failure after your edit is yours:
   A `knowledge` provider answers `write_page { slug, title?,
   body, verified_refs, removed_refs }` → `{ page }`, `delete_page { slug }` and
   `link { page, target }`, each also answering the page's
-  `knowledge.page.recorded@1` event `{ page: { ref: "wiki:<slug>", title,
-  body, refs, updated_at, deleted? } }` (`refs`: the body's links as `file:…` /
-  `wiki:…`), and a `knowledge_pages` collector of the same rows;
+  `knowledge.page.recorded@1` event `{ page: { ref: "oxplow:oxplow/wiki?slug=<slug>", title,
+  body, refs, updated_at, deleted? } }` (`refs`: the body's links as `oxplow:oxplow/file?path=…` /
+  `oxplow:oxplow/wiki?slug=…`), and a `knowledge_pages` collector of the same rows;
 - `effect` — a script reacting to a logged event by composing commands
   (private; runs under the extension's permissions);
 - `job` — model work that runs on its own, outside any transaction: its

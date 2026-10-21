@@ -15,7 +15,7 @@ mock.module("../api.js", () => ({
   listNativeConversations: async () => [
     { conversation: { id: "c1", title: "Current one", first_prompt: null, started_at: null, updated_at: null, size_bytes: null, parent: null }, current: true, open_in: null },
     { conversation: { id: "c2", title: null, first_prompt: "Speed up the build", started_at: null, updated_at: null, size_bytes: null, parent: null }, current: false, open_in: null },
-    { conversation: { id: "c3", title: "Taken", first_prompt: null, started_at: null, updated_at: null, size_bytes: null, parent: null }, current: false, open_in: "agent_session:ses4" },
+    { conversation: { id: "c3", title: "Taken", first_prompt: null, started_at: null, updated_at: null, size_bytes: null, parent: null }, current: false, open_in: "oxplow:oxplow/agent_session?id=ses4" },
   ],
   resumeConversation: async (session: string, conversation: string) => {
     resumed.push([session, conversation]);

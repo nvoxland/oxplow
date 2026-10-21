@@ -2272,7 +2272,7 @@ mod tests {
             // Recorded by some other build.
             let conn = rusqlite::Connection::open(&path).unwrap();
             conn.execute(
-                "UPDATE refinery_schema_history SET version = 99
+                "UPDATE refinery_schema_history SET version = 9999
                  WHERE version = (SELECT max(version) FROM refinery_schema_history)",
                 [],
             )
@@ -2282,7 +2282,7 @@ mod tests {
             Ok(_) => panic!("another schema version must be refused"),
             Err(e) => e.to_string(),
         };
-        assert!(err.contains("schema version 99"), "{err}");
+        assert!(err.contains("schema version 9999"), "{err}");
         // A current database opens and can be read, but not written.
         std::fs::remove_file(&path).unwrap();
         drop(Database::open(&path).unwrap());
@@ -2302,6 +2302,7 @@ mod tests {
     #[test]
     fn v5_keeps_efforts_and_leaves_one_open_per_thread() {
         let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
         crate::models::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(4))
@@ -2333,7 +2334,7 @@ mod tests {
             vec![
                 (
                     1,
-                    Some("work_item:oxplow:tsk1".to_string()),
+                    Some("oxplow:oxplow/work_item?id=tsk1&provider=oxplow".to_string()),
                     false,
                     Some("system".to_string())
                 ),
@@ -2362,6 +2363,7 @@ mod tests {
     #[test]
     fn v6_strips_effort_from_logged_work_item_payloads() {
         let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
         crate::models::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(5))
@@ -2404,6 +2406,7 @@ mod tests {
     #[test]
     fn v30_rewrites_work_item_events_in_the_interfaces_words() {
         let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
         crate::models::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(29))
@@ -2452,6 +2455,7 @@ mod tests {
     #[test]
     fn v31_moves_thread_note_events_to_v2() {
         let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
         crate::models::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(30))
@@ -2491,6 +2495,7 @@ mod tests {
     #[test]
     fn v70_rewrites_old_event_versions_to_the_newest() {
         let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
         crate::models::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(69))
@@ -2563,6 +2568,7 @@ mod tests {
     #[test]
     fn v71_relabels_backfilled_snapshot_ops_as_manual() {
         let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
         crate::models::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(70))
@@ -2604,6 +2610,7 @@ mod tests {
     #[test]
     fn v36_rewrites_plugin_names_to_extensions_and_contributions() {
         let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
         crate::models::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(35))
@@ -2686,6 +2693,7 @@ mod tests {
     #[test]
     fn v37_renames_the_plugin_zone_to_agents() {
         let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
         crate::models::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(36))
@@ -2730,6 +2738,7 @@ mod tests {
     #[test]
     fn v41_keys_ai_results_by_their_request() {
         let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
         crate::models::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(40))
@@ -2778,6 +2787,7 @@ mod tests {
     #[test]
     fn v32_moves_agent_columns_onto_one_session_per_thread() {
         let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
         crate::models::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(31))
@@ -2853,6 +2863,7 @@ mod tests {
     #[test]
     fn v81_drops_thread_status_and_adds_an_unset_mark() {
         let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
         crate::models::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(80))
@@ -2922,6 +2933,7 @@ mod tests {
     #[test]
     fn v80_closes_chat_sessions_and_drops_acp_agent() {
         let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
         crate::models::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(79))
@@ -2996,6 +3008,7 @@ mod tests {
     #[test]
     fn v8_moves_effort_events_to_v2_without_retroactive() {
         let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
         crate::models::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(7))
@@ -3024,11 +3037,11 @@ mod tests {
             vec![
                 (
                     2,
-                    r#"{"effort":"effort:eff1","work_item":"work_item:oxplow:tsk1","thread":"thread:thr1"}"#
+                    r#"{"effort":"oxplow:oxplow/effort?id=eff1","work_item":"oxplow:oxplow/work_item?id=tsk1&provider=oxplow","thread":"oxplow:oxplow/thread?id=thr1"}"#
                         .to_string()
                 ),
-                (2, r#"{"effort":"effort:eff1"}"#.to_string()),
-                (2, r#"{"effort":"effort:eff1"}"#.to_string()),
+                (2, r#"{"effort":"oxplow:oxplow/effort?id=eff1"}"#.to_string()),
+                (2, r#"{"effort":"oxplow:oxplow/effort?id=eff1"}"#.to_string()),
             ]
         );
     }
@@ -3038,6 +3051,7 @@ mod tests {
     #[test]
     fn v9_keeps_effort_marks_under_their_thread() {
         let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
         crate::models::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(8))
@@ -3082,6 +3096,7 @@ mod tests {
     #[test]
     fn v10_gives_nudges_an_audience_and_counts_evaluations() {
         let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
         crate::models::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(9))
@@ -3113,6 +3128,7 @@ mod tests {
     #[test]
     fn v13_counts_earlier_analyses_as_scanned() {
         let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
         crate::models::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(12))
@@ -3146,6 +3162,7 @@ mod tests {
     #[test]
     fn v26_rewrites_history_to_three_part_command_ids() {
         let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
         crate::models::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(24))
@@ -3177,7 +3194,7 @@ mod tests {
         );
         assert_eq!(
             one("SELECT inverse_json FROM command_audit WHERE id = 1"),
-            r#"{"name":"oxplow.thread.reopen","input":{"thread":"thread:thr1"}}"#
+            r#"{"name":"oxplow.thread.reopen","input":{"thread":"oxplow:oxplow/thread?id=thr1"}}"#
         );
         assert_eq!(
             one("SELECT command FROM command_proposal"),
@@ -3201,6 +3218,7 @@ mod tests {
     #[test]
     fn v19_prunes_superseded_scans() {
         let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
         crate::models::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(18))
@@ -3244,7 +3262,8 @@ mod tests {
         );
         assert_eq!(
             ids(
-                "SELECT CAST(source_id AS INTEGER) FROM page_ref WHERE source_kind = 'finding' ORDER BY 1"
+                "SELECT CAST(uri_param(source_uri, 'id') AS INTEGER) FROM page_ref \
+                 WHERE source_resource = 'oxplow/finding' ORDER BY 1"
             ),
             vec![12, 13]
         );
@@ -3255,6 +3274,7 @@ mod tests {
     #[test]
     fn v14_moves_config_changes_to_v2_in_the_project_layer() {
         let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
         crate::models::drop_all(&conn).unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(13))
@@ -3287,6 +3307,7 @@ mod tests {
     #[test]
     fn a_migration_rebuilds_a_table_that_rows_reference() {
         let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         crate::sql_functions::register(&conn).unwrap();
         embedded::migrations::runner()
@@ -3312,7 +3333,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(subject, "file:a.rs");
+        assert_eq!(subject, "oxplow:oxplow/file?path=a.rs");
         let on: i64 = conn
             .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
             .unwrap();
@@ -3324,6 +3345,7 @@ mod tests {
     #[test]
     fn a_migration_that_orphans_a_row_is_refused() {
         let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         conn.execute_batch(
             "CREATE TABLE p (id INTEGER PRIMARY KEY);

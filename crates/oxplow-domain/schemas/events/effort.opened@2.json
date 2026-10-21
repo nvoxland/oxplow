@@ -4,22 +4,22 @@
   "description": "`effort.opened@2`: a span of a thread's work began, linked to a work\nitem or not (`.context/work-tracking.md`).",
   "properties": {
     "effort": {
-      "description": "`effort:eff12`.",
+      "description": "`oxplow:oxplow/effort?id=eff12`.",
       "type": "string"
     },
     "start_snapshot": {
-      "description": "`snapshot:N`, when the open already had its start snapshot.",
+      "description": "`oxplow:oxplow/snapshot?id=N`, when the open already had its start snapshot.",
       "type": [
         "string",
         "null"
       ]
     },
     "thread": {
-      "description": "`thread:thr3` — the thread doing the work.",
+      "description": "`oxplow:oxplow/thread?id=thr3` — the thread doing the work.",
       "type": "string"
     },
     "work_item": {
-      "description": "`work_item:oxplow:tsk42`, or another provider's item, when linked.",
+      "description": "`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`, or another provider's item, when linked.",
       "type": [
         "string",
         "null"

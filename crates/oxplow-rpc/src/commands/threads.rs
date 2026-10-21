@@ -109,7 +109,10 @@ mod tests {
                     .result
             }
         };
-        let stream_ref = format!("stream:{}", stream.id);
+        let stream_ref = oxplow_domain::uri::build::keyed(
+            oxplow_domain::uri::resources::STREAM,
+            &format!("{}", stream.id),
+        );
         run(
             "oxplow.thread.create",
             serde_json::json!({ "stream": stream_ref, "title": "First" }),
@@ -130,7 +133,7 @@ mod tests {
         .unwrap();
         run(
             "oxplow.thread.close",
-            serde_json::json!({ "thread": format!("thread:{other_id}") }),
+            serde_json::json!({ "thread": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::THREAD, &other_id.to_string()) }),
         )
         .await;
 

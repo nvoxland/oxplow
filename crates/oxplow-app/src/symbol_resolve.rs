@@ -1,13 +1,14 @@
-//! Where a `symbol:` ref points (`.context/language-support.md` "Symbols"):
-//! the current symbol is its `v_symbol` row; a ref pinned to a version
-//! (`@snap:<id>`, `@git:<sha>`) is found by extracting the file as it was
+//! Where a symbol URI points (`.context/language-support.md` "Symbols"):
+//! the current symbol is its `v_symbol` row; a URI pinned to a version
+//! (`rev=snap:<id>`, `rev=git:<sha>`) is found by extracting the file as it was
 //! then. A pin whose version is gone — a pruned snapshot, an unknown
 //! commit — or no longer holds the symbol falls back to the current one,
 //! flagged, rather than a dead link.
 
 use std::path::Path;
 
-use oxplow_domain::uri::{grammar::Uri, types};
+use oxplow_domain::uri::build;
+use oxplow_domain::uri::resources::SYMBOL;
 use oxplow_domain::vcs::Revision;
 use oxplow_domain::{DomainError, StreamId};
 use serde::{Deserialize, Serialize};
@@ -37,24 +38,24 @@ pub async fn resolve(
     ws: &Path,
     r: &str,
 ) -> Result<Option<SymbolLocation>, DomainError> {
-    let parsed =
-        Uri::parse(r).map_err(|e| DomainError::Invalid(format!("`{r}`: {}", e.reason())))?;
-    if parsed.kind != types::SYMBOL {
-        return Err(DomainError::Invalid(format!("`{r}` isn't a symbol ref")));
-    }
+    let parsed = build::parse_resource(r, SYMBOL)
+        .map_err(|_| DomainError::Invalid(format!("`{r}` isn't a symbol URI")))?;
+    let (Some(path), Some(symbol)) = (parsed.param("path"), parsed.param("symbol")) else {
+        return Err(DomainError::Invalid(format!(
+            "`{r}` names no path and symbol"
+        )));
+    };
     let mut version_gone = false;
-    if let Some(rev) = &parsed.rev {
+    if let Some(rev) = parsed.param("rev") {
         let revision: Revision = rev
             .parse()
             .map_err(|e: String| DomainError::Invalid(format!("`{r}`: {e}")))?;
-        match at_revision(svc, ws, &parsed.id, &revision).await {
+        match at_revision(svc, ws, path, symbol, &revision).await {
             Some(found) => return Ok(Some(found)),
             None => version_gone = true,
         }
     }
-    let current = Uri::new(types::SYMBOL, &parsed.id, None, None)
-        .map_err(|e| DomainError::Invalid(e.reason().into()))?
-        .to_string();
+    let current = build::symbol_uri(path, symbol);
     let id = stream.value();
     let row = svc
         .db
@@ -81,34 +82,28 @@ pub async fn resolve(
     }))
 }
 
-/// `<path>/<symbol id>` found at `revision`: the path is the longest
-/// `/`-prefix of the id that names a file then (a path and a symbol id can
-/// both hold a `/`, so the tree decides, not the text).
+/// `symbol` in the file at `path`, found as the file was at `revision`.
 async fn at_revision(
     svc: &Services,
     ws: &Path,
-    id: &str,
+    path: &str,
+    symbol: &str,
     revision: &Revision,
 ) -> Option<SymbolLocation> {
-    let cuts: Vec<usize> = id.match_indices('/').map(|(i, _)| i).collect();
-    for &cut in cuts.iter().rev() {
-        let (path, symbol) = (&id[..cut], &id[cut + 1..]);
-        let Ok(Some(bytes)) = svc.trees.read_at(ws, revision, path).await else {
-            continue;
-        };
-        let text = String::from_utf8(bytes).ok()?;
-        let found = oxplow_code_metrics::extract(path, &text)
-            .into_iter()
-            .find(|d| d.id == symbol)?;
-        return Some(SymbolLocation {
-            path: path.to_string(),
-            line: found.name_line,
-            col: found.name_col,
-            revision: Some(revision.clone()),
-            version_gone: false,
-        });
-    }
-    None
+    let Ok(Some(bytes)) = svc.trees.read_at(ws, revision, path).await else {
+        return None;
+    };
+    let text = String::from_utf8(bytes).ok()?;
+    let found = oxplow_code_metrics::extract(path, &text)
+        .into_iter()
+        .find(|d| d.id == symbol)?;
+    Some(SymbolLocation {
+        path: path.to_string(),
+        line: found.name_line,
+        col: found.name_col,
+        revision: Some(revision.clone()),
+        version_gone: false,
+    })
 }
 
 #[cfg(test)]
@@ -169,10 +164,15 @@ mod tests {
             .await
             .unwrap();
 
-        let now = resolve(&svc, stream, dir.path(), "symbol:Lib/w.py/Widget::spin")
-            .await
-            .unwrap()
-            .unwrap();
+        let now = resolve(
+            &svc,
+            stream,
+            dir.path(),
+            "oxplow:oxplow/symbol?path=Lib/w.py&symbol=Widget::spin",
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert_eq!((now.path.as_str(), now.line, now.col), ("Lib/w.py", 4, 9));
         assert!(!now.version_gone && now.revision.is_none());
 
@@ -180,7 +180,7 @@ mod tests {
             &svc,
             stream,
             dir.path(),
-            &format!("symbol:Lib/w.py/Widget::spin@snap:{snap}"),
+            &format!("oxplow:oxplow/symbol?path=Lib/w.py&rev=snap:{snap}&symbol=Widget::spin"),
         )
         .await
         .unwrap()
@@ -192,16 +192,21 @@ mod tests {
             &svc,
             stream,
             dir.path(),
-            "symbol:Lib/w.py/Widget::spin@snap:999999",
+            "oxplow:oxplow/symbol?path=Lib/w.py&rev=snap:999999&symbol=Widget::spin",
         )
         .await
         .unwrap()
         .unwrap();
         assert_eq!((gone.line, gone.version_gone), (4, true));
 
-        assert!(resolve(&svc, stream, dir.path(), "symbol:Lib/w.py/Nope")
-            .await
-            .unwrap()
-            .is_none());
+        assert!(resolve(
+            &svc,
+            stream,
+            dir.path(),
+            "oxplow:oxplow/symbol?path=Lib/w.py&symbol=Nope"
+        )
+        .await
+        .unwrap()
+        .is_none());
     }
 }

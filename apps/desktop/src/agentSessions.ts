@@ -42,8 +42,8 @@ const COLUMNS =
 export function agentSessionsFromResult(result: SqlQueryResult): AgentSessionRow[] {
   const at = (row: SqlCell[], name: string) => row[result.columns.indexOf(name)] ?? null;
   return result.rows.map((row) => ({
-    id: idOf(String(at(row, "ref")), "agent_session") ?? "",
-    threadId: idOf(String(at(row, "thread_ref")), "thread") ?? "",
+    id: idOf(String(at(row, "ref")), "oxplow/agent_session") ?? "",
+    threadId: idOf(String(at(row, "thread_ref")), "oxplow/thread") ?? "",
     kind: String(at(row, "kind")),
     harness: String(at(row, "harness")),
     title: String(at(row, "title") ?? ""),

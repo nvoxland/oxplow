@@ -21,7 +21,7 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   then, runs the fake this checkout built; its `provider.json` is checked
   in and kept equal to the fake's declarations by
   `the_suite_fixture_declares_what_the_fake_does`), an effect, a model, a
-  lens with its page, and a ref kind. Private, since `providers` is still
+  lens with its page, and a resource. Private, since `providers` is still
   experimental. The effect comments on each created task; a title with
   `[fail]` makes it fail (Delivery, Retry) and one with `[delete]` makes it
   delete the task (a proposal). It also declares a scripted model provider,
@@ -95,7 +95,7 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
 
 `shell/` boot and connecting with a token; `work/` tasks, the Board
 (transition, confirm, undo) and launcher search; `knowledge/` the wiki and
-an extension's ref kind; `code/` a commit's diff; `data/` Explore Data
+an extension's resource; `code/` a commit's diff; `data/` Explore Data
 (Save as Lens), lenses and dashboards, extension pages; `settings/`
 Programs approval and the settings pages; `integrations/` the fake tracker
 (configure, Check, Enable, active, Sync Now), Delivery (a failed reaction,

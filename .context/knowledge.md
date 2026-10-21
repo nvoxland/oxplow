@@ -100,9 +100,9 @@ rail's "Finished" list) from `knowledge.page.written`'s thread anchor.
 
 ## Reads are SQL (P5.C4)
 
-- **`v_knowledge_page`** — one row per page: `ref` (`wiki:<slug>`),
+- **`v_knowledge_page`** — one row per page: `ref` (`oxplow:oxplow/wiki?slug=<slug>`),
   `provider`, `slug`, `title`, `excerpt`, `body_size`, `outbound_refs`
-  (JSON array of every ref it links to), `stale_ref_count`, `updated_at`.
+  (JSON array of every URI it links to), `stale_ref_count`, `updated_at`.
 - **`v_knowledge_ref`** — each page's file refs: `page`, `path`,
   `pinned_snapshot_id`, `pinned_vcs_rev`, `pinned_vcs_rev_exact`,
   `latest_snapshot_id`, `stale`.
@@ -136,7 +136,7 @@ written by command or by hand alike — reading the body from the row. The old e
 
 **The desktop** (`apps/desktop/src/knowledge.ts`) reads the index, a
 page and its freshness from these models and finds pages with the site
-search (`kinds: ["wiki"]`, matches marked `«…»`); every read returns what
+search (`resources: ["oxplow/wiki"]`, matches marked `«…»`); every read returns what
 it read (`reads`) and every wiki surface re-reads it through
 `useRerunOnChange` (the title cache through `readsChanged`) when one of
 those models changes — a drifting ref re-reads the freshness rows without
@@ -182,8 +182,8 @@ instead of parsing a body written in the store's own grammar; its
 collector's records of pages edited outside oxplow are restated by
 `providers::knowledge::KnowledgeRecords` while it is the active store.
 
-**The record is the active store's pages.** Page refs are bare
-(`wiki:<slug>`, `.context/resources.md`), so one record can't hold two
+**The record is the active store's pages.** Page URIs are bare
+(`oxplow:oxplow/wiki?slug=<slug>`, no `provider` param; `.context/resources.md`), so one record can't hold two
 stores' pages: `wiki_page`, its `page_ref` slices and the touches are
 whichever store is active. `v_knowledge_page.provider` is that store
 (the active `capability_provider` row). On `capability.switched` for

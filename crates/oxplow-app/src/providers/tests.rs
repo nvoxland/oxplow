@@ -53,7 +53,7 @@ fn write_extension(project: &Path, hooks: &str) {
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: tracker\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a work item's points.\n    provider: fake\n    op: estimate\n    invokers: { human: true, agent: true, lens: true }\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: work_item, input: { ref: \"{{ref}}\", points: 3 } }\npermissions: { process: true }\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: tracker\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a work item's points.\n    provider: fake\n    op: estimate\n    invokers: { human: true, agent: true, lens: true }\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: oxplow/work_item, input: { ref: \"{{ref}}\", points: 3 } }\npermissions: { process: true }\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -332,7 +332,10 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
     assert!(!running(&fx.svc, "fake"));
     let disabled = logged(&fx, "contribution.disabled").await;
     assert_eq!(disabled.len(), 1);
-    assert_eq!(disabled[0]["contribution"], "provider:tracker/fake");
+    assert_eq!(
+        disabled[0]["contribution"],
+        oxplow_domain::uri::build::keyed("oxplow/provider", "tracker/fake")
+    );
     assert_eq!(disabled[0]["reason"], reason.as_str());
 
     // The log keeps it off.
@@ -500,7 +503,7 @@ async fn a_repair_item_is_filed_on_the_active_alternate_provider() {
         .svc
         .sql
         .query_sql(
-            "SELECT w.ref FROM v_work_item w JOIN v_work_item_link l ON l.from_ref = w.ref WHERE l.to_ref = 'collector:work/hot' AND l.link_type = 'about'",
+            "SELECT w.ref FROM v_work_item w JOIN v_work_item_link l ON l.from_ref = w.ref WHERE l.to_ref = 'oxplow:oxplow/collector?collector=work/hot' AND l.link_type = 'about'",
             vec![],
             None,
         )
@@ -509,7 +512,7 @@ async fn a_repair_item_is_filed_on_the_active_alternate_provider() {
     assert_eq!(filed.rows.len(), 1, "{:?}", filed.rows);
     assert_eq!(
         filed.rows[0][0],
-        oxplow_db::SqlCell::Text("work_item:fake:W-1".into())
+        oxplow_db::SqlCell::Text("oxplow:oxplow/work_item?id=W-1&provider=fake".into())
     );
     let shown = fx
         .svc
@@ -544,7 +547,7 @@ async fn work_item_commands_write_another_providers_items_through_its_process() 
     assert_eq!(
         estimate.op,
         Some(oxplow_domain::OpRef {
-            scope: "provider:tracker/fake".into(),
+            scope: oxplow_domain::uri::build::keyed("oxplow/provider", "tracker/fake"),
             op: "estimate".into()
         })
     );
@@ -561,7 +564,7 @@ async fn work_item_commands_write_another_providers_items_through_its_process() 
         .await
         .unwrap()
         .expect("the list keeps it");
-    assert_eq!(item, "work_item:fake:W-1");
+    assert_eq!(item, "oxplow:oxplow/work_item?id=W-1&provider=fake");
     // It runs on the instance its `ref` is of; one naming an instance that
     // doesn't run is refused.
     let estimated = fx
@@ -684,13 +687,17 @@ async fn an_outside_item_is_filed_on_the_thread_named_or_the_agents() {
         .run(
             &Actor::Human,
             crate::commands::work_item::CREATE,
-            json!({ "title": "named", "thread": fx.thread.to_string() }),
+            json!({ "title": "named", "thread": oxplow_domain::uri::build::thread_uri(fx.thread) }),
             false,
         )
         .await
         .unwrap();
     let named = named.result["ref"].as_str().unwrap().to_string();
-    assert!(named.starts_with("work_item:fake:"), "{named}");
+    assert_eq!(
+        oxplow_domain::uri::build::work_item_of_uri(&named).map(|(provider, _)| provider),
+        Some("fake".to_string()),
+        "{named}"
+    );
     assert_eq!(thread_of(named).await, json!([[fx.thread.value()]]));
     let agent = Actor::Agent {
         session_id: None,
@@ -789,7 +796,7 @@ async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
     );
     let ours = crate::work_items::PROVIDER;
     // An oxplow item: refused for its provider before it's looked up.
-    let task = "work_item:oxplow:tsk1".to_string();
+    let task = "oxplow:oxplow/work_item?id=tsk1&provider=oxplow".to_string();
     let err = run(
         json!({ "title": "x", "parent_ref": task }),
         "oxplow.work_item.create",
@@ -847,7 +854,11 @@ async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
     let oxplow_domain::CommandError::Proposed { proposal, .. } = err else {
         panic!("{err:?}");
     };
-    let id: i64 = proposal.strip_prefix("proposal:").unwrap().parse().unwrap();
+    let id: i64 =
+        oxplow_domain::uri::build::id_of(&proposal, oxplow_domain::uri::resources::PROPOSAL)
+            .unwrap()
+            .parse()
+            .unwrap();
     let kept = fx
         .svc
         .commands
@@ -1354,17 +1365,35 @@ fn a_provider_event_names_only_its_own_refs() {
         "work_items",
         "fake_second",
         "tracker",
-        "work_item:fake_second:W-1"
+        "oxplow:oxplow/work_item?id=W-1&provider=fake_second"
     )
     .is_ok());
-    assert!(check_subject("work_items", "fake_second", "tracker", "work_item:fake:W-1").is_err());
-    assert!(check_subject("work_items", "fake", "tracker", "work_item:fake:W-1").is_ok());
-    assert!(check_subject("work_items", "fake", "tracker", "extension:tracker").is_ok());
+    assert!(check_subject(
+        "work_items",
+        "fake_second",
+        "tracker",
+        "oxplow:oxplow/work_item?id=W-1&provider=fake"
+    )
+    .is_err());
+    assert!(check_subject(
+        "work_items",
+        "fake",
+        "tracker",
+        "oxplow:oxplow/work_item?id=W-1&provider=fake"
+    )
+    .is_ok());
+    assert!(check_subject(
+        "work_items",
+        "fake",
+        "tracker",
+        "oxplow:oxplow/extension?name=tracker"
+    )
+    .is_ok());
     for bad in [
-        "work_item:oxplow:tsk1",
-        "extension:other",
-        "wiki:page",
-        "file:src/a.rs",
+        "oxplow:oxplow/work_item?id=tsk1&provider=oxplow",
+        "oxplow:oxplow/extension?name=other",
+        "oxplow:oxplow/wiki?slug=page",
+        "oxplow:oxplow/file?path=src/a.rs",
         "garbage",
     ] {
         assert!(
@@ -1777,9 +1806,27 @@ fn a_manifest_names_a_capability_a_process_may_implement() {
 #[test]
 fn an_event_names_only_its_capabilitys_own_refs() {
     use super::registry::check_subject;
-    assert!(check_subject("work_items", "fake", "tracker", "work_item:fake:W-1").is_ok());
-    assert!(check_subject("effort_policy", "fake", "tracker", "work_item:fake:W-1").is_err());
-    assert!(check_subject("effort_policy", "fake", "tracker", "extension:tracker").is_ok());
+    assert!(check_subject(
+        "work_items",
+        "fake",
+        "tracker",
+        "oxplow:oxplow/work_item?id=W-1&provider=fake"
+    )
+    .is_ok());
+    assert!(check_subject(
+        "effort_policy",
+        "fake",
+        "tracker",
+        "oxplow:oxplow/work_item?id=W-1&provider=fake"
+    )
+    .is_err());
+    assert!(check_subject(
+        "effort_policy",
+        "fake",
+        "tracker",
+        "oxplow:oxplow/extension?name=tracker"
+    )
+    .is_ok());
 }
 
 /// The fake's three items, filed through `oxplow.work_item.create`.
@@ -2012,7 +2059,11 @@ async fn a_failed_read_keeps_what_its_checkpoints_covered() {
         )
         .await
         .unwrap_err();
-    assert!(err.to_string().contains("work_item:other:X-1"), "{err}");
+    assert!(
+        err.to_string()
+            .contains("oxplow:oxplow/work_item?id=X-1&provider=other"),
+        "{err}"
+    );
     assert_eq!(logged(&fx, "work_item.recorded").await.len(), before);
 }
 
@@ -2650,7 +2701,7 @@ async fn two_instances_of_one_provider_run_side_by_side() {
             .await
             .unwrap()
             .expect("the list keeps it"),
-        "work_item:fake_second:W-1"
+        "oxplow:oxplow/work_item?id=W-1&provider=fake_second"
     );
     make_active(&fx, "fake").await;
     assert_eq!(
@@ -2659,7 +2710,7 @@ async fn two_instances_of_one_provider_run_side_by_side() {
             .await
             .unwrap()
             .expect("the list keeps it"),
-        "work_item:fake:W-1"
+        "oxplow:oxplow/work_item?id=W-1&provider=fake"
     );
     let listed = fx
         .svc
@@ -5386,7 +5437,7 @@ async fn a_retry_files_on_the_tracker_active_when_sent() {
         .run(
             &Actor::Human,
             crate::commands::effect::RETRY,
-            json!({ "effect": format!("{EXT}/file"), "event": format!("event:{}", ev.envelope.id) }),
+            json!({ "effect": format!("{EXT}/file"), "event": oxplow_domain::uri::build::event_uri(&ev.envelope.id.to_string()) }),
             true,
         )
         .await
@@ -5485,7 +5536,7 @@ async fn a_persons_retry_takes_the_place_of_a_scheduled_one() {
         .run(
             &Actor::Human,
             crate::commands::effect::RETRY,
-            json!({ "effect": format!("{EXT}/file"), "event": format!("event:{}", ev.envelope.id) }),
+            json!({ "effect": format!("{EXT}/file"), "event": oxplow_domain::uri::build::event_uri(&ev.envelope.id.to_string()) }),
             true,
         )
         .await
@@ -5958,7 +6009,7 @@ async fn file_task(fx: &EffortFixture) -> String {
         .run(
             &Actor::Human,
             crate::commands::work_item::CREATE,
-            json!({ "title": "policy work", "thread": fx.thread.to_string() }),
+            json!({ "title": "policy work", "thread": oxplow_domain::uri::build::thread_uri(fx.thread) }),
             false,
         )
         .await
@@ -6613,7 +6664,7 @@ async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
         serde_json::to_string(&json!({
             "items": {}, "next": 1, "rev": 1, "answered": {},
             "pages": { "outside": { "rev": 1, "record": {
-                "ref": "wiki:outside", "title": "Outside", "body": "# Outside\n\nWritten in the vault.\n",
+                "ref": "oxplow:oxplow/wiki?slug=outside", "title": "Outside", "body": "# Outside\n\nWritten in the vault.\n",
                 "refs": [], "updated_at": "2026-10-09T00:00:01Z"
             } } }
         }))
@@ -6680,7 +6731,7 @@ async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
         )
         .await
         .unwrap();
-    assert_eq!(out.result["page"], "wiki:design");
+    assert_eq!(out.result["page"], "oxplow:oxplow/wiki?slug=design");
     assert!(!project.join(".oxplow/wiki/design.md").exists());
     let body: Option<String> = fx
         .svc
@@ -6690,15 +6741,18 @@ async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
         .unwrap()
         .map(|(_, body)| body);
     assert_eq!(body.as_deref(), Some("# Design\n\nSee [[src/lib.rs]].\n"));
-    let fresh = crate::knowledge::freshness(&fx.svc.db, "wiki:design")
+    let fresh = crate::knowledge::freshness(&fx.svc.db, "oxplow:oxplow/wiki?slug=design")
         .await
         .unwrap();
     assert_eq!(
         fresh.iter().map(|f| f.target.as_str()).collect::<Vec<_>>(),
-        ["file:src/lib.rs"]
+        ["oxplow:oxplow/file?path=src/lib.rs"]
     );
     let saved = std::fs::read_to_string(&state).unwrap();
-    assert!(saved.contains("wiki:design"), "the store kept it: {saved}");
+    assert!(
+        saved.contains("oxplow:oxplow/wiki?slug=design"),
+        "the store kept it: {saved}"
+    );
 
     // A delete takes it out of both.
     fx.svc

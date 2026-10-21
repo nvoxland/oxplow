@@ -185,15 +185,23 @@ mod tests {
     /// Each answerability question is a prompt; an `about` names a
     /// registered kind of ref, and the entity pages have some.
     #[test]
-    fn answerability_prompts_are_about_registered_ref_kinds() {
+    fn answerability_prompts_are_about_declared_resources() {
         let prompts = answerability_prompts();
-        let kinds = oxplow_domain::uri::types::core_types();
+        let resources = oxplow_domain::uri::resources::foundation().clone();
         for p in &prompts {
             if let Some(about) = &p.about {
-                assert!(kinds.get(about).is_some(), "{}: `{about}`", p.prompt);
+                let declared = about
+                    .parse()
+                    .is_ok_and(|name| resources.get(&name).is_some());
+                assert!(declared, "{}: `{about}`", p.prompt);
             }
         }
-        for kind in ["file", "commit", "effort", "work_item"] {
+        for kind in [
+            "oxplow/file",
+            "oxplow/commit",
+            "oxplow/effort",
+            "oxplow/work_item",
+        ] {
             assert!(
                 prompts.iter().any(|p| p.about.as_deref() == Some(kind)),
                 "no prompt about `{kind}`"

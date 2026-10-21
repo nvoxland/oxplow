@@ -4,15 +4,15 @@
   "description": "`handoff.sent@1`: work was handed from one thread to another\n(`oxplow.handoff.send`).",
   "properties": {
     "from_thread": {
-      "description": "The sending thread (`thread:thr<n>`).",
+      "description": "The sending thread (`oxplow:oxplow/thread?id=thr<n>`).",
       "type": "string"
     },
     "handoff": {
-      "description": "`handoff:hnd<n>`.",
+      "description": "`oxplow:oxplow/handoff?id=hnd<n>`.",
       "type": "string"
     },
     "to_thread": {
-      "description": "The receiving thread (`thread:thr<n>`).",
+      "description": "The receiving thread (`oxplow:oxplow/thread?id=thr<n>`).",
       "type": "string"
     },
     "work_item": {

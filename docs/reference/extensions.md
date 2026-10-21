@@ -106,12 +106,13 @@ intent:
 
 ### Public imports and exports
 
-Export a contribution explicitly, using its canonical ID and a positive
+Export a contribution explicitly, using its canonical URI (the resource
+`oxplow/<kind>` with the kind's own name as the key param) and a positive
 integer contract version:
 
 ```yaml
 exports:
-  - contribution: model:review-data/items
+  - contribution: "oxplow:oxplow/model?model=review-data/items"
     version: 1
     visibility: stable
 ```
@@ -121,11 +122,11 @@ The consumer chooses a local binding:
 ```yaml
 imports:
   - id: review_items
-    contribution: model:review-data/items
+    contribution: "oxplow:oxplow/model?model=review-data/items"
     version: 1
     optional: true
 import_guards:
-  - contribution: collector:review-ui/summarize
+  - contribution: "oxplow:oxplow/collector?collector=review-ui/summarize"
     imports: [review_items]
 ```
 
@@ -136,8 +137,8 @@ independent contributions remain usable. Explicit guards can name models,
 lenses, collectors, commands, effects, advisories, skills or providers. Their
 exports and dependent mounts are withheld too. Each unavailable optional
 import is one warning naming why and everything it withheld:
-`` optional import `items` for `model:maker/items` v1 is unavailable: maker
-is disabled; withheld: `lens:review-ui/items`, `slot:review-ui/work_item.detail.body-0` ``.
+`` optional import `items` for `oxplow:oxplow/model?model=maker/items` v1 is unavailable: maker
+is disabled; withheld: `oxplow:oxplow/lens?lens=review-ui/items`, `oxplow:oxplow/slot?slot=review-ui/work_item.detail.body-0` ``.
 Missing required imports and
 dependency cycles block the extension with source-located errors.
 
@@ -232,7 +233,7 @@ for managing references is not implemented yet.
 | `dimensions` | a way to slice metrics | [Metrics](../guide/metrics.md) |
 | `collectors` | outside data brought in as entities, or facts for metrics | below |
 | `event_types` | its own namespace's event types |  |
-| `ref_kinds` | kinds of thing a ref can name |  |
+| `resources` | kinds of thing a URI can name |  |
 | `commands` | commands on oxplow's command bus | below |
 | `jobs` | durable host operations scheduled by an extension |  |
 | `ai_profiles` | a named model need an extension declares: bound by the person, or falling back to a built-in role |  |
@@ -373,7 +374,7 @@ commands:
     entry: handlers/finish.star     # transform(x) → { commands: [...] } | { refuse: "why" }
     needs: [sql.read]               # the scopes its script calls
     invokers: { human: true, agent: true, lens: true }
-    ui: { label: Finish Review, group: Review, about: work_item, input: { ref: "{{ref}}" } }
+    ui: { label: Finish Review, group: Review, about: oxplow/work_item, input: { ref: "{{ref}}" } }
 ```
 
 - A script reaches oxplow only through the scopes in `needs`. Today a
@@ -389,19 +390,22 @@ commands:
   one the answer carries a `warning`. This rule also applies to effects,
   effort policies and provider host calls. A complete result does not
   prove every source was collected.
-- Refs are carried, not assembled. Every script has `ref`:
-  `uri.build(kind, id, rev=, frag=)` makes one (`uri.build("file",
-  f["path"])`), and `uri.parse(r)` (`{kind, id, rev, frag}`),
-  `uri.id(r, kind=)`, `uri.type(r)` and `uri.is_uri(v)` read one. In SQL,
-  select a model's `ref` column and compare refs to refs (`WHERE ref =
-  :ref`); don't concatenate `'effort:eff' || id` or slice a ref. A ref
-  can outlive what it names, so store it even when the thing may go.
-- `ui` says how a person meets it. `about` offers it on that kind of
-  ref's page and rows. `input` binds `{{stream}}`, `{{thread}}`,
+- URIs are carried, not assembled. Every script has `uri`:
+  `uri.build(resource, **params)` makes one (`uri.build("oxplow/file",
+  path = f["path"])`), and `uri.parse(u)` (`{resource, params, view}`),
+  `uri.param(u, name)`, `uri.id(u, resource=)`, `uri.resource(u)` and
+  `uri.is_uri(v)` read one. In SQL, select a model's `ref` column and
+  compare URIs to URIs (`WHERE ref = :ref`); build one with
+  `uri('oxplow/effort', 'id', 'eff' || id)` and read a param with
+  `uri_param(ref, 'id')`. Don't concatenate `'oxplow:oxplow/effort?id=' || id`
+  or slice a URI. A URI can outlive what it names, so store it even when
+  the thing may go.
+- `ui` says how a person meets it. `about` names a resource
+  (`oxplow/work_item`, `acme/pr`) and offers the command on a URI of it, its page and rows. `input` binds `{{stream}}`, `{{thread}}`,
   `{{ref}}` or `{{ref.id}}`, each as a whole string. `form` opens a
-  page to gather the input instead; offered on a ref (`about`), the page
-  opens with `?ref=<ref>`, which a `pages:` lens form prefills from with
-  `defaults: { ref: "{{param.ref}}" }`. `open_after` opens a ref once it
+  page to gather the input instead; offered on a URI (`about`), the page
+  opens with `ref=<uri>`, which a `pages:` lens form prefills from with
+  `defaults: { ref: "{{param.ref}}" }`. `open_after` opens a URI once it
   ran, taking `{{result.<field>}}` from its result.
 - A mistake in `ui` is a load error naming the field, not a menu entry
   that never shows.
@@ -443,7 +447,7 @@ chooses the model for it, and a job that declares `tools` takes none here. The r
 is private and limited to 1 MiB and 64 nesting levels. `cancel` and
 `snapshot` take `{id}`. The `intentKey` is what the job is about, one job
 per key: asking again with it returns the same job. Put the subject in it
-(`review:effort:eff12`), and read it back as the snapshot's `intentKey` or
+(`review:eff12`), and read it back as the snapshot's `intentKey` or
 `v_job_run.intent_key`. The host records intent before a worker starts, and
 the extension must declare `permissions: { ai: true }` before a job can
 spend an AI provider key, and a person approves that when the extension is
@@ -506,6 +510,39 @@ picks a model, nothing more — what a job's model may call is still its
 `tools:`. `oxplow extension check` prints one line per profile saying
 what serves it.
 
+### Resources
+
+A resource is a kind of thing your extension adds: pull requests, tickets,
+deployments. `resources:` declares it, and every thing of it gets a URI,
+`oxplow:<extension>/<resource>?<params>` (`oxplow:github/pr?id=12`).
+
+```yaml
+resources:
+  - name: pr
+    label: Pull request
+    params: { id: { required: true, pattern: '^\d+$' } }
+    resolve: pull_request     # a model with `ref` and `title` columns
+    searchable: pull_request  # optional: a model with `ref`, `title`, `body`
+    page: pr                  # optional: one of your pages, opened with `ref=<uri>`
+    icon: git-pull-request
+    wikilink: { prefix: pr, param: id }   # [[pr:12]]
+```
+
+- `params` are the named values that identify one. A `pattern` is
+  anchored (`^…$`) and limited to plain characters, classes, `\d`, `\w`,
+  escapes and quantifiers: no groups, alternation or `.`.
+- `resolve` gives each thing a title in links and backlinks. `searchable`
+  puts the model's rows in search; a row whose `ref` isn't a URI of this
+  resource is skipped.
+- A URI that nothing resolves (the extension is off, or the thing is
+  gone) shows as its raw text. It never errors.
+- `about:` on a command or a prompt, and `resource:` on a decorator, take
+  a resource name: `oxplow/work_item`, `github/pr`.
+
+`oxplow extension check` refuses an unknown model, an unknown page, a pattern
+outside that subset, an icon oxplow doesn't draw, and a resource or
+wikilink prefix that another extension already uses.
+
 ### Replacing a core view
 
 A lens can stand in for one of these core views (`ui.replacements: [{
@@ -567,8 +604,9 @@ effects:
 
 An entry is one of:
 - a bare id: this extension's own effect or collector;
-- a ref: `effect:<extension>/<id>` or `collector:<extension>/<id>`,
-  any extension's;
+- a short URI: `effect:<extension>/<id>` or `collector:<extension>/<id>`,
+  any extension's (the short forms of `oxplow:oxplow/effect?effect=…` and
+  `oxplow:oxplow/collector?collector=…`);
 - one of oxplow's own steps, by name (`change.analyze`, `collection`,
   `page_ref.work_item`, …), or as `consumer:<name>`.
 
@@ -594,10 +632,10 @@ triggered it):
 {
   "id": "0199…", "type": "work_item.state_changed", "v": 1, "seq": 812,
   "at": "2026-10-09T14:02:11.120000Z", "source": "agent:thr3",
-  "subject": ["work_item:oxplow:tsk4"],
+  "subject": ["oxplow:oxplow/work_item?id=tsk4&provider=oxplow"],
   "anchors": { "stream_id": "str1", "thread_id": "thr3", "effort_id": null,
                "turn_id": 41, "agent_session_id": "ses2", "snapshot_id": null },
-  "payload": { "work_item": "work_item:oxplow:tsk4", "to": "done" },
+  "payload": { "work_item": "oxplow:oxplow/work_item?id=tsk4&provider=oxplow", "to": "done" },
   "cause": null
 }
 ```
@@ -716,7 +754,7 @@ command's fixture may check what the command answers, `expect: { result:
 {...} }`, compared on the keys you name. A job's fixture can make the
 data its tools read first: `setup: [{ command, input?, as? }]` runs
 oxplow's own commands in order (as a person, or `as: agent` for the agent
-of `thread:thr1`), and `rows` seeds your own entities as a lens fixture
+of `oxplow:oxplow/thread?id=thr1`), and `rows` seeds your own entities as a lens fixture
 does. A fixture model's reply may say `when: "<text>"` to answer only the
 request whose last message carries that text, such as a tool's result;
 other replies answer in turn. `--bless` writes a provider's golden

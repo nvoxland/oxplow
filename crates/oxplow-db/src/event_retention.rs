@@ -412,7 +412,7 @@ mod tests {
                        (run_id, extension, contribution, kind, actor_kind, actor, mode,
                         started_at, finished_at, outcome, wall_ms, cpu_ms, peak_bytes,
                         ai_calls, scopes_json, decisions_json)
-                     VALUES (?1, 'acme', 'collector:acme/pull', 'collector', 'system', 'system',
+                     VALUES (?1, 'acme', 'oxplow:oxplow/collector?collector=acme/pull', 'collector', 'system', 'system',
                         'external', ?2, ?2, 'ok', 1, 0, 0, 0, '{}', '[]')",
                     rusqlite::params![id, started],
                 )

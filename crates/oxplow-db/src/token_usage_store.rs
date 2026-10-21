@@ -373,7 +373,7 @@ mod tests {
                 let task_id = conn.last_insert_rowid();
                 conn.execute(
                     "INSERT INTO effort (work_item, thread_id, started_at)
-                     VALUES ('work_item:oxplow:tsk' || ?1, 1, ?2)",
+                     VALUES ('oxplow:oxplow/work_item?id=tsk&provider=oxplow' || ?1, 1, ?2)",
                     params![task_id, now],
                 )?;
                 Ok(())

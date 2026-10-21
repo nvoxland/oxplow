@@ -17,13 +17,13 @@ const ext = (name: string, enabled: boolean, pageRef: string, id: string) =>
   ({ name, enabled, pages: [{ id, pageRef, title: id }] }) as unknown as Extension;
 
 test("a page resolves by its tab id among the enabled extensions", () => {
-  const exts = [ext("oxplow-foundation", true, "page:tasks", "tasks"), ext("gh", true, "page:gh/open-prs", "open-prs")];
+  const exts = [ext("oxplow-foundation", true, "oxplow:oxplow/page?page=tasks", "tasks"), ext("gh", true, "oxplow:oxplow/page?page=gh/open-prs", "open-prs")];
   expect(declaredPage(exts, { extension: null, page: "tasks", params: {} })?.id).toBe("tasks");
   expect(declaredPage(exts, { extension: "gh", page: "open-prs", params: {} })?.id).toBe("open-prs");
   expect(declaredPage(exts, { extension: "oxplow-foundation", page: "tasks", params: {} })).toBeNull();
 });
 
 test("a disabled extension's page doesn't resolve, and loading is undefined", () => {
-  expect(declaredPage([ext("gh", false, "page:gh/open-prs", "open-prs")], { extension: "gh", page: "open-prs", params: {} })).toBeNull();
+  expect(declaredPage([ext("gh", false, "oxplow:oxplow/page?page=gh/open-prs", "open-prs")], { extension: "gh", page: "open-prs", params: {} })).toBeNull();
   expect(declaredPage(null, { extension: null, page: "tasks", params: {} })).toBeUndefined();
 });

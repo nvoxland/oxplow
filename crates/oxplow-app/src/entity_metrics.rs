@@ -388,11 +388,11 @@ mod tests {
                    VALUES (1, 1, 'T', '2026-01-01', '2026-01-01');
                  INSERT INTO capability_provider (capability, provider, active) VALUES ('work_items', 'oxplow', 1);
                  INSERT INTO work_item (ref, provider, title, state, native_state, native, thread_id, rank, created_at, updated_at, closed_at) VALUES
-                   ('work_item:oxplow:tsk1', 'oxplow', 'a', 'done', 'done', '{\"priority\":\"high\"}', 1, 10, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-21T09:00:00Z'),
-                   ('work_item:oxplow:tsk2', 'oxplow', 'b', 'done', 'done', '{\"priority\":\"low\"}', 1, 20, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-21T17:30:00Z'),
-                   ('work_item:oxplow:tsk3', 'oxplow', 'c', 'done', 'done', '{\"priority\":\"high\"}', 1, 30, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-23T12:00:00Z'),
-                   ('work_item:oxplow:tsk4', 'oxplow', 'd', 'todo', 'ready', '{\"priority\":\"high\"}', 1, 40, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', NULL),
-                   ('work_item:oxplow:tsk5', 'oxplow', 'e', 'in_progress', 'in_progress', '{\"priority\":\"medium\"}', 1, 50, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', NULL);",
+                   ('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 'oxplow', 'a', 'done', 'done', '{\"priority\":\"high\"}', 1, 10, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-21T09:00:00Z'),
+                   ('oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 'oxplow', 'b', 'done', 'done', '{\"priority\":\"low\"}', 1, 20, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-21T17:30:00Z'),
+                   ('oxplow:oxplow/work_item?id=tsk3&provider=oxplow', 'oxplow', 'c', 'done', 'done', '{\"priority\":\"high\"}', 1, 30, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-23T12:00:00Z'),
+                   ('oxplow:oxplow/work_item?id=tsk4&provider=oxplow', 'oxplow', 'd', 'todo', 'ready', '{\"priority\":\"high\"}', 1, 40, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', NULL),
+                   ('oxplow:oxplow/work_item?id=tsk5&provider=oxplow', 'oxplow', 'e', 'in_progress', 'in_progress', '{\"priority\":\"medium\"}', 1, 50, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', NULL);",
             )
             .map_err(|e| DomainError::Invalid(e.to_string()))
         })
@@ -591,7 +591,7 @@ mod tests {
             c.execute_batch(
                 "WITH RECURSIVE n(i) AS (SELECT 100 UNION ALL SELECT i + 1 FROM n WHERE i < 10100)
                  INSERT INTO work_item (ref, provider, title, state, native_state, native, thread_id, rank, created_at, updated_at)
-                 SELECT 'work_item:oxplow:tsk' || i, 'oxplow', 't', 'todo', 'ready', '{\"priority\":\"low\"}', 1, i, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z' FROM n;",
+                 SELECT 'oxplow:oxplow/work_item?id=tsk&provider=oxplow' || i, 'oxplow', 't', 'todo', 'ready', '{\"priority\":\"low\"}', 1, i, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z' FROM n;",
             )
             .map_err(|e| DomainError::Invalid(e.to_string()))
         })

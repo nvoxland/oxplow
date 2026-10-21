@@ -27,7 +27,7 @@ async fn project() -> tempfile::TempDir {
 /// Scaffold `kind` as `name`; `check` is clean with no warnings.
 async fn scaffolded(root: &Path, kind: &str, name: &str) {
     let kind = Kind::parse(kind).unwrap_or_else(|| panic!("`extension new {kind}`"));
-    scaffold(root, kind, name, Some("effort:eff1")).unwrap();
+    scaffold(root, kind, name, Some("oxplow:oxplow/effort?id=eff1")).unwrap();
     let report = check(root, name, &ExtensionCatalog::new(), None, None, None)
         .await
         .unwrap();
@@ -109,7 +109,7 @@ async fn a_scaffolded_collector_checks_before_its_first_sync_and_runs() {
         .run(
             &oxplow_domain::Actor::Human,
             "oxplow.collector.sync",
-            serde_json::json!({ "collector": format!("collector:open-items/{}", collector.id) }),
+            serde_json::json!({ "collector": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::COLLECTOR, &format!("open-items/{}", collector.id)) }),
             true,
         )
         .await
@@ -428,7 +428,7 @@ async fn a_scaffolded_effort_policy_is_red_until_a_program_speaks_for_it() {
         dir.path(),
         Kind::provider("effort_policy").unwrap(),
         "fake",
-        Some("effort:eff1"),
+        Some("oxplow:oxplow/effort?id=eff1"),
     )
     .unwrap();
     let report = test_extension(dir.path(), "fake", false).await.unwrap();
@@ -517,7 +517,7 @@ async fn a_scaffolded_harness_provider_is_red_until_a_program_speaks_for_it() {
         dir.path(),
         Kind::provider("agent_harness").unwrap(),
         "relay",
-        Some("effort:eff1"),
+        Some("oxplow:oxplow/effort?id=eff1"),
     )
     .unwrap();
     let env = harness_env();
@@ -663,7 +663,7 @@ async fn extension_test_runs_the_knowledge_suite_over_a_knowledge_provider() {
     .unwrap();
     std::fs::write(
         ext.join("fixtures/basic.yaml"),
-        format!("input: {write}\nexpect: {{ page: 'wiki:example' }}\n"),
+        format!("input: {write}\nexpect: {{ page: 'oxplow:oxplow/wiki?slug=example' }}\n"),
     )
     .unwrap();
     std::fs::write(
@@ -716,7 +716,7 @@ async fn extension_test_runs_the_snapshot_suite_over_a_snapshots_provider() {
     std::fs::create_dir_all(&tree).unwrap();
     std::fs::write(tree.join("a.txt"), "alpha").unwrap();
     let mark = format!(
-        "{{ command: mark, input: {{ stream: 'stream:str1', worktree: '{}', trigger: manual, parent: null }} }}",
+        "{{ command: mark, input: {{ stream: 'oxplow:oxplow/stream?id=str1', worktree: '{}', trigger: manual, parent: null }} }}",
         tree.display()
     );
     std::fs::write(
@@ -776,7 +776,7 @@ async fn a_scaffolded_snapshots_provider_is_red_until_a_program_speaks_for_it() 
         dir.path(),
         Kind::provider("snapshots").unwrap(),
         "shutter",
-        Some("effort:eff1"),
+        Some("oxplow:oxplow/effort?id=eff1"),
     )
     .unwrap();
     let report = test_extension(dir.path(), "shutter", false).await.unwrap();
@@ -825,7 +825,7 @@ async fn a_scaffolded_knowledge_provider_is_red_until_a_program_speaks_for_it() 
         dir.path(),
         Kind::provider("knowledge").unwrap(),
         "shelf",
-        Some("effort:eff1"),
+        Some("oxplow:oxplow/effort?id=eff1"),
     )
     .unwrap();
     let report = test_extension(dir.path(), "shelf", false).await.unwrap();

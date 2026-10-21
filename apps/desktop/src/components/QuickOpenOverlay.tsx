@@ -1,9 +1,9 @@
 import type { CommandEntry } from "./quickOpenResults.js";
 import { useAppPreference } from "../prefs/remembered.js";
-import { pageUri, uriOf } from "../uri/uri.js";
+import { commandUri, fileUri, pageUri, shortResource } from "../uri/uri.js";
 import { SEARCH_TRIGGER_TESTID } from "./TitleBar.js";
 import type { CSSProperties } from "react";
-import { useRefKinds } from "../refKinds.js";
+import { useResources } from "../resources.js";
 import { useListNav } from "../kit/index.js";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useExtensions } from "../extensionsStore.js";
@@ -90,7 +90,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
   const [siteHits, setSiteHits] = useState<SearchHit[]>([]);
   // A hit of an extension's ref kind is drawn with that kind's icon and
   // label: redraw when the kinds change.
-  useRefKinds();
+  useResources();
   const [recentEntries, setRecentEntries] = useState<LauncherPageEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -465,7 +465,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
               if (result.kind === "command") {
                 return (
                   <button type="button"
-                    key={uriOf("command", result.entry.id)}
+                    key={commandUri(result.entry.id)}
                     data-testid={`launcher-command-${result.entry.id}`}
                     data-row-index={index}
                     {...rowA11y(nav.optionProps(index))}
@@ -493,8 +493,8 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
               if (result.kind === "hit") {
                 return (
                   <button type="button"
-                    key={`hit:${result.hit.ref}:${result.hit.stream_id ?? ""}`}
-                    data-testid={`launcher-hit-${result.hit.ref}`}
+                    key={`hit:${result.hit.uri}:${result.hit.stream_id ?? ""}`}
+                    data-testid={`launcher-hit-${result.hit.uri}`}
                     data-row-index={index}
                     {...rowA11y(nav.optionProps(index))}
                     onClick={() => confirm(result)}
@@ -504,15 +504,15 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                     }}
                   >
                     <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}>
-                      <PageKindIcon kind={result.hit.kind} size={14} style={{ color: "var(--text-secondary)" }} />
+                      <PageKindIcon kind={shortResource(result.hit.resource)} size={14} style={{ color: "var(--text-secondary)" }} />
                     </span>
                     <span style={{ flexShrink: 0, maxWidth: "40%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {result.hit.title || result.hit.ref}
+                      {result.hit.title || result.hit.uri}
                     </span>
                     <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--muted)", fontSize: 11 }}>
                       {result.hit.snippet}
                     </span>
-                    <span style={{ color: "var(--muted)", fontSize: 11 }}>{pageKindLabel(result.hit.kind)}</span>
+                    <span style={{ color: "var(--muted)", fontSize: 11 }}>{pageKindLabel(shortResource(result.hit.resource))}</span>
                   </button>
                 );
               }
@@ -542,7 +542,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
               }
               return (
                 <button type="button"
-                  key={uriOf("file", result.file.path)}
+                  key={fileUri(result.file.path)}
                   data-row-index={index}
                     {...rowA11y(nav.optionProps(index))}
                   onClick={() => confirm(result)}

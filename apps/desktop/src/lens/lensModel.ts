@@ -21,7 +21,7 @@ import { diffRef, duplicateBlockRef, effortDiffRef, fileRef, gitCommitRef, lensR
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { formatContextMention, type ContextRef } from "../agent-context-ref.js";
-import { idOf, parseUri } from "../uri/uri.js";
+import { idOf, parseUri, typeOf } from "../uri/uri.js";
 
 export interface DisplayColumn {
   key: string;
@@ -168,8 +168,10 @@ export function rowContextRef(lens: Lens, columns: string[], row: SqlCell[]): Co
   const ref = rowRef(lens, columns, row);
   if (!ref) return null;
   const parsed = parseUri(ref);
-  if (parsed?.kind === "wiki" && parsed.rev === null) return { kind: "wiki", slug: parsed.id };
-  if (parsed?.kind === "file" && parsed.rev === null && parsed.frag === null) return { kind: "file", path: parsed.id };
+  if (typeOf(ref) === "oxplow/wiki" && parsed?.params.slug) return { kind: "wiki", slug: parsed.params.slug };
+  if (typeOf(ref) === "oxplow/file" && parsed?.params.path && !("rev" in parsed.params) && Object.keys(parsed.view).length === 0) {
+    return { kind: "file", path: parsed.params.path };
+  }
   return { kind: "ref", ref };
 }
 
@@ -251,7 +253,7 @@ export function cellLinkRef(
     case "effort-diff": {
       // A lens row carries the effort's ref (`v_effort.ref`); a cell that
       // isn't one links nowhere.
-      const id = idOf(s, "effort");
+      const id = idOf(s, "oxplow/effort");
       return id === null ? null : effortDiffRef(id);
     }
   }

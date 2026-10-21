@@ -43,7 +43,7 @@ test("a task made elsewhere appears without a reload", async ({ fresh }) => {
   await expandRailSection(page, "ext:oxplow-bundled/work");
   await expect(page.getByTestId("rail-section-ext:oxplow-bundled/work")).toBeVisible();
   await waitForModels(daemon, ["v_work_item"], () =>
-    run(daemon, "oxplow.work_item.create", { title: "Made elsewhere", thread: daemon.thread }),
+    run(daemon, "oxplow.work_item.create", { title: "Made elsewhere", thread: daemon.threadUri }),
   );
   await expect(page.getByTestId("rail-section-ext:oxplow-bundled/work")).toContainText("Made elsewhere");
 });
@@ -55,8 +55,8 @@ test("the Tasks page's scope is its tab's: it re-renders the page, a reload keep
   const { page } = fresh;
   await page.goto("/");
   await openFromLauncher(page, "Tasks");
-  const body = () => page.locator('[data-testid^="center-tab-body-page:tasks"]:visible');
-  await expect(body()).toHaveAttribute("data-testid", "center-tab-body-page:tasks");
+  const body = () => page.locator('[data-testid^="center-tab-body-oxplow:oxplow/page?"][data-testid*="page=tasks"]:visible');
+  await expect(body()).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=tasks");
   // A mark on the page's element: a change of view re-renders the page,
   // it doesn't mount it again.
   await body().getByTestId("tasks-scope-picker").evaluate((el) => {
@@ -64,15 +64,15 @@ test("the Tasks page's scope is its tab's: it re-renders the page, a reload keep
   });
   await body().getByTestId("tasks-scope-button").click();
   await body().getByTestId("tasks-scope-all").click();
-  await expect(body()).toHaveAttribute("data-testid", "center-tab-body-page:tasks?scope=all");
+  await expect(body()).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=tasks&scope=all");
   await expect(body().getByTestId("tasks-scope-picker")).toHaveAttribute("data-mounted-once", "yes");
   // A scope is a filter: it replaced the entry, so there's no Back to it.
   await expect(page.getByTestId("page-nav-back").filter({ visible: true })).toBeDisabled();
   await page.reload();
-  await expect(body()).toHaveAttribute("data-testid", "center-tab-body-page:tasks?scope=all");
+  await expect(body()).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=tasks&scope=all");
   await expect(body().getByTestId("tasks-scope-button")).toContainText("Everything");
   // Tasks at its default view is another page of the tab strip.
   await openFromLauncher(page, "Tasks");
-  await expect(page.getByTestId("center-tab-page:tasks")).toBeVisible();
-  await expect(page.getByTestId("center-tab-page:tasks?scope=all")).toBeVisible();
+  await expect(page.getByTestId("center-tab-oxplow:oxplow/page?page=tasks")).toBeVisible();
+  await expect(page.getByTestId("center-tab-oxplow:oxplow/page?page=tasks&scope=all")).toBeVisible();
 });

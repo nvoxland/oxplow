@@ -5,19 +5,15 @@
 
 use oxplow_app::Services;
 use oxplow_domain::stores::CommentStore;
-use oxplow_domain::{CommentTarget, CommentThread, StreamId};
+use oxplow_domain::{CommentThread, StreamId};
 
 use crate::error::IpcError;
 
+/// The comments on `target`, a page's URI.
 pub async fn list_comments_for_target(
     svc: &Services,
-    target_kind: String,
-    target_id: String,
+    target: String,
 ) -> Result<Vec<CommentThread>, IpcError> {
-    let target = CommentTarget {
-        kind: target_kind,
-        id: target_id,
-    };
     Ok(svc.comment_store.list_for_target(&target).await?)
 }
 
@@ -35,7 +31,7 @@ mod tests {
         let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "list_comments_for_target",
-            serde_json::json!({"targetKind": "wiki", "targetId": "some-slug"}),
+            serde_json::json!({"target": oxplow_domain::uri::build::wiki_uri("some-slug")}),
             &svc,
         )
         .await

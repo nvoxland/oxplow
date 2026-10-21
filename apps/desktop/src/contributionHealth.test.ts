@@ -52,7 +52,7 @@ const health = (over: Partial<ContributionHealth>): ContributionHealth => ({
 
 test("rows read as health", () => {
   const [h] = contributionHealthFromResult(
-    result([["tracker", "issues", "collector", "disabled", "3 failures", 3, "boom", 12.5, 2, 0, "work_item:oxplow:tsk9"]]),
+    result([["tracker", "issues", "collector", "disabled", "3 failures", 3, "boom", 12.5, 2, 0, "oxplow:oxplow/work_item?id=tsk9&provider=oxplow"]]),
   );
   expect(h).toEqual(
     health({
@@ -63,7 +63,7 @@ test("rows read as health", () => {
       meanMs: 12.5,
       deadLetters: 2,
       fresh: false,
-      repairItem: "work_item:oxplow:tsk9",
+      repairItem: "oxplow:oxplow/work_item?id=tsk9&provider=oxplow",
     }),
   );
 });
@@ -74,11 +74,11 @@ test("an extension's health is its contributions'", () => {
 });
 
 test("a disabled contribution shows its reason and can be enabled and repaired", () => {
-  const line = healthLine(health({ state: "disabled", reason: "3 failures in a row; the last: boom", repairItem: "work_item:oxplow:tsk9" }));
+  const line = healthLine(health({ state: "disabled", reason: "3 failures in a row; the last: boom", repairItem: "oxplow:oxplow/work_item?id=tsk9&provider=oxplow" }));
   expect(line.text).toBe("Disabled: 3 failures in a row; the last: boom");
   expect(line.tone).toBe("error");
   expect(line.canEnable).toBe(true);
-  expect(line.repairItem).toBe("work_item:oxplow:tsk9");
+  expect(line.repairItem).toBe("oxplow:oxplow/work_item?id=tsk9&provider=oxplow");
 });
 
 test("a disabled contribution without an open repair item has nothing to repair from", () => {
@@ -104,15 +104,15 @@ test("a healthy contribution says so, with its average, missed schedule and unde
 });
 
 test("the repair mention names the repair item as a ref, on one line", () => {
-  expect(repairMention("work_item:oxplow:tsk9")).toBe(
-    "Repair the extension described in [oxplow ref work_item:oxplow:tsk9] — read it first.",
+  expect(repairMention("oxplow:oxplow/work_item?id=tsk9&provider=oxplow")).toBe(
+    "Repair the extension described in [oxplow ref oxplow:oxplow/work_item?id=tsk9&provider=oxplow] — read it first.",
   );
 });
 
 test("Repair with the Agent fills the agent input with the mention, and only that", () => {
   const inserted: string[] = [];
-  repairWithAgent("work_item:issues:ENG-12", (t) => inserted.push(t));
-  expect(inserted).toEqual(["Repair the extension described in [oxplow ref work_item:issues:ENG-12] — read it first."]);
+  repairWithAgent("oxplow:oxplow/work_item?id=ENG-12&provider=issues", (t) => inserted.push(t));
+  expect(inserted).toEqual(["Repair the extension described in [oxplow ref oxplow:oxplow/work_item?id=ENG-12&provider=issues] — read it first."]);
 });
 
 test("Enable Again runs oxplow.contribution.enable as the person", async () => {

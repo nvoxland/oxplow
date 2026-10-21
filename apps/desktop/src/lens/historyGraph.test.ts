@@ -118,8 +118,8 @@ test("a click opens the commit; a Cmd-click opens it in a new tab", async () => 
   rows()[0]!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   rows()[1]!.dispatchEvent(new MouseEvent("click", { bubbles: true, metaKey: true }));
   expect(opened).toEqual([
-    ["commit:c", { newTab: false }],
-    ["commit:a", { newTab: true }],
+    ["oxplow:oxplow/commit?sha=c", { newTab: false }],
+    ["oxplow:oxplow/commit?sha=a", { newTab: true }],
   ]);
 });
 

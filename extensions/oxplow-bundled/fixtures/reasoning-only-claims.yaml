@@ -4,10 +4,10 @@ input:
   effect: store-reasoning
   event:
     type: contribution.job.completed
-    payload: { job_run: "job_run:01990000-0000-7000-8000-000000000000", job: "job:oxplow-bundled/reasoning", version: 1, attempt: 1, fence: 1, outcome: succeeded }
+    payload: { job_run: "oxplow:oxplow/job_run?id=01990000-0000-7000-8000-000000000000", job: "oxplow:oxplow/job?job=oxplow-bundled/reasoning", version: 1, attempt: 1, fence: 1, outcome: succeeded }
   answers:
     jobs.read:
-      - intentKey: "reasoning:effort:eff3@2"
+      - intentKey: "reasoning:oxplow:oxplow/effort?id=eff3@2"
         result:
           parts: [{ type: text, text: '{"claims": []}' }]
 expect:

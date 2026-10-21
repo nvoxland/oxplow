@@ -4,7 +4,7 @@
   "description": "`contribution.disabled@1` (P7.C1): one of an extension's contributions —\na provider instance, a collector, an effect — was stopped on this machine after\nrepeated failures (or a provider whose handshake no longer matches what\nwas approved), and stays off until a person enables it again\n(`oxplow.contribution.enable`).",
   "properties": {
     "contribution": {
-      "description": "The contribution (`collector:<extension>/<id>`, `effect:…`,\n`provider:…`).",
+      "description": "The contribution (`oxplow:oxplow/collector?collector=<extension>/<id>`, `effect:…`,\n`provider:…`).",
       "type": "string"
     },
     "reason": {

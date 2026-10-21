@@ -124,8 +124,8 @@ that runs each call under `spawn_blocking`. `Services.vcs` holds it as
 **`Revision`** (`oxplow_domain::vcs`) is the one "which version" type:
 `working`, `snap:<id>` or `<rev_kind>:<rev>` (`git:HEAD`). On the wire,
 in tab ids and in `v_change.base_revision` / `head_revision` and
-`v_code_quality_scan.revision` it is that string; in the ref grammar it
-is the `@rev` slot, where the working tree is the omitted slot
+`v_code_quality_scan.revision` it is that string; in a URI it
+is the `rev` param, where the working tree is the omitted param
 (`rev_slot` / `from_rev_slot`). The desktop mirror is
 `apps/desktop/src/revision.ts`. It replaced `TreeVersion` (and the
 `oxplow-tree-source` crate), `DiffEndpoint` and the desktop's
@@ -153,7 +153,7 @@ into VCS ids.
 
 The neutral RPCs are `read_at { streamId, path, revision }`, `files_at`,
 `diff { streamId, from, to }` and `changed_paths` (same arguments, UI
-only), and, for an agent, MCP `read` of `file:<path>@<revision>`. A view that doesn't show line counts calls
+only), and, for an agent, MCP `read` of `oxplow:oxplow/file?path=<path>&rev=<revision>`. A view that doesn't show line counts calls
 `changed_paths`. The daemon finishes every request it gets (dropping a
 result in the UI doesn't cancel the work), so a view that refreshes on
 workspace events routes those refreshes through `coalescedRefresh`

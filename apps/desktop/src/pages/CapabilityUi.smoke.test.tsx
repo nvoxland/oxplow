@@ -43,7 +43,7 @@ const answers: Record<string, (...args: unknown[]) => Promise<unknown>> = {
     if (sql.includes("FROM v_work_item w")) {
       return ok({
         columns: WORK_ITEM_COLUMNS,
-        rows: [["work_item:fake:W-1", "fake", "Their bug", "It breaks.", "todo", "work_item:fake:W-0", null, null, null, "t", "t", null, 0]],
+        rows: [["oxplow:oxplow/work_item?id=W-1&provider=fake", "fake", "Their bug", "It breaks.", "todo", "oxplow:oxplow/work_item?id=W-0&provider=fake", null, null, null, "t", "t", null, 0]],
         truncated: false,
         reads,
         freshness: [],
@@ -123,7 +123,7 @@ async function expectPlain(view: ReturnType<typeof render>) {
 }
 
 test("another provider's item, with every flag off, is its core content and no more", async () => {
-  const view = mount("work_item:fake:W-1", <WorkItemPage workItemRef="work_item:fake:W-1" stream={null} thread={null} onOpenPage={() => {}} />);
+  const view = mount("oxplow:oxplow/work_item?id=W-1&provider=fake", <WorkItemPage workItemRef="oxplow:oxplow/work_item?id=W-1&provider=fake" stream={null} thread={null} onOpenPage={() => {}} />);
   await waitFor(() => expect(view.getByTestId("work-item-page").textContent).toContain("It breaks."));
   expect(view.queryByTestId("work-item-comment-open")).toBeNull();
   expect(view.queryByTestId("work-item-link-open")).toBeNull();
@@ -134,22 +134,22 @@ test("another provider's item, with every flag off, is its core content and no m
 });
 
 test("the Board, the commit page, uncommitted changes and history render plain", async () => {
-  const board = mount("page:board", <BoardPage threadId={null} streamId="str1" onOpenPage={() => {}} />);
+  const board = mount("oxplow:oxplow/page?page=board", <BoardPage threadId={null} streamId="str1" onOpenPage={() => {}} />);
   await waitFor(() => expect(board.getByTestId("work-board").textContent).toContain("Their bug"));
   await expectPlain(board);
   cleanup();
 
-  const commit = mount("commit:abc1234def", <GitCommitPage stream={STREAM} sha="abc1234def" threadWork={null} onOpenPage={() => {}} onOpenFile={() => {}} />);
+  const commit = mount("oxplow:oxplow/commit?sha=abc1234def", <GitCommitPage stream={STREAM} sha="abc1234def" threadWork={null} onOpenPage={() => {}} onOpenFile={() => {}} />);
   await waitFor(() => expect(commit.container.textContent).toContain("Fix the widget"));
   await expectPlain(commit);
   cleanup();
 
-  const uncommitted = mount("page:uncommitted-changes", <UncommittedChangesPage stream={STREAM} onOpenPage={() => {}} onOpenFile={() => {}} />);
+  const uncommitted = mount("oxplow:oxplow/page?page=uncommitted-changes", <UncommittedChangesPage stream={STREAM} onOpenPage={() => {}} onOpenFile={() => {}} />);
   await waitFor(() => expect(uncommitted.getByTestId("uncommitted-files").textContent).toContain("a.ts"));
   await expectPlain(uncommitted);
   cleanup();
 
-  const history = mount("page:git-history", historyPage());
+  const history = mount("oxplow:oxplow/page?page=git-history", historyPage());
   await waitFor(() => expect(history.getByTestId("lens-document")).toBeTruthy());
   await expectPlain(history);
 });
@@ -168,7 +168,7 @@ test("an extension's mount reaches the uncommitted strip", async () => {
       lenses: [{ id: "x/status", params: [{ name: "stream_id", label: null, default: null }] }],
     },
   ];
-  mount("page:uncommitted-changes", <UncommittedChangesPage stream={STREAM} onOpenPage={() => {}} onOpenFile={() => {}} />);
+  mount("oxplow:oxplow/page?page=uncommitted-changes", <UncommittedChangesPage stream={STREAM} onOpenPage={() => {}} onOpenFile={() => {}} />);
   await waitFor(() => expect(lensRuns).toContainEqual(["x/status", { stream_id: 1 }]));
 });
 
@@ -227,7 +227,7 @@ test("Git History's list is replaced by the one extension drawing the graph", as
   };
   answers.getLens = async (...args) =>
     ok({ id: args[0], params: ["stream_id", "head_sha", "reveal_sha", "limit"].map((name) => ({ name, label: null, default: null })) });
-  const history = mount("page:git-history", historyPage());
+  const history = mount("oxplow:oxplow/page?page=git-history", historyPage());
   await waitFor(() =>
     expect(history.getByTestId("replacement-vcs.history.graph").textContent).toContain("replaced by oxplow-bundled"),
   );
@@ -239,7 +239,7 @@ test("Git History's list is replaced by the one extension drawing the graph", as
 // mounted lens gets the path and the two revisions it declares.
 test("the file diff's header strip is plain, and a mount gets the file and its revisions", async () => {
   const spec = { path: "a.ts", leftVersion: "git:abc", rightVersion: "working", baseLabel: "HEAD" } as never;
-  const plain = mount("page:diff", <DiffFileHeaderSlot streamId="str1" spec={spec} />);
+  const plain = mount("oxplow:oxplow/page?page=diff", <DiffFileHeaderSlot streamId="str1" spec={spec} />);
   await expectPlain(plain);
   cleanup();
 
@@ -255,7 +255,7 @@ test("the file diff's header strip is plain, and a mount gets the file and its r
       lenses: [{ id: "x/co", params: ["path", "left_revision", "right_revision"].map((name) => ({ name, label: null, default: null })) }],
     },
   ];
-  const view = mount("page:diff", <DiffFileHeaderSlot streamId="str1" spec={spec} />);
+  const view = mount("oxplow:oxplow/page?page=diff", <DiffFileHeaderSlot streamId="str1" spec={spec} />);
   await waitFor(() =>
     expect(lensRuns).toContainEqual(["x/co", { path: "a.ts", left_revision: "git:abc", right_revision: "working" }]),
   );
@@ -282,7 +282,7 @@ const replacing = (name: string, target: string, lens: string, params: string[],
 // the page's own chrome stays oxplow's.
 test("an extension's view replaces the Board, whichever list is active", async () => {
   extensions = [replacing("views", "work_item.board", "board", ["scope", "thread_id"], "board")];
-  const replaced = mount("page:board", <BoardPage threadId={null} streamId="str1" onOpenPage={() => {}} />);
+  const replaced = mount("oxplow:oxplow/page?page=board", <BoardPage threadId={null} streamId="str1" onOpenPage={() => {}} />);
   await waitFor(() => expect(replaced.getByTestId("replacement-work_item.board").textContent).toContain("replaced by views"));
   expect(replaced.queryByTestId("work-board")).toBeNull();
   expect(lensRuns).toEqual([["views/board", { scope: "all", thread_id: null }]]);
@@ -294,10 +294,10 @@ test("an extension's view replaces the Board, whichever list is active", async (
 // item can always move whatever the editor offers.
 test("an extension's editor replaces a work item's title and body, and the rail stays", async () => {
   extensions = [replacing("views", "work_item.detail", "edit", ["ref"], "detail editor")];
-  const page = mount("work_item:fake:W-1", <WorkItemPage workItemRef="work_item:fake:W-1" stream={null} thread={null} onOpenPage={() => {}} />);
+  const page = mount("oxplow:oxplow/work_item?id=W-1&provider=fake", <WorkItemPage workItemRef="oxplow:oxplow/work_item?id=W-1&provider=fake" stream={null} thread={null} onOpenPage={() => {}} />);
   const replaced = await waitFor(() => page.getByTestId("replacement-work_item.detail"));
   expect(replaced.textContent).toContain("replaced by views");
-  expect(lensRuns).toEqual([["views/edit", { ref: "work_item:fake:W-1" }]]);
+  expect(lensRuns).toEqual([["views/edit", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake" }]]);
   expect(page.getByLabelText("State")).toBeTruthy();
   expect(replaced.contains(page.getByLabelText("State"))).toBe(false);
   // Oxplow's own title field isn't there; the lens is.
@@ -337,7 +337,7 @@ test("a work item's own provider's extension replaces its state control, not the
       freshness: [],
     });
   };
-  const page = () => mount("work_item:fake:W-1", <WorkItemPage workItemRef="work_item:fake:W-1" stream={null} thread={null} onOpenPage={() => {}} />);
+  const page = () => mount("oxplow:oxplow/work_item?id=W-1&provider=fake", <WorkItemPage workItemRef="oxplow:oxplow/work_item?id=W-1&provider=fake" stream={null} thread={null} onOpenPage={() => {}} />);
   try {
     const replaced = page();
     await waitFor(() => expect(replaced.getByTestId("replacement-work_item.detail.state").textContent).toContain("replaced by y"));
@@ -345,7 +345,7 @@ test("a work item's own provider's extension replaces its state control, not the
     // states the lens offers, the item can always move.
     expect(replaced.getByLabelText("State")).toBeTruthy();
     expect(replaced.getByTestId("replacement-work_item.detail.state").contains(replaced.getByLabelText("State"))).toBe(false);
-    expect(lensRuns).toEqual([["y/state", { ref: "work_item:fake:W-1" }]]);
+    expect(lensRuns).toEqual([["y/state", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake" }]]);
     // The rest of the page is still oxplow's.
     expect(replaced.getByTestId("work-item-page").textContent).toContain("It breaks.");
     cleanup();

@@ -17,7 +17,7 @@ pub struct ListedConversation {
     pub conversation: NativeConversation,
     /// The session is on it now.
     pub current: bool,
-    /// The other open session on it (`agent_session:ses4`), if one is:
+    /// The other open session on it (`oxplow:oxplow/agent_session?id=ses4`), if one is:
     /// resuming it there is refused.
     pub open_in: Option<String>,
 }

@@ -234,10 +234,10 @@ pub async fn check(file: &str, questions: &[Question], c: &Checker<'_>) -> Check
     for (i, q) in questions.iter().enumerate() {
         let at = format!("{file}: question {} ({:?})", i + 1, q.question);
         if let Some(about) = &q.about {
-            if oxplow_domain::uri::types::core_types().get(about).is_none() {
+            if let Some(why) = oxplow_app::extension_resources::resource_problem(about) {
                 out.errors.push(format!(
-                    "{at}: `about: {about}` isn't a kind of ref — fix: `file`, `commit`, `effort`, \
-                     `work_item`, …"
+                    "{at}: `about: {about}`: {why} — fix: `oxplow/file`, `oxplow/commit`, \
+                     `oxplow/effort`, `oxplow/work_item`, …"
                 ));
             }
         }
@@ -572,7 +572,10 @@ mod tests {
         };
         let ok = check(
             "q.yaml",
-            &ask("oxplow_effort_files", "{ effort: 'effort:eff1' }"),
+            &ask(
+                "oxplow_effort_files",
+                "{ effort: 'oxplow:oxplow/effort?id=eff1' }",
+            ),
             &checker,
         )
         .await;

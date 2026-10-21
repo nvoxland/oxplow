@@ -13,9 +13,9 @@ An extension with an **external provider** (`providers:` — a program that
    match the protocol, the session must match the golden
    `fixtures/transcripts/<id>.jsonl` (`--bless` writes it when a change is
    intended — commit it), and its capability's conformance suite must pass.
-   A `ref_kinds:` entry may add `searchable: <model>` (a model of yours
+   A `resources:` entry may add `searchable: <model>` (a model of yours
    with `ref`, `title`, `body`): its rows are then found by the launcher's
-   search and open the kind's page.
+   search and open the resource's page.
    An effect's `on:` (and a collector's `trigger: { on: [...] }`) may
    name another extension's event type (`acme_pr.merged`): `check` warns,
    and the extension shows an error while no enabled extension registers

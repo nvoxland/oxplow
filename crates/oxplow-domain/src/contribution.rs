@@ -78,7 +78,7 @@ pub enum ContributionKind {
     Dimension,
     Collector,
     EventType,
-    RefKind,
+    Resource,
     Command,
     Job,
     AiProfile,
@@ -185,10 +185,10 @@ pub const KINDS: &[KindSpec] = &[
         false,
     ),
     spec(
-        ContributionKind::RefKind,
-        "ref_kinds",
-        "Ref kind",
-        "kinds of thing a ref can name",
+        ContributionKind::Resource,
+        "resources",
+        "Resource",
+        "kinds of thing a URI can name",
         false,
         false,
     ),
@@ -341,11 +341,16 @@ impl ContributionKind {
                 | ContributionKind::Metric
                 | ContributionKind::Dimension
                 | ContributionKind::EventType
-                | ContributionKind::RefKind
         )
     }
 
-    /// Its ref kind: the segment (`job`, `ai_profile`, `command`).
+    /// The resource a URI of one names (`oxplow/job`), oxplow-foundation's.
+    pub fn resource(self) -> String {
+        format!("oxplow/{}", self.segment())
+    }
+
+    /// Its segment (`job`, `ai_profile`, `command`): its resource's name and
+    /// key param.
     pub fn segment(self) -> &'static str {
         match self {
             ContributionKind::Model => "model",
@@ -354,7 +359,7 @@ impl ContributionKind {
             ContributionKind::Dimension => "dimension",
             ContributionKind::Collector => "collector",
             ContributionKind::EventType => "event_type",
-            ContributionKind::RefKind => "ref_kind",
+            ContributionKind::Resource => "resource",
             ContributionKind::Command => "command",
             ContributionKind::Job => "job",
             ContributionKind::AiProfile => "ai_profile",
@@ -378,7 +383,7 @@ impl ContributionKind {
 /// kind it is, and its id there (for a [`ContributionKind::global_name`]
 /// kind, its global name). Its only public name is its ref
 /// ([`ContributionId::reference`], also its `Display`):
-/// `job:effort-review/review`, `command:oxplow.review.accept`. Storage,
+/// `oxplow:oxplow/job?job=effort-review/review`, `oxplow:oxplow/command?command=oxplow.review.accept`. Storage,
 /// events, manifests and the desktop all carry that ref
 /// (`.context/resources.md` "Using refs").
 #[derive(
@@ -396,8 +401,8 @@ impl std::fmt::Display for ContributionId {
     }
 }
 
-/// A contribution named by its ref, as text carries it: `job:acme/review`
-/// or `command:acme.pr.merge`. A local ref names its owner
+/// A contribution named by its ref, as text carries it: `oxplow:oxplow/job?job=acme/review`
+/// or `oxplow:oxplow/command?command=acme.pr.merge`. A local ref names its owner
 /// ([`ContributionRef::id`]); a global one is resolved by the catalog,
 /// which knows who declares each global name.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, specta::Type)]
@@ -442,7 +447,11 @@ impl std::fmt::Display for ContributionRef {
             Some(ext) => format!("{ext}/{}", self.0.name),
             None => self.0.name.clone(),
         };
-        f.write_str(&crate::uri::build::of(self.0.kind.segment(), &id))
+        let segment = self.0.kind.segment();
+        f.write_str(&crate::uri::build::of(
+            &format!("oxplow/{segment}"),
+            &[(segment, &id)],
+        ))
     }
 }
 
@@ -451,28 +460,31 @@ impl std::str::FromStr for ContributionRef {
 
     fn from_str(s: &str) -> Result<Self, String> {
         let parsed =
-            crate::uri::grammar::Uri::parse(s).map_err(|e| format!("`{s}` isn't a ref: {e}"))?;
-        if parsed.rev.is_some() || parsed.frag.is_some() {
-            return Err(format!(
-                "`{s}` names a contribution with a revision or fragment"
-            ));
-        }
+            crate::uri::OxplowUri::parse(s).map_err(|e| format!("`{s}` isn't a URI: {e}"))?;
+        let resource = parsed.resource();
         let kind = KINDS
             .iter()
             .map(|k| k.kind)
-            .find(|k| k.segment() == parsed.kind)
-            .ok_or_else(|| format!("`{}` isn't a kind of contribution", parsed.kind))?;
+            .find(|k| resource.extension() == "oxplow" && k.segment() == resource.name())
+            .ok_or_else(|| format!("`{resource}` isn't a kind of contribution"))?;
+        let segment = kind.segment();
+        let id = parsed
+            .param(segment)
+            .filter(|_| parsed.params().len() == 1 && parsed.view().is_empty())
+            .ok_or_else(|| {
+                format!("`{s}` names a contribution by its `{segment}` param and nothing else")
+            })?
+            .to_string();
         let parts = if kind.global_name() {
             RefParts {
                 kind,
                 extension: None,
-                name: parsed.id,
+                name: id,
             }
         } else {
-            let (ext, name) = parsed
-                .id
+            let (ext, name) = id
                 .split_once('/')
-                .ok_or_else(|| format!("`{s}` isn't `{}:<extension>/<id>`", kind.segment()))?;
+                .ok_or_else(|| format!("`{s}`'s `{segment}` isn't `<extension>/<id>`"))?;
             let id = ContributionId::new(ext, kind, name);
             if let Some(problem) = id.problem() {
                 return Err(problem);
@@ -619,7 +631,7 @@ pub struct Descriptor {
     /// What it runs after when an event reaches it and them (an effect's
     /// or a collector's `after:`), as refs once the catalog resolved them
     /// (`oxplow_domain::ordering`): `effect:<ext>/<id>`,
-    /// `collector:<ext>/<id>` or `consumer:<name>`.
+    /// `oxplow:oxplow/collector?collector=<ext>/<id>` or `oxplow:oxplow/consumer?name=<name>`.
     pub after: Vec<String>,
     /// Where it runs among the effects and collectors one event reaches:
     /// 0 first, each after every contribution it names. `None` for a kind
@@ -747,34 +759,47 @@ mod tests {
     #[test]
     fn a_contribution_is_named_by_its_ref() {
         let job = ContributionId::new("effort-review", ContributionKind::Job, "review");
-        assert_eq!(job.to_string(), "job:effort-review/review");
+        assert_eq!(
+            job.to_string(),
+            "oxplow:oxplow/job?job=effort-review/review"
+        );
         let command = ContributionId::new(
             "acme-tools",
             ContributionKind::Command,
             "acme_tools.pr.merge",
         );
-        assert_eq!(command.to_string(), "command:acme_tools.pr.merge");
+        assert_eq!(
+            command.to_string(),
+            "oxplow:oxplow/command?command=acme_tools.pr.merge"
+        );
 
-        let parsed: ContributionRef = "job:effort-review/review".parse().unwrap();
+        let parsed: ContributionRef = "oxplow:oxplow/job?job=effort-review/review"
+            .parse()
+            .unwrap();
         assert_eq!(parsed, job.reference());
-        assert_eq!(parsed.to_string(), "job:effort-review/review");
+        assert_eq!(
+            parsed.to_string(),
+            "oxplow:oxplow/job?job=effort-review/review"
+        );
         assert_eq!(parsed.id(), Some(job.clone()));
-        let global: ContributionRef = "command:acme_tools.pr.merge".parse().unwrap();
+        let global: ContributionRef = "oxplow:oxplow/command?command=acme_tools.pr.merge"
+            .parse()
+            .unwrap();
         assert_eq!(global, command.reference());
         assert_eq!(global.id(), None, "a global name doesn't say its owner");
         for bad in [
             "effort-review/job/review",
             "nope:acme/x",
-            "job:review",
-            "job:Acme/x",
+            "oxplow:oxplow/job?job=review",
+            "oxplow:oxplow/job?job=Acme/x",
             "effect:acme/a.b",
-            "extension:acme",
+            "oxplow:oxplow/extension?name=acme",
         ] {
             assert!(bad.parse::<ContributionRef>().is_err(), "{bad}");
         }
 
-        // Every kind's refs are registered kinds whose ids fit.
-        let kinds = crate::uri::types::core_types();
+        // Every kind's URI names a resource foundation declares, its id fitting.
+        let resources = crate::uri::resources::foundation();
         for spec in KINDS {
             let local = match (spec.kind.global_name(), spec.dotted) {
                 (true, true) => "acme.x",
@@ -782,8 +807,10 @@ mod tests {
                 (false, _) => "x",
             };
             let r = ContributionId::new("acme", spec.kind, local).to_string();
-            let c = crate::uri::grammar::Uri::parse(&r).unwrap();
-            kinds.validate(&c).unwrap_or_else(|e| panic!("{r}: {e}"));
+            let c = crate::uri::OxplowUri::parse(&r).unwrap();
+            resources
+                .validate(&c)
+                .unwrap_or_else(|e| panic!("{r}: {e}"));
         }
         assert!(
             ContributionId::new("acme", ContributionKind::Effect, "9lives")

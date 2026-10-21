@@ -27,7 +27,7 @@
 //! turn the tool's output into the answer (`invoked` / `records`). Tool
 //! output is data — the mapping reads it, nothing runs it — and what the
 //! mapping returns is checked: only declared event types, only this
-//! provider's refs (`work_item:<id>:…`, the id from
+//! provider's refs (`oxplow:oxplow/work_item?id=…&provider=<id>`, the id from
 //! `OXPLOW_PROVIDER_ID`).
 
 use std::collections::HashMap;
@@ -68,7 +68,7 @@ pub struct Adapter {
     pub tools: Vec<Value>,
     /// The MCP server: a program it runs, or one it reaches.
     pub server: Server,
-    /// Its provider id: its refs are `work_item:<id>:…`.
+    /// Its provider id: its refs are `oxplow:oxplow/work_item?id=…&provider=<id>`.
     pub provider_id: String,
 }
 
@@ -137,13 +137,6 @@ impl Adapter {
             server,
             provider_id: provider_id.to_string(),
         })
-    }
-
-    fn prefix(&self) -> String {
-        oxplow_domain::uri::build::of(
-            oxplow_domain::uri::types::WORK_ITEM,
-            &format!("{}:", self.provider_id),
-        )
     }
 }
 
@@ -684,12 +677,13 @@ async fn call(
     Ok((tool, output, result.is_error == Some(true)))
 }
 
-/// Refuse what isn't this provider's: a ref outside its prefix.
-fn own_ref(prefix: &str, r: &Value, what: &str) -> Result<(), ProtocolError> {
-    match r.as_str() {
-        Some(r) if r.starts_with(prefix) => Ok(()),
+/// Refuse what isn't this provider's: a work item URI with another
+/// `provider`, or none.
+fn own_ref(provider: &str, r: &Value, what: &str) -> Result<(), ProtocolError> {
+    match r.as_str().and_then(oxplow_domain::uri::build::work_item_of_uri) {
+        Some((p, _)) if p == provider => Ok(()),
         _ => Err(internal(format!(
-            "the mapping returned {what} `{r}`, which isn't one of this provider's ({prefix}…)"
+            "the mapping returned {what} `{r}`, which isn't one of this provider's work items (`provider={provider}`)"
         ))),
     }
 }
@@ -703,7 +697,7 @@ fn invoke_result(adapter: &Adapter, answer: Value) -> Result<InvokeResult, Proto
         "inverse": answer.get("inverse").cloned(),
     }))
     .map_err(|e| internal(format!("the mapping's answer: {e}")))?;
-    let prefix = adapter.prefix();
+    let prefix = adapter.provider_id.as_str();
     for e in &result.events {
         if !adapter
             .declarations
@@ -717,10 +711,10 @@ fn invoke_result(adapter: &Adapter, answer: Value) -> Result<InvokeResult, Proto
             )));
         }
         for s in &e.subject {
-            own_ref(&prefix, &json!(s), "a subject")?;
+            own_ref(prefix, &json!(s), "a subject")?;
         }
         if let Some(item) = e.payload.get("item") {
-            own_ref(&prefix, &item["ref"], "an item")?;
+            own_ref(prefix, &item["ref"], "an item")?;
         }
     }
     Ok(result)
@@ -812,10 +806,10 @@ async fn handle(
                 .filter(|s| !s.is_null())
                 .cloned()
                 .ok_or_else(|| internal("the mapping's records answer has no `state`"))?;
-            let prefix = adapter.prefix();
+            let prefix = adapter.provider_id.as_str();
             let rows = answer["records"].as_array().cloned().unwrap_or_default();
             for row in &rows {
-                own_ref(&prefix, &row["ref"], "a record")?;
+                own_ref(prefix, &row["ref"], "a record")?;
             }
             for row in &rows {
                 peer.notify(

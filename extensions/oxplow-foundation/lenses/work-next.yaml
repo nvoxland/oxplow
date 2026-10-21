@@ -1,7 +1,7 @@
 title: Next
 description: What to pick up next on a thread's list. Ready means `todo` with no open blocker. When the first ready item is an epic (an item with children), it and its ready descendants, as one unit; otherwise every ready item that isn't an epic.
 params:
-  - { name: thread, label: Thread (`thread:thr3`) }
+  - { name: thread, label: Thread (`oxplow:oxplow/thread?id=thr3`) }
 query: |
   WITH items AS (
     SELECT * FROM v_work_item

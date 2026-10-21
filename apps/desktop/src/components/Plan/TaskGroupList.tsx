@@ -1,4 +1,3 @@
-import { idOf } from "../../uri/uri.js";
 import { useCollapsedSet } from "../../tabs/useViewParam.js";
 import type { CSSProperties } from "react";
 import { Fragment, useEffect, useMemo, useState } from "react";
@@ -716,8 +715,7 @@ function EpicInlineRow({
       title={locked ? `${item.title} (in progress — pinned in place)` : item.title}
       data-key={rowKey}
       data-testid={`tasks-row-${item.ref}`}
-      data-ref-kind="work_item"
-      data-ref-id={idOf(item.ref, "work_item") ?? item.ref}
+      data-ref={item.ref}
     >
       <InlineStatusPicker status={item.state} onChange={(state) => { void onUpdateTask(item.ref, { state }); }} locked={locked} />
       <span
@@ -974,8 +972,7 @@ function InlineItemRow({
       title={locked ? `${item.title} (in progress — pinned in place)` : item.title}
       data-key={rowKey}
       data-testid={`tasks-row-${item.ref}`}
-      data-ref-kind="work_item"
-      data-ref-id={idOf(item.ref, "work_item") ?? item.ref}
+      data-ref={item.ref}
     >
       <InlineStatusPicker
         status={item.state}

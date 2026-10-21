@@ -11,7 +11,7 @@
       "type": "string"
     },
     "work_item": {
-      "description": "The item linked from (`work_item:<list>:<id>`).",
+      "description": "The item linked from (`oxplow:oxplow/work_item?id=<id>&provider=<list>`).",
       "type": "string"
     }
   },

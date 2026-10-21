@@ -6,18 +6,14 @@ import { MediaLightbox, type LightboxContent } from "./MediaLightbox.js";
 
 /**
  * react-markdown's defaultUrlTransform only allows
- * http/https/ircs/mailto/xmpp; our internal schemes (the canonical ref
- * kinds `file:`, `dir:`, `commit:`, `work_item:`; see .context/resources.md)
- * get stripped to empty strings, which makes the click handler see
- * `kind: "empty"` and no-op. Pass our schemes through untouched and
- * defer everything else to the default sanitizer.
+ * http/https/ircs/mailto/xmpp; our own scheme (`oxplow:`, every resource's
+ * URI; see .context/resources.md) gets stripped to empty strings, which
+ * makes the click handler see `kind: "empty"` and no-op. Pass our scheme
+ * through untouched and defer everything else to the default sanitizer.
  */
-const APP_SCHEMES = /^(file|dir|commit|work_item|oxplow-invalid):/i;
+const INVALID_LINK = "oxplow-invalid:";
 function urlTransform(value: string): string {
-  if (APP_SCHEMES.test(value)) return value;
-  // An extension's ref kind (P8.D7) is a scheme of ours while installed.
-  const kind = parseUri(value)?.kind;
-  if (kind && refKindInfo(kind)) return value;
+  if (isOxplowScheme(value) || value.startsWith(INVALID_LINK)) return value;
   return defaultUrlTransform(value);
 }
 import { useRowContextMenu } from "../useRowContextMenu.js";
@@ -25,14 +21,14 @@ import type { MenuItem } from "../../menu.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef, directoryRef, gitCommitRef, wikiPageRef } from "../../tabs/pageRefs.js";
-import { WORKING, gitRevision } from "../../revision.js";
+import { WORKING, gitRevision, revisionFromSlot, revisionSlot } from "../../revision.js";
 import { useWikiRef } from "../../wikiTitleCache.js";
 import { useWorkItemRef } from "../../workItemTitleCache.js";
 import { useWorkListProfile } from "../../useWorkListProfile.js";
 import { workItemRefOfMention } from "../../workItems.js";
 import { workItemId, workItemLabel } from "../../workItemRef.js";
-import { parseUri, rawAfterType } from "../../uri/uri.js";
-import { extensionWikilinkRef, refKindInfo, useExtensionRefTitle, useRefKinds } from "../../refKinds.js";
+import { dirUri, fileLinesUri, fileUri, identityOf, isOxplowScheme, linkTarget, commitUri, parseUri, typeOf } from "../../uri/uri.js";
+import { extensionWikilinkRef, resourceInfo, useExtensionRefTitle, useResources } from "../../resources.js";
 import { attachPanZoom, loadMermaid } from "./mermaidRender.js";
 
 // Mermaid + svg-pan-zoom load lazily inside mermaidRender, so this module
@@ -56,9 +52,9 @@ export type ParsedLink =
     }
   | { kind: "directory"; path: string }
   | { kind: "commit"; sha: string }
-  /** A work item, by its ref (`work_item:<provider>:<id>`). */
+  /** A work item, by its URI. */
   | { kind: "work_item"; ref: string }
-  /** A ref of an extension's kind (`acme_pr:12`, P8.D7). */
+  /** A URI of an extension's resource (`oxplow:acme/pr?id=12`, P8.D7). */
   | { kind: "ref"; ref: string }
   /** A `[[…]]` whose target matches no known ref shape (e.g. the GitHub
    *  `[[#13]]` form). Rendered as a broken, non-clickable link. */
@@ -95,7 +91,8 @@ export function parseGitRefTarget(target: string): string | null {
 function parsedLinkIconKind(parsed: ParsedLink): string | null {
   switch (parsed.kind) {
     case "ref":
-      return parseUri(parsed.ref)?.kind ?? null;
+      // URI-SWITCH: the icon table is keyed by resource name.
+      return typeOf(parsed.ref);
     case "internal":
       return "wiki";
     case "file":
@@ -119,69 +116,36 @@ export function parseMarkdownLink(rawHref: string): ParsedLink {
   if (/^https?:\/\//i.test(rawHref) || rawHref.startsWith("mailto:")) {
     return { kind: "external" };
   }
-  const fileRaw = rawAfterType(rawHref, "file");
-  if (fileRaw !== null) {
-    const raw = fileRaw;
-    if (!raw) return { kind: "empty" };
-    // The preprocessed href shape is `file:<path>[@<version>][:<line>]`.
-    // Pull the version off first since it can contain hex / branch
-    // names that the line regex would mishandle.
-    let body = raw;
-    let version: import("../../revision.js").Revision | null = null;
-    const atIdx = body.indexOf("@");
-    if (atIdx > 0) {
-      const versionPart = body.slice(atIdx + 1);
-      body = body.slice(0, atIdx);
-      // Version may have a trailing `:<line>` anchor.
-      const colonIdx = versionPart.lastIndexOf(":");
-      let versionToken = versionPart;
-      let trailingLine: string | null = null;
-      if (colonIdx >= 0) {
-        const maybeLine = versionPart.slice(colonIdx + 1);
-        if (/^\d+$/.test(maybeLine)) {
-          versionToken = versionPart.slice(0, colonIdx);
-          trailingLine = maybeLine;
-        }
+  const uri = parseUri(rawHref);
+  if (uri !== null) {
+    const p = uri.params;
+    switch (typeOf(rawHref)) {
+      case "oxplow/file": {
+        if (!p.path) return { kind: "empty" };
+        const line = Number(/^(\d+)-\d+$/.exec(uri.view.lines ?? "")?.[1]);
+        const version = p.rev ? revisionFromSlot(p.rev) : null;
+        return Number.isInteger(line) ? { kind: "file", path: p.path, line, version } : { kind: "file", path: p.path, version };
       }
-      // `@disk` / `@local` is the working tree; anything else is a git
-      // revision (the wiki's authoring syntax — `.context/vcs.md`).
-      if (versionToken.toLowerCase() === "disk" || versionToken.toLowerCase() === "local") {
-        version = WORKING;
-      } else if (versionToken) {
-        version = gitRevision(versionToken);
+      case "oxplow/dir": {
+        const path = (p.path ?? "").replace(/\/+$/, "");
+        return path ? { kind: "directory", path } : { kind: "empty" };
       }
-      if (trailingLine != null) {
-        body = `${body}:${trailingLine}`;
+      case "oxplow/commit":
+        return p.sha ? { kind: "commit", sha: p.sha } : { kind: "empty" };
+      case "oxplow/wiki":
+        return p.slug ? { kind: "internal", slug: p.slug } : { kind: "empty" };
+      case "oxplow/work_item":
+        // Any list's item, by its URI.
+        return workItemId(rawHref) === null ? { kind: "empty" } : { kind: "work_item", ref: identityOf(rawHref) ?? rawHref };
+      default: {
+        // URI-SWITCH: the registry is keyed by resource name (`v_resource`).
+        const resource = typeOf(rawHref);
+        if (resource && resourceInfo(resource)) return { kind: "ref", ref: rawHref };
       }
     }
-    const lineMatch = body.match(/^(.+?):(\d+)$/);
-    if (lineMatch) {
-      return { kind: "file", path: lineMatch[1]!, line: Number(lineMatch[2]), version };
-    }
-    return { kind: "file", path: body, version };
   }
-  const dirRaw = rawAfterType(rawHref, "dir");
-  if (dirRaw !== null) {
-    const raw = dirRaw.replace(/\/+$/, "");
-    if (!raw) return { kind: "empty" };
-    return { kind: "directory", path: raw };
-  }
-  const commitRaw = rawAfterType(rawHref, "commit");
-  if (commitRaw !== null) {
-    const sha = commitRaw;
-    if (!sha) return { kind: "empty" };
-    return { kind: "commit", sha };
-  }
-  if (rawAfterType(rawHref, "work_item") !== null) {
-    // Any list's item, by its ref.
-    return workItemId(rawHref) === null ? { kind: "empty" } : { kind: "work_item", ref: rawHref };
-  }
-  {
-    const kind = parseUri(rawHref)?.kind;
-    if (kind && refKindInfo(kind)) return { kind: "ref", ref: rawHref };
-  }
-  if (rawHref.startsWith("oxplow-invalid:")) {
-    const target = decodeURIComponent(rawHref.slice("oxplow-invalid:".length));
+  if (rawHref.startsWith(INVALID_LINK)) {
+    const target = decodeURIComponent(rawHref.slice(INVALID_LINK.length));
     return {
       kind: "broken",
       reason: `Broken link: “${target}” is not a recognized reference (use a work item's id, [[some-slug]] for a wiki page)`,
@@ -242,9 +206,9 @@ function collapseLinksOutsideInlineCode(text: string): string {
     // Then collapse `[label](url)` for our internal schemes — but
     // NOT `![alt](url)` (images).
     return unmangled.replace(
-      /(^|[^!])\[([^\]\n]+)\]\(((?:file|dir|commit|work_item|oxplow-invalid):[^)\s]+)\)/g,
+      /(^|[^!])\[([^\]\n]+)\]\(([^)\s]+)\)/g,
       (_match, lead: string, label: string, url: string) => {
-        const collapsed = collapseInternalLink(label, url);
+        const collapsed = isOxplowScheme(url) || url.startsWith(INVALID_LINK) ? collapseInternalLink(label, url) : null;
         return collapsed == null ? _match : `${lead}${collapsed}`;
       },
     );
@@ -252,41 +216,50 @@ function collapseLinksOutsideInlineCode(text: string): string {
 }
 
 function collapseInternalLink(label: string, url: string): string | null {
-  const filePath = rawAfterType(url, "file");
-  if (filePath !== null) {
-    const path = filePath;
-    if (!path) return null;
-    return label === path ? `[[${path}]]` : `[[${path}|${label}]]`;
+  const uri = parseUri(url);
+  if (uri !== null) {
+    const p = uri.params;
+    switch (typeOf(url)) {
+      case "oxplow/file": {
+        if (!p.path) return null;
+        const line = /^(\d+)-\d+$/.exec(uri.view.lines ?? "")?.[1];
+        // The authoring form: `path[@rev][:line]`, a git revision as its
+        // bare token.
+        const target = `${p.path}${p.rev ? `@${p.rev.startsWith("git:") ? p.rev.slice(4) : p.rev}` : ""}${line ? `:${line}` : ""}`;
+        return label === target ? `[[${target}]]` : `[[${target}|${label}]]`;
+      }
+      case "oxplow/dir": {
+        if (!p.path) return null;
+        return label === p.path ? `[[dir:${p.path}]]` : `[[dir:${p.path}|${label}]]`;
+      }
+      case "oxplow/commit": {
+        const sha = p.sha;
+        if (!sha) return null;
+        // If the label is a prefix of the SHA (the bare `[[<sha>]]` form
+        // renders as the short 7-char SHA), drop the label and emit the
+        // bare wikilink. Otherwise preserve it.
+        const labelIsHexPrefix = /^[0-9a-f]{7,40}$/i.test(label) && sha.toLowerCase().startsWith(label.toLowerCase());
+        return labelIsHexPrefix ? `[[git:${sha}]]` : `[[git:${sha}|${label}]]`;
+      }
+      case "oxplow/work_item": {
+        if (workItemId(url) === null) return null;
+        // A bare `[[tsk42]]` (or the whole URI) renders with what was
+        // written as its text (the title swap is a render-time overlay, not
+        // stored), so a label equal to it collapses to the bare form.
+        const id = workItemLabel(url);
+        const whole = identityOf(url) ?? url;
+        if (label === whole) return `[[${whole}]]`;
+        return label === id ? `[[${id}]]` : `[[${id}|${label}]]`;
+      }
+      default:
+        return null;
+    }
   }
-  const dirPath = rawAfterType(url, "dir");
-  if (dirPath !== null) {
-    const path = dirPath;
-    if (!path) return null;
-    return label === path ? `[[dir:${path}]]` : `[[dir:${path}|${label}]]`;
-  }
-  const commitSha = rawAfterType(url, "commit");
-  if (commitSha !== null) {
-    const sha = commitSha;
-    if (!sha) return null;
-    // If the label is a prefix of the SHA (the bare `[[<sha>]]` form
-    // renders as the short 7-char SHA), drop the label and emit the
-    // bare wikilink. Otherwise preserve it.
-    const labelIsHexPrefix = /^[0-9a-f]{7,40}$/i.test(label) && sha.toLowerCase().startsWith(label.toLowerCase());
-    return labelIsHexPrefix ? `[[git:${sha}]]` : `[[git:${sha}|${label}]]`;
-  }
-  if (rawAfterType(url, "work_item") !== null && workItemId(url) !== null) {
-    // A bare `[[tsk42]]` (or `[[work_item:…]]`) renders with what was
-    // written as its text (the title swap is a render-time overlay, not
-    // stored), so a label equal to it collapses to the bare form.
-    const id = workItemLabel(url);
-    if (label === url) return `[[${url}]]`;
-    return label === id ? `[[${id}]]` : `[[${id}|${label}]]`;
-  }
-  if (url.startsWith("oxplow-invalid:")) {
+  if (url.startsWith(INVALID_LINK)) {
     // Preserve the author's original (invalid) target verbatim so the
     // round-trip through the editor doesn't rewrite or lose it — the
     // author still needs to see and fix it.
-    const target = decodeURIComponent(url.slice("oxplow-invalid:".length));
+    const target = decodeURIComponent(url.slice(INVALID_LINK.length));
     if (!target) return null;
     return label === target ? `[[${target}]]` : `[[${target}|${label}]]`;
   }
@@ -313,6 +286,37 @@ function looksLikeSlug(target: string): boolean {
   if (bare.includes("/") || bare.includes(".") || bare.includes(" ")) return false;
   if (/^[0-9a-f]{7,40}$/i.test(bare)) return false;
   return /^[A-Za-z0-9_-]+$/.test(bare);
+}
+
+/** The file URI a `[[path[@version][:line]]]` interior names. A `@disk` /
+ *  `@local` version is the working tree (no `rev`); anything else is a git
+ *  revision (the wiki's authoring syntax — `.context/vcs.md`). */
+function fileTargetUri(target: string): string {
+  let body = target;
+  let rev: string | null = null;
+  let line: number | null = null;
+  const atIdx = body.indexOf("@");
+  if (atIdx > 0) {
+    const versionPart = body.slice(atIdx + 1);
+    body = body.slice(0, atIdx);
+    // The version may have a trailing `:<line>` anchor.
+    let token = versionPart;
+    const colonIdx = versionPart.lastIndexOf(":");
+    if (colonIdx >= 0 && /^\d+$/.test(versionPart.slice(colonIdx + 1))) {
+      token = versionPart.slice(0, colonIdx);
+      line = Number(versionPart.slice(colonIdx + 1));
+    }
+    const lower = token.toLowerCase();
+    if (lower !== "disk" && lower !== "local" && token) rev = revisionSlot(gitRevision(token));
+  }
+  if (line === null) {
+    const m = body.match(/^(.+?):(\d+)$/);
+    if (m) {
+      body = m[1]!;
+      line = Number(m[2]);
+    }
+  }
+  return line === null ? fileUri(body, rev) : fileLinesUri(body, line, line, rev);
 }
 
 function looksLikeFilePath(target: string): boolean {
@@ -365,11 +369,11 @@ function rewriteWikilinksOutsideInlineCode(text: string, mentionRef: MentionRef)
         // Display short sha when the user didn't supply a label and the
         // raw target is the full hex (avoid 40-char inline link text).
         const shortDisplay = label ? display : sha.slice(0, 7);
-        return `[${shortDisplay}](commit:${sha})`;
+        return `[${shortDisplay}](${linkTarget(commitUri(sha))})`;
       }
       // Directory form: explicit `dir:` prefix (mirrors `git:`).
       // Trailing slash on the path is tolerated and stripped.
-      const dirTarget = rawAfterType(target, "dir");
+      const dirTarget = target.startsWith("dir:") ? target.slice("dir:".length) : null;
       if (dirTarget !== null) {
         const dir = dirTarget.trim().replace(/\/+$/, "");
         if (dir) {
@@ -377,28 +381,28 @@ function rewriteWikilinksOutsideInlineCode(text: string, mentionRef: MentionRef)
           // path (without the `dir:` prefix) so the rendered link
           // reads as a directory rather than a URL-shaped token.
           const dirDisplay = label ? display : dir;
-          return `[${dirDisplay}](dir:${dir})`;
+          return `[${dirDisplay}](${linkTarget(dirUri(dir))})`;
         }
       }
-      // A work item: its full ref (`[[work_item:issues:ENG-1]]`), or a
-      // bare id of the active list's (`[[tsk42]]` with oxplow's tasks), as
-      // the backend's ref extractor recognizes them for backlinks. The
+      // A work item: its whole URI, or a bare id of the active list's
+      // (`[[tsk42]]` with oxplow's tasks), as the backend's ref extractor
+      // recognizes them for backlinks. The
       // rendered text defaults to the token; the item's title is swapped
       // in at render time (WikiLinkSpan + useWorkItemRef).
-      const itemRef = workItemId(target) !== null ? target : mentionRef(target);
+      const itemRef = workItemId(target) !== null ? (identityOf(target) ?? target) : mentionRef(target);
       if (itemRef) {
-        return `[${display}](${itemRef})`;
+        return `[${display}](${linkTarget(itemRef)})`;
       }
       // An extension's ref kind, by its kind or its `wikilink:` prefix.
       const extensionRef = extensionWikilinkRef(target);
       if (extensionRef) {
-        return `[${display}](${extensionRef})`;
+        return `[${display}](${linkTarget(extensionRef)})`;
       }
       if (looksLikeFilePath(target)) {
-        // The target may carry a `@<version>` segment; the file:
-        // URL preserves it verbatim and parseMarkdownLink decodes it
-        // back into a Revision at click time.
-        return `[${display}](file:${target})`;
+        // The target may carry `@<version>` and `:<line>`; the file URI
+        // names them (`rev`, `#lines`) and parseMarkdownLink reads them
+        // back at click time.
+        return `[${display}](${linkTarget(fileTargetUri(target))})`;
       }
       // Slug-shaped → wiki note. Anything else matches no known ref
       // shape (e.g. the GitHub `[[#13]]` form) → a broken link the
@@ -407,7 +411,7 @@ function rewriteWikilinksOutsideInlineCode(text: string, mentionRef: MentionRef)
       if (looksLikeSlug(target)) {
         return `[${display}](${target})`;
       }
-      return `[${display}](oxplow-invalid:${encodeURIComponent(target)})`;
+      return `[${display}](${INVALID_LINK}${encodeURIComponent(target)})`;
     });
   }).join("");
 }
@@ -597,7 +601,7 @@ export function MarkdownView({
   className,
 }: MarkdownViewProps) {
   // Extensions' ref kinds change what a `[[…]]` names.
-  const refKinds = useRefKinds();
+  const refKinds = useResources();
   // …and the active work list's ids do too.
   const profile = useWorkListProfile();
   const processedBody = useMemo(

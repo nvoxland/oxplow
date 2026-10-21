@@ -1,5 +1,6 @@
 import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { keyOf, proposalUri } from "../uri/uri.js";
 import type { Lens, LensRun } from "../tauri-bridge/generated/bindings.js";
 
 // `viz: approvals` draws the kit's Approvals: it reads the pending
@@ -12,10 +13,10 @@ const decided: [number, boolean][] = [];
 const columns = ["id", "ref", "created_at", "command", "input", "actor_kind", "actor_id", "thread_id", "thread_title", "key", "preview", "dry_run"];
 const row = (id: number, threadId: number, key: string) => [
   id,
-  `proposal:${id}`,
+  proposalUri(id),
   "2026-10-01T00:00:00Z",
   "oxplow.config.set",
-  JSON.stringify({ key: key.replace("config:", ""), value: "x" }),
+  JSON.stringify({ key: keyOf(key), value: "x" }),
   "agent",
   `thr${threadId}`,
   threadId,
@@ -30,7 +31,7 @@ mock.module("../api.js", () => ({
     sql.includes("v_command_proposal")
       ? {
           columns,
-          rows: [row(7, 3, "config:agentPromptAppend"), row(8, 9, "config:other")],
+          rows: [row(7, 3, "oxplow:oxplow/config?key=agentPromptAppend"), row(8, 9, "oxplow:oxplow/config?key=other")],
           truncated: false,
           reads: { models: [], tables: [], measures: [] },
           freshness: {},
@@ -77,7 +78,7 @@ test("an approvals lens draws every pending proposal and decides through the per
 });
 
 test("its thread and setting params narrow the list", async () => {
-  const byThread = render(<LensResultView run={runWith({ thread: "thread:thr9" })} onOpenPage={() => {}} />);
+  const byThread = render(<LensResultView run={runWith({ thread: "oxplow:oxplow/thread?id=thr9" })} onOpenPage={() => {}} />);
   await waitFor(() => byThread.getByTestId("proposal-8"));
   expect(byThread.queryByTestId("proposal-7")).toBeNull();
   cleanup();

@@ -23,6 +23,6 @@ pub use model::{
     Task, TaskActorKind, TaskAuthor, TaskLinkType, TaskNote, TaskPriority, TaskStatus,
 };
 pub use provider::OxplowTasks;
-pub use refs::{task_of_work_item_ref, work_item_id, work_item_ref, PROVIDER};
+pub use refs::{task_of_work_item_ref, work_item_ref, PROVIDER};
 pub use satellite::{SqliteTaskNoteStore, TaskNoteStore};
 pub use store::{SqliteTaskStore, TaskStore};

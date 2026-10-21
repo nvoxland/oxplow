@@ -16,7 +16,7 @@ import { openFromLauncher } from "../../support/ui.js";
 /** Run the example's sync as a person, until `count` pull requests are
  *  collected. */
 async function collect(daemon: Daemon, count: number) {
-  await run(daemon, "oxplow.collector.sync", { collector: "collector:github/prs" });
+  await run(daemon, "oxplow.collector.sync", { collector: "oxplow:oxplow/collector?collector=github/prs" });
   await until(`${count} pull requests to be collected`, 30_000, async () => {
     const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT count(*) FROM v_github_pr" });
     return out.rows[0]?.[0] === count;
@@ -73,8 +73,8 @@ test("a bad date is left out, and a filter holds across the host's re-run", asyn
   await collect(daemon, 4);
   // The host's re-run, with the filter kept: the open ones, #13 and #14.
   await expect(frame.locator(".bar")).toHaveCount(2);
-  await expect(frame.locator('.bar[data-ref="github_pr:14"]')).toHaveCount(1);
-  await expect(frame.locator('.bar[data-ref="github_pr:12"]')).toHaveCount(0);
+  await expect(frame.locator('.bar[data-ref="oxplow:github/pr?id=14"]')).toHaveCount(1);
+  await expect(frame.locator('.bar[data-ref="oxplow:github/pr?id=12"]')).toHaveCount(0);
 });
 
 test("PR lifetimes draws, filters, syncs and opens", async ({ fresh }) => {
@@ -85,7 +85,7 @@ test("PR lifetimes draws, filters, syncs and opens", async ({ fresh }) => {
   // Its filters re-run its own lens.
   await frame.locator('[data-state="open"]').click();
   await expect(frame.locator(".bar")).toHaveCount(1);
-  await expect(frame.locator(".bar")).toHaveAttribute("data-ref", "github_pr:13");
+  await expect(frame.locator(".bar")).toHaveAttribute("data-ref", "oxplow:github/pr?id=13");
   await frame.locator('[data-state="all"]').click();
   await expect(frame.locator(".bar")).toHaveCount(2);
 
@@ -96,7 +96,7 @@ test("PR lifetimes draws, filters, syncs and opens", async ({ fresh }) => {
   await expect(page.getByTestId("custom-component-refused")).toHaveCount(0);
 
   // A bar opens its pull request's page.
-  await frame.locator('[data-ref="github_pr:12"] rect').click();
+  await frame.locator('[data-ref="oxplow:github/pr?id=12"] rect').click();
   await expect(page.getByText("#12 Fix the hover state").first()).toBeVisible();
 });
 

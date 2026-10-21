@@ -22,7 +22,7 @@
      commands: [names] }` (only the keys you name are compared);
    - a job: `input: { job: <id>, intentKey, request, cancel?, setup?,
      rows? }` — `setup: [{ command, input?, as? }]` first runs oxplow's
-     own commands (`as: agent` for the agent of `thread:thr1`) to make
+     own commands (`as: agent` for the agent of `oxplow:oxplow/thread?id=thr1`) to make
      what its tools read: a work item, an effort, a test run — run
      through your commands over `jobs.write/enqueue` and
      `jobs.read/snapshot` (declare both), its model rounds
@@ -37,7 +37,7 @@
      queries?: [{ asset, params? }], invokes?: [{ command, input? }] }` — what its
      frame would ask; `expect: { queries: [{ rows }], invokes: [{ ok,
      refused? }] }` (an invoke is `refused` when the command refuses it; `items` are work
-     items filed first, `work_item:oxplow:<id>`, …);
+     items filed first, `oxplow:oxplow/work_item?id=<id>&provider=oxplow`, …);
    - a form lens (`viz: form`): `input: { form: <lens>, params? }` — opens
      it as a person would; `expect: { values?, fixed?, fields? }` (the
      values its fields start from, the read-only fields, the shown ones,

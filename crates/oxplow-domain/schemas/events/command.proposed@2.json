@@ -42,11 +42,11 @@
       "type": "boolean"
     },
     "proposal": {
-      "description": "`proposal:<id>`.",
+      "description": "`oxplow:oxplow/proposal?id=<id>`.",
       "type": "string"
     },
     "supersedes": {
-      "description": "The pending proposals of the same call (`proposal:<id>`) this one\nreplaced — marked superseded in the same transaction.",
+      "description": "The pending proposals of the same call (`oxplow:oxplow/proposal?id=<id>`) this one\nreplaced — marked superseded in the same transaction.",
       "items": {
         "type": "string"
       },

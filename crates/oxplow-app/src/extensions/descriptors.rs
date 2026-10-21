@@ -8,8 +8,7 @@
 //! rest keep their own checks until then.
 
 use oxplow_domain::contribution::{
-    extension_namespace, Collision, ContributionId, ContributionKind, DeclaredAt, Descriptor,
-    Owner, Registry, RunsOn,
+    Collision, ContributionId, ContributionKind, DeclaredAt, Descriptor, Owner, Registry, RunsOn,
 };
 
 use super::Extension;
@@ -69,10 +68,14 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         d.source = declared_at(&t.declared_at);
         out.push(d);
     }
-    for k in &ext.ref_kinds {
-        let mut d = new(ContributionKind::RefKind, &k.kind, RunsOn::Declared);
-        d.global = Some(k.kind.clone());
-        d.source = declared_at(&k.declared_at);
+    for r in &ext.resources {
+        let mut d = new(
+            ContributionKind::Resource,
+            r.decl.name.name(),
+            RunsOn::Declared,
+        );
+        d.global = Some(r.decl.name.to_string());
+        d.source = declared_at(&r.declared_at);
         out.push(d);
     }
     for l in &ext.lenses {
@@ -244,35 +247,12 @@ pub fn check_ids(ext: &mut Extension) {
 pub fn check_catalog(exts: &mut [Extension]) -> Registry {
     let mut registry = Registry::default();
     let mut refused: Vec<Vec<Collision>> = vec![Vec::new(); exts.len()];
-    // A ref kind in two extensions' namespaces is the more specific
-    // namespace's (`acme-pr`'s `acme_pr_` holds inside `acme`'s `acme_`),
-    // so those are registered most specific first; equal namespaces, and
-    // every other kind, go in catalog order.
-    let mut by_specificity: Vec<usize> = (0..exts.len())
-        .filter(|&i| exts[i].enabled && !exts[i].public_contracts.blocked)
-        .collect();
-    by_specificity.sort_by_key(|&i| std::cmp::Reverse(extension_namespace(&exts[i].name).len()));
-    for i in by_specificity {
-        for d in exts[i]
-            .contributions
-            .iter()
-            .filter(|d| d.id.kind == ContributionKind::RefKind)
-        {
-            if let Err(collision) = registry.add(d.clone()) {
-                refused[i].push(*collision);
-            }
-        }
-    }
     for (i, ext) in exts
         .iter()
         .enumerate()
         .filter(|(_, e)| e.enabled && !e.public_contracts.blocked)
     {
-        for d in ext
-            .contributions
-            .iter()
-            .filter(|d| d.id.kind != ContributionKind::RefKind)
-        {
+        for d in &ext.contributions {
             if let Err(collision) = registry.add(d.clone()) {
                 refused[i].push(*collision);
             }
@@ -516,7 +496,7 @@ fn remove(ext: &mut Extension, c: &Collision) {
             .models
             .retain(|x| x.decl.name != local && x.twin.as_ref().is_none_or(|t| t.of != local)),
         ContributionKind::EventType => ext.event_types.types.retain(|x| x.event_type != local),
-        ContributionKind::RefKind => ext.ref_kinds.retain(|x| x.kind != local),
+        ContributionKind::Resource => ext.resources.retain(|x| x.decl.name.name() != local),
         ContributionKind::Collector => ext.collectors.retain(|x| x.id != local),
         ContributionKind::Measure => ext.measures.retain(|x| x.key.as_deref() != Some(local)),
         ContributionKind::Metric => ext.metrics.retain(|x| x.key.as_deref() != Some(local)),
@@ -568,9 +548,9 @@ mod tests {
              event_types:\n  types:\n    - {{ type: {ns}.merged, v: 1, schema: merged.json, summary: Merged. }}\n\
              pages:\n  - {{ id: pr, title: Pull request, category: Work, lens: open }}\n\
              panels:\n  - {{ id: inbox, title: Inbox, scope: project, body: open }}\n\
-             ref_kinds:\n  - {{ kind: {ns}_pr, label: Pull request, id: '^\\\\d+$', resolve: prs, page: pr, icon: git-pull-request }}\n\
+             resources:\n  - {{ name: pr, label: Pull request, params: {{ id: {{ required: true, pattern: '^[0-9]+$' }} }}, resolve: prs, icon: git-pull-request }}\n\
              custom_components:\n  - {{ id: chart }}\n\
-             ui:\n  slots:\n    - {{ slot: effort.review.details, lens: open }}\n    - {{ slot: vcs.commit.details, lens: open }}\n  decorators:\n    - {{ model: prs, kind: work_item, placement: ref-chip, label: title }}\n"
+             ui:\n  slots:\n    - {{ slot: effort.review.details, lens: open }}\n    - {{ slot: vcs.commit.details, lens: open }}\n  decorators:\n    - {{ model: prs, resource: oxplow/work_item, placement: ref-chip, label: title }}\n"
         )
     }
 
@@ -580,7 +560,7 @@ mod tests {
         write(
             root,
             &format!("{dir}/models/prs.sql"),
-            "SELECT 'work_item:oxplow:tsk1' AS ref, 'One' AS title",
+            "SELECT 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' AS ref, 'One' AS title",
         );
         write(
             root,
@@ -658,8 +638,8 @@ mod tests {
         assert_eq!(
             ids,
             [
-                "implementation:acme/effort_policy.tidy",
-                "implementation:acme/ai_provider.tidy"
+                "oxplow:oxplow/implementation?implementation=acme/effort_policy.tidy",
+                "oxplow:oxplow/implementation?implementation=acme/ai_provider.tidy"
             ]
         );
     }
@@ -668,7 +648,7 @@ mod tests {
     fn a_model_is_a_query_named_by_its_view() {
         let ext = acme();
         let d = one(&ext, K::Model);
-        assert_eq!(d.id.to_string(), "model:acme-pr/prs");
+        assert_eq!(d.id.to_string(), "oxplow:oxplow/model?model=acme-pr/prs");
         assert_eq!(d.trigger, RunsOn::Query);
         assert_eq!(d.contract_version, Some(3));
         assert_eq!(d.global.as_deref(), Some("v_acme_pr_prs"));
@@ -678,7 +658,10 @@ mod tests {
     fn an_event_type_is_declared_and_named_by_its_type() {
         let ext = acme();
         let d = one(&ext, K::EventType);
-        assert_eq!(d.id.to_string(), "event_type:acme_pr.merged");
+        assert_eq!(
+            d.id.to_string(),
+            "oxplow:oxplow/event_type?event_type=acme_pr.merged"
+        );
         assert_eq!(d.trigger, RunsOn::Declared);
         assert_eq!(d.contract_version, Some(1));
         assert_eq!(d.global.as_deref(), Some("acme_pr.merged"));
@@ -686,25 +669,31 @@ mod tests {
     }
 
     #[test]
-    fn a_ref_kind_is_declared_and_named_by_its_kind() {
+    fn a_resource_is_declared_and_named_by_its_extension_and_name() {
         let ext = acme();
-        let d = one(&ext, K::RefKind);
-        assert_eq!(d.id.to_string(), "ref_kind:acme_pr_pr");
+        let d = one(&ext, K::Resource);
+        assert_eq!(d.id.local, "pr");
         assert_eq!(d.trigger, RunsOn::Declared);
-        assert_eq!(d.global.as_deref(), Some("acme_pr_pr"));
+        assert_eq!(d.global.as_deref(), Some("acme-pr/pr"));
     }
 
     #[test]
     fn the_ui_kinds_are_mounted_and_claim_no_global_name() {
         let ext = acme();
         let lens = one(&ext, K::Lens);
-        assert_eq!(lens.id.to_string(), "lens:acme-pr/open");
+        assert_eq!(lens.id.to_string(), "oxplow:oxplow/lens?lens=acme-pr/open");
         let page = one(&ext, K::Page);
-        assert_eq!(page.id.to_string(), "page:acme-pr/pr");
+        assert_eq!(page.id.to_string(), "oxplow:oxplow/page?page=acme-pr/pr");
         let panel = one(&ext, K::Panel);
-        assert_eq!(panel.id.to_string(), "panel:acme-pr/inbox");
+        assert_eq!(
+            panel.id.to_string(),
+            "oxplow:oxplow/panel?panel=acme-pr/inbox"
+        );
         let component = one(&ext, K::CustomComponent);
-        assert_eq!(component.id.to_string(), "custom_component:acme-pr/chart");
+        assert_eq!(
+            component.id.to_string(),
+            "oxplow:oxplow/custom_component?custom_component=acme-pr/chart"
+        );
         for d in [lens, page, panel, component] {
             assert_eq!(d.trigger, RunsOn::Mount, "{}", d.id);
             assert_eq!(d.global, None, "{}", d.id);
@@ -719,8 +708,8 @@ mod tests {
         assert_eq!(
             ids,
             vec![
-                "slot:acme-pr/effort.review.details-0",
-                "slot:acme-pr/vcs.commit.details-1"
+                "oxplow:oxplow/slot?slot=acme-pr/effort.review.details-0",
+                "oxplow:oxplow/slot?slot=acme-pr/vcs.commit.details-1"
             ]
         );
         for d in slots {
@@ -732,7 +721,10 @@ mod tests {
     fn a_decorator_is_named_by_its_position() {
         let ext = acme();
         let d = one(&ext, K::Decorator);
-        assert_eq!(d.id.to_string(), "decorator:acme-pr/decorator-0");
+        assert_eq!(
+            d.id.to_string(),
+            "oxplow:oxplow/decorator?decorator=acme-pr/decorator-0"
+        );
         assert_eq!((d.trigger.clone(), d.global.clone()), (RunsOn::Mount, None));
     }
 
@@ -765,7 +757,10 @@ mod tests {
             .into_iter()
             .find(|d| d.id.kind == K::Replacement)
             .expect("described");
-        assert_eq!(d.id.to_string(), "replacement:tracker/work_item.board");
+        assert_eq!(
+            d.id.to_string(),
+            "oxplow:oxplow/replacement?replacement=tracker/work_item.board"
+        );
         assert_eq!(d.id.problem(), None);
         assert_eq!((d.trigger.clone(), d.global.clone()), (RunsOn::Mount, None));
     }
@@ -796,7 +791,7 @@ mod tests {
         for (what, name) in [
             ("model", "v_acme_pr_prs"),
             ("event type", "acme_pr.merged"),
-            ("ref kind", "acme_pr_pr"),
+            ("resource", "acme-pr/pr"),
         ] {
             let reports: Vec<&String> = second
                 .errors
@@ -810,49 +805,15 @@ mod tests {
                 reports[0]
             );
         }
-        assert!(second.models.is_empty() && second.ref_kinds.is_empty());
+        assert!(second.models.is_empty() && second.resources.is_empty());
         assert!(second.event_types.types.is_empty());
         assert_eq!(first.models.len(), 1);
-        assert_eq!(first.ref_kinds.len(), 1);
+        assert_eq!(first.resources.len(), 1);
         assert_eq!(first.event_types.types.len(), 1);
-        for kind in [K::Model, K::EventType, K::RefKind] {
+        for kind in [K::Model, K::EventType, K::Resource] {
             assert!(of(second, kind).is_empty(), "{kind:?}");
             assert_eq!(of(first, kind).len(), 1, "{kind:?}");
         }
-    }
-
-    /// A kind in the namespaces of two extensions (`acme`'s `acme_` holds
-    /// `acme-pr`'s `acme_pr_`) is the more specific one's, whichever loads
-    /// first.
-    #[test]
-    fn a_ref_kind_in_two_namespaces_is_the_more_specific_ones() {
-        let manifest = |name: &str| {
-            acme_manifest("acme-pr")
-                .replace("name: acme-pr", &format!("name: {name}"))
-                .replace("acme_pr_pr", "acme_pr_x")
-        };
-        let dir = tempfile::tempdir().unwrap();
-        for name in ["acme", "acme-pr"] {
-            write_acme(dir.path(), name);
-            write(
-                dir.path(),
-                &format!(".oxplow/extensions/{name}/extension.yaml"),
-                &manifest(name),
-            );
-        }
-        let exts = load_extensions(dir.path());
-        let acme = exts.iter().find(|e| e.name == "acme").unwrap();
-        let specific = exts.iter().find(|e| e.name == "acme-pr").unwrap();
-        assert!(acme.ref_kinds.is_empty(), "{:?}", acme.errors);
-        assert!(
-            acme.errors
-                .iter()
-                .any(|e| e.contains("ref kind `acme_pr_x`") && e.contains("`acme-pr`")),
-            "{:?}",
-            acme.errors
-        );
-        assert_eq!(specific.ref_kinds.len(), 1);
-        assert!(!specific.errors.iter().any(|e| e.contains("acme_pr_x")));
     }
 }
 
@@ -954,7 +915,13 @@ mod catalog_tests {
             .iter()
             .map(|d| d.id.to_string())
             .collect();
-        assert_eq!(ids, ["skill:acme/deploy", "measure:acme.loc"]);
+        assert_eq!(
+            ids,
+            [
+                "oxplow:oxplow/skill?skill=acme/deploy",
+                "oxplow:oxplow/measure?measure=acme.loc"
+            ]
+        );
         assert!(acme
             .contributions
             .iter()
@@ -1023,7 +990,10 @@ mod ordering_tests {
             "second",
             &[
                 ("notify", "react"),
-                ("react", "\"effect:first/seed\", change.analyze"),
+                (
+                    "react",
+                    "\"oxplow:oxplow/effect?effect=first/seed\", change.analyze",
+                ),
             ],
             &[("gather", "")],
         );
@@ -1039,14 +1009,17 @@ mod ordering_tests {
             Some((
                 1,
                 vec![
-                    "effect:first/seed".to_string(),
-                    "consumer:change.analyze".to_string()
+                    "oxplow:oxplow/effect?effect=first/seed".to_string(),
+                    "oxplow:oxplow/consumer?name=change.analyze".to_string()
                 ]
             ))
         );
         assert_eq!(
             placed(second, "effect", "notify"),
-            Some((2, vec!["effect:second/react".to_string()]))
+            Some((
+                2,
+                vec!["oxplow:oxplow/effect?effect=second/react".to_string()]
+            ))
         );
         assert_eq!(placed(second, "collector", "gather"), Some((0, vec![])));
     }
@@ -1059,7 +1032,7 @@ mod ordering_tests {
             "acme",
             &[
                 ("bare", "no.such.thing"),
-                ("elsewhere", "\"effect:nobody/home\""),
+                ("elsewhere", "\"oxplow:oxplow/effect?effect=nobody/home\""),
                 ("fine", ""),
             ],
             &[],
@@ -1068,12 +1041,14 @@ mod ordering_tests {
         let acme = named(&exts, "acme");
         let errors = acme.errors.join("\n");
         assert!(
-            errors.contains("effect:acme/bare: `after`: `no.such.thing` is none of"),
+            errors.contains(
+                "oxplow:oxplow/effect?effect=acme/bare: `after`: `no.such.thing` is none of"
+            ),
             "{errors}"
         );
         assert!(
             errors.contains(
-                "effect:acme/elsewhere runs after effect:nobody/home, which nothing declares"
+                "oxplow:oxplow/effect?effect=acme/elsewhere runs after oxplow:oxplow/effect?effect=nobody/home, which nothing declares"
             ),
             "{errors}"
         );
@@ -1095,12 +1070,14 @@ mod ordering_tests {
         let errors = acme.errors.join("\n");
         assert!(
             errors.contains(
-                "these contributions wait on each other: effect:acme/a → effect:acme/b → effect:acme/c"
+                "these contributions wait on each other: oxplow:oxplow/effect?effect=acme/a → oxplow:oxplow/effect?effect=acme/b → oxplow:oxplow/effect?effect=acme/c"
             ),
             "{errors}"
         );
         assert!(
-            errors.contains("these contributions wait on each other: effect:acme/me"),
+            errors.contains(
+                "these contributions wait on each other: oxplow:oxplow/effect?effect=acme/me"
+            ),
             "{errors}"
         );
         assert_eq!(acme.errors.len(), 2, "{errors}");
@@ -1115,7 +1092,7 @@ mod ordering_tests {
         write(
             dir.path(),
             "second",
-            &[("react", "\"effect:first/seed\"")],
+            &[("react", "\"oxplow:oxplow/effect?effect=first/seed\"")],
             &[],
         );
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
@@ -1128,10 +1105,9 @@ mod ordering_tests {
         let second = named(&exts, "second");
         assert_eq!(second.errors, Vec::<String>::new());
         assert!(
-            second
-                .warnings
-                .iter()
-                .any(|w| w.contains("runs after effect:first/seed, whose extension is disabled")),
+            second.warnings.iter().any(|w| w.contains(
+                "runs after oxplow:oxplow/effect?effect=first/seed, whose extension is disabled"
+            )),
             "{:?}",
             second.warnings
         );

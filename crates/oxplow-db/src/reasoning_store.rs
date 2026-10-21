@@ -11,7 +11,7 @@ use crate::Database;
 #[serde(rename_all = "camelCase")]
 pub struct NewDecision {
     pub thread_id: i64,
-    /// The work item it was made on (`work_item:<provider>:<id>`).
+    /// The work item it was made on (`oxplow:oxplow/work_item?id=<id>&provider=<provider>`).
     pub work_item: Option<String>,
     pub effort_id: Option<i64>,
     /// The fork: what had to be decided.
@@ -29,13 +29,13 @@ pub struct NewDecision {
 #[serde(rename_all = "camelCase")]
 pub struct NewClaim {
     pub thread_id: i64,
-    /// The work item it was made on (`work_item:<provider>:<id>`).
+    /// The work item it was made on (`oxplow:oxplow/work_item?id=<id>&provider=<provider>`).
     pub work_item: Option<String>,
     pub effort_id: Option<i64>,
     pub statement: String,
     /// `tests_pass`, `no_behavior_change`, `handles_case` or `other`.
     pub kind: String,
-    /// What backs it (`run:<id>`, a test name, a file); `None` = unbacked.
+    /// What backs it (`oxplow:oxplow/run?id=<id>`, a test name, a file); `None` = unbacked.
     pub evidence_ref: Option<String>,
     /// The agent session making it: it lands on that session's open turn.
     pub agent_session_id: Option<i64>,
@@ -233,8 +233,8 @@ mod tests {
                    VALUES (1, 1, 'T', '2026-01-01', '2026-01-01');
                  INSERT INTO task (id, thread_id, title, status, priority, created_by, created_at, updated_at)
                    VALUES (1, 1, 'Task', 'in_progress', 'medium', 'agent', '2026-01-01', '2026-01-01');
-                 INSERT INTO effort (id, work_item, thread_id, started_at, ended_at) VALUES (1, 'work_item:oxplow:tsk1', 1, '2026-01-01', '2026-01-01');
-                 INSERT INTO effort (id, work_item, thread_id, started_at) VALUES (2, 'work_item:oxplow:tsk1', 1, '2026-01-02');",
+                 INSERT INTO effort (id, work_item, thread_id, started_at, ended_at) VALUES (1, 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 1, '2026-01-01', '2026-01-01');
+                 INSERT INTO effort (id, work_item, thread_id, started_at) VALUES (2, 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 1, '2026-01-02');",
             )
         })
         .await
@@ -252,7 +252,7 @@ mod tests {
         store
             .record_decision(NewDecision {
                 thread_id: 1,
-                work_item: Some("work_item:oxplow:tsk1".into()),
+                work_item: Some("oxplow:oxplow/work_item?id=tsk1&provider=oxplow".into()),
                 effort_id: Some(1),
                 question: "Where do extensions live?".into(),
                 choice: ".oxplow/extensions/".into(),
@@ -273,7 +273,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
             json!([[
-                "work_item:oxplow:tsk1",
+                "oxplow:oxplow/work_item?id=tsk1&provider=oxplow",
                 1,
                 ".oxplow/extensions/",
                 "[\".oxplow/extensions/\"]",
@@ -318,7 +318,7 @@ mod tests {
     fn decision(question: &str) -> NewDecision {
         NewDecision {
             thread_id: 1,
-            work_item: Some("work_item:oxplow:tsk1".into()),
+            work_item: Some("oxplow:oxplow/work_item?id=tsk1&provider=oxplow".into()),
             effort_id: Some(1),
             question: question.into(),
             choice: "c".into(),
@@ -383,7 +383,7 @@ mod tests {
     fn claim(statement: &str) -> NewClaim {
         NewClaim {
             thread_id: 1,
-            work_item: Some("work_item:oxplow:tsk1".into()),
+            work_item: Some("oxplow:oxplow/work_item?id=tsk1&provider=oxplow".into()),
             effort_id: Some(1),
             statement: statement.into(),
             kind: "tests_pass".into(),

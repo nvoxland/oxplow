@@ -1,80 +1,85 @@
 import { afterEach, expect, test } from "bun:test";
 
-import { setRefKinds, type RefKind } from "../refKinds.js";
-import { commentsRef, extPageRef, fileRef, wikiPageRef, workItemTabRef } from "./pageRefs.js";
+import { setResources, type Resource } from "../resources.js";
+import { commentUri, eventUri, fileUri, pageUri, resourceUri, threadUri, wikiUri, workItemUri } from "../uri/uri.js";
+import { extPageRef, fileRef, wikiPageRef, workItemTabRef } from "./pageRefs.js";
 import { refTarget, refTargetNow } from "./refOpener.js";
 
-const core = (kind: string, page: string | null, resolve: string | null = null): RefKind => ({
-  kind,
-  extension: null,
-  label: null,
-  idPattern: ".*",
-  wikilinks: [],
-  resolve,
-  page,
+// oxplow's resources are oxplow-foundation's declarations: the URI's
+// extension segment (`oxplow`) isn't the declaring extension's name.
+const resource = (name: string, page: string | null, segment = "oxplow"): Resource => ({
+  resource: `${segment}/${name}`,
+  extension: segment === "oxplow" ? "oxplow-foundation" : segment,
+  label: name,
+  params: { id: { required: true, pattern: null } },
+  additional: false,
+  resolve: null,
+  title: null,
+  searchable: null,
   icon: null,
+  wikilink: null,
+  page,
 });
 
-const KINDS: RefKind[] = [
-  core("work_item", "{ref}", "v_work_item"),
-  core("wiki", "{ref}", "v_knowledge_page"),
-  core("file", "{ref}"),
-  core("thread", "{ref}", "v_thread"),
-  core("comment", "page:comments", "v_comment"),
-  core("thread_note", "{thread_ref}", "v_thread_note"),
-  core("decision", "{effort_ref|thread_ref}", "v_decision"),
-  core("event", null, "v_event"),
+const RESOURCES: Resource[] = [
+  resource("work_item", null),
+  resource("wiki", null),
+  resource("file", null),
+  resource("thread", null),
+  // An oxplow resource that names a page opens there, with the URI as `ref`.
+  resource("comment", pageUri("comments")),
+  resource("event", null),
   {
-    kind: "acme_pr",
-    extension: "acme",
+    ...resource("pr", pageUri("acme/pr"), "acme"),
     label: "Pull request",
-    idPattern: "^\\d+$",
-    wikilinks: ["pr"],
     resolve: "v_acme_prs",
-    page: "page:acme/pr?ref={ref}",
     icon: "git-pull-request",
+    wikilink: { prefix: "pr", param: "id" },
   },
+  resource("issue", null, "acme"),
 ];
 
-afterEach(() => setRefKinds([]));
+afterEach(() => setResources([]));
 
-// Every ref opens where its kind's page template says: the ref itself, a
-// shell page, an extension's page given the ref — read from the registry,
-// core kinds and an extension's alike.
-test("a ref opens where its kind's template says, with no row to read", () => {
-  setRefKinds(KINDS);
-  expect(refTargetNow("work_item:oxplow:tsk1")).toEqual({ tab: workItemTabRef("work_item:oxplow:tsk1") });
-  expect(refTargetNow("wiki:home")).toEqual({ tab: wikiPageRef("home") });
-  expect(refTargetNow("file:src/a.ts")).toEqual({ tab: fileRef("src/a.ts") });
-  expect(refTargetNow("comment:cmt7")).toEqual({ tab: commentsRef() });
-  expect(refTargetNow("acme_pr:12")).toEqual({ tab: extPageRef("acme", "pr", { ref: "acme_pr:12" }) });
-  expect(refTargetNow("thread:thr4")).toEqual({ thread: "thr4" });
+// Every URI opens by one rule: an extension's resource opens its page with
+// the URI as `ref`; every other URI opens as itself, through `refFromTabId`
+// (a thread or a stream selects instead of opening a tab).
+test("a URI opens where its resource's page says, or as itself", () => {
+  setResources(RESOURCES);
+  const item = workItemUri("oxplow", "tsk1");
+  expect(refTargetNow(item)).toEqual({ tab: workItemTabRef(item) });
+  expect(refTargetNow(wikiUri("home"))).toEqual({ tab: wikiPageRef("home") });
+  expect(refTargetNow(fileUri("src/a.ts"))).toEqual({ tab: fileRef("src/a.ts") });
+  expect(refTargetNow(threadUri("thr4"))).toEqual({ thread: "thr4" });
+  const pr = resourceUri("acme/pr", { id: 12 });
+  expect(refTargetNow(pr)).toEqual({ tab: extPageRef("acme", "pr", { ref: pr }) });
 });
 
-// A template that names columns needs its kind's row: the sync path says
-// so, the async one reads it (one query on the kind's `resolve` view).
-test("a template that reads a column opens through its row", async () => {
-  setRefKinds(KINDS);
-  expect(refTargetNow("thread_note:not3")).toBeNull();
-  const asked: Array<{ view: string; columns: string[]; ref: string }> = [];
-  const read = (rows: Record<string, Record<string, unknown>>) => async (view: string, columns: string[], ref: string) => {
-    asked.push({ view, columns, ref });
-    return rows[ref] ?? null;
-  };
-  expect(await refTarget("thread_note:not3", read({ "thread_note:not3": { thread_ref: "thread:thr2" } }))).toEqual({
-    thread: "thr2",
+test("an oxplow resource with a page opens it with the URI as its ref", () => {
+  setResources(RESOURCES);
+  const comment = commentUri("cmt7");
+  expect(refTargetNow(comment)).toEqual({
+    tab: expect.objectContaining({ id: pageUri("comments", { ref: comment }), kind: "page" }),
   });
-  expect(asked).toEqual([{ view: "v_thread_note", columns: ["thread_ref"], ref: "thread_note:not3" }]);
-  // `{a|b}`: the first that isn't empty.
-  expect(
-    await refTarget("decision:5", read({ "decision:5": { effort_ref: null, thread_ref: "thread:thr9" } })),
-  ).toEqual({ thread: "thr9" });
-  // Its row gone: nothing to open.
-  expect("unopenable" in (await refTarget("decision:6", read({})))).toBe(true);
 });
 
-test("a kind with no page, or one nobody declares, opens nothing", async () => {
-  setRefKinds(KINDS);
-  expect("unopenable" in (await refTarget("event:00000000-0000-0000-0000-000000000000", async () => null))).toBe(true);
-  expect("unopenable" in (await refTarget("gone_kind:1", async () => null))).toBe(true);
+test("before the registry is read, a URI opens as itself", () => {
+  expect(refTargetNow(wikiUri("home"))).toEqual({ tab: wikiPageRef("home") });
+  expect(refTargetNow(threadUri("thr4"))).toEqual({ thread: "thr4" });
+});
+
+test("refTarget is refTargetNow, awaited", async () => {
+  setResources(RESOURCES);
+  expect(await refTarget(threadUri("thr4"))).toEqual({ thread: "thr4" });
+});
+
+test("a resource with no page, or one nobody declares, opens nothing", async () => {
+  setResources(RESOURCES);
+  // An extension's resource with no page has nowhere to open.
+  expect("unopenable" in (await refTarget(resourceUri("acme/issue", { id: 3 })))).toBe(true);
+  // A resource the registry doesn't list, and text that isn't a URI.
+  expect("unopenable" in (await refTarget(resourceUri("gone/kind", { id: 1 })))).toBe(true);
+  expect("unopenable" in (await refTarget("gone_kind:1"))).toBe(true);
+  // An oxplow resource that is no tab opens nothing either.
+  expect("unopenable" in (await refTarget(eventUri("00000000-0000-0000-0000-000000000000")))).toBe(true);
 });

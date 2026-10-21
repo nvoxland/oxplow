@@ -30,18 +30,38 @@ import {
 } from "../revision.js";
 import type { SqlCell } from "../tauri-bridge/generated/bindings.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
-import { agentSessionUri as agentSessionRefString, extPageUri as extPageRefString, formatUri, lensUri as lensRefString, metricUri as metricRefString, pageUri as pageRefString, parseUri, rawAfterType, uriOf, splitParams, withParams, type ParamValue } from "../uri/uri.js";
+import {
+  agentSessionUri,
+  commitUri,
+  dirUri,
+  effortUri,
+  extPageUri,
+  fileUri,
+  formatUri,
+  identityOf,
+  lensUri,
+  metricUri,
+  pageUri,
+  parseUri,
+  snapshotUri,
+  turnUri,
+  typeOf,
+  wikiUri,
+  workItemUri,
+  type ParamValue,
+} from "../uri/uri.js";
 
-function canonicalId(kind: string, id: string, rev: string | null = null): string {
-  return formatUri({ kind, id, rev, frag: null });
-}
+// Params (`?k=v&k=v`, named, keys sorted) are encoded and split by
+// uri/uri.ts, the one place that spells a URI.
 
-// Query params (`?k=v&k=v` after a route name or a lens id) are encoded and
-// split by uri/uri.ts, the one place that spells a ref.
-
-/** `tabId` with `params` added to its query (after any it has). */
+/** `tabId` with `params` added to its params (a null or undefined value
+ *  leaves one out). */
 export function withPageParams(tabId: string, params: Record<string, ParamValue>): string {
-  return withParams(tabId, params);
+  const u = parseUri(tabId);
+  if (!u) return tabId;
+  const merged = { ...u.params };
+  for (const [k, v] of Object.entries(params)) if (v !== null && v !== undefined) merged[k] = String(v);
+  return formatUri({ ...u, params: merged });
 }
 
 /** What a page tab carries: whose page (`null` for oxplow's own, which are
@@ -64,7 +84,7 @@ function cleanParams(params?: Record<string, ParamValue>): Record<string, string
 export function pageTabRef(page: string, params?: Record<string, ParamValue>): TabRef {
   const clean = cleanParams(params);
   const payload: PagePayload = { extension: null, page, params: clean };
-  return { id: pageRefString(page, Object.keys(clean).length ? clean : undefined), kind: "page", payload };
+  return { id: pageUri(page, clean), kind: "page", payload };
 }
 
 /** An extension's page: `page:<extension>/<id>[?params]` — `ref`, when it
@@ -72,7 +92,7 @@ export function pageTabRef(page: string, params?: Record<string, ParamValue>): T
 export function extPageRef(extension: string, page: string, params?: Record<string, ParamValue>): TabRef {
   const clean = cleanParams(params);
   const payload: PagePayload = { extension, page, params: clean };
-  return { id: extPageRefString(extension, page, Object.keys(clean).length ? clean : undefined), kind: "page", payload };
+  return { id: extPageUri(extension, page, clean), kind: "page", payload };
 }
 
 /** A page tab's payload; null for any other tab. */
@@ -111,25 +131,25 @@ export function recordedPageKind(ref: TabRef): string {
  * `@snap:<id>`) so it is a distinct tab from the working-tree view.
  */
 export function fileRef(path: string, version: Revision = WORKING): TabRef {
-  return { id: canonicalId("file", path, revisionSlot(version)), kind: "file", payload: { path, version } };
+  return { id: fileUri(path, revisionSlot(version)), kind: "file", payload: { path, version } };
 }
 
 /** The working-tree file a tab id shows, or `null` when the id is not a
  *  file or pins a revision (a read-only viewer, not the editor's file). */
 export function diskFilePath(tabId: string): string | null {
   const r = parseUri(tabId);
-  return r && r.kind === "file" && r.rev === null ? r.id : null;
+  return r && typeOf(tabId) === "oxplow/file" && !("rev" in r.params) ? (r.params.path ?? null) : null;
 }
 
 export function directoryRef(path: string): TabRef {
   // Trailing slash is normalized away — `[[src/]]` and `[[src]]` (when
   // ever the parser admits the latter) collapse to one tab.
   const bare = path.replace(/\/+$/, "");
-  return { id: canonicalId("dir", bare), kind: "dir", payload: { path: bare } };
+  return { id: dirUri(bare), kind: "dir", payload: { path: bare } };
 }
 
 export function wikiPageRef(slug: string): TabRef {
-  return { id: canonicalId("wiki", slug), kind: "wiki", payload: { slug } };
+  return { id: wikiUri(slug), kind: "wiki", payload: { slug } };
 }
 
 /** A work item's page, whichever list it's on: the tab id is its ref
@@ -142,12 +162,12 @@ export function workItemTabRef(ref: string): TabRef {
  *  Pinned — it leads the strip and is never evicted; its tab follows
  *  the session's row (`reconcileSessionTabs`). */
 export function agentSessionRef(sessionId: string): TabRef {
-  return { id: agentSessionRefString(sessionId), kind: "agent_session", payload: { sessionId }, pinned: true };
+  return { id: agentSessionUri(sessionId), kind: "agent_session", payload: { sessionId }, pinned: true };
 }
 
 /** Single git commit page. */
 export function gitCommitRef(sha: string): TabRef {
-  return { id: canonicalId("commit", sha), kind: "commit", payload: { sha } };
+  return { id: commitUri(sha), kind: "commit", payload: { sha } };
 }
 
 /** Open one metric's detail page, optionally scoped to an effort's window —
@@ -155,9 +175,9 @@ export function gitCommitRef(sha: string): TabRef {
  *  further exploration). Its own page kind (`metric`); Metrics and the
  *  dashboard tiles both navigate into it. */
 export function metricRef(metricKey: string, params?: Record<string, SqlCell>): TabRef {
-  const keys = Object.keys(params ?? {}).sort();
-  if (!params || keys.length === 0) return { id: canonicalId("metric", metricKey), kind: "metric", payload: { metricKey } };
-  const id = metricRefString(metricKey, Object.fromEntries(keys.map((k) => [k, params[k] === null ? "" : String(params[k])])));
+  const keys = Object.keys(params ?? {});
+  if (!params || keys.length === 0) return { id: metricUri(metricKey), kind: "metric", payload: { metricKey } };
+  const id = metricUri(metricKey, Object.fromEntries(keys.map((k) => [k, params[k] === null ? "" : String(params[k])])));
   return { id, kind: "metric", payload: { metricKey, params } };
 }
 
@@ -167,9 +187,9 @@ export function metricRef(metricKey: string, params?: Record<string, SqlCell>): 
  *  the tab, its history and bookmarks reopen the lens with the same
  *  values. */
 export function lensRef(lensId: string, params?: Record<string, SqlCell>): TabRef {
-  const keys = Object.keys(params ?? {}).sort();
-  if (!params || keys.length === 0) return { id: lensRefString(lensId), kind: "lens", payload: { lensId } };
-  const id = lensRefString(lensId, Object.fromEntries(keys.map((k) => [k, params[k] === null ? "" : String(params[k])])));
+  const keys = Object.keys(params ?? {});
+  if (!params || keys.length === 0) return { id: lensUri(lensId), kind: "lens", payload: { lensId } };
+  const id = lensUri(lensId, Object.fromEntries(keys.map((k) => [k, params[k] === null ? "" : String(params[k])])));
   return { id, kind: "lens", payload: { lensId, params } };
 }
 
@@ -194,23 +214,15 @@ export function withViewParams(ref: TabRef, params: Record<string, SqlCell>): Ta
   return page.extension === null ? pageTabRef(page.page, values) : extPageRef(page.extension, page.page, values);
 }
 
-/** Parse a metric id's raw `<key>?k=v` tail back into a ref. */
-function metricRefFromTail(tail: string): TabRef {
-  const { head, params } = splitParams(tail);
+/** A view's params read back from a URI's: an empty value is null and a
+ *  number is a number, as the params form reads them. */
+function viewParamsFrom(params: Record<string, string>, key: string): Record<string, SqlCell> {
   const out: Record<string, SqlCell> = {};
-  for (const [k, v] of params) out[k] = v === "" ? null : /^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v;
-  return metricRef(head, out);
-}
-
-/** Parse a lens id's raw `<lensId>?k=v` tail back into a ref. Numeric
- *  values come back as numbers, as the params form reads them. */
-function lensRefFromTail(tail: string): TabRef {
-  const { head, params } = splitParams(tail);
-  const out: Record<string, SqlCell> = {};
-  for (const [k, v] of params) {
+  for (const [k, v] of Object.entries(params)) {
+    if (k === key) continue;
     out[k] = v === "" ? null : /^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v;
   }
-  return lensRef(head, out);
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -422,7 +434,7 @@ export type DiffViewPayload =
  *  dashboard, file version history, and snapshot backlinks. */
 export function snapshotRef(snapshotId: number): TabRef {
   return {
-    id: canonicalId("snapshot", String(snapshotId)),
+    id: snapshotUri(snapshotId),
     kind: "snapshot",
     payload: { mode: "snapshot", snapshotId },
   };
@@ -432,7 +444,7 @@ export function snapshotRef(snapshotId: number): TabRef {
  *  'View diff' button on a completed effort points here. */
 export function effortDiffRef(effortId: string): TabRef {
   return {
-    id: canonicalId("effort", effortId),
+    id: effortUri(effortId),
     kind: "effort",
     payload: { mode: "effort", effortId },
   };
@@ -440,7 +452,7 @@ export function effortDiffRef(effortId: string): TabRef {
 
 /** An agent turn's page (`trn<N>`) — what the turn changed. */
 export function turnRef(turnId: string): TabRef {
-  return { id: canonicalId("turn", turnId), kind: "turn", payload: { mode: "turn", turnId } };
+  return { id: turnUri(turnId), kind: "turn", payload: { mode: "turn", turnId } };
 }
 
 /** Diff view between two revisions. `start = null` diffs `end` against
@@ -542,43 +554,43 @@ export function externalUrlRef(url: string): TabRef {
  * declares renders as "No such page".
  */
 export function refFromTabId(id: string): TabRef | null {
-  const canonical = parseUri(id);
-  if (!canonical) return null;
-  const kind: string = canonical.kind;
-  switch (kind) {
-    case "file":
-      return fileRef(canonical.id, revisionFromSlot(canonical.rev));
-    case "dir":
-      return directoryRef(canonical.id);
-    case "wiki":
-      return wikiPageRef(canonical.id);
-    case "work_item":
-      return workItemTabRef(uriOf("work_item", canonical.id));
-    case "commit":
-      return gitCommitRef(canonical.id);
-    case "metric":
-      return metricRefFromTail(rawAfterType(id, "metric") ?? "");
-    case "snapshot": {
-      const n = Number(canonical.id);
+  const u = parseUri(id);
+  if (!u) return null;
+  const p = u.params;
+  switch (typeOf(id)) {
+    case "oxplow/file":
+      return p.path ? fileRef(p.path, revisionFromSlot(p.rev ?? null)) : null;
+    case "oxplow/dir":
+      return p.path ? directoryRef(p.path) : null;
+    case "oxplow/wiki":
+      return p.slug ? wikiPageRef(p.slug) : null;
+    case "oxplow/work_item":
+      return p.provider && p.id ? workItemTabRef(workItemUri(p.provider, p.id)) : null;
+    case "oxplow/commit":
+      return p.sha ? gitCommitRef(p.sha) : null;
+    case "oxplow/metric":
+      return p.metric ? metricRef(p.metric, viewParamsFrom(p, "metric")) : null;
+    case "oxplow/snapshot": {
+      const n = Number(p.id);
       return Number.isInteger(n) ? snapshotRef(n) : null;
     }
-    case "effort":
-      return effortDiffRef(canonical.id);
-    case "turn":
-      return turnRef(canonical.id);
-    case "symbol":
-      return symbolRef(id);
-    case "agent_session":
-      return agentSessionRef(canonical.id);
-    case "dashboard":
-      return customDashboardRef(canonical.id);
-    case "lens":
-      return lensRefFromTail(rawAfterType(id, "lens") ?? "");
-    case "page": {
-      // Oxplow's own pages are `page:<id>`, another extension's
-      // `page:<extension>/<id>`; what draws one comes from its declaration.
-      const { head, params } = splitParams(rawAfterType(id, "page") ?? "");
-      const values = Object.fromEntries(params.entries());
+    case "oxplow/effort":
+      return p.id ? effortDiffRef(p.id) : null;
+    case "oxplow/turn":
+      return p.id ? turnRef(p.id) : null;
+    case "oxplow/symbol":
+      return symbolRef(identityOf(id) ?? id);
+    case "oxplow/agent_session":
+      return p.id ? agentSessionRef(p.id) : null;
+    case "oxplow/dashboard":
+      return p.id ? customDashboardRef(p.id) : null;
+    case "oxplow/lens":
+      return p.lens ? lensRef(p.lens, viewParamsFrom(p, "lens")) : null;
+    case "oxplow/page": {
+      // Oxplow's own pages are `page=<id>`, another extension's
+      // `page=<extension>/<id>`; what draws one comes from its declaration.
+      const head = p.page ?? "";
+      const { page: _page, ...values } = p;
       const slash = head.indexOf("/");
       if (slash === -1) return head ? pageTabRef(head, values) : null;
       const extension = head.slice(0, slash);
@@ -586,8 +598,8 @@ export function refFromTabId(id: string): TabRef | null {
       return extension && page && !page.includes("/") ? extPageRef(extension, page, values) : null;
     }
     default:
-      // Not a tab id: a ref of another kind opens where its kind's page
-      // says (`openRef`, `refOpener`), not here.
+      // Not a tab id: a URI of another resource opens where its resource's
+      // page says (`openRef`, `refOpener`), not here.
       return null;
   }
 }
@@ -595,10 +607,10 @@ export function refFromTabId(id: string): TabRef | null {
 /** The `PageKind` a tab id renders as: an entity ref's kind, or `page`.
  *  `null` for text that is not a tab id. */
 export function pageKindOf(tabId: string): PageKind | null {
-  const canonical = parseUri(tabId);
-  if (!canonical) return null;
-  if (canonical.kind === "page") return "page";
-  // The entity kinds that open as a page.
+  const resource = typeOf(tabId);
+  if (resource === null) return null;
+  if (resource === "oxplow/page") return "page";
+  // The resources that open as a page.
   const entity: readonly string[] = [
     "file",
     "dir",
@@ -613,5 +625,6 @@ export function pageKindOf(tabId: string): PageKind | null {
     "symbol",
     "agent_session",
   ];
-  return entity.includes(canonical.kind) ? (canonical.kind as PageKind) : null;
+  const name = resource.slice("oxplow/".length);
+  return resource.startsWith("oxplow/") && entity.includes(name) ? (name as PageKind) : null;
 }

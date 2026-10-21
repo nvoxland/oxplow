@@ -4,7 +4,7 @@
   "description": "`vcs.commit.indexed@1`: the commit indexer stored a commit it hadn't\nseen, reachable from a stream's head — every commit, however it was made\n(a `vcs.head.moved` needs a clean worktree, so it misses most).",
   "properties": {
     "commit": {
-      "description": "`commit:<sha>`.",
+      "description": "`oxplow:oxplow/commit?sha=<sha>`.",
       "type": "string"
     },
     "committed_at": {
@@ -12,7 +12,7 @@
       "type": "string"
     },
     "stream": {
-      "description": "`stream:strN`, the stream whose workspace it was found from.",
+      "description": "`oxplow:oxplow/stream?id=strN`, the stream whose workspace it was found from.",
       "type": "string"
     }
   },

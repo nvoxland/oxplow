@@ -158,16 +158,10 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                     .collect();
                 let mut enriched = Vec::with_capacity(filtered.len());
                 for t in filtered {
-                    let primary = ref_resolver::resolve_ref(
-                        &svc,
-                        &t.comment.target_kind,
-                        &t.comment.target_id,
-                    )
-                    .await;
+                    let primary = ref_resolver::resolve_ref(&svc, &t.comment.target).await;
                     let context_chain =
                         ref_resolver::resolve_refs(&svc, &t.comment.context_chain).await;
-                    let referenced =
-                        ref_resolver::resolve_refs(&svc, &t.comment.referenced_refs).await;
+                    let referenced = ref_resolver::resolve_refs(&svc, &t.comment.referenced).await;
                     enriched.push(EnrichedCommentThread {
                         thread: t,
                         primary,
@@ -312,12 +306,12 @@ mod tests {
                 &Actor::Human,
                 "oxplow.knowledge.add_comment",
                 json!({
-                    "stream": format!("stream:{stream}"),
-                    "target": { "kind": "file", "id": "src/app.rs" },
+                    "stream": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::STREAM, &stream.to_string()),
+                    "target": oxplow_domain::uri::build::file_uri("src/app.rs"),
                     "quote": "the highlighted text",
                     "selectors_json": "[]",
                     "context_chain": [],
-                    "referenced_refs": [{ "kind": "file", "id": "src/b.rs" }],
+                    "referenced": [oxplow_domain::uri::build::file_uri("src/b.rs")],
                     "intent": "followup",
                     "body": "what about this?",
                 }),
@@ -342,7 +336,10 @@ mod tests {
             .unwrap()
             .result;
         assert_eq!(out[0]["thread"]["comment"]["quote"], "the highlighted text");
-        assert_eq!(out[0]["referenced"][0]["id"], "src/b.rs");
+        assert_eq!(
+            out[0]["referenced"][0]["uri"],
+            oxplow_domain::uri::build::file_uri("src/b.rs")
+        );
         let resolved = svc
             .commands
             .run(

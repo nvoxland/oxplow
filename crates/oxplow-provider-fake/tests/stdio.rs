@@ -249,7 +249,10 @@ async fn a_peer_drives_the_fake_over_stdio() {
     let created = invoke(&peer, &handle, "create", json!({ "title": "First" }))
         .await
         .unwrap();
-    assert_eq!(created.result, json!({ "ref": "work_item:fake:W-1" }));
+    assert_eq!(
+        created.result,
+        json!({ "ref": "oxplow:oxplow/work_item?id=W-1&provider=fake" })
+    );
     assert_eq!(created.events[0].event_type, "work_item.recorded");
     assert_eq!(created.events[0].payload["item"]["native_state"], "Backlog");
     invoke(&peer, &handle, "create", json!({ "title": "Second" }))
@@ -259,7 +262,7 @@ async fn a_peer_drives_the_fake_over_stdio() {
         &peer,
         &handle,
         "transition",
-        json!({ "ref": "work_item:fake:W-1", "to": "in_progress" }),
+        json!({ "ref": "oxplow:oxplow/work_item?id=W-1&provider=fake", "to": "in_progress" }),
     )
     .await
     .unwrap();
@@ -268,7 +271,7 @@ async fn a_peer_drives_the_fake_over_stdio() {
         &peer,
         &handle,
         "transition",
-        json!({ "ref": "work_item:fake:W-9", "to": "done" }),
+        json!({ "ref": "oxplow:oxplow/work_item?id=W-9&provider=fake", "to": "done" }),
     )
     .await
     .unwrap_err();
@@ -309,7 +312,10 @@ async fn a_peer_drives_the_fake_over_stdio() {
     // W-1 changed last (its transition), so it comes after W-2.
     assert_eq!(
         streamed,
-        vec![json!("work_item:fake:W-2"), json!("work_item:fake:W-1")]
+        vec![
+            json!("oxplow:oxplow/work_item?id=W-2&provider=fake"),
+            json!("oxplow:oxplow/work_item?id=W-1&provider=fake")
+        ]
     );
     assert_eq!(state, Some(json!({ "cursor": 3, "seen": 2 })));
     let resumed: ReadResult = peer
@@ -443,7 +449,10 @@ async fn the_read_hooks_stream_progress_fail_midway_and_misreport() {
     initialize(&peer).await;
     let handle = check(&peer).await;
     let (_, seen) = read(&peer, &handle, &mut incoming).await;
-    assert_eq!(seen[0].1["row"]["ref"], "work_item:other:X-1");
+    assert_eq!(
+        seen[0].1["row"]["ref"],
+        "oxplow:oxplow/work_item?id=X-1&provider=other"
+    );
 }
 
 /// P9.B1: the fake is whichever instance the host says it is — its refs
@@ -475,12 +484,15 @@ async fn the_fake_takes_its_id_from_the_host_and_reports_a_missing_credential() 
     let created = invoke(&peer, &handle, "create", json!({ "title": "First" }))
         .await
         .unwrap();
-    assert_eq!(created.result["ref"], "work_item:fake_second:W-1");
+    assert_eq!(
+        created.result["ref"],
+        "oxplow:oxplow/work_item?id=W-1&provider=fake_second"
+    );
     let moved = invoke(
         &peer,
         &handle,
         "transition",
-        json!({ "ref": "work_item:fake_second:W-1", "to": "done" }),
+        json!({ "ref": "oxplow:oxplow/work_item?id=W-1&provider=fake_second", "to": "done" }),
     )
     .await;
     assert!(moved.is_ok(), "{moved:?}");
@@ -489,7 +501,7 @@ async fn the_fake_takes_its_id_from_the_host_and_reports_a_missing_credential() 
         &peer,
         &handle,
         "transition",
-        json!({ "ref": "work_item:fake:W-1", "to": "done" }),
+        json!({ "ref": "oxplow:oxplow/work_item?id=W-1&provider=fake", "to": "done" }),
     )
     .await;
     assert!(
@@ -603,8 +615,8 @@ async fn as_an_effort_policy_it_composes_efforts() {
     let event = |to: &str, thread: Option<&str>| {
         json!({ "event": {
             "id": format!("e-{to}"), "type": "work_item.state_changed", "v": 1, "seq": 1,
-            "source": "human", "subject": ["work_item:oxplow:tsk1"],
-            "payload": { "work_item": "work_item:oxplow:tsk1", "to": to },
+            "source": "human", "subject": ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow"],
+            "payload": { "work_item": "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "to": to },
             "anchors": { "thread_id": thread },
         }})
     };
@@ -620,7 +632,7 @@ async fn as_an_effort_policy_it_composes_efforts() {
     assert_eq!(
         started.result,
         json!({ "commands": [{ "name": "oxplow.effort.open",
-                               "input": { "thread": "thread:thr3", "work_item": "work_item:oxplow:tsk1" } }] })
+                               "input": { "thread": "oxplow:oxplow/thread?id=thr3", "work_item": "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" } }] })
     );
     let done = keyed(
         &peer,
@@ -634,7 +646,7 @@ async fn as_an_effort_policy_it_composes_efforts() {
     assert_eq!(
         done.result,
         json!({ "commands": [{ "name": "oxplow.effort.close",
-                               "input": { "effort": "effort:eff7", "reason": "switch" } }] })
+                               "input": { "effort": "oxplow:oxplow/effort?id=eff7", "reason": "switch" } }] })
     );
     let asked = asked.lock().unwrap().clone();
     assert_eq!(asked.len(), 1);
@@ -642,7 +654,7 @@ async fn as_an_effort_policy_it_composes_efforts() {
     assert_eq!(asked[0]["scope"], "sql.read");
     assert_eq!(
         asked[0]["args"]["params"]["work_item"],
-        "work_item:oxplow:tsk1"
+        "oxplow:oxplow/work_item?id=tsk1&provider=oxplow"
     );
     let skipped = keyed(
         &peer,
@@ -735,7 +747,7 @@ async fn as_a_snapshots_provider_it_marks_tells_what_changed_and_gives_bytes_bac
     initialize(&peer).await;
     let handle = check(&peer).await;
     let mark = |parent: Value| {
-        json!({ "stream": "stream:str1", "worktree": root, "trigger": "turn_end",
+        json!({ "stream": "oxplow:oxplow/stream?id=str1", "worktree": root, "trigger": "turn_end",
                 "parent": parent })
     };
 
@@ -753,7 +765,7 @@ async fn as_a_snapshots_provider_it_marks_tells_what_changed_and_gives_bytes_bac
         &peer,
         &handle,
         "changed",
-        json!({ "stream": "stream:str1", "from": null, "to": "m1" }),
+        json!({ "stream": "oxplow:oxplow/stream?id=str1", "from": null, "to": "m1" }),
     )
     .await
     .unwrap()
@@ -792,7 +804,7 @@ async fn as_a_snapshots_provider_it_marks_tells_what_changed_and_gives_bytes_bac
         &peer,
         &handle,
         "changed",
-        json!({ "stream": "stream:str1", "from": "m2", "to": "m3" }),
+        json!({ "stream": "oxplow:oxplow/stream?id=str1", "from": "m2", "to": "m3" }),
     )
     .await
     .unwrap()
@@ -835,11 +847,11 @@ async fn as_a_snapshots_provider_it_marks_tells_what_changed_and_gives_bytes_bac
         ("read_at", json!({ "handle": "m1", "path": "nope.txt" })),
         (
             "changed",
-            json!({ "stream": "stream:str1", "from": "m9", "to": "m1" }),
+            json!({ "stream": "oxplow:oxplow/stream?id=str1", "from": "m9", "to": "m1" }),
         ),
         (
             "changed",
-            json!({ "stream": "stream:str1", "from": null, "to": "m9" }),
+            json!({ "stream": "oxplow:oxplow/stream?id=str1", "from": null, "to": "m9" }),
         ),
     ] {
         let refused = invoke(&peer, &handle, verb, input).await;
@@ -947,16 +959,28 @@ async fn as_a_knowledge_provider_a_write_answers_the_page_and_its_record() {
     )
     .await
     .unwrap();
-    assert_eq!(wrote.result, json!({ "page": "wiki:design" }));
+    assert_eq!(
+        wrote.result,
+        json!({ "page": "oxplow:oxplow/wiki?slug=design" })
+    );
     assert_eq!(wrote.events.len(), 1);
     let event = &wrote.events[0];
     assert_eq!(event.event_type, "knowledge.page.recorded");
     assert_eq!(event.v, 1);
-    assert_eq!(event.subject, vec!["wiki:design".to_string()]);
+    assert_eq!(
+        event.subject,
+        vec!["oxplow:oxplow/wiki?slug=design".to_string()]
+    );
     let page = &event.payload["page"];
-    assert_eq!(page["ref"], "wiki:design");
+    assert_eq!(page["ref"], "oxplow:oxplow/wiki?slug=design");
     assert_eq!(page["title"], "design");
-    assert_eq!(page["refs"], json!(["file:src/lib.rs", "wiki:other-page"]));
+    assert_eq!(
+        page["refs"],
+        json!([
+            "oxplow:oxplow/file?path=src/lib.rs",
+            "oxplow:oxplow/wiki?slug=other-page"
+        ])
+    );
     assert!(page.get("deleted").is_none());
     assert!(page["updated_at"].as_str().unwrap().ends_with('Z'));
 
@@ -965,7 +989,7 @@ async fn as_a_knowledge_provider_a_write_answers_the_page_and_its_record() {
         &peer,
         &handle,
         "link",
-        json!({ "page": "wiki:design", "target": "wiki:third" }),
+        json!({ "page": "oxplow:oxplow/wiki?slug=design", "target": "oxplow:oxplow/wiki?slug=third" }),
     )
     .await
     .unwrap();
@@ -980,7 +1004,11 @@ async fn as_a_knowledge_provider_a_write_answers_the_page_and_its_record() {
     );
     assert_eq!(
         page["refs"],
-        json!(["file:src/lib.rs", "wiki:other-page", "wiki:third"])
+        json!([
+            "oxplow:oxplow/file?path=src/lib.rs",
+            "oxplow:oxplow/wiki?slug=other-page",
+            "oxplow:oxplow/wiki?slug=third"
+        ])
     );
 
     let deleted = invoke(&peer, &handle, "delete_page", json!({ "slug": "design" }))
@@ -992,7 +1020,10 @@ async fn as_a_knowledge_provider_a_write_answers_the_page_and_its_record() {
     for (verb, input) in [
         ("delete_page", json!({ "slug": "design" })),
         ("delete_page", json!({ "slug": "nope" })),
-        ("link", json!({ "page": "wiki:nope", "target": "x" })),
+        (
+            "link",
+            json!({ "page": "oxplow:oxplow/wiki?slug=nope", "target": "x" }),
+        ),
     ] {
         let refused = invoke(&peer, &handle, verb, input).await;
         assert!(
@@ -1064,7 +1095,7 @@ async fn as_a_knowledge_provider_it_streams_changed_pages_and_keeps_them() {
         .collect();
     assert_eq!(
         slugs,
-        vec!["wiki:b", "wiki:a"],
+        vec!["oxplow:oxplow/wiki?slug=b", "oxplow:oxplow/wiki?slug=a"],
         "in revision order, a's rewrite last"
     );
     assert_eq!(rows[1]["row"]["body"], "uno");

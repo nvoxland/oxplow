@@ -30,7 +30,7 @@ pub const UPDATE: &str = "oxplow.knowledge.update_note";
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AddInput {
-    /// The thread (`thread:thr3`); an agent's is always its own.
+    /// The thread (`oxplow:oxplow/thread?id=thr3`); an agent's is always its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
     /// The note (markdown; `[[…]]` links are checked). May be empty: a
@@ -43,7 +43,7 @@ pub struct AddInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateInput {
-    /// The note (`thread_note:not12`).
+    /// The note (`oxplow:oxplow/thread_note?id=not12`).
     pub note: String,
     pub body: String,
 }
@@ -71,7 +71,7 @@ pub fn add_op(deps: LinkDeps) -> Op {
             let thread = acting_thread(ctx, input.thread.as_deref())?;
             let (note, event) = add_thread_note_tx(
                 ctx.conn,
-                &ctx.events.vocabulary.kinds,
+                &ctx.events.vocabulary.resources,
                 thread,
                 &input.body,
                 author_of(ctx.actor()),
@@ -95,7 +95,11 @@ pub fn update_op(deps: LinkDeps) -> Op {
         true,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: UpdateInput = parse(input)?;
-            let id: NoteId = ref_id(&input.note, "thread_note", "/note")?;
+            let id: NoteId = ref_id(
+                &input.note,
+                oxplow_domain::uri::resources::THREAD_NOTE,
+                "/note",
+            )?;
             let before = note_tx(ctx.conn, id)?
                 .ok_or_else(|| invalid("/note", format!("no thread note `{id}`")))?;
             if let Some((own, _)) = agent_scope(ctx)? {
@@ -108,7 +112,8 @@ pub fn update_op(deps: LinkDeps) -> Op {
                     });
                 }
             }
-            let event = update_note_tx(ctx.conn, &ctx.events.vocabulary.kinds, id, &input.body)?;
+            let event =
+                update_note_tx(ctx.conn, &ctx.events.vocabulary.resources, id, &input.body)?;
             let note = serde_json::to_value(note_tx(ctx.conn, id)?).expect("a note serializes");
             Ok(HandlerOutput {
                 result: with_warnings(&deps, ctx, note, &input.body, Some(before.thread_id)),
@@ -253,7 +258,10 @@ mod tests {
             .run(&agent(&fx), ADD, json!({}), false)
             .await
             .unwrap();
-        let id = format!("thread_note:{}", out.result["note"]["id"].as_str().unwrap());
+        let id = oxplow_domain::uri::build::keyed(
+            oxplow_domain::uri::resources::THREAD_NOTE,
+            out.result["note"]["id"].as_str().unwrap(),
+        );
         let filled = fx
             .svc
             .commands

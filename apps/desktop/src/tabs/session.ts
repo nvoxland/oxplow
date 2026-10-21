@@ -15,6 +15,7 @@
  */
 
 import type { TabRef } from "./tabState.js";
+import { keyIdentityOf } from "../uri/uri.js";
 
 /** One item of the collection a page was opened from. */
 export interface OriginItem {
@@ -79,10 +80,10 @@ export function current(tab: Tab): Entry {
   return tab.entries[tab.at]!;
 }
 
-/** A ref's identity: its id without its view (the `?…` query). */
+/** A page's or lens's identity: its id without the params it is viewed
+ *  with (only its key param stays). */
 export function identityOf(id: string): string {
-  const q = id.indexOf("?");
-  return q === -1 ? id : id.slice(0, q);
+  return keyIdentityOf(id) ?? id;
 }
 
 function touched(mru: string[], slot: string): string[] {

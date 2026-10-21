@@ -10,7 +10,7 @@
 //! - **close** → closed (its agent sessions close too, and their
 //!   processes stop after commit); **reopen** → open again.
 //!
-//! A thread is named by ref (`thread:thr12`), a stream by `stream:str1`.
+//! A thread is named by ref (`oxplow:oxplow/thread?id=thr12`), a stream by `oxplow:oxplow/stream?id=str1`.
 //! An agent acts only on its own stream, and closes only its own thread;
 //! setting a prompt steers an agent and marking a thread is the person's
 //! own grouping, so both are a person's.
@@ -40,10 +40,10 @@ pub const REOPEN: &str = "oxplow.thread.reopen";
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateInput {
-    /// The stream (`stream:str1`).
+    /// The stream (`oxplow:oxplow/stream?id=str1`).
     pub stream: String,
     pub title: String,
-    /// Fork this thread (`thread:thr3`): the new one joins its stream.
+    /// Fork this thread (`oxplow:oxplow/thread?id=thr3`): the new one joins its stream.
     /// Nothing agent-ish is copied — a thread's agents are its sessions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
@@ -52,7 +52,7 @@ pub struct CreateInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RenameInput {
-    /// The thread (`thread:thr12`).
+    /// The thread (`oxplow:oxplow/thread?id=thr12`).
     pub thread: String,
     pub title: String,
 }
@@ -60,7 +60,7 @@ pub struct RenameInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SetPromptInput {
-    /// The thread (`thread:thr12`).
+    /// The thread (`oxplow:oxplow/thread?id=thr12`).
     pub thread: String,
     /// Appended to the agent's prompt; empty (or only whitespace) or absent
     /// clears it.
@@ -72,7 +72,7 @@ pub struct SetPromptInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MarkInput {
-    /// The thread (`thread:thr12`).
+    /// The thread (`oxplow:oxplow/thread?id=thr12`).
     pub thread: String,
     /// The colour for its tab: `amber`, `red`, `green`, `blue` or
     /// `violet`; absent clears it.
@@ -83,7 +83,7 @@ pub struct MarkInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ThreadInput {
-    /// The thread (`thread:thr12`).
+    /// The thread (`oxplow:oxplow/thread?id=thr12`).
     pub thread: String,
 }
 
@@ -123,7 +123,9 @@ fn record_thread(
     own: Option<Option<ThreadId>>,
     named: Option<&str>,
 ) -> Result<ThreadId, CommandError> {
-    let named = named.map(|t| ref_id(t, "thread", "/thread")).transpose()?;
+    let named = named
+        .map(|t| ref_id(t, oxplow_domain::uri::resources::THREAD, "/thread"))
+        .transpose()?;
     match own {
         None => named.ok_or_else(|| invalid("/thread", "name the thread")),
         Some(None) => Err(CommandError::Denied {
@@ -218,7 +220,11 @@ pub fn create_op() -> Op {
         false,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: CreateInput = parse(input)?;
-            let stream: StreamId = ref_id(&input.stream, "stream", "/stream")?;
+            let stream: StreamId = ref_id(
+                &input.stream,
+                oxplow_domain::uri::resources::STREAM,
+                "/stream",
+            )?;
             on_own_stream(ctx, stream)?;
             // Only a stream that's there — not archived — takes a thread.
             oxplow_db::stream_store::get_tx(ctx.conn, stream)
@@ -226,7 +232,11 @@ pub fn create_op() -> Op {
                 .filter(|s| s.archived_at.is_none())
                 .ok_or_else(|| invalid("/stream", format!("no stream `{}`", input.stream)))?;
             if let Some(from) = &input.from {
-                let source = load(ctx, ref_id(from, "thread", "/from")?, "/from")?;
+                let source = load(
+                    ctx,
+                    ref_id(from, oxplow_domain::uri::resources::THREAD, "/from")?,
+                    "/from",
+                )?;
                 if source.stream_id != stream {
                     return Err(invalid("/from", format!("`{from}` is on another stream")));
                 }
@@ -269,7 +279,15 @@ pub fn rename_op() -> Op {
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: RenameInput = parse(input)?;
-            let mut thread = load(ctx, ref_id(&input.thread, "thread", "/thread")?, "/thread")?;
+            let mut thread = load(
+                ctx,
+                ref_id(
+                    &input.thread,
+                    oxplow_domain::uri::resources::THREAD,
+                    "/thread",
+                )?,
+                "/thread",
+            )?;
             on_own_stream(ctx, thread.stream_id)?;
             let before = std::mem::replace(&mut thread.title, input.title);
             thread.updated_at = Timestamp::now();
@@ -292,7 +310,15 @@ pub fn set_prompt_op() -> Op {
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: SetPromptInput = parse(input)?;
-            let mut thread = load(ctx, ref_id(&input.thread, "thread", "/thread")?, "/thread")?;
+            let mut thread = load(
+                ctx,
+                ref_id(
+                    &input.thread,
+                    oxplow_domain::uri::resources::THREAD,
+                    "/thread",
+                )?,
+                "/thread",
+            )?;
             let before = std::mem::replace(
                 &mut thread.custom_prompt,
                 input.prompt.filter(|p| !p.trim().is_empty()),
@@ -323,7 +349,15 @@ pub fn mark_op() -> Op {
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: MarkInput = parse(input)?;
-            let mut thread = load(ctx, ref_id(&input.thread, "thread", "/thread")?, "/thread")?;
+            let mut thread = load(
+                ctx,
+                ref_id(
+                    &input.thread,
+                    oxplow_domain::uri::resources::THREAD,
+                    "/thread",
+                )?,
+                "/thread",
+            )?;
             if thread.mark == input.mark {
                 return Ok(unchanged(&thread));
             }
@@ -351,7 +385,11 @@ pub fn close_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
         true,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: ThreadInput = parse(input)?;
-            let id = ref_id(&input.thread, "thread", "/thread")?;
+            let id = ref_id(
+                &input.thread,
+                oxplow_domain::uri::resources::THREAD,
+                "/thread",
+            )?;
             own_thread_only(ctx, id, "closes")?;
             let mut thread = load(ctx, id, "/thread")?;
             if !thread.is_open() {
@@ -416,7 +454,11 @@ pub fn reopen_op() -> Op {
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: ThreadInput = parse(input)?;
-            let id = ref_id(&input.thread, "thread", "/thread")?;
+            let id = ref_id(
+                &input.thread,
+                oxplow_domain::uri::resources::THREAD,
+                "/thread",
+            )?;
             own_thread_only(ctx, id, "reopens")?;
             let mut thread = load(ctx, id, "/thread")?;
             if thread.is_open() {
@@ -519,7 +561,7 @@ mod tests {
         use oxplow_domain::stores::AgentSessionStore as _;
         let fx = services_with_effort().await;
         // Only a stream that's there takes a thread.
-        for stream in ["stream:str99"] {
+        for stream in ["oxplow:oxplow/stream?id=str99"] {
             let err = run(
                 &fx,
                 &Actor::Human,
@@ -700,7 +742,7 @@ mod tests {
             &fx,
             &agent(&fx),
             CREATE,
-            json!({ "stream": "stream:str99", "title": "x" }),
+            json!({ "stream": "oxplow:oxplow/stream?id=str99", "title": "x" }),
         )
         .await
         .unwrap_err();

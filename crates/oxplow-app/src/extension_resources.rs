@@ -11,6 +11,7 @@
 //!     searchable: prs             # …and `body`, which search indexes
 //!     icon: git-pull-request
 //!     wikilink: { prefix: pr, param: id }   # [[pr:12]]
+//!     page: pr                    # one of its pages, opened with `ref=<uri>`
 //! ```
 //!
 //! A resource is `<extension>/<name>`, where the extension segment is the
@@ -24,12 +25,81 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use oxplow_domain::uri::oxplow_uri::ResourceName;
-use oxplow_domain::uri::resources::{ParamDecl, ResourceDecl, WikilinkDecl};
+use oxplow_domain::uri::resources::{ParamDecl, ResourceDecl};
 
-use crate::extension_ref_kinds::{id_pattern, REF_KIND_ICONS};
 use crate::extensions::manifest_v2::{at, item_lines, key_line};
 use crate::extensions::CORE_NAMESPACE;
+
+/// The icons a resource or a page may name (lucide names; the desktop maps each).
+pub const RESOURCE_ICONS: &[&str] = &[
+    "activity",
+    "archive",
+    "bar-chart-3",
+    "bell",
+    "book-open",
+    "box",
+    "bug",
+    "calendar",
+    "check-square",
+    "circle-check",
+    "circle-dot",
+    "columns-3",
+    "copy",
+    "database",
+    "external-link",
+    "file-text",
+    "flag",
+    "folder",
+    "folder-tree",
+    "git-branch",
+    "git-commit",
+    "git-compare",
+    "git-merge",
+    "git-pull-request",
+    "history",
+    "inbox",
+    "layout-dashboard",
+    "link",
+    "list-tree",
+    "message-square",
+    "package",
+    "plus",
+    "server",
+    "settings",
+    "shield",
+    "star",
+    "tag",
+    "terminal",
+    "ticket",
+    "triangle-alert",
+    "user",
+    "zap",
+];
+
+/// Wikilink sugar oxplow-foundation declares (`dir:`,
+/// `finding:`): another extension's `wikilink.prefix` may not take it. A work
+/// list's own ids (`tsk42`) are its id pattern's, not a prefix core keeps.
+const RESERVED_PREFIXES: &[&str] = &["dir", "finding"];
+
+/// Why `name` can't name a resource from a manifest (a decorator's
+/// `resource:`, a prompt's `about:`): not `<extension>/<name>`, or one of
+/// oxplow's that oxplow-foundation doesn't declare. Another extension's
+/// is the vocabulary's to know.
+pub fn resource_problem(name: &str) -> Option<String> {
+    let parsed: oxplow_domain::uri::ResourceName = match name.parse() {
+        Ok(n) => n,
+        Err(_) => {
+            return Some(
+                "a resource is `<extension>/<name>` (`oxplow/work_item`, `oxplow/commit`)".into(),
+            )
+        }
+    };
+    (parsed.extension() == CORE_NAMESPACE
+        && oxplow_domain::uri::resources::foundation()
+            .get(&parsed)
+            .is_none())
+    .then(|| "oxplow declares no such resource".to_string())
+}
 
 /// A resource an extension declares (valid ones; invalid ones are in its
 /// `errors`).
@@ -42,27 +112,7 @@ pub struct ExtensionResource {
 }
 
 /// A `resources:` entry as the manifest holds it.
-#[derive(Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct ResourceFile {
-    name: String,
-    label: String,
-    #[serde(default)]
-    params: BTreeMap<String, ParamDecl>,
-    #[serde(default)]
-    additional: bool,
-    #[serde(default)]
-    resolve: Option<String>,
-    /// The column of `resolve` that titles one (default `title`).
-    #[serde(default)]
-    title: Option<String>,
-    #[serde(default)]
-    searchable: Option<String>,
-    #[serde(default)]
-    icon: Option<String>,
-    #[serde(default)]
-    wikilink: Option<WikilinkDecl>,
-}
+pub(crate) type ResourceFile = oxplow_domain::uri::resources::ResourceEntry;
 
 /// The extension segment of the resources `extension` declares.
 pub fn resource_extension(extension: &str, namespace: &str) -> String {
@@ -74,12 +124,13 @@ pub fn resource_extension(extension: &str, namespace: &str) -> String {
 }
 
 /// Parse a `resources:` block against the extension's models (core's,
-/// for oxplow's namespace): the valid resources, and an error
+/// for oxplow's namespace) and pages: the valid resources, and an error
 /// (`file:line: …`) for each broken one.
 pub fn parse_resources(
     extension: &str,
     namespace: &str,
     models: &[oxplow_db::models::ModelSource],
+    pages: &[crate::extensions::ExtensionPage],
     value: &serde_yaml::Value,
     file: &str,
     manifest: &str,
@@ -120,7 +171,7 @@ pub fn parse_resources(
             continue;
         }
         let declared_at = at(file, line, "").trim_end_matches(": ").to_string();
-        match decl_of(&segment, extension, core, models, f) {
+        match decl_of(&segment, extension, core, models, pages, f) {
             Ok(decl) => out.push(ExtensionResource { decl, declared_at }),
             Err(e) => errors.push(at(file, line, e)),
         }
@@ -133,14 +184,10 @@ fn decl_of(
     extension: &str,
     core: bool,
     models: &[oxplow_db::models::ModelSource],
+    pages: &[crate::extensions::ExtensionPage],
     f: ResourceFile,
 ) -> Result<ResourceDecl, String> {
-    let name = ResourceName::new(segment, &f.name).map_err(|_| {
-        format!(
-            "resource `{}`: a name is lowercase letters, digits and `_`, starting with a letter",
-            f.name
-        )
-    })?;
+    let declared = f.clone().into_decl(segment)?;
     let named = |m: String| format!("resource `{}`: {m}", f.name);
     let mut params = BTreeMap::new();
     for (key, p) in f.params {
@@ -154,7 +201,7 @@ fn decl_of(
         }
         let pattern = match p.pattern {
             Some(pattern) => Some(
-                id_pattern(&pattern)
+                crate::param_pattern::param_pattern(&pattern)
                     .map_err(|why| named(format!("param `{key}`'s `pattern: {pattern}`: {why}")))?,
             ),
             None => None,
@@ -230,25 +277,41 @@ fn decl_of(
                 w.prefix
             )));
         }
-    }
-    if let Some(icon) = &f.icon {
-        if !REF_KIND_ICONS.contains(&icon.as_str()) {
+        if !core && RESERVED_PREFIXES.contains(&w.prefix.as_str()) {
             return Err(named(format!(
-                "`icon: {icon}` isn't one oxplow draws; use one of {}",
-                REF_KIND_ICONS.join(", ")
+                "`wikilink.prefix: {}` is oxplow's own sugar (`[[{}:…]]`); choose another",
+                w.prefix, w.prefix
             )));
         }
     }
+    if let Some(icon) = &f.icon {
+        if !RESOURCE_ICONS.contains(&icon.as_str()) {
+            return Err(named(format!(
+                "`icon: {icon}` isn't one oxplow draws; use one of {}",
+                RESOURCE_ICONS.join(", ")
+            )));
+        }
+    }
+    let page = match &f.page {
+        Some(id) => Some(
+            pages
+                .iter()
+                .find(|p| p.id == *id)
+                .map(|p| p.page_ref.clone())
+                .ok_or_else(|| {
+                    named(format!(
+                        "`page: {id}` isn't one of this extension's pages (`pages:`)"
+                    ))
+                })?,
+        ),
+        None => None,
+    };
     Ok(ResourceDecl {
-        name,
-        label: f.label,
         params,
-        additional: f.additional,
         resolve,
-        title: f.title,
         searchable,
-        icon: f.icon,
-        wikilink: f.wikilink,
+        page,
+        ..declared
     })
 }
 
@@ -282,7 +345,7 @@ resources:
         std::fs::write(root.join("extension.yaml"), manifest).unwrap();
         std::fs::write(
             root.join("models/prs.sql"),
-            "SELECT CAST('acme_pr:1' AS TEXT) AS ref, CAST('One' AS TEXT) AS title",
+            "SELECT CAST('oxplow:acme/pr?id=1' AS TEXT) AS ref, CAST('One' AS TEXT) AS title",
         )
         .unwrap();
         load_extensions(dir.path())
@@ -316,6 +379,7 @@ resources:
             ),
             ("param: id }", "param: number }", "isn't one of its params"),
             ("prefix: pr,", "prefix: Pr,", "lowercase letters"),
+            ("prefix: pr,", "prefix: dir,", "oxplow's own sugar"),
             (
                 "icon: git-pull-request",
                 "icon: rocket",
@@ -325,7 +389,7 @@ resources:
             (
                 "    label: Pull request\n",
                 "    label: Pull request\n    page: pr\n",
-                "unknown field",
+                "isn't one of this extension's pages",
             ),
         ] {
             let ext = acme(&MANIFEST.replace(from, to));
@@ -365,5 +429,27 @@ resources:
             .find(|r| r.decl.name.to_string() == "oxplow/effort")
             .expect("foundation declares oxplow/effort");
         assert_eq!(effort.decl.resolve.as_deref(), Some("v_effort"));
+    }
+
+    /// The desktop draws exactly the icons a resource may name: its
+    /// `RESOURCE_ICONS` map (`apps/desktop/src/resources.ts`) has a key for
+    /// each, and no other.
+    #[test]
+    fn the_desktop_draws_every_allowed_icon() {
+        let ts = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../apps/desktop/src/resources.ts"),
+        )
+        .unwrap();
+        let start = ts.find("RESOURCE_ICONS").unwrap();
+        let body = &ts[start..start + ts[start..].find("};").unwrap()];
+        let mut drawn: Vec<&str> = body
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix('"')?.split('"').next())
+            .collect();
+        drawn.sort();
+        let mut allowed = super::RESOURCE_ICONS.to_vec();
+        allowed.sort();
+        assert_eq!(drawn, allowed);
     }
 }

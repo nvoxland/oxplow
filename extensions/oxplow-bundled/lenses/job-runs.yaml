@@ -2,7 +2,7 @@ title: Job Runs
 description: Each job run — running and queued first, then the last day's — with what it has used so far. Open one to follow its output; Cancel stops it.
 query: |
   SELECT ref,
-         lens_ref('oxplow-bundled/job-run-output', 'job_run', ref) AS output_ref,
+         uri('oxplow/lens', 'lens', 'oxplow-bundled/job-run-output', 'job_run', ref) AS output_ref,
          job,
          intent_key,
          state,

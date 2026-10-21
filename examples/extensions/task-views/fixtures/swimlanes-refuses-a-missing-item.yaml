@@ -2,7 +2,7 @@
 input:
   component: swimlanes
   invokes:
-    - { command: oxplow.work_item.update, input: { ref: "work_item:oxplow:1", title: x } }
+    - { command: oxplow.work_item.update, input: { ref: "oxplow:oxplow/work_item?id=1&provider=oxplow", title: x } }
 expect:
   invokes:
     - { ok: false, refused: $any }

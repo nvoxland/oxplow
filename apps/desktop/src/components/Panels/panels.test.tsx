@@ -102,7 +102,7 @@ test("the alerts are the badges that fire, from the same runs", () => {
 test("a panel's header opens the page it names, else its body lens", async () => {
   const { panelOpenRef } = await import("./panelLayout.js");
   const { lensRef } = await import("../../tabs/pageRefs.js");
-  expect(panelOpenRef(panel("stream", { open: "page:comments" })).id).toBe("page:comments");
+  expect(panelOpenRef(panel("stream", { open: "oxplow:oxplow/page?page=comments" })).id).toBe("oxplow:oxplow/page?page=comments");
   expect(panelOpenRef(panel("stream"))).toEqual(lensRef("x/body"));
 });
 

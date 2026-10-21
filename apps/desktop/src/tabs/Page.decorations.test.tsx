@@ -19,7 +19,7 @@ mock.module("../api.js", () => ({
       ui: {
         slots: [],
         commands: [],
-        decorators: [{ id: "flags/0", extension: "flags", view: "v_flags_flags", kind: "work_item", placement: "ref-chip", label: "label", color: "color" }],
+        decorators: [{ id: "flags/0", extension: "flags", view: "v_flags_flags", resource: "oxplow/work_item", placement: "ref-chip", label: "label", color: "color" }],
       },
     },
     // P10 (K1): oxplow-bundled's verdict, on the effort it was given on.
@@ -30,7 +30,7 @@ mock.module("../api.js", () => ({
         slots: [],
         commands: [],
         decorators: [
-          { id: "oxplow-bundled/0", extension: "oxplow-bundled", view: "v_oxplow_bundled_verdict", kind: "effort", placement: "ref-chip", label: "label", color: "color" },
+          { id: "oxplow-bundled/0", extension: "oxplow-bundled", view: "v_oxplow_bundled_verdict", resource: "oxplow/effort", placement: "ref-chip", label: "label", color: "color" },
         ],
       },
     },
@@ -39,7 +39,7 @@ mock.module("../api.js", () => ({
     if (sql.includes("FROM v_oxplow_bundled_verdict")) {
       return {
         columns: ["ref", "label", "color"],
-        rows: [["effort:eff7", "Changes requested", "red"]],
+        rows: [["oxplow:oxplow/effort?id=eff7", "Changes requested", "red"]],
         truncated: false,
         reads: { models: ["v_oxplow_bundled_verdict"], tables: [], measures: [] },
         freshness: {},
@@ -49,7 +49,7 @@ mock.module("../api.js", () => ({
     queries.push(sql);
     return {
       columns: ["ref", "label", "color"],
-      rows: [["work_item:fake:W-1", "urgent", "#ff0000"]],
+      rows: [["oxplow:oxplow/work_item?id=W-1&provider=fake", "urgent", "#ff0000"]],
       truncated: false,
       reads: { models: ["v_flags_flags"], tables: [], measures: [] },
       freshness: {},
@@ -68,7 +68,7 @@ const nav = {
   goForward() {},
   canGoBack: false,
   canGoForward: false,
-  ask: { ref: "work_item:fake:W-1" },
+  ask: { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake" },
 } as unknown as PageNavigation;
 
 const page = () =>
@@ -97,7 +97,7 @@ test("a disabled extension decorates nothing", async () => {
 
 // An effort opens as its diff, the effort's ref in the navigation.
 test("an effort page shows its review verdict as a chip", async () => {
-  const effortNav = { ...nav, ask: { ref: "effort:eff7" } } as unknown as PageNavigation;
+  const effortNav = { ...nav, ask: { ref: "oxplow:oxplow/effort?id=eff7" } } as unknown as PageNavigation;
   const view = render(
     <PageNavigationContext.Provider value={effortNav}>
       <Page title="Changes" kind="diff-view" chips={[{ label: "closed" }]}>

@@ -7,8 +7,7 @@ params:
   - { name: parent }
 query: |
   SELECT 'todo' AS state, :parent AS parent_ref,
-         -- `thread` of the create command is the thread's own id (`thr3`), not its ref.
-         (SELECT 'thr' || t.id FROM v_thread t WHERE t.id = :thread_id) AS thread
+         (SELECT t.ref FROM v_thread t WHERE t.id = :thread_id) AS thread
 viz: form
 form:
   command: oxplow.work_item.create

@@ -45,7 +45,7 @@ use oxplow_domain::{DomainError, StoredEvent};
 use tokio::sync::Notify;
 
 /// Core's own event consumers, by name: what an extension's `after:` may
-/// name as `consumer:<name>` (`oxplow_domain::ordering`). The two that run
+/// name as `oxplow:oxplow/consumer?name=<name>` (`oxplow_domain::ordering`). The two that run
 /// extensions' effects and collectors aren't here: an `after:` names the
 /// effect or collector itself.
 pub const CORE_CONSUMERS: &[&str] = &[
@@ -1182,7 +1182,6 @@ mod tests {
     #[tokio::test]
     async fn consumers_receive_the_newest_version_of_a_type() {
         use oxplow_domain::events::schema::{DeclaredEventType, EventSchemaRegistry};
-        use oxplow_domain::uri::types::core_types;
         use oxplow_domain::vocabulary::Vocabulary;
         let (db, _) = setup().await;
         let object = |field: &str| {
@@ -1209,7 +1208,10 @@ mod tests {
                 .unwrap();
         }
         let vocabulary = VocabularyHandle::core();
-        vocabulary.swap(Vocabulary::new(registry, core_types()));
+        vocabulary.swap(Vocabulary::new(
+            registry,
+            oxplow_domain::uri::resources::foundation().clone(),
+        ));
         let store = SqliteEventLogStore::new(db.clone(), vocabulary);
         let v1 = Envelope::new("acme.thing", 1, "test", json!({ "count": 3 })).unwrap();
         store.append(v1).await.unwrap();
@@ -1225,13 +1227,16 @@ mod tests {
     #[tokio::test]
     async fn an_unregistered_type_is_delivered_at_its_logged_version() {
         use oxplow_domain::events::schema::EventSchemaRegistry;
-        use oxplow_domain::uri::types::core_types;
+        use oxplow_domain::uri::resources::foundation;
         use oxplow_domain::vocabulary::Vocabulary;
         let (db, _) = setup().await;
         let vocabulary = VocabularyHandle::core();
         let store = SqliteEventLogStore::new(db.clone(), vocabulary.clone());
         store.append(config_changed("a")).await.unwrap();
-        vocabulary.swap(Vocabulary::new(EventSchemaRegistry::new(), core_types()));
+        vocabulary.swap(Vocabulary::new(
+            EventSchemaRegistry::new(),
+            foundation().clone(),
+        ));
         let report = pump(&db, &store, vec![Recorder::new("rec", None)])
             .run_once()
             .await

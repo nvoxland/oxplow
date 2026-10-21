@@ -32,7 +32,7 @@ view/edit toggle. The editor is Tiptap, configured to preserve
 everything the read view supports: a `MermaidBlock` node that
 shows the rendered SVG when the caret is outside the block and
 the raw source when the caret enters; custom link handling that
-keeps `file:` / `dir:` / `gitcommit:` schemes through Tiptap's
+keeps oxplow URIs (`oxplow:oxplow/file?path=…`) through Tiptap's
 URL sanitizer; and a wikilink round-trip pass so `[[ ]]` syntax
 on disk parses to clickable markdown links in the editor and
 re-serializes back to `[[ ]]` on save (with bare vs labeled

@@ -52,7 +52,7 @@ models:
     description: "Each effort that changed a migration file, judged: `changes requested` when it drops a table, its latest test run isn't an observed green one, its diff coverage is under 90%, or a function it added is more complex than 15; else `accepted`."
     columns:
       - { name: effort_id, type: INTEGER, doc: "The effort (v_effort.id)." }
-      - { name: ref, type: TEXT, doc: "The effort's ref (`effort:eff<id>`)." }
+      - { name: ref, type: TEXT, doc: "The effort's ref (`oxplow:oxplow/effort?id=eff<id>`)." }
       - { name: verdict, type: TEXT, doc: "`accepted` or `changes requested`." }
       - { name: reasons, type: "", doc: "Why it asks for changes, `; `-separated ('' when accepted)." }
       - { name: statements, type: "", doc: "DDL statements in the migration files it changed." }
@@ -65,4 +65,4 @@ ui:
   slots:
     - { slot: effort.review.details, lens: schema-changes }
   decorators:
-    - { model: verdict, kind: effort, placement: row-badge, label: label, color: color }
+    - { model: verdict, resource: oxplow/effort, placement: row-badge, label: label, color: color }

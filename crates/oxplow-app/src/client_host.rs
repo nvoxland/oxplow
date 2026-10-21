@@ -215,18 +215,18 @@ impl ClientHost {
     }
 }
 
-/// `tabs.write`'s operations' input: the tab (its id, `file:src/a.rs`,
-/// `page:git-dashboard`).
+/// `tabs.write`'s operations' input: the tab (its id, `oxplow:oxplow/file?path=src/a.rs`,
+/// `oxplow:oxplow/page?page=git-dashboard`).
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TabInput {
-    /// The tab's id: a page's ref (`file:src/a.rs`, `work_item:oxplow:tsk3`,
-    /// `page:git-dashboard`).
+    /// The tab's id: a page's ref (`oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/work_item?id=tsk3&provider=oxplow`,
+    /// `oxplow:oxplow/page?page=git-dashboard`).
     #[serde(rename = "ref")]
     pub tab: String,
 }
 
-/// `editor.write` `save`'s input: the file (its tab id, `file:src/a.rs`);
+/// `editor.write` `save`'s input: the file (its tab id, `oxplow:oxplow/file?path=src/a.rs`);
 /// none saves the one the thread shows.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -259,12 +259,12 @@ pub struct OpenProjectInput {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NavigateInput {
-    /// What to show: a page's ref (`file:src/a.rs`, `work_item:oxplow:tsk3`,
-    /// `effort:…`, `lens:…`, `wiki:…`, `dir:…`, `page:<route>`), or a
+    /// What to show: a page's ref (`oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/work_item?id=tsk3&provider=oxplow`,
+    /// `oxplow:oxplow/effort?id=…`, `oxplow:oxplow/lens?lens=…`, `oxplow:oxplow/wiki?slug=…`, `oxplow:oxplow/dir?path=…`, `oxplow:oxplow/page?page=<route>`), or a
     /// `stream:` / `thread:` ref to select it.
     #[serde(rename = "ref")]
     pub target: String,
-    /// The stream to switch to first (`stream:str1`).
+    /// The stream to switch to first (`oxplow:oxplow/stream?id=str1`).
     #[serde(default)]
     pub stream: Option<String>,
 }
@@ -372,11 +372,11 @@ mod tests {
                 &agent(Some(3)),
                 "tabs.write",
                 "open",
-                json!({ "ref": "file:a.rs" }),
+                json!({ "ref": "oxplow:oxplow/file?path=a.rs" }),
             )
             .await
             .unwrap();
-        assert_eq!(out, json!({ "opened": "file:a.rs" }));
+        assert_eq!(out, json!({ "opened": "oxplow:oxplow/file?path=a.rs" }));
         window.await.unwrap();
     }
 
@@ -426,14 +426,14 @@ mod tests {
                     stream_id: None,
                 },
                 "oxplow.tab.open",
-                json!({ "ref": "file:src/a.rs" }),
+                json!({ "ref": "oxplow:oxplow/file?path=src/a.rs" }),
                 false,
             )
             .await
             .unwrap();
         let (thread, input, answered) = window.await.unwrap();
         assert_eq!(thread, Some(fx.thread));
-        assert_eq!(input, json!({ "ref": "file:src/a.rs" }));
+        assert_eq!(input, json!({ "ref": "oxplow:oxplow/file?path=src/a.rs" }));
         assert!(answered);
         assert_eq!(out.result, json!({ "open": true }));
         assert_eq!(out.audit_id, None);
@@ -479,7 +479,7 @@ mod tests {
             thread_id: Some(fx.thread),
             stream_id: None,
         };
-        let input = json!({ "ref": "file:src/auth.rs", "stream": "stream:str2" });
+        let input = json!({ "ref": "oxplow:oxplow/file?path=src/auth.rs", "stream": "oxplow:oxplow/stream?id=str2" });
         let out = fx
             .svc
             .commands
@@ -492,7 +492,7 @@ mod tests {
         assert!(answered);
         assert_eq!(
             out.result,
-            json!({ "opened": "file:src/auth.rs", "stream": "str2" })
+            json!({ "opened": "oxplow:oxplow/file?path=src/auth.rs", "stream": "str2" })
         );
         assert_eq!(out.audit_id, None);
     }

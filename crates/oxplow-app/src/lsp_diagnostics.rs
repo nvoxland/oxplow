@@ -438,7 +438,13 @@ mod tests {
         };
         let first = logged_n(1).await;
         assert_eq!(first[0]["path"], "src/a.rs");
-        assert_eq!(first[0]["stream"], format!("stream:{}", stream.id));
+        assert_eq!(
+            first[0]["stream"],
+            oxplow_domain::uri::build::keyed(
+                oxplow_domain::uri::resources::STREAM,
+                &format!("{}", stream.id)
+            )
+        );
         assert_eq!(first[0]["counts"]["error"], 1);
 
         let wait = changed(&mut events);

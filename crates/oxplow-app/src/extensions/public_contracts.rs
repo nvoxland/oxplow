@@ -176,8 +176,8 @@ pub(super) fn load(
     }
 }
 
-/// A manifest's contribution ref (`model:effort-review/reviews`,
-/// `command:acme.pr.merge`). A global name says no owner: in an export or
+/// A manifest's contribution ref (`oxplow:oxplow/model?model=effort-review/reviews`,
+/// `oxplow:oxplow/command?command=acme.pr.merge`). A global name says no owner: in an export or
 /// guard it is the extension's own; in an import the owner is found when
 /// imports resolve ([`resolve_global_imports`]), until then its extension
 /// is empty.
@@ -204,7 +204,7 @@ fn parse_id(
     }
 }
 
-/// An import of a global name (`command:acme.pr.merge`) is of whichever
+/// An import of a global name (`oxplow:oxplow/command?command=acme.pr.merge`) is of whichever
 /// extension declares that name; one nothing declares stays ownerless
 /// and resolves as missing.
 fn resolve_global_imports(extensions: &mut [Extension]) {
@@ -779,21 +779,21 @@ fn prune_mounts(
                 .iter()
                 .map(|model| oxplow_db::models::extension_view(&ext.name, &model.decl.name))
                 .collect();
-            let pages: BTreeSet<_> = ext.pages.iter().map(|page| page.page_ref.clone()).collect();
-            ext.ref_kinds.retain(|kind| {
-                if models.contains(&kind.resolve)
-                    && pages.contains(&kind.page)
-                    && kind
-                        .searchable
-                        .as_ref()
-                        .is_none_or(|view| models.contains(view))
+            let core = ext.namespace == super::CORE_NAMESPACE;
+            ext.resources.retain(|resource| {
+                let decl = &resource.decl;
+                if core
+                    || [&decl.resolve, &decl.searchable]
+                        .into_iter()
+                        .flatten()
+                        .all(|view| models.contains(view))
                 {
                     true
                 } else {
                     removed.insert(ContributionId::new(
                         &ext.name,
-                        ContributionKind::RefKind,
-                        &kind.kind,
+                        ContributionKind::Resource,
+                        decl.name.name(),
                     ));
                     false
                 }

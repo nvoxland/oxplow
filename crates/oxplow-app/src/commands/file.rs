@@ -29,7 +29,7 @@ use crate::workspace_files::{WorkspaceError, WorkspaceFiles};
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SaveInput {
-    /// The stream whose worktree it's in (`stream:str2`).
+    /// The stream whose worktree it's in (`oxplow:oxplow/stream?id=str2`).
     pub stream: String,
     /// Its path in the worktree.
     pub path: String,
@@ -40,7 +40,7 @@ pub struct SaveInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateInput {
-    /// The stream whose worktree it's in (`stream:str2`).
+    /// The stream whose worktree it's in (`oxplow:oxplow/stream?id=str2`).
     pub stream: String,
     /// Its path in the worktree; the folders above it are made.
     pub path: String,
@@ -52,7 +52,7 @@ pub struct CreateInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PathInput {
-    /// The stream whose worktree it's in (`stream:str2`).
+    /// The stream whose worktree it's in (`oxplow:oxplow/stream?id=str2`).
     pub stream: String,
     /// Its path in the worktree.
     pub path: String,
@@ -61,7 +61,7 @@ pub struct PathInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RenameInput {
-    /// The stream whose worktree it's in (`stream:str2`).
+    /// The stream whose worktree it's in (`oxplow:oxplow/stream?id=str2`).
     pub stream: String,
     /// The file or directory as it is.
     pub from: String,
@@ -73,7 +73,7 @@ pub struct RenameInput {
 /// person any; anyone else only their own — an agent's tools' rule (an
 /// effect has none).
 fn stream_of(invocation: &Invocation, named: &str) -> Result<StreamId, CommandError> {
-    let stream: StreamId = ref_id(named, "stream", "/stream")?;
+    let stream: StreamId = ref_id(named, oxplow_domain::uri::resources::STREAM, "/stream")?;
     if !invocation.actor().may_confirm() && invocation.actor().stream_id() != Some(stream) {
         return Err(CommandError::Denied {
             reason: format!(
@@ -342,7 +342,10 @@ mod tests {
             .expect("file.saved logged");
         assert_eq!(saved.envelope.cause, out.event_id);
         assert_eq!(saved.envelope.payload["path"], json!("notes.txt"));
-        assert_eq!(saved.envelope.subject, vec!["file:notes.txt".to_string()]);
+        assert_eq!(
+            saved.envelope.subject,
+            vec!["oxplow:oxplow/file?path=notes.txt".to_string()]
+        );
     }
 
     async fn run(
@@ -478,7 +481,7 @@ mod tests {
     }
 
     fn stream_str(stream_ref: &str) -> String {
-        stream_ref.trim_start_matches("stream:").to_string()
+        oxplow_domain::uri::build::id_of(stream_ref, oxplow_domain::uri::resources::STREAM).unwrap()
     }
 
     /// A person works in any stream; an agent only in its own — the rule

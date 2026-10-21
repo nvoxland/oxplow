@@ -139,14 +139,16 @@ struggle signals (the bundled review policy's `v_oxplow_bundled_struggle`, over 
 
 ## Models (P4.2)
 
-Every connection registers one scalar function for refs,
-`lens_ref(id, key1, value1, …)` (`oxplow-db/src/sql_functions.rs`): it builds a
-`lens:` ref through `uri::build::lens_ref_with` — the params escaped like a
-URL query, a NULL value left out, a NULL id giving NULL, an even argument
-count an error — so a model or lens links to another lens
-(`lens_ref('oxplow-bundled/job-run-output', 'job_run', ref)`) without
-concatenating a prefix. Other refs are selected from their owning model's
-`ref` column (`.context/resources.md`).
+Every connection registers three scalar functions for URIs
+(`oxplow-db/src/sql_functions.rs`): `uri(resource, key1, value1, …)` builds
+a canonical URI — the params sorted and escaped, a NULL value left out —
+so a model or lens links to another lens
+(`uri('oxplow/lens', 'lens', 'oxplow-bundled/job-run-output', 'job_run', ref)`)
+or builds a record's URI (`uri('oxplow/effort', 'id', 'eff' || id)`) without
+concatenating a prefix; `uri_param(uri, key)` reads one param back (NULL when
+the URI lacks it or isn't one) and `uri_resource(uri)` its resource
+(`oxplow/work_item`). Other URIs are selected from their owning model's
+`ref` column (`.context/resources.md` "Using URIs").
 
 Extension models and lenses may use `import_ref('binding')` for a model declared
 in the extension's explicit public `imports`. The host resolves the canonical
@@ -567,8 +569,8 @@ What a query read is what it subscribes to.
   or through other models (reloading the lineage when `model_input`
   itself changes, and treating a lagged channel as "everything changed" —
   every table touched, the registry included: one `react` for both, so a
-  missed batch that held a `model`, `model_input` or `ref_kind` write
-  still re-registers the materialized models and the searchable kinds'
+  missed batch that held a `model`, `model_input` or `resource` write
+  still re-registers the materialized models and the searchable resources'
   indexes, tsk854),
   stamps each one's in-memory watermark (`ModelWatermarks`, derivable, so
   not persisted) and emits `OxplowEvent::ModelsChanged { models }`.
@@ -715,9 +717,9 @@ and `v_model_test` are the catalog of all of them:
 | `v_commit`, `v_commit_file`, `v_commit_work_item`, `v_branch`, `v_tag` | history, branches and tags (V85, V113). The commit indexer (`commit_indexer.rs`, run at boot and on each ref move, `RefMoves`) stores the commits reachable from **every stream's** head — new history whole, up to a 5000-commit horizon (`IndexDepth`) — through the VCS capability (`Vcs::log`/`revision`, `.context/vcs.md`) — with their files (first-parent diff) as it projects them into `page_ref`; `v_commit.parents` (JSON, v2) lets a stream's history be a recursive read from its branch's head. `v_commit_work_item` reads the indexer's work-item mention edges and the work-item → commit links (declared impacts, held effort work), for the active work list's items. `refresh_refs` restates `v_branch` (`is_default`, v2) and `v_tag` from `Vcs::branches`/`tags` and maps each local branch to the stream checked out on it. The desktop's history panel, dashboard lists, branch picker and new-stream form read these models (`apps/desktop/src/vcsHistory.ts`) |
 | `v_test_case_stat` | each test's summary per stream, branch and producer (V139, tsk733): last status and duration, runs, failures, flips, last failed / passed, max and mean duration — updated with every run, the home of per-test history since a run writes change-only per-case facts |
 | `v_test_run`, `v_test_case` | test runs (V87), views only. A run IS its `metric_capture` (producer `tests`, or `test-run` for a run that measured nothing), and both views read its verbatim `test-detail` payload in `detail_json`: counts from the payload, cases by `json_each` over `suites[].cases[]`. Cases come from the payload, not the `oxplow.test_case` facts, because those are skipped while every tests metric is disabled. `effort_id` (v2) is the capture's own: the effort of the tool call that ran it. A run that only reported counts (`oxplow.test.record_run`) has no cases |
-| `v_thread_answer` | the lenses an agent showed on a thread (`oxplow_show_lens`, V124, P6.C1): `ref` `answer:<id>`, `thread_id`, `turn_id` / `effort_id` open when it was shown, `title`, either `lens` (an existing lens id) or `spec` (the `LensSpec` as JSON), `params`, `created_at`, and `kept_lens` once someone kept it (extensions.md → "Thread answers") |
+| `v_thread_answer` | the lenses an agent showed on a thread (`oxplow_show_lens`, V124, P6.C1): `ref` `oxplow:oxplow/answer?id=<id>`, `thread_id`, `turn_id` / `effort_id` open when it was shown, `title`, either `lens` (an existing lens id) or `spec` (the `LensSpec` as JSON), `params`, `created_at`, and `kept_lens` once someone kept it (extensions.md → "Thread answers") |
 | `v_diagnostic` | what the language servers have published, right now (V86). `lsp_diagnostics.rs` subscribes to the LSP session broadcast and replaces a file's rows per `(stream, language, path)` on each `textDocument/publishDiagnostics` (paths repo-relative, positions 1-based, a URI outside the worktree dropped). Live state: the table is cleared at boot and a server's rows when it restarts, crashes or stops. Only files a server has published appear (usually the open ones, not the whole repo). A view re-runs on `ModelsChanged` when rows commit; at most every 500 ms per stream, from the first change (so a server that publishes continuously can't starve it), `code.diagnostics.changed@1` is logged per changed file (P5.C5) |
-| `v_symbol` / `v_symbol_capture` | the definitions oxplow's own tree-sitter extraction finds in each stream's files, in every supported language, no language server needed (V62) — the current tree, restated per changed file at each snapshot by the `symbols.collect` pump consumer (`ref` `symbol:<path>/<id>`, no revision, unique per stream; `kind` from one vocabulary; `container` `::`-joined; `signature` the parameter types in overloading languages; the name's `line`/`col` and the whole symbol's `start_*`..`end_*`), and what each snapshot's collection covered (`files_collected`, `files_failed`: content unreadable at the snapshot). Details: language-support.md "Symbols" |
+| `v_symbol` / `v_symbol_capture` | the definitions oxplow's own tree-sitter extraction finds in each stream's files, in every supported language, no language server needed (V62) — the current tree, restated per changed file at each snapshot by the `symbols.collect` pump consumer (`ref` `oxplow:oxplow/symbol?path=<path>&symbol=<id>`, no revision, unique per stream; `kind` from one vocabulary; `container` `::`-joined; `signature` the parameter types in overloading languages; the name's `line`/`col` and the whole symbol's `start_*`..`end_*`), and what each snapshot's collection covered (`files_collected`, `files_failed`: content unreadable at the snapshot). Details: language-support.md "Symbols" |
 
 **Column docs live with the model, not here.** `models.yaml` documents
 every column, and the registry is the catalog: `v_model` +
@@ -981,7 +983,7 @@ oxplow's own.
 `collector_run` row and its `collector.synced@1` event in **one
 transaction**; a failed run commits the failure the same way (no rows,
 the last good counts and checkpoint kept). The event's subject is
-`collector:<owner>/<id>` (ref kind `collector`), its `trigger` is
+`oxplow:oxplow/collector?collector=<owner>/<id>` (resource `oxplow/collector`), its `trigger` is
 `manual` (`oxplow.collector.sync` by an actor), `every` (the scheduler, as the
 system) or `on`. `collector_run` (V133, `v_collector_run`; it replaced
 V75 `ext_source_state`) keeps `owner, id, status (ok | error |

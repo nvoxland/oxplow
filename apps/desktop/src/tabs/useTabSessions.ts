@@ -5,7 +5,7 @@ import { shellStorage } from "../shellStorage.js";
 import { emptySession, parseSession, serializeSession, type Session } from "./session.js";
 
 /** Every thread's center tabs (`tabs/session.ts`), in one key. */
-export const SESSIONS_STORAGE_KEY = "oxplow.layout.v4.sessions";
+export const SESSIONS_STORAGE_KEY = "oxplow.layout.v5.sessions";
 
 /** The stored sessions; nothing for text that isn't them. */
 export function readPersistedSessions(): Record<string, Session> {

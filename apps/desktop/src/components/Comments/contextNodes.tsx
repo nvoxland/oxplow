@@ -2,12 +2,10 @@
 /// selection can discover the typed entity (and the hierarchy of
 /// entities) it sits inside.
 ///
-/// Any element that represents a canonical thing carries two data
-/// attributes using the same `(kind,id)` vocabulary as tab ids and the
-/// `page_ref` graph (`file` / `directory` / `wiki` / `task` /
-/// `commit` / `finding`, extensible):
+/// Any element that represents a canonical thing carries one data
+/// attribute: its URI, the same one tab ids and the `page_ref` graph use:
 ///
-///   <div data-ref-kind="commit" data-ref-id="abc1234"> … </div>
+///   <div data-ref="oxplow:oxplow/commit?sha=abc1234"> … </div>
 ///
 /// Because `window.getSelection()` hands back raw DOM nodes, the only
 /// uniform way to ask "what typed region is this selection in?" across
@@ -20,24 +18,11 @@
 
 import type { ReactNode } from "react";
 
-/// A canonical cross-page reference — matches the backend
-/// `CommentTarget` `{ kind, id }` shape (and the `page_ref` vocabulary).
-export interface RefNode {
-  kind: string;
-  id: string;
-}
+const REF_ATTR = "data-ref";
 
-const KIND_ATTR = "data-ref-kind";
-const ID_ATTR = "data-ref-id";
-
-/// The nearest element at or above `node` that carries BOTH `data-ref-*`
-/// attributes, read as a [`RefNode`]. A node with only one of the two
-/// attributes is malformed and skipped (we keep climbing).
-function refOf(el: Element): RefNode | null {
-  const kind = el.getAttribute(KIND_ATTR);
-  const id = el.getAttribute(ID_ATTR);
-  if (kind && id) return { kind, id };
-  return null;
+/// The URI an element declares, or null when it declares none.
+function refOf(el: Element): string | null {
+  return el.getAttribute(REF_ATTR) || null;
 }
 
 /// Resolve the starting element for an ancestor walk. Selections often
@@ -49,22 +34,19 @@ function startElement(node: Node | null): Element | null {
 }
 
 /// Walk from `node` up through its ancestors collecting every context
-/// node, innermost→outermost. Adjacent duplicates (the same `(kind,id)`
+/// node, innermost→outermost. Adjacent duplicates (the same URI
 /// declared on a wrapper and its child) collapse to one entry, so a
 /// region can be marked on multiple nested elements without polluting
 /// the chain.
-export function collectContextChain(node: Node | null): RefNode[] {
-  const chain: RefNode[] = [];
+export function collectContextChain(node: Node | null): string[] {
+  const chain: string[] = [];
   let el = startElement(node);
-  let lastKey = "";
+  let last = "";
   while (el) {
     const ref = refOf(el);
-    if (ref) {
-      const key = `${ref.kind}\u0000${ref.id}`;
-      if (key !== lastKey) {
-        chain.push(ref);
-        lastKey = key;
-      }
+    if (ref && ref !== last) {
+      chain.push(ref);
+      last = ref;
     }
     el = el.parentElement;
   }
@@ -74,54 +56,49 @@ export function collectContextChain(node: Node | null): RefNode[] {
 /// The innermost context node at or above `node`, or `null` when the
 /// selection sits in a region that declares no typed identity (the
 /// caller then falls back to the active page's own tab ref).
-export function nearestContextNode(node: Node | null): RefNode | null {
+export function nearestContextNode(node: Node | null): string | null {
   return collectContextChain(node)[0] ?? null;
 }
 
-/// The nearest ELEMENT at or above `node` that carries both `data-ref-*`
-/// attributes — the anchoring element whose `textContent` a plain-DOM
+/// The nearest ELEMENT at or above `node` that carries a `data-ref` — the anchoring element whose `textContent` a plain-DOM
 /// comment's quote is resolved within. Returns `null` when the selection
 /// sits outside any context node.
 export function nearestContextElement(node: Node | null): Element | null {
   const start = startElement(node);
-  return start ? start.closest(`[${KIND_ATTR}][${ID_ATTR}]`) : null;
+  return start ? start.closest(`[${REF_ATTR}]`) : null;
 }
 
-/// Read the [`RefNode`] declared directly on `el`, or `null` when `el`
-/// is missing either attribute.
-export function refOfElement(el: Element): RefNode | null {
+/// Read the URI declared directly on `el`, or `null` when it declares none.
+export function refOfElement(el: Element): string | null {
   return refOf(el);
 }
 
-/// The data attributes that mark an element as a context node. Spread
+/// The data attribute that marks an element as a context node. Spread
 /// onto any element to declare its canonical identity:
 ///
-///   <tr {...contextNodeProps("work_item", `oxplow:${id}`)}> … </tr>
-export function contextNodeProps(kind: string, id: string): Record<string, string> {
-  return { [KIND_ATTR]: kind, [ID_ATTR]: id };
+///   <tr {...contextNodeProps(item.ref)}> … </tr>
+export function contextNodeProps(uri: string): Record<string, string> {
+  return { [REF_ATTR]: uri };
 }
 
 /// Hook form of [`contextNodeProps`] for call sites that prefer it.
-export function useContextNode(kind: string, id: string): Record<string, string> {
-  return contextNodeProps(kind, id);
+export function useContextNode(uri: string): Record<string, string> {
+  return contextNodeProps(uri);
 }
 
-/// Declarative wrapper: renders a `<div>` (or the given `as` element)
-/// tagged as a context node. Use when there isn't already an element to
-/// hang the attributes on.
+/// Declarative wrapper: renders a `<div>` tagged as a context node. Use
+/// when there isn't already an element to hang the attribute on.
 export function ContextNode({
-  kind,
-  id,
+  uri,
   children,
   className,
 }: {
-  kind: string;
-  id: string;
+  uri: string;
   children?: ReactNode;
   className?: string;
 }): ReactNode {
   return (
-    <div className={className} {...contextNodeProps(kind, id)}>
+    <div className={className} {...contextNodeProps(uri)}>
       {children}
     </div>
   );

@@ -35,8 +35,8 @@ pub struct LinkWarning {
 /// written, which may link to itself before its row exists.
 pub struct LinkWorld<'a> {
     pub conn: &'a rusqlite::Connection,
-    /// The ref kinds links may name (the running vocabulary's).
-    pub kinds: &'a oxplow_domain::uri::types::TypeRegistry,
+    /// The resources links may name (the running vocabulary's).
+    pub resources: &'a oxplow_domain::uri::resources::ResourceRegistry,
     pub project_dir: &'a std::path::Path,
     pub graph: &'a dyn RevisionGraph,
     pub this_page: Option<&'a str>,
@@ -48,10 +48,10 @@ pub struct LinkWorld<'a> {
 /// Synchronous, so a command validates inside its transaction.
 pub fn check_links_in(world: &LinkWorld<'_>, body: &str) -> Vec<LinkWarning> {
     let mut out = Vec::new();
-    for link in classify_wikilinks(world.kinds, body) {
+    for link in classify_wikilinks(world.resources, body) {
         match (&link.reference, &link.canonical) {
-            // A kind the vocabulary knows with no typed probe here: one a
-            // model holds (`v_ref_kind.resolve`, core's or an extension's)
+            // A resource the vocabulary knows with no typed probe here: one a
+            // model holds (its `resolve:`)
             // is checked against it, any other is a link as it stands
             // (tsk894).
             (None, Some(canonical)) => {
@@ -107,7 +107,7 @@ impl LinkDeps {
         body: &str,
         thread: Option<oxplow_domain::ThreadId>,
     ) -> Vec<LinkWarning> {
-        self.warnings_tx(ctx.conn, &ctx.events.vocabulary.kinds, body, thread)
+        self.warnings_tx(ctx.conn, &ctx.events.vocabulary.resources, body, thread)
     }
 
     /// The links in a work item's `body` that don't resolve, on a read of
@@ -140,7 +140,7 @@ impl LinkDeps {
                     (None, None) => None,
                 };
                 let vocabulary = deps.vocabulary.current();
-                Ok(deps.warnings_tx(tx, &vocabulary.kinds, &body, thread))
+                Ok(deps.warnings_tx(tx, &vocabulary.resources, &body, thread))
             })
             .await;
         read.unwrap_or_else(|error| {
@@ -152,7 +152,7 @@ impl LinkDeps {
     fn warnings_tx(
         &self,
         conn: &rusqlite::Connection,
-        kinds: &oxplow_domain::uri::types::TypeRegistry,
+        resources: &oxplow_domain::uri::resources::ResourceRegistry,
         body: &str,
         thread: Option<oxplow_domain::ThreadId>,
     ) -> Vec<LinkWarning> {
@@ -163,7 +163,7 @@ impl LinkDeps {
         check_links_in(
             &LinkWorld {
                 conn,
-                kinds,
+                resources,
                 project_dir: &root,
                 graph: &*graph,
                 this_page: None,
@@ -222,7 +222,7 @@ pub async fn check_links_at(
         Ok(check_links_in(
             &LinkWorld {
                 conn,
-                kinds: &vocabulary.kinds,
+                resources: &vocabulary.resources,
                 project_dir: &project_dir,
                 graph: &*graph,
                 this_page: None,
@@ -240,26 +240,16 @@ fn exists(conn: &rusqlite::Connection, sql: &str, param: &dyn rusqlite::ToSql) -
         .unwrap_or(false)
 }
 
-/// `Some(reason)` when `canonical` is of a kind whose `resolve`
-/// model has no row for it (`v_ref_kind.resolve`, by its `ref` column).
-/// A kind with no `resolve` model, or one that can't be read, isn't
-/// probed.
+/// `Some(reason)` when `canonical` is of a resource whose `resolve`
+/// model has no row for it (by its `ref` column). A resource with no
+/// `resolve` model, or one that can't be read, isn't probed.
 fn unresolved_ref(
     world: &LinkWorld<'_>,
-    canonical: &oxplow_domain::uri::grammar::Uri,
+    canonical: &oxplow_domain::uri::OxplowUri,
 ) -> Option<String> {
     use rusqlite::OptionalExtension;
-    let resolve: String = world
-        .conn
-        .query_row(
-            "SELECT resolve FROM v_ref_kind WHERE kind = ?1 AND resolve IS NOT NULL",
-            [&canonical.kind],
-            |r| r.get(0),
-        )
-        .optional()
-        .ok()
-        .flatten()?;
-    let at = canonical.to_string();
+    let resolve = world.resources.get(canonical.resource())?.resolve.clone()?;
+    let at = canonical.identity();
     let found = world
         .conn
         .query_row(
@@ -282,12 +272,10 @@ fn unresolved_ref(
 fn missing_reason(world: &LinkWorld<'_>, reference: &Reference) -> Option<String> {
     match reference {
         // Through the interface: the active list's items.
-        Reference::WorkItem(id) => (!exists(
-            world.conn,
-            "SELECT 1 FROM v_work_item WHERE ref = ?1",
-            &oxplow_domain::uri::build::of("work_item", id),
-        ))
-        .then(|| format!("work item `{id}` does not exist")),
+        Reference::WorkItem(uri) => {
+            (!exists(world.conn, "SELECT 1 FROM v_work_item WHERE ref = ?1", uri))
+                .then(|| format!("work item `{uri}` does not exist"))
+        }
         Reference::Wiki(slug) => (world.this_page != Some(slug.as_str())
             && !exists(world.conn, "SELECT 1 FROM wiki_page WHERE slug = ?1", slug))
         .then(|| format!("wiki page `{slug}` does not exist")),
@@ -380,7 +368,7 @@ mod tests {
         assert!(
             warnings[0]
                 .reason
-                .contains("`oxplow:tsk999` does not exist"),
+                .contains("`oxplow:oxplow/work_item?id=tsk999&provider=oxplow` does not exist"),
             "{}",
             warnings[0].reason
         );

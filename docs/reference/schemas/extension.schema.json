@@ -51,7 +51,7 @@
           "type": "string"
         },
         "origin": {
-          "description": "The thread or effort ref that created it (`effort:eff42`), when known.",
+          "description": "The thread or effort ref that created it (`oxplow:oxplow/effort?id=eff42`), when known.",
           "type": [
             "string",
             "null"
@@ -275,17 +275,6 @@
       ],
       "default": null
     },
-    "ref_kinds": {
-      "description": "Kinds of thing a ref can name.",
-      "type": [
-        "array",
-        "null"
-      ],
-      "items": {
-        "$ref": "#/definitions/RefKindFile"
-      },
-      "default": null
-    },
     "resources": {
       "description": "What its URIs may name (`oxplow:<extension>/<resource>`).",
       "type": [
@@ -293,7 +282,7 @@
         "null"
       ],
       "items": {
-        "$ref": "#/definitions/ResourceFile"
+        "$ref": "#/definitions/ResourceEntry"
       },
       "default": null
     },
@@ -2004,7 +1993,7 @@
           "default": null
         },
         "form": {
-          "description": "What gathers its input — a page (a tab id, `page:new-task`) or one\nof the window's own forms (`new-thread`, `commit`): choosing it\nopens that rather than running it.",
+          "description": "What gathers its input — a page (a tab id, `oxplow:oxplow/page?page=new-task`) or one\nof the window's own forms (`new-thread`, `commit`): choosing it\nopens that rather than running it.",
           "type": [
             "string",
             "null"
@@ -2012,7 +2001,7 @@
           "default": null
         },
         "open_after": {
-          "description": "The page to open once it ran: a tab id whose `{{result.<field>}}`\ntakes the result's field (`page:custom-dashboard?id={{result.id}}`).",
+          "description": "The page to open once it ran: a tab id whose `{{result.<field>}}`\ntakes the result's field (`oxplow:oxplow/page?id={{result.id}}&page=custom-dashboard`).",
           "type": [
             "string",
             "null"
@@ -2571,7 +2560,7 @@
         "model": {
           "type": "string"
         },
-        "kind": {
+        "resource": {
           "type": "string"
         },
         "placement": {
@@ -2591,7 +2580,7 @@
       "additionalProperties": false,
       "required": [
         "model",
-        "kind",
+        "resource",
         "placement",
         "label"
       ]
@@ -2838,55 +2827,8 @@
       },
       "additionalProperties": false
     },
-    "RefKindFile": {
-      "description": "A `ref_kinds:` entry as the manifest holds it.",
-      "type": "object",
-      "properties": {
-        "kind": {
-          "type": "string"
-        },
-        "label": {
-          "type": "string"
-        },
-        "id": {
-          "type": "string"
-        },
-        "resolve": {
-          "type": "string"
-        },
-        "page": {
-          "type": "string"
-        },
-        "wikilink": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
-        "searchable": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
-        "icon": {
-          "type": "string"
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "kind",
-        "label",
-        "id",
-        "resolve",
-        "page",
-        "icon"
-      ]
-    },
-    "ResourceFile": {
-      "description": "A `resources:` entry as the manifest holds it.",
+    "ResourceEntry": {
+      "description": "A `resources:` entry as a manifest holds it. `resolve` and `searchable`\nname models as the manifest does; the app's loader turns them into the\nviews they publish as and checks them (`extension_resources`).",
       "type": "object",
       "properties": {
         "name": {
@@ -2943,6 +2885,14 @@
             {
               "type": "null"
             }
+          ],
+          "default": null
+        },
+        "page": {
+          "description": "One of the extension's pages (its id), which opens one given\n`ref=<uri>`.",
+          "type": [
+            "string",
+            "null"
           ],
           "default": null
         }
@@ -3095,7 +3045,7 @@
       "type": "object",
       "properties": {
         "id": {
-          "description": "The provider's id: its program's approval (`<extension>/<id>`) and\nthe id of its default instance — an instance's id is its refs'\nsegment (`work_item:<id>:…`) and its commands' namespace\n(`<id>.estimate`).",
+          "description": "The provider's id: its program's approval (`<extension>/<id>`) and\nthe id of its default instance — an instance's id is its refs'\nsegment (`oxplow:oxplow/work_item?id=…&provider=<id>`) and its commands' namespace\n(`<id>.estimate`).",
           "type": "string"
         },
         "capability": {

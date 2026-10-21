@@ -11,7 +11,7 @@ use serde::Serialize;
 
 use oxplow_domain::events::schema::{HandoffSent, HandoffSentV1, HandoffSettled, HandoffSettledV1};
 use oxplow_domain::uri::build::{handoff_uri, thread_uri};
-use oxplow_domain::uri::types::{TypeRegistry, HANDOFF};
+use oxplow_domain::uri::resources::ResourceRegistry;
 use oxplow_domain::{AgentSessionId, DomainError, Envelope, HandoffId, ThreadId, Timestamp};
 
 use crate::database::{map_sql_err, string_to_ts, ts_to_string, Database};
@@ -141,7 +141,7 @@ pub fn handoff_tx(
 /// transaction). Returns it and the `handoff.sent` to log.
 pub fn send_tx(
     conn: &rusqlite::Connection,
-    kinds: &TypeRegistry,
+    kinds: &ResourceRegistry,
     new: NewHandoff<'_>,
 ) -> Result<(Handoff, Envelope), DomainError> {
     let now = Timestamp::now();
@@ -161,12 +161,8 @@ pub fn send_tx(
     )
     .map_err(map_sql_err)?;
     let id = HandoffId::new(conn.last_insert_rowid());
-    replace_source_tx(
-        conn,
-        HANDOFF,
-        &id.to_string(),
-        note_edges(kinds, HANDOFF, &id.to_string(), new.body),
-    )?;
+    let uri = handoff_uri(id);
+    replace_source_tx(conn, &uri, note_edges(kinds, &uri, new.body))?;
     let handoff = handoff_tx(conn, id)?.ok_or_else(|| {
         DomainError::Invalid(format!("handoff `{id}` vanished in its own transaction"))
     })?;
@@ -286,14 +282,14 @@ impl SqliteHandoffStore {
             .await
     }
 
-    /// Every handoff's id and body, for the boot-time `page_ref` backfill.
+    /// Every handoff's URI and body, for the boot-time `page_ref` backfill.
     pub async fn list_all_for_backfill(&self) -> Result<Vec<(String, String)>, DomainError> {
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare("SELECT id, body FROM handoff")?;
                 let rows = stmt.query_map([], |r| {
                     Ok((
-                        HandoffId::new(r.get::<_, i64>(0)?).to_string(),
+                        handoff_uri(HandoffId::new(r.get::<_, i64>(0)?)),
                         r.get::<_, String>(1)?,
                     ))
                 })?;

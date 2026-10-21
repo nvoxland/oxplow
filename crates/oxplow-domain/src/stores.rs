@@ -10,7 +10,7 @@
 use async_trait::async_trait;
 
 use crate::agent_session::{AgentSession, NewAgentSession};
-use crate::comment::{CommentTarget, CommentThread};
+use crate::comment::CommentThread;
 use crate::hook::{AgentStatus, AgentTurn};
 use crate::ids::{AgentSessionId, AgentTurnId, CommentId, StreamId, ThreadId};
 use crate::stream::Stream;
@@ -138,10 +138,7 @@ pub trait CommentStore: Send + Sync {
     // Writing a comment is a `knowledge.*_comment` command (P8.A6), over
     // `oxplow_db::comment_store::*_tx`.
     async fn get(&self, id: CommentId) -> Result<Option<CommentThread>, DomainError>;
-    async fn list_for_target(
-        &self,
-        target: &CommentTarget,
-    ) -> Result<Vec<CommentThread>, DomainError>;
+    async fn list_for_target(&self, target: &str) -> Result<Vec<CommentThread>, DomainError>;
     async fn list_for_stream(&self, stream: &StreamId) -> Result<Vec<CommentThread>, DomainError>;
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<CommentThread>, DomainError>;
 

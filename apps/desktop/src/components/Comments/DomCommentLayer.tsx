@@ -11,7 +11,7 @@
 //!   - opens a thread popover when a highlight is clicked.
 //!
 //! It is target-agnostic: it shows every stream comment whose
-//! `(target_kind, target_id)` matches a context node currently on the
+//! its target URI matches a context node currently on the
 //! page, so the same component serves the tasks list, the file list, the
 //! git dashboard, etc. Editor surfaces (Monaco, ProseMirror) keep their
 //! own layers — this one deliberately skips their subtrees.
@@ -36,10 +36,8 @@ function cssEscape(value: string): string {
 
 /// Find the on-page element that declares a comment's target context
 /// node, or null when that target isn't currently rendered.
-function targetElement(kind: string, id: string): Element | null {
-  return document.querySelector(
-    `[data-ref-kind="${cssEscape(kind)}"][data-ref-id="${cssEscape(id)}"]`,
-  );
+function targetElement(target: string): Element | null {
+  return document.querySelector(`[data-ref="${cssEscape(target)}"]`);
 }
 
 interface Painted {
@@ -78,7 +76,7 @@ export function DomCommentLayer({
     const painted: Painted[] = [];
     for (const t of threads) {
       const c = t.comment;
-      const el = targetElement(c.target_kind, c.target_id);
+      const el = targetElement(c.target);
       if (!el) continue;
       const text = el.textContent ?? "";
       const res = resolveAnchor(text, anchorInputFromSelectors(c.selectors_json, c.quote));
@@ -146,12 +144,11 @@ export function DomCommentLayer({
     await createComment({
       streamId,
       threadId,
-      targetKind: pending.targetKind,
-      targetId: pending.targetId,
+      target: pending.target,
       quote: pending.quote,
       selectorsJson: pending.selectorsJson,
       contextChain: pending.contextChain,
-      referencedRefs: pending.referencedRefs,
+      referenced: pending.referenced,
       intent: input.intent,
       body: input.body,
     });

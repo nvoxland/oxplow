@@ -32,7 +32,7 @@ pub const REPORT: &str = "oxplow.effort.report";
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReportInput {
-    /// The thread whose effort it is (`thread:thr3`): an agent's is always
+    /// The thread whose effort it is (`oxplow:oxplow/thread?id=thr3`): an agent's is always
     /// its own; a person names one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
@@ -44,7 +44,7 @@ pub struct ReportInput {
     #[serde(default)]
     pub impacts: Vec<EffortImpact>,
     /// What you claim about the work and can back ("the parser tests
-    /// pass", citing `run:<id>`): recorded on the effort for its review,
+    /// pass", citing `oxplow:oxplow/run?id=<id>`): recorded on the effort for its review,
     /// replacing the claims an earlier report stated that nobody reviewed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(length(max = 8))]
@@ -98,12 +98,12 @@ async fn report(
     actor: Actor,
     input: ReportInput,
 ) -> Result<Value, CommandError> {
-    use oxplow_db::page_ref_projections::{impact_kind, IMPACT_KINDS};
+    use oxplow_db::page_ref_projections::IMPACT_KINDS;
     if let Some((i, imp)) = input
         .impacts
         .iter()
         .enumerate()
-        .find(|(_, imp)| impact_kind(&imp.kind).is_none())
+        .find(|(_, imp)| !IMPACT_KINDS.contains(&imp.kind.as_str()))
     {
         return Err(invalid(
             &format!("/impacts/{i}/kind"),
@@ -117,7 +117,7 @@ async fn report(
     let named = input
         .thread
         .as_deref()
-        .map(|t| ref_id(t, "thread", "/thread"))
+        .map(|t| ref_id(t, oxplow_domain::uri::resources::THREAD, "/thread"))
         .transpose()?;
     let thread = match agents_thread(&actor, named)? {
         Some(own) => own,
@@ -482,7 +482,7 @@ mod tests {
             }
         };
         report(json!([
-            { "statement": "the parser tests pass", "kind": "tests_pass", "evidence_ref": "run:1" },
+            { "statement": "the parser tests pass", "kind": "tests_pass", "evidence_ref": "oxplow:oxplow/run?id=1" },
             { "statement": "no behavior change", "kind": "no_behavior_change" },
         ]))
         .await;
@@ -517,7 +517,12 @@ mod tests {
             json!([
                 ["handles empty input", "inferred", null, null],
                 ["no behavior change", "recorded", null, null],
-                ["the parser tests pass", "recorded", "run:1", null],
+                [
+                    "the parser tests pass",
+                    "recorded",
+                    "oxplow:oxplow/run?id=1",
+                    null
+                ],
             ])
         );
 

@@ -580,9 +580,9 @@ struct LauncherFile {
 )]
 #[serde(rename_all = "kebab-case")]
 pub enum LensLinkKind {
-    /// `file:<path>`; the value is a repo-relative path.
+    /// `oxplow:oxplow/file?path=<path>`; the value is a repo-relative path.
     File,
-    /// `wiki:<slug>`.
+    /// `oxplow:oxplow/wiki?slug=<slug>`.
     Wiki,
     /// The effort's diff view; the value is an effort id.
     EffortDiff,
@@ -590,8 +590,8 @@ pub enum LensLinkKind {
     Commit,
     /// A metric's page; the value is a metric key.
     Metric,
-    /// Any oxplow page by its tab id (`work_item:oxplow:<id>`,
-    /// `commit:<sha>`, `page:git-dashboard`, …),
+    /// Any oxplow page by its tab id (`oxplow:oxplow/work_item?id=<id>&provider=oxplow`,
+    /// `oxplow:oxplow/commit?sha=<sha>`, `oxplow:oxplow/page?page=git-dashboard`, …),
     /// e.g. `v_page_visit.page_id`.
     Page,
     /// A file's diff within a change: the value is the path; `line`,
@@ -1746,7 +1746,7 @@ pub struct ExtensionPanel {
     pub body: String,
     /// The badge lens, which declares an `alert`.
     pub badge: Option<String>,
-    /// The page its header opens (`page:<kind>`, a canonical ref): a core
+    /// The page its header opens (`oxplow:oxplow/page?page=<kind>`, a canonical ref): a core
     /// page the panel summarizes, as Comments opens the inbox.
     /// Absent, the body lens's own page.
     pub open: Option<String>,
@@ -1760,15 +1760,15 @@ pub struct ExtensionPanel {
 }
 
 /// A page an extension contributes (P6.G2, target §11.3): a lens shown
-/// full-page at `page:<extension>/<id>`, listed in the launcher under
+/// full-page at `oxplow:oxplow/page?page=<extension>/<id>`, listed in the launcher under
 /// its category.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtensionPage {
     pub id: String,
     pub extension: String,
-    /// Its tab id: `page:<id>` for the oxplow-namespace extension (its
-    /// pages are core-named, as its commands are), `page:<extension>/<id>`
+    /// Its tab id: `oxplow:oxplow/page?page=<id>` for the oxplow-namespace extension (its
+    /// pages are core-named, as its commands are), `oxplow:oxplow/page?page=<extension>/<id>`
     /// for any other.
     pub page_ref: String,
     pub title: String,
@@ -1778,7 +1778,7 @@ pub struct ExtensionPage {
     pub category: Option<LauncherCategory>,
     /// More words the launcher matches it on.
     pub keywords: Option<String>,
-    /// The params its id carries (`page:settings?area=agents`).
+    /// The params its id carries (`oxplow:oxplow/page?area=agents&page=settings`).
     pub params: Vec<String>,
     /// The lens whose value (a `number` lens) is the launcher's badge
     /// (`<extension>/<slug>`).
@@ -1788,7 +1788,7 @@ pub struct ExtensionPage {
 }
 
 /// The namespace oxplow's own extension declares (`namespace: oxplow`): its
-/// commands are `oxplow.<area>.<verb>` and its pages `page:<id>`.
+/// commands are `oxplow.<area>.<verb>` and its pages `oxplow:oxplow/page?page=<id>`.
 pub const CORE_NAMESPACE: &str = "oxplow";
 
 /// What draws a page: a lens core renders through the kit, or — for the
@@ -2011,9 +2011,6 @@ pub struct Extension {
     /// Event types it declares (valid ones — the vocabulary registers
     /// them, `vocabulary_reactor`).
     pub event_types: crate::extension_event_types::EventTypes,
-    /// Ref kinds it declares (valid ones — the vocabulary registers
-    /// them, `vocabulary_reactor`).
-    pub ref_kinds: Vec<crate::extension_ref_kinds::RefKindDecl>,
     /// Resources it declares (valid ones — the vocabulary registers
     /// them, `vocabulary_reactor`).
     pub resources: Vec<crate::extension_resources::ExtensionResource>,
@@ -3151,7 +3148,6 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         providers: Vec::new(),
         custom_components: Vec::new(),
         event_types: Default::default(),
-        ref_kinds: Vec::new(),
         resources: Vec::new(),
         effects: Vec::new(),
         implementations: Vec::new(),
@@ -3310,7 +3306,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     let decorator_files = m.ui.decorators.clone();
     let replacement_files = m.ui.replacements.clone();
     let page_files = m.pages.clone();
-    let ref_kind_files = m.ref_kinds.clone();
     let resource_files = m.resources.clone();
     let slot_files = {
         if let Some(v) = m.event_types.as_ref() {
@@ -3973,25 +3968,13 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             at(&file, line.or(key_line(&manifest, "pages")), e)
         }));
     }
-    // After models and pages: a ref kind names one of each.
-    if let Some(v) = ref_kind_files {
-        let (kinds, errors) = crate::extension_ref_kinds::parse_ref_kinds(
-            name,
-            &ext.models,
-            &ext.pages,
-            &v,
-            &file,
-            &manifest,
-        );
-        ext.ref_kinds = kinds;
-        ext.errors.extend(errors);
-    }
     // After models: a resource is titled by one.
     if let Some(v) = resource_files {
         let (resources, errors) = crate::extension_resources::parse_resources(
             name,
             &ext.namespace,
             &ext.models,
+            &ext.pages,
             &v,
             &file,
             &manifest,
@@ -4323,12 +4306,12 @@ fn parse_pages(
         } else if p
             .icon
             .as_deref()
-            .is_some_and(|i| !crate::extension_ref_kinds::REF_KIND_ICONS.contains(&i))
+            .is_some_and(|i| !crate::extension_resources::RESOURCE_ICONS.contains(&i))
         {
             errors.push(err(format!(
                 "its icon `{}` isn't one oxplow draws (one of {})",
                 p.icon.as_deref().unwrap_or_default(),
-                crate::extension_ref_kinds::REF_KIND_ICONS.join(", ")
+                crate::extension_resources::RESOURCE_ICONS.join(", ")
             )));
         } else if let Some(bad) = p.params.iter().find(|n| {
             n.is_empty()
@@ -4342,7 +4325,7 @@ fn parse_pages(
         } else {
             pages.push(ExtensionPage {
                 page_ref: if core_named {
-                    oxplow_domain::uri::build::page_uri(&p.id, None)
+                    oxplow_domain::uri::build::page_uri(&p.id, &[])
                 } else {
                     oxplow_domain::uri::build::extension_page_uri(extension, &p.id)
                 },
@@ -4405,11 +4388,14 @@ fn parse_panels(
         };
         let mut ok = true;
         if let Some(open) = &p.open {
-            let page =
-                oxplow_domain::uri::grammar::Uri::parse(open).is_ok_and(|r| r.kind == "page");
+            let page = oxplow_domain::uri::build::parse_resource(
+                open,
+                oxplow_domain::uri::resources::PAGE,
+            )
+            .is_ok();
             if !page {
                 errors.push(err(format!(
-                    "`open` must be a page ref (`page:<kind>`), not `{open}`"
+                    "`open` must be a page URI (`oxplow:oxplow/page?page=<page>`), not `{open}`"
                 )));
                 ok = false;
             }
@@ -4977,7 +4963,6 @@ pub(super) fn clear_contributions(ext: &mut Extension) {
     ext.providers.clear();
     ext.custom_components.clear();
     ext.event_types = Default::default();
-    ext.ref_kinds.clear();
     ext.resources.clear();
     ext.effects.clear();
     ext.implementations.clear();
@@ -5474,7 +5459,7 @@ fn check_fixture_pairing(ext: &mut Extension, files: &dyn ExtensionFiles) {
 /// `None` where there's no running app to ask (the CLI).
 pub trait RunningCommands: Sync {
     fn input_schema(&self, name: &str) -> Option<serde_json::Value>;
-    /// Who holds `namespace` (`oxplow`, `extension:<name>`,
+    /// Who holds `namespace` (`oxplow`, `oxplow:oxplow/extension?name=<name>`,
     /// `provider:<instance>`), `None` when it's free.
     fn namespace_owner(&self, _namespace: &str) -> Option<String> {
         None
@@ -6996,7 +6981,7 @@ empty: No items.
         };
         let origin = LensOrigin {
             purpose: "Busy Files",
-            origin: Some("thread:thr1"),
+            origin: Some("oxplow:oxplow/thread?id=thr1"),
         };
         let lens = save_lens(
             project.path(),
@@ -7014,7 +6999,10 @@ empty: No items.
                 .join(".oxplow/extensions/my-lenses/extension.yaml"),
         )
         .unwrap();
-        assert!(manifest.contains("origin: thread:thr1"), "{manifest}");
+        assert!(
+            manifest.contains("origin: oxplow:oxplow/thread?id=thr1"),
+            "{manifest}"
+        );
         let bad = LensSpec {
             viz: LensViz::Bar,
             chart: None,
@@ -7612,7 +7600,7 @@ commands:
             .map(|c| c.id.to_string())
             .filter(|id| id.contains("ai_profile"))
             .collect();
-        assert_eq!(described, ["ai_profile:x/review"]);
+        assert_eq!(described, ["oxplow:oxplow/ai_profile?ai_profile=x/review"]);
     }
 
     /// Every command an agent is offered — core's, oxplow-foundation's and
@@ -8117,11 +8105,14 @@ commands:
         for name in names {
             let ext = load_one(&Disk(examples.join(&name)), &name, &name, "project");
             assert!(ext.errors.is_empty(), "{name}: {:?}", ext.errors);
-            // P10 (K3): the github example's pull-request kind is the use
-            // that made `ref_kinds` stable.
+            // The github example's pull requests are a resource of its own.
             if name == "github" {
-                let kinds: Vec<&str> = ext.ref_kinds.iter().map(|k| k.kind.as_str()).collect();
-                assert_eq!(kinds, vec!["github_pr"]);
+                let resources: Vec<String> = ext
+                    .resources
+                    .iter()
+                    .map(|r| r.decl.name.to_string())
+                    .collect();
+                assert_eq!(resources, vec!["github/pr"]);
             }
         }
     }
@@ -9356,18 +9347,21 @@ commands:
         // as the Comments panel opens the inbox); without one, its body lens.
         let (_d, ext) = load_x(
             &lenses,
-            "manifest: 2\nintent:\n  purpose: p\npanels:\n  - { id: c, title: C, scope: project, body: quiet, open: 'page:comments' }\n",
+            "manifest: 2\nintent:\n  purpose: p\npanels:\n  - { id: c, title: C, scope: project, body: quiet, open: 'oxplow:oxplow/page?page=comments' }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-        assert_eq!(ext.panels[0].open.as_deref(), Some("page:comments"));
+        assert_eq!(
+            ext.panels[0].open.as_deref(),
+            Some("oxplow:oxplow/page?page=comments")
+        );
         for (panel, says) in [
             (
                 "{ id: a, title: A, scope: project, body: quiet, open: comments }",
-                "`open` must be a page ref",
+                "`open` must be a page URI",
             ),
             (
                 "{ id: a, title: A, scope: project, body: quiet, open: 'task:1' }",
-                "`open` must be a page ref",
+                "`open` must be a page URI",
             ),
             (
                 "{ id: a, title: A, scope: project, body: nope }",
@@ -9457,7 +9451,7 @@ commands:
             &[
                 (
                     "a",
-                    "title: A\nviz: list\nquery: SELECT 1 AS id, 'Ready' AS bucket, 'page:tasks' AS bucket_ref, 1 AS current, 0 AS indent, 'done' AS glyph, 'success' AS hue\nparams: [{ name: stream_id, default: '' }]\ngroup: { by: bucket, link: { kind: page, from: bucket_ref } }\nemphasis: current\ndepth: indent\ncolumns:\n  - { key: id, icon: glyph, tone: hue }\nactions:\n  - { id: add, label: '+', command: oxplow.work_item.create, group: Ready, input: { stream: '{{param.stream_id}}' } }\n",
+                    "title: A\nviz: list\nquery: SELECT 1 AS id, 'Ready' AS bucket, 'oxplow:oxplow/page?page=tasks' AS bucket_ref, 1 AS current, 0 AS indent, 'done' AS glyph, 'success' AS hue\nparams: [{ name: stream_id, default: '' }]\ngroup: { by: bucket, link: { kind: page, from: bucket_ref } }\nemphasis: current\ndepth: indent\ncolumns:\n  - { key: id, icon: glyph, tone: hue }\nactions:\n  - { id: add, label: '+', command: oxplow.work_item.create, group: Ready, input: { stream: '{{param.stream_id}}' } }\n",
                 ),
                 ("t", "title: T\nviz: tree\nquery: SELECT 1 AS id, NULL AS p, 'x' AS l, 1 AS on_\ntree: { id: id, parent: p, label: l }\nemphasis: on_\n"),
                 ("b", "title: B\nviz: tree\nquery: SELECT 1 AS id, NULL AS p, 'x' AS l\ntree: { id: id, parent: p, label: l }\ngroup: { by: l }\n"),
@@ -9935,7 +9929,7 @@ commands:
     }
 
     /// An extension's page is a lens (or one of its custom components) at
-    /// `page:<extension>/<page>`, in the launcher under its category when it
+    /// `oxplow:oxplow/page?page=<extension>/<page>`, in the launcher under its category when it
     /// has one.
     #[test]
     fn pages_are_lenses_with_a_route() {
@@ -9957,7 +9951,7 @@ commands:
                 ExtensionPage {
                     id: "open-prs".into(),
                     extension: "x".into(),
-                    page_ref: "page:x/open-prs".into(),
+                    page_ref: "oxplow:oxplow/page?page=x/open-prs".into(),
                     title: "Open PRs".into(),
                     icon: Some("git-pull-request".into()),
                     category: Some(LauncherCategory::Work),
@@ -9971,7 +9965,7 @@ commands:
                 ExtensionPage {
                     id: "detail".into(),
                     extension: "x".into(),
-                    page_ref: "page:x/detail".into(),
+                    page_ref: "oxplow:oxplow/page?page=x/detail".into(),
                     title: "Detail".into(),
                     icon: None,
                     category: None,

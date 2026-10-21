@@ -4,4 +4,4 @@
 SELECT t.stream_id, t.path, t.measure_key, t.value, t.numerator,
        t.denominator, t.captured_at
   FROM ref('tree_fact') t
- WHERE t.subject_kind = 'file'
+ WHERE t.subject_kind = 'oxplow/file'

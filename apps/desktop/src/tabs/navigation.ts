@@ -1,7 +1,7 @@
 /// Where `window.show/navigate` takes the person: the stream and thread to
 /// show and the page to open there. Pure over the window's thread lists;
 /// `App.tsx` does it (`clientHost.ts`).
-import { parseUri } from "../uri/uri.js";
+import { idOf } from "../uri/uri.js";
 import { refTarget, type RefTarget } from "./refOpener.js";
 import type { TabRef } from "./tabState.js";
 
@@ -21,10 +21,9 @@ export interface NavigationPlan {
   page: TabRef | null;
 }
 
-/** `ref` as a stream id: `stream:str1` or `str1`. */
+/** `ref` as a stream id: a stream's URI or `str1`. */
 function streamIdOf(ref: string): string {
-  const parsed = parseUri(ref);
-  return parsed && parsed.kind === "stream" ? parsed.id : ref;
+  return idOf(ref, "oxplow/stream") ?? ref;
 }
 
 /** What `input` (`{ ref, stream? }`) asks for, given the window's `states`

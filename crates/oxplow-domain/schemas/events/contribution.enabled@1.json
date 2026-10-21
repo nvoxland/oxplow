@@ -4,7 +4,7 @@
   "description": "`contribution.enabled@1` (P7.C1): a person enabled a disabled contribution\nagain on this machine (`oxplow.contribution.enable`).",
   "properties": {
     "contribution": {
-      "description": "The contribution (`collector:<extension>/<id>`, `effect:…`,\n`provider:…`).",
+      "description": "The contribution (`oxplow:oxplow/collector?collector=<extension>/<id>`, `effect:…`,\n`provider:…`).",
       "type": "string"
     }
   },

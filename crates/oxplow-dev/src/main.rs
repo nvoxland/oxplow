@@ -522,9 +522,8 @@ impl Tasks {
     }
 
     async fn show(&self, id: &str) -> Result<String, String> {
-        let id = oxplow_domain::uri::build::work_item_id_of_uri(id)
-            .and_then(|rest| rest.strip_prefix("oxplow:"))
-            .unwrap_or(id)
+        let id = oxplow_domain::uri::build::work_item_of_uri(id)
+            .map_or(id.to_string(), |(_, item)| item)
             .trim_start_matches("tsk")
             .to_string();
         let rows = self
@@ -719,7 +718,10 @@ mod tests {
         let written = dev(p, &["wiki", "write", "wombats", "--file", &body])
             .await
             .unwrap();
-        assert!(written.contains("wiki:wombats"), "{written}");
+        assert!(
+            written.contains("oxplow:oxplow/wiki?slug=wombats"),
+            "{written}"
+        );
         assert!(p.join(".oxplow/wiki/wombats.md").is_file());
         assert!(dev(p, &["wiki", "list"])
             .await

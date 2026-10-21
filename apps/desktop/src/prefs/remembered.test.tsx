@@ -26,9 +26,9 @@ function backend(stored: UiPreference[] = []) {
 }
 
 test("a page's memory is scoped by the page, whatever its params", () => {
-  expect(pageMemoryScope(pageTabRef("tasks", { state: "open" }))).toBe("page:tasks");
-  expect(pageMemoryScope(extPageRef("acme", "pulls"))).toBe("page:acme/pulls");
-  expect(pageMemoryScope(lensRef("x/y", { range: "7d" }))).toBe("lens:x/y");
+  expect(pageMemoryScope(pageTabRef("tasks", { state: "open" }))).toBe("oxplow:oxplow/page?page=tasks");
+  expect(pageMemoryScope(extPageRef("acme", "pulls"))).toBe("oxplow:oxplow/page?page=acme/pulls");
+  expect(pageMemoryScope(lensRef("x/y", { range: "7d" }))).toBe("oxplow:oxplow/lens?lens=x/y");
   expect(pageMemoryScope(wikiPageRef("home"))).toBe("kind:wiki");
 });
 
@@ -99,8 +99,8 @@ test("page memory is shared by every tab of a page, and app preferences by every
   await waitFor(() =>
     expect(b.saves.sort()).toEqual([
       ["app", "railWidth", "270"],
-      ["page:git-dashboard", "mergeMode", '"rebase"'],
-      ["panel:core:work", "show", '"all"'],
+      ["oxplow:oxplow/page?page=git-dashboard", "mergeMode", '"rebase"'],
+      ["oxplow:oxplow/panel?panel=core:work", "show", '"all"'],
     ]),
   );
 });
@@ -114,5 +114,5 @@ test("outside a tab, page memory is the component's own", () => {
   );
   fireEvent.click(view.getByTestId("mode"));
   expect(view.getByTestId("mode").textContent).toBe("rebase");
-  expect(store.get("page:tasks", "mergeMode")).toBeUndefined();
+  expect(store.get("oxplow:oxplow/page?page=tasks", "mergeMode")).toBeUndefined();
 });

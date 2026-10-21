@@ -766,8 +766,9 @@ def transform(input):
         assert_eq!(
             subjects,
             vec![
-                "symbol:src/Parser.java/Parser::parse(String)".to_string(),
-                "symbol:src/Parser.java/Parser::parse(int)".to_string(),
+                "oxplow:oxplow/symbol?path=src/Parser.java&symbol=Parser::parse(String)"
+                    .to_string(),
+                "oxplow:oxplow/symbol?path=src/Parser.java&symbol=Parser::parse(int)".to_string(),
             ]
         );
         let dims = out[0].dims.as_ref().unwrap();

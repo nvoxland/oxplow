@@ -32,7 +32,7 @@ test("underline is not in the schema — markdown has no syntax for it", () => {
 });
 
 test("internal-scheme links survive the round-trip as links", () => {
-  const md = "See [the file](file:src/a.ts) and [a task](work_item:oxplow:tsk42).";
+  const md = "See [the file](oxplow:oxplow/file?path=src/a.ts) and [a task](oxplow:oxplow/work_item?id=tsk42&provider=oxplow).";
   expect(getMarkdown(mount(md)).trim()).toBe(md);
 });
 

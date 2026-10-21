@@ -6,5 +6,5 @@ sections:
   - { id: data, title: What data there is, lens: catalog }
   - { id: configure, title: What you can configure, lens: catalog-config-keys }
 actions:
-  - { id: settings, label: Open Settings, command: oxplow.window.navigate, input: { ref: "page:settings" } }
+  - { id: settings, label: Open Settings, command: oxplow.window.navigate, input: { ref: "oxplow:oxplow/page?page=settings" } }
 hidden: true

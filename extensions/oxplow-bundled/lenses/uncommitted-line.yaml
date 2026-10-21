@@ -15,7 +15,7 @@ query: |
            sum(f.additions) AS plus, sum(f.deletions) AS minus, count(*) AS files
     FROM v_change_file f JOIN change c ON c.id = f.change_id
   )
-  SELECT label, 'page:uncommitted-changes' AS page, tone FROM (
+  SELECT label, 'oxplow:oxplow/page?page=uncommitted-changes' AS page, tone FROM (
     SELECT 0 AS ord,
            rtrim(CASE WHEN a > 0 THEN a || 'A ' ELSE '' END || CASE WHEN m > 0 THEN m || 'M ' ELSE '' END
                  || CASE WHEN d > 0 THEN d || 'D' ELSE '' END)

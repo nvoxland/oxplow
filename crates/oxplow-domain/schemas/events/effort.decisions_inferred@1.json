@@ -10,7 +10,7 @@
       "type": "integer"
     },
     "effort": {
-      "description": "`effort:eff<id>`.",
+      "description": "`oxplow:oxplow/effort?id=eff<id>`.",
       "type": "string"
     },
     "work_item": {

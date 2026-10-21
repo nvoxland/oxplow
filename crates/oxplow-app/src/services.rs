@@ -38,7 +38,7 @@ pub enum Trees {
 #[derive(Clone, Default)]
 pub struct Sources {
     pub tree: Option<Trees>,
-    /// A model, asked as the caller named here (`collector:<owner>/<id>`),
+    /// A model, asked as the caller named here (`oxplow:oxplow/collector?collector=<owner>/<id>`),
     /// each answer recorded on the run.
     pub ai: Option<(Arc<crate::ai_compute::AiCompute>, String)>,
 }

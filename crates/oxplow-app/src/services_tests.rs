@@ -90,7 +90,7 @@ async fn a_collector_reads_the_tree_it_declares() {
     assert_eq!(report.row_counts["seen"], 1);
     assert_eq!(trees.asked.lock().unwrap().len(), 1);
     assert_eq!(
-        decided(svc, "collector:acme/paths").await,
+        decided(svc, "oxplow:oxplow/collector?collector=acme/paths").await,
         json!([{ "need": "scope", "name": "tree.read", "decision": "allowed" }])
     );
 

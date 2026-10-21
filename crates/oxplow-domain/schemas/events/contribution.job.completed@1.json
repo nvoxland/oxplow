@@ -39,11 +39,11 @@
       "type": "integer"
     },
     "job": {
-      "description": "The job it ran (`job:<extension>/<id>`).",
+      "description": "The job it ran (`oxplow:oxplow/job?job=<extension>/<id>`).",
       "type": "string"
     },
     "job_run": {
-      "description": "The run (`job_run:<id>`).",
+      "description": "The run (`oxplow:oxplow/job_run?id=<id>`).",
       "type": "string"
     },
     "outcome": {

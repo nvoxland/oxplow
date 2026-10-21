@@ -83,11 +83,15 @@ pub fn parse_wiki_file_ref(interior: &str) -> Option<WikiFileRef> {
 /// Parse `[[…]]` wikilinks + inline file paths out of `body`.
 /// The refs a store states (a provider's record), as a body's would parse.
 pub fn stated_refs(refs: &[String]) -> ParsedRefs {
-    let of = |kind: &str| -> Vec<String> {
+    let of = |resource: &str, param: &str| -> Vec<String> {
         let mut out: Vec<String> = refs
             .iter()
-            .filter_map(|r| r.strip_prefix(kind)?.strip_prefix(':'))
-            .map(str::to_string)
+            .filter_map(|r| {
+                oxplow_domain::uri::build::parse_resource(r, resource)
+                    .ok()?
+                    .param(param)
+                    .map(str::to_string)
+            })
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
@@ -95,9 +99,9 @@ pub fn stated_refs(refs: &[String]) -> ParsedRefs {
         out
     };
     ParsedRefs {
-        file_refs: of("file"),
-        dir_refs: of("dir"),
-        related_notes: of("wiki"),
+        file_refs: of(oxplow_domain::uri::resources::FILE, "path"),
+        dir_refs: of(oxplow_domain::uri::resources::DIR, "path"),
+        related_notes: of(oxplow_domain::uri::resources::WIKI, "slug"),
     }
 }
 
@@ -323,9 +327,7 @@ pub fn strip_body_version_literals(body: &str) -> String {
         if let Some(after_paren) = rest.strip_prefix('(') {
             // The link's scheme is a ref kind: `file` or `dir`, then `:`.
             let scheme_len = match after_paren.split_once(':').map(|(scheme, _)| scheme) {
-                Some(
-                    scheme @ (oxplow_domain::uri::types::FILE | oxplow_domain::uri::types::DIR),
-                ) => Some(scheme.len() + 1),
+                Some(scheme @ ("file" | "dir")) => Some(scheme.len() + 1),
                 _ => None,
             };
             if let Some(scheme_len) = scheme_len {
@@ -480,11 +482,11 @@ fn find_wikilinks(body: &str) -> Vec<&str> {
 
 /// If `s` is a directory wikilink target (`dir:<path>`), return the
 /// stripped path. Otherwise return None. The `dir:` prefix is the
-/// explicit directory marker — mirrors `git:` for commit refs.
+/// explicit directory marker — authoring syntax, not a resource name.
 fn looks_like_dir(s: &str) -> Option<String> {
     let trimmed = s.trim();
     let (kind, rest) = trimmed.split_once(':')?;
-    if kind != oxplow_domain::uri::types::DIR {
+    if kind != "dir" {
         return None;
     }
     let raw = rest.trim_start();
@@ -609,7 +611,7 @@ mod tests {
     /// Core's vocabulary with oxplow's tasks as the work list (`tsk<n>`).
     fn tasks_vocabulary() -> oxplow_domain::vocabulary::VocabularyHandle {
         let mut v = oxplow_domain::vocabulary::Vocabulary::core();
-        v.kinds = v.kinds.with_work_item_ids("oxplow", r"tsk\d+").unwrap();
+        v.resources = v.resources.with_work_item_ids("oxplow", r"tsk\d+").unwrap();
         oxplow_domain::vocabulary::VocabularyHandle::new(v)
     }
 
@@ -1162,42 +1164,50 @@ mod tests {
 
         // wi-1 backlink picks up the wiki source.
         let inbound_wi = page_refs
-            .list_backlinks("work_item", "oxplow:tsk1", None)
+            .list_backlinks(
+                &oxplow_domain::uri::build::work_item_uri("oxplow", "tsk1"),
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(inbound_wi.len(), 1);
-        assert_eq!(inbound_wi[0].source_kind, "wiki");
-        assert_eq!(inbound_wi[0].source_id, "intro");
+        assert_eq!(
+            inbound_wi[0].source,
+            oxplow_domain::uri::build::wiki_uri("intro")
+        );
 
         // file backlink also points at the wiki.
         let inbound_file = page_refs
-            .list_backlinks("file", "src/app.rs", None)
+            .list_backlinks(&oxplow_domain::uri::build::file_uri("src/app.rs"), None)
             .await
             .unwrap();
         assert!(
-            inbound_file.iter().any(|e| e.source_id == "intro"),
+            inbound_file
+                .iter()
+                .any(|e| e.source == oxplow_domain::uri::build::wiki_uri("intro")),
             "expected wiki:intro in file backlinks; got {inbound_file:?}"
         );
 
         // finding backlink works too.
         let inbound_finding = page_refs
-            .list_backlinks("finding", "fnd-1", None)
+            .list_backlinks(&oxplow_domain::uri::build::finding_uri("fnd-1"), None)
             .await
             .unwrap();
-        assert!(inbound_finding.iter().any(|e| e.source_id == "intro"));
+        assert!(inbound_finding
+            .iter()
+            .any(|e| e.source == oxplow_domain::uri::build::wiki_uri("intro")));
 
         // Outbound view of the wiki shows the same edges.
         let outbound = page_refs
-            .list_outbound("wiki", "intro", None)
+            .list_outbound(&oxplow_domain::uri::build::wiki_uri("intro"), None)
             .await
             .unwrap();
-        let targets: std::collections::BTreeSet<_> = outbound
-            .iter()
-            .map(|e| (e.target_kind.as_str(), e.target_id.as_str()))
-            .collect();
-        assert!(targets.contains(&("work_item", "oxplow:tsk1")));
-        assert!(targets.contains(&("file", "src/app.rs")));
-        assert!(targets.contains(&("finding", "fnd-1")));
+        let targets: std::collections::BTreeSet<_> =
+            outbound.iter().map(|e| e.target.clone()).collect();
+        use oxplow_domain::uri::build;
+        assert!(targets.contains(&build::work_item_uri("oxplow", "tsk1")));
+        assert!(targets.contains(&build::file_uri("src/app.rs")));
+        assert!(targets.contains(&build::finding_uri("fnd-1")));
     }
 
     #[test]
@@ -1236,10 +1246,8 @@ mod tests {
         page_refs
             .upsert_edge(
                 oxplow_db::PageRefEdge::new(
-                    "wiki",
-                    "intro",
-                    "file",
-                    "crates/cp/src/lib.rs",
+                    oxplow_domain::uri::build::wiki_uri("intro"),
+                    oxplow_domain::uri::build::file_uri("crates/cp/src/lib.rs"),
                     "wiki_file_ref",
                 )
                 .with_version(42, None, false),
@@ -1253,7 +1261,10 @@ mod tests {
             .await
             .unwrap();
         let after = page_refs
-            .list_backlinks("file", "crates/cp/src/lib.rs", None)
+            .list_backlinks(
+                &oxplow_domain::uri::build::file_uri("crates/cp/src/lib.rs"),
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(after.len(), 1, "verification edge should survive re-sync");
@@ -1266,7 +1277,10 @@ mod tests {
             .await
             .unwrap();
         let gone = page_refs
-            .list_backlinks("file", "crates/cp/src/lib.rs", None)
+            .list_backlinks(
+                &oxplow_domain::uri::build::file_uri("crates/cp/src/lib.rs"),
+                None,
+            )
             .await
             .unwrap();
         assert!(
@@ -1298,12 +1312,18 @@ mod tests {
             .unwrap();
 
         let inbound_2 = page_refs
-            .list_backlinks("work_item", "oxplow:tsk2", None)
+            .list_backlinks(
+                &oxplow_domain::uri::build::work_item_uri("oxplow", "tsk2"),
+                None,
+            )
             .await
             .unwrap();
         assert!(inbound_2.is_empty(), "expected no backlinks after removal");
         let inbound_1 = page_refs
-            .list_backlinks("work_item", "oxplow:tsk1", None)
+            .list_backlinks(
+                &oxplow_domain::uri::build::work_item_uri("oxplow", "tsk1"),
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(inbound_1.len(), 1);

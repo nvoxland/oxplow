@@ -590,11 +590,13 @@ mod tests {
     #[tokio::test]
     async fn a_store_accepts_a_type_swapped_in_after_it_was_built() {
         use oxplow_domain::events::schema::EventSchemaRegistry;
-        use oxplow_domain::uri::types::core_types;
+        use oxplow_domain::uri::resources::foundation;
         use oxplow_domain::vocabulary::Vocabulary;
         let db = Database::in_memory();
-        let handle =
-            VocabularyHandle::new(Vocabulary::new(EventSchemaRegistry::new(), core_types()));
+        let handle = VocabularyHandle::new(Vocabulary::new(
+            EventSchemaRegistry::new(),
+            foundation().clone(),
+        ));
         let store = SqliteEventLogStore::new(db.clone(), handle.clone());
         assert!(store.append(env(None)).await.is_err());
         handle.swap(Vocabulary::core());
@@ -624,7 +626,7 @@ mod tests {
         let e1 = Envelope::typed::<WorkItemStateChanged>(
             "human",
             &WorkItemStateChangedV1 {
-                work_item: "work_item:oxplow:tsk4".into(),
+                work_item: "oxplow:oxplow/work_item?id=tsk4&provider=oxplow".into(),
                 to: oxplow_domain::work_items::CanonicalState::InProgress,
             },
         )
@@ -634,7 +636,7 @@ mod tests {
             thread_id: Some(ThreadId::new(4)),
             ..Anchors::default()
         })
-        .with_subject(["work_item:oxplow:tsk4"]);
+        .with_subject(["oxplow:oxplow/work_item?id=tsk4&provider=oxplow"]);
         let e2 = Envelope::typed::<CommandExecuted>(
             "agent:thr4",
             &CommandExecutedV4 {
@@ -757,7 +759,13 @@ mod tests {
     async fn subjects_must_be_canonical_refs_of_registered_kinds() {
         let db = Database::in_memory();
         let store = store(&db);
-        for bad in ["zones", "config:", "nope:thing", "commit:xyz", "effort:12"] {
+        for bad in [
+            "zones",
+            "config:",
+            "nope:thing",
+            "oxplow:oxplow/commit?sha=xyz",
+            "oxplow:oxplow/effort?id=12",
+        ] {
             let err = store
                 .append(env(None).with_subject([bad]))
                 .await
@@ -767,9 +775,9 @@ mod tests {
         }
         store
             .append(env(None).with_subject([
-                "config:zones",
-                "stream:str1",
-                "work_item:oxplow:tsk4",
+                "oxplow:oxplow/config?key=zones",
+                "oxplow:oxplow/stream?id=str1",
+                "oxplow:oxplow/work_item?id=tsk4&provider=oxplow",
             ]))
             .await
             .unwrap();

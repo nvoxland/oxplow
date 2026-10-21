@@ -61,13 +61,13 @@ pub struct RecordInput {
     pub key: String,
     /// The asserted value.
     pub value: f64,
-    /// What it's about, as a ref (`file:src/a.rs`, `ai_model:opus`).
+    /// What it's about, as a ref (`oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/ai_model?name=opus`).
     #[serde(default)]
     pub subject: Option<String>,
     /// Extra dimensions, recorded on the fact.
     #[serde(default)]
     pub dims: Option<BTreeMap<String, String>>,
-    /// The stream (`stream:str1`); defaults to the caller's, else the primary.
+    /// The stream (`oxplow:oxplow/stream?id=str1`); defaults to the caller's, else the primary.
     #[serde(default)]
     pub stream: Option<String>,
 }
@@ -129,7 +129,7 @@ fn stream_for(
     let Some(named) = named else {
         return Ok(own.unwrap_or(primary));
     };
-    let stream: StreamId = ref_id(named, "stream", "/stream")?;
+    let stream: StreamId = ref_id(named, oxplow_domain::uri::resources::STREAM, "/stream")?;
     match own {
         Some(own) if actor.is_agent_driven() && own != stream => Err(invalid(
             "/stream",
@@ -166,10 +166,10 @@ fn record_tx(
         )
     })?;
     if let Some(subject) = input.subject.as_deref() {
-        if oxplow_domain::uri::build::type_of(subject).is_none() {
+        if oxplow_domain::uri::build::resource_of(subject).is_none() {
             return Err(invalid(
                 "/subject",
-                format!("`{subject}` isn't a ref (`<kind>:<id>`, like `file:src/a.rs`)"),
+                format!("`{subject}` isn't a URI (`oxplow:<extension>/<resource>?…`, like `oxplow:oxplow/file?path=src/a.rs`)"),
             ));
         }
     }
@@ -422,7 +422,7 @@ mod tests {
         let out = run(
             &svc,
             RECORD,
-            json!({ "key": "ci.flaky_rate", "value": 0.12, "subject": "suite:unit" }),
+            json!({ "key": "ci.flaky_rate", "value": 0.12, "subject": "oxplow:ci/suite?id=unit" }),
         )
         .await
         .unwrap();
@@ -438,8 +438,8 @@ mod tests {
         assert_eq!(facts[0].value, 0.12);
         assert_eq!(facts[0].provenance, "asserted");
         assert_eq!(facts[0].source, "agent-reported");
-        assert_eq!(facts[0].subject_kind.as_deref(), Some("suite"));
-        assert_eq!(facts[0].subject.as_deref(), Some("suite:unit"));
+        assert_eq!(facts[0].subject_kind.as_deref(), Some("ci/suite"));
+        assert_eq!(facts[0].subject.as_deref(), Some("oxplow:ci/suite?id=unit"));
         let audited: i64 = svc
             .db
             .read(|tx| {
@@ -600,7 +600,7 @@ mod tests {
             ),
             (json!({ "key": "ci.derived", "value": 1.0 }), "formula"),
             (
-                json!({ "key": "oxplow.rust.unsafe_blocks", "value": 1.0, "stream": "stream:str2" }),
+                json!({ "key": "oxplow.rust.unsafe_blocks", "value": 1.0, "stream": "oxplow:oxplow/stream?id=str2" }),
                 "not the caller's stream",
             ),
         ] {
@@ -632,7 +632,7 @@ mod tests {
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("count.star"),
-            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 42, \"rule\": \"answer\", \"subject\": \"tree:.\"}]}\n",
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 42, \"rule\": \"answer\", \"subject\": uri.build(\"oxplow/dir\", path = \".\")}]}\n",
         )
         .unwrap();
         std::fs::write(
@@ -644,7 +644,7 @@ mod tests {
         let out = run(
             &svc,
             crate::collector_runner::SYNC,
-            json!({ "collector": "collector:project/repo.answer" }),
+            json!({ "collector": "oxplow:oxplow/collector?collector=project/repo.answer" }),
         )
         .await
         .unwrap();
@@ -696,7 +696,7 @@ mod tests {
             run(
                 &svc,
                 crate::collector_runner::SYNC,
-                json!({ "collector": "collector:project/repo.bad" }),
+                json!({ "collector": "oxplow:oxplow/collector?collector=project/repo.bad" }),
             )
         };
         for _ in 0..3 {

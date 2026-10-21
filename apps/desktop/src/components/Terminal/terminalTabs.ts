@@ -1,3 +1,5 @@
+import { pageUri } from "../../uri/uri.js";
+
 /**
  * Pure helpers for the Terminal page's per-stream terminal list. Kept
  * free of React/DOM so the add / close / rename / persistence logic is
@@ -25,9 +27,10 @@ export function paneTargetFor(id: string): string {
   return id === DEFAULT_TERMINAL_ID ? "shell" : `shell:${id}`;
 }
 
-/** Comment-layer `targetId` for a terminal within a stream. */
+/** Comment-layer target URI for a terminal within a stream: the Terminal
+ *  page, scoped to the stream and the terminal. */
 export function commentTargetFor(streamId: string, id: string): string {
-  return id === DEFAULT_TERMINAL_ID ? streamId : `${streamId}:${id}`;
+  return pageUri("terminal", id === DEFAULT_TERMINAL_ID ? { stream: streamId } : { stream: streamId, terminal: id });
 }
 
 /**

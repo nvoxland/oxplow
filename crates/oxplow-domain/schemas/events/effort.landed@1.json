@@ -4,14 +4,14 @@
   "description": "`effort.landed@1`: a commit holds an open effort's work — every file\nthe effort changed is in the commit as the effort left it (`complete`),\nor only some of them. What an effort policy closes an effort on.",
   "properties": {
     "commit": {
-      "description": "`commit:<sha>`.",
+      "description": "`oxplow:oxplow/commit?sha=<sha>`.",
       "type": "string"
     },
     "complete": {
       "type": "boolean"
     },
     "effort": {
-      "description": "`effort:eff12`.",
+      "description": "`oxplow:oxplow/effort?id=eff12`.",
       "type": "string"
     }
   },

@@ -9,7 +9,7 @@
   work_item? }`: split work oxplow grouped together.
 - `oxplow.effort.report { summary?, impacts? }`: other words than your last
   answer, or outcomes beyond edits. Each impact is `{ kind, id, action? }`,
-  where `kind` is `wiki`, `work_item` (its ref, or its id as the work list
+  where `kind` is `wiki`, `work_item` (its URI, or its id as the work list
   writes it), `git_commit`, `file` or `directory`. The result's
   `link_warnings` flags `[[…]]` links that don't resolve.
 
@@ -37,5 +37,5 @@ runs, claims and decisions in one call.
   bound, last activity, the efforts it worked in, and its subagents beneath.
 - `oxplow_session_transcript { session, turn?, page? }` — a session's turns
   oldest first, 50 a page, with the thread's notes where they fall and a
-  subagent's hand-back marked; each row is a turn ref. A subagent's last
-  message is `oxplow_read { ref: "subagent:ses3/<id>#result" }`.
+  subagent's hand-back marked; each row is a turn URI. A subagent's last
+  message is `oxplow_read { ref: "oxplow:oxplow/subagent?agent=<id>&session=ses3#part=result" }`.

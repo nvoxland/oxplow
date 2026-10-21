@@ -54,7 +54,7 @@ pub struct ShowInput {
     pub spec: Option<LensSpec>,
     /// Param values by name (the lens's declared params).
     pub params: Option<BTreeMap<String, Value>>,
-    /// The thread it's shown in (`thread:thr3`); the caller's when omitted.
+    /// The thread it's shown in (`oxplow:oxplow/thread?id=thr3`); the caller's when omitted.
     pub thread: Option<String>,
 }
 
@@ -62,12 +62,12 @@ pub struct ShowInput {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct KeepInput {
-    /// The answer to keep (`answer:12`). Give this or `spec`.
+    /// The answer to keep (`oxplow:oxplow/answer?id=12`). Give this or `spec`.
     pub answer: Option<String>,
     /// A lens of its own to keep (title, query, viz and what its viz
     /// needs), checked as `oxplow.lens.show` checks one.
     pub spec: Option<LensSpec>,
-    /// The stream whose worktree a `spec` goes in (`stream:str2`): the caller's
+    /// The stream whose worktree a `spec` goes in (`oxplow:oxplow/stream?id=str2`): the caller's
     /// thread's when omitted, else the primary's. An answer goes in its
     /// own thread's.
     pub stream: Option<String>,
@@ -120,18 +120,19 @@ fn thread_stream_tx(conn: &rusqlite::Connection, thread: i64) -> Result<Option<i
     .map_err(oxplow_db::map_sql_err)
 }
 
-/// The worktree of stream `raw` (`stream:str2`); `Invalid` for one that isn't.
+/// The worktree of stream `raw` (`oxplow:oxplow/stream?id=str2`); `Invalid` for one that isn't.
 fn stream_root_tx(
     conn: &rusqlite::Connection,
     project_dir: &Path,
     raw: &str,
 ) -> Result<(i64, PathBuf), DomainError> {
-    let stream: oxplow_domain::StreamId = ref_id(raw, "stream", "/stream").map_err(|e| {
-        DomainError::Invalid(match e {
-            CommandError::Invalid { message, .. } => message,
-            other => other.to_string(),
-        })
-    })?;
+    let stream: oxplow_domain::StreamId =
+        ref_id(raw, oxplow_domain::uri::resources::STREAM, "/stream").map_err(|e| {
+            DomainError::Invalid(match e {
+                CommandError::Invalid { message, .. } => message,
+                other => other.to_string(),
+            })
+        })?;
     let path: Option<String> = conn
         .query_row(
             "SELECT worktree_path FROM streams WHERE id = ?1",
@@ -189,7 +190,7 @@ fn cells(params: &BTreeMap<String, Value>) -> BTreeMap<String, SqlCell> {
 fn answer_id(raw: &str) -> Result<i64, CommandError> {
     // A bare number is the answer too.
     raw.parse().or_else(|_| {
-        oxplow_domain::uri::build::parse_as(raw, oxplow_domain::uri::types::ANSWER)
+        oxplow_domain::uri::build::parse_as(raw, oxplow_domain::uri::resources::ANSWER)
             .map_err(|e: oxplow_domain::uri::build::NotA| invalid("/answer", e.to_string()))
     })
 }
@@ -272,7 +273,7 @@ fn record_answer_tx(
 ) -> Result<Shown, CommandError> {
     let thread: i64 = match input.thread.as_deref() {
         Some(raw) => {
-            let named: ThreadId = ref_id(raw, "thread", "/thread")?;
+            let named: ThreadId = ref_id(raw, oxplow_domain::uri::resources::THREAD, "/thread")?;
             // An agent shows answers in its own thread only; a person
             // may name any.
             if actor.is_agent_driven() && actor.thread_id() != Some(named) {
@@ -378,7 +379,10 @@ async fn keeping_answer(target: &LensTarget, raw: &str) -> Result<Keeping, Comma
         .read(move |tx| kept_lens_tx(tx, &project_dir, id))
         .await
         .map_err(|e| match e {
-            DomainError::NotFound => invalid("/answer", format!("no answer `answer:{id}`")),
+            DomainError::NotFound => invalid(
+                "/answer",
+                format!("no answer `oxplow:oxplow/answer?id={id}`"),
+            ),
             DomainError::Invalid(m) => invalid("/answer", m),
             other => CommandError::from(other),
         })?;
@@ -770,7 +774,10 @@ mod tests {
     #[tokio::test]
     async fn an_agent_shows_only_in_its_own_thread() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        let other = format!("thread:thr{}", fx.thread.value() + 1000);
+        let other = oxplow_domain::uri::build::keyed(
+            oxplow_domain::uri::resources::THREAD,
+            &format!("thr{}", fx.thread.value() + 1000),
+        );
         let err = fx
             .svc
             .commands
@@ -966,7 +973,10 @@ mod tests {
         assert_eq!(file("saved"), file("kept"));
         let kept = events_of(&fx, "lens.kept").await;
         assert_eq!(kept.len(), 2);
-        assert_eq!(kept[1], json!({ "lens": "lens:saved/busy-tasks" }));
+        assert_eq!(
+            kept[1],
+            json!({ "lens": "oxplow:oxplow/lens?lens=saved/busy-tasks" })
+        );
     }
 
     /// A kept spec gets `oxplow.lens.show`'s check: a query over a physical table
@@ -1155,7 +1165,9 @@ mod tests {
                 json!({ "spec": spec(), "stream": stream, "extension": "kept", "slug": slug });
             async move { svc.commands.run(&actor, KEEP, input, false).await }
         };
-        let err = keep(agent(&fx), "stream:str2", "theirs").await.unwrap_err();
+        let err = keep(agent(&fx), "oxplow:oxplow/stream?id=str2", "theirs")
+            .await
+            .unwrap_err();
         assert!(
             matches!(&err, CommandError::Invalid { field: Some(f), message }
                 if f == "/stream" && message.contains("its own thread's stream")),
@@ -1173,7 +1185,9 @@ mod tests {
             .extension_catalog
             .find_lens(&project, "kept/mine")
             .is_ok());
-        keep(Actor::Human, "stream:str2", "theirs").await.unwrap();
+        keep(Actor::Human, "oxplow:oxplow/stream?id=str2", "theirs")
+            .await
+            .unwrap();
         assert!(wt
             .path()
             .join(".oxplow/extensions/kept/lenses/theirs.yaml")
@@ -1188,8 +1202,8 @@ mod tests {
         let fx = crate::test_fixtures::services_with_effort().await;
         for input in [
             json!({}),
-            json!({ "answer": "answer:1", "spec": spec() }),
-            json!({ "answer": "answer:1", "stream": "stream:str1" }),
+            json!({ "answer": "oxplow:oxplow/answer?id=1", "spec": spec() }),
+            json!({ "answer": "oxplow:oxplow/answer?id=1", "stream": "oxplow:oxplow/stream?id=str1" }),
         ] {
             let err = fx
                 .svc

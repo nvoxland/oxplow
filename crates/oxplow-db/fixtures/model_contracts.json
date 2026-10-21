@@ -641,6 +641,96 @@
         }
       ],
       "key": []
+    },
+    "8": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Turn id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread the turn ran in."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session it ran in (v_agent_session.id); NULL for a turn no session claims (a hook from an agent oxplow didn't start)."
+        },
+        {
+          "name": "prompt",
+          "type": "TEXT",
+          "doc": "What the human typed."
+        },
+        {
+          "name": "answer",
+          "type": "TEXT",
+          "doc": "The agent's final answer, once the turn ended."
+        },
+        {
+          "name": "session_id",
+          "type": "TEXT",
+          "doc": "The harness session id, when it reported one."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "ended_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp; NULL while running."
+        },
+        {
+          "name": "start_snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot the worktree was at when the turn opened (v_snapshot.id); NULL if the stream had none yet."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot the worktree was at when the turn ended (v_snapshot.id); NULL while running."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
+        },
+        {
+          "name": "transcript_page",
+          "type": "TEXT",
+          "doc": "The session's transcript lens opened at this turn (`oxplow:oxplow/lens?lens=oxplow-foundation/session-transcript&session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)"
+        },
+        {
+          "name": "model",
+          "type": "TEXT",
+          "doc": "The model the turn ran on, as its harness reported it with the turn's end; NULL while running, or when the harness said nothing (opencode). (v5)"
+        },
+        {
+          "name": "effort",
+          "type": "TEXT",
+          "doc": "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
+        },
+        {
+          "name": "context_tokens",
+          "type": "INTEGER",
+          "doc": "Tokens in the agent's context when the turn ended (input plus cache reads and writes of the turn's last request), as its harness reported it with the turn's end; NULL while running, or when the harness said nothing. (v6)"
+        },
+        {
+          "name": "context_window",
+          "type": "INTEGER",
+          "doc": "The size of the model's context window, in tokens, as its harness reported it; NULL while running, or when it said nothing (Claude Code never does). context_tokens / context_window is how full the context was. (v6)"
+        },
+        {
+          "name": "from_peer",
+          "type": "TEXT",
+          "doc": "Who opened the turn when it has no prompt of a person's: the name the other agent session gave itself (Claude Code's cross-session message, `agent.peer_message.received`). NULL for a turn a person's prompt opened, and for any other. (v7)"
+        }
+      ],
+      "key": []
     }
   },
   "ai_call": {
@@ -1033,6 +1123,91 @@
         }
       ],
       "key": []
+    },
+    "6": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Row id."
+        },
+        {
+          "name": "role",
+          "type": "TEXT",
+          "doc": "Role used (`main`, `summarize`, `decide`)."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "Provider id from ai.yaml."
+        },
+        {
+          "name": "model",
+          "type": "TEXT",
+          "doc": "Model id."
+        },
+        {
+          "name": "caller",
+          "type": "TEXT",
+          "doc": "What asked: the asking thread's ref (`oxplow:oxplow/thread?id=<id>`) for an agent's MCP call, `oxplow:oxplow/collector?collector=<owner>/<id>`, `inferred-decisions`, …"
+        },
+        {
+          "name": "input_tokens",
+          "type": "INTEGER",
+          "doc": "Input tokens."
+        },
+        {
+          "name": "output_tokens",
+          "type": "INTEGER",
+          "doc": "Output tokens."
+        },
+        {
+          "name": "latency_ms",
+          "type": "INTEGER",
+          "doc": "Round-trip time."
+        },
+        {
+          "name": "ok",
+          "type": "INTEGER",
+          "doc": "1 succeeded, 0 failed."
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "Error message when it failed."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "input_hash",
+          "type": "TEXT",
+          "doc": "For a recorded computation (`v_ai_result`), the hash of its input; NULL for other calls."
+        },
+        {
+          "name": "request_hash",
+          "type": "TEXT",
+          "doc": "Content hash of what the model was asked (`{ system, prompt, json }` or `{ state, questions }`), its body kept for the `ai` retention window (`read_ai_call`); NULL for a call made before requests were kept."
+        },
+        {
+          "name": "response_hash",
+          "type": "TEXT",
+          "doc": "Content hash of what the model answered (`{ text }` or `{ answers }`), kept like the request; NULL when the call failed."
+        },
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "doc": "The extension run that made the call (`v_extension_run.run_id`); NULL for oxplow's own calls. (v3)"
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/ai_call?id=<id>`: its ref. `oxplow_read` gives its row and, with `#request` / `#response`, its bodies. (v4)"
+        }
+      ],
+      "key": []
     }
   },
   "ai_result": {
@@ -1146,7 +1321,7 @@
         {
           "name": "caller",
           "type": "TEXT",
-          "doc": "What first asked, e.g. `inferred-decisions`, `collector:<owner>/<id>`."
+          "doc": "What first asked, e.g. `inferred-decisions`, `oxplow:oxplow/collector?collector=<owner>/<id>`."
         },
         {
           "name": "output_json",
@@ -1848,7 +2023,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "The function's symbol ref, `symbol:<path>/<id>` (`v_symbol.ref` without the snapshot): overloads and same-named functions are separate rows. Unique per change."
+          "doc": "The function's symbol ref, `oxplow:oxplow/symbol?path=<path>&symbol=<id>` (`v_symbol.ref` without the snapshot): overloads and same-named functions are separate rows. Unique per change."
         },
         {
           "name": "container",
@@ -2523,6 +2698,76 @@
         }
       ],
       "key": []
+    },
+    "9": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Claim id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread it was made in."
+        },
+        {
+          "name": "work_item",
+          "type": "TEXT",
+          "doc": "The work item it was made on (`oxplow:oxplow/work_item?id=<id>&provider=<provider>`), if any."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Effort, if one was open."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "Turn it happened in (v_agent_turn.id), when known."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session that made it (v_agent_session.id); NULL when not recorded. (v4)"
+        },
+        {
+          "name": "statement",
+          "type": "TEXT",
+          "doc": "The claim in words."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`tests_pass`, `no_behavior_change`, `handles_case` or `other`."
+        },
+        {
+          "name": "evidence_ref",
+          "type": "TEXT",
+          "doc": "What it cites (`oxplow:oxplow/run?id=<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited. Whether anything else backs it is a review policy's call (oxplow-bundled's `v_oxplow_bundled_claim_status`). (v6)"
+        },
+        {
+          "name": "review",
+          "type": "TEXT",
+          "doc": "A reviewer's verdict: `verified` (`oxplow.effort.verify_claim`, with what backs it in `evidence_ref`) or `dismissed` (the agent didn't claim it, or didn't mean it: `oxplow.effort.dismiss_claim`); NULL while unreviewed. Reading the effort again, or reporting again, replaces only that source's unreviewed claims. (v7)"
+        },
+        {
+          "name": "provenance",
+          "type": "TEXT",
+          "doc": "`recorded` (the agent stated it in `oxplow.effort.report`'s `claims`) or `inferred` (a model read it in the effort's answers). The review treats both alike. (v8)"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/claim?id=<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v5)"
+        }
+      ],
+      "key": []
     }
   },
   "code_quality_finding": {
@@ -2809,6 +3054,96 @@
         }
       ],
       "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Comment id."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Stream the comment was made in."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread it was made in, if any."
+        },
+        {
+          "name": "target_resource",
+          "type": "TEXT",
+          "doc": "The resource of the page it is anchored to: `oxplow/file`, `oxplow/wiki`, `oxplow/work_item`, …"
+        },
+        {
+          "name": "target",
+          "type": "TEXT",
+          "doc": "The URI of that page (v3: one URI for the kind and id)."
+        },
+        {
+          "name": "quote",
+          "type": "TEXT",
+          "doc": "The selected text the comment is anchored to."
+        },
+        {
+          "name": "intent",
+          "type": "TEXT",
+          "doc": "`note` (for me) or `followup` (for the agent to act on)."
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "doc": "`open` or `resolved`."
+        },
+        {
+          "name": "orphaned",
+          "type": "INTEGER",
+          "doc": "1 when the quote can no longer be found in the page."
+        },
+        {
+          "name": "author",
+          "type": "TEXT",
+          "doc": "Who started it."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "last_activity_at",
+          "type": "TEXT",
+          "doc": "Time of the newest message."
+        },
+        {
+          "name": "resolved_at",
+          "type": "TEXT",
+          "doc": "Set when resolved."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Text of the first message."
+        },
+        {
+          "name": "message_count",
+          "type": "",
+          "doc": "Number of messages in the thread."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/comment?id=cmt<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
+        }
+      ],
+      "key": []
     }
   },
   "commit": {
@@ -2913,6 +3248,61 @@
           "name": "ref",
           "type": "TEXT",
           "doc": "`commit:<sha>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
+        }
+      ],
+      "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "sha",
+          "type": "TEXT",
+          "doc": "Full commit sha."
+        },
+        {
+          "name": "author",
+          "type": "TEXT",
+          "doc": "Author name."
+        },
+        {
+          "name": "email",
+          "type": "TEXT",
+          "doc": "Author email."
+        },
+        {
+          "name": "committed_at",
+          "type": "TEXT",
+          "doc": "Commit time (RFC 3339)."
+        },
+        {
+          "name": "subject",
+          "type": "TEXT",
+          "doc": "First line of the message."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The rest of the message."
+        },
+        {
+          "name": "first_parent",
+          "type": "",
+          "doc": "First parent's sha; NULL for a root commit."
+        },
+        {
+          "name": "parent_count",
+          "type": "",
+          "doc": "Number of parents (2+ for a merge)."
+        },
+        {
+          "name": "parents",
+          "type": "TEXT",
+          "doc": "Every parent's sha, as a JSON array (first parent first)."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/commit?sha=<sha>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         }
       ],
       "key": []
@@ -3061,6 +3451,41 @@
           "name": "ref",
           "type": "TEXT",
           "doc": "`dashboard:dsh<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
+        }
+      ],
+      "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Dashboard id."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Title."
+        },
+        {
+          "name": "sort_index",
+          "type": "INTEGER",
+          "doc": "Order in the dashboards list."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/dashboard?id=dsh<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         }
       ],
       "key": []
@@ -3440,6 +3865,86 @@
           "name": "thread_ref",
           "type": "TEXT",
           "doc": "Its thread's ref (`thread:thr<n>`): where a decision opens when it has no effort. (v5)"
+        }
+      ],
+      "key": []
+    },
+    "6": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Decision id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread it was made in."
+        },
+        {
+          "name": "work_item",
+          "type": "TEXT",
+          "doc": "The work item being worked on (`oxplow:oxplow/work_item?id=<id>&provider=<provider>`), if any."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Effort it was made during, if one was open."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "Turn it happened in (v_agent_turn.id), when known."
+        },
+        {
+          "name": "question",
+          "type": "TEXT",
+          "doc": "What had to be decided."
+        },
+        {
+          "name": "choice",
+          "type": "TEXT",
+          "doc": "What was chosen."
+        },
+        {
+          "name": "alternatives",
+          "type": "TEXT",
+          "doc": "Options not taken, as a JSON array of strings."
+        },
+        {
+          "name": "confidence",
+          "type": "TEXT",
+          "doc": "`low`, `medium` or `high`."
+        },
+        {
+          "name": "why",
+          "type": "TEXT",
+          "doc": "The reasoning."
+        },
+        {
+          "name": "provenance",
+          "type": "TEXT",
+          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/decision?id=<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v4)"
+        },
+        {
+          "name": "effort_ref",
+          "type": "TEXT",
+          "doc": "Its effort's ref (`oxplow:oxplow/effort?id=eff<n>`), when it was made during one: where a decision opens. (v5)"
+        },
+        {
+          "name": "thread_ref",
+          "type": "TEXT",
+          "doc": "Its thread's ref (`oxplow:oxplow/thread?id=thr<n>`): where a decision opens when it has no effort. (v5)"
         }
       ],
       "key": []
@@ -3879,6 +4384,71 @@
           "name": "ref",
           "type": "TEXT",
           "doc": "`effort:eff<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v6)"
+        }
+      ],
+      "key": []
+    },
+    "7": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Effort id."
+        },
+        {
+          "name": "work_item",
+          "type": "TEXT",
+          "doc": "The work item it's linked to, as a canonical ref (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`, `oxplow:oxplow/work_item?id=ENG-12&provider=issues`); NULL while unlinked. (v2: nullable)"
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread that did the work."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "That thread's stream."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "ended_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp; NULL while the effort is open."
+        },
+        {
+          "name": "start_snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot at the start (v_snapshot.id)."
+        },
+        {
+          "name": "end_snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot at the end; NULL while open."
+        },
+        {
+          "name": "summary",
+          "type": "",
+          "doc": "What shipped: the summary `oxplow.effort.report` recorded, else the final message of the last agent turn in the effort."
+        },
+        {
+          "name": "title",
+          "type": "",
+          "doc": "Its own title, else its work item's, else the first line of its first prompt. (v2)"
+        },
+        {
+          "name": "closed_by",
+          "type": "TEXT",
+          "doc": "What closed it: `commit`, `switch`, `person`, `agent` or `system`; NULL while open. (v2)"
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/effort?id=eff<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v6)"
         }
       ],
       "key": []
@@ -4522,6 +5092,106 @@
         }
       ],
       "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "seq",
+          "type": "INTEGER",
+          "doc": "Insert order — the delivery order consumers checkpoint on."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "Public identity (UUIDv7; sorts by time)."
+        },
+        {
+          "name": "type",
+          "type": "TEXT",
+          "doc": "`namespace.name`, e.g. `work_item.state_changed`."
+        },
+        {
+          "name": "v",
+          "type": "INTEGER",
+          "doc": "Schema version of `type`."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "What emitted it: `human`, `agent:thr3`, `task_service`, …"
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Anchor, when known."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Anchor, when known."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Anchor, when known."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "Anchor (agent_turn), when known."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "Anchor, when known."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "Anchor (v_agent_session.id): the agent session it happened in, when known."
+        },
+        {
+          "name": "subject",
+          "type": "TEXT",
+          "doc": "JSON array of the canonical refs the event is about."
+        },
+        {
+          "name": "payload",
+          "type": "TEXT",
+          "doc": "JSON, validated against `type@v`'s schema."
+        },
+        {
+          "name": "payload_hash",
+          "type": "TEXT",
+          "doc": "Content hash when the body lives in the content store."
+        },
+        {
+          "name": "payload_expired_at",
+          "type": "TEXT",
+          "doc": "When retention replaced the payload with `{}` (the envelope stays); NULL while it's kept."
+        },
+        {
+          "name": "cause",
+          "type": "TEXT",
+          "doc": "The event id that caused this one."
+        },
+        {
+          "name": "dedupe_key",
+          "type": "TEXT",
+          "doc": "Emitter-derived key; unique."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/event?id=<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
+        }
+      ],
+      "key": []
     }
   },
   "event_checkpoint": {
@@ -4999,6 +5669,106 @@
         }
       ],
       "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Fact id; the same across the captures that hold the fact unchanged."
+        },
+        {
+          "name": "capture_id",
+          "type": "INTEGER",
+          "doc": "A capture holding it (v_capture.id)."
+        },
+        {
+          "name": "measure_key",
+          "type": "TEXT",
+          "doc": "Measure this is a value of (v_measure.key)."
+        },
+        {
+          "name": "value",
+          "type": "REAL",
+          "doc": "The measured value."
+        },
+        {
+          "name": "numerator",
+          "type": "REAL",
+          "doc": "Ratio numerator, for ratio measures."
+        },
+        {
+          "name": "denominator",
+          "type": "REAL",
+          "doc": "Ratio denominator, for ratio measures."
+        },
+        {
+          "name": "subject_kind",
+          "type": "TEXT",
+          "doc": "The subject URI's resource (`oxplow/file`, `oxplow/symbol`, `oxplow/test`, …): a filter, not an identity."
+        },
+        {
+          "name": "subject",
+          "type": "TEXT",
+          "doc": "What the fact is about, as one ref (`oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/symbol?path=src/a.rs&symbol=f`, `oxplow:oxplow/ai_model?name=claude-opus-4-8`)."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "File path, when the subject has one."
+        },
+        {
+          "name": "line",
+          "type": "INTEGER",
+          "doc": "Line number, when it has one."
+        },
+        {
+          "name": "severity",
+          "type": "TEXT",
+          "doc": "Finding severity, for lint-like facts."
+        },
+        {
+          "name": "rule",
+          "type": "TEXT",
+          "doc": "Rule id, for lint-like facts."
+        },
+        {
+          "name": "detail",
+          "type": "TEXT",
+          "doc": "Free-text detail."
+        },
+        {
+          "name": "dims_json",
+          "type": "TEXT",
+          "doc": "Extra dimensions as a JSON object."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "From the capture."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "From the capture."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "From the capture."
+        },
+        {
+          "name": "captured_at",
+          "type": "TEXT",
+          "doc": "From the capture."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "From the capture."
+        }
+      ],
+      "key": []
     }
   },
   "measure": {
@@ -5151,7 +5921,7 @@
         {
           "name": "page_id",
           "type": "TEXT",
-          "doc": "Page id (`task:42`, `file:src/a.rs`, …)."
+          "doc": "Page id (`task:42`, `oxplow:oxplow/file?path=src/a.rs`, …)."
         },
         {
           "name": "label",
@@ -5203,7 +5973,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "The comment's canonical ref (`comment:cmt<n>`): what a hit opens."
+          "doc": "The comment's canonical ref (`oxplow:oxplow/comment?id=cmt<n>`): what a hit opens."
         },
         {
           "name": "title",
@@ -5339,7 +6109,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`wiki:<slug>`."
+          "doc": "`oxplow:oxplow/wiki?slug=<slug>`."
         },
         {
           "name": "title",
@@ -5939,6 +6709,46 @@
           "name": "ref",
           "type": "TEXT",
           "doc": "`snapshot:<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
+        }
+      ],
+      "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Snapshot id."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Stream captured."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "revision",
+          "type": "TEXT",
+          "doc": "The VCS revision the captured tree equals (`git:<sha>`): set when the workspace was clean at the head; NULL otherwise."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "Branch when captured, if known."
+        },
+        {
+          "name": "tree_hash",
+          "type": "TEXT",
+          "doc": "Whole-tree identity: two snapshots with the same tree_hash hold the same files. NULL before V96."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/snapshot?id=<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         }
       ],
       "key": []
@@ -6573,6 +7383,66 @@
         }
       ],
       "key": []
+    },
+    "5": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Stream id."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`primary` (the repo) or `worktree`."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Display name."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "Git branch currently checked out in the worktree."
+        },
+        {
+          "name": "worktree_path",
+          "type": "TEXT",
+          "doc": "Absolute path of the stream's worktree."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "archived_at",
+          "type": "TEXT",
+          "doc": "Set when the stream was archived; NULL while live."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/stream?id=str<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
+        },
+        {
+          "name": "prompt",
+          "type": "TEXT",
+          "doc": "The standing instructions the person set for every agent session in this stream (appended to its system prompt); NULL when none. (v3)"
+        },
+        {
+          "name": "head_sha",
+          "type": "TEXT",
+          "doc": "The commit its workspace is on (HEAD), whether it has a branch checked out or is detached; NULL before its first commit or the first refs scan. Restated whenever refs move. (v4)"
+        }
+      ],
+      "key": []
     }
   },
   "struggle": {
@@ -6753,7 +7623,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`symbol:<path>/<id>`, the current symbol (no revision; pin one with `@snap:<id>` / `@git:<sha>`). The id is the containers and the name joined by `::` (`Parser::parse`, `<Parser as Display>::fmt`), the parameter types in languages that overload by them (`Parser::parse(String,int)`), and `~n` for the nth same id in a file (`main~2`). Unique per stream."
+          "doc": "`oxplow:oxplow/symbol?path=<path>&symbol=<id>`, the current symbol (no revision; pin one with `@snap:<id>` / `@git:<sha>`). The id is the containers and the name joined by `::` (`Parser::parse`, `<Parser as Display>::fmt`), the parameter types in languages that overload by them (`Parser::parse(String,int)`), and `~n` for the nth same id in a file (`main~2`). Unique per stream."
         },
         {
           "name": "snapshot_id",
@@ -7272,7 +8142,7 @@
         {
           "name": "id",
           "type": "INTEGER",
-          "doc": "Run id; `run:<id>` is how claims and decisions cite it."
+          "doc": "Run id; `oxplow:oxplow/run?id=<id>` is how claims and decisions cite it."
         },
         {
           "name": "stream_id",
@@ -7638,6 +8508,66 @@
         }
       ],
       "key": []
+    },
+    "6": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Thread id."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Owning stream (v_stream.id)."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Display name."
+        },
+        {
+          "name": "sort_index",
+          "type": "INTEGER",
+          "doc": "Order within the stream."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "closed_at",
+          "type": "TEXT",
+          "doc": "Set when the thread was closed; NULL while it is open. Open or closed is all a thread's state is (v4: `status` is gone)."
+        },
+        {
+          "name": "archived_at",
+          "type": "TEXT",
+          "doc": "Set when the thread was archived."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/thread?id=thr<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
+        },
+        {
+          "name": "mark",
+          "type": "TEXT",
+          "doc": "The person's colour for its tab — `amber`, `red`, `green`, `blue` or `violet` — or NULL when unmarked. It changes nothing else. (v4)"
+        },
+        {
+          "name": "prompt",
+          "type": "TEXT",
+          "doc": "The standing instructions the person set for this thread's agent sessions (appended to its system prompt, after the stream's); NULL when none. (v5)"
+        }
+      ],
+      "key": []
     }
   },
   "asset": {
@@ -7718,7 +8648,7 @@
         {
           "name": "subject",
           "type": "TEXT",
-          "doc": "The test: `test:<classname>::<name>`."
+          "doc": "The test: `oxplow:oxplow/test?class=<classname>&name=<name>`."
         },
         {
           "name": "last_status",
@@ -7986,6 +8916,61 @@
           "name": "ref",
           "type": "TEXT",
           "doc": "`collector:<owner>/<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
+        }
+      ],
+      "key": []
+    },
+    "5": {
+      "columns": [
+        {
+          "name": "owner",
+          "type": "TEXT",
+          "doc": "The extension that declares it, `project` for `.oxplow/project.yaml`, or `built-in`."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "The collector's id within its owner (may be dotted: `repo.scan_clone`)."
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "doc": "`ok`, `error` (what failed, or a permission its extension lacks; v4), or `skipped` (the loop guard refused its run for an event; `error` says why)."
+        },
+        {
+          "name": "last_run_at",
+          "type": "TEXT",
+          "doc": "When it last ran (RFC 3339)."
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "The last run's error, when it failed."
+        },
+        {
+          "name": "row_counts_json",
+          "type": "TEXT",
+          "doc": "Rows per entity after the last successful run, as JSON."
+        },
+        {
+          "name": "cursor_json",
+          "type": "TEXT",
+          "doc": "Its checkpoint: the opaque state its script or provider read returned last."
+        },
+        {
+          "name": "last_event_id",
+          "type": "INTEGER",
+          "doc": "The seq of the last trigger event it ran for."
+        },
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "doc": "Its last run (`v_extension_run.run_id`); NULL for a run before runs were recorded. (v2)"
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/collector?collector=<owner>/<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         }
       ],
       "key": []
@@ -8322,7 +9307,7 @@
         {
           "name": "provider",
           "type": "TEXT",
-          "doc": "The implementation's id: what `activeProviders` names, a work item ref's segment (`work_item:<provider>:…`), `git`, `none`."
+          "doc": "The implementation's id: what `activeProviders` names, a work item ref's segment (`oxplow:oxplow/work_item?id=…&provider=<provider>`), `git`, `none`."
         },
         {
           "name": "extension",
@@ -8558,6 +9543,91 @@
         }
       ],
       "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Proposal id."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/proposal?id=<id>`."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "command",
+          "type": "TEXT",
+          "doc": "The command (`oxplow.config.set`, `oxplow.work_item.delete`)."
+        },
+        {
+          "name": "input",
+          "type": "TEXT",
+          "doc": "Its input (JSON)."
+        },
+        {
+          "name": "actor_kind",
+          "type": "TEXT",
+          "doc": "Who proposed it: `agent` or `lens`."
+        },
+        {
+          "name": "actor_id",
+          "type": "TEXT",
+          "doc": "The proposing thread (`thr3`) or lens, when known."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it was proposed in (v_thread.id), if any."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream it was proposed in, if any."
+        },
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "What it supersedes on: `oxplow:oxplow/config?key=<key>` for a config change, else the command and its input."
+        },
+        {
+          "name": "preview",
+          "type": "TEXT",
+          "doc": "The confirmation preview (JSON: command, summary, input, destructive)."
+        },
+        {
+          "name": "dry_run",
+          "type": "TEXT",
+          "doc": "What it would have done when proposed (JSON: a config key's before/after, a composite's children); NULL when it can't be dry-run."
+        },
+        {
+          "name": "decision",
+          "type": "TEXT",
+          "doc": "`pending`, `approved`, `declined` or `superseded`."
+        },
+        {
+          "name": "decided_at",
+          "type": "TEXT",
+          "doc": "When it was decided or superseded."
+        },
+        {
+          "name": "audit_id",
+          "type": "INTEGER",
+          "doc": "The approving run's command audit row."
+        },
+        {
+          "name": "superseded_by",
+          "type": "INTEGER",
+          "doc": "The proposal that replaced it."
+        }
+      ],
+      "key": []
     }
   },
   "thread_answer": {
@@ -8632,6 +9702,66 @@
           "name": "ref",
           "type": "TEXT",
           "doc": "`answer:<id>`."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it was shown in (v_thread.id)."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "The turn it was shown in (v_agent_turn.id), when one was open."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "The effort open in the thread at the time, if any."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "What it's called."
+        },
+        {
+          "name": "lens",
+          "type": "TEXT",
+          "doc": "An existing lens shown (`<extension>/<slug>`); NULL when the answer has its own spec."
+        },
+        {
+          "name": "spec",
+          "type": "TEXT",
+          "doc": "The answer's own lens spec (JSON: title, query, viz, columns, chart, …); NULL for an existing lens."
+        },
+        {
+          "name": "params",
+          "type": "TEXT",
+          "doc": "The params it ran with (JSON object)."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "kept_lens",
+          "type": "TEXT",
+          "doc": "The lens it was kept as (`oxplow.lens.keep`), if it was."
+        }
+      ],
+      "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Answer id."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/answer?id=<id>`."
         },
         {
           "name": "thread_id",
@@ -9253,6 +10383,81 @@
         }
       ],
       "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/work_item?id=<id>&provider=<provider>` (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`)."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "The implementation it comes from: the active work list (`oxplow`, a provider instance)."
+        },
+        {
+          "name": "native_id",
+          "type": "TEXT",
+          "doc": "The id the list itself knows it by (`tsk42`, `ENG-12`): the ref without `oxplow:oxplow/work_item?id=&provider=<provider>`. Match a tracker's own rows on this, never by slicing `ref`."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Markdown body."
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "Canonical state: `todo`, `in_progress`, `blocked`, `done` or `canceled`."
+        },
+        {
+          "name": "native_state",
+          "type": "TEXT",
+          "doc": "The list's own state (oxplow: the task status, `archived` included)."
+        },
+        {
+          "name": "native",
+          "type": "TEXT",
+          "doc": "The list's own fields as JSON (its declared fields; oxplow: priority, author, …)."
+        },
+        {
+          "name": "parent_ref",
+          "type": "TEXT",
+          "doc": "The parent work item's ref (an epic); NULL at top level or when the parent is deleted."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The list it's on: a thread's, or NULL for the backlog."
+        },
+        {
+          "name": "rank",
+          "type": "REAL",
+          "doc": "Its order on its list (ascending); NULL orders by `created_at`."
+        },
+        {
+          "name": "closed_at",
+          "type": "TEXT",
+          "doc": "When it first reached `done` or `canceled` (RFC 3339); NULL while open."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
     }
   },
   "knowledge_page": {
@@ -9355,6 +10560,56 @@
         }
       ],
       "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/wiki?slug=<slug>`."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "The knowledge store that keeps it: the project's active one (`oxplow`, the wiki; a provider's instance). The pages are the active store's. (v2)"
+        },
+        {
+          "name": "slug",
+          "type": "TEXT",
+          "doc": "Page slug (link with [[slug]])."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The page's first `# ` heading, else its slug."
+        },
+        {
+          "name": "excerpt",
+          "type": "TEXT",
+          "doc": "Start of the body."
+        },
+        {
+          "name": "body_size",
+          "type": "INTEGER",
+          "doc": "Size of the full body, bytes."
+        },
+        {
+          "name": "outbound_refs",
+          "type": "TEXT",
+          "doc": "JSON array of every ref the page links to (`oxplow:oxplow/file?path=src/lib.rs`, `oxplow:oxplow/wiki?slug=other`, `oxplow:oxplow/work_item?id=tsk42&provider=oxplow`)."
+        },
+        {
+          "name": "stale_ref_count",
+          "type": "INT",
+          "doc": "Its `stale` rows in v_knowledge_ref: file refs whose file has a newer primary-stream snapshot than the one the ref was pinned to (or that were never pinned but have been snapshotted): what may no longer hold."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
     }
   },
   "knowledge_ref": {
@@ -9363,7 +10618,7 @@
         {
           "name": "page",
           "type": "TEXT",
-          "doc": "The page (`wiki:<slug>`, v_knowledge_page.ref)."
+          "doc": "The page (`oxplow:oxplow/wiki?slug=<slug>`, v_knowledge_page.ref)."
         },
         {
           "name": "path",
@@ -9405,7 +10660,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`wiki:<slug>` (v_knowledge_page.ref)."
+          "doc": "`oxplow:oxplow/wiki?slug=<slug>` (v_knowledge_page.ref)."
         },
         {
           "name": "body",
@@ -9422,7 +10677,7 @@
         {
           "name": "page",
           "type": "TEXT",
-          "doc": "The page (`wiki:<slug>`, v_knowledge_page.ref)."
+          "doc": "The page (`oxplow:oxplow/wiki?slug=<slug>`, v_knowledge_page.ref)."
         },
         {
           "name": "thread_id",
@@ -10025,6 +11280,106 @@
         }
       ],
       "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Fact id."
+        },
+        {
+          "name": "capture_id",
+          "type": "INTEGER",
+          "doc": "Producing capture (v_capture.id)."
+        },
+        {
+          "name": "measure_key",
+          "type": "TEXT",
+          "doc": "Measure this is a value of (v_measure.key)."
+        },
+        {
+          "name": "value",
+          "type": "REAL",
+          "doc": "The measured value."
+        },
+        {
+          "name": "numerator",
+          "type": "REAL",
+          "doc": "Ratio numerator, for ratio measures."
+        },
+        {
+          "name": "denominator",
+          "type": "REAL",
+          "doc": "Ratio denominator, for ratio measures."
+        },
+        {
+          "name": "subject_kind",
+          "type": "TEXT",
+          "doc": "The subject URI's resource: `oxplow/file` or `oxplow/symbol`."
+        },
+        {
+          "name": "subject",
+          "type": "TEXT",
+          "doc": "The subject as one ref (`oxplow:oxplow/symbol?path=src/a.rs&symbol=Parser::parse`, `oxplow:oxplow/file?path=src/a.rs`)."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "File path."
+        },
+        {
+          "name": "line",
+          "type": "INTEGER",
+          "doc": "Line number, when it has one."
+        },
+        {
+          "name": "severity",
+          "type": "TEXT",
+          "doc": "Finding severity, for lint-like facts."
+        },
+        {
+          "name": "rule",
+          "type": "TEXT",
+          "doc": "Rule id, for lint-like facts."
+        },
+        {
+          "name": "detail",
+          "type": "TEXT",
+          "doc": "Free-text detail."
+        },
+        {
+          "name": "dims_json",
+          "type": "TEXT",
+          "doc": "Extra dimensions as a JSON object."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream (worktree) whose tree it describes."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "From the capture."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "From the capture."
+        },
+        {
+          "name": "captured_at",
+          "type": "TEXT",
+          "doc": "When the capture that holds it ran."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "From the capture."
+        }
+      ],
+      "key": []
     }
   },
   "function": {
@@ -10147,10 +11502,115 @@
         }
       ],
       "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream (worktree) whose tree it's in."
+        },
+        {
+          "name": "symbol",
+          "type": "TEXT",
+          "doc": "The function's `oxplow:oxplow/symbol?path=<path>&symbol=<id>` ref (`v_symbol.ref`)."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "The file it's in."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The function's own name (`v_symbol.name`)."
+        },
+        {
+          "name": "container",
+          "type": "TEXT",
+          "doc": "What it's inside, `::`-joined; NULL at top level (`v_symbol.container`)."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`function`, `method` or `constructor` (`v_symbol.kind`)."
+        },
+        {
+          "name": "line",
+          "type": "",
+          "doc": "Its first line."
+        },
+        {
+          "name": "language",
+          "type": "",
+          "doc": "Its language (`rust`, `typescript`, …)."
+        },
+        {
+          "name": "complexity",
+          "type": "",
+          "doc": "Cyclomatic complexity; NULL when not measured."
+        },
+        {
+          "name": "length",
+          "type": "",
+          "doc": "Length in lines; NULL when not measured."
+        },
+        {
+          "name": "parameters",
+          "type": "",
+          "doc": "Parameter count; NULL when not measured."
+        },
+        {
+          "name": "captured_at",
+          "type": "",
+          "doc": "When its latest capture ran."
+        }
+      ],
+      "key": []
     }
   },
   "file_metric": {
     "1": {
+      "columns": [
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream (worktree) whose tree it's in."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "The file."
+        },
+        {
+          "name": "measure_key",
+          "type": "TEXT",
+          "doc": "The measure (v_measure.key)."
+        },
+        {
+          "name": "value",
+          "type": "REAL",
+          "doc": "Its value for the file."
+        },
+        {
+          "name": "numerator",
+          "type": "REAL",
+          "doc": "Ratio numerator, for ratio measures."
+        },
+        {
+          "name": "denominator",
+          "type": "REAL",
+          "doc": "Ratio denominator, for ratio measures."
+        },
+        {
+          "name": "captured_at",
+          "type": "TEXT",
+          "doc": "When its latest capture ran."
+        }
+      ],
+      "key": []
+    },
+    "2": {
       "columns": [
         {
           "name": "stream_id",
@@ -10492,7 +11952,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "The item's canonical ref (`work_item:<provider>:<id>`): what a hit opens."
+          "doc": "The item's canonical ref (`oxplow:oxplow/work_item?id=<id>&provider=<provider>`): what a hit opens."
         },
         {
           "name": "title",
@@ -10515,6 +11975,21 @@
   },
   "commit_work_item": {
     "1": {
+      "columns": [
+        {
+          "name": "sha",
+          "type": "TEXT",
+          "doc": "The commit (v_commit.sha)."
+        },
+        {
+          "name": "work_item",
+          "type": "TEXT",
+          "doc": "The work item (v_work_item.ref)."
+        }
+      ],
+      "key": []
+    },
+    "2": {
       "columns": [
         {
           "name": "sha",
@@ -10632,6 +12107,46 @@
           "name": "thread_ref",
           "type": "TEXT",
           "doc": "Its thread's ref (`thread:thr<n>`): where a note opens. (v3)"
+        }
+      ],
+      "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Note id (`not<n>`)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it's on."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Markdown body."
+        },
+        {
+          "name": "author",
+          "type": "TEXT",
+          "doc": "Who wrote it (`agent`, `user`, …)."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/thread_note?id=not<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
+        },
+        {
+          "name": "thread_ref",
+          "type": "TEXT",
+          "doc": "Its thread's ref (`oxplow:oxplow/thread?id=thr<n>`): where a note opens. (v3)"
         }
       ],
       "key": []
@@ -11237,6 +12752,106 @@
         }
       ],
       "key": []
+    },
+    "8": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Session id (its ref is `oxplow:oxplow/agent_session?id=ses<id>`)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it's on (v_thread.id)."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`terminal` (a harness in a PTY) or `action` (a one-shot session). (v7: `chat` is gone.)"
+        },
+        {
+          "name": "harness",
+          "type": "TEXT",
+          "doc": "What runs in it: `claude`, `codex`, `opencode`, or a harness an extension declares."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "What the person called it; empty until renamed."
+        },
+        {
+          "name": "resume_session_id",
+          "type": "TEXT",
+          "doc": "The harness's own session id, to resume it; empty when unknown."
+        },
+        {
+          "name": "host",
+          "type": "TEXT",
+          "doc": "The host it runs on; NULL is the local machine."
+        },
+        {
+          "name": "opened_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "closed_at",
+          "type": "TEXT",
+          "doc": "When its slot was closed; NULL while open."
+        },
+        {
+          "name": "closed_reason",
+          "type": "TEXT",
+          "doc": "`closed` (closed itself), `thread_closed` or `stream_archived`; NULL while open."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "pid",
+          "type": "INTEGER",
+          "doc": "OS pid of the process the daemon spawned for it, rewritten on every spawn; NULL for a session with no process of its own (a chat) or not yet spawned. May be dead or reused: read it with last_seen_at. (v2)"
+        },
+        {
+          "name": "last_seen_at",
+          "type": "TEXT",
+          "doc": "The newest hook seen from it, to the 30 s (RFC 3339); NULL before the first. A live agent has a recent one and a pid that exists. (v2)"
+        },
+        {
+          "name": "stopped_by_user_at",
+          "type": "TEXT",
+          "doc": "When the person deliberately stopped it; NULL once started again, and after a crash or backend restart (which resume when the tab is shown). A stopped session is not spawned until a person starts it. (v3)"
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/agent_session?id=ses<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v4)"
+        },
+        {
+          "name": "native_title",
+          "type": "TEXT",
+          "doc": "The name its harness gives the conversation it is bound to (Claude's `/rename`, a generated title); empty when it gave none, and cleared when the slot moves to another conversation. (v6)"
+        },
+        {
+          "name": "fork_next",
+          "type": "INTEGER",
+          "doc": "1 when its next launch forks the conversation it is bound to instead of resuming it. (v6)"
+        },
+        {
+          "name": "display_name",
+          "type": "TEXT",
+          "doc": "What a person calls it: its `title`, else its `native_title`, else the harness and the day it was opened. The one place a session is named. (v5; v6: the native title)"
+        },
+        {
+          "name": "bound_origin",
+          "type": "TEXT",
+          "doc": "How it came to its current conversation (v_agent_session_binding.origin); NULL when it is bound to none. (v6)"
+        }
+      ],
+      "key": []
     }
   },
   "agent_session_status": {
@@ -11511,6 +13126,86 @@
         }
       ],
       "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "The contribution's ref (`effect:tracker/fake`): the same as its `v_contribution.ref`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension it belongs to."
+        },
+        {
+          "name": "contribution",
+          "type": "TEXT",
+          "doc": "The provider's, collector's or effect's id within it."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`provider`, `collector` or `effect`."
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "`ok`, `failing` or `disabled`."
+        },
+        {
+          "name": "reason",
+          "type": "TEXT",
+          "doc": "Why it's disabled."
+        },
+        {
+          "name": "consecutive_failures",
+          "type": "INTEGER",
+          "doc": "Failures since its last success."
+        },
+        {
+          "name": "last_ok_at",
+          "type": "TEXT",
+          "doc": "When it last succeeded (RFC 3339)."
+        },
+        {
+          "name": "last_error",
+          "type": "TEXT",
+          "doc": "Its last failure."
+        },
+        {
+          "name": "mean_ms",
+          "type": "REAL",
+          "doc": "A moving average of its successful runs or calls, in milliseconds."
+        },
+        {
+          "name": "next_due_at",
+          "type": "TEXT",
+          "doc": "When it should next run (a schedule's next slot), if it runs on one."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "When this row last changed."
+        },
+        {
+          "name": "dead_letters",
+          "type": "",
+          "doc": "Events it couldn't handle and that wait for a person: dead letters of its consumer (its `ref`) or of events whose subject names it (its `ref`)."
+        },
+        {
+          "name": "fresh",
+          "type": "",
+          "doc": "1 unless a scheduled run is overdue (`next_due_at` has passed) or a collector's last run failed (`state` isn't `ok`): its data is then the last good run's, not current. (v3)"
+        },
+        {
+          "name": "repair_item",
+          "type": "TEXT",
+          "doc": "The open repair work item for it — the one whose title starts `Repair <extension> <contribution>:`, filed by the bundled repair effect; NULL when none is open."
+        }
+      ],
+      "key": []
     }
   },
   "contribution": {
@@ -11678,7 +13373,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "Its ref: `job:effort-review/review`, `collector:triage/todos`, `command:oxplow.review.accept`. (v3, was `id`)"
+          "doc": "Its ref: `oxplow:oxplow/job?job=effort-review/review`, `oxplow:oxplow/collector?collector=triage/todos`, `oxplow:oxplow/command?command=oxplow.review.accept`. (v3, was `id`)"
         },
         {
           "name": "extension",
@@ -11723,7 +13418,7 @@
         {
           "name": "after",
           "type": "TEXT",
-          "doc": "What an effect or a collector runs after when one event reaches it and them (JSON array of refs: `effect:<ext>/<id>`, `collector:<ext>/<id>`, `consumer:<name>`), as the catalog resolved its `after:`."
+          "doc": "What an effect or a collector runs after when one event reaches it and them (JSON array of refs: `effect:<ext>/<id>`, `oxplow:oxplow/collector?collector=<ext>/<id>`, `oxplow:oxplow/consumer?name=<name>`), as the catalog resolved its `after:`."
         },
         {
           "name": "order_level",
@@ -12066,7 +13761,7 @@
         {
           "name": "contribution",
           "type": "TEXT",
-          "doc": "The contribution's ref (`v_contribution.ref`): `command:oxplow.review.accept`, `job:effort-review/review`."
+          "doc": "The contribution's ref (`v_contribution.ref`): `oxplow:oxplow/command?command=oxplow.review.accept`, `oxplow:oxplow/job?job=effort-review/review`."
         },
         {
           "name": "kind",
@@ -12614,6 +14309,108 @@
       "key": [
         "id"
       ]
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "The run's id (a UUIDv7)."
+        },
+        {
+          "name": "job",
+          "type": "TEXT",
+          "doc": "The job it runs: `oxplow:oxplow/job?job=<extension>/<id>` (`v_contribution.ref`)."
+        },
+        {
+          "name": "intent_key",
+          "type": "TEXT",
+          "doc": "What it is about: the `intentKey` it was started with, one run per key and job (`review:oxplow:oxplow/effort?id=eff12`). (v2)"
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension it belongs to."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The extension's declared `version:` when it was started; NULL when it declares none."
+        },
+        {
+          "name": "contract_version",
+          "type": "INTEGER",
+          "doc": "The job declaration's own `version:`."
+        },
+        {
+          "name": "operation",
+          "type": "TEXT",
+          "doc": "What it runs: `ai.complete_typed`."
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "`queued`, `running`, `succeeded`, `failed`, `cancelled` or `interrupted` (it stopped without a known end: oxplow restarted, or it lost its lease)."
+        },
+        {
+          "name": "attempt",
+          "type": "INTEGER",
+          "doc": "Its current attempt, 0 before the first starts."
+        },
+        {
+          "name": "cancellation_requested",
+          "type": "INT",
+          "doc": "1 once someone asked it to stop."
+        },
+        {
+          "name": "invoker",
+          "type": "TEXT",
+          "doc": "Who started it, as an event source: `human`, `agent:thr3`, `effect:<ext>/<id>`, …"
+        },
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "doc": "The run that started it (`v_extension_run.run_id`)."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "When it was started (RFC 3339)."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "When its state last changed (RFC 3339)."
+        },
+        {
+          "name": "ai_calls",
+          "type": "INT",
+          "doc": "Model rounds its current attempt has finished."
+        },
+        {
+          "name": "tool_calls",
+          "type": "INT",
+          "doc": "Tools the model called in its current attempt."
+        },
+        {
+          "name": "input_tokens",
+          "type": "INT",
+          "doc": "Input tokens its current attempt's rounds reported (observed usage only)."
+        },
+        {
+          "name": "output_tokens",
+          "type": "INT",
+          "doc": "Output tokens likewise."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/job_run?id=<id>`: its ref — what `jobs.read/snapshot`, `jobs.write/cancel` and `oxplow.job_run.cancel` take. (v3)"
+        }
+      ],
+      "key": [
+        "id"
+      ]
     }
   },
   "job_run_output": {
@@ -12664,6 +14461,46 @@
   },
   "knowledge_pin": {
     "1": {
+      "columns": [
+        {
+          "name": "slug",
+          "type": "TEXT",
+          "doc": "The page's slug (v_knowledge_page.slug)."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "The file it relies on (workspace-relative)."
+        },
+        {
+          "name": "pinned_snapshot_id",
+          "type": "INTEGER",
+          "doc": "The snapshot the ref was pinned to (written or verified against); NULL if never pinned."
+        },
+        {
+          "name": "pinned_vcs_rev",
+          "type": "TEXT",
+          "doc": "The VCS revision nearest the pin (v_commit.sha for git); NULL without one."
+        },
+        {
+          "name": "pinned_vcs_rev_exact",
+          "type": "INT",
+          "doc": "1 when the pinned snapshot is exactly `pinned_vcs_rev` (a clean worktree), else 0."
+        },
+        {
+          "name": "latest_snapshot_id",
+          "type": "INT",
+          "doc": "The file's latest primary-stream snapshot (the stream a pin comes from); NULL if it was never captured there."
+        },
+        {
+          "name": "stale",
+          "type": "INT",
+          "doc": "1 when the file changed after the pin (or was captured but never pinned)."
+        }
+      ],
+      "key": []
+    },
+    "2": {
       "columns": [
         {
           "name": "slug",
@@ -12965,6 +14802,68 @@
           "name": "ref",
           "type": "TEXT",
           "doc": "`lens:<extension>/<slug>`: its ref, the one place SQL spells it."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it (v_extension.name)."
+        },
+        {
+          "name": "slug",
+          "type": "TEXT",
+          "doc": "Its id within the extension: the lens file's name."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "What the person sees."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "What it shows; empty when it says nothing."
+        },
+        {
+          "name": "viz",
+          "type": "TEXT",
+          "doc": "How it is drawn: `table`, `list`, `chart`, `tree`, `grid`, `form`, `custom`, … "
+        },
+        {
+          "name": "params",
+          "type": "TEXT",
+          "doc": "The params it takes, as a JSON array of `{name, label, default, options, type, role, presets}`: `type` is `text`, `choice`, `bool`, `date_range`, `branch` or `search`; `role` is `selection` when a column of its rows (or of a part's) selects it, else `filter`."
+        },
+        {
+          "name": "hidden",
+          "type": "INTEGER",
+          "doc": "1 when the launcher doesn't list it (a drill-down or a grid's child)."
+        },
+        {
+          "name": "launcher_category",
+          "type": "TEXT",
+          "doc": "The launcher section it is listed under (`Work`, `Code`, `Activity`, `Data`, …); NULL for the default `Lenses`."
+        },
+        {
+          "name": "needs",
+          "type": "TEXT",
+          "doc": "The capabilities (or features) it needs, as a JSON array; without them its run says so."
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "Its source file, the one to edit, relative to the project; NULL when no source is here (it ships with oxplow). A deployed extension runs a copy of it in the store."
+        }
+      ],
+      "key": [
+        "ref"
+      ]
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/lens?lens=<extension>/<slug>`: its ref, the one place SQL spells it."
         },
         {
           "name": "extension",
@@ -13340,6 +15239,93 @@
       "key": [
         "ref"
       ]
+    },
+    "5": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/extension?name=<name>`."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "Its name."
+        },
+        {
+          "name": "namespace",
+          "type": "TEXT",
+          "doc": "The namespace its commands' ids are under."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "What it is, in a line."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "The folder its files are read from: its deployment in the store, or its source relative to the checkout."
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "doc": "`project` or `bundled` (ships with oxplow, read-only)."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "Its `version:`; NULL when it declares none."
+        },
+        {
+          "name": "enabled",
+          "type": "INTEGER",
+          "doc": "0 when configuration disables it or a public contract blocks it: it contributes nothing."
+        },
+        {
+          "name": "purpose",
+          "type": "TEXT",
+          "doc": "Why it exists (its intent); NULL when the manifest didn't load."
+        },
+        {
+          "name": "deployment",
+          "type": "TEXT",
+          "doc": "Where its files come from: `deployed` (a deployment in the store, `v_extension_deployment`), `shipped` (the deployment that ships with oxplow), `source` (read from its source folder), `undeployed` (its source is here but it was never deployed; it runs nothing) or `not_here` (listed as on, but neither its source nor a deployment is on this machine). (v2)"
+        },
+        {
+          "name": "hash",
+          "type": "TEXT",
+          "doc": "The hash of the deployment it runs; NULL when it runs none. (v2)"
+        },
+        {
+          "name": "errors",
+          "type": "TEXT",
+          "doc": "Problems reported while loading it that did not hold it back, as a JSON array of strings; `[]` when healthy."
+        },
+        {
+          "name": "warnings",
+          "type": "TEXT",
+          "doc": "Things worth fixing that don't stop it loading, as a JSON array of strings."
+        },
+        {
+          "name": "permissions",
+          "type": "TEXT",
+          "doc": "What its manifest declares it may reach beyond the baseline (`permissions:`: `sql`, `commands`, `files`, `ai`, `network`, `process`, `secrets`, `agent`), as a JSON object; `{}` is the baseline. Approved when it is deployed. (v3)"
+        },
+        {
+          "name": "pending",
+          "type": "TEXT",
+          "doc": "What an extension that is on but undeployed waits on a person for: the permissions its source would add, one line each, as a JSON array; `[]` when nothing waits. Startup deploys an undeployed extension only when it asks for nothing. (v3)"
+        },
+        {
+          "name": "shared",
+          "type": "INTEGER",
+          "doc": "1 when it is the team's: the project's `extensions:` list names it (`oxplow.extension.share`). (v4)"
+        }
+      ],
+      "key": [
+        "ref"
+      ]
     }
   },
   "page_ref": {
@@ -13364,6 +15350,56 @@
           "name": "target_kind",
           "type": "TEXT",
           "doc": "The target's ref kind."
+        },
+        {
+          "name": "ref_type",
+          "type": "TEXT",
+          "doc": "How the source relates to the target (`touched_file`, `wikilink`, `impact`, `work_item_mention`, `summary_commit_mention`, …)."
+        },
+        {
+          "name": "source_extra",
+          "type": "TEXT",
+          "doc": "Edge-specific extras as JSON (a line anchor, a version pin, a link sub-type), when the writer recorded any."
+        },
+        {
+          "name": "local_snapshot_id",
+          "type": "INTEGER",
+          "doc": "The snapshot the edge was recorded at, when there is one (v_snapshot.id)."
+        },
+        {
+          "name": "closest_vcs_rev",
+          "type": "TEXT",
+          "doc": "The VCS revision nearest the edge when recorded."
+        },
+        {
+          "name": "vcs_rev_exact",
+          "type": "INTEGER",
+          "doc": "1 when that revision is exactly the state recorded."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "source_uri",
+          "type": "TEXT",
+          "doc": "The page or record the edge starts at (`oxplow:oxplow/wiki?slug=intro`, a commit's, a work item's)."
+        },
+        {
+          "name": "target_uri",
+          "type": "TEXT",
+          "doc": "What it points at (`oxplow:oxplow/file?path=src/app.rs`, a work item's, another wiki page's)."
+        },
+        {
+          "name": "source_resource",
+          "type": "TEXT",
+          "doc": "The source's resource (`oxplow/wiki`)."
+        },
+        {
+          "name": "target_resource",
+          "type": "TEXT",
+          "doc": "The target's resource (`oxplow/file`)."
         },
         {
           "name": "ref_type",
@@ -13604,7 +15640,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`collector:<owner>/<id>`."
+          "doc": "`oxplow:oxplow/collector?collector=<owner>/<id>`."
         },
         {
           "name": "owner",
@@ -13789,7 +15825,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "The note's canonical ref (`thread_note:not<n>`): what a hit opens."
+          "doc": "The note's canonical ref (`oxplow:oxplow/thread_note?id=not<n>`): what a hit opens."
         },
         {
           "name": "title",
@@ -13821,7 +15857,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`agent_session:ses<n>`: what a hit opens."
+          "doc": "`oxplow:oxplow/agent_session?id=ses<n>`: what a hit opens."
         },
         {
           "name": "title",
@@ -13853,7 +15889,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`commit:<sha>`: what a hit opens."
+          "doc": "`oxplow:oxplow/commit?sha=<sha>`: what a hit opens."
         },
         {
           "name": "title",
@@ -13885,7 +15921,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`dashboard:dsh<n>`: what a hit opens."
+          "doc": "`oxplow:oxplow/dashboard?id=dsh<n>`: what a hit opens."
         },
         {
           "name": "title",
@@ -13917,7 +15953,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`decision:<n>`: what a hit opens."
+          "doc": "`oxplow:oxplow/decision?id=<n>`: what a hit opens."
         },
         {
           "name": "title",
@@ -13949,7 +15985,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`effort:eff<n>`: what a hit opens."
+          "doc": "`oxplow:oxplow/effort?id=eff<n>`: what a hit opens."
         },
         {
           "name": "title",
@@ -13976,7 +16012,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`lens:<extension>/<slug>`: what a hit opens."
+          "doc": "`oxplow:oxplow/lens?lens=<extension>/<slug>`: what a hit opens."
         },
         {
           "name": "title",
@@ -14003,7 +16039,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`thread:thr<n>`: what a hit opens."
+          "doc": "`oxplow:oxplow/thread?id=thr<n>`: what a hit opens."
         },
         {
           "name": "title",
@@ -14035,7 +16071,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`turn:trn<n>`: what a hit opens."
+          "doc": "`oxplow:oxplow/turn?id=trn<n>`: what a hit opens."
         },
         {
           "name": "title",
@@ -14097,7 +16133,7 @@
         {
           "name": "session_ref",
           "type": "TEXT",
-          "doc": "The slot's ref (`agent_session:ses<n>`)."
+          "doc": "The slot's ref (`oxplow:oxplow/agent_session?id=ses<n>`)."
         }
       ],
       "key": []
@@ -14173,6 +16209,76 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "The harness's id for it, or the id of the call that started it."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "What kind of subagent the harness says it is (Claude's `agent_type`); NULL when it says nothing."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The session it acted in (v_agent_session.id)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The session's thread."
+        },
+        {
+          "name": "turn_id",
+          "type": "",
+          "doc": "The turn it started in, else the turn of its first call; NULL when neither says."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "When its `agent.subagent.started` was logged; NULL for an `unknown` one."
+        },
+        {
+          "name": "finished_at",
+          "type": "TEXT",
+          "doc": "When it stopped or handed its report back; NULL while running or unknown."
+        },
+        {
+          "name": "calls",
+          "type": "",
+          "doc": "Tool calls made as it (v_tool_call.subagent_id)."
+        },
+        {
+          "name": "last_activity_at",
+          "type": "TEXT",
+          "doc": "The newest of its start, its calls and its finish."
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "`running` (started, not finished), `finished`, or `unknown` (only tool calls name it)."
+        },
+        {
+          "name": "finished_event_id",
+          "type": "TEXT",
+          "doc": "The event that finished it; its `result` body is the subagent's last message, read as `subagent:<id>#result`."
+        },
+        {
+          "name": "session_ref",
+          "type": "TEXT",
+          "doc": "Its session's ref (`oxplow:oxplow/agent_session?id=ses3`): where it opens."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/subagent?agent=<id>&session=ses<n>`: its ref, the one place SQL spells it — select and join on this."
+        }
+      ],
+      "key": []
     }
   },
   "agent_plan": {
@@ -14233,7 +16339,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "The handoff's canonical ref (`handoff:hnd<n>`): what a hit opens."
+          "doc": "The handoff's canonical ref (`oxplow:oxplow/handoff?id=hnd<n>`): what a hit opens."
         },
         {
           "name": "title",
@@ -14291,6 +16397,101 @@
           "name": "from_session_ref",
           "type": "TEXT",
           "doc": "That session's ref (`agent_session:ses<n>`)."
+        },
+        {
+          "name": "from_actor",
+          "type": "TEXT",
+          "doc": "Who sent it: `user`, `agent`, `effect`, `job` or `system` (the actor, never an input)."
+        },
+        {
+          "name": "to_thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it is for (never a session: the thread outlives its processes)."
+        },
+        {
+          "name": "to_thread_ref",
+          "type": "TEXT",
+          "doc": "That thread's ref: where a handoff opens."
+        },
+        {
+          "name": "work_item",
+          "type": "TEXT",
+          "doc": "The work item it hands over (a `work_item:` ref), when it names one; taking the handoff moves the item onto the recipient thread."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Markdown body."
+        },
+        {
+          "name": "sent_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "delivered_at",
+          "type": "TEXT",
+          "doc": "When a prompt in the recipient thread carried it to its agent; NULL until then."
+        },
+        {
+          "name": "delivered_to_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session that prompt was in."
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "`open`, `taken`, `declined` (by the recipient) or `withdrawn` (by the sender)."
+        },
+        {
+          "name": "settled_at",
+          "type": "TEXT",
+          "doc": "When it was taken, declined or withdrawn; NULL while open."
+        },
+        {
+          "name": "settled_by_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session that settled it; NULL for a person."
+        },
+        {
+          "name": "note",
+          "type": "TEXT",
+          "doc": "What its settler said, when anything."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Handoff id (`hnd<n>`)."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/handoff?id=hnd<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it."
+        },
+        {
+          "name": "from_thread_id",
+          "type": "INTEGER",
+          "doc": "The thread that sent it."
+        },
+        {
+          "name": "from_thread_ref",
+          "type": "TEXT",
+          "doc": "That thread's ref (`oxplow:oxplow/thread?id=thr<n>`)."
+        },
+        {
+          "name": "from_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session that sent it; NULL when a person or an effect did."
+        },
+        {
+          "name": "from_session_ref",
+          "type": "TEXT",
+          "doc": "That session's ref (`oxplow:oxplow/agent_session?id=ses<n>`)."
         },
         {
           "name": "from_actor",
@@ -14747,6 +16948,63 @@
       "key": [
         "ref"
       ]
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/extension_deployment?hash=<hash>&name=<name>`."
+        },
+        {
+          "name": "extension_ref",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/extension?name=<name>`: the extension it is a deployment of; NULL when the catalog no longer lists it."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The extension's name."
+        },
+        {
+          "name": "hash",
+          "type": "TEXT",
+          "doc": "The hash of the source it was copied from: its identity."
+        },
+        {
+          "name": "deployed_at",
+          "type": "TEXT",
+          "doc": "When it was first deployed."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream whose checkout it was deployed from; NULL when oxplow deployed it at startup."
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "The source folder it was copied from."
+        },
+        {
+          "name": "active",
+          "type": "INTEGER",
+          "doc": "1 for the deployment the extension runs now."
+        },
+        {
+          "name": "permissions",
+          "type": "TEXT",
+          "doc": "What it declares it may reach beyond the baseline, as a JSON object (`v_extension.permissions`'s shape): what a person approved when it was deployed. (v2)"
+        },
+        {
+          "name": "build",
+          "type": "TEXT",
+          "doc": "The command it was built with (its manifest's `build.run`), which a person approved when it was deployed; NULL when it has no build. (v3)"
+        }
+      ],
+      "key": [
+        "ref"
+      ]
     }
   },
   "extension_source": {
@@ -14779,7 +17037,7 @@
         {
           "name": "scope",
           "type": "TEXT",
-          "doc": "`app`; a page's ref (`page:…`, `lens:…`) or `kind:<kind>`; a panel's ref; or `component:<extension>/<id>`."
+          "doc": "`app`; a page's ref (`oxplow:oxplow/page?page=…`, `oxplow:oxplow/lens?lens=…`) or `kind:<kind>`; a panel's ref; or `component:<extension>/<id>`."
         },
         {
           "name": "key",
@@ -14881,6 +17139,68 @@
           "name": "wikilink",
           "type": "TEXT",
           "doc": "JSON `{ prefix, param }`: `[[<prefix>:<value>]]` names it with that param set; NULL when it has no sugar."
+        }
+      ],
+      "key": [
+        "resource"
+      ]
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "resource",
+          "type": "TEXT",
+          "doc": "`<extension>/<name>`: `oxplow/file`, `acme/pr`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it (`oxplow-foundation` for oxplow's own)."
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "What one is called (`Pull request`)."
+        },
+        {
+          "name": "params",
+          "type": "TEXT",
+          "doc": "JSON object of its params by name, each `{ required, pattern }`: a URI carries every required one, and each value matches its pattern."
+        },
+        {
+          "name": "additional",
+          "type": "INTEGER",
+          "doc": "1 when a URI may carry params beyond its own (a page's or a lens's)."
+        },
+        {
+          "name": "resolve",
+          "type": "TEXT",
+          "doc": "The view whose rows name each one; NULL when no model holds it (a file, a page)."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The column of `resolve` that titles one; NULL means `title`."
+        },
+        {
+          "name": "searchable",
+          "type": "TEXT",
+          "doc": "The view search indexes it from; NULL when search doesn't."
+        },
+        {
+          "name": "icon",
+          "type": "TEXT",
+          "doc": "The icon it is drawn with."
+        },
+        {
+          "name": "wikilink",
+          "type": "TEXT",
+          "doc": "JSON `{ prefix, param }`: `[[<prefix>:<value>]]` names it with that param set; NULL when it has no sugar."
+        },
+        {
+          "name": "page",
+          "type": "TEXT",
+          "doc": "The page URI one opens on, given `ref=<uri>` (v2): an extension's resource with a page of its own; NULL for one that opens as itself."
         }
       ],
       "key": [

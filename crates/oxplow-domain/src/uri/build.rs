@@ -1,410 +1,477 @@
-//! Canonical ref builders and readers (`.context/resources.md` "Using refs").
+//! URI builders and readers (`.context/resources.md` "Using URIs").
 //!
 //! Every Rust producer that names a thing — in an event subject, a
-//! payload, a `page_uri` row, a command's input — builds the ref here, and
+//! payload, a `page_ref` row, a command's input — builds the URI here, and
 //! every reader reads one back through [`parse_as`] / [`id_of`] /
-//! [`parse_type`], so a kind's prefix is spelled once
-//! (`uri::types::{EFFORT, FILE, …}`) and an id is always escaped and
-//! decoded by the grammar. A work list builds its own items' refs
-//! (`oxplow_tasks::work_item_ref`). The `refs_are_built_and_parsed_through_the_grammar`
-//! source guard refuses a hand-built or hand-parsed ref anywhere else.
+//! [`param_of`] / [`parse_resource`], so a resource's name and params are
+//! spelled once (`uri::resources::{EFFORT, FILE, …}`) and a value is always
+//! escaped and decoded by the grammar. A work list builds its own items'
+//! URIs through [`work_item_uri`]. The `refs_are_built_and_parsed_through_the_grammar`
+//! source guard refuses a hand-built or hand-parsed URI anywhere else.
+//!
+//! The params of oxplow's resources are oxplow-foundation's declarations
+//! (its manifest's `resources:`); a test there pins that every URI built
+//! here is one it declares.
 
+use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use crate::ids::{
     AgentSessionId, AgentTurnId, CommentId, EffortId, HandoffId, NoteId, StreamId, ThreadId,
 };
-use crate::uri::grammar::{Uri, UriParseError};
-use crate::uri::types as k;
+use crate::uri::oxplow_uri::{OxplowUri, ResourceName};
+use crate::uri::resources as r;
 
-/// `<kind>:<id>`, the id escaped as the grammar needs: what every builder
-/// below is. A producer calls the typed builder for its kind; this is
-/// for a kind it only knows at run time (an extension's).
+/// `resource` (`oxplow/effort`, `acme/pr`) with `params`, canonical: what
+/// every builder below is. A producer calls the typed builder for its
+/// resource; this is for one it only knows at run time (an extension's).
 ///
 /// # Panics
-/// On an invalid kind name or an empty id: a builder is called with a
-/// kind constant and a real id, so either is a bug at the call site.
-pub fn of(kind: &str, id: &str) -> String {
-    at(kind, id, None, None)
+/// On an invalid resource name or param key: a builder is called with a
+/// resource constant and literal keys, so either is a bug at the call
+/// site.
+pub fn of(resource: &str, params: &[(&str, &str)]) -> String {
+    of_with_view(resource, params, &[])
 }
 
-/// [`of`] with a revision (`git:HEAD`, `snap:01J9…`) and a fragment
-/// (`L10-20`).
-pub fn at(kind: &str, id: &str, rev: Option<&str>, frag: Option<&str>) -> String {
-    Uri::new(kind, id, rev, frag)
-        .unwrap_or_else(|e| panic!("building a `{kind}` ref of `{id}`: {e}"))
-        .to_string()
+/// [`of`] with a view (`#lines=10-20`).
+pub fn of_with_view(resource: &str, params: &[(&str, &str)], view: &[(&str, &str)]) -> String {
+    uri(resource, params, view).to_string()
 }
 
-/// Why a string isn't a ref of the kind its reader expects.
+fn uri(resource: &str, params: &[(&str, &str)], view: &[(&str, &str)]) -> OxplowUri {
+    let name: ResourceName = resource
+        .parse()
+        .unwrap_or_else(|e| panic!("building a `{resource}` URI: {e}"));
+    let map = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    };
+    OxplowUri::new(name, map(params), map(view))
+}
+
+/// The one param that names one of `resource`'s, when one does: a
+/// contribution's id is its own name's param (`oxplow/lens` → `lens`), a
+/// stored thing's is `id`, and a few say what they are (`commit` → `sha`).
+/// `None` for a resource named by several (a file's `path` and `rev`, a
+/// work item's `provider` and `id`), which has its own readers.
+pub fn key_param(resource: &str) -> Option<String> {
+    let (extension, name) = resource.split_once('/')?;
+    if extension != "oxplow" {
+        return Some("id".to_string());
+    }
+    if crate::contribution::KINDS
+        .iter()
+        .any(|k| k.kind.segment() == name)
+    {
+        return Some(name.to_string());
+    }
+    Some(
+        match name {
+            "commit" => "sha",
+            "branch" | "ai_model" | "extension" | "consumer" => "name",
+            "wiki" => "slug",
+            "config" => "key",
+            "nudge" => "kind",
+            "file"
+            | "dir"
+            | "symbol"
+            | "work_item"
+            | "subagent"
+            | "block"
+            | "test"
+            | "extension_deployment" => return None,
+            _ => "id",
+        }
+        .to_string(),
+    )
+}
+
+/// An author's short form of one of oxplow's single-key resources —
+/// `<name>:<key>` (`effect:acme/notify`, `oxplow:oxplow/wiki?slug=architecture`,
+/// `oxplow:oxplow/commit?sha=4c44d495`) — as its URI; `None` for anything else. What a
+/// wikilink or a manifest's `after:` may say instead of the whole URI;
+/// what is stored is always the URI.
+pub fn expand_short(text: &str) -> Option<String> {
+    if text.starts_with("oxplow:") {
+        return None;
+    }
+    let (name, value) = text.split_once(':')?;
+    let resource = format!("oxplow/{name}");
+    resource.parse::<ResourceName>().ok()?;
+    let key = key_param(&resource)?;
+    (!value.is_empty()).then(|| of(&resource, &[(&key, value)]))
+}
+
+/// Why a string isn't a URI of the resource its reader expects.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("`{text}` isn't a {kind} ref ({kind}:<id>)")]
+#[error("`{text}` isn't an {resource} URI (oxplow:{resource}?…)")]
 pub struct NotA {
     pub text: String,
-    pub kind: String,
+    pub resource: String,
 }
 
-/// `r` parsed, when it is a ref of `kind`: revision and fragment kept.
-pub fn parse_type(r: &str, kind: &str) -> Result<Uri, NotA> {
-    Uri::parse(r)
-        .ok()
-        .filter(|c| c.kind == kind)
-        .ok_or_else(|| NotA {
-            text: r.to_string(),
-            kind: kind.to_string(),
-        })
-}
-
-/// The decoded id of a `kind` ref (`file:a%40b.rs` → `a@b.rs`). A
-/// revision or fragment is refused: a reader that wants them calls
-/// [`parse_type`].
-pub fn id_of(r: &str, kind: &str) -> Result<String, NotA> {
-    let parsed = parse_type(r, kind)?;
-    if parsed.rev.is_some() || parsed.frag.is_some() {
-        return Err(NotA {
-            text: r.to_string(),
-            kind: kind.to_string(),
-        });
+fn not_a(text: &str, resource: &str) -> NotA {
+    NotA {
+        text: text.to_string(),
+        resource: resource.to_string(),
     }
-    Ok(parsed.id)
 }
 
-/// The id of a `kind` ref, parsed as `T` (`effort:eff12` → `EffortId(12)`,
-/// `decision:3` → `3`).
-pub fn parse_as<T: FromStr>(r: &str, kind: &str) -> Result<T, NotA> {
-    id_of(r, kind)?.parse().map_err(|_| NotA {
-        text: r.to_string(),
-        kind: kind.to_string(),
-    })
+/// `text` parsed, when it is a URI of `resource`: its view kept.
+pub fn parse_resource(text: &str, resource: &str) -> Result<OxplowUri, NotA> {
+    OxplowUri::parse(text)
+        .ok()
+        .filter(|u| u.resource().to_string() == resource)
+        .ok_or_else(|| not_a(text, resource))
 }
 
-/// The kind a ref names, or `None` for a string that isn't a ref.
-pub fn type_of(r: &str) -> Option<String> {
-    Uri::parse(r).ok().map(|c| c.kind)
+/// The decoded value of `text`'s param `name`, when `text` is a URI of
+/// `resource` that has it.
+pub fn param_of(text: &str, resource: &str, name: &str) -> Result<String, NotA> {
+    parse_resource(text, resource)?
+        .param(name)
+        .map(str::to_string)
+        .ok_or_else(|| not_a(text, resource))
+}
+
+/// The value of the one param that names a `resource` (its [`key_param`])
+/// in `text`, which names nothing else: no other param and no view (a
+/// reader that wants them calls [`parse_resource`]).
+pub fn id_of(text: &str, resource: &str) -> Result<String, NotA> {
+    let key = key_param(resource).ok_or_else(|| not_a(text, resource))?;
+    let u = parse_resource(text, resource)?;
+    if u.params().len() != 1 || !u.view().is_empty() {
+        return Err(not_a(text, resource));
+    }
+    u.param(&key)
+        .map(str::to_string)
+        .ok_or_else(|| not_a(text, resource))
+}
+
+/// The key of a `resource` URI, parsed as `T` (`oxplow:oxplow/effort?id=eff12`
+/// → `EffortId(12)`, a decision's → `3`).
+pub fn parse_as<T: FromStr>(text: &str, resource: &str) -> Result<T, NotA> {
+    id_of(text, resource)?
+        .parse()
+        .map_err(|_| not_a(text, resource))
+}
+
+/// The resource a URI names (`oxplow/wiki`), or `None` for a string that
+/// isn't one of oxplow's URIs.
+pub fn resource_of(text: &str) -> Option<String> {
+    OxplowUri::parse(text)
+        .ok()
+        .map(|u| u.resource().to_string())
+}
+
+/// The URI of a `resource` named by its key param alone ([`key_param`]):
+/// `keyed("oxplow/measure", "oxplow.loc")`.
+///
+/// # Panics
+/// On a resource without a key param (`oxplow/file`, …): those have
+/// their own builders.
+pub fn keyed(resource: &str, value: &str) -> String {
+    let key = key_param(resource).expect("a keyed resource");
+    of(resource, &[(&key, value)])
 }
 
 pub fn project_uri(name: &str) -> String {
-    of(k::PROJECT, name)
+    keyed(r::PROJECT, name)
 }
 
 pub fn stream_uri(id: StreamId) -> String {
-    of(k::STREAM, &id.to_string())
+    keyed(r::STREAM, &id.to_string())
 }
 
 pub fn thread_uri(id: ThreadId) -> String {
-    of(k::THREAD, &id.to_string())
+    keyed(r::THREAD, &id.to_string())
 }
 
 pub fn effort_uri(id: EffortId) -> String {
-    of(k::EFFORT, &id.to_string())
+    keyed(r::EFFORT, &id.to_string())
 }
 
-/// The effort behind an `effort:` ref (`effort:eff12`), the inverse of
-/// [`effort_uri`]; `None` for any other string, a bare id included.
-pub fn effort_of_uri(r: &str) -> Option<EffortId> {
-    parse_as(r, k::EFFORT).ok()
+/// The effort an effort's URI names, the inverse of [`effort_uri`];
+/// `None` for any other string, a bare id included.
+pub fn effort_of_uri(text: &str) -> Option<EffortId> {
+    parse_as(text, r::EFFORT).ok()
 }
 
 pub fn turn_uri(id: AgentTurnId) -> String {
-    of(k::TURN, &id.to_string())
+    keyed(r::TURN, &id.to_string())
 }
 
 /// A snapshot (`snapshot.id`).
 pub fn snapshot_uri(id: i64) -> String {
-    of(k::SNAPSHOT, &id.to_string())
+    keyed(r::SNAPSHOT, &id.to_string())
 }
 
 /// A commit by sha (7–64 lowercase hex).
 pub fn commit_uri(sha: &str) -> String {
-    of(k::COMMIT, sha)
+    keyed(r::COMMIT, sha)
 }
 
 pub fn branch_uri(name: &str) -> String {
-    of(k::BRANCH, name)
+    keyed(r::BRANCH, name)
 }
 
 /// A file by its workspace-relative path, in the working tree.
 pub fn file_uri(path: &str) -> String {
-    of(k::FILE, path)
+    of(r::FILE, &[("path", path)])
 }
 
 /// A file at a revision (`git:HEAD`, `snap:01J9…`), optionally lines of
-/// it (`L10-20`).
+/// it (`10-20`, the view).
 pub fn file_uri_at(path: &str, rev: Option<&str>, lines: Option<&str>) -> String {
-    at(k::FILE, path, rev, lines)
+    let mut params = vec![("path", path)];
+    params.extend(rev.map(|rev| ("rev", rev)));
+    let view: Vec<(&str, &str)> = lines.map(|l| ("lines", l)).into_iter().collect();
+    of_with_view(r::FILE, &params, &view)
+}
+
+/// A file URI's path and revision (`None`: the working tree), with its
+/// lines when its view names them.
+pub fn file_of_uri(text: &str) -> Result<(String, Option<String>, Option<String>), NotA> {
+    let u = parse_resource(text, r::FILE)?;
+    let path = u
+        .param("path")
+        .ok_or_else(|| not_a(text, r::FILE))?
+        .to_string();
+    Ok((
+        path,
+        u.param("rev").map(str::to_string),
+        u.view().get("lines").cloned(),
+    ))
 }
 
 pub fn dir_uri(path: &str) -> String {
-    of(k::DIR, path)
+    of(r::DIR, &[("path", path)])
 }
 
-/// A symbol: `<path>/<id>`, `id` its symbol id within the file
+/// A symbol: `id` its symbol id within the file at `path`
 /// (`oxplow_code_metrics::Definition::id`: `Parser::parse`, `main~2`).
-/// The current symbol; pin a version with [`at`] (`@snap:<id>`,
-/// `@git:<sha>`).
+/// The current symbol; pin a version with [`symbol_uri_at`].
 pub fn symbol_uri(path: &str, id: &str) -> String {
-    of(k::SYMBOL, &format!("{path}/{id}"))
+    symbol_uri_at(path, id, None)
+}
+
+/// A symbol at a revision (`snap:<id>`, `git:<sha>`).
+pub fn symbol_uri_at(path: &str, id: &str, rev: Option<&str>) -> String {
+    let mut params = vec![("path", path), ("symbol", id)];
+    params.extend(rev.map(|rev| ("rev", rev)));
+    of(r::SYMBOL, &params)
 }
 
 pub fn wiki_uri(slug: &str) -> String {
-    of(k::WIKI, slug)
+    keyed(r::WIKI, slug)
 }
 
 pub fn comment_uri(id: CommentId) -> String {
-    of(k::COMMENT, &id.to_string())
+    keyed(r::COMMENT, &id.to_string())
 }
 
 /// A logged event, by its public id (UUIDv7).
 pub fn event_uri(id: &str) -> String {
-    of(k::EVENT, id)
+    keyed(r::EVENT, id)
 }
 
 /// A lens (`<extension>/<slug>`).
 pub fn lens_uri(id: &str) -> String {
-    of(k::LENS, id)
+    keyed(r::LENS, id)
 }
 
-/// A lens ref carrying params (`lens:acme/blocked?stream_id=2`): the
-/// query follows the ref raw, each key and value escaped like a URL
-/// query (the desktop's `withParams`), so `splitParams` reads it back.
-/// A param with no value is left out.
-///
-/// # Errors
-/// On an empty id.
-pub fn lens_uri_with(id: &str, params: &[(&str, Option<&str>)]) -> Result<String, UriParseError> {
-    Uri::new(k::LENS, id, None, None)?;
-    let head = lens_uri(id);
-    let query: Vec<String> = params
-        .iter()
-        .filter_map(|(key, value)| {
-            Some(format!("{}={}", query_escape(key), query_escape((*value)?)))
-        })
-        .collect();
-    Ok(if query.is_empty() {
-        head
-    } else {
-        format!("{head}?{}", query.join("&"))
-    })
-}
-
-/// A page's id as its identity (the ref without its `?…`) and its view
-/// (the query's params, in order, decoded): the inverse of
-/// [`lens_uri_with`] and the desktop's `withParams`.
-pub fn view_of(id: &str) -> (String, Vec<(String, String)>) {
-    let Some((head, query)) = id.split_once('?') else {
-        return (id.to_string(), Vec::new());
-    };
-    let params = query
-        .split('&')
-        .filter(|pair| !pair.is_empty())
-        .map(|pair| {
-            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-            (query_unescape(key), query_unescape(value))
-        })
-        .collect();
-    (head.to_string(), params)
-}
-
-/// The inverse of [`query_escape`]: `+` is a space, `%XX` a byte.
-fn query_unescape(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'+' => out.push(b' '),
-            b'%' if i + 2 < bytes.len() => {
-                let hex = |b: u8| (b as char).to_digit(16);
-                match (hex(bytes[i + 1]), hex(bytes[i + 2])) {
-                    (Some(hi), Some(lo)) => {
-                        out.push((hi * 16 + lo) as u8);
-                        i += 2;
-                    }
-                    _ => out.push(b'%'),
-                }
-            }
-            b => out.push(b),
-        }
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-/// `encodeURIComponent`, keeping `/ : ? ,` and writing a space as `+`.
-fn query_escape(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' => out.push(b as char),
-            b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')' => out.push(b as char),
-            b'/' | b':' | b'?' | b',' => out.push(b as char),
-            b' ' => out.push('+'),
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
+/// A lens with its params; one with no value is left out.
+pub fn lens_uri_with(id: &str, params: &[(&str, Option<&str>)]) -> String {
+    let mut all = vec![("lens", id)];
+    all.extend(params.iter().filter_map(|(k, v)| Some((*k, (*v)?))));
+    of(r::LENS, &all)
 }
 
 /// An agent's answer in a thread (`thread_answer.id`).
 pub fn answer_uri(id: i64) -> String {
-    of(k::ANSWER, &id.to_string())
+    keyed(r::ANSWER, &id.to_string())
 }
 
-/// A shell route (`settings`), optionally with its query string.
-pub fn page_uri(name: &str, query: Option<&str>) -> String {
-    match query {
-        Some(q) if !q.is_empty() => of(k::PAGE, &format!("{name}?{q}")),
-        _ => of(k::PAGE, name),
-    }
+/// A page (`tasks`, `<extension>/<id>`) with its params.
+pub fn page_uri(page: &str, params: &[(&str, &str)]) -> String {
+    let mut all = vec![("page", page)];
+    all.extend_from_slice(params);
+    of(r::PAGE, &all)
 }
 
-/// An extension's page (the contribution `page:<extension>/<id>`).
+/// An extension's page (`<extension>/<id>`).
 pub fn extension_page_uri(extension: &str, page: &str) -> String {
-    of(k::PAGE, &format!("{extension}/{page}"))
+    page_uri(&format!("{extension}/{page}"), &[])
+}
+
+/// A page or lens URI apart: the URI naming the page or lens alone (its
+/// key param, no view) and the params it is opened with.
+pub fn params_of(text: &str) -> Option<(String, BTreeMap<String, String>)> {
+    let u = OxplowUri::parse(text).ok()?;
+    let resource = u.resource().to_string();
+    let key = key_param(&resource)?;
+    let mut params = u.params().clone();
+    let head = params.remove(&key)?;
+    Some((of(&resource, &[(&key, &head)]), params))
 }
 
 /// A metric by its key.
 pub fn metric_uri(key: &str) -> String {
-    of(k::METRIC, key)
+    keyed(r::METRIC, key)
 }
 
 /// One of core's published models by its name (`effort`, published as
-/// `v_effort`); an extension's is the contribution
-/// `model:<extension>/<name>`.
+/// `v_effort`); an extension's is `<extension>/<name>`.
 pub fn model_uri(name: &str) -> String {
-    of(k::MODEL, name)
+    keyed(r::MODEL, name)
 }
 
 /// One run of a declared job (`v_job_run.id`).
 pub fn job_run_uri(id: &str) -> String {
-    of(k::JOB_RUN, id)
+    keyed(r::JOB_RUN, id)
 }
 
 /// One recorded model call (`v_ai_call.id`).
 pub fn ai_call_uri(id: i64) -> String {
-    of(k::AI_CALL, &id.to_string())
+    keyed(r::AI_CALL, &id.to_string())
 }
 
 /// A language model by the name its harness or provider reports
-/// (`ai_model:claude-opus-4-8`); not the `model` kind, a published view.
+/// (`claude-opus-4-8`); not a `model`, a published view.
 pub fn ai_model_uri(name: &str) -> String {
-    of(k::AI_MODEL, name)
+    keyed(r::AI_MODEL, name)
 }
 
 /// An extension, by its name.
 pub fn extension_uri(name: &str) -> String {
-    of(k::EXTENSION, name)
+    keyed(r::EXTENSION, name)
 }
 
 /// A command by name (`oxplow.config.set`).
 pub fn command_uri(name: &str) -> String {
-    of(k::COMMAND, name)
+    keyed(r::COMMAND, name)
 }
 
 /// A `.oxplow/project.yaml` key (`zones`, `metricRetentionDays`).
 pub fn config_uri(key: &str) -> String {
-    of(k::CONFIG, key)
+    keyed(r::CONFIG, key)
 }
 
 /// A code-quality finding.
 pub fn finding_uri(id: &str) -> String {
-    of(k::FINDING, id)
+    keyed(r::FINDING, id)
 }
 
 pub fn thread_note_uri(id: NoteId) -> String {
-    of(k::THREAD_NOTE, &id.to_string())
+    keyed(r::THREAD_NOTE, &id.to_string())
 }
 
 /// Work handed from one thread to another (`handoff.id`).
 pub fn handoff_uri(id: HandoffId) -> String {
-    of(k::HANDOFF, &id.to_string())
+    keyed(r::HANDOFF, &id.to_string())
 }
 
 /// An agent slot on a thread (`agent_session.id`).
 pub fn agent_session_uri(id: AgentSessionId) -> String {
-    of(k::AGENT_SESSION, &id.to_string())
+    keyed(r::AGENT_SESSION, &id.to_string())
 }
 
 /// A subagent of an agent session, by the harness's id for it.
 pub fn subagent_uri(session: AgentSessionId, id: &str) -> String {
-    of(k::SUBAGENT, &format!("{session}/{id}"))
+    of(
+        r::SUBAGENT,
+        &[("session", &session.to_string()), ("agent", id)],
+    )
 }
 
 /// A user-created dashboard (`dashboard.id`).
 pub fn dashboard_uri(id: crate::DashboardId) -> String {
-    of(k::DASHBOARD, &id.to_string())
+    keyed(r::DASHBOARD, &id.to_string())
 }
 
 /// A test or analysis run (`metric_capture.id`).
 pub fn run_uri(id: i64) -> String {
-    of(k::RUN, &id.to_string())
+    keyed(r::RUN, &id.to_string())
 }
 
 /// A command waiting for a person's decision (`command_proposal.id`).
 pub fn proposal_uri(id: i64) -> String {
-    of(k::PROPOSAL, &id.to_string())
+    keyed(r::PROPOSAL, &id.to_string())
 }
 
 /// A claim an agent made about its work (`claim.id`).
 pub fn claim_uri(id: i64) -> String {
-    of(k::CLAIM, &id.to_string())
+    keyed(r::CLAIM, &id.to_string())
 }
 
 /// A decision an agent recorded or oxplow inferred (`decision.id`).
 pub fn decision_uri(id: i64) -> String {
-    of(k::DECISION, &id.to_string())
+    keyed(r::DECISION, &id.to_string())
 }
 
 /// A collector, by its owner and id (`collector_run.owner`/`id`).
 pub fn collector_uri(owner: &str, id: &str) -> String {
-    of(k::COLLECTOR, &format!("{owner}/{id}"))
+    keyed(r::COLLECTOR, &format!("{owner}/{id}"))
 }
 
-/// One of core's event consumers (`consumer:change.analyze`), as an
-/// `after:` names it.
+/// One of core's event consumers (`change.analyze`), as an `after:` names
+/// it.
 pub fn consumer_uri(name: &str) -> String {
-    of(k::CONSUMER, name)
+    keyed(r::CONSUMER, name)
 }
 
-/// The provider-scoped id inside a `work_item` ref (`oxplow:tsk42`,
-/// `issues:ENG-12`) — the `page_uri` id of the work item.
-pub fn work_item_id_of_uri(r: &str) -> Option<&str> {
-    r.strip_prefix("work_item:").filter(|id| !id.is_empty())
+/// A code block (`<start>-<end>` lines of a file), a fact's subject.
+pub fn block_uri(path: &str, lines: &str) -> String {
+    of(r::BLOCK, &[("path", path), ("lines", lines)])
 }
 
-/// A `work_item` ref in its one canonical spelling, or `Invalid` naming
+/// A test case, a fact's subject.
+pub fn test_uri(class: &str, name: &str) -> String {
+    of(r::TEST, &[("class", class), ("name", name)])
+}
+
+/// A work list's item: its provider's id and the item's.
+pub fn work_item_uri(provider: &str, id: &str) -> String {
+    of(r::WORK_ITEM, &[("provider", provider), ("id", id)])
+}
+
+/// The provider and the provider's id a work item's URI names.
+pub fn work_item_of_uri(text: &str) -> Option<(String, String)> {
+    let u = parse_resource(text, r::WORK_ITEM).ok()?;
+    Some((u.param("provider")?.to_string(), u.param("id")?.to_string()))
+}
+
+/// A work item's URI in its one canonical spelling, or `Invalid` naming
 /// what's wrong with it. Efforts key on the string (one open effort per
-/// work item is a unique index), so an alias — a revision, a fragment,
-/// an escaped spelling — is refused rather than treated as a different
-/// item. What a list's own ids look like is that list's to say.
-pub fn validate_work_item_uri(r: &str) -> Result<(), crate::DomainError> {
-    let invalid = |why: &str| Err(crate::DomainError::Invalid(format!("`{r}` {why}")));
-    const SHAPE: &str = "a work item ref is `work_item:<provider>:<id>` (`work_item:oxplow:tsk42`)";
-    // `work_item` is core's kind, the same in every vocabulary: its shape
-    // is checked here, no registry needed.
-    let parsed = crate::uri::Uri::parse(r).map_err(|e| {
-        crate::DomainError::Invalid(format!(
-            "`{r}` is not a canonical ref: {}; {SHAPE}",
-            e.reason()
-        ))
+/// work item is a unique index), so an alias — a view, an extra param, an
+/// escaped spelling — is refused rather than treated as a different item.
+/// What a list's own ids look like is that list's to say.
+pub fn validate_work_item_uri(text: &str) -> Result<(), crate::DomainError> {
+    let invalid = |why: &str| Err(crate::DomainError::Invalid(format!("`{text}` {why}")));
+    const SHAPE: &str =
+        "a work item's URI is `oxplow:oxplow/work_item?id=<id>&provider=<provider>`";
+    let parsed = OxplowUri::parse(text).map_err(|e| {
+        crate::DomainError::Invalid(format!("`{text}` is not a URI: {}; {SHAPE}", e.reason()))
     })?;
-    if parsed.kind != "work_item" {
-        return invalid(&format!("is not a work_item ref; {SHAPE}"));
+    if parsed.resource().to_string() != r::WORK_ITEM {
+        return invalid(&format!("is not a work item's; {SHAPE}"));
     }
-    let provider_ok = parsed.id.split_once(':').is_some_and(|(provider, native)| {
-        !native.is_empty()
-            && provider.starts_with(|c: char| c.is_ascii_lowercase())
+    let provider_ok = parsed.param("provider").is_some_and(|provider| {
+        provider.starts_with(|c: char| c.is_ascii_lowercase())
             && provider
                 .chars()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
     });
-    if !provider_ok {
-        return invalid(&format!("names no `<provider>:<id>`; {SHAPE}"));
+    if !provider_ok || parsed.param("id").is_none_or(str::is_empty) {
+        return invalid(&format!("names no provider and id; {SHAPE}"));
     }
-    if parsed.rev.is_some() || parsed.frag.is_some() {
-        return invalid("names a work item with a revision or fragment");
+    if parsed.params().len() != 2 || !parsed.view().is_empty() {
+        return invalid("names a work item with other params or a view");
     }
-    if parsed.to_string() != r {
+    if parsed.to_string() != text {
         return invalid(&format!("is not canonical; write `{parsed}`"));
     }
     Ok(())
@@ -413,16 +480,15 @@ pub fn validate_work_item_uri(r: &str) -> Result<(), crate::DomainError> {
 /// The `source` of an event a system component emits on its own behalf
 /// (`system:snapshot_capture`); an actor's runs use `Actor::source()`.
 ///
-/// A source says who emitted an event. It looks like a ref but is its own
-/// vocabulary — `system:…`, a provider instance, an effort policy are no
-/// refs — so the sources are built here, beside the refs, and nowhere
-/// else.
+/// A source says who emitted an event. It is its own vocabulary —
+/// `system:…`, a provider instance, an effort policy are no URIs — so the
+/// sources are built here, beside the URIs, and nowhere else.
 pub fn system_source(component: &str) -> String {
     format!("system:{component}")
 }
 
-/// An effect's runs (`effect:<extension>/<id>`, which is also its ref) or
-/// an effort policy's (`effect:effort_policy:<id>`).
+/// An effect's runs (`effect:<extension>/<id>`) or an effort policy's
+/// (`effect:effort_policy:<id>`).
 pub fn effect_source(effect: &str) -> String {
     format!("effect:{effect}")
 }
@@ -440,237 +506,127 @@ pub fn provider_source(instance: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::uri::types::core_types;
 
-    /// tsk1025: an `effort.*` payload carries the ref, and every consumer
-    /// reads it back through this one inverse.
+    /// An effort payload carries the URI, and every consumer reads it back
+    /// through this one inverse.
     #[test]
-    fn an_effort_ref_reads_back_to_its_effort() {
+    fn an_effort_uri_reads_back_to_its_effort() {
         let id = EffortId::try_from_str("eff12").unwrap();
+        assert_eq!(effort_uri(id), "oxplow:oxplow/effort?id=eff12");
         assert_eq!(effort_of_uri(&effort_uri(id)), Some(id));
-        assert_eq!(effort_of_uri("eff12"), None, "a bare id isn't a ref");
-        assert_eq!(effort_of_uri("turn:12"), None);
+        assert_eq!(effort_of_uri("eff12"), None, "a bare id isn't a URI");
+        assert_eq!(effort_of_uri(&turn_uri(AgentTurnId::new(12))), None);
     }
 
     #[test]
-    fn a_lens_ref_carries_its_params_escaped_like_a_query() {
+    fn a_lens_or_page_carries_its_own_params() {
         assert_eq!(
-            lens_uri_with("acme/blocked", &[("stream_id", Some("2"))]).unwrap(),
-            "lens:acme/blocked?stream_id=2"
+            lens_uri_with("acme/blocked", &[("stream_id", Some("2")), ("gone", None)]),
+            "oxplow:oxplow/lens?lens=acme/blocked&stream_id=2"
         );
         assert_eq!(
-            lens_uri_with(
-                "acme/x",
-                &[("a", Some("b c&d=e%")), ("gone", None), ("z", Some("1"))]
-            )
-            .unwrap(),
-            "lens:acme/x?a=b+c%26d%3De%25&z=1"
-        );
-        assert_eq!(lens_uri_with("acme/x", &[]).unwrap(), "lens:acme/x");
-        assert!(lens_uri_with("", &[]).is_err());
-    }
-
-    /// A page's id is its identity and its view: `view_of` reads back what
-    /// `lens_uri_with` (and the desktop's `withParams`) wrote.
-    #[test]
-    fn a_page_id_splits_into_its_identity_and_its_params() {
-        let id = lens_uri_with(
-            "acme/x",
-            &[("a", Some("b c&d=e%")), ("q", Some("")), ("z", Some("1"))],
-        )
-        .unwrap();
-        let (page, params) = view_of(&id);
-        assert_eq!(page, "lens:acme/x");
-        assert_eq!(
-            params,
-            vec![
-                ("a".to_string(), "b c&d=e%".to_string()),
-                ("q".to_string(), String::new()),
-                ("z".to_string(), "1".to_string()),
-            ]
+            page_uri("settings", &[("area", "ai")]),
+            "oxplow:oxplow/page?area=ai&page=settings"
         );
         assert_eq!(
-            view_of("file:src/a.rs@git:HEAD"),
-            ("file:src/a.rs@git:HEAD".to_string(), vec![])
+            params_of("oxplow:oxplow/page?area=ai&page=settings#lines=3"),
+            Some((
+                "oxplow:oxplow/page?page=settings".to_string(),
+                [("area".to_string(), "ai".to_string())].into()
+            ))
         );
-    }
-
-    #[test]
-    fn every_builder_produces_a_valid_canonical_ref() {
-        let reg = core_types();
-        for r in [
-            project_uri("oxplow"),
-            branch_uri("main"),
-            file_uri("src/a@b.rs"),
-            file_uri_at("src/a.rs", Some("git:HEAD"), Some("L10-20")),
-            dir_uri("src/ui"),
-            symbol_uri("src/a.rs", "parse"),
-            symbol_uri("README.md", "Parser::parse(String,int)"),
-            symbol_uri("Sources/App/Main.swift", "<Parser as Display>::fmt~2"),
-            symbol_uri("src/core.clj", "area([:a :b])"),
-            at(k::SYMBOL, "src/a.rs/Parser::parse", Some("snap:812"), None),
-            at(
-                k::SYMBOL,
-                "src/a.rs/Parser::parse",
-                Some("git:3f2a9c1"),
-                None,
-            ),
-            wiki_uri("architecture"),
-            comment_uri(CommentId::new(4)),
-            event_uri("01a1369e-b063-76f8-968f-902d392f882d"),
-            lens_uri("acme/blocked"),
-            answer_uri(3),
-            page_uri("settings", None),
-            page_uri("dashboard", Some("variant=visits")),
+        assert_eq!(
             extension_page_uri("github", "pr"),
-            metric_uri("oxplow.rust.unsafe_blocks"),
-            model_uri("effort"),
-            job_run_uri("01a1369e-b063-76f8-968f-902d392f882d"),
-            ai_call_uri(42),
-            extension_uri("effort-review"),
-            finding_uri("clippy:1"),
-            thread_note_uri(NoteId::new(5)),
-            agent_session_uri(AgentSessionId::new(2)),
-            dashboard_uri(crate::DashboardId::new(3)),
-            subagent_uri(AgentSessionId::new(3), "agent-7f"),
-            run_uri(9),
-            claim_uri(1),
-            decision_uri(2),
-            collector_uri("triage", "todos"),
-            stream_uri(StreamId::new(1)),
-            thread_uri(ThreadId::new(3)),
-            effort_uri(EffortId::new(12)),
-            turn_uri(AgentTurnId::new(7)),
-            snapshot_uri(42),
-            commit_uri("4c44d495"),
-            command_uri("oxplow.config.set"),
-            config_uri("metricRetentionDays"),
-            "work_item:oxplow:tsk42".to_string(),
-            proposal_uri(12),
-        ] {
-            let parsed = Uri::parse(&r).unwrap_or_else(|e| panic!("{r}: {}", e.reason()));
-            reg.validate(&parsed).unwrap_or_else(|e| panic!("{r}: {e}"));
-        }
-        assert_eq!(stream_uri(StreamId::new(1)), "stream:str1");
-        assert_eq!(turn_uri(AgentTurnId::new(7)), "turn:trn7");
-        assert_eq!(proposal_uri(12), "proposal:12");
-        assert_eq!(file_uri("src/a@b.rs"), "file:src/a%40b.rs", "escaped");
+            "oxplow:oxplow/page?page=github/pr"
+        );
     }
 
-    /// Every core kind has a builder: the test above names one ref per
-    /// kind `core_types()` registers.
     #[test]
-    fn every_core_kind_has_a_builder() {
-        let built: std::collections::BTreeSet<String> = [
-            project_uri("p"),
-            stream_uri(StreamId::new(1)),
-            thread_uri(ThreadId::new(1)),
-            effort_uri(EffortId::new(1)),
-            turn_uri(AgentTurnId::new(1)),
-            snapshot_uri(1),
-            commit_uri("4c44d495"),
-            branch_uri("b"),
-            file_uri("a"),
-            dir_uri("a"),
-            symbol_uri("a", "b"),
-            "work_item:oxplow:tsk1".to_string(),
-            wiki_uri("w"),
-            comment_uri(CommentId::new(1)),
-            event_uri("01a1369e-b063-76f8-968f-902d392f882d"),
-            lens_uri("a/b"),
-            answer_uri(1),
-            page_uri("p", None),
-            metric_uri("m"),
-            model_uri("v_a"),
-            job_run_uri("01a1369e-b063-76f8-968f-902d392f882d"),
-            ai_call_uri(1),
-            ai_model_uri("claude-opus-4-8"),
-            extension_uri("e"),
-            command_uri("a.b"),
-            config_uri("c"),
-            finding_uri("f"),
-            thread_note_uri(NoteId::new(1)),
-            agent_session_uri(AgentSessionId::new(1)),
-            handoff_uri(HandoffId::new(1)),
-            dashboard_uri(crate::DashboardId::new(1)),
-            subagent_uri(AgentSessionId::new(1), "a"),
-            run_uri(1),
-            proposal_uri(1),
-            claim_uri(1),
-            decision_uri(1),
-            collector_uri("a", "b"),
-            consumer_uri("change.analyze"),
-        ]
-        .iter()
-        .map(|r| type_of(r).unwrap())
-        .collect();
-        // A contribution's ref is its id's (`ContributionId::reference`).
-        let contributions: std::collections::BTreeSet<String> = crate::contribution::KINDS
-            .iter()
-            .map(|k| k.kind.segment().to_string())
-            .collect();
-        let registered: std::collections::BTreeSet<String> =
-            core_types().kinds().map(|k| k.kind.clone()).collect();
-        let core: std::collections::BTreeSet<String> =
-            registered.difference(&contributions).cloned().collect();
-        let built_core: std::collections::BTreeSet<String> =
-            built.difference(&contributions).cloned().collect();
-        assert_eq!(built_core, core);
-    }
-
-    /// A reader gets the decoded id, typed, or says which kind it wanted.
-    #[test]
-    fn a_ref_reads_back_through_the_grammar() {
-        assert_eq!(id_of("file:a%40b.rs", k::FILE).unwrap(), "a@b.rs");
-        assert_eq!(parse_as::<i64>("decision:3", k::DECISION).unwrap(), 3);
+    fn a_shaped_uri_names_its_parts() {
+        assert_eq!(file_uri("src/a@b.rs"), "oxplow:oxplow/file?path=src/a@b.rs");
         assert_eq!(
-            parse_as::<ThreadId>("thread:thr3", k::THREAD).unwrap(),
+            file_uri_at("src/a.rs", Some("git:HEAD"), Some("10-20")),
+            "oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-20"
+        );
+        assert_eq!(
+            file_of_uri("oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-20").unwrap(),
+            (
+                "src/a.rs".to_string(),
+                Some("git:HEAD".to_string()),
+                Some("10-20".to_string())
+            )
+        );
+        assert_eq!(
+            symbol_uri_at("src/a.rs", "Parser::parse", Some("snap:812")),
+            "oxplow:oxplow/symbol?path=src/a.rs&rev=snap:812&symbol=Parser::parse"
+        );
+        assert_eq!(
+            subagent_uri(AgentSessionId::new(3), "agent-7f"),
+            "oxplow:oxplow/subagent?agent=agent-7f&session=ses3"
+        );
+        assert_eq!(
+            collector_uri("triage", "todos"),
+            "oxplow:oxplow/collector?collector=triage/todos"
+        );
+        assert_eq!(commit_uri("4c44d495"), "oxplow:oxplow/commit?sha=4c44d495");
+        assert_eq!(wiki_uri("auth-flow"), "oxplow:oxplow/wiki?slug=auth-flow");
+    }
+
+    /// A reader gets the decoded key, typed, or says which resource it
+    /// wanted.
+    #[test]
+    fn a_uri_reads_back_through_the_grammar() {
+        assert_eq!(id_of(&wiki_uri("a b"), r::WIKI).unwrap(), "a b");
+        assert_eq!(parse_as::<i64>(&decision_uri(3), r::DECISION).unwrap(), 3);
+        assert_eq!(
+            parse_as::<ThreadId>(&thread_uri(ThreadId::new(3)), r::THREAD).unwrap(),
             ThreadId::new(3)
         );
-        let e = parse_as::<i64>("claim:3", k::DECISION).unwrap_err();
+        let e = parse_as::<i64>(&claim_uri(3), r::DECISION).unwrap_err();
         assert_eq!(
             e.to_string(),
-            "`claim:3` isn't a decision ref (decision:<id>)"
+            "`oxplow:oxplow/claim?id=3` isn't an oxplow/decision URI (oxplow:oxplow/decision?…)"
         );
         assert!(
-            id_of("file:a.rs@git:HEAD", k::FILE).is_err(),
-            "a revision needs parse_type"
+            id_of(&file_uri("a.rs"), r::FILE).is_err(),
+            "a file has no single key"
         );
-        let at = parse_type("file:a.rs@git:HEAD#L1", k::FILE).unwrap();
-        assert_eq!(
-            (at.rev.as_deref(), at.frag.as_deref()),
-            (Some("git:HEAD"), Some("L1"))
+        assert!(
+            id_of("oxplow:oxplow/wiki?slug=a#part=x", r::WIKI).is_err(),
+            "a view needs parse_resource"
         );
-        assert_eq!(type_of("wiki:x").as_deref(), Some("wiki"));
-        assert_eq!(type_of("nope"), None);
+        assert_eq!(resource_of(&wiki_uri("x")).as_deref(), Some("oxplow/wiki"));
+        assert_eq!(resource_of("nope"), None);
+        assert_eq!(key_param("acme/pr").as_deref(), Some("id"));
+        assert_eq!(key_param("oxplow/lens").as_deref(), Some("lens"));
     }
 
     #[test]
     fn the_work_item_inverses() {
         assert_eq!(system_source("hook_ingest"), "system:hook_ingest");
+        let item = work_item_uri("issues", "ENG-1");
+        assert_eq!(item, "oxplow:oxplow/work_item?id=ENG-1&provider=issues");
         assert_eq!(
-            work_item_id_of_uri("work_item:issues:ENG-1"),
-            Some("issues:ENG-1")
+            work_item_of_uri(&item),
+            Some(("issues".into(), "ENG-1".into()))
         );
-        assert_eq!(work_item_id_of_uri("work_item:"), None);
-        assert_eq!(work_item_id_of_uri("effort:eff1"), None);
-        assert!(validate_work_item_uri("work_item:issues:ENG-1").is_ok());
-        for bad in ["", "tsk1", "effort:eff1", "work_item:"] {
-            assert!(validate_work_item_uri(bad).is_err(), "{bad}");
-        }
-        // A wrong shape shows the right one.
-        for bad in ["work_item:oxplow/tsk1097", "oxplow:tsk1097", "effort:eff1"] {
+        assert_eq!(work_item_of_uri(&effort_uri(EffortId::new(1))), None);
+        assert!(validate_work_item_uri(&item).is_ok());
+        for bad in ["", "tsk1", "oxplow:tsk1097", "oxplow:oxplow/work_item?id=x"] {
             let e = validate_work_item_uri(bad).unwrap_err().to_string();
-            assert!(e.contains("`work_item:<provider>:<id>`"), "{e}");
+            assert!(
+                e.contains("oxplow:oxplow/work_item?id=<id>&provider=<provider>"),
+                "{bad}: {e}"
+            );
         }
         // Only the canonical spelling is a key: the open-effort index
-        // compares strings, so a fragment, a revision or an escaped
-        // spelling would slip a second open effort past it. (What a list's
-        // own ids look like is that list's to say, not core's.)
+        // compares strings, so a view, an extra param or an escaped
+        // spelling would slip a second open effort past it.
         for alias in [
-            "work_item:oxplow:tsk1#x",
-            "work_item:oxplow:tsk1@v2",
-            "work_item:issues:ENG%2D1",
+            "oxplow:oxplow/work_item?id=tsk1&provider=oxplow#x=1",
+            "oxplow:oxplow/work_item?id=tsk1&provider=oxplow&v=2",
+            "oxplow:oxplow/work_item?provider=oxplow&id=tsk1",
+            "oxplow:oxplow/work_item?id=ts%6B1&provider=oxplow",
         ] {
             assert!(validate_work_item_uri(alias).is_err(), "{alias}");
         }
