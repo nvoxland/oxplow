@@ -74,6 +74,7 @@ mock.module("../api.js", () => ({
   querySql: (sql: string, params: unknown[] = [], limit: number | null = null, raw = false) =>
     viaBindings("querySql")(sql, params, limit, raw),
   runLens: viaBindings("runLens"),
+  getLens: viaBindings("getLens"),
 }));
 mock.module("../tauri-bridge/generated/bindings.js", () => ({
   ...realBindings,
@@ -85,7 +86,7 @@ const { WorkItemPage } = await import("./WorkItemPage.js");
 const { BoardPage } = await import("./BoardPage.js");
 const { GitCommitPage } = await import("./GitCommitPage.js");
 const { UncommittedChangesPage } = await import("./UncommittedChangesPage.js");
-const { GitHistoryPage } = await import("./GitHistoryPage.js");
+const { DocumentViz } = await import("../lens/PartsViz.js");
 const { DiffFileHeaderSlot } = await import("../components/Diff/DiffFileHeaderSlot.js");
 
 afterEach(() => {
@@ -96,6 +97,12 @@ afterEach(() => {
 });
 
 const STREAM = { id: "str1", kind: "primary", title: "Main", branch: "main" } as never;
+/** Git History's page body: a document whose one part is the commit list
+ *  standing in for `vcs.history.graph`. */
+const HISTORY_PARTS = [
+  { id: "history", title: "Commits", lens: "x/commits", markdown: null, size: null, replaceable: "vcs.history.graph", from: null },
+];
+const historyPage = () => <DocumentViz parts={HISTORY_PARTS} params={{ stream_id: 1 }} streamId="str1" />;
 /** `page` inside a navigation context for `ref`, as `App` mounts pages. */
 function mount(ref: string, page: ReactElement) {
   const nav = { goBack() {}, goForward() {}, canGoBack: false, canGoForward: false, ask: { ref } };
@@ -142,44 +149,40 @@ test("the Board, the commit page, uncommitted changes and history render plain",
   await expectPlain(uncommitted);
   cleanup();
 
-  const history = mount("page:git-history", <GitHistoryPage stream={STREAM} onOpenPage={() => {}} />);
-  await waitFor(() => expect(history.getByTestId("page-git-history")).toBeTruthy());
+  const history = mount("page:git-history", historyPage());
+  await waitFor(() => expect(history.getByTestId("lens-document")).toBeTruthy());
   await expectPlain(history);
 });
 
-test("an extension's mounts reach the uncommitted strip and the history side column", async () => {
+test("an extension's mount reaches the uncommitted strip", async () => {
   extensions = [
     {
       name: "x",
       enabled: true,
       ui: {
-        slots: [
-          { slot: "vcs.status.header", lensId: "x/status" },
-          { slot: "vcs.history.sidebar", lensId: "x/history" },
-        ],
+        slots: [{ slot: "vcs.status.header", lensId: "x/status" }],
         commands: [],
         decorators: [],
         replacements: [],
       },
-      lenses: ["x/status", "x/history"].map((id) => ({ id, params: [{ name: "stream_id", label: null, default: null }] })),
+      lenses: [{ id: "x/status", params: [{ name: "stream_id", label: null, default: null }] }],
     },
   ];
   mount("page:uncommitted-changes", <UncommittedChangesPage stream={STREAM} onOpenPage={() => {}} onOpenFile={() => {}} />);
   await waitFor(() => expect(lensRuns).toContainEqual(["x/status", { stream_id: 1 }]));
-  cleanup();
-  const history = mount("page:git-history", <GitHistoryPage stream={STREAM} onOpenPage={() => {}} />);
-  await waitFor(() => expect(lensRuns).toContainEqual(["x/history", { stream_id: 1 }]));
-  // Mounted, with no rows: it folds into the column's "Nothing found" line,
-  // named (tsk1036).
-  await waitFor(() => expect(history.getByTestId("vcs.history.sidebar-nothing-found").textContent).toContain("Mounted"));
 });
-
 
 // Git History's commits are oxplow's plain list with every enhancement
 // off; oxplow-bundled's graph replaces it (a target no provider binds),
 // given the stream's head, the commit to reveal and the limit.
 test("Git History's list is replaced by the one extension drawing the graph", async () => {
   extensions = [
+    {
+      name: "x",
+      enabled: true,
+      ui: { slots: [], commands: [], decorators: [], replacements: [] },
+      lenses: [{ id: "x/commits", params: ["stream_id", "head_sha", "reveal_sha", "limit"].map((name) => ({ name, label: null, default: null })) }],
+    },
     {
       name: "oxplow-bundled",
       enabled: true,
@@ -209,14 +212,27 @@ test("Git History's list is replaced by the one extension drawing the graph", as
       ],
     },
   ];
-  const history = mount("page:git-history", <GitHistoryPage stream={STREAM} onOpenPage={() => {}} />);
+  // The part's own lens is oxplow's list; it runs with the contract's props
+  // (the stream's head, resolved by the lens run).
+  const props = { stream_id: 1, head_sha: "a".repeat(40), reveal_sha: "", limit: 500 };
+  answers.runLens = async (...args) => {
+    lensRuns.push([String(args[0]), args[1]]);
+    const own = args[0] === "x/commits";
+    return ok({
+      lens: { id: args[0], title: "Commits", params: [], columns: own ? [{ key: "subject", label: "Commit" }] : [], viz: "table", actions: [] },
+      params: own ? props : args[1],
+      result: { columns: own ? ["subject"] : [], rows: own ? [["Fix"]] : [], truncated: false, reads },
+      alert: null,
+    });
+  };
+  answers.getLens = async (...args) =>
+    ok({ id: args[0], params: ["stream_id", "head_sha", "reveal_sha", "limit"].map((name) => ({ name, label: null, default: null })) });
+  const history = mount("page:git-history", historyPage());
   await waitFor(() =>
     expect(history.getByTestId("replacement-vcs.history.graph").textContent).toContain("replaced by oxplow-bundled"),
   );
-  expect(history.queryByTestId("commit-list")).toBeNull();
-  expect(lensRuns).toEqual([
-    ["oxplow-bundled/history-graph", { head_sha: "a".repeat(40), reveal_sha: null, limit: 500 }],
-  ]);
+  expect(lensRuns.map(([id]) => id)).toEqual(["x/commits", "oxplow-bundled/history-graph"]);
+  expect(lensRuns[1]![1]).toMatchObject({ head_sha: "a".repeat(40), reveal_sha: "", limit: 500 });
 });
 
 // P9.A2: a file diff's header strip — plain with nothing mounted; a

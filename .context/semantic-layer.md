@@ -675,7 +675,7 @@ and `v_model_test` are the catalog of all of them:
 | `v_comment` | comment threads, with first-message `body` and `message_count` |
 | `v_wiki_page` | wiki pages (excerpt; full body is on disk) |
 | `v_snapshot` | worktree snapshots, with `tree_hash` (whole-tree identity, V96) |
-| `v_snapshot_file` | every captured version of a file (`file_snapshot`): its snapshot, stream, path, storage class, size and `content_hash`. A snapshot records only what changed since the stream's previous one, so a file's history is its rows (P11, tsk944) |
+| `v_snapshot_file` | every captured version of a file (`file_snapshot`): its snapshot, stream, path, storage class, size and `content_hash`. A snapshot records only what changed since the stream's previous one, so a file's history is its rows, and `kind` (v2) says what the snapshot did to the path: `added`, `modified`, `deleted`, or NULL when the row changed nothing (P11, tsk944) |
 | `v_snapshot_op` | the snapshot operation log: one row per take (a new snapshot or an unchanged tree) with `parent_snapshot_id`, `trigger`, thread / turn / effort anchors, `elapsed_ms`, `budget_ms`, `over_budget` (V97) |
 | `v_measure` | fact-type catalog |
 | `v_capture` | the scan/run that produced facts |

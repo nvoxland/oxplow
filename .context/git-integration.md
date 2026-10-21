@@ -218,7 +218,6 @@ outside the worktree would be missed.
 Fires `vcsRefsChanged` after each debounce. Consumed silently (no
 loading spinner) by:
 
-- `HistoryPanel` — reloads the commit log.
 - `ProjectPanel` — refreshes the indexed git statuses.
 - (Formerly `GitChangesPanel`, now folded into `ProjectPanel`'s filter
   modes.)

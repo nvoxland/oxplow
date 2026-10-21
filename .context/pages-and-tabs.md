@@ -80,7 +80,7 @@ pages are THE shell.
 | `apps/desktop/src/pages/GitCommitPage.tsx` | Single-commit page (`commit:<sha>`): commit metadata (collapsing a long body behind "Show more") with cherry-pick / revert, the changed files (`ChangedFilesTree`, parent → commit diffs) and the `vcs.commit.details` lens slot (`change_id` from `useChange`). Routed via `gitCommitRef(sha)`. |
 | `apps/desktop/src/components/RailHud/sections.ts` | The launcher's categories (`PAGE_CATEGORY_ORDER`, `PageDirectoryEntry`) and `settingsAreaEntries` (the Settings areas as launcher entries); every other launcher page is a declared page (`components/extensionLauncher.ts`). |
 | `apps/desktop/src/pages/GitDashboardPage.tsx` | Committed-history rollup: branch header (current branch + upstream + ahead/behind + push), small uncommitted mini-card that links to `UncommittedChangesPage`, recent commits rendered through the shared `CommitGraphTable` (last 5, current branch only via `getGitLog({ all: false })`; click a row → reveal in `GitHistoryPage`), worktrees row with per-row "Merge into current", a **"Merge readiness" card** (cross-stream divergence vs the integration branch via `listStreamDivergences()` — per-stream ahead/behind + a clean/will-conflict/integrated badge, naming the overlapping files on conflict, with a one-click "Merge into &lt;base&gt;" offered only while viewing the base stream), recent remote branches with per-row pull/push. Each action asks first exactly when its command's spec does (`SpecConfirm`, tsk898: merge and rebase, which are `Destructive`; pull and push are `Never`, as everywhere else they run). Routed via `gitDashboardRef()`. |
-| `apps/desktop/src/components/History/CommitGraphTable.tsx` | Pure presentation of the git-log graph (branch/merge dots + lines + sha + ref badges + subject + author + relative date). Used by both `HistoryPanel` (full list with detail pane; `GitHistoryPage` wraps it, with a `vcs.history.sidebar` side column when an extension mounts there) and `GitDashboardPage`'s recent-commits card. `indexRefsBySha(log)` exported alongside groups branch heads + tags by sha so callers feed identical maps. |
+| `apps/desktop/src/components/History/CommitGraphTable.tsx` | Pure presentation of the git-log graph (branch/merge dots + lines + sha + ref badges + subject + author + relative date). Used by `GitDashboardPage`'s recent-commits card. `indexRefsBySha(log)` exported alongside groups branch heads + tags by sha so callers feed identical maps. |
 | `apps/desktop/src/pages/UncommittedChangesPage.tsx` | Working-tree changes: a Commit-all form, the changed files (`ChangedFilesTree` via `useChangedFiles({ kind: "working" })`, with a `N changed · +a −d` heading), the `vcs.status.header` strip above them (`stream_id`) and the `vcs.status.details` lens slot below. Distinct from `FilesPage` which is the full project file tree. Routed via `uncommittedChangesRef()`. |
 | (change analysis) | No page of its own: `crates/oxplow-app/src/change_analysis.rs` stores each change behind `v_change*`, and the oxplow-bundled `change-review` lens grid shows it in the `vcs.commit.details`, `vcs.status.details` and `effort.review.details` slots. The old per-page scope drilldown is gone; scoped tab ids reopen the unscoped page. |
 | ~~`apps/desktop/src/tabs/backlinksIndex.ts`~~ | **Deleted.** The in-memory cross-kind indexer is replaced by the persisted `page_ref` table; see `data-model.md`. The `BacklinkEntry` type that renderers consume now lives in `apps/desktop/src/tabs/backlinkTypes.ts`. |
@@ -231,11 +231,12 @@ oxplow's pages and their params:
 
 - Lens pages: `problems`, `symbols` (`path`, `filter`), `closed-threads`,
   `wiki-index`, `wiki-freshness` (`slug`), `go-to`, `dashboards`,
-  `hook-events`, `done-work`, `catalog`.
+  `hook-events`, `done-work`, `catalog`, `git-history` (a document with one replaceable part: the commit list, or the history graph; params `q`, `author`, `branch`), `local-history` (a document of
+  two lenses; params `mode` `recent` | `by-commit` and `all`, which lifts
+  the caps — the rail's, so no "View all" step to go Back from).
 - Built-in pages: `tasks`, `backlog` (badge: `backlog-count`), `board`,
-  `files`, `git-dashboard`, `git-history`, `uncommitted-changes`,
-  `local-history` (view: `mode` `recent` | `by-commit`, `all` — "View
-  all" pushes it), `comments`, `explore-data`, `metrics-recorded`,
+  `files`, `git-dashboard`, `uncommitted-changes`,
+  `comments`, `explore-data`, `metrics-recorded`,
   `terminal`, `alerts`, `settings` (view: `area`, `section` — another
   area is a pushed view change, never a page opened over it),
   `custom-dashboard` (`id`), `new-session`, `new-stream`, `new-task`
@@ -401,8 +402,7 @@ the body region differs.
   Selection, About this page, built from `RailGroup` and `ParamList`
   (usability.md "A page's controls are in its rail").
   It is orthogonal to the archetype — a dashboard may have one for its
-  filters, Git History has one only while an extension mounts something
-  in `vcs.history.sidebar`.
+  filters, Git History's holds its find, author and branch.
 
 The rail is **purely responsive — no user toggle**. A `ResizeObserver`
 on the body watches its width; below `960px` the same panel moves to the
@@ -685,7 +685,8 @@ which carries its spec. New-tab paths drop it. Back/Forward restore each
 entry's own origin. Adopted lists: `BacklinksList`, `FileTree` (file rows
 of one directory), `CommitList` / `CommitGraphTable`
 (`CommitRowDispatcher`), `MetricsPage` (`metricOrigin`, flattened across
-sections), the Local History dashboard. `WorkGroupList` rows open an edit
+sections), and every lens table or list's link column (`lens/linkOrigin.ts`: the
+column's pages, in row order). `WorkGroupList` rows open an edit
 modal, not a page, so they don't adopt.
 
 **Keys.** The global handler in `App.tsx` (`tabs/navigationKeys.ts`):
@@ -918,7 +919,7 @@ params. Its history state is its own object in the entry
 
 **A page never navigates to itself, and a mode is a param, not a page
 name.** Settings' areas, Diff View's endpoints and Local History's
-grouping and "View all" are view changes on one page (pushed when Back
+grouping and "Show every snapshot" are view changes on one page (pushed when Back
 should return), so the page stays mounted and its other state stays.
 
 Core pages follow the same rule: the Tasks page's scope and filter chips

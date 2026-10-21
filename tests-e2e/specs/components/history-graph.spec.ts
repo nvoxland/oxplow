@@ -63,6 +63,9 @@ test("the history graph's filter is the page's: in the address and kept on a rel
   await expect(body).toHaveAttribute("data-testid", "center-tab-body-page:git-history?q=side");
   await expect(page.getByTestId("page-nav-back").filter({ visible: true })).toBeDisabled();
 
+  // The filter re-runs the page's lenses; let them finish, or WebKit reports
+  // the reload's aborted requests as page errors.
+  await page.waitForLoadState("networkidle");
   await page.reload();
   await expect(body).toHaveAttribute("data-testid", "center-tab-body-page:git-history?q=side");
   await expect(frame.locator("#query")).toHaveValue("side");
@@ -70,8 +73,8 @@ test("the history graph's filter is the page's: in the address and kept on a rel
 
   // Oxplow's own list, given the same address, filters by it.
   await run(daemon, "oxplow.extension.disable", { name: "oxplow-bundled" });
-  await expect(page.getByTestId("commit-list-row").filter({ hasText: "Side work" })).toBeVisible();
-  await expect(page.getByPlaceholder("Filter commits (message, sha, author)").filter({ visible: true })).toHaveValue("side");
+  await expect(page.getByTestId("lens-part-history").filter({ visible: true }).getByText("Side work")).toBeVisible();
+  await expect(page.getByTestId("lens-param-q-value").filter({ visible: true })).toContainText("side");
 });
 
 test("without oxplow-bundled, Git History is oxplow's plain list", async ({ fresh }) => {
@@ -80,6 +83,6 @@ test("without oxplow-bundled, Git History is oxplow's plain list", async ({ fres
   await run(daemon, "oxplow.extension.disable", { name: "oxplow-bundled" });
   await page.goto("/");
   await openFromLauncher(page, "Git History");
-  await expect(page.getByTestId("commit-list-row").filter({ hasText: "Merge side" })).toBeVisible();
+  await expect(page.getByTestId("lens-part-history").filter({ visible: true }).getByText("Merge side")).toBeVisible();
   await expect(page.locator('[data-testid^="replacement-"]')).toHaveCount(0);
 });

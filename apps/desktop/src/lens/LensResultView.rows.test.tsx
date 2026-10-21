@@ -284,3 +284,25 @@ test("toolbarTo hands the toolbar's actions to the page instead of drawing them"
     ]),
   );
 });
+
+// A table's links are one collection: the page a row opens has Up and Down
+// through the rows' pages (`Origin`).
+test("a link opens with its column's pages as the origin", () => {
+  const opened: Array<[string, unknown]> = [];
+  const nav = {
+    navigate: () => {},
+    openRef: (ref: string, how?: { origin?: unknown }) => opened.push([ref, how?.origin]),
+  } as unknown as PageNavigation;
+  const view = render(
+    <PageNavigationContext.Provider value={nav}>
+      <LensResultView
+        run={runOf({ viz: "table", columns: [{ key: "title", label: null, link: link("page", "ref"), unit: null }] })}
+      />
+    </PageNavigationContext.Provider>,
+  );
+  fireEvent.click(view.getByText("Child"));
+  const [ref, origin] = opened[0]!;
+  expect(ref).toBe("work_item:oxplow:tsk2");
+  expect((origin as { index: number; items: { label: string }[] }).index).toBe(1);
+  expect((origin as { items: { label: string }[] }).items.map((i) => i.label)).toEqual(["Epic", "Child", "Next"]);
+});

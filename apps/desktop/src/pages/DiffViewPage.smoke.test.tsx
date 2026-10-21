@@ -115,7 +115,6 @@ mock.module("../tauri-bridge/generated/bindings.js", () => ({
 
 const { DiffViewPage } = await import("./DiffViewPage.js");
 const { GitCommitPage } = await import("./GitCommitPage.js");
-const { HistoryPanel } = await import("../components/History/HistoryPanel.js");
 
 afterEach(cleanup);
 
@@ -149,15 +148,6 @@ test("the commit page reads its commit through vcsRevision, not git commands", a
   );
   await findByText("Fix the widget");
   await findByText(/b\.ts/);
-  expect(gitCalls).toEqual([]);
-});
-
-test("history reads v_commit from the stream's head, not git log", async () => {
-  gitCalls.length = 0;
-  const { findByText } = render(<HistoryPanel stream={STREAM} />);
-  await findByText("Second commit");
-  await findByText("First commit");
-  expect(sqlCalls.some((sql) => sql.includes("WITH RECURSIVE"))).toBe(true);
   expect(gitCalls).toEqual([]);
 });
 

@@ -898,6 +898,7 @@ mod tests {
                 lens: lens.map(Into::into),
                 markdown: markdown.map(Into::into),
                 size: None,
+                replaceable: None,
                 from: None,
             }
         };

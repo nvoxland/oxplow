@@ -12,9 +12,7 @@ import { DiffPage } from "./DiffPage.js";
 import { DuplicateBlockPage } from "./DuplicateBlockPage.js";
 import { SettingsPage } from "./SettingsPage.js";
 import { settingsArea } from "./settingsAreas.js";
-import { LocalHistoryDashboardPage } from "./LocalHistoryDashboardPage.js";
 import { DiffViewPage } from "./DiffViewPage.js";
-import { GitHistoryPage } from "./GitHistoryPage.js";
 import { GitDashboardPage } from "./GitDashboardPage.js";
 import { UncommittedChangesPage } from "./UncommittedChangesPage.js";
 import { NewSessionPage } from "./NewSessionPage.js";
@@ -210,30 +208,7 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
       render: () => <SettingsPage area={area.id} section={section} onOpenPage={nav.navOpen} />,
     };
   },
-  "local-history": ({ ref, nav, scope }) => {
-    return {
-      id: ref.id,
-      label: "Local History",
-      closable: true,
-      render: () => (
-        <LocalHistoryDashboardPage
-          stream={scope.stream}
-          onOpenPage={nav.navOpen}
-        />
-      ),
-    };
-  },
   "diff-view": ({ ref, params, nav, scope }) => diffViewTab(ref, endpointsOf(params), nav, scope.stream),
-  "git-history": ({ ref, nav, scope }) => {
-    return {
-      id: ref.id,
-      label: "Git History",
-      closable: true,
-      render: () => (
-        <GitHistoryPage stream={scope.stream} onOpenPage={nav.navOpen} />
-      ),
-    };
-  },
   "git-dashboard": ({ ref, nav, scope }) => {
     return {
       id: ref.id,

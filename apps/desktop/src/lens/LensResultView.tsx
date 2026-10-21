@@ -19,6 +19,7 @@ import { SchemaForm } from "../components/SchemaForm/SchemaForm.js";
 import type { Drafts } from "../components/SchemaForm/schemaFormModel.js";
 import { fieldErrors, needsConfirmation } from "../ipc-error.js";
 import { RouteLink } from "../tabs/RouteLink.js";
+import { linkOrigins } from "./linkOrigin.js";
 import { parseRef } from "../refs/ref.js";
 import { openRefInWindow } from "../tabs/openRef.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
@@ -350,6 +351,11 @@ function RowsBody({
     );
   }
   const cols = displayColumns(lens, result.columns);
+  // A link column's pages are one collection: Up and Down on the page a
+  // row opens step through its siblings.
+  const origins = new Map(
+    cols.filter((c) => c.link).map((c) => [c.key, linkOrigins(lens.title, c, result.rows, result.columns)] as const),
+  );
   const cell: CellRenderer = (row, c) => {
     const raw = row[c.index] ?? null;
     const formatted = formatCell(raw, c.unitIndex === null ? undefined : (row[c.unitIndex] ?? null), c.format);
@@ -378,7 +384,7 @@ function RowsBody({
     const ref = c.link ? cellLinkRef(c.link, c.key, row, result.columns) : null;
     const mine = ref ? badges.filter((b) => b.ref === linkTargetId(ref)) : [];
     const body = ref ? (
-      <RouteLink to={ref} onNavigate={tabNavigate(ref, onOpenPage)} style={tone ? { ...linkStyle, color: tone } : linkStyle}>
+      <RouteLink to={ref} onNavigate={tabNavigate(ref, onOpenPage)} origin={origins.get(c.key)?.(row)} style={tone ? { ...linkStyle, color: tone } : linkStyle}>
         {text}
       </RouteLink>
     ) : (

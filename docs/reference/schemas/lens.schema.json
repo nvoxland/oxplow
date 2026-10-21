@@ -1058,6 +1058,14 @@
             }
           ],
           "default": null
+        },
+        "replaceable": {
+          "description": "The core component this part's lens stands in for (a lens part's).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false

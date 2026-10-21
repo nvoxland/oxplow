@@ -20,8 +20,6 @@ pub const BUILT_IN_PAGES: &[&str] = &[
     "external-url",
     "files",
     "git-dashboard",
-    "git-history",
-    "local-history",
     "metrics-recorded",
     "new-session",
     "new-stream",

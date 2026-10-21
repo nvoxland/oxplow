@@ -17,7 +17,7 @@
 import { isTasksViewParam } from "../components/Plan/tasksView.js";
 import { isDashboardViewParam, isMetricsViewParam, isMetricViewParam } from "./metricsView.js";
 import { isAlertsViewParam, isBoardViewParam, isFilesViewParam } from "./modeViews.js";
-import { isCommentsViewParam, isExploreViewParam, isGitHistoryViewParam, isNewSessionViewParam, isSettingsViewParam } from "./searchViews.js";
+import { isCommentsViewParam, isExploreViewParam, isNewSessionViewParam, isSettingsViewParam } from "./searchViews.js";
 import { identityOf } from "../tabs/session.js";
 import { extPageRef, pagePayload, pageTabRef, viewParamsOf, withViewParams } from "../tabs/pageRefs.js";
 import type { SqlCell } from "../tauri-bridge/generated/bindings.js";
@@ -31,7 +31,6 @@ const BUILT_IN_VIEW: Record<string, (key: string) => boolean> = {
   "metrics-recorded": isMetricsViewParam,
   "custom-dashboard": isDashboardViewParam,
   metric: isMetricViewParam,
-  "git-history": isGitHistoryViewParam,
   comments: isCommentsViewParam,
   files: isFilesViewParam,
   alerts: isAlertsViewParam,
@@ -42,8 +41,6 @@ const BUILT_IN_VIEW: Record<string, (key: string) => boolean> = {
   diff: (key) => key === "line",
   // A pair of endpoints: the same diff view, rescoped.
   "diff-view": (key) => key === "start" || key === "end",
-  // Its grouping, and every row or only the latest.
-  "local-history": (key) => key === "mode" || key === "all",
   // One Settings page shows every area.
   settings: (key) => key === "area" || key === "section" || isSettingsViewParam(key),
 };

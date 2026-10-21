@@ -1,0 +1,11 @@
+title: Git History
+description: The stream's commits, newest first, narrowed by text, author or branch. An extension may draw them as a graph.
+params:
+  - { name: stream_id }
+  - { name: q, label: Find, type: search }
+  - { name: author, label: Author, default: "" }
+  - { name: branch, label: Branch, type: branch }
+viz: document
+sections:
+  - { id: history, title: Commits, lens: git-history-commits, replaceable: vcs.history.graph }
+hidden: true
