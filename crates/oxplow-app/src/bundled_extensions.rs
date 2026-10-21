@@ -2117,6 +2117,7 @@ mod tests {
             ("go-to", "oxplow-foundation/go-to"),
             ("dashboards", "oxplow-foundation/dashboards"),
             ("local-history", "oxplow-foundation/local-history"),
+            ("git-history", "oxplow-foundation/git-history"),
         ] {
             assert!(pages.contains(&(page, lens)), "{page}: {pages:?}");
         }
@@ -2620,6 +2621,93 @@ mod tests {
             .as_array()
             .unwrap()
             .is_empty());
+    }
+
+    /// Git History's plain list: the commits reachable from the stream's
+    /// HEAD (`head_sha`, which a lens with that param gets from the
+    /// viewed stream), narrowed by text, author or branch, with the
+    /// branches and tags at each.
+    #[tokio::test]
+    async fn the_git_history_lens_lists_the_commits_from_the_streams_head() {
+        use oxplow_db::git_store::{GitBranchRow, GitCommitRow, GitTagRow};
+        use oxplow_db::SqlCell::{Int, Text};
+        let f = crate::test_fixtures::services_with_effort().await;
+        let commit =
+            |sha: &str, author: &str, subject: &str, secs: i64, parents: &[&str]| GitCommitRow {
+                sha: sha.into(),
+                author: author.into(),
+                email: format!("{author}@x"),
+                committed_secs: secs,
+                subject: subject.into(),
+                body: String::new(),
+                parents: parents.iter().map(|p| p.to_string()).collect(),
+                files: Vec::new(),
+            };
+        for c in [
+            commit("aaa111", "ann", "First", 1_700_000_000, &[]),
+            commit("bbb222", "bob", "Second fix", 1_700_000_100, &["aaa111"]),
+            commit("ccc333", "ann", "Third", 1_700_000_200, &["bbb222"]),
+            commit("ddd444", "ann", "Side work", 1_700_000_150, &["aaa111"]),
+        ] {
+            f.svc.git_store.upsert_commit(c).await.unwrap();
+        }
+        f.svc
+            .git_store
+            .replace_branches(vec![
+                GitBranchRow {
+                    name: "main".into(),
+                    kind: "local".into(),
+                    head_sha: Some("ccc333".into()),
+                    stream_id: Some(1),
+                    ..Default::default()
+                },
+                GitBranchRow {
+                    name: "side".into(),
+                    kind: "local".into(),
+                    head_sha: Some("ddd444".into()),
+                    ..Default::default()
+                },
+            ])
+            .await
+            .unwrap();
+        f.svc
+            .git_store
+            .replace_tags(vec![GitTagRow {
+                name: "v1".into(),
+                sha: "bbb222".into(),
+            }])
+            .await
+            .unwrap();
+        f.svc
+            .git_store
+            .replace_stream_heads(vec![(1, "ccc333".into())])
+            .await
+            .unwrap();
+        let lens = |extra: Vec<(&'static str, oxplow_db::SqlCell)>| {
+            let f = &f;
+            let mut params = vec![("stream_id", Int(1))];
+            params.extend(extra);
+            async move {
+                run_bundled_lens_with(f, "oxplow-foundation/git-history-commits", &params).await
+            }
+        };
+        // No head given: the stream's. The side branch isn't reachable from it.
+        let rows = lens(vec![]).await;
+        assert_eq!(texts(&rows, 1), ["Third", "Second fix", "First"], "{rows}");
+        assert_eq!(texts(&rows, 4), ["main", "v1", ""], "{rows}");
+        // Text, author, and a branch (reachable from its head) narrow it.
+        assert_eq!(
+            texts(&lens(vec![("q", Text("fix".into()))]).await, 1),
+            ["Second fix"]
+        );
+        assert_eq!(
+            texts(&lens(vec![("author", Text("ann".into()))]).await, 1),
+            ["Third", "First"]
+        );
+        assert_eq!(
+            texts(&lens(vec![("branch", Text("side".into()))]).await, 1),
+            ["First"]
+        );
     }
 
     /// Go To (the page): the thread's bookmarks with the scope each is at,

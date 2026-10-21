@@ -13,7 +13,6 @@ import { DuplicateBlockPage } from "./DuplicateBlockPage.js";
 import { SettingsPage } from "./SettingsPage.js";
 import { settingsArea } from "./settingsAreas.js";
 import { DiffViewPage } from "./DiffViewPage.js";
-import { GitHistoryPage } from "./GitHistoryPage.js";
 import { GitDashboardPage } from "./GitDashboardPage.js";
 import { UncommittedChangesPage } from "./UncommittedChangesPage.js";
 import { NewSessionPage } from "./NewSessionPage.js";
@@ -210,16 +209,6 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
     };
   },
   "diff-view": ({ ref, params, nav, scope }) => diffViewTab(ref, endpointsOf(params), nav, scope.stream),
-  "git-history": ({ ref, nav, scope }) => {
-    return {
-      id: ref.id,
-      label: "Git History",
-      closable: true,
-      render: () => (
-        <GitHistoryPage stream={scope.stream} onOpenPage={nav.navOpen} />
-      ),
-    };
-  },
   "git-dashboard": ({ ref, nav, scope }) => {
     return {
       id: ref.id,

@@ -4176,6 +4176,12 @@ export type LensPart = {
 	markdown: string | null,
 	/**  A tile's size. */
 	size: TileSize | null,
+	/**
+	 *  The core component its lens stands in for (a target of
+	 *  `oxplow_domain::replaceable::REPLACEABLE`): its lens is oxplow's own,
+	 *  shown unless an extension replaces the target.
+	 */
+	replaceable: string | null,
 	/**  The extension that mounted it, when it isn't the lens's own. */
 	from: string | null,
 };

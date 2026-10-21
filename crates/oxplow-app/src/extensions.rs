@@ -587,6 +587,10 @@ pub struct LensPart {
     pub markdown: Option<String>,
     /// A tile's size.
     pub size: Option<TileSize>,
+    /// The core component its lens stands in for (a target of
+    /// `oxplow_domain::replaceable::REPLACEABLE`): its lens is oxplow's own,
+    /// shown unless an extension replaces the target.
+    pub replaceable: Option<String>,
     /// The extension that mounted it, when it isn't the lens's own.
     pub from: Option<String>,
 }
@@ -608,6 +612,9 @@ struct PartFile {
     /// A tile's size (`tiles:` only).
     #[serde(default)]
     size: Option<TileSize>,
+    /// The core component this part's lens stands in for (a lens part's).
+    #[serde(default)]
+    replaceable: Option<String>,
 }
 
 /// A lens file's `sections:` (for `document`) or `tiles:` (for
@@ -644,6 +651,17 @@ fn parse_parts(
                 "{key}[{i}]: needs exactly one of `lens` and `markdown`"
             ));
         }
+        if let Some(target) = &f.replaceable {
+            if lens.is_none() {
+                return Err(format!("{key}[{i}]: `replaceable` is a lens part's"));
+            }
+            if oxplow_domain::replaceable::replaceable(target).is_none() {
+                return Err(format!(
+                    "{key}[{i}]: `replaceable: {target}` isn't a replaceable component ({})",
+                    oxplow_domain::replaceable::targets()
+                ));
+            }
+        }
         if key == "sections" && f.size.is_some() {
             return Err(format!("{key}[{i}]: `size` is a dashboard tile's"));
         }
@@ -661,6 +679,7 @@ fn parse_parts(
             lens,
             markdown: f.markdown,
             size: f.size,
+            replaceable: f.replaceable,
             from: None,
         });
     }
@@ -1347,8 +1366,6 @@ pub const SLOTS: &[SlotSpec] = &[
     // Uncommitted changes: a strip above them, and below the files.
     SlotSpec::region("vcs.status.header", &["stream_id"]),
     SlotSpec::region("vcs.status.details", &["change_id"]),
-    // Git history's side column.
-    SlotSpec::region("vcs.history.sidebar", &["stream_id"]),
     // A file diff's header strip, above the editor: the file and the two
     // revisions the diff reads (`working`, `snap:<id>`, `git:<sha>`).
     SlotSpec::region(
@@ -2451,6 +2468,7 @@ fn place_lens_mounts(out: &mut [Extension]) {
                             lens: Some(mount.lens_id.clone()),
                             markdown: None,
                             size: mount.size,
+                            replaceable: None,
                             from: Some(ext.name.clone()),
                         },
                         mount.at.clone().unwrap_or_default(),
@@ -3697,6 +3715,25 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     }
     ext.lenses
         .retain(|l| !selects.iter().any(|(id, _)| id == &l.id));
+    let replaceable: Vec<(String, String)> = ext
+        .lenses
+        .iter()
+        .filter_map(|l| {
+            Some((
+                l.id.clone(),
+                format!(
+                    "{}: {}",
+                    l.origin.running,
+                    replaceable_problem(l, &ext.lenses)?
+                ),
+            ))
+        })
+        .collect();
+    for (_, problem) in &replaceable {
+        ext.errors.push(problem.clone());
+    }
+    ext.lenses
+        .retain(|l| !replaceable.iter().any(|(id, _)| id == &l.id));
     let selected: Vec<Vec<String>> = ext
         .lenses
         .iter()
@@ -4455,10 +4492,20 @@ const MAX_COLUMNS: usize = 8;
 /// the lens.
 fn layout_warnings(lens: &Lens, lenses: &[Lens]) -> Vec<String> {
     let mut out = Vec::new();
+    // The props of a core component this lens stands in for on another
+    // lens's page: the host's to give, so neither a filter a person sets
+    // nor a param its query must read.
+    let contract: Vec<&str> = lenses
+        .iter()
+        .flat_map(|l| &l.parts)
+        .filter(|part| part.lens.as_deref() == Some(lens.id.as_str()))
+        .filter_map(|part| oxplow_domain::replaceable::replaceable(part.replaceable.as_deref()?))
+        .flat_map(|t| t.props.iter().copied())
+        .collect();
     let filters = lens
         .params
         .iter()
-        .filter(|p| p.role == Some(ParamRole::Filter))
+        .filter(|p| p.role == Some(ParamRole::Filter) && !contract.contains(&p.name.as_str()))
         .count();
     if filters > MAX_FILTERS {
         out.push(format!(
@@ -4505,6 +4552,7 @@ fn layout_warnings(lens: &Lens, lenses: &[Lens]) -> Vec<String> {
             let read = |token: &str| queries.iter().any(|q| reads_param(q, token));
             let range = p.kind == Some(ParamType::DateRange);
             if !(read(&p.name)
+                || contract.contains(&p.name.as_str())
                 || range && (read(&format!("{}_from", p.name)) || read(&format!("{}_to", p.name)))
                 || templated.contains(&p.name)
                 || marked.contains(&p.name.as_str()))
@@ -4564,6 +4612,42 @@ fn selects_problem(lens: &Lens, lenses: &[Lens]) -> Option<String> {
             .find(|name| !lens.params.iter().any(|p| &p.name == name))
             .map(|name| format!("part `{id}` selects `{name}`, a param this lens doesn't declare"))
     })
+}
+
+/// A part standing in for a core component whose lens (one of this
+/// extension's) lacks a prop of the target's contract, or two parts
+/// standing in for the same target: the host gives a replacement exactly the
+/// contract, so the part's lens must hold all of it.
+fn replaceable_problem(lens: &Lens, lenses: &[Lens]) -> Option<String> {
+    let mut seen: Vec<&str> = Vec::new();
+    for part in &lens.parts {
+        let (Some(target), Some(id)) = (part.replaceable.as_deref(), part.lens.as_deref()) else {
+            continue;
+        };
+        if seen.contains(&target) {
+            return Some(format!("`{target}` is placed once on a page"));
+        }
+        seen.push(target);
+        let (Some(t), Some(part_lens)) = (
+            oxplow_domain::replaceable::replaceable(target),
+            lenses.iter().find(|l| l.id == id),
+        ) else {
+            continue;
+        };
+        let missing: Vec<String> = t
+            .props
+            .iter()
+            .filter(|p| !part_lens.params.iter().any(|lp| lp.name == **p))
+            .map(|p| format!("`{p}`"))
+            .collect();
+        if !missing.is_empty() {
+            return Some(format!(
+                "part lens `{id}` must declare {} (`params:`) — what `{target}` gives its replacement",
+                missing.join(", ")
+            ));
+        }
+    }
+    None
 }
 
 impl LensProvenance {
@@ -5041,20 +5125,45 @@ pub async fn run_lenses(layer: &crate::sql_gateway::SqlGateway, ext: &Extension)
     out
 }
 
+/// The HEAD commit of stream `stream_id`, when it is known.
+async fn stream_head(
+    layer: &crate::sql_gateway::SqlGateway,
+    stream_id: i64,
+) -> Result<Option<String>, DomainError> {
+    let rows = layer
+        .run(
+            oxplow_db::SqlQuery::new("SELECT head_sha FROM v_stream WHERE id = :id")
+                .named(vec![("id".into(), SqlCell::Int(stream_id))])
+                .limit(Some(1)),
+        )
+        .await?;
+    Ok(match rows.rows.first().and_then(|r| r.first()) {
+        Some(SqlCell::Text(sha)) => Some(sha.clone()),
+        _ => None,
+    })
+}
+
 async fn execute(
     layer: &crate::sql_gateway::SqlGateway,
     lens: Lens,
     supplied: BTreeMap<String, SqlCell>,
     ctx: &LensContext,
 ) -> Result<LensRun, DomainError> {
-    let params = resolve_params(&lens, &supplied, ctx)?;
-    let named = binds(&lens, &params, time::OffsetDateTime::now_utc());
+    let mut params = resolve_params(&lens, &supplied, ctx)?;
     // A lens's `:stream_id` is the stream its metrics (`metric_grid()`)
     // are read over.
     let stream = match params.get("stream_id") {
         Some(SqlCell::Int(id)) => Some(*id),
         _ => None,
     };
+    // `head_sha`, unless supplied, is the viewed stream's HEAD commit
+    // (`v_stream.head_sha`), as `stream_id` is the viewer's stream.
+    if let (Some(SqlCell::Null(())), Some(stream_id)) = (params.get("head_sha"), stream) {
+        if let Some(head) = stream_head(layer, stream_id).await? {
+            params.insert("head_sha".into(), SqlCell::Text(head));
+        }
+    }
+    let named = binds(&lens, &params, time::OffsetDateTime::now_utc());
     // A form without a query has no rows to read.
     let result = if lens.query.trim().is_empty() {
         oxplow_db::SqlQueryResult {
@@ -7614,6 +7723,48 @@ commands:
             ("tiled", "has `sections`, not `tiles`"),
             ("empty", "needs `sections: [...]`"),
             ("stray", "`sections` are a `document`'s"),
+        ] {
+            assert!(
+                errs.lines().any(|l| l.contains(slug) && l.contains(want)),
+                "{slug}: {errs}"
+            );
+            assert!(!ext.lenses.iter().any(|l| l.slug == slug), "{slug}");
+        }
+    }
+
+    /// A part may declare the core component it stands in for
+    /// (`replaceable: <target>`): its own lens is oxplow's, shown unless an
+    /// extension replaces the target. The target must exist, the part must
+    /// be a lens, and that lens must declare every prop of the target's
+    /// contract, as a replacement lens must.
+    #[test]
+    fn a_replaceable_part_names_a_target_whose_props_its_lens_declares() {
+        let (_d, ext) = load_x(
+            &[
+                (
+                    "log",
+                    "title: L\nparams: [{ name: head_sha }, { name: reveal_sha, default: \"\" }, { name: limit, default: 500 }]\nquery: SELECT 1\n",
+                ),
+                ("short", "title: S\nparams: [{ name: head_sha }]\nquery: SELECT 1\n"),
+                ("doc", "title: D\nviz: document\nsections: [{ lens: log, replaceable: vcs.history.graph }]\n"),
+                ("doc-short", "title: D\nviz: document\nsections: [{ lens: short, replaceable: vcs.history.graph }]\n"),
+                ("doc-unknown", "title: D\nviz: document\nsections: [{ lens: log, replaceable: nope.nothing }]\n"),
+                ("doc-md", "title: D\nviz: document\nsections: [{ id: m, markdown: hi, replaceable: vcs.history.graph }]\n"),
+                ("doc-twice", "title: D\nviz: document\nsections: [{ lens: log, replaceable: vcs.history.graph }, { id: again, lens: log, replaceable: vcs.history.graph }]\n"),
+            ],
+            "",
+        );
+        let doc = ext.lenses.iter().find(|l| l.slug == "doc").unwrap();
+        assert_eq!(
+            doc.parts[0].replaceable.as_deref(),
+            Some("vcs.history.graph")
+        );
+        let errs = ext.errors.join("\n");
+        for (slug, want) in [
+            ("doc-short", "must declare `reveal_sha`, `limit`"),
+            ("doc-unknown", "isn't a replaceable component"),
+            ("doc-md", "`replaceable` is a lens part's"),
+            ("doc-twice", "`vcs.history.graph` is placed once"),
         ] {
             assert!(
                 errs.lines().any(|l| l.contains(slug) && l.contains(want)),

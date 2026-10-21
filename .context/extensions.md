@@ -915,9 +915,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     (body and sidebar; the item's ref, whichever list); PlanPane
     `thread_id` (the compact `strip` variant, which hides lenses with no
     rows); GitCommitPage and UncommittedChangesPage `change_id`, plus
-    UncommittedChangesPage's strip and GitHistoryPage's side column
-    `stream_id` (a side column only when something mounts there —
-    `useSlotMounted`).
+    UncommittedChangesPage's strip `stream_id`.
     Numeric ids come from `numericRowId` (`tsk42` → 42).
   - **Latest request wins** (`src/request-guard.ts`, tsk370). LensSlots,
     LensPage and ExploreDataPage `begin()` each fetch and apply its result
@@ -2110,7 +2108,6 @@ they live under `ui:`.
 | `vcs.commit.details` | GitCommitPage | `change_id` |
 | `vcs.status.header` | UncommittedChangesPage, a strip above everything | `stream_id` |
 | `vcs.status.details` | UncommittedChangesPage | `change_id` |
-| `vcs.history.sidebar` | GitHistoryPage, a side column shown only when something mounts there (`useSlotMounted`) | `stream_id` |
 | `diff.file.header` | a file diff (`DiffPane`), a strip under its header (P9.A2; `DiffFileHeaderSlot`) | `path`, `left_revision`, `right_revision` (each a revision in its wire form: `working`, `snap:<id>`, `git:<sha>`), `stream_id` |
 | `settings.<area>.sections` (parts per area: `overview` `every`; `agents` `agents`, `new-threads`, `prompt`; `lsp` `servers`; `extensions` `installed`; `data` `data`; `integrations` `capabilities`, `integrations`; `ai` `ai`) | each Settings area's page (`pages/settingsAreas.ts` lists the same ids; a TS test checks they match): an extension's status or setup views go beside the area they belong to | none |
 | `new-session.sections` (parts: `start`, `earlier`) | the New Session page's sections (`DocumentLayout`) | `thread_id` |
@@ -2152,7 +2149,20 @@ it props it doesn't know.
 | `work_item.detail` | a work item's editor, its title and body (`TaskDetail`, `WorkItemPage`): the rail (state pill, Move To, fields, Delete), Comment / Link, slots and activity stay oxplow's | `work_items` | no | `ref` (the item) | — |
 | `work_item.detail.state` | a work item's State (`WorkItemPage`'s rail; P10) — never its Move To, which stays oxplow's canonical states, so a replacement can't strand an item (tsk919) | `work_items` | yes | `ref` (the item) | — |
 | `effort.verdict` | an effort's verdict, the first line of its page (`DiffViewPage`). Core has **none of its own**: with no replacement, or `oxplow` chosen, the page shows nothing. oxplow-bundled's `effort-verdict` is the default | `effort_policy` | no | `effort_id` (the effort's row id) | — |
-| `vcs.history.graph` | Git History's commits (`HistoryPanel`): oxplow's own is a plain list (`CommitList`) | `vcs` | no | `head_sha` (the stream's head), `reveal_sha` (a commit to scroll to and mark, or null), `limit` | `q`, `author`, `branch` (Git History's filters; v2) |
+| `vcs.history.graph` | Git History's commits (a part of the `git-history` document): oxplow's own is a plain list, the part's lens (`git-history-commits`) | `vcs` | no | `head_sha` (the stream's head), `reveal_sha` (a commit to scroll to and mark, or null), `limit` | `q`, `author`, `branch` (Git History's filters; v2) |
+
+**Who places a target.** A core component (`<Replaceable target …
+fallback>`, `BoardPage`) or a **lens part** of a declared page: a
+`document` section or `dashboard` tile with `replaceable: <target>`
+(`LensPart.replaceable`, `PartsViz`). The part's own lens is oxplow's own
+and the fallback; it must declare every prop of the target's contract
+(`replaceable_problem`, an error at load, as a replacement lens must), and
+a target is placed once per page. At render the part's run gives the props
+(its resolved `params`), and `Replaceable` draws the replacement in the
+part's place under its badge. A lens param named `head_sha` is, unless
+supplied, the viewed stream's HEAD commit (`v_stream.head_sha`), as
+`stream_id` is the viewer's stream. Git History is this: the `git-history`
+document's one section.
 
 **Bound or not.** A bound target shows one provider's own thing — the
 state control lists that tracker's states — so only the extension of the
@@ -2467,7 +2477,7 @@ block is gone.
 (`extensionsStore.ts`, `useExtensions()`): one `listExtensions` (the
 live set, the same in every stream) and one event subscription
 however many readers are mounted
-(slots, `useSlotMounted`,
+(slots,
 decorators, rail panels, extension pages, the launcher), reloaded on
 `extensionsChanged`; the listing lives while something reads it, so a
 later mount loads afresh. Only Settings → Extensions lists them itself — it

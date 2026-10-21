@@ -20,7 +20,6 @@ export const BUILT_IN_PAGES = [
   "external-url",
   "files",
   "git-dashboard",
-  "git-history",
   "metrics-recorded",
   "new-session",
   "new-stream",

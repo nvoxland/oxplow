@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import type { LensRun, SqlCell } from "../api.js";
 import type { LensPart } from "../tauri-bridge/generated/bindings.js";
+import { Replaceable } from "../components/Replaceable.js";
 import { MarkdownView } from "../components/Wiki/MarkdownView.js";
 import { Loading } from "../kit/Loading.js";
 import { Section } from "../kit/Section.js";
@@ -75,7 +76,12 @@ function PartBody({
   // part selects that the page doesn't declare stays plain.
   const selects = run.run.lens.columns.find((c) => c.select)?.select;
   const set = selects && selects in params ? onSetParam : undefined;
-  return <LensResultView run={run.run} onOpenPage={onOpenPage} streamId={streamId} maxRows={maxRows} toolbar={false} onSetParam={set} />;
+  const own = <LensResultView run={run.run} onOpenPage={onOpenPage} streamId={streamId} maxRows={maxRows} toolbar={false} onSetParam={set} />;
+  // A part standing in for a core component: its lens is oxplow's own,
+  // shown unless an extension replaces the target; the replacement is given
+  // the part's resolved params (the contract the loader checked it declares).
+  if (!part.replaceable) return own;
+  return <Replaceable target={part.replaceable} props={run.run.params} streamId={streamId} onOpenPage={onOpenPage} fallback={own} />;
 }
 
 /**
