@@ -18,8 +18,9 @@ import { ResultCompleteness } from "./ResultCompleteness.js";
 import { SchemaForm } from "../components/SchemaForm/SchemaForm.js";
 import type { Drafts } from "../components/SchemaForm/schemaFormModel.js";
 import { fieldErrors, needsConfirmation } from "../ipc-error.js";
-import { RouteLink } from "../tabs/RouteLink.js";
+import { RouteLink, routeDispatch } from "../tabs/RouteLink.js";
 import { linkOrigins } from "./linkOrigin.js";
+import { useListNav } from "../kit/useListNav.js";
 import { parseRef } from "../refs/ref.js";
 import { openRefInWindow } from "../tabs/openRef.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
@@ -335,6 +336,12 @@ function RowsBody({
   const ctxMenu = useContextMenu();
   const refOffersFor = useRefOffers();
   const extensions = useExtensions();
+  const pageNav = useOptionalPageNavigation();
+  // The rows in drawing order and the cursor over them: ↑/↓ move it, Enter
+  // opens the row's link or runs its first row action (`useListNav`).
+  let drawn: SqlCell[][] = result.rows;
+  let openRow: (row: SqlCell[]) => void = () => {};
+  const rowNav = useListNav({ count: result.rows.length, onPick: (i) => drawn[i] && openRow(drawn[i]!), id: `lens-rows-${lens.id}` });
   // Extensions' badges for the refs these rows link to (P6b.C5).
   const linkedRefs = result.rows.flatMap((row) =>
     lens.columns.flatMap((c) => {
@@ -356,6 +363,19 @@ function RowsBody({
   const origins = new Map(
     cols.filter((c) => c.link).map((c) => [c.key, linkOrigins(lens.title, c, result.rows, result.columns)] as const),
   );
+  const rowActions0 = lens.actions.filter((a) => a.row);
+  openRow = (row) => {
+    for (const c of cols) {
+      const target = c.link ? cellLinkRef(c.link, c.key, row, result.columns) : null;
+      if (target !== null) {
+        routeDispatch(target, pageNav, { onNavigate: tabNavigate(target, onOpenPage), origin: origins.get(c.key)?.(row) })(false);
+        return;
+      }
+    }
+    const record = rowRecord(result.columns, row);
+    const action = rowActions0.find((a) => actionOffered(a, record));
+    if (action) actions?.run(action, record);
+  };
   const cell: CellRenderer = (row, c) => {
     const raw = row[c.index] ?? null;
     const formatted = formatCell(raw, c.unitIndex === null ? undefined : (row[c.unitIndex] ?? null), c.format);
@@ -470,6 +490,8 @@ function RowsBody({
   };
   // A grouped list or table: its headings, each with its group's actions.
   const groups = rowGroups(lens, result);
+  drawn = groups ? groups.flatMap((g) => g.rows) : result.rows;
+  const drawnAt = new Map(drawn.map((r, i) => [r, i] as const));
   const heading = (g: RowGroup) => (
     <GroupHeading
       group={g}
@@ -479,7 +501,24 @@ function RowsBody({
       onOpenPage={onOpenPage}
     />
   );
-  const rowsView: RowsView = { groups, heading, rowLook };
+  const rowsView: RowsView = {
+    groups,
+    heading,
+    rowLook,
+    cursor: {
+      // The list takes the keys itself: a row's own (Enter that picks, the
+      // menu key) and a control's (an input in a cell) go first.
+      listProps: {
+        tabIndex: 0,
+        onKeyDown: (e) => {
+          if (e.defaultPrevented || (e.target as Element).closest("input, select, textarea")) return;
+          rowNav.keyProps.onKeyDown(e);
+        },
+      },
+      isCursor: (row) => drawnAt.get(row) === rowNav.cursor,
+      point: (row) => rowNav.setCursor(drawnAt.get(row) ?? 0),
+    },
+  };
   return (
     <>
       {compact ? null : <ResultCompleteness result={result} />}
@@ -526,6 +565,12 @@ interface RowsView {
   groups: RowGroup[] | null;
   heading(g: RowGroup): ReactNode;
   rowLook: RowLook;
+  /** The keyboard cursor over the drawn rows (list and table). */
+  cursor: {
+    listProps: React.HTMLAttributes<HTMLElement>;
+    isCursor(row: SqlCell[]): boolean;
+    point(row: SqlCell[]): void;
+  };
 }
 
 /** A group's heading, styled as the rail's sub-headings: its value
@@ -1212,7 +1257,7 @@ function ListViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
   const [head, ...rest] = cols;
   return (
     <>
-      <ul data-testid="lens-list" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+      <ul data-testid="lens-list" style={{ listStyle: "none", padding: 0, margin: 0 }} {...(view?.cursor.listProps as React.HTMLAttributes<HTMLUListElement>)}>
         {sections(rows, view).map(({ group, rows: inGroup }) => (
           <Fragment key={group?.key ?? ""}>
             {group && view ? <li style={{ listStyle: "none" }}>{view.heading(group)}</li> : null}
@@ -1222,6 +1267,8 @@ function ListViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
                 <li
                   key={i}
                   data-testid={`lens-row-${i}`}
+                  data-cursor={view?.cursor.isCursor(row) ? "true" : undefined}
+                  onMouseEnter={() => view?.cursor.point(row)}
                   style={{
                     ...listRowStyle,
                     ...(look.emphasized || look.selected ? emphasisStyle : {}),
@@ -1265,6 +1312,7 @@ function TableViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
   return (
     <DataTable<Row>
       testId="lens-table"
+      tableProps={view?.cursor.listProps as React.HTMLAttributes<HTMLTableElement>}
       columns={columns}
       groups={parts.map(({ group, rows: inGroup }) => ({
         key: group?.key ?? "",
@@ -1276,6 +1324,8 @@ function TableViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
         const look = view?.rowLook(row) ?? noLook;
         return {
           "data-testid": `lens-row-${i}`,
+          "data-cursor": view?.cursor.isCursor(row) ? "true" : undefined,
+          onMouseEnter: () => view?.cursor.point(row),
           className:
             [look.emphasized ? "ox-emphasis" : "", look.picks ? "ox-clickable" : "", look.selected ? "ox-selected" : ""].filter(Boolean).join(" ") ||
             undefined,

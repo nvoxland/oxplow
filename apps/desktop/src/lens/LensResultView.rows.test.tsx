@@ -306,3 +306,46 @@ test("a link opens with its column's pages as the origin", () => {
   expect((origin as { index: number; items: { label: string }[] }).index).toBe(1);
   expect((origin as { items: { label: string }[] }).items.map((i) => i.label)).toEqual(["Epic", "Child", "Next"]);
 });
+
+// A lens table is keyboard-driven as every list is (`useListNav`): ↑/↓ move
+// the cursor, Enter opens the row's link, or runs its first row action when
+// it has none.
+test("↑/↓ and Enter open the row under the cursor", () => {
+  const opened: Array<[string, unknown]> = [];
+  const nav = {
+    navigate: () => {},
+    openRef: (ref: string, how?: { origin?: unknown }) => opened.push([ref, how?.origin ? "origin" : "none"]),
+  } as unknown as PageNavigation;
+  const view = render(
+    <PageNavigationContext.Provider value={nav}>
+      <LensResultView
+        run={runOf({ viz: "table", columns: [{ key: "title", label: null, link: link("page", "ref"), unit: null }] })}
+      />
+    </PageNavigationContext.Provider>,
+  );
+  const table = view.getByTestId("lens-table");
+  fireEvent.keyDown(table, { key: "ArrowDown" });
+  fireEvent.keyDown(table, { key: "ArrowDown" });
+  fireEvent.keyDown(table, { key: "ArrowUp" });
+  fireEvent.keyDown(table, { key: "Enter" });
+  expect(opened).toEqual([["work_item:oxplow:tsk2", "origin"]]);
+  expect(view.getByTestId("lens-row-1").getAttribute("data-cursor")).toBe("true");
+});
+
+test("Enter runs the first row action of a row with no link", async () => {
+  actionRuns.length = 0;
+  const view = render(
+    <LensResultView
+      run={runOf({
+        viz: "table",
+        columns: [{ key: "title", label: null, link: null, unit: null }],
+        actions: [{ id: "open", label: "Open", command: "oxplow.work_item.update", input: {}, row: true }],
+      })}
+      onOpenPage={() => {}}
+    />,
+  );
+  const table = view.getByTestId("lens-table");
+  fireEvent.keyDown(table, { key: "ArrowDown" });
+  fireEvent.keyDown(table, { key: "Enter" });
+  await waitFor(() => expect(actionRuns.map((r) => r.action)).toEqual(["open"]));
+});

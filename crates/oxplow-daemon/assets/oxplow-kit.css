@@ -108,6 +108,8 @@
 .ox-table tr.ox-clickable { cursor: pointer; }
 .ox-table tr.ox-clickable:hover,
 .ox-table tr.ox-selected { background: var(--accent-soft-bg); }
+.ox-table:focus-within tr[data-cursor="true"],
+[data-testid="lens-list"]:focus-within > li[data-cursor="true"] { background: var(--accent-soft-bg); }
 .ox-table tr.ox-inert { color: var(--text-muted); cursor: default; }
 .ox-table tr.ox-emphasis { background: var(--accent-soft-bg); font-weight: var(--weight-medium); }
 .ox-num { font-variant-numeric: tabular-nums; text-align: right; }

@@ -663,6 +663,12 @@ declaring *what it is* and mounting the generic layer.
   ↑/↓ move the cursor, Enter takes the row under it, Escape is the page's
   (clear the filter), the pointer moves the cursor too, and focus stays in
   the input (`aria-activedescendant`). Don't hand-roll another.
+- **Every lens table and list is keyboard-driven the same way.** Focus the
+  table (Tab, or click a row) and ↑/↓ move the cursor (`data-cursor`, drawn
+  while the table has focus), Enter opens the cursor row's first link — with
+  the column's rows as the opened page's origin — or, when the row has no
+  link, runs its first row action. A row that picks a param (`select`) keeps
+  its own Enter; keys typed into a control in a cell stay the control's.
 - **Shortcuts are commands'.** A shortcut is a command's `ui.shortcut`
   (`.context/commands.md` "Offering a command to a person"), shown on
   its menu item when it has a `ui.menu` place; there's no separate key
