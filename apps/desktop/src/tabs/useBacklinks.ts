@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { listBacklinks, listPageOutbound, type BacklinkEdge } from "../api.js";
 import { lensRef } from "./pageRefs.js";
 import { refKindInfo, refKindsLoaded } from "../refKinds.js";
-import { workItemId } from "../workItemRef.js";
-import { contributionOf, idOf, typeOf, pageUri, parseUri, uriOf, wikiUri } from "../uri/uri.js";
+import { workItemId, workItemUriOfId } from "../workItemRef.js";
+import { contributionOf, idOf, keyOf, keyedUri, typeOf, pageUri, wikiUri } from "../uri/uri.js";
 import type { TabRef } from "./tabState.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
 
@@ -107,7 +107,8 @@ export function canonicalIdForTarget(ref: TabRef): string | null {
       // Any other kind with a page is its canonical ref's id (a lens, an
       // effort, a collector's page); a shell route (`settings`) is not a
       // ref of its kind and has none.
-      return idOf(ref.id, ref.kind);
+      // URI-SWITCH: the graph's ends become URIs (`page_ref`).
+      return keyOf(ref.id);
   }
 }
 
@@ -143,7 +144,7 @@ export function edgeToOutboundEntry(edge: BacklinkEdge): BacklinkEntry {
  * throws; an extension may come back, or the record.
  */
 function entryFor(edge: BacklinkEdge, kind: string, id: string): BacklinkEntry {
-  const target = uriOf(kind, id);
+  const target = edgeUri(kind, id);
   const open = openFor(kind, id, edge.resolved);
   const dead = open === null && !edge.resolved;
   return {
@@ -154,6 +155,13 @@ function entryFor(edge: BacklinkEdge, kind: string, id: string): BacklinkEntry {
     dead,
     linkType: linkTypeOf(edge.ref_type),
   };
+}
+
+/** The URI of an edge's end, from the graph's `(kind, id)` pair.
+ *  URI-SWITCH: `page_ref` stores URIs, and this goes. */
+function edgeUri(kind: string, id: string): string {
+  if (kind === "work_item") return workItemUriOfId(id) ?? keyedUri("oxplow/work_item", id);
+  return keyedUri(`oxplow/${kind}`, id);
 }
 
 /**
@@ -188,7 +196,7 @@ export function dedupeEntriesByTarget(entries: BacklinkEntry[]): BacklinkEntry[]
     if (group.length === 1) return group[0];
     // Pick the "best" base entry: wiki kind wins over file when the
     // file is the on-disk shadow of the same wiki page.
-    const wikiMember = group.find((g) => typeOf(g.target) === "wiki");
+    const wikiMember = group.find((g) => typeOf(g.target) === "oxplow/wiki");
     const base = wikiMember ?? group[0];
     // Combine subtitles, dropping empties and duplicates while
     // preserving first-seen order.
@@ -215,9 +223,9 @@ export function dedupeEntriesByTarget(entries: BacklinkEntry[]): BacklinkEntry[]
  * the wiki tab itself.
  */
 function canonicalEntryKey(entry: BacklinkEntry): string {
-  const parsed = parseUri(entry.target);
-  if (parsed?.kind === "file") {
-    const m = /^\.oxplow\/wiki\/(.+)\.md$/.exec(parsed.id);
+  const path = idOf(entry.target, "oxplow/file");
+  if (path !== null) {
+    const m = /^\.oxplow\/wiki\/(.+)\.md$/.exec(path);
     if (m) return wikiUri(m[1]!);
   }
   return entry.target;
@@ -233,7 +241,7 @@ function canonicalEntryKey(entry: BacklinkEntry): string {
 function openFor(kind: string, id: string, resolved: boolean): string | null {
   // Findings are listed by the oxplow-bundled Findings lens.
   if (kind === "finding") return lensRef("oxplow-bundled/findings").id;
-  const canonical = uriOf(kind, id);
+  const canonical = edgeUri(kind, id);
   const info = refKindInfo(kind);
   // Before the kinds are read, a ref is taken to open as itself.
   if (info ? info.page !== null : !refKindsLoaded()) return canonical;

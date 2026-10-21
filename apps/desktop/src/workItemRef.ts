@@ -1,24 +1,29 @@
 /**
- * Work-item refs on the TS side — the mirror of Rust's
+ * Work-item URIs on the TS side — the mirror of Rust's
  * `oxplow_domain::uri::build` work-item helpers (`.context/resources.md`).
- * A work item's ref is `work_item:<provider>:<id>`, whichever list it's
- * on (`work_item:oxplow:tsk42`, `work_item:issues:ENG-12`); the UI never
- * reads meaning into the id.
+ * A work item's URI is `oxplow:oxplow/work_item?id=<id>&provider=<list>`,
+ * whichever list it's on; the UI never reads meaning into the id.
  */
 
-import { idOf } from "./uri/uri.js";
+import { workItemOf, workItemUri } from "./uri/uri.js";
 
-/** The `<provider>:<id>` part of a work-item ref (its `page_ref` id);
- *  `null` for anything that isn't one. */
+/** The `<provider>:<id>` of a work-item URI (what an element's
+ *  `data-ref-id` and a comment anchor carry); `null` for anything that
+ *  isn't one. */
 export function workItemId(ref: string): string | null {
-  const rest = idOf(ref, "work_item");
-  if (rest === null) return null;
-  return rest.includes(":") && !rest.startsWith(":") && !rest.endsWith(":") ? rest : null;
+  const item = workItemOf(ref);
+  return item === null ? null : `${item.provider}:${item.id}`;
+}
+
+/** The URI of the work item whose `<provider>:<id>` (`workItemId`) is
+ *  `id`; null when it isn't one. */
+export function workItemUriOfId(id: string): string | null {
+  const colon = id.indexOf(":");
+  return colon <= 0 || colon === id.length - 1 ? null : workItemUri(id.slice(0, colon), id.slice(colon + 1));
 }
 
 /** How a person names a work item: its own id, as its list gives it
- *  (`tsk42`, `ENG-12`); the input when it isn't a work-item ref. */
+ *  (`tsk42`, `ENG-12`); the input when it isn't a work-item URI. */
 export function workItemLabel(ref: string): string {
-  const id = workItemId(ref);
-  return id === null ? ref : id.slice(id.indexOf(":") + 1);
+  return workItemOf(ref)?.id ?? ref;
 }

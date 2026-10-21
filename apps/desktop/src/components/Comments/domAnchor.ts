@@ -7,7 +7,7 @@
 //! `[start, length)` char span (via the shared `resolveAnchor`) and turn
 //! that span back into a DOM `Range` to paint, without mutating the DOM.
 
-import { idOf } from "../../uri/uri.js";
+import { workItemId } from "../../workItemRef.js";
 import { parseMarkdownLink } from "../Wiki/MarkdownView.js";
 import type { RefNode } from "./contextNodes.js";
 
@@ -66,7 +66,7 @@ export function refFromHref(href: string): RefNode | null {
     case "commit":
       return { kind: "commit", id: parsed.sha };
     case "work_item":
-      return { kind: "work_item", id: idOf(parsed.ref, "work_item") ?? parsed.ref };
+      return { kind: "work_item", id: workItemId(parsed.ref) ?? parsed.ref };
     default:
       return null;
   }

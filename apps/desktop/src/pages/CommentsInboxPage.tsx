@@ -12,15 +12,17 @@ import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { agentSessionRef, fileRef, wikiPageRef, workItemTabRef } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
-import { uriOf } from "../uri/uri.js";
-import { workItemLabel } from "../workItemRef.js";
+import { workItemLabel, workItemUriOfId } from "../workItemRef.js";
 import { EmptyState } from "../components/Prompts/EmptyState.js";
 
 /// Map a comment's target back to the page that owns it.
 function targetRef(kind: string, id: string): TabRef | null {
   if (kind === "file") return fileRef(id);
   if (kind === "wiki") return wikiPageRef(id);
-  if (kind === "work_item") return workItemTabRef(uriOf("work_item", id));
+  if (kind === "work_item") {
+    const uri = workItemUriOfId(id);
+    return uri === null ? null : workItemTabRef(uri);
+  }
   // An agent session's terminal (its tab while the session is open).
   if (kind === "agent_session") return agentSessionRef(id);
   return null;
@@ -31,7 +33,7 @@ function targetRef(kind: string, id: string): TabRef | null {
 export function targetLabel(kind: string, id: string): string {
   if (kind === "file") return id;
   if (kind === "wiki") return `wiki/${id}`;
-  if (kind === "work_item") return workItemLabel(uriOf("work_item", id));
+  if (kind === "work_item") return workItemLabel(workItemUriOfId(id) ?? id);
   if (kind === "agent_session") return "an agent session's terminal";
   return `${kind}:${id}`;
 }

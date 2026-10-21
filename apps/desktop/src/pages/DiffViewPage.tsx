@@ -1,4 +1,4 @@
-import { effortUri, uriOf } from "../uri/uri.js";
+import { effortUri, snapshotUri, turnUri } from "../uri/uri.js";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { DiffEntry, EffortAtSnapshot, Snapshot, Stream } from "../api.js";
@@ -275,11 +275,11 @@ function DiffBody({
 function specKey(spec: DiffViewSpec): string {
   switch (spec.mode) {
     case "snapshot":
-      return uriOf("snapshot", String(spec.snapshotId));
+      return snapshotUri(spec.snapshotId);
     case "effort":
       return effortUri(String(spec.effortId));
     case "turn":
-      return uriOf("turn", String(spec.turnId));
+      return turnUri(spec.turnId);
     case "endpoints":
       return `endpoints:${JSON.stringify(spec.start)}:${JSON.stringify(spec.end)}`;
   }

@@ -19,6 +19,7 @@ export function SuggestedPrompts({
   onAsked?(): void;
 }) {
   const catalog = usePromptCatalog();
+  // URI-SWITCH: a prompt's `about` names the resource.
   const kind = typeOf(refId);
   const prompts = kind ? promptsAbout(catalog, kind) : [];
   if (prompts.length === 0) return null;

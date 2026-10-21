@@ -24,8 +24,8 @@ function when(at: string, now: Date): { text: string; today: boolean } | null {
   return { text: today ? time : `${MONTHS[d.getMonth()]} ${d.getDate()} at ${time}`, today };
 }
 
-/** `collector:my-gh/gh` → `my-gh/gh`. */
-const sourceName = (source: string) => idOf(source, "collector") ?? source;
+/** A collector's URI → `my-gh/gh`. */
+const sourceName = (source: string) => idOf(source, "oxplow/collector") ?? source;
 
 /** The model as a noun: `v_my_gh_pull_request` fed by `my-gh/gh` is
  *  "Pull request" (the extension's prefix goes, underscores become spaces). */

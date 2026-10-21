@@ -11,7 +11,7 @@
  */
 import { querySql } from "../api.js";
 import { pageColumns, pageTabId, refKindInfo } from "../refKinds.js";
-import { parseUri } from "../uri/uri.js";
+import { idOf, typeOf } from "../uri/uri.js";
 import { refFromTabId } from "./pageRefs.js";
 import type { TabRef } from "./tabState.js";
 
@@ -26,9 +26,10 @@ export type RowReader = (view: string, columns: string[], ref: string) => Promis
 
 /** What the window does with tab id `tabId`. */
 function targetOf(tabId: string): RefTarget {
-  const parsed = parseUri(tabId);
-  if (parsed?.kind === "thread") return { thread: parsed.id };
-  if (parsed?.kind === "stream") return { stream: parsed.id };
+  const thread = idOf(tabId, "oxplow/thread");
+  if (thread !== null) return { thread };
+  const stream = idOf(tabId, "oxplow/stream");
+  if (stream !== null) return { stream };
   const tab = refFromTabId(tabId);
   return tab ? { tab } : { unopenable: `\`${tabId}\` isn't a page the window shows` };
 }
@@ -38,7 +39,8 @@ function targetOf(tabId: string): RefTarget {
 export function refTargetNow(ref: string): RefTarget | null {
   // Before the registry is read (a window starting), a ref opens as
   // itself, which is where every core kind but a few opens.
-  const kind = parseUri(ref)?.kind;
+  // URI-SWITCH: the registry is keyed by resource name (`v_resource`).
+  const kind = typeOf(ref);
   if (kind && !refKindInfo(kind)) return targetOf(ref);
   if (pageColumns(ref)) return null;
   const tabId = pageTabId(ref);

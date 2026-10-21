@@ -6,7 +6,7 @@ import type { MenuItem } from "../menu.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
 import { kindForTabId, PageKindIcon } from "../pageKinds.js";
-import { parseUri, uriOf } from "../uri/uri.js";
+import { commitUri, idOf, snapshotUri, typeOf } from "../uri/uri.js";
 import { openRefInWindow } from "./openRef.js";
 import { refTargetNow } from "./refOpener.js";
 import { setContextRefDrag } from "../agent-context-dnd.js";
@@ -79,10 +79,11 @@ export interface BacklinksListProps {
  * Pure — exported for tests.
  */
 export function refToContextRef(ref: string): ContextRef | null {
-  const parsed = parseUri(ref);
-  if (parsed?.kind === "file") return { kind: "file", path: parsed.id };
-  if (parsed?.kind === "wiki") return { kind: "wiki", slug: parsed.id };
-  if (parsed?.kind === "work_item") {
+  const path = idOf(ref, "oxplow/file");
+  if (path !== null) return { kind: "file", path };
+  const slug = idOf(ref, "oxplow/wiki");
+  if (slug !== null) return { kind: "wiki", slug };
+  if (typeOf(ref) === "oxplow/work_item") {
     return { kind: "work_item", ref, title: workItemLabel(ref), state: "" };
   }
   return null;
@@ -134,7 +135,7 @@ export function BacklinksList({
     <div data-testid="backlinks-list" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       {snapshotEntries.map((entry) => (
         <button
-          key={uriOf("snapshot", String(entry.snapshotId))}
+          key={snapshotUri(entry.snapshotId)}
           type="button"
           data-testid={`backlinks-snapshot-${entry.snapshotId}`}
           onClick={() => onOpenSnapshot?.({
@@ -159,7 +160,7 @@ export function BacklinksList({
       ))}
       {commitEntries.map((entry) => (
         <button
-          key={uriOf("commit", entry.sha)}
+          key={commitUri(entry.sha)}
           type="button"
           data-testid={`backlinks-commit-${entry.sha}`}
           onClick={() => onOpenCommit?.({ sha: entry.sha, subject: entry.subject })}

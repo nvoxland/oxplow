@@ -1,4 +1,5 @@
 import Link from "@tiptap/extension-link";
+import { isOxplowScheme } from "../../uri/uri.js";
 
 /**
  * Tiptap Link mark extended to permit our internal URL schemes
@@ -26,12 +27,13 @@ import Link from "@tiptap/extension-link";
  * name match against its internal `link` extension and invokes
  * `setup(md)` at parse time.
  */
-const INTERNAL_PROTOCOL_RE = /^(file|dir|commit|work_item|oxplow-invalid):/i;
-
-/** Whether `url` is one of our schemes. Tiptap may hand a link with no
- *  href over as null. */
+/** Whether `url` is one of our schemes: oxplow's URIs, and the marker
+ *  for a `[[…]]` that names nothing. Tiptap may hand a link with no href
+ *  over as null. */
 function internal(url: string | null | undefined): boolean {
-  return typeof url === "string" && INTERNAL_PROTOCOL_RE.test(url.trim());
+  if (typeof url !== "string") return false;
+  const trimmed = url.trim();
+  return isOxplowScheme(trimmed) || trimmed.toLowerCase().startsWith("oxplow-invalid:");
 }
 
 export const InternalLink = Link.extend({

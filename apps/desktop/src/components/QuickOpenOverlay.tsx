@@ -1,6 +1,6 @@
 import type { CommandEntry } from "./quickOpenResults.js";
 import { useAppPreference } from "../prefs/remembered.js";
-import { pageUri, uriOf } from "../uri/uri.js";
+import { commandUri, fileUri, pageUri } from "../uri/uri.js";
 import { SEARCH_TRIGGER_TESTID } from "./TitleBar.js";
 import type { CSSProperties } from "react";
 import { useRefKinds } from "../refKinds.js";
@@ -465,7 +465,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
               if (result.kind === "command") {
                 return (
                   <button type="button"
-                    key={uriOf("command", result.entry.id)}
+                    key={commandUri(result.entry.id)}
                     data-testid={`launcher-command-${result.entry.id}`}
                     data-row-index={index}
                     {...rowA11y(nav.optionProps(index))}
@@ -542,7 +542,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
               }
               return (
                 <button type="button"
-                  key={uriOf("file", result.file.path)}
+                  key={fileUri(result.file.path)}
                   data-row-index={index}
                     {...rowA11y(nav.optionProps(index))}
                   onClick={() => confirm(result)}

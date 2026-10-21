@@ -2000,7 +2000,7 @@ export async function effortTitles(effortIds: string[]): Promise<Map<string, str
     [JSON.stringify(effortIds.map(effortUri))],
     10_000,
   );
-  return new Map(res.rows.map((r) => [idOf(String(r[0]), "effort") ?? "", String(r[1])] as [string, string]));
+  return new Map(res.rows.map((r) => [idOf(String(r[0]), "oxplow/effort") ?? "", String(r[1])] as [string, string]));
 }
 
 export async function listEffortsAtSnapshots(

@@ -13,7 +13,7 @@ import { workItemTabRef } from "../tabs/pageRefs.js";
 import { workItemLabel } from "../workItemRef.js";
 import { useWorkListProfile } from "../useWorkListProfile.js";
 import { workItemRefOfMention } from "../workItems.js";
-import { effortUri, parseUri } from "../uri/uri.js";
+import { effortUri, identityOf, workItemOf } from "../uri/uri.js";
 
 /** An effort as its page shows it (`v_effort`). */
 export interface EffortRecord {
@@ -45,12 +45,11 @@ export const realEffortHeaderDeps: EffortHeaderDeps = {
 };
 
 /** The work-item ref a person typed: an id of the active list's (as it
- *  declares them), or a full `work_item:<provider>:<id>`; null for
+ *  declares them), or a whole work-item URI; null for
  *  anything else. */
 export function normalizeWorkItemInput(raw: string, mentionRef: (id: string) => string | null): string | null {
   const v = raw.trim();
-  const parsed = parseUri(v);
-  if (parsed?.kind === "work_item" && /^[a-z0-9_-]+:\S+$/.test(parsed.id)) return v;
+  if (workItemOf(v) !== null) return identityOf(v);
   return mentionRef(v);
 }
 

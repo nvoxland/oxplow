@@ -37,7 +37,7 @@ import { REF_KIND_ICONS, refKindIcon, refKindInfo } from "./refKinds.js";
 import { useExtensions } from "./extensionsStore.js";
 import { pageKindOf, recordedPageKind, refFromTabId } from "./tabs/pageRefs.js";
 import type { Extension, ExtensionPage } from "./tauri-bridge/generated/bindings.js";
-import { extPageUri, pageUri as corePageRef, parseUri } from "./uri/uri.js";
+import { extPageUri, pageUri as corePageRef, typeOf } from "./uri/uri.js";
 
 /**
  * Map a page-kind string to its icon component. Returns `null`
@@ -191,6 +191,8 @@ export function kindForTabId(tabId: string): string {
   const kind = pageKindOf(tabId);
   if (kind === "page") return recordedPageKind(refFromTabId(tabId)!);
   if (kind) return kind;
-  // A ref of a kind with no page of its own (`finding:…`) still has an icon.
-  return parseUri(tabId)?.kind ?? tabId;
+  // A resource with no page of its own (a finding) still has an icon.
+  // URI-SWITCH: the icon table is keyed by resource name (`v_resource`).
+  const resource = typeOf(tabId);
+  return resource === null ? tabId : resource.startsWith("oxplow/") ? resource.slice("oxplow/".length) : resource;
 }

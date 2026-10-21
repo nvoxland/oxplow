@@ -62,7 +62,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { querySql } from "./api.js";
 import { recordOpError } from "./components/opErrorsStore.js";
 import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
-import { parseUri } from "./uri/uri.js";
+import { keyedUri, typeOf } from "./uri/uri.js";
 import type { Reads, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
 /**
@@ -196,7 +196,8 @@ function placeholders(template: string): Array<{ at: number; end: number; names:
  *  the view to read them from; null when it reads none (`{ref}`, a page)
  *  or its kind has no page. */
 export function pageColumns(ref: string): { view: string; columns: string[] } | null {
-  const kind = parseUri(ref)?.kind;
+  // URI-SWITCH: the registry is keyed by resource name (`v_resource`).
+  const kind = typeOf(ref);
   const info = kind ? current.get(kind) : undefined;
   if (!info?.page || !info.resolve) return null;
   const columns = [...new Set(placeholders(info.page).flatMap((p) => p.names))].filter((c) => c !== "ref");
@@ -211,10 +212,11 @@ export function pageColumns(ref: string): { view: string; columns: string[] } | 
  * or the template names a column `row` doesn't give.
  */
 export function pageTabId(ref: string, row: Readonly<Record<string, unknown>> = {}): string | null {
-  const kind = parseUri(ref)?.kind;
+  // URI-SWITCH: the page template becomes a URI template.
+  const kind = typeOf(ref);
   const template = kind ? current.get(kind)?.page : null;
   if (!template) return null;
-  const query = template.indexOf("?");
+  const query = template.search(/\?/);
   let out = "";
   let last = 0;
   for (const p of placeholders(template)) {
@@ -262,7 +264,8 @@ export function extensionWikilinkRef(interior: string): string | null {
   } catch {
     matches = false;
   }
-  return matches ? `${kind.kind}:${id}` : null;
+  // URI-SWITCH: `kind.kind` becomes the resource name (`<extension>/<name>`).
+  return matches ? keyedUri(kind.kind, id) : null;
 }
 
 function subscribe(listener: () => void): () => void {
@@ -314,7 +317,7 @@ export function useRefKindsLoader(): void {
  *  model has no row for it. */
 export function useExtensionRefTitle(ref: string | null): string | null {
   const kinds = useRefKinds();
-  const kind = ref ? kinds.get(parseUri(ref)?.kind ?? "") : undefined;
+  const kind = ref ? kinds.get(typeOf(ref) ?? "") : undefined;
   const [title, setTitle] = useState<string | null>(null);
   const [reads, setReads] = useState<Reads>(NO_READS);
   const view = kind?.resolve ?? null;

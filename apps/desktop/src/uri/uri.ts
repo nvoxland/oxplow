@@ -252,10 +252,32 @@ export function idOf(text: string, resource: string): string | null {
   return u.params[keyParamOf(resource)] ?? null;
 }
 
+/** A work item's list and its id in that list; null for anything else. */
+export function workItemOf(text: string): { provider: string; id: string } | null {
+  const u = parseUri(text);
+  if (!u || typeOf(text) !== "oxplow/work_item") return null;
+  const { provider, id } = u.params;
+  return provider && id ? { provider, id } : null;
+}
+
+/** `text`'s key param, whatever its resource (`thr3` of a thread, the slug
+ *  of a wiki page); null when it isn't a URI or lacks it. */
+export function keyOf(text: string): string | null {
+  const resource = typeOf(text);
+  return resource === null ? null : idOf(text, resource);
+}
+
 /** The URI of `resource` named by its key param. For a resource known
  *  only at run time; one known at the call site has a builder below. */
 export function keyedUri(resource: string, id: string): string {
   return resourceUri(resource, { [keyParamOf(resource)]: id });
+}
+
+/** `uri` as a markdown link target: its parentheses escaped, which a
+ *  canonical URI carries raw and a `[label](…)` would end at. Read back
+ *  by `parseUri` (`%28` decodes). */
+export function linkTarget(uri: string): string {
+  return uri.replace(/\(/g, "%28").replace(/\)/g, "%29");
 }
 
 /** Whether `text` is a URI of another scheme (the web, mail): a resource

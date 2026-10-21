@@ -1,5 +1,5 @@
 import { fuzzyMatches } from "../fuzzy-match.js";
-import { pageUri, parseUri, uriOf } from "../uri/uri.js";
+import { commandUri, fileUri, keyOf, pageUri } from "../uri/uri.js";
 import type { SearchHit, WorkspaceIndexedFile } from "../api.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { MenuPlace } from "../tauri-bridge/generated/bindings.js";
@@ -49,7 +49,8 @@ export function dedupeSiteHits(
   hits: SearchHit[],
   matchedFilePaths: ReadonlySet<string>,
 ): SearchHit[] {
-  return hits.filter((h) => !(h.kind === "file" && matchedFilePaths.has(parseUri(h.ref)?.id ?? "")));
+  // URI-SWITCH: a hit's `kind` is a resource name.
+  return hits.filter((h) => !(h.kind === "file" && matchedFilePaths.has(keyOf(h.ref) ?? "")));
 }
 
 /// Split a query on whitespace and require each token to fuzzy-match
@@ -96,7 +97,7 @@ function isExactMatch(r: QuickOpenResult, q: string): boolean {
       return base.toLowerCase() === q || r.file.path.toLowerCase() === q;
     }
     case "hit":
-      return r.hit.title.toLowerCase() === q || (parseUri(r.hit.ref)?.id ?? "").toLowerCase() === q;
+      return r.hit.title.toLowerCase() === q || (keyOf(r.hit.ref) ?? "").toLowerCase() === q;
     case "ask":
       return false;
   }
@@ -109,9 +110,9 @@ function resultKey(r: QuickOpenResult): string {
     case "page":
       return pageUri(r.entry.id);
     case "command":
-      return uriOf("command", r.entry.id);
+      return commandUri(r.entry.id);
     case "file":
-      return uriOf("file", r.file.path);
+      return fileUri(r.file.path);
     case "hit":
       return `hit:${r.hit.ref}:${r.hit.stream_id ?? ""}`;
     case "ask":
