@@ -14,8 +14,8 @@ pub fn restate_tx(conn: &Connection) -> Result<(), DomainError> {
         .map_err(map_sql_err)?;
     let mut st = conn
         .prepare(
-            "INSERT INTO replaceable (target, capability, bound, version, props, label)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO replaceable (target, capability, bound, version, props, view, label)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )
         .map_err(map_sql_err)?;
     for r in REPLACEABLE {
@@ -25,6 +25,7 @@ pub fn restate_tx(conn: &Connection) -> Result<(), DomainError> {
             r.bound_to_provider as i64,
             i64::from(r.version),
             serde_json::to_string(r.props).expect("prop names serialize"),
+            serde_json::to_string(r.view).expect("view names serialize"),
             r.label
         ])
         .map_err(map_sql_err)?;

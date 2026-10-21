@@ -984,7 +984,7 @@
   tests:
     - { not_null: event_type }
 - name: replaceable
-  version: 1
+  version: 2
   key: [target]
   description: "The core sub-components an extension may replace with a lens (`ui.replacements`), each with its versioned props contract: what the replacement is given, and must declare, instead of any host state. Which extension replaces one is the person's choice (`replacements:` in the project config) or, for a bound target, its provider's."
   columns:
@@ -993,6 +993,7 @@
     - { name: "bound", type: "INTEGER", doc: "1 when only the extension of the capability's deciding provider may replace it (the item's own provider's states); 0 when any extension may, and the person chooses." }
     - { name: "version", type: "INTEGER", doc: "The contract's version; a declaration may pin it (`version:`)." }
     - { name: "props", type: "TEXT", doc: "JSON array of the prop names the replacement lens is given and must declare as `params`." }
+    - { name: "view", type: "TEXT", doc: "JSON array of the host page's view params the replacement shares: it reads and writes them as the core component does (`q`, `author`, `branch` for `vcs.history.graph`). (v2)" }
     - { name: "label", type: "TEXT", doc: "What a person calls it (\"board\", \"detail editor\")." }
   tests:
     - { not_null: target }

@@ -2082,8 +2082,8 @@ they live under `ui:`.
 | Slot | Core page | Params |
 |---|---|---|
 | `effort.review.details` | diff-view for an effort | `effort_id`, `effort`, `change_id` |
-| `work_item.detail.body` | WorkItemPage, below the body | `ref` |
-| `work_item.detail.sidebar` | WorkItemPage, in the side rail | `ref` |
+| `work_item.detail.body` | WorkItemPage, below the body | `ref` | — |
+| `work_item.detail.sidebar` | WorkItemPage, in the side rail | `ref` | — |
 | `thread.plan.header` | PlanPane (compact strip) | `thread_id` |
 | `vcs.commit.details` | GitCommitPage | `change_id` |
 | `vcs.status.header` | UncommittedChangesPage, a strip above everything | `stream_id` |
@@ -2104,13 +2104,18 @@ sub-component** — never a whole page:
 ```yaml
 ui:
   replacements:
-    - { target: vcs.history.graph, lens: history-graph, version: 1 }
+    - { target: vcs.history.graph, lens: history-graph, version: 2 }
 ```
 
 The targets are one table, `oxplow_domain::replaceable::REPLACEABLE`:
 each a `target`, the `capability` it belongs to, whether it is **bound to
-a provider**, its contract's **version**, and its **props contract** —
-the params the replacement lens is given instead of any host state. The
+a provider**, its contract's **version**, its **props contract** —
+the params the replacement lens is given instead of any host state — and
+its **view**: the host page's view params the replacement shares, read
+(`init.view`), written (`setViewParams`) and heard (`viewParams`) as the
+core component it replaces reads and writes them, so the two leave the
+same address. Only those keys: any other is refused, and a target with
+no view gives its replacement none (its filters are its own). The
 table is published as `v_replaceable` (restated with the vocabulary,
 `replaceable_store`) and generated into the reference
 (`the_reference_lists_every_replaceable_view`), so an author reads the
@@ -2118,14 +2123,14 @@ contracts where everything else is. A declaration's optional `version:`
 must be the contract's: a changed contract refuses it rather than handing
 it props it doesn't know.
 
-| Target | Core component | Capability | Bound | Props |
-|---|---|---|---|---|
-| `work_item.board` | the Board's columns of cards (`WorkBoard`, `BoardPage`) | `work_items` | no | `scope` (`thread` / `backlog` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) |
-| `work_item.list` | the Tasks page's list (`TasksList`, `TasksPage`): the scope picker, detail pane and backlog drawer stay oxplow's; the lens's `stream_id` is the scope's stream | `work_items` | no | `scope` (`thread` / `stream` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) |
-| `work_item.detail` | a work item's editor, its title and body (`TaskDetail`, `WorkItemPage`): the rail (state pill, Move To, fields, Delete), Comment / Link, slots and activity stay oxplow's | `work_items` | no | `ref` (the item) |
-| `work_item.detail.state` | a work item's State (`WorkItemPage`'s rail; P10) — never its Move To, which stays oxplow's canonical states, so a replacement can't strand an item (tsk919) | `work_items` | yes | `ref` (the item) |
-| `effort.verdict` | an effort's verdict, the first line of its page (`DiffViewPage`). Core has **none of its own**: with no replacement, or `oxplow` chosen, the page shows nothing. oxplow-bundled's `effort-verdict` is the default | `effort_policy` | no | `effort_id` (the effort's row id) |
-| `vcs.history.graph` | Git History's commits (`HistoryPanel`): oxplow's own is a plain list (`CommitList`) | `vcs` | no | `head_sha` (the stream's head), `reveal_sha` (a commit to scroll to and mark, or null), `limit` |
+| Target | Core component | Capability | Bound | Props | View |
+|---|---|---|---|---|---|
+| `work_item.board` | the Board's columns of cards (`WorkBoard`, `BoardPage`) | `work_items` | no | `scope` (`thread` / `backlog` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) | — |
+| `work_item.list` | the Tasks page's list (`TasksList`, `TasksPage`): the scope picker, detail pane and backlog drawer stay oxplow's; the lens's `stream_id` is the scope's stream | `work_items` | no | `scope` (`thread` / `stream` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) | — |
+| `work_item.detail` | a work item's editor, its title and body (`TaskDetail`, `WorkItemPage`): the rail (state pill, Move To, fields, Delete), Comment / Link, slots and activity stay oxplow's | `work_items` | no | `ref` (the item) | — |
+| `work_item.detail.state` | a work item's State (`WorkItemPage`'s rail; P10) — never its Move To, which stays oxplow's canonical states, so a replacement can't strand an item (tsk919) | `work_items` | yes | `ref` (the item) | — |
+| `effort.verdict` | an effort's verdict, the first line of its page (`DiffViewPage`). Core has **none of its own**: with no replacement, or `oxplow` chosen, the page shows nothing. oxplow-bundled's `effort-verdict` is the default | `effort_policy` | no | `effort_id` (the effort's row id) | — |
+| `vcs.history.graph` | Git History's commits (`HistoryPanel`): oxplow's own is a plain list (`CommitList`) | `vcs` | no | `head_sha` (the stream's head), `reveal_sha` (a commit to scroll to and mark, or null), `limit` | `q`, `author`, `branch` (Git History's filters; v2) |
 
 **Bound or not.** A bound target shows one provider's own thing — the
 state control lists that tracker's states — so only the extension of the

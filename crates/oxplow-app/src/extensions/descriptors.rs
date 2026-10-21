@@ -758,6 +758,7 @@ mod tests {
                 bound_to_provider: false,
                 lens_id: "tracker/board".into(),
                 version: 1,
+                view: vec![],
                 label: "board".into(),
             });
         let d = describe(&ext)

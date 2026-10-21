@@ -117,7 +117,7 @@ ui:
   # list (`vcs.history.graph`, a target no provider binds). It only shows
   # and opens commits, so it isn't a program to approve.
   replacements:
-    - { target: vcs.history.graph, lens: history-graph }
+    - { target: vcs.history.graph, lens: history-graph, version: 2 }
     # The effort's verdict on its page (`effort.verdict`): core has none;
     # this is oxplow's default review policy's, and another may replace it.
     - { target: effort.verdict, lens: effort-verdict, version: 1 }

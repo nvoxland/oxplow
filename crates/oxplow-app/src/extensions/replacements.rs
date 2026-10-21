@@ -40,6 +40,8 @@ pub struct UiReplacement {
     pub lens_id: String,
     /// The contract's version it was written against (the table's).
     pub version: u32,
+    /// The host page's view params it shares (the table's `view`).
+    pub view: Vec<String>,
     /// What a person calls the target (`board`), from its table.
     pub label: String,
 }
@@ -151,6 +153,7 @@ pub fn parse_replacements(
             bound_to_provider: t.bound_to_provider,
             lens_id: l.id.clone(),
             version: t.version,
+            view: t.view.iter().map(|k| k.to_string()).collect(),
             label: t.label.to_string(),
         });
     }
@@ -250,6 +253,7 @@ mod tests {
                 capability: "work_items".into(),
                 lens_id: "tracker/board".into(),
                 version: 1,
+                view: vec![],
                 label: "board".into(),
                 bound_to_provider: false,
             }]
@@ -397,7 +401,8 @@ mod tests {
     /// A target core owns (its capability's implementation is oxplow's
     /// own, `vcs`) isn't bound to a provider: any extension — a shared
     /// one, oxplow-bundled — may replace it, and the person chooses among
-    /// several (`replacements:`).
+    /// several (`replacements:`). It carries the host page's view it
+    /// shares, Git History's filters.
     #[test]
     fn an_unbound_target_needs_no_provider_and_a_shared_extension_may_replace_it() {
         let ext = load("", "    - { target: vcs.history.graph, lens: graph }\n");
@@ -406,9 +411,9 @@ mod tests {
             ext.ui
                 .replacements
                 .iter()
-                .map(|r| (r.target.as_str(), r.bound_to_provider))
+                .map(|r| (r.target.as_str(), r.bound_to_provider, r.view.join(",")))
                 .collect::<Vec<_>>(),
-            vec![("vcs.history.graph", false)]
+            vec![("vcs.history.graph", false, "q,author,branch".to_string())]
         );
     }
 
@@ -417,11 +422,11 @@ mod tests {
     #[test]
     fn the_reference_lists_every_replaceable_view() {
         let mut table = String::from(
-            "| Target | What it is | Bound to a provider | Version | Props |\n|---|---|---|---|---|\n",
+            "| Target | What it is | Bound to a provider | Version | Props | View |\n|---|---|---|---|---|---|\n",
         );
         for r in oxplow_domain::replaceable::REPLACEABLE {
             table.push_str(&format!(
-                "| `{}` | {} | {} | {} | {} |\n",
+                "| `{}` | {} | {} | {} | {} | {} |\n",
                 r.target,
                 r.label,
                 if r.bound_to_provider { "yes" } else { "no" },
@@ -430,7 +435,16 @@ mod tests {
                     .iter()
                     .map(|p| format!("`{p}`"))
                     .collect::<Vec<_>>()
-                    .join(", ")
+                    .join(", "),
+                if r.view.is_empty() {
+                    "—".to_string()
+                } else {
+                    r.view
+                        .iter()
+                        .map(|k| format!("`{k}`"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }
             ));
         }
         crate::test_fixtures::generated_section(

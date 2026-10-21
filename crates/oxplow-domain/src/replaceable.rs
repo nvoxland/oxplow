@@ -30,6 +30,10 @@ pub struct Replaceable {
     pub version: u32,
     /// What the replacement is given, by name; its lens declares each.
     pub props: &'static [&'static str],
+    /// Its host page's view params it shares: the replacement reads them
+    /// (`init.view`), writes them (`setViewParams`) and hears them change,
+    /// as the core component it replaces does. None: it keeps its own.
+    pub view: &'static [&'static str],
     /// What a person calls it ("board"): the one name the UI shows it by.
     pub label: &'static str,
 }
@@ -48,6 +52,7 @@ pub const REPLACEABLE: &[Replaceable] = &[
         bound_to_provider: false,
         version: 1,
         props: &["scope", "thread_id"],
+        view: &[],
         label: "board",
     },
     // The Tasks page's list (`TasksList`): `scope` is `thread`, `stream`
@@ -60,6 +65,7 @@ pub const REPLACEABLE: &[Replaceable] = &[
         bound_to_provider: false,
         version: 1,
         props: &["scope", "thread_id"],
+        view: &[],
         label: "list",
     },
     // A work item's editor (`TaskDetail`: its title and body): `ref` is
@@ -71,6 +77,7 @@ pub const REPLACEABLE: &[Replaceable] = &[
         bound_to_provider: false,
         version: 1,
         props: &["ref"],
+        view: &[],
         label: "detail editor",
     },
     // A work item's state control (`WorkItemPage`'s State; its Move To is
@@ -83,18 +90,22 @@ pub const REPLACEABLE: &[Replaceable] = &[
         bound_to_provider: true,
         version: 1,
         props: &["ref"],
+        view: &[],
         label: "state control",
     },
     // The commit history's graph (`GitHistoryPage`, the Git dashboard):
     // `head_sha` the stream's head, `reveal_sha` a commit to scroll to and
-    // mark (or null), `limit` how many commits. Core's own is a plain
-    // list; the graph is oxplow-bundled's component.
+    // mark (or null), `limit` how many commits. Its view is Git History's
+    // filters (`q`, `author`, `branch`; v2), which core's own list reads
+    // too. Core's own is a plain list; the graph is oxplow-bundled's
+    // component.
     Replaceable {
         target: "vcs.history.graph",
         capability: "vcs",
         bound_to_provider: false,
-        version: 1,
+        version: 2,
         props: &["head_sha", "reveal_sha", "limit"],
+        view: &["q", "author", "branch"],
         label: "history graph",
     },
     // An effort's verdict, the first line of its review page
@@ -108,6 +119,7 @@ pub const REPLACEABLE: &[Replaceable] = &[
         bound_to_provider: false,
         version: 1,
         props: &["effort_id"],
+        view: &[],
         label: "effort verdict",
     },
 ];
@@ -168,5 +180,24 @@ mod tests {
             Some((false, &["effort_id"][..]))
         );
         assert!(replaceable("vcs.conflict.resolver").is_none());
+    }
+
+    /// A target's view is its host page's view params: never one of its
+    /// props, and the history graph shares Git History's filters.
+    #[test]
+    fn a_view_key_is_the_host_pages_not_a_prop() {
+        for r in REPLACEABLE {
+            for key in r.view {
+                assert!(!r.props.contains(key), "{}: {key}", r.target);
+            }
+        }
+        assert_eq!(
+            replaceable("vcs.history.graph").map(|r| (r.version, r.view)),
+            Some((2, &["q", "author", "branch"][..]))
+        );
+        assert_eq!(
+            replaceable("work_item.board").map(|r| r.view),
+            Some(&[][..])
+        );
     }
 }

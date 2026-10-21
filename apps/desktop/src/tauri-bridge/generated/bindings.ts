@@ -6581,6 +6581,8 @@ export type UiReplacement = {
 	lensId: string,
 	/**  The contract's version it was written against (the table's). */
 	version: number,
+	/**  The host page's view params it shares (the table's `view`). */
+	view: string[],
 	/**  What a person calls the target (`board`), from its table. */
 	label: string,
 };
