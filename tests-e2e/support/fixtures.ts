@@ -55,11 +55,16 @@ async function workspace(): Promise<Workspace> {
   }
 }
 
-/** Collect what `page` throws; check it once the spec is done. */
+/** Collect what `page` throws; check it once the spec is done. A spec that
+ *  already failed (a timeout closes its page mid-request, which WebKit
+ *  reports as failed fetches) is reported for its own error, not these. */
 function guard(page: Page): () => void {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
-  return () => expect(errors, "the page threw").toEqual([]);
+  return () => {
+    if (test.info().status !== test.info().expectedStatus) return;
+    expect(errors, "the page threw").toEqual([]);
+  };
 }
 
 /** A page's storage pointing its transport at `base` with `token`. */
