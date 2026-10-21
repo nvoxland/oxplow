@@ -469,8 +469,8 @@ export function TaskGroupList({
 
   return (
     // Sections are collapsible — the pane scrolls as a whole, and each
-    // section's body only renders when expanded. Collapsed state persists
-    // in localStorage so the user's layout choices stick across reloads.
+    // section's body only renders when expanded. Collapsed state is kept in
+    // this step's history state (`useCollapsedSections`).
     <div>
       {sections.map((section, index) => {
         const empty = section.rows.length === 0;

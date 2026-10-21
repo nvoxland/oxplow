@@ -28,7 +28,6 @@ import { isBuiltInPage } from "./declaredPages.js";
  *  kind whose page has a view (by kind). One table, one rule. */
 const BUILT_IN_VIEW: Record<string, (key: string) => boolean> = {
   tasks: isTasksViewParam,
-  backlog: isTasksViewParam,
   "metrics-recorded": isMetricsViewParam,
   "custom-dashboard": isDashboardViewParam,
   metric: isMetricViewParam,

@@ -6,7 +6,6 @@ export type BacklogPageProps =
   Omit<
     ComponentProps<typeof PlanPane>,
     | "forceMode"
-    | "hideBacklogChip"
     | "visibleSections"
     | "sectionItemLimit"
     | "extraSectionLinks"
@@ -25,7 +24,6 @@ export function BacklogPage(props: BacklogPageProps) {
         <PlanPane
           {...props}
           forceMode="backlog"
-          hideBacklogChip
         />
       </div>
     </Page>

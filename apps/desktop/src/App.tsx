@@ -47,7 +47,6 @@ import {
   applyItemChange,
   createWorkItem,
   deleteWorkItem,
-  moveWorkItem,
   readWorkList,
   reorderWorkItems,
   type ItemChange,
@@ -888,10 +887,6 @@ export function App() {
   async function handleReorderTasks(orderedRefs: string[]) {
     if (!selectedThread) return;
     await reorderList(threadWorkStates[selectedThread.id], orderedRefs);
-  }
-
-  async function handleMoveItemToBacklog(ref: string) {
-    await runTaskWrite(() => moveWorkItem(ref, null));
   }
 
   async function handleReorderBacklog(orderedRefs: string[]) {
@@ -2084,7 +2079,6 @@ export function App() {
       handleDeleteTask,
       handleReorderTasks,
       handleReorderBacklog,
-      handleMoveItemToBacklog,
     };
     const pageRenderers: Record<PageKind, (ref: TabRef, nav: SlotNav) => CenterTab | null> = {
       agent_session: (ref) => {

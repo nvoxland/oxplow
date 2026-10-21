@@ -28,7 +28,6 @@ export type TasksPageProps =
     | "visibleSections"
     | "sectionItemLimit"
     | "extraSectionLinks"
-    | "hideBacklogChip"
     | "onlyStates"
     | "excludeStates"
   > & {
@@ -238,7 +237,6 @@ export function TasksPage({
         onUpdateTask: NOOP_ASYNC as typeof rest.onUpdateTask,
         onDeleteTask: NOOP_ASYNC as typeof rest.onDeleteTask,
         onReorderTasks: NOOP_ASYNC as typeof rest.onReorderTasks,
-        onMoveItemToBacklog: NOOP_ASYNC as typeof rest.onMoveItemToBacklog,
       }
     : { ...rest, threadWork: effectiveThreadWork };
 
@@ -278,7 +276,6 @@ export function TasksPage({
                   visibleSections={TASKS_PAGE_SECTIONS}
                   sectionItemLimit={{ done: PREVIEW_LIMIT }}
                   extraSectionLinks={{ done: viewAllDone }}
-                  hideBacklogChip
                 />
               }
             />

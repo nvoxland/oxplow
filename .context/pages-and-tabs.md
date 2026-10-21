@@ -613,7 +613,7 @@ what the list can do: drag reordering with `ordering`, the backlog with
 list's editable enum fields (oxplow's priority), and the Tasks page's
 filter bar a chip row per declared enum field. They pass filter props
 (`visibleSections`, `sectionItemLimit`, `onlyStates`, `excludeStates`,
-`extraSectionLinks`, `forceMode`, `hideBacklogChip`). There's no
+`extraSectionLinks`, `forceMode`). There's no
 Archived page: oxplow's archived tasks are done or canceled, as the
 interface states them.
 

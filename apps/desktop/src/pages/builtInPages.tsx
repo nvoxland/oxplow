@@ -57,7 +57,6 @@ const workPage: BuiltInPage = ({ ref, nav, scope }) => {
     onDeleteTask: scope.handleDeleteTask,
     onReorderTasks: scope.handleReorderTasks,
     onReorderBacklog: scope.handleReorderBacklog,
-    onMoveItemToBacklog: scope.handleMoveItemToBacklog,
     registerOpenCreate: (fn: () => void) => { scope.planOpenCreateRef.current = fn; },
     onOpenNewTaskPage: (payload: { parentRef?: string | null }) =>
       nav.navOpen(newTaskRef(payload)),

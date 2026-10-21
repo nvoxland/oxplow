@@ -484,7 +484,7 @@ not a pick and isn't in the address.
     `onContextMenu={(e) => open(e, items)}` and the parent renders
     `{menu}` once.
   Both open the same `ContextMenu` popover with the same `MenuItem[]`
-  payload. Some surfaces (FileTree, Plan task rows, the blame gutter)
+  payload. Some surfaces (Plan task rows, the blame gutter)
   instead keep a single parent-owned `ContextMenu` and have each row's
   `onContextMenu` call an existing `onOpenMenu({…, x, y})` opener — pass
   the cursor coords (`new DOMRect(clientX, clientY, 0, 0)` when the

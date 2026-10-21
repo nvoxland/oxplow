@@ -17,8 +17,6 @@ import {
   type OpenAgentTurn,
   subscribeAgentTurns,
 } from "../../api.js";
-import { decodeWorkItemDrag, dragHasWorkItems } from "../../agent-context-dnd.js";
-import { WORK_ITEM_DRAG_MIME } from "../../dragMimes.js";
 import { useListNav } from "../../kit/index.js";
 import { ContextMenu } from "../ContextMenu.js";
 import { showToast } from "../toastStore.js";
@@ -81,7 +79,6 @@ interface Props {
   /** Apply a drag's new order to the thread's list (refs). */
   onReorderTasks(orderedRefs: string[]): Promise<void>;
   onReorderBacklog(orderedRefs: string[]): Promise<void>;
-  onMoveItemToBacklog(ref: string, fromThreadId: string): Promise<void>;
   openNewRequest?: number;
   /** Open the page for the given item. Change the token to request again
    *  even if the ref repeats. */
@@ -112,13 +109,9 @@ interface Props {
    *  Used by Plan Work for "View all done →" links pointing at the
    *  dedicated Done Work / Archived pages. */
   extraSectionLinks?: Partial<Record<TaskSectionKind, React.ReactNode>>;
-  /** Pin the pane mode and disable the bottom-bar toggle. The Backlog
-   *  page passes `"backlog"` so the pane renders the stream-global
-   *  backlog full-pane. */
+  /** Pin the pane mode. The Backlog page passes `"backlog"` so the pane
+   *  renders the stream-global backlog full-pane. */
   forceMode?: "thread" | "backlog";
-  /** Suppress the bottom Backlog chip entirely. The page split drops it
-   *  in favour of rail-nav + a "View backlog" link on Plan Work. */
-  hideBacklogChip?: boolean;
 }
 
 interface ContextMenuState {
@@ -140,7 +133,6 @@ export function PlanPane({
   onDeleteTask,
   onReorderTasks,
   onReorderBacklog,
-  onMoveItemToBacklog,
   openNewRequest,
   editRequest,
   registerOpenCreate,
@@ -152,15 +144,11 @@ export function PlanPane({
   excludeStates,
   extraSectionLinks,
   forceMode,
-  hideBacklogChip = false,
 }: Props) {
   const features = profile.features;
   const editableEnums = fields.filter((f) => f.kind === "enum" && !f.read_only);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-  const [internalMode, setInternalMode] = useState<"thread" | "backlog">("thread");
-  const mode = forceMode ?? internalMode;
-  const [backlogChipDragOver, setBacklogChipDragOver] = useState(false);
+  const mode = forceMode ?? "thread";
   const { isCollapsed: isSectionCollapsed, toggle: onToggleSectionCollapsed } = useCollapsedSections();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Extra "marked" ids for multi-select beyond the primary `selectedId`. Driven
@@ -425,25 +413,6 @@ export function PlanPane({
     return <div style={{ padding: 12, color: "var(--muted)" }}>No thread selected.</div>;
   }
 
-  const handleBacklogChipDragOver = (event: React.DragEvent) => {
-    if (!dragHasWorkItems(event)) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-    if (!backlogChipDragOver) setBacklogChipDragOver(true);
-  };
-
-  const handleBacklogChipDrop = (event: React.DragEvent) => {
-    const drag = decodeWorkItemDrag(event.dataTransfer.getData(WORK_ITEM_DRAG_MIME));
-    setBacklogChipDragOver(false);
-    if (!drag) return;
-    event.preventDefault();
-    const fromThreadId = drag.fromThreadId;
-    if (!fromThreadId) return;
-    // Move each carried item in sequence — one at a time keeps the failure
-    // mode simple.
-    for (const ref of drag.refs) void onMoveItemToBacklog(ref, fromThreadId);
-  };
-
   return (
     <div
       ref={paneRef}
@@ -582,26 +551,6 @@ export function PlanPane({
           })
         )}
       </div>
-      {hideBacklogChip || forceMode || !features.lists ? null : (
-      <div style={bottomBarStyle}>
-        <button type="button"
-          onClick={() => setInternalMode((prev) => (prev === "backlog" ? "thread" : "backlog"))}
-          onDragOver={handleBacklogChipDragOver}
-          onDragLeave={() => setBacklogChipDragOver(false)}
-          onDrop={handleBacklogChipDrop}
-          style={{
-            ...bottomChipStyle,
-            background: mode === "backlog" ? "var(--accent)" : "var(--bg-2)",
-            color: mode === "backlog" ? "#fff" : "inherit",
-            borderColor: backlogChipDragOver ? "var(--accent)" : "var(--border)",
-            boxShadow: backlogChipDragOver ? "0 0 0 2px var(--accent)" : undefined,
-          }}
-          title="Backlog (global across streams)"
-        >
-          Backlog{backlog ? ` · ${backlog.items.length}` : ""}
-        </button>
-      </div>
-      )}
       {contextMenu ? (
         <ContextMenu
           items={contextMenu.groupIds
@@ -640,7 +589,6 @@ export function PlanPane({
             : buildItemMenu(contextMenu.item, editableEnums, {
                 onDelete: activeDelete ? (item) => {
                   setContextMenu(null);
-                  if (expandedId === item.ref) setExpandedId(null);
                   void activeDelete(item.ref);
                   showToast({ message: `Deleted "${item.title}".` });
                 } : null,
@@ -860,28 +808,4 @@ function buildGroupMenu(
   if (onDelete) items.push({ id: "tasks.delete", label: `Delete (${n} items)`, enabled: !locked, run: () => onDelete(item, groupIds) });
   return items;
 }
-
-const bottomBarStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 6,
-  padding: "6px 8px",
-  borderTop: "1px solid var(--border)",
-  background: "var(--bg)",
-};
-
-const bottomChipStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 6,
-  padding: "3px 10px",
-  border: "1px solid var(--border)",
-  borderRadius: 999,
-  background: "var(--bg-2)",
-  color: "inherit",
-  cursor: "pointer",
-  fontFamily: "inherit",
-  fontSize: 11,
-  whiteSpace: "nowrap",
-};
 
