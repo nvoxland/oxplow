@@ -1321,6 +1321,76 @@
         {
           "name": "caller",
           "type": "TEXT",
+          "doc": "What first asked, e.g. `inferred-decisions`, `collector:<owner>/<id>`."
+        },
+        {
+          "name": "output_json",
+          "type": "TEXT",
+          "doc": "The result as JSON."
+        },
+        {
+          "name": "input_tokens",
+          "type": "INTEGER",
+          "doc": "Input tokens of the call that computed it."
+        },
+        {
+          "name": "output_tokens",
+          "type": "INTEGER",
+          "doc": "Output tokens of that call."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "When it was computed (RFC 3339)."
+        },
+        {
+          "name": "ai_call_id",
+          "type": "INTEGER",
+          "doc": "The call that computed it (v_ai_call.id)."
+        }
+      ],
+      "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Row id."
+        },
+        {
+          "name": "input_hash",
+          "type": "TEXT",
+          "doc": "sha256 of the canonical `{ op, args }`."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "The provider that served the model (`ai_*` settings id); another provider of the same model name is another result."
+        },
+        {
+          "name": "model",
+          "type": "TEXT",
+          "doc": "The model that computed it."
+        },
+        {
+          "name": "request_hash",
+          "type": "TEXT",
+          "doc": "Content hash of the exact request the model was sent (`v_ai_call.request_hash`); a changed prompt is a new result."
+        },
+        {
+          "name": "op",
+          "type": "TEXT",
+          "doc": "`classify`, `score`, `decide`, `summarize` or `extract`."
+        },
+        {
+          "name": "role",
+          "type": "TEXT",
+          "doc": "The role it ran on: a built-in (`decide`, `summarize`, `main`) or an extension's AI profile (`acme/review`)."
+        },
+        {
+          "name": "caller",
+          "type": "TEXT",
           "doc": "What first asked, e.g. `inferred-decisions`, `oxplow:oxplow/collector?collector=<owner>/<id>`."
         },
         {
@@ -2009,6 +2079,116 @@
       "key": []
     },
     "2": {
+      "columns": [
+        {
+          "name": "change_id",
+          "type": "INTEGER",
+          "doc": "The change (v_change.id)."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "File."
+        },
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "The function's symbol ref, `symbol:<path>/<id>` (`v_symbol.ref` without the snapshot): overloads and same-named functions are separate rows. Unique per change."
+        },
+        {
+          "name": "container",
+          "type": "TEXT",
+          "doc": "Enclosing class/impl/module path, `::`-joined; '' at top level."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "Function name."
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "doc": "`added`, `deleted` or `modified`."
+        },
+        {
+          "name": "signature_changed",
+          "type": "INTEGER",
+          "doc": "1 if its parameter count changed."
+        },
+        {
+          "name": "body_changed",
+          "type": "INTEGER",
+          "doc": "1 if its complexity or length changed."
+        },
+        {
+          "name": "start_line",
+          "type": "INTEGER",
+          "doc": "First line (head side, or base side if deleted)."
+        },
+        {
+          "name": "visibility",
+          "type": "TEXT",
+          "doc": "`public`, `private` or `unknown`."
+        },
+        {
+          "name": "is_test",
+          "type": "INTEGER",
+          "doc": "1 if it's a test (test file, test name or test container)."
+        },
+        {
+          "name": "complexity",
+          "type": "REAL",
+          "doc": "Cyclomatic complexity (head side, or base if deleted)."
+        },
+        {
+          "name": "length",
+          "type": "INTEGER",
+          "doc": "Length in lines."
+        },
+        {
+          "name": "params_before",
+          "type": "INTEGER",
+          "doc": "Parameter count before; NULL if added."
+        },
+        {
+          "name": "params_after",
+          "type": "INTEGER",
+          "doc": "Parameter count after; NULL if deleted."
+        },
+        {
+          "name": "complexity_delta",
+          "type": "REAL",
+          "doc": "Complexity change, for modified functions."
+        },
+        {
+          "name": "length_delta",
+          "type": "INTEGER",
+          "doc": "Length change, for modified functions."
+        },
+        {
+          "name": "added_lines",
+          "type": "INTEGER",
+          "doc": "Lines added inside it."
+        },
+        {
+          "name": "deleted_lines",
+          "type": "INTEGER",
+          "doc": "Lines deleted inside it."
+        },
+        {
+          "name": "modified_lines",
+          "type": "INTEGER",
+          "doc": "min(added, deleted): edited both ways."
+        },
+        {
+          "name": "churn_share",
+          "type": "REAL",
+          "doc": "Its share of the change's function churn (0–1)."
+        }
+      ],
+      "key": []
+    },
+    "3": {
       "columns": [
         {
           "name": "change_id",
@@ -5921,6 +6101,46 @@
         {
           "name": "page_id",
           "type": "TEXT",
+          "doc": "Page id (`task:42`, `file:src/a.rs`, …)."
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "Title shown at the time."
+        },
+        {
+          "name": "visited_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "duration_ms",
+          "type": "INTEGER",
+          "doc": "Time on the page, when known."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Visit id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread the page was opened in."
+        },
+        {
+          "name": "page_kind",
+          "type": "TEXT",
+          "doc": "Page kind (`task`, `file`, `lens`, …)."
+        },
+        {
+          "name": "page_id",
+          "type": "TEXT",
           "doc": "Page id (`task:42`, `oxplow:oxplow/file?path=src/a.rs`, …)."
         },
         {
@@ -5969,6 +6189,36 @@
       "key": []
     },
     "2": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "The comment's canonical ref (`comment:cmt<n>`): what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The quote it's anchored to."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The quote, then every message, a line each."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its stream (`str1`)."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "Changes whenever the row's text does; a recompute reads the text of rows whose version moved only. (v2: the newer of the comment's change and its last message)"
+        }
+      ],
+      "key": []
+    },
+    "3": {
       "columns": [
         {
           "name": "ref",
@@ -6105,6 +6355,36 @@
       "key": []
     },
     "2": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`wiki:<slug>`."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The page's title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The page's full markdown."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: wiki pages are project-global."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "Changes whenever the row's text does; a recompute reads the text of rows whose version moved only. (v2: the page's `updated_at`)"
+        }
+      ],
+      "key": []
+    },
+    "3": {
       "columns": [
         {
           "name": "ref",
@@ -7623,6 +7903,86 @@
         {
           "name": "ref",
           "type": "TEXT",
+          "doc": "`symbol:<path>/<id>`, the current symbol (no revision; pin one with `@snap:<id>` / `@git:<sha>`). The id is the containers and the name joined by `::` (`Parser::parse`, `<Parser as Display>::fmt`), the parameter types in languages that overload by them (`Parser::parse(String,int)`), and `~n` for the nth same id in a file (`main~2`). Unique per stream."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "The snapshot the file's symbols were read at."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream (v_stream.id)."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "Workspace-relative file."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The symbol's own name."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`function`, `method`, `constructor`, `class`, `struct`, `enum`, `enum_member`, `interface`, `trait`, `type`, `field`, `constant`, `variable`, `module`, `namespace` or `macro` — one vocabulary for every language."
+        },
+        {
+          "name": "container",
+          "type": "TEXT",
+          "doc": "What it's inside, `::`-joined (`Parser`, `acme::Parser`); NULL at top level."
+        },
+        {
+          "name": "signature",
+          "type": "TEXT",
+          "doc": "Its parameter types (or dispatch value) as written, without parentheses, in languages that tell overloads apart by them; NULL otherwise."
+        },
+        {
+          "name": "language",
+          "type": "TEXT",
+          "doc": "Its language (`rust`, `typescript`, …)."
+        },
+        {
+          "name": "line",
+          "type": "INTEGER",
+          "doc": "Where its name is (what to jump to), 1-based."
+        },
+        {
+          "name": "col",
+          "type": "INTEGER",
+          "doc": "1-based."
+        },
+        {
+          "name": "start_line",
+          "type": "INTEGER",
+          "doc": "Where the whole definition starts, 1-based."
+        },
+        {
+          "name": "start_col",
+          "type": "INTEGER",
+          "doc": "1-based."
+        },
+        {
+          "name": "end_line",
+          "type": "INTEGER",
+          "doc": "Where the whole definition ends (its body included), 1-based: the lines `start_line`..`end_line` are the symbol."
+        },
+        {
+          "name": "end_col",
+          "type": "INTEGER",
+          "doc": "1-based, exclusive."
+        }
+      ],
+      "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
           "doc": "`oxplow:oxplow/symbol?path=<path>&symbol=<id>`, the current symbol (no revision; pin one with `@snap:<id>` / `@git:<sha>`). The id is the containers and the name joined by `::` (`Parser::parse`, `<Parser as Display>::fmt`), the parameter types in languages that overload by them (`Parser::parse(String,int)`), and `~n` for the nth same id in a file (`main~2`). Unique per stream."
         },
         {
@@ -8142,6 +8502,96 @@
         {
           "name": "id",
           "type": "INTEGER",
+          "doc": "Run id; `run:<id>` is how claims and decisions cite it."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Stream it ran in (v_stream.id)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread whose agent ran it, if known."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Effort it belongs to: the one the tool call that ran it was in (or the thread's open one)."
+        },
+        {
+          "name": "command",
+          "type": "",
+          "doc": "The command that was run."
+        },
+        {
+          "name": "exit_code",
+          "type": "",
+          "doc": "Its exit code, if known."
+        },
+        {
+          "name": "passed",
+          "type": "",
+          "doc": "Tests passed (NULL when not reported)."
+        },
+        {
+          "name": "failed",
+          "type": "",
+          "doc": "Tests failed (NULL when not reported)."
+        },
+        {
+          "name": "skipped",
+          "type": "",
+          "doc": "Tests skipped (NULL when not reported)."
+        },
+        {
+          "name": "total",
+          "type": "",
+          "doc": "Tests run in total (NULL when not reported)."
+        },
+        {
+          "name": "duration_ms",
+          "type": "",
+          "doc": "Wall-clock duration, if known."
+        },
+        {
+          "name": "provenance",
+          "type": "TEXT",
+          "doc": "`observed` (oxplow parsed a report) or `asserted` (an agent reported counts)."
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "What recorded it (`hook`, `mcp`, …)."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "Branch checked out when it ran."
+        },
+        {
+          "name": "closest_vcs_rev",
+          "type": "TEXT",
+          "doc": "The VCS revision (a git sha) the tested tree was at or nearest to."
+        },
+        {
+          "name": "captured_at",
+          "type": "TEXT",
+          "doc": "When it was recorded (RFC 3339)."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "The agent turn it ran in (v_agent_turn.id), if it ran in one."
+        }
+      ],
+      "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
           "doc": "Run id; `oxplow:oxplow/run?id=<id>` is how claims and decisions cite it."
         },
         {
@@ -8629,6 +9079,91 @@
   },
   "test_case_stat": {
     "1": {
+      "columns": [
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Stream it ran in (v_stream.id)."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "Branch checked out when it ran; empty when unknown."
+        },
+        {
+          "name": "producer",
+          "type": "TEXT",
+          "doc": "What recorded the runs (`tests`)."
+        },
+        {
+          "name": "subject",
+          "type": "TEXT",
+          "doc": "The test: `test:<classname>::<name>`."
+        },
+        {
+          "name": "last_status",
+          "type": "TEXT",
+          "doc": "`passed`, `failed` or `skipped` in its latest run."
+        },
+        {
+          "name": "last_ms",
+          "type": "REAL",
+          "doc": "Its duration in its latest timed run, in milliseconds."
+        },
+        {
+          "name": "max_ms",
+          "type": "REAL",
+          "doc": "Its longest duration in any run."
+        },
+        {
+          "name": "mean_ms",
+          "type": "",
+          "doc": "Its mean duration across its timed runs."
+        },
+        {
+          "name": "runs",
+          "type": "INTEGER",
+          "doc": "Runs it was part of."
+        },
+        {
+          "name": "failures",
+          "type": "INTEGER",
+          "doc": "Runs it failed in."
+        },
+        {
+          "name": "flips",
+          "type": "INTEGER",
+          "doc": "Times its status changed from one run to the next: how flaky it is."
+        },
+        {
+          "name": "first_seen_at",
+          "type": "TEXT",
+          "doc": "Its first run here (RFC 3339)."
+        },
+        {
+          "name": "last_seen_at",
+          "type": "TEXT",
+          "doc": "Its latest run here (RFC 3339)."
+        },
+        {
+          "name": "last_failed_at",
+          "type": "TEXT",
+          "doc": "When it last failed; NULL if never."
+        },
+        {
+          "name": "last_passed_at",
+          "type": "TEXT",
+          "doc": "When it last passed; NULL if never."
+        },
+        {
+          "name": "last_run_id",
+          "type": "INTEGER",
+          "doc": "Its latest run (v_test_run.id)."
+        }
+      ],
+      "key": []
+    },
+    "2": {
       "columns": [
         {
           "name": "stream_id",
@@ -9298,6 +9833,81 @@
       "key": []
     },
     "7": {
+      "columns": [
+        {
+          "name": "capability",
+          "type": "TEXT",
+          "doc": "`work_items`, `effort_policy`, `snapshots`, `vcs`, `knowledge`, `agent_harness`, `ai_provider`."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "The implementation's id: what `activeProviders` names, a work item ref's segment (`work_item:<provider>:…`), `git`, `none`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension declaring it; NULL for core's."
+        },
+        {
+          "name": "features",
+          "type": "TEXT",
+          "doc": "The features it declares, as JSON (`work_items`: `hierarchy`, `comments`, `links`, `delete`, `idempotent_writes`; `vcs`: `isolated_workspaces`, `remotes`, `rename_detection`; `snapshots`: `contents`)."
+        },
+        {
+          "name": "active",
+          "type": "INTEGER",
+          "doc": "1 on the capability's active implementation."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "How a person names it. (v3)"
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "How it's loaded: `core`, `builtin`, `external`, `none`; `unknown` for a choice nothing provides. (v3)"
+        },
+        {
+          "name": "available",
+          "type": "INTEGER",
+          "doc": "0 for a chosen implementation that isn't there to use. (v3)"
+        },
+        {
+          "name": "chosen_by",
+          "type": "TEXT",
+          "doc": "On the active row, why it's the one: `personal` (a person's own `.oxplow/personal.yaml`), `project` (`activeProviders`), `default`, `fallback` (the choice isn't available), or `declared` on every row of a capability many implementations serve. NULL on the rest. (v3)"
+        },
+        {
+          "name": "capability_title",
+          "type": "TEXT",
+          "doc": "How a person names the capability (`Work list`). (v4)"
+        },
+        {
+          "name": "choosable",
+          "type": "INTEGER",
+          "doc": "1 when a project chooses the capability's implementation; 0 for one core fixes (`vcs`, `knowledge`). (v4)"
+        },
+        {
+          "name": "optional",
+          "type": "INTEGER",
+          "doc": "1 when the capability may be `none`. (v4)"
+        },
+        {
+          "name": "fields",
+          "type": "TEXT",
+          "doc": "Its own fields as a JSON array of `{ name, title, kind: enum|text|number, values? }`: what a work list keeps in `native` (oxplow's tasks: `priority`)."
+        },
+        {
+          "name": "id_pattern",
+          "type": "TEXT",
+          "doc": "What a work list's own ids look like, a regex matched whole (oxplow's tasks: `tsk\\d+`): how its ids are recognized in text, as core's vocabulary recognizes them. NULL when it doesn't say. (v6)"
+        }
+      ],
+      "key": []
+    },
+    "8": {
       "columns": [
         {
           "name": "capability",
@@ -10618,6 +11228,46 @@
         {
           "name": "page",
           "type": "TEXT",
+          "doc": "The page (`wiki:<slug>`, v_knowledge_page.ref)."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "The file it relies on (workspace-relative)."
+        },
+        {
+          "name": "pinned_snapshot_id",
+          "type": "INTEGER",
+          "doc": "The snapshot the ref was pinned to (written or verified against); NULL if never pinned."
+        },
+        {
+          "name": "pinned_vcs_rev",
+          "type": "TEXT",
+          "doc": "The VCS revision nearest the pin (v_commit.sha for git); NULL without one."
+        },
+        {
+          "name": "pinned_vcs_rev_exact",
+          "type": "INT",
+          "doc": "1 when the pinned snapshot is exactly `pinned_vcs_rev` (a clean worktree), else 0."
+        },
+        {
+          "name": "latest_snapshot_id",
+          "type": "INT",
+          "doc": "The file's latest primary-stream snapshot (the stream a pin comes from); NULL if it was never captured there."
+        },
+        {
+          "name": "stale",
+          "type": "INT",
+          "doc": "1 when the file changed after the pin (or was captured but never pinned)."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "page",
+          "type": "TEXT",
           "doc": "The page (`oxplow:oxplow/wiki?slug=<slug>`, v_knowledge_page.ref)."
         },
         {
@@ -10660,6 +11310,21 @@
         {
           "name": "ref",
           "type": "TEXT",
+          "doc": "`wiki:<slug>` (v_knowledge_page.ref)."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The page's markdown, as its file holds it."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
           "doc": "`oxplow:oxplow/wiki?slug=<slug>` (v_knowledge_page.ref)."
         },
         {
@@ -10673,6 +11338,26 @@
   },
   "knowledge_touch": {
     "1": {
+      "columns": [
+        {
+          "name": "page",
+          "type": "TEXT",
+          "doc": "The page (`wiki:<slug>`, v_knowledge_page.ref)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread (v_thread.id)."
+        },
+        {
+          "name": "last_seen_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp of that thread's latest write to it."
+        }
+      ],
+      "key": []
+    },
+    "2": {
       "columns": [
         {
           "name": "page",
@@ -11948,6 +12633,31 @@
       "key": []
     },
     "2": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "The item's canonical ref (`work_item:<provider>:<id>`): what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The item's title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its own id (so typing `tsk42` finds it), then its body."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its thread's stream (`str1`); NULL for a backlog item."
+        }
+      ],
+      "key": []
+    },
+    "3": {
       "columns": [
         {
           "name": "ref",
@@ -13373,6 +14083,83 @@
         {
           "name": "ref",
           "type": "TEXT",
+          "doc": "Its ref: `job:effort-review/review`, `collector:triage/todos`, `command:oxplow.review.accept`. (v3, was `id`)"
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `lens`, …"
+        },
+        {
+          "name": "local",
+          "type": "TEXT",
+          "doc": "Its id within the extension, or its global name (a command's bus id, a metric's key)."
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "doc": "`project` or `bundled`."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The extension's `version:` (a bundled one's is oxplow's); NULL when it declares none."
+        },
+        {
+          "name": "contract_version",
+          "type": "INTEGER",
+          "doc": "The contract's own version (a model's, an event type's), when it has one."
+        },
+        {
+          "name": "runs_on",
+          "type": "TEXT",
+          "doc": "How it comes to run, as JSON: `{on: events, types}`, `{on: schedule, every}`, `{on: run}`, `{on: call}`, `{on: query}`, `{on: mount}`, `{on: agent}`, `{on: declared}`."
+        },
+        {
+          "name": "needs",
+          "type": "TEXT",
+          "doc": "What it requires (capabilities, features, scopes), as a JSON array. Never what a person granted."
+        },
+        {
+          "name": "after",
+          "type": "TEXT",
+          "doc": "What an effect or a collector runs after when one event reaches it and them (JSON array of refs: `effect:<ext>/<id>`, `collector:<ext>/<id>`, `consumer:<name>`), as the catalog resolved its `after:`."
+        },
+        {
+          "name": "order_level",
+          "type": "INTEGER",
+          "doc": "Where an effect or a collector runs among what one event reaches: 0 first, each after every contribution it names. NULL for a kind that isn't ordered."
+        },
+        {
+          "name": "global_name",
+          "type": "TEXT",
+          "doc": "The name it holds in a space every extension shares (a metric key, a skill name, `<capability>/<id>`); NULL when none."
+        },
+        {
+          "name": "file",
+          "type": "TEXT",
+          "doc": "The manifest it's declared in."
+        },
+        {
+          "name": "line",
+          "type": "INTEGER",
+          "doc": "Its line there, when the kind tracks lines."
+        }
+      ],
+      "key": [
+        "ref"
+      ]
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
           "doc": "Its ref: `oxplow:oxplow/job?job=effort-review/review`, `oxplow:oxplow/collector?collector=triage/todos`, `oxplow:oxplow/command?command=oxplow.review.accept`. (v3, was `id`)"
         },
         {
@@ -13742,6 +14529,153 @@
       ]
     },
     "3": {
+      "columns": [
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "doc": "The run (a UUIDv7). `v_command_audit`-style records name it in their `run_id`."
+        },
+        {
+          "name": "parent_run_id",
+          "type": "TEXT",
+          "doc": "The run it was nested in (a person's `oxplow.collector.sync`, an effect's composing script); NULL for a top-level run."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension it belongs to."
+        },
+        {
+          "name": "contribution",
+          "type": "TEXT",
+          "doc": "The contribution's ref (`v_contribution.ref`): `command:oxplow.review.accept`, `job:effort-review/review`."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`collector`, `effect`, `command`, `implementation`, …"
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The extension's declared `version:` when it ran; NULL when it declares none."
+        },
+        {
+          "name": "generation",
+          "type": "TEXT",
+          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none — a collector's, an effect's or a job's belongs to its extension's version. (v2)"
+        },
+        {
+          "name": "actor_kind",
+          "type": "TEXT",
+          "doc": "`human`, `agent`, `lens`, `system` or `effect`."
+        },
+        {
+          "name": "actor",
+          "type": "TEXT",
+          "doc": "Who, as an event source: `human`, `agent:thr3`, `system`, `effect:<ext>/<id>`, `effect:effort_policy:<id>`."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream it ran for; NULL when none."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it ran for; NULL when none."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "The effort it ran for; NULL when none."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "The agent turn it ran for; NULL when none."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session it ran for; NULL when none."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "The snapshot it ran over; NULL when none."
+        },
+        {
+          "name": "cause_event_id",
+          "type": "TEXT",
+          "doc": "The event that caused it (`v_event.id`); NULL for a run a person or schedule started."
+        },
+        {
+          "name": "mode",
+          "type": "TEXT",
+          "doc": "`pure` (no I/O but scope reads), `transactional` or `external` (may call out)."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "When it began (RFC 3339)."
+        },
+        {
+          "name": "finished_at",
+          "type": "TEXT",
+          "doc": "When it ended (RFC 3339)."
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "doc": "`ok`, `skipped`, `failed`, `denied` (its grant refused something), or `cancelled` (stopped: a person's cancel, or its approval or extension revoked, disabled or changed under it). (v3)"
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "Why it failed, was denied or stopped."
+        },
+        {
+          "name": "wall_ms",
+          "type": "INTEGER",
+          "doc": "How long it ran."
+        },
+        {
+          "name": "cpu_ms",
+          "type": "INTEGER",
+          "doc": "Its scripts' CPU time, summed (0 for a run that ran no script)."
+        },
+        {
+          "name": "peak_bytes",
+          "type": "INTEGER",
+          "doc": "The most any one of its scripts held live at once."
+        },
+        {
+          "name": "ai_calls",
+          "type": "INTEGER",
+          "doc": "The model calls it made."
+        },
+        {
+          "name": "scopes",
+          "type": "TEXT",
+          "doc": "The scopes it called, counted, as JSON (`{\"sql.read\": 2}`)."
+        },
+        {
+          "name": "decisions",
+          "type": "TEXT",
+          "doc": "What its grant decided for what it asked, as a JSON array of `{ need, decision, reason? }` (`allowed`, `denied`, `unenforced`)."
+        },
+        {
+          "name": "latest",
+          "type": "",
+          "doc": "1 on its contribution's most recent run."
+        }
+      ],
+      "key": [
+        "run_id"
+      ]
+    },
+    "4": {
       "columns": [
         {
           "name": "run_id",
@@ -15640,6 +16574,38 @@
         {
           "name": "ref",
           "type": "TEXT",
+          "doc": "`collector:<owner>/<id>`."
+        },
+        {
+          "name": "owner",
+          "type": "TEXT",
+          "doc": "The extension that declares it."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "Its id within the extension."
+        },
+        {
+          "name": "network_enforced",
+          "type": "INT",
+          "doc": "1 when this OS enforces the collector's `network` list."
+        },
+        {
+          "name": "disabled",
+          "type": "TEXT",
+          "doc": "Why failures disabled it on this machine; NULL when it isn't."
+        }
+      ],
+      "key": [
+        "ref"
+      ]
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
           "doc": "`oxplow:oxplow/collector?collector=<owner>/<id>`."
         },
         {
@@ -15825,6 +16791,36 @@
         {
           "name": "ref",
           "type": "TEXT",
+          "doc": "The note's canonical ref (`thread_note:not<n>`): what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Empty: a note has no title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The note's markdown."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its thread's stream (`str1`)."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "Changes whenever the row's text does; a recompute reads the text of rows whose version moved only. (v4: when it was written; a note is not edited)"
+        }
+      ],
+      "key": []
+    },
+    "5": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
           "doc": "The note's canonical ref (`oxplow:oxplow/thread_note?id=not<n>`): what a hit opens."
         },
         {
@@ -15853,6 +16849,36 @@
   },
   "search_agent_session": {
     "1": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`agent_session:ses<n>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "`v_agent_session.display_name`."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The harness, the titles of its thread's efforts that overlapped it, and what it touched: the distinct paths of its tool calls and the commands of its shell calls (up to 300 of each)."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its thread's stream (`str1`)."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The newer of the session's change and its last tool call."
+        }
+      ],
+      "key": []
+    },
+    "2": {
       "columns": [
         {
           "name": "ref",
@@ -15889,6 +16915,36 @@
         {
           "name": "ref",
           "type": "TEXT",
+          "doc": "`commit:<sha>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The subject."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The message body, the author, and the paths it changed (up to 300)."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: commits belong to the project."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The sha: a commit never changes."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
           "doc": "`oxplow:oxplow/commit?sha=<sha>`: what a hit opens."
         },
         {
@@ -15917,6 +16973,36 @@
   },
   "search_dashboard": {
     "1": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`dashboard:dsh<n>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The dashboard's title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The text of its text tiles and the titles of its query tiles, a line each, in order."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: dashboards belong to the project."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The newer of the dashboard's change and its tiles'."
+        }
+      ],
+      "key": []
+    },
+    "2": {
       "columns": [
         {
           "name": "ref",
@@ -15953,6 +17039,36 @@
         {
           "name": "ref",
           "type": "TEXT",
+          "doc": "`decision:<n>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The question."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The choice, why, and the alternatives, a line each."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its thread's stream (`str1`)."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "When it was made: a decision never changes."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
           "doc": "`oxplow:oxplow/decision?id=<n>`: what a hit opens."
         },
         {
@@ -15985,6 +17101,31 @@
         {
           "name": "ref",
           "type": "TEXT",
+          "doc": "`effort:eff<n>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The effort's title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its summary, then the work item it was on (the ref, so its id finds it)."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its thread's stream (`str1`)."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
           "doc": "`oxplow:oxplow/effort?id=eff<n>`: what a hit opens."
         },
         {
@@ -16012,6 +17153,31 @@
         {
           "name": "ref",
           "type": "TEXT",
+          "doc": "`lens:<extension>/<slug>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The lens's title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its description."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: lenses belong to the project."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
           "doc": "`oxplow:oxplow/lens?lens=<extension>/<slug>`: what a hit opens."
         },
         {
@@ -16035,6 +17201,36 @@
   },
   "search_thread": {
     "1": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "`thread:thr<n>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The thread's title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its efforts' titles and summaries, then its sessions' names."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its stream (`str1`)."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The newest of the thread's change, its efforts' starts and ends, its sessions' changes and its last turn."
+        }
+      ],
+      "key": []
+    },
+    "2": {
       "columns": [
         {
           "name": "ref",
@@ -16071,6 +17267,36 @@
         {
           "name": "ref",
           "type": "TEXT",
+          "doc": "`turn:trn<n>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The session's name and when the turn started."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The prompt, then the answer."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its thread's stream (`str1`)."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "When the turn ended, else when it started."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
           "doc": "`oxplow:oxplow/turn?id=trn<n>`: what a hit opens."
         },
         {
@@ -16099,6 +17325,46 @@
   },
   "agent_session_binding": {
     "1": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Row id."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The slot (v_agent_session.id)."
+        },
+        {
+          "name": "native_id",
+          "type": "TEXT",
+          "doc": "The harness's own conversation id."
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "doc": "`started` (its first, or the first since it had none), `switched` (the harness moved it), `forked` (a fork launch's copy) or `chosen` (the person chose it)."
+        },
+        {
+          "name": "bound_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "unbound_at",
+          "type": "TEXT",
+          "doc": "When the next one replaced it or the slot was left with none; NULL while it is the slot's."
+        },
+        {
+          "name": "session_ref",
+          "type": "TEXT",
+          "doc": "The slot's ref (`agent_session:ses<n>`)."
+        }
+      ],
+      "key": []
+    },
+    "2": {
       "columns": [
         {
           "name": "id",
@@ -16335,6 +17601,36 @@
   },
   "search_handoff": {
     "1": {
+      "columns": [
+        {
+          "name": "ref",
+          "type": "TEXT",
+          "doc": "The handoff's canonical ref (`handoff:hnd<n>`): what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Empty: a handoff has no title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "The handoff's markdown."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its recipient thread's stream (`str1`)."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "Changes whenever the row's text does; a recompute reads the text of rows whose version moved only (when it was sent; a body is not edited)."
+        }
+      ],
+      "key": []
+    },
+    "2": {
       "columns": [
         {
           "name": "ref",
@@ -17033,6 +18329,31 @@
   },
   "ui_preference": {
     "1": {
+      "columns": [
+        {
+          "name": "scope",
+          "type": "TEXT",
+          "doc": "`app`; a page's ref (`page:…`, `lens:…`) or `kind:<kind>`; a panel's ref; or `component:<extension>/<id>`."
+        },
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "What is remembered, within its scope (`railWidth`, `mergeMode.str1.main`)."
+        },
+        {
+          "name": "value_json",
+          "type": "TEXT",
+          "doc": "Its value, as JSON text."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp of the last change."
+        }
+      ],
+      "key": []
+    },
+    "2": {
       "columns": [
         {
           "name": "scope",
