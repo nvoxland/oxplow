@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from "react";
 import { decideProposal, querySql } from "./api.js";
 import { recordOpError } from "./components/opErrorsStore.js";
 import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
-import { configRef } from "./refs/ref.js";
+import { configUri } from "./uri/uri.js";
 import { threadRowId } from "./modelIds.js";
 import { valueText } from "./pages/settingsModel.js";
 import type { Reads, SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
@@ -166,7 +166,7 @@ export function summarizeProposal(p: Proposal): ProposalSummary {
 
 /** The pending proposal that changes setting `key`, if any. */
 export function proposalForSetting(proposals: Proposal[], key: string): Proposal | undefined {
-  return proposals.find((p) => p.key === configRef(key));
+  return proposals.find((p) => p.key === configUri(key));
 }
 
 /** Approve or decline `p` as the person. */

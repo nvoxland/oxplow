@@ -16,7 +16,7 @@ const APP_SCHEMES = /^(file|dir|commit|work_item|oxplow-invalid):/i;
 function urlTransform(value: string): string {
   if (APP_SCHEMES.test(value)) return value;
   // An extension's ref kind (P8.D7) is a scheme of ours while installed.
-  const kind = parseRef(value)?.kind;
+  const kind = parseUri(value)?.kind;
   if (kind && refKindInfo(kind)) return value;
   return defaultUrlTransform(value);
 }
@@ -31,7 +31,7 @@ import { useWorkItemRef } from "../../workItemTitleCache.js";
 import { useWorkListProfile } from "../../useWorkListProfile.js";
 import { workItemRefOfMention } from "../../workItems.js";
 import { workItemId, workItemLabel } from "../../workItemRef.js";
-import { parseRef, rawAfterKind } from "../../refs/ref.js";
+import { parseUri, rawAfterType } from "../../uri/uri.js";
 import { extensionWikilinkRef, refKindInfo, useExtensionRefTitle, useRefKinds } from "../../refKinds.js";
 import { attachPanZoom, loadMermaid } from "./mermaidRender.js";
 
@@ -95,7 +95,7 @@ export function parseGitRefTarget(target: string): string | null {
 function parsedLinkIconKind(parsed: ParsedLink): string | null {
   switch (parsed.kind) {
     case "ref":
-      return parseRef(parsed.ref)?.kind ?? null;
+      return parseUri(parsed.ref)?.kind ?? null;
     case "internal":
       return "wiki";
     case "file":
@@ -119,7 +119,7 @@ export function parseMarkdownLink(rawHref: string): ParsedLink {
   if (/^https?:\/\//i.test(rawHref) || rawHref.startsWith("mailto:")) {
     return { kind: "external" };
   }
-  const fileRaw = rawAfterKind(rawHref, "file");
+  const fileRaw = rawAfterType(rawHref, "file");
   if (fileRaw !== null) {
     const raw = fileRaw;
     if (!raw) return { kind: "empty" };
@@ -160,24 +160,24 @@ export function parseMarkdownLink(rawHref: string): ParsedLink {
     }
     return { kind: "file", path: body, version };
   }
-  const dirRaw = rawAfterKind(rawHref, "dir");
+  const dirRaw = rawAfterType(rawHref, "dir");
   if (dirRaw !== null) {
     const raw = dirRaw.replace(/\/+$/, "");
     if (!raw) return { kind: "empty" };
     return { kind: "directory", path: raw };
   }
-  const commitRaw = rawAfterKind(rawHref, "commit");
+  const commitRaw = rawAfterType(rawHref, "commit");
   if (commitRaw !== null) {
     const sha = commitRaw;
     if (!sha) return { kind: "empty" };
     return { kind: "commit", sha };
   }
-  if (rawAfterKind(rawHref, "work_item") !== null) {
+  if (rawAfterType(rawHref, "work_item") !== null) {
     // Any list's item, by its ref.
     return workItemId(rawHref) === null ? { kind: "empty" } : { kind: "work_item", ref: rawHref };
   }
   {
-    const kind = parseRef(rawHref)?.kind;
+    const kind = parseUri(rawHref)?.kind;
     if (kind && refKindInfo(kind)) return { kind: "ref", ref: rawHref };
   }
   if (rawHref.startsWith("oxplow-invalid:")) {
@@ -252,19 +252,19 @@ function collapseLinksOutsideInlineCode(text: string): string {
 }
 
 function collapseInternalLink(label: string, url: string): string | null {
-  const filePath = rawAfterKind(url, "file");
+  const filePath = rawAfterType(url, "file");
   if (filePath !== null) {
     const path = filePath;
     if (!path) return null;
     return label === path ? `[[${path}]]` : `[[${path}|${label}]]`;
   }
-  const dirPath = rawAfterKind(url, "dir");
+  const dirPath = rawAfterType(url, "dir");
   if (dirPath !== null) {
     const path = dirPath;
     if (!path) return null;
     return label === path ? `[[dir:${path}]]` : `[[dir:${path}|${label}]]`;
   }
-  const commitSha = rawAfterKind(url, "commit");
+  const commitSha = rawAfterType(url, "commit");
   if (commitSha !== null) {
     const sha = commitSha;
     if (!sha) return null;
@@ -274,7 +274,7 @@ function collapseInternalLink(label: string, url: string): string | null {
     const labelIsHexPrefix = /^[0-9a-f]{7,40}$/i.test(label) && sha.toLowerCase().startsWith(label.toLowerCase());
     return labelIsHexPrefix ? `[[git:${sha}]]` : `[[git:${sha}|${label}]]`;
   }
-  if (rawAfterKind(url, "work_item") !== null && workItemId(url) !== null) {
+  if (rawAfterType(url, "work_item") !== null && workItemId(url) !== null) {
     // A bare `[[tsk42]]` (or `[[work_item:…]]`) renders with what was
     // written as its text (the title swap is a render-time overlay, not
     // stored), so a label equal to it collapses to the bare form.
@@ -369,7 +369,7 @@ function rewriteWikilinksOutsideInlineCode(text: string, mentionRef: MentionRef)
       }
       // Directory form: explicit `dir:` prefix (mirrors `git:`).
       // Trailing slash on the path is tolerated and stripped.
-      const dirTarget = rawAfterKind(target, "dir");
+      const dirTarget = rawAfterType(target, "dir");
       if (dirTarget !== null) {
         const dir = dirTarget.trim().replace(/\/+$/, "");
         if (dir) {

@@ -13,7 +13,7 @@ import { workItemTabRef } from "../tabs/pageRefs.js";
 import { workItemLabel } from "../workItemRef.js";
 import { useWorkListProfile } from "../useWorkListProfile.js";
 import { workItemRefOfMention } from "../workItems.js";
-import { effortRef, parseRef } from "../refs/ref.js";
+import { effortUri, parseUri } from "../uri/uri.js";
 
 /** An effort as its page shows it (`v_effort`). */
 export interface EffortRecord {
@@ -49,7 +49,7 @@ export const realEffortHeaderDeps: EffortHeaderDeps = {
  *  anything else. */
 export function normalizeWorkItemInput(raw: string, mentionRef: (id: string) => string | null): string | null {
   const v = raw.trim();
-  const parsed = parseRef(v);
+  const parsed = parseUri(v);
   if (parsed?.kind === "work_item" && /^[a-z0-9_-]+:\S+$/.test(parsed.id)) return v;
   return mentionRef(v);
 }
@@ -93,7 +93,7 @@ export function EffortHeader({
 }) {
   const profile = useWorkListProfile();
   const row = effortRowId(effortId);
-  const ref = effortRef(row === null ? effortId : `eff${row}`);
+  const ref = effortUri(row === null ? effortId : `eff${row}`);
   const [effort, setEffort] = useState<EffortRecord | null>(null);
   const [linking, setLinking] = useState(false);
   const [busy, setBusy] = useState(false);

@@ -10,7 +10,7 @@
  * reads the item through the work-item interface if it cares.
  */
 
-import { fileLinesRef } from "./refs/ref.js";
+import { fileLinesUri } from "./uri/uri.js";
 
 export type ContextRef =
   | { kind: "file"; path: string }
@@ -29,7 +29,7 @@ export function askAboutSelection(
   rev: string | null = null,
 ): string {
   const end = sel.endColumn === 1 && sel.endLineNumber > sel.startLineNumber ? sel.endLineNumber - 1 : sel.endLineNumber;
-  return formatContextMention({ kind: "ref", ref: fileLinesRef(path, sel.startLineNumber, end, rev) });
+  return formatContextMention({ kind: "ref", ref: fileLinesUri(path, sel.startLineNumber, end, rev) });
 }
 
 export function formatContextMention(ref: ContextRef): string {

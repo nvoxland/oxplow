@@ -5,7 +5,7 @@
 /// `crates/oxplow-app/fixtures/built_in_pages.json`), which only shrinks.
 import type { Extension, ExtensionPage } from "../tauri-bridge/generated/bindings.js";
 import type { PagePayload } from "../tabs/pageRefs.js";
-import { extPageRef, pageRef as corePageRef } from "../refs/ref.js";
+import { extPageUri, pageUri as corePageRef } from "../uri/uri.js";
 
 export const BUILT_IN_PAGES = [
   "alerts",
@@ -40,7 +40,7 @@ export function isBuiltInPage(name: string): name is BuiltInPageName {
 /// enabled extension declares it.
 export function declaredPage(extensions: Extension[] | null, page: PagePayload): ExtensionPage | null | undefined {
   if (extensions === null) return undefined;
-  const pageRef = page.extension ? extPageRef(page.extension, page.page) : corePageRef(page.page);
+  const pageRef = page.extension ? extPageUri(page.extension, page.page) : corePageRef(page.page);
   for (const e of extensions) {
     if (!e.enabled) continue;
     const found = e.pages.find((p) => p.pageRef === pageRef);

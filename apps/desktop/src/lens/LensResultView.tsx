@@ -21,7 +21,7 @@ import { fieldErrors, needsConfirmation } from "../ipc-error.js";
 import { RouteLink, routeDispatch } from "../tabs/RouteLink.js";
 import { linkOrigins } from "./linkOrigin.js";
 import { useListNav } from "../kit/useListNav.js";
-import { parseRef } from "../refs/ref.js";
+import { parseUri } from "../uri/uri.js";
 import { openRefInWindow } from "../tabs/openRef.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -1046,7 +1046,7 @@ function TimelineViz({
   return (
     <ol data-testid="lens-timeline" style={{ listStyle: "none", padding: 0, margin: 0, borderLeft: "2px solid var(--border-subtle)" }}>
       {entries.map((e, i) => {
-        const ref = e.ref && parseRef(e.ref) ? e.ref : null;
+        const ref = e.ref && parseUri(e.ref) ? e.ref : null;
         return (
           <li key={i} data-testid={`lens-timeline-entry-${i}`} style={{ padding: "4px 0 4px 12px" }} {...rowMenu(e.row)}>
             <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{e.at}</div>

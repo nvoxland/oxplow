@@ -2,7 +2,7 @@
 /// core refs — a chip on a page whose ref the model lists (`ref-chip`), a
 /// badge after a lens cell that links to one (`row-badge`). Additive: a
 /// page or row is complete without them.
-import { parseRef } from "../refs/ref.js";
+import { parseUri } from "../uri/uri.js";
 import type { DecoratorPlacement, Extension, SqlCell, SqlQueryResult, UiDecorator } from "../tauri-bridge/generated/bindings.js";
 import type { PageChip } from "../tabs/Page.js";
 
@@ -43,7 +43,7 @@ export function decorationQueries(decorator: UiDecorator, refs: string[]): Decor
   // same; this is where the SQL is built).
   const names = [decorator.view, decorator.label, ...(decorator.color ? [decorator.color] : [])];
   if (!names.every((n) => IDENTIFIER.test(n))) return [];
-  const mine = refs.filter((r) => parseRef(r)?.kind === decorator.kind);
+  const mine = refs.filter((r) => parseUri(r)?.kind === decorator.kind);
   const color = decorator.color ? `, "${decorator.color}" AS color` : "";
   const out: DecorationQuery[] = [];
   for (let at = 0; at < mine.length; at += REFS_PER_QUERY) {

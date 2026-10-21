@@ -21,7 +21,7 @@ import { diffRef, duplicateBlockRef, effortDiffRef, fileRef, gitCommitRef, lensR
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { formatContextMention, type ContextRef } from "../agent-context-ref.js";
-import { idOf, parseRef } from "../refs/ref.js";
+import { idOf, parseUri } from "../uri/uri.js";
 
 export interface DisplayColumn {
   key: string;
@@ -167,7 +167,7 @@ export function rowDepth(lens: Lens, columns: string[], row: SqlCell[]): number 
 export function rowContextRef(lens: Lens, columns: string[], row: SqlCell[]): ContextRef | null {
   const ref = rowRef(lens, columns, row);
   if (!ref) return null;
-  const parsed = parseRef(ref);
+  const parsed = parseUri(ref);
   if (parsed?.kind === "wiki" && parsed.rev === null) return { kind: "wiki", slug: parsed.id };
   if (parsed?.kind === "file" && parsed.rev === null && parsed.frag === null) return { kind: "file", path: parsed.id };
   return { kind: "ref", ref };
@@ -210,7 +210,7 @@ export function cellLinkRef(
       return metricRef(s);
     case "page":
       // Any ref: the registry says where its kind opens.
-      return parseRef(s) ? s : null;
+      return parseUri(s) ? s : null;
     case "diff-at": {
       const at = (col: string | null) => {
         const i = col ? resultColumns.indexOf(col) : -1;
@@ -475,7 +475,7 @@ export function rowMention(lensId: string, columns: string[], row: SqlCell[]): s
 export function rowRef(lens: Lens, columns: string[], row: SqlCell[]): string | null {
   for (const c of lens.columns) {
     const ref = c.link ? cellLinkRef(c.link, c.key, row, columns) : null;
-    if (ref && parseRef(linkTargetId(ref))) return linkTargetId(ref);
+    if (ref && parseUri(linkTargetId(ref))) return linkTargetId(ref);
   }
   return null;
 }

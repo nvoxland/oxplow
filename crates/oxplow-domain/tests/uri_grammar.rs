@@ -1,5 +1,5 @@
 //! Golden tests for the canonical ref grammar (`.context/refs.md`).
-//! The fixture is shared with the TS parser (`apps/desktop/src/refs/ref.test.ts`).
+//! The fixture is shared with the TS parser (`apps/desktop/src/uri/uri.test.ts`).
 
 use oxplow_domain::uri::grammar::{Uri, UriParseError};
 use serde::Deserialize;
@@ -83,7 +83,7 @@ fn a_bad_kind_error_names_the_kind() {
 }
 
 /// The core kinds, one list for both languages: the desktop's guard
-/// (`apps/desktop/src/refs/refs.guard.test.ts`) reads the same array.
+/// (`apps/desktop/src/uri/uri.guard.test.ts`) reads the same array.
 #[test]
 fn the_fixture_lists_exactly_the_core_kinds() {
     let registry = oxplow_domain::uri::types::core_types();

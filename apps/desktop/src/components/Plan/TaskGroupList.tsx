@@ -1,4 +1,4 @@
-import { idOf } from "../../refs/ref.js";
+import { idOf } from "../../uri/uri.js";
 import { useCollapsedSet } from "../../tabs/useViewParam.js";
 import type { CSSProperties } from "react";
 import { Fragment, useEffect, useMemo, useState } from "react";

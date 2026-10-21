@@ -1,4 +1,4 @@
-import { proposalRef } from "../../refs/ref.js";
+import { proposalUri } from "../../uri/uri.js";
 /// What needs the person, in one place: the status bar's bell,
 /// the Alerts page and the toasts all read these items. Pure.
 
@@ -34,7 +34,7 @@ export function alertsSummary(items: AlertItems): { count: number; tone: AlertTo
  *  and delivery failing at all (not each failed event). */
 export function alertKeys(items: AlertItems): Set<string> {
   const keys = new Set<string>();
-  for (const p of items.proposals) keys.add(proposalRef(p.id));
+  for (const p of items.proposals) keys.add(proposalUri(p.id));
   for (const e of items.opErrors) keys.add(`op:${e.id}`);
   if (items.undelivered > 0) keys.add("delivery");
   if (items.failedReactions > 0) keys.add("reactions");
@@ -52,7 +52,7 @@ export function newAlerts(seen: Set<string>, items: AlertItems): { key: string; 
   const add = (key: string, message: string) => {
     if (!seen.has(key)) out.push({ key, message });
   };
-  for (const p of items.proposals) add(proposalRef(p.id), p.title);
+  for (const p of items.proposals) add(proposalUri(p.id), p.title);
   for (const e of items.opErrors) add(`op:${e.id}`, e.label);
   if (items.undelivered > 0) {
     add("delivery", items.undelivered === 1 ? "1 event couldn't be delivered" : `${items.undelivered} events couldn't be delivered`);

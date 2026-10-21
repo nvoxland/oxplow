@@ -36,7 +36,7 @@ readable identity, its **ref**, `<kind>:<id>[@rev][#frag]`
 | Rust | `oxplow_domain::uri::build::{effort_uri, file_uri, wiki_uri, …}` — one per core kind; `of(kind, id)` / `at(kind, id, rev, frag)` for a kind known only at run time; a work list builds its own items' refs (`oxplow_tasks::work_item_ref`) | `build::parse_as::<T>(r, kind)` (typed id), `id_of(r, kind)` (decoded id), `parse_kind(r, kind)` (keeps rev and frag), `kind_of(r)`; kind names are `uri::types::{EFFORT, FILE, …}` |
 | SQL (models, lenses, scripts' queries) | the owning model's `ref` column (`oxplow_db::ref_models::CORE_KINDS`: `v_effort.ref`, `v_decision.ref`, `v_thread.ref`, …) — the only SQL that spells a prefix | `SELECT ref`, `WHERE ref = :ref`, `JOIN … ON x.ref = y.subject`; never `'kind:' || id`, never `substr` on a ref |
 | Starlark (commands, effects, collectors, policies) | `ref.build(kind, id, rev=, frag=)` (`id` a string or an int) | `ref.parse(r)` → `{kind, id, rev, frag}`, `ref.id(r, kind=)`, `ref.kind(r)`, `ref.is_ref(v)` |
-| TS (desktop) | `refs/ref.ts` builders (`effortRef`, `wikiRef`, `pageRef`, `refOf`, …) | `parseRef`, `idOf`, `isRefOfKind` |
+| TS (desktop) | `uri/uri.ts` builders (`effortRef`, `wikiRef`, `pageRef`, `refOf`, …) | `parseRef`, `idOf`, `isRefOfKind` |
 
 **Resolving.** `ref_resolver::resolve_ref` names any ref: richer
 resolvers for `work_item`, `commit`, `file`, `dir`, `wiki` and
@@ -44,7 +44,7 @@ resolvers for `work_item`, `commit`, `file`, `dir`, `wiki` and
 (`ref_models::CORE_KINDS`); an extension's kind through the `resolve` view its
 `ref_kinds:` names. Nothing resolves it → `resolved: false`.
 
-**Guards.** `refs/refs.guard.test.ts` (TS), `source_guards::refs_are_built_and_parsed_through_the_grammar` (Rust) and `source_guards::scripts_and_sql_carry_refs_rather_than_spelling_them` (shipped `.star`, lens and model SQL, embedded Starlark templates; a kind's owning model in `ref_models::CORE_KINDS` is exempt) refuse a hand-built or hand-parsed ref outside the owning
+**Guards.** `uri/uri.guard.test.ts` (TS), `source_guards::refs_are_built_and_parsed_through_the_grammar` (Rust) and `source_guards::scripts_and_sql_carry_refs_rather_than_spelling_them` (shipped `.star`, lens and model SQL, embedded Starlark templates; a kind's owning model in `ref_models::CORE_KINDS` is exempt) refuse a hand-built or hand-parsed ref outside the owning
 place. When one fires, the fix is the builder or reader above — or, when
 a kind has none, adding it to `uri::build` / `ref_models` — never a
 string.
@@ -88,7 +88,7 @@ variant. Pure, no IO.
 
 **The golden fixture** `crates/oxplow-domain/tests/fixtures/ref_grammar.json`
 pins the grammar. `tests/ref_grammar.rs` asserts it, and the TS parser
-(`apps/desktop/src/refs/ref.ts`: `parseRef`, `formatRef`, `ref`,
+(`apps/desktop/src/uri/uri.ts`: `parseRef`, `formatRef`, `ref`,
 `kindOf`; asserted by `ref.test.ts`) asserts the same file, so the two
 parsers can't drift. Add a case there when you extend the grammar;
 never change an existing case's expectation without changing both parsers.
@@ -421,7 +421,7 @@ matching the backend's `CommentTarget`), and lens `link.kind` targets.
 inside an id never splits it.
 
 **One place spells a ref; one place reads it.** A ref's owner spells it
-and everyone else carries it. In the desktop, `apps/desktop/src/refs/ref.ts`
+and everyone else carries it. In the desktop, `apps/desktop/src/uri/uri.ts`
 is the only file that writes a kind prefix (`refOf(kind, id)` and a builder
 per kind the desktop names: `threadRef`, `streamRef`, `effortRef`,
 `commentRef`, `agentSessionRef`, `wikiRef`, `workItemRef(provider, id)`,
@@ -429,7 +429,7 @@ per kind the desktop names: `threadRef`, `streamRef`, `effortRef`,
 `extPageRef`, `lensRef`), and `parseRef` / `kindOf` / `idOf(ref, kind)` are
 how a ref is read; everything else takes a ref from a builder or from data
 and passes it on. A revision (`git:`, `snap:`) is not a ref and stays
-`revision.ts`'s. `refs/refs.guard.test.ts` fails on a hand-built or
+`revision.ts`'s. `uri/uri.guard.test.ts` fails on a hand-built or
 hand-parsed prefix of any core kind anywhere else (a template
 `` `kind:${…}` ``, `"kind:" +`, `startsWith("kind:")`,
 `slice("kind:".length)`, `replace(/^kind:/…)`, or `indexOf(":")` on a

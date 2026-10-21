@@ -4,7 +4,7 @@
 import type { CSSProperties } from "react";
 
 import { insertIntoAgent } from "../../agent-input-bus.js";
-import { kindOf } from "../../refs/ref.js";
+import { typeOf } from "../../uri/uri.js";
 import { askText, promptsAbout } from "./promptModel.js";
 import { usePromptCatalog } from "./usePromptCatalog.js";
 
@@ -19,7 +19,7 @@ export function SuggestedPrompts({
   onAsked?(): void;
 }) {
   const catalog = usePromptCatalog();
-  const kind = kindOf(refId);
+  const kind = typeOf(refId);
   const prompts = kind ? promptsAbout(catalog, kind) : [];
   if (prompts.length === 0) return null;
   return (

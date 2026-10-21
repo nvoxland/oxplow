@@ -1,5 +1,5 @@
 import { fuzzyMatches } from "../fuzzy-match.js";
-import { pageRef, parseRef, refOf } from "../refs/ref.js";
+import { pageUri, parseUri, uriOf } from "../uri/uri.js";
 import type { SearchHit, WorkspaceIndexedFile } from "../api.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { MenuPlace } from "../tauri-bridge/generated/bindings.js";
@@ -49,7 +49,7 @@ export function dedupeSiteHits(
   hits: SearchHit[],
   matchedFilePaths: ReadonlySet<string>,
 ): SearchHit[] {
-  return hits.filter((h) => !(h.kind === "file" && matchedFilePaths.has(parseRef(h.ref)?.id ?? "")));
+  return hits.filter((h) => !(h.kind === "file" && matchedFilePaths.has(parseUri(h.ref)?.id ?? "")));
 }
 
 /// Split a query on whitespace and require each token to fuzzy-match
@@ -96,7 +96,7 @@ function isExactMatch(r: QuickOpenResult, q: string): boolean {
       return base.toLowerCase() === q || r.file.path.toLowerCase() === q;
     }
     case "hit":
-      return r.hit.title.toLowerCase() === q || (parseRef(r.hit.ref)?.id ?? "").toLowerCase() === q;
+      return r.hit.title.toLowerCase() === q || (parseUri(r.hit.ref)?.id ?? "").toLowerCase() === q;
     case "ask":
       return false;
   }
@@ -107,11 +107,11 @@ function isExactMatch(r: QuickOpenResult, q: string): boolean {
 function resultKey(r: QuickOpenResult): string {
   switch (r.kind) {
     case "page":
-      return pageRef(r.entry.id);
+      return pageUri(r.entry.id);
     case "command":
-      return refOf("command", r.entry.id);
+      return uriOf("command", r.entry.id);
     case "file":
-      return refOf("file", r.file.path);
+      return uriOf("file", r.file.path);
     case "hit":
       return `hit:${r.hit.ref}:${r.hit.stream_id ?? ""}`;
     case "ask":

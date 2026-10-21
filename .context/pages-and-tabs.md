@@ -129,7 +129,7 @@ Built only by the helpers in `apps/desktop/src/tabs/pageRefs.ts` — never
 hand-format an id.
 
 **Every tab id is a canonical ref** ([refs.md](./refs.md)), parsed
-through the shared grammar (`apps/desktop/src/refs/ref.ts`) so a `:`
+through the shared grammar (`apps/desktop/src/uri/uri.ts`) so a `:`
 inside an id (`work_item:oxplow:tsk42`) never splits it. Two families:
 
 - **Entity pages** (`EntityPageKind`): the tab id of a file, directory,

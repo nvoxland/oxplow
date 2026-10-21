@@ -1,4 +1,4 @@
-import { effortRef, refOf } from "../refs/ref.js";
+import { effortUri, uriOf } from "../uri/uri.js";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { DiffEntry, EffortAtSnapshot, Snapshot, Stream } from "../api.js";
@@ -275,11 +275,11 @@ function DiffBody({
 function specKey(spec: DiffViewSpec): string {
   switch (spec.mode) {
     case "snapshot":
-      return refOf("snapshot", String(spec.snapshotId));
+      return uriOf("snapshot", String(spec.snapshotId));
     case "effort":
-      return effortRef(String(spec.effortId));
+      return effortUri(String(spec.effortId));
     case "turn":
-      return refOf("turn", String(spec.turnId));
+      return uriOf("turn", String(spec.turnId));
     case "endpoints":
       return `endpoints:${JSON.stringify(spec.start)}:${JSON.stringify(spec.end)}`;
   }
@@ -720,7 +720,7 @@ function ResolvedEndpointDiff({
           params={
             effortRowId(primaryEffortId) === null
               ? null
-              : { effort: effortRef(primaryEffortId), effort_id: effortRowId(primaryEffortId), ...(effortChange ? { change_id: effortChange.id } : {}) }
+              : { effort: effortUri(primaryEffortId), effort_id: effortRowId(primaryEffortId), ...(effortChange ? { change_id: effortChange.id } : {}) }
           }
           streamId={stream?.id ?? null}
           onOpenPage={(ref) => onOpenPage(ref)}

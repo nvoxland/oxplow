@@ -1,4 +1,4 @@
-import { idOf } from "../../refs/ref.js";
+import { idOf } from "../../uri/uri.js";
 import { LensSlots } from "../../lens/LensSlots.js";
 import { numericRowId } from "../../lens/lensModel.js";
 import type { CSSProperties } from "react";

@@ -30,27 +30,14 @@ import {
 } from "../revision.js";
 import type { SqlCell } from "../tauri-bridge/generated/bindings.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
-import {
-  agentSessionRef as agentSessionRefString,
-  extPageRef as extPageRefString,
-  formatRef,
-  lensRef as lensRefString,
-  metricRef as metricRefString,
-  pageRef as pageRefString,
-  parseRef,
-  rawAfterKind,
-  refOf,
-  splitParams,
-  withParams,
-  type ParamValue,
-} from "../refs/ref.js";
+import { agentSessionUri as agentSessionRefString, extPageUri as extPageRefString, formatUri, lensUri as lensRefString, metricUri as metricRefString, pageUri as pageRefString, parseUri, rawAfterType, uriOf, splitParams, withParams, type ParamValue } from "../uri/uri.js";
 
 function canonicalId(kind: string, id: string, rev: string | null = null): string {
-  return formatRef({ kind, id, rev, frag: null });
+  return formatUri({ kind, id, rev, frag: null });
 }
 
 // Query params (`?k=v&k=v` after a route name or a lens id) are encoded and
-// split by refs/ref.ts, the one place that spells a ref.
+// split by uri/uri.ts, the one place that spells a ref.
 
 /** `tabId` with `params` added to its query (after any it has). */
 export function withPageParams(tabId: string, params: Record<string, ParamValue>): string {
@@ -130,7 +117,7 @@ export function fileRef(path: string, version: Revision = WORKING): TabRef {
 /** The working-tree file a tab id shows, or `null` when the id is not a
  *  file or pins a revision (a read-only viewer, not the editor's file). */
 export function diskFilePath(tabId: string): string | null {
-  const r = parseRef(tabId);
+  const r = parseUri(tabId);
   return r && r.kind === "file" && r.rev === null ? r.id : null;
 }
 
@@ -555,7 +542,7 @@ export function externalUrlRef(url: string): TabRef {
  * declares renders as "No such page".
  */
 export function refFromTabId(id: string): TabRef | null {
-  const canonical = parseRef(id);
+  const canonical = parseUri(id);
   if (!canonical) return null;
   const kind: string = canonical.kind;
   switch (kind) {
@@ -566,11 +553,11 @@ export function refFromTabId(id: string): TabRef | null {
     case "wiki":
       return wikiPageRef(canonical.id);
     case "work_item":
-      return workItemTabRef(refOf("work_item", canonical.id));
+      return workItemTabRef(uriOf("work_item", canonical.id));
     case "commit":
       return gitCommitRef(canonical.id);
     case "metric":
-      return metricRefFromTail(rawAfterKind(id, "metric") ?? "");
+      return metricRefFromTail(rawAfterType(id, "metric") ?? "");
     case "snapshot": {
       const n = Number(canonical.id);
       return Number.isInteger(n) ? snapshotRef(n) : null;
@@ -586,11 +573,11 @@ export function refFromTabId(id: string): TabRef | null {
     case "dashboard":
       return customDashboardRef(canonical.id);
     case "lens":
-      return lensRefFromTail(rawAfterKind(id, "lens") ?? "");
+      return lensRefFromTail(rawAfterType(id, "lens") ?? "");
     case "page": {
       // Oxplow's own pages are `page:<id>`, another extension's
       // `page:<extension>/<id>`; what draws one comes from its declaration.
-      const { head, params } = splitParams(rawAfterKind(id, "page") ?? "");
+      const { head, params } = splitParams(rawAfterType(id, "page") ?? "");
       const values = Object.fromEntries(params.entries());
       const slash = head.indexOf("/");
       if (slash === -1) return head ? pageTabRef(head, values) : null;
@@ -608,7 +595,7 @@ export function refFromTabId(id: string): TabRef | null {
 /** The `PageKind` a tab id renders as: an entity ref's kind, or `page`.
  *  `null` for text that is not a tab id. */
 export function pageKindOf(tabId: string): PageKind | null {
-  const canonical = parseRef(tabId);
+  const canonical = parseUri(tabId);
   if (!canonical) return null;
   if (canonical.kind === "page") return "page";
   // The entity kinds that open as a page.

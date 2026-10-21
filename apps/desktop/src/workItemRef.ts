@@ -6,7 +6,7 @@
  * reads meaning into the id.
  */
 
-import { idOf } from "./refs/ref.js";
+import { idOf } from "./uri/uri.js";
 
 /** The `<provider>:<id>` part of a work-item ref (its `page_ref` id);
  *  `null` for anything that isn't one. */
