@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { keyOf, keyedUri, wikiUri } from "../uri/uri.js";
 import type { SearchHit, WorkspaceIndexedFile } from "../api.js";
 import type { PageDirectoryEntry } from "./RailHud/sections.js";
 import type { PageCategory } from "./RailHud/sections.js";
@@ -17,8 +18,8 @@ import {
 
 function hit(kind: string, refId: string): SearchHit {
   return {
-    kind,
-    ref: `${kind}:${refId}`,
+    kind: `oxplow/${kind}`,
+    ref: keyedUri(`oxplow/${kind}`, refId),
     stream_id: null,
     title: refId,
     snippet: "…",
@@ -44,7 +45,7 @@ describe("dedupeSiteHits", () => {
       [hit("wiki", "architecture-overview"), hit("file", "src/other.rs"), hit("work_item", "12")],
       new Set(["src/main.rs"]),
     );
-    expect(out.map((h) => h.ref.slice(h.kind.length + 1))).toEqual(["architecture-overview", "src/other.rs", "12"]);
+    expect(out.map((h) => keyOf(h.ref))).toEqual(["architecture-overview", "src/other.rs", "12"]);
   });
 
   test("drops file hits whose path already matched by filename", () => {
@@ -52,7 +53,7 @@ describe("dedupeSiteHits", () => {
       [hit("file", "src/main.rs"), hit("wiki", "w")],
       new Set(["src/main.rs"]),
     );
-    expect(out.map((h) => h.ref.slice(h.kind.length + 1))).toEqual(["w"]);
+    expect(out.map((h) => keyOf(h.ref))).toEqual(["w"]);
   });
 
   test("non-file kinds are never deduped against paths", () => {
@@ -117,7 +118,7 @@ describe("buildQuickOpenResults", () => {
       files,
       siteHits: [hit("wiki", "w"), hit("work_item", "tsk30")],
     });
-    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { kind: "work_item", ref: "work_item:tsk30" } });
+    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { kind: "oxplow/work_item", ref: keyedUri("oxplow/work_item", "tsk30") } });
   });
 
   test("an exact content match floats above a fuzzy page/file match", () => {
@@ -130,7 +131,7 @@ describe("buildQuickOpenResults", () => {
       files,
       siteHits: [hit("wiki", "gt")],
     });
-    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { ref: "oxplow:oxplow/wiki?slug=gt" } });
+    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { ref: wikiUri("gt") } });
     expect(out.results.some((r) => r.kind === "page")).toBe(true);
   });
 
@@ -144,7 +145,7 @@ describe("buildQuickOpenResults", () => {
       siteHits: [fileHit("a.rs", "str1"), fileHit("b.rs", "str2"), fileHit("c.rs", null)],
       currentStreamId: "str1",
     });
-    const hitIds = out.results.flatMap((r) => (r.kind === "hit" ? [r.hit.ref.slice(r.hit.kind.length + 1)] : []));
+    const hitIds = out.results.flatMap((r) => (r.kind === "hit" ? [keyOf(r.hit.ref)] : []));
     expect(hitIds).toEqual(["a.rs", "c.rs"]); // b.rs (str2) dropped, global c.rs kept
   });
 
@@ -167,7 +168,7 @@ describe("buildQuickOpenResults", () => {
     const hits = Array.from({ length: 35 }, (_, i) => hit("wiki", i === 33 ? "meeting" : `w${i}`));
     const out = buildQuickOpenResults({ query: "meeting", pages, commands, files, siteHits: hits });
     // Pre-fix this exact hit was sliced away before the float ran.
-    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { ref: "oxplow:oxplow/wiki?slug=meeting" } });
+    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { ref: wikiUri("meeting") } });
   });
 
   // tsk1031: "todo" ranked Planning, Recent Decisions and Unbacked Claims
@@ -282,7 +283,7 @@ describe("buildRecentEntries", () => {
       { refKind: "file", refId: "oxplow:oxplow/file?path=src/main.rs", label: "main.rs" },
       { refKind: "wiki", refId: "oxplow:oxplow/wiki?slug=architecture", label: "" },
     ]);
-    expect(entries[0]!.id).toBe("recent:file:src/main.rs");
+    expect(entries[0]!.id).toBe("recent:oxplow:oxplow/file?path=src/main.rs");
     expect(entries[0]!.label).toBe("main.rs");
     expect(entries[0]!.ref.kind).toBe("file");
     // Empty stored label falls back to the ref id.

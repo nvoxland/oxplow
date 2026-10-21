@@ -304,7 +304,7 @@ export function WorkItemPage({
             message={`Link this item to another item or to any ref (an effort, a collector, a file…), as ${item.provider} names the link. \`about\` fits any ref.`}
             fields={[
               { key: "link_type", initialValue: DEFAULT_LINK_TYPE, placeholder: "link type" },
-              { key: "target", placeholder: "a ref: work_item:…, effort:eff12, collector:x/y" },
+              { key: "target", placeholder: "a URI, e.g. oxplow:oxplow/effort?id=eff12" },
             ]}
             confirmLabel="Link"
             busy={busy}

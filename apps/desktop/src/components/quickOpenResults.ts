@@ -50,7 +50,7 @@ export function dedupeSiteHits(
   matchedFilePaths: ReadonlySet<string>,
 ): SearchHit[] {
   // URI-SWITCH: a hit's `kind` is a resource name.
-  return hits.filter((h) => !(h.kind === "file" && matchedFilePaths.has(keyOf(h.ref) ?? "")));
+  return hits.filter((h) => !(h.kind === "oxplow/file" && matchedFilePaths.has(keyOf(h.ref) ?? "")));
 }
 
 /// Split a query on whitespace and require each token to fuzzy-match
@@ -178,7 +178,7 @@ export function buildQuickOpenResults(input: {
     input.currentStreamId == null
       ? input.siteHits
       : input.siteHits.filter(
-          (h) => h.kind !== "file" || h.stream_id == null || h.stream_id === input.currentStreamId,
+          (h) => h.kind !== "oxplow/file" || h.stream_id == null || h.stream_id === input.currentStreamId,
         );
   const dedupedHits = dedupeSiteHits(streamScopedHits, matchedPathsAll);
   const fileResultsAll: QuickOpenResult[] = matchedFilesAll.map((file) => ({ kind: "file", file }));

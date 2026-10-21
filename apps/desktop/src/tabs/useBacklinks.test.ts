@@ -4,6 +4,7 @@ import { canonicalIdForTarget, dedupeEntriesByTarget, edgeToInboundEntry, edgeTo
 import type { BacklinkEntry } from "./backlinkTypes.js";
 import type { BacklinkEdge } from "../api.js";
 import { setResources, type Resource } from "../resources.js";
+import { collectorUri, effortUri, pageUri, resourceUri } from "../uri/uri.js";
 import {
   directoryRef,
   effortDiffRef,
@@ -173,10 +174,21 @@ describe("dedupeEntriesByTarget", () => {
 
 describe("edges to any ref", () => {
   // The kinds are read: core's, as the registry lists them.
-  const coreKind = (kind: string, page: string | null): Resource => ({
-    kind, extension: null, label: null, idPattern: ".*", wikilinks: [], resolve: null, page, icon: null,
+  const coreKind = (name: string, page: string | null): Resource => ({
+    resource: `oxplow/${name}`,
+    extension: "oxplow",
+    label: name,
+    params: { id: { required: true, pattern: null } },
+    additional: false,
+    resolve: null,
+    title: null,
+    searchable: null,
+    icon: null,
+    wikilink: null,
+    page,
   });
-  beforeEach(() => setResources([coreKind("effort", "{ref}"), coreKind("work_item", "{ref}"), coreKind("collector", null)]));
+  const CORE = () => [coreKind("effort", null), coreKind("work_item", null), coreKind("collector", null)];
+  beforeEach(() => setResources(CORE()));
   afterEach(() => setResources([]));
   const edge = (over: Partial<BacklinkEdge>): BacklinkEdge => ({
     source_kind: "work_item",
@@ -195,38 +207,50 @@ describe("edges to any ref", () => {
       edge({ target_kind: "collector", target_id: "triage/todos", source_label: "Triage todos" }),
     );
     expect(entry.dead).toBe(false);
-    expect(entry.open).toBe("oxplow:oxplow/page?page=settings");
+    expect(entry.open).toBe(pageUri("settings"));
     expect(entry.label).toBe("Triage todos");
     expect(entry.subtitle).toBe("about");
     expect(entry.linkType).toBe("about");
-    expect(entry.target).toBe("oxplow:oxplow/collector?collector=triage/todos");
+    expect(entry.target).toBe(collectorUri("triage", "todos"));
   });
 
   test("a link to a core kind with a page opens it", () => {
     const entry = edgeToOutboundEntry(edge({ target_kind: "effort", target_id: "eff12", source_label: "An effort" }));
-    expect(entry.open).toBe("oxplow:oxplow/effort?id=eff12");
+    expect(entry.open).toBe(effortUri("eff12"));
   });
 
-  test("a link to an extension's kind opens the page its ref_kinds names", () => {
+  test("a link to an extension's resource opens the page its registry row names", () => {
     setResources([
-      { kind: "acme_pr", extension: "acme", label: "PR", idPattern: ".*", wikilinks: [], resolve: "", page: "oxplow:oxplow/page?page=acme/pr&ref=%7Bref%7D", icon: "" },
+      {
+        resource: "acme/pr",
+        extension: "acme",
+        label: "PR",
+        params: { id: { required: true, pattern: null } },
+        additional: false,
+        resolve: null,
+        title: null,
+        searchable: null,
+        icon: null,
+        wikilink: null,
+        page: pageUri("acme/pr"),
+      },
     ]);
     try {
-      const entry = edgeToOutboundEntry(edge({ target_kind: "acme_pr", target_id: "12", source_label: "PR 12" }));
-      expect(entry.open).toBe("acme_pr:12");
+      const entry = edgeToOutboundEntry(edge({ target_kind: "acme/pr", target_id: "12", source_label: "PR 12" }));
+      expect(entry.open).toBe(resourceUri("acme/pr", { id: 12 }));
       expect(entry.dead).toBe(false);
     } finally {
-      setResources([coreKind("effort", "{ref}"), coreKind("work_item", "{ref}"), coreKind("collector", null)]);
+      setResources(CORE());
     }
   });
 
-  test("a link to an uninstalled extension's kind is dead, with its raw text, and does not throw", () => {
+  test("a link to an uninstalled extension's resource is dead, with its raw text, and does not throw", () => {
     const entry = edgeToOutboundEntry(
       edge({ target_kind: "acme_pr", target_id: "12", resolved: false, source_label: null }),
     );
     expect(entry.open).toBeNull();
     expect(entry.dead).toBe(true);
-    expect(entry.label).toBe("acme_pr:12");
+    expect(entry.label).toBe(resourceUri("oxplow/acme_pr", { id: 12 }));
     expect(dedupeEntriesByTarget([entry, entry])).toHaveLength(1);
   });
 

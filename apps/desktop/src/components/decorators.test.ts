@@ -11,12 +11,13 @@ import {
   REFS_PER_QUERY,
   safeColor,
 } from "./decorators.js";
+import { workItemUri } from "../uri/uri.js";
 
 const decorator = (over: Partial<UiDecorator>): UiDecorator => ({
   id: "flags/0",
   extension: "flags",
   view: "v_flags_flags",
-  kind: "work_item",
+  kind: "oxplow/work_item",
   placement: "ref-chip",
   label: "label",
   color: "color",
@@ -50,7 +51,7 @@ test("one query per decorator, over the refs of its kind", () => {
 // tsk934: a large table's row badges aren't cut off by one row limit —
 // the refs go in chunks, each with room for every ref's decorations.
 test("many refs are asked in chunks, each with room for all its decorations", () => {
-  const refs = Array.from({ length: 2 * REFS_PER_QUERY + 50 }, (_, i) => `oxplow:oxplow/work_item?id=tsk&provider=oxplow${i}`);
+  const refs = Array.from({ length: 2 * REFS_PER_QUERY + 50 }, (_, i) => workItemUri("oxplow", `tsk${i}`));
   const queries = decorationQueries(decorator({}), refs);
   expect(queries.map((q) => q.params.length)).toEqual([REFS_PER_QUERY, REFS_PER_QUERY, 50]);
   expect(queries.flatMap((q) => q.params)).toEqual(refs);

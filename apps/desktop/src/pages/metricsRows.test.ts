@@ -1,3 +1,4 @@
+import { metricUri } from "../uri/uri.js";
 import { describe, expect, it } from "bun:test";
 
 import {
@@ -93,7 +94,7 @@ describe("metricOrigin", () => {
     // as the eye reads the page.
     const sibs = metricOrigin(
       [section(["a", "b"]), section(["c"])],
-      (key) => ({ id: `metric:${key}`, kind: "metric", payload: null }),
+      (key) => ({ id: metricUri(key), kind: "metric", payload: null }),
     );
     expect(sibs.items.map((e) => e.ref.id)).toEqual([
       "oxplow:oxplow/metric?metric=a",

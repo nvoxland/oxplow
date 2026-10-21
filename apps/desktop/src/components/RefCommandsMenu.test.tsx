@@ -10,10 +10,10 @@ const realApi = await import("../api.js");
 mock.module("../api.js", () => ({
   ...realApi,
   listPersonCommands: async () => [
-    personSpec("tracker.item.estimate", { label: "Estimate in Fake…", group: "Tracker", about: "work_item", input: { ref: "{{ref}}", points: 3 } }),
-    personSpec("tracker.commit.sync", { label: "Sync", group: "Tracker", about: "commit", input: { sha: "{{ref.id}}" } }),
-    personSpec("oxplow.review.accept", { label: "Accept Review", group: "Review", about: "effort", input: { ref: "{{ref}}" } }),
-    personSpec("oxplow.review.request_changes", { label: "Request Changes", group: "Review", about: "effort", input: { ref: "{{ref}}" } }),
+    personSpec("tracker.item.estimate", { label: "Estimate in Fake…", group: "Tracker", about: "oxplow/work_item", input: { ref: "{{ref}}", points: 3 } }),
+    personSpec("tracker.commit.sync", { label: "Sync", group: "Tracker", about: "oxplow/commit", input: { sha: "{{ref.id}}" } }),
+    personSpec("oxplow.review.accept", { label: "Accept Review", group: "Review", about: "oxplow/effort", input: { ref: "{{ref}}" } }),
+    personSpec("oxplow.review.request_changes", { label: "Request Changes", group: "Review", about: "oxplow/effort", input: { ref: "{{ref}}" } }),
   ],
 }));
 const { RefCommandsMenu } = await import("./RefCommandsMenu.js");

@@ -66,6 +66,7 @@ mock.module("../api.js", () => ({
     return { lens: { id, title: id, columns: [], viz: "table", actions: [] }, params, result: { columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] } }, alert: null };
   },
 }));
+const { pageUri, resourceUri } = await import("../uri/uri.js");
 const { WorkItemPage } = await import("./WorkItemPage.js");
 const { PageNavigationContext } = await import("../tabs/PageNavigationContext.js");
 
@@ -73,8 +74,9 @@ const { setResources } = await import("../resources.js");
 // The kinds are read, as in the app: a collector has no page of its own.
 beforeEach(() =>
   setResources(
-    [["work_item", "{ref}"], ["collector", null]].map(([kind, page]) => ({
-      kind: kind!, extension: null, label: null, idPattern: ".*", wikilinks: [], resolve: null, page, icon: null,
+    ["work_item", "collector"].map((name) => ({
+      resource: `oxplow/${name}`, extension: "oxplow", label: name, params: {}, additional: false, resolve: null,
+      title: null, searchable: null, icon: null, wikilink: null, page: null,
     })),
   ),
 );
@@ -186,6 +188,9 @@ const pageWithNav = () => {
   );
 };
 
+// An edge names its end by (kind, id); an unknown kind is oxplow's, unresolved.
+const DEAD = resourceUri("oxplow/acme_pr", { id: 12 });
+
 const aboutEdge = (kind: string, id: string, resolved: boolean, label: string | null) => ({
   source_kind: "work_item",
   source_id: "fake:W-1",
@@ -202,7 +207,7 @@ test("Link… takes any ref: its placeholder says so, and an `about` link to an 
   const view = page();
   fireEvent.click(await waitFor(() => view.getByTestId("work-item-link-open")));
   expect((view.getByTestId("work-item-link-target") as HTMLInputElement).placeholder).toBe(
-    "a ref: work_item:…, oxplow:oxplow/effort?id=eff12, oxplow:oxplow/collector?collector=x/y",
+    "a URI, e.g. oxplow:oxplow/effort?id=eff12",
   );
   fireEvent.change(view.getByTestId("work-item-link-link_type"), { target: { value: "about" } });
   fireEvent.change(view.getByTestId("work-item-link-target"), { target: { value: "oxplow:oxplow/effort?id=eff12" } });
@@ -217,7 +222,7 @@ test("a link row's right-click menu has Unlink, which runs work_item.unlink with
   outbound = [aboutEdge("collector", "triage/todos", true, "Triage todos")];
   const view = pageWithNav();
   fireEvent.click(await waitFor(() => view.getByTestId("page-nav-outbound-toggle")));
-  const row = await waitFor(() => view.getByTestId("backlinks-entry-page:settings"));
+  const row = await waitFor(() => view.getByTestId(`backlinks-entry-${pageUri("settings")}`));
   expect(row.textContent).toContain("Triage todos");
   fireEvent.contextMenu(row, { clientX: 3, clientY: 3 });
   fireEvent.click(view.getByTestId("menu-item-unlink"));
@@ -233,8 +238,8 @@ test("a link to a ref nothing resolves is a dead link: raw text, and it still un
   outbound = [aboutEdge("acme_pr", "12", false, null)];
   const view = pageWithNav();
   fireEvent.click(await waitFor(() => view.getByTestId("page-nav-outbound-toggle")));
-  const row = await waitFor(() => view.getByTestId("backlinks-dead-acme_pr:12"));
-  expect(row.textContent).toContain("acme_pr:12");
+  const row = await waitFor(() => view.getByTestId(`backlinks-dead-${DEAD}`));
+  expect(row.textContent).toContain(DEAD);
   fireEvent.contextMenu(row, { clientX: 3, clientY: 3 });
   expect(view.getByTestId("menu-item-unlink")).toBeTruthy();
 });

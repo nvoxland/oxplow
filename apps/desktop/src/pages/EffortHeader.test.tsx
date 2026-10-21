@@ -1,3 +1,4 @@
+import { workItemUri } from "../uri/uri.js";
 import { afterEach, expect, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
@@ -82,7 +83,7 @@ test("an open effort closes; a closed one says how it closed", async () => {
 });
 
 test("a typed item is the active list's id or a work item ref", () => {
-  const ids = (id: string) => (/^tsk\d+$/.test(id) ? `work_item:oxplow:${id}` : null);
+  const ids = (id: string) => (/^tsk\d+$/.test(id) ? workItemUri("oxplow", id) : null);
   expect(normalizeWorkItemInput(" tsk42 ", ids)).toBe("oxplow:oxplow/work_item?id=tsk42&provider=oxplow");
   expect(normalizeWorkItemInput("oxplow:oxplow/work_item?id=ENG-12&provider=issues", ids)).toBe("oxplow:oxplow/work_item?id=ENG-12&provider=issues");
   expect(normalizeWorkItemInput("fix it", ids)).toBeNull();

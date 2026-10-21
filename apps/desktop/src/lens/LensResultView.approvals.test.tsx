@@ -1,5 +1,6 @@
 import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { keyOf, proposalUri } from "../uri/uri.js";
 import type { Lens, LensRun } from "../tauri-bridge/generated/bindings.js";
 
 // `viz: approvals` draws the kit's Approvals: it reads the pending
@@ -12,10 +13,10 @@ const decided: [number, boolean][] = [];
 const columns = ["id", "ref", "created_at", "command", "input", "actor_kind", "actor_id", "thread_id", "thread_title", "key", "preview", "dry_run"];
 const row = (id: number, threadId: number, key: string) => [
   id,
-  `proposal:${id}`,
+  proposalUri(id),
   "2026-10-01T00:00:00Z",
   "oxplow.config.set",
-  JSON.stringify({ key: key.replace("config:", ""), value: "x" }),
+  JSON.stringify({ key: keyOf(key), value: "x" }),
   "agent",
   `thr${threadId}`,
   threadId,

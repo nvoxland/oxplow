@@ -18,8 +18,8 @@ mock.module("../../api.js", () => ({
   ...realApi,
   listExtensions: async () => extensions,
   listPersonCommands: async () => [
-    personSpec("tracker.item.estimate", { label: "Estimate in Fake", group: "Tracker", about: "work_item", input: { ref: "{{ref}}" } }),
-    personSpec("tracker.commit.sync", { label: "Sync", group: "Tracker", about: "commit" }),
+    personSpec("tracker.item.estimate", { label: "Estimate in Fake", group: "Tracker", about: "oxplow/work_item", input: { ref: "{{ref}}" } }),
+    personSpec("tracker.commit.sync", { label: "Sync", group: "Tracker", about: "oxplow/commit" }),
   ],
   querySql: async (sql: string, ...rest: unknown[]) => {
     if (!sql.includes("FROM v_work_item w")) return (realQuerySql as (...a: unknown[]) => unknown)(sql, ...rest);

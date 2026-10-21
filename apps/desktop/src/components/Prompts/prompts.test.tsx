@@ -3,14 +3,15 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import { subscribeAgentInput } from "../../agent-input-bus.js";
 import { askText, promptsAbout, type CatalogPrompt } from "./promptModel.js";
+import { effortUri, fileUri } from "../../uri/uri.js";
 import { promptsOf } from "./usePromptCatalog.js";
 
 // P6.D2: the prompt catalog, contextual suggestions, and EmptyState —
 // every Ask fills the agent's input and never sends.
 
 const catalog: CatalogPrompt[] = [
-  { prompt: "Which files did this effort touch?", about: "effort", source: { kind: "area", name: "work_items" } },
-  { prompt: "Who has changed this file the most?", about: "file", source: { kind: "area", name: "vcs" } },
+  { prompt: "Which files did this effort touch?", about: "oxplow/effort", source: { kind: "area", name: "work_items" } },
+  { prompt: "Who has changed this file the most?", about: "oxplow/file", source: { kind: "area", name: "vcs" } },
   { prompt: "Which PRs wait on me?", about: null, source: { kind: "extension", name: "gh" } },
 ];
 
@@ -40,19 +41,19 @@ afterEach(() => {
 
 test("v_prompt's rows are the catalog; prompts about a kind; asking about a ref leads with it", () => {
   expect(promptsOf(rows)).toEqual(catalog);
-  expect(promptsAbout(catalog, "effort").map((p) => p.prompt)).toEqual(["Which files did this effort touch?"]);
-  expect(askText("Who has changed this file the most?", "oxplow:oxplow/file?path=src/a.rs")).toBe(
-    "[oxplow ref oxplow:oxplow/file?path=src/a.rs] Who has changed this file the most?",
+  expect(promptsAbout(catalog, "oxplow/effort").map((p) => p.prompt)).toEqual(["Which files did this effort touch?"]);
+  expect(askText("Who has changed this file the most?", fileUri("src/a.rs"))).toBe(
+    `[oxplow ref ${fileUri("src/a.rs")}] Who has changed this file the most?`,
   );
   expect(askText("Which PRs wait on me?", null)).toBe("Which PRs wait on me?");
 });
 
 test("a page for an effort suggests its prompts, asked about that effort", async () => {
-  const view = render(<SuggestedPrompts refId="oxplow:oxplow/effort?id=12" />);
+  const view = render(<SuggestedPrompts refId={effortUri("eff12")} />);
   const ask = await waitFor(() => view.getByText("Which files did this effort touch?"));
   expect(view.queryByText("Who has changed this file the most?")).toBeNull();
   fireEvent.click(ask);
-  expect(inserted).toEqual(["[oxplow ref oxplow:oxplow/effort?id=12] Which files did this effort touch?"]);
+  expect(inserted).toEqual([`[oxplow ref ${effortUri("eff12")}] Which files did this effort touch?`]);
 });
 
 test("an empty state offers prompts; Ask fills the input", () => {

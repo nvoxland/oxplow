@@ -35,7 +35,7 @@ function renderTabs(opts: {
 
 test("right-click any tab exposes the universal close items", () => {
   const { getByTestId } = renderTabs({});
-  fireEvent.contextMenu(getByTestId("center-tab-file:b.ts"), { clientX: 10, clientY: 10 });
+  fireEvent.contextMenu(getByTestId("center-tab-oxplow:oxplow/file?path=b.ts"), { clientX: 10, clientY: 10 });
   expect(getByTestId("menu-item-tab.close-others")).toBeTruthy();
   expect(getByTestId("menu-item-tab.close-right")).toBeTruthy();
 });
@@ -43,7 +43,7 @@ test("right-click any tab exposes the universal close items", () => {
 test("Close Other Tabs closes every closable tab except the anchor", () => {
   const closed: string[] = [];
   const { getByTestId } = renderTabs({ onClose: (id) => closed.push(id) });
-  fireEvent.contextMenu(getByTestId("center-tab-file:b.ts"), { clientX: 10, clientY: 10 });
+  fireEvent.contextMenu(getByTestId("center-tab-oxplow:oxplow/file?path=b.ts"), { clientX: 10, clientY: 10 });
   fireEvent.click(getByTestId("menu-item-tab.close-others"));
   expect(closed).toEqual(["oxplow:oxplow/file?path=a.ts", "oxplow:oxplow/page?left=disk&page=diff&path=c&right=disk"]);
 });
@@ -51,14 +51,14 @@ test("Close Other Tabs closes every closable tab except the anchor", () => {
 test("Close Tabs to the Right closes only tabs after the anchor", () => {
   const closed: string[] = [];
   const { getByTestId } = renderTabs({ onClose: (id) => closed.push(id) });
-  fireEvent.contextMenu(getByTestId("center-tab-file:a.ts"), { clientX: 10, clientY: 10 });
+  fireEvent.contextMenu(getByTestId("center-tab-oxplow:oxplow/file?path=a.ts"), { clientX: 10, clientY: 10 });
   fireEvent.click(getByTestId("menu-item-tab.close-right"));
   expect(closed).toEqual(["oxplow:oxplow/file?path=b.ts", "oxplow:oxplow/page?left=disk&page=diff&path=c&right=disk"]);
 });
 
 test("Close Tabs to the Right is disabled on the last tab", () => {
   const { getByTestId } = renderTabs({});
-  fireEvent.contextMenu(getByTestId("center-tab-page:diff?path=c&left=disk&right=disk"), { clientX: 10, clientY: 10 });
+  fireEvent.contextMenu(getByTestId("center-tab-oxplow:oxplow/page?left=disk&page=diff&path=c&right=disk"), { clientX: 10, clientY: 10 });
   expect((getByTestId("menu-item-tab.close-right") as HTMLButtonElement).disabled).toBe(true);
 });
 
@@ -71,7 +71,7 @@ test("closing a batch that swept the active tab refocuses the anchor", () => {
     onClose: (id) => closed.push(id),
     onActivate: (id) => activated.push(id),
   });
-  fireEvent.contextMenu(getByTestId("center-tab-file:b.ts"), { clientX: 10, clientY: 10 });
+  fireEvent.contextMenu(getByTestId("center-tab-oxplow:oxplow/file?path=b.ts"), { clientX: 10, clientY: 10 });
   fireEvent.click(getByTestId("menu-item-tab.close-others"));
   expect(closed).toEqual(["oxplow:oxplow/file?path=a.ts", "oxplow:oxplow/page?left=disk&page=diff&path=c&right=disk"]);
   // The active tab (a.ts) was closed → selection falls back to the anchor.
@@ -86,7 +86,7 @@ test("closing tabs that leave the active tab open does not refocus", () => {
     activeId: "oxplow:oxplow/file?path=a.ts",
     onActivate: (id) => activated.push(id),
   });
-  fireEvent.contextMenu(getByTestId("center-tab-file:b.ts"), { clientX: 10, clientY: 10 });
+  fireEvent.contextMenu(getByTestId("center-tab-oxplow:oxplow/file?path=b.ts"), { clientX: 10, clientY: 10 });
   fireEvent.click(getByTestId("menu-item-tab.close-right"));
   expect(activated).toEqual([]);
 });
@@ -108,9 +108,9 @@ test("a session's tab closes on one click of its ×", () => {
       onReorder={() => {}}
     />,
   );
-  fireEvent.click(getByTestId("center-tab-close-agent_session:ses7"));
+  fireEvent.click(getByTestId("center-tab-close-oxplow:oxplow/agent_session?id=ses7"));
   expect(closed).toEqual(["oxplow:oxplow/agent_session?id=ses7"]);
-  expect(queryByTestId("center-tab-close-agent_session:ses7-confirm")).toBeNull();
+  expect(queryByTestId("center-tab-close-oxplow:oxplow/agent_session?id=ses7-confirm")).toBeNull();
 });
 
 // An agent session's tab shows its harness's logo, else the generic robot.
@@ -142,10 +142,10 @@ test("a body with the same key keeps its state when its id changes", () => {
       </button>
     );
   }
-  const tab = (id: string): CenterTab => ({ id, key: "t1/lens:x/y", label: "Lens", closable: true, render: () => <Counter /> });
+  const tab = (id: string): CenterTab => ({ id, key: "t1/oxplow:oxplow/lens?lens=x/y", label: "Lens", closable: true, render: () => <Counter /> });
   const view = render(<CenterTabs tabs={[tab("oxplow:oxplow/lens?lens=x/y")]} activeId="oxplow:oxplow/lens?lens=x/y" onActivate={() => {}} onClose={() => {}} onReorder={() => {}} />);
   fireEvent.click(view.getByTestId("count"));
   view.rerender(<CenterTabs tabs={[tab("oxplow:oxplow/lens?lens=x/y&range=7d")]} activeId="oxplow:oxplow/lens?lens=x/y&range=7d" onActivate={() => {}} onClose={() => {}} onReorder={() => {}} />);
   expect(view.getByTestId("count").textContent).toBe("1");
-  expect(view.getByTestId("center-tab-body-lens:x/y?range=7d")).not.toBeNull();
+  expect(view.getByTestId("center-tab-body-oxplow:oxplow/lens?lens=x/y&range=7d")).not.toBeNull();
 });

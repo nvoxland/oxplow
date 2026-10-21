@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { fileRef, lensRef, pageTabRef, wikiPageRef } from "./pageRefs.js";
+import { lensUri, pageUri, wikiUri } from "../uri/uri.js";
 import {
   activate,
   back,
@@ -203,7 +204,7 @@ describe("bodies: what stays mounted", () => {
     s = setView(s, slot, lensRef("x/y", { commit: "abc" }), { push: true });
     s = navigate(s, slot, e(a));
     const out = bodies(s.tabs[0]!);
-    expect(out.map((x) => x.key)).toEqual([`${slot}/lens:x/y`, `${slot}/wiki:a`]);
+    expect(out.map((x) => x.key)).toEqual([`${slot}/${lensUri("x/y")}`, `${slot}/${wikiUri("a")}`]);
     // The lens body shows its nearest entry: the one with the commit.
     expect(out[0]!.entry.ref.id).toBe("oxplow:oxplow/lens?commit=abc&lens=x/y");
     expect(out.map((x) => x.current)).toEqual([false, true]);
@@ -215,7 +216,7 @@ describe("bodies: what stays mounted", () => {
     let s = open(emptySession(), e(pageTabRef("settings", { area: "agents" })));
     const slot = s.active!;
     s = navigate(s, slot, e(pageTabRef("settings", { area: "data" })));
-    expect(bodies(s.tabs[0]!)).toMatchObject([{ key: `${slot}/page:settings`, current: true, entry: { ref: { id: "oxplow:oxplow/page?area=data&page=settings" } } }]);
+    expect(bodies(s.tabs[0]!)).toMatchObject([{ key: `${slot}/${pageUri("settings")}`, current: true, entry: { ref: { id: "oxplow:oxplow/page?area=data&page=settings" } } }]);
   });
 
   test("identityOf is the ref without its view", () => {

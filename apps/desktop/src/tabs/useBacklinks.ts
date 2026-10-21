@@ -161,7 +161,7 @@ function entryFor(edge: BacklinkEdge, kind: string, id: string): BacklinkEntry {
  *  URI-SWITCH: `page_ref` stores URIs, and this goes. */
 function edgeUri(kind: string, id: string): string {
   if (kind === "work_item") return workItemUriOfId(id) ?? keyedUri("oxplow/work_item", id);
-  return keyedUri(`oxplow/${kind}`, id);
+  return keyedUri(kind.includes("/") ? kind : `oxplow/${kind}`, id);
 }
 
 /**

@@ -280,6 +280,13 @@ export function linkTarget(uri: string): string {
   return uri.replace(/\(/g, "%28").replace(/\)/g, "%29");
 }
 
+/** A resource's short name for the chrome's tables (icons, labels): oxplow's
+ *  own drop their namespace (`oxplow/file` → `file`), an extension's keep
+ *  theirs (`acme/pr`). */
+export function shortResource(resource: string): string {
+  return resource.startsWith("oxplow/") ? resource.slice("oxplow/".length) : resource;
+}
+
 /** Whether `text` is a URI of another scheme (the web, mail): a resource
  *  oxplow hands to that scheme's renderer. */
 export function isExternal(text: string): boolean {

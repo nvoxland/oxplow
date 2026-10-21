@@ -15,13 +15,13 @@ mock.module("../api.js", () => ({
     personSpec("oxplow.handoff.send", {
       label: "Hand Off Work…",
       group: "Threads",
-      about: "thread",
+      about: "oxplow/thread",
       input: { from_thread: "{{ref}}" },
     }),
     personSpec("tracker.item.estimate", {
       label: "Estimate",
       group: "Tracker",
-      about: "work_item",
+      about: "oxplow/work_item",
     }),
   ],
 }));

@@ -68,7 +68,7 @@ test("a failed decision shows its error on the card", async () => {
     <ProposalCard
       proposal={proposal}
       onDecide={async () => {
-        throw new Error("oxplow:oxplow/proposal?id=7%20is%20already%20declined");
+        throw new Error("proposal 7 is already declined");
       }}
     />,
   );

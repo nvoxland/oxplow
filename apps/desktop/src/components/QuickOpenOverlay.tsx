@@ -1,6 +1,6 @@
 import type { CommandEntry } from "./quickOpenResults.js";
 import { useAppPreference } from "../prefs/remembered.js";
-import { commandUri, fileUri, pageUri } from "../uri/uri.js";
+import { commandUri, fileUri, pageUri, shortResource } from "../uri/uri.js";
 import { SEARCH_TRIGGER_TESTID } from "./TitleBar.js";
 import type { CSSProperties } from "react";
 import { useResources } from "../resources.js";
@@ -504,7 +504,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                     }}
                   >
                     <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}>
-                      <PageKindIcon kind={result.hit.kind} size={14} style={{ color: "var(--text-secondary)" }} />
+                      <PageKindIcon kind={shortResource(result.hit.kind)} size={14} style={{ color: "var(--text-secondary)" }} />
                     </span>
                     <span style={{ flexShrink: 0, maxWidth: "40%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {result.hit.title || result.hit.ref}
@@ -512,7 +512,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                     <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--muted)", fontSize: 11 }}>
                       {result.hit.snippet}
                     </span>
-                    <span style={{ color: "var(--muted)", fontSize: 11 }}>{pageKindLabel(result.hit.kind)}</span>
+                    <span style={{ color: "var(--muted)", fontSize: 11 }}>{pageKindLabel(shortResource(result.hit.kind))}</span>
                   </button>
                 );
               }

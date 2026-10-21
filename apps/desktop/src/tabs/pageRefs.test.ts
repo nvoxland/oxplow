@@ -40,7 +40,7 @@ import {
   type PagePayload,
 } from "./pageRefs.js";
 import type { TabRef } from "./tabState.js";
-import { parseUri } from "../uri/uri.js";
+import { idOf, typeOf } from "../uri/uri.js";
 
 describe("pageRefs", () => {
   test("an agent session's tab is its ref, pinned; the picker is a closable page", () => {
@@ -127,12 +127,12 @@ describe("pageRefs", () => {
 
   test("route params stay readable: only the ref-reserved and query-syntax characters are escaped", () => {
     // `/` and `:` are legal raw in a ref id and in a query value; `#`, `=`,
-    // `&` and `%` are not.
+    // `&` and `%` are not (a url's own `&` is escaped inside the one `url` value).
     expect(externalUrlRef("https://x.test/p?a=1&b=2#frag").id)
-      .toBe("oxplow:oxplow/page?b=2%23frag&page=external-url&url=https://x.test/p?a%3D1");
+      .toBe("oxplow:oxplow/page?page=external-url&url=https://x.test/p?a%3D1%26b%3D2%23frag");
     // Every route id is a valid canonical ref of kind `page`.
-    expect(parseUri(externalUrlRef("https://x.test/p?a=1#frag").id)?.kind).toBe("page");
-    expect(parseUri(diffRef({ path: "a@b/c%d.ts", leftVersion: "working", rightVersion: "working", baseLabel: "" }).id)?.kind).toBe("page");
+    expect(typeOf(externalUrlRef("https://x.test/p?a=1#frag").id)).toBe("oxplow/page");
+    expect(typeOf(diffRef({ path: "a@b/c%d.ts", leftVersion: "working", rightVersion: "working", baseLabel: "" }).id)).toBe("oxplow/page");
   });
 
   test("a new item's parent is its param", () => {
@@ -344,7 +344,7 @@ describe("refFromTabId", () => {
   test("lensRef carries params in the id, sorted, and round-trips them", () => {
     const r = lensRef("x/effort-tests", { effort_id: 12, label: "a b" });
     expect(r.id).toBe("oxplow:oxplow/lens?effort_id=12&label=a%20b&lens=x/effort-tests");
-    expect(parseUri(r.id)?.kind).toBe("lens");
+    expect(typeOf(r.id)).toBe("oxplow/lens");
     expect(r.payload).toEqual({ lensId: "x/effort-tests", params: { effort_id: 12, label: "a b" } });
     expect(refFromTabId(r.id)).toEqual(r);
     expect(lensRef("x/y", {}).id).toBe("oxplow:oxplow/lens?lens=x/y");
@@ -353,7 +353,8 @@ describe("refFromTabId", () => {
   test("a metric's view rides in its ref as a query and round-trips", () => {
     const r = metricRef("oxplow.todos", { slice: "oxplow.language", range: "2026-06-01..2026-06-03" });
     expect(r.id).toBe("oxplow:oxplow/metric?metric=oxplow.todos&range=2026-06-01..2026-06-03&slice=oxplow.language");
-    expect(parseUri(r.id)).toMatchObject({ kind: "metric", id: "oxplow.todos?range=2026-06-01..2026-06-03&slice=oxplow.language" });
+    expect(typeOf(r.id)).toBe("oxplow/metric");
+    expect(idOf(r.id, "oxplow/metric")).toBe("oxplow.todos");
     expect(refFromTabId(r.id)).toEqual(r);
     expect(viewParamsOf(r)).toEqual({ slice: "oxplow.language", range: "2026-06-01..2026-06-03" });
     expect(withViewParams(metricRef("oxplow.todos"), { range: "30d" }).id).toBe("oxplow:oxplow/metric?metric=oxplow.todos&range=30d");

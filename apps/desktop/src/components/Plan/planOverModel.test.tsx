@@ -1,3 +1,4 @@
+import { workItemUri } from "../../uri/uri.js";
 import { afterEach, expect, test } from "bun:test";
 import { cleanup, render } from "@testing-library/react";
 
@@ -48,5 +49,5 @@ test("the list renders a thread's work read from v_work_item", () => {
   );
   expect(view.container.textContent).toContain("Epic");
   expect(view.container.textContent).toContain("Loose item");
-  expect(view.getByTestId("tasks-row-work_item:issues:E-3")).not.toBeNull();
+  expect(view.getByTestId(`tasks-row-${workItemUri("issues", "E-3")}`)).not.toBeNull();
 });

@@ -30,7 +30,7 @@ mock.module("../api.js", () => ({
   },
   getCommand: async () => Promise.reject(new Error("no bridge in tests")),
   listPersonCommands: async () => [
-    personSpec("tracker.item.flag", { label: "Flag It", group: "Tracker", about: "work_item", input: { ref: "{{ref}}" } }),
+    personSpec("tracker.item.flag", { label: "Flag It", group: "Tracker", about: "oxplow/work_item", input: { ref: "{{ref}}" } }),
   ],
   listExtensions: async () => [
     {
@@ -39,7 +39,7 @@ mock.module("../api.js", () => ({
       ui: {
         slots: [],
         decorators: [
-          { id: "tracker/0", extension: "tracker", view: "v_tracker_flags", kind: "work_item", placement: "row-badge", label: "label", color: null },
+          { id: "tracker/0", extension: "tracker", view: "v_tracker_flags", kind: "oxplow/work_item", placement: "row-badge", label: "label", color: null },
         ],
       },
     },
@@ -136,6 +136,7 @@ test("rows are focusable and open their menu from the keyboard, in every row com
 // A row that links to a ref offers the commands about that kind of ref
 // (their `ui.about`), after Ask About This and the lens's row actions.
 test("a row's linked ref gets its kind's commands", async () => {
+  commandRuns.length = 0; // an earlier test's action reports its failure here
   recordRefOffers(commandRuns);
   const linked: LensRun = {
     lens: { ...lens, columns: [{ key: "ref", label: null, link: { kind: "page", from: null, line: null, base: null, head: null } }] },
