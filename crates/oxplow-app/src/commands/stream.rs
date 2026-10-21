@@ -69,8 +69,8 @@ pub struct RenameInput {
 pub struct SetPromptInput {
     /// The stream (`stream:str1`).
     pub stream: String,
-    /// Appended to every agent prompt in this stream; empty or absent
-    /// clears it.
+    /// Appended to every agent prompt in this stream; empty (or only
+    /// whitespace) or absent clears it.
     #[schemars(extend("contentMediaType" = "text/markdown"))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
@@ -336,7 +336,7 @@ pub fn set_prompt_op() -> Op {
             let mut stream = load(ctx, ref_id(&input.stream, "stream", "/stream")?)?;
             let before = std::mem::replace(
                 &mut stream.custom_prompt,
-                input.prompt.filter(|p| !p.is_empty()),
+                input.prompt.filter(|p| !p.trim().is_empty()),
             );
             stream.updated_at = Timestamp::now();
             upsert_tx(ctx.conn, &stream).map_err(sql)?;
@@ -446,6 +446,18 @@ mod tests {
             primary(&fx).await.custom_prompt.as_deref(),
             Some("be brief")
         );
+        // A prompt that is only whitespace clears it, from any caller.
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                SET_PROMPT,
+                json!({ "stream": r, "prompt": "  \n\t " }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(primary(&fx).await.custom_prompt, None);
     }
 
     /// Archiving is destructive: a person is asked first, and an agent

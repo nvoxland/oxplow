@@ -62,7 +62,8 @@ pub struct RenameInput {
 pub struct SetPromptInput {
     /// The thread (`thread:thr12`).
     pub thread: String,
-    /// Appended to the agent's prompt; empty or absent clears it.
+    /// Appended to the agent's prompt; empty (or only whitespace) or absent
+    /// clears it.
     #[schemars(extend("contentMediaType" = "text/markdown"))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
@@ -294,7 +295,7 @@ pub fn set_prompt_op() -> Op {
             let mut thread = load(ctx, ref_id(&input.thread, "thread", "/thread")?, "/thread")?;
             let before = std::mem::replace(
                 &mut thread.custom_prompt,
-                input.prompt.filter(|p| !p.is_empty()),
+                input.prompt.filter(|p| !p.trim().is_empty()),
             );
             thread.updated_at = Timestamp::now();
             save(ctx, &thread)?;
@@ -790,6 +791,23 @@ mod tests {
             &Actor::Human,
             SET_PROMPT,
             json!({ "thread": r, "prompt": "" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(thread(&fx, fx.thread).await.custom_prompt, None); // A prompt that is only whitespace clears it, from any caller.
+        run(
+            &fx,
+            &Actor::Human,
+            SET_PROMPT,
+            json!({ "thread": r, "prompt": "be brief" }),
+        )
+        .await
+        .unwrap();
+        run(
+            &fx,
+            &Actor::Human,
+            SET_PROMPT,
+            json!({ "thread": r, "prompt": " \n\t " }),
         )
         .await
         .unwrap();
