@@ -668,12 +668,12 @@ def transform(x):
     thread = e["anchors"].get("thread_id")
     if to == "in_progress" and thread != None:
         return {"commands": [{"name": "oxplow.effort.open",
-                              "input": {"thread": ref.build("thread", thread), "work_item": item}}]}
+                              "input": {"thread": uri.build("thread", thread), "work_item": item}}]}
     if to == "done" or to == "canceled":
         rows = scope("sql.read", {"sql": "SELECT id FROM v_effort WHERE work_item = :w AND ended_at IS NULL",
                                   "params": {"w": item}})
         return {"commands": [{"name": "oxplow.effort.close",
-                              "input": {"effort": ref.build("effort", "eff" + str(r["id"])), "reason": "switch"}}
+                              "input": {"effort": uri.build("effort", "eff" + str(r["id"])), "reason": "switch"}}
                              for r in rows]}
     return {"skip": "a move that changes no effort"}
 "#

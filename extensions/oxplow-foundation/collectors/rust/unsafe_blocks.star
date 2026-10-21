@@ -12,5 +12,5 @@ def transform(input):
     for f in files("**/*.rs"):
         c = len(ast_query(f["text"], "rust", "(unsafe_block) @u"))
         if c > 0:
-            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "unsafe_block", "subject": ref.build("file", f["path"]), "path": f["path"], "dims": {"oxplow.language": "rust"}})
+            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "unsafe_block", "subject": uri.build("file", f["path"]), "path": f["path"], "dims": {"oxplow.language": "rust"}})
     return {"facts": facts}

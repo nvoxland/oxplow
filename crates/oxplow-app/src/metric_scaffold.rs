@@ -284,7 +284,7 @@ fn collector_script(starter: &MetricStarter, measure: &str, area: &str) -> Strin
          \x20       facts.append({{\n\
          \x20           \"measure\": \"{measure}\",\n\
          \x20           \"value\": len(over),\n\
-         \x20           \"subject\": ref.build(\"file\", f[\"path\"]),\n\
+         \x20           \"subject\": uri.build(\"file\", f[\"path\"]),\n\
          \x20           \"path\": f[\"path\"],\n\
          \x20           \"line\": worst[\"start_line\"],  # where the lens links to\n\
          \x20           \"dims\": {{\"{area}\": area(f[\"path\"])}},\n\

@@ -1237,7 +1237,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             ext.join("files.star"),
-            "def transform(x):\n    return {\"facts\": [{\"measure\": \"work.files\", \"value\": len(files(\"**\")), \"subject\": ref.build(\"file\", \"src/a.rs\")}]}\n",
+            "def transform(x):\n    return {\"facts\": [{\"measure\": \"work.files\", \"value\": len(files(\"**\")), \"subject\": uri.build(\"file\", \"src/a.rs\")}]}\n",
         )
         .unwrap();
         deploy_sources(&svc).await;

@@ -51,7 +51,7 @@ its ref kind from `KINDS` (`uri::types::core_types`), so a new kind is
 linkable with no other change. Text names a contribution as a
 `ContributionRef` (`FromStr`); a local ref says its owner, a global one is
 resolved by the catalog (who declares that name). Starlark reads one with
-`ref.contribution(r)` → `{ kind, extension, id }`.
+`uri.contribution(r)` → `{ kind, extension, id }`.
 
 At load, `check_ids` turns an id that breaks the grammar into a load
 error, and the folder name must be a valid extension name

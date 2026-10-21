@@ -54,7 +54,7 @@ def read(sql, effort_id):
 
 def transform(x):
     effort = x["input"]["effort"]
-    if not ref.is_ref(effort) or ref.kind(effort) != "effort":
+    if not uri.is_uri(effort) or uri.type(effort) != "effort":
         return {"refuse": "`effort` is an effort ref, `effort:<id>`"}
     found = scope("sql.read", {
         "sql": "SELECT e.id, e.work_item, coalesce(w.title, '') AS title FROM v_effort e "

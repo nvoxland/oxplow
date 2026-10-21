@@ -61,7 +61,7 @@ def _quote(reason):
 def transform(x):
     event = x["event"]
     p = event["payload"]
-    named = ref.contribution(p["contribution"])
+    named = uri.contribution(p["contribution"])
     extension, contribution, kind = named["extension"], named["id"], named["kind"]
     reason = p["reason"]
     prefix = "Repair %s %s:" % (extension, contribution)

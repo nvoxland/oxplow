@@ -575,7 +575,7 @@ pub(crate) fn run_starlark_inner(
         .with(collect_helpers)
         .with(crate::ai::ai_builtins)
         .with(crate::scope::scope_builtins)
-        .with(crate::refs::ref_builtins)
+        .with(crate::uri::uri_builtins)
         .build();
 
     Module::with_temp_heap(|module| {

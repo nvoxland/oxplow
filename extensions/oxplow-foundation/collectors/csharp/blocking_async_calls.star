@@ -19,5 +19,5 @@ def transform(input):
             elif m["capture"] == "wait" and m["text"] == "Wait":
                 c += 1
         if c > 0:
-            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "blocking_async", "subject": ref.build("file", f["path"]), "path": f["path"], "dims": {"oxplow.language": "csharp"}})
+            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "blocking_async", "subject": uri.build("file", f["path"]), "path": f["path"], "dims": {"oxplow.language": "csharp"}})
     return {"facts": facts}

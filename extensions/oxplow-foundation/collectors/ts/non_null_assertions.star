@@ -17,5 +17,5 @@ def transform(input):
     for tri in _ts_files():
         c = len(ast_query(tri[1], tri[2], "(non_null_expression) @n"))
         if c > 0:
-            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "non_null_assertion", "subject": ref.build("file", tri[0]), "path": tri[0], "dims": {"oxplow.language": "typescript"}})
+            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "non_null_assertion", "subject": uri.build("file", tri[0]), "path": tri[0], "dims": {"oxplow.language": "typescript"}})
     return {"facts": facts}

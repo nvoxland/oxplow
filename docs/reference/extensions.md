@@ -390,9 +390,9 @@ commands:
   effort policies and provider host calls. A complete result does not
   prove every source was collected.
 - Refs are carried, not assembled. Every script has `ref`:
-  `ref.build(kind, id, rev=, frag=)` makes one (`ref.build("file",
-  f["path"])`), and `ref.parse(r)` (`{kind, id, rev, frag}`),
-  `ref.id(r, kind=)`, `ref.kind(r)` and `ref.is_ref(v)` read one. In SQL,
+  `uri.build(kind, id, rev=, frag=)` makes one (`uri.build("file",
+  f["path"])`), and `uri.parse(r)` (`{kind, id, rev, frag}`),
+  `uri.id(r, kind=)`, `uri.type(r)` and `uri.is_uri(v)` read one. In SQL,
   select a model's `ref` column and compare refs to refs (`WHERE ref =
   :ref`); don't concatenate `'effort:eff' || id` or slice a ref. A ref
   can outlive what it names, so store it even when the thing may go.

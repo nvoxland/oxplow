@@ -25,5 +25,5 @@ def transform(input):
             if m["text"] == "console" and (m["capture"] == "o" or m["capture"] == "c"):
                 c += 1
         if c > 0:
-            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "console_call", "subject": ref.build("file", tri[0]), "path": tri[0], "dims": {"oxplow.language": "typescript"}})
+            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "console_call", "subject": uri.build("file", tri[0]), "path": tri[0], "dims": {"oxplow.language": "typescript"}})
     return {"facts": facts}

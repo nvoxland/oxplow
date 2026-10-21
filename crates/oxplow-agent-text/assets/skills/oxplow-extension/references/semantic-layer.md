@@ -46,9 +46,9 @@ Carry refs; never assemble or dissect them:
   thread_id)` gives `lens:oxplow-bundled/thread-activity?thread_id=7`
   (params escaped, a NULL value left out; an odd argument count is an
   error). Never `'lens:…?x=' || value`.
-- **In a script**, build with `ref.build("file", f["path"])` and read
-  with `ref.parse(r)` / `ref.id(r, kind = "effort")` (which refuses a ref
-  of another kind) / `ref.kind(r)` / `ref.is_ref(v)`. Never
+- **In a script**, build with `uri.build("file", f["path"])` and read
+  with `uri.parse(r)` / `uri.id(r, kind = "effort")` (which refuses a ref
+  of another kind) / `uri.type(r)` / `uri.is_uri(v)`. Never
   `"effort:eff" + str(id)` or `r[len("effort:eff"):]`.
 - **In a lens action's input**, pass a row's ref column
   (`{ ref: "{{row.ref}}" }`), not a ref rebuilt from an id.

@@ -12,7 +12,7 @@ evidence you were not given."""
 
 def transform(x):
     effort = x["input"]["effort"]
-    if not ref.is_ref(effort) or ref.kind(effort) != "effort":
+    if not uri.is_uri(effort) or uri.type(effort) != "effort":
         return {"refuse": "`effort` is an effort ref, `effort:<id>`"}
     return {"commands": [{
         "name": "effort_review.review.ask",
