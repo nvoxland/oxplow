@@ -10,6 +10,8 @@ test("a task made in the UI is on the thread's list", async ({ fresh }) => {
   await openNewTask(page);
   await page.getByTestId("lens-form-fields-title").fill("Made in the UI");
   await page.getByTestId("lens-form-fields-submit").click();
+  // The form gives way to the item it made.
+  await expect(page.locator('[data-testid="lens-form"]:visible')).toHaveCount(0);
   await expandRailSection(page, "ext:oxplow-bundled/work");
   await expect(page.getByTestId("rail-section-ext:oxplow-bundled/work")).toContainText("Made in the UI");
 });
