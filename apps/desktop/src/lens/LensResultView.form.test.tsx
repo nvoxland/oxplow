@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { useState, type ReactNode } from "react";
 import type { ActionThen, CommandSpec, Lens, LensRun } from "../tauri-bridge/generated/bindings.js";
 import { IpcCallError } from "../ipc-error.js";
 import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
@@ -226,4 +227,55 @@ test("`then: replace` sends the form's page out of history", async () => {
 
 test("`then: stay` keeps the form for the next entry", async () => {
   expect(await submitOnPage("stay")).toEqual([]);
+});
+
+/** A tab whose history state the form keeps its draft in: `state` is
+ *  what it holds, kept across the tab's renders. */
+function Tab({ state, children }: { state: Record<string, unknown>; children: ReactNode }) {
+  const [held, setHeld] = useState(state);
+  const nav = {
+    historyState: held,
+    setHistoryState: (patch: Record<string, unknown>) => {
+      Object.assign(state, patch);
+      setHeld({ ...state });
+    },
+  } as unknown as PageNavigation;
+  return <PageNavigationContext.Provider value={nav}>{children}</PageNavigationContext.Provider>;
+}
+
+// What the person typed is the tab's (history state): Back, Forward and a
+// restart give it back, and an edit form saves only when changed.
+test("an edit form keeps its draft in the tab and saves only when changed", async () => {
+  const state: Record<string, unknown> = {};
+  const edit: LensRun = {
+    lens: { ...lens, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["ref"], fields: ["title"], mode: "edit" }, actions: [] },
+    params: {},
+    result: { columns: [], rows: [], truncated: false },
+  } as unknown as LensRun;
+  const view = render(
+    <Tab state={state}>
+      <LensResultView run={edit} onOpenPage={() => {}} />
+    </Tab>,
+  );
+  const title = await waitFor(() => view.getByTestId("lens-form-fields-title") as HTMLInputElement);
+  expect((view.getByTestId("lens-form-fields-submit") as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(title, { target: { value: "Half" } });
+  expect(state["form:x/l"]).toEqual({ ref: "work_item:oxplow:tsk1", title: "Half" });
+  cleanup();
+
+  // The page again, from its kept step: the draft is there.
+  const again = render(
+    <Tab state={state}>
+      <LensResultView run={edit} onOpenPage={() => {}} />
+    </Tab>,
+  );
+  const kept = await waitFor(() => again.getByTestId("lens-form-fields-title") as HTMLInputElement);
+  await waitFor(() => expect(kept.value).toBe("Half"));
+  fireEvent.click(again.getByTestId("lens-form-fields-discard"));
+  expect(kept.value).toBe("Old");
+  expect(state["form:x/l"]).toBe(null);
+  fireEvent.change(kept, { target: { value: "New" } });
+  fireEvent.submit(again.getByTestId("lens-form-fields"));
+  await waitFor(() => expect(submits).toEqual([{ ref: "work_item:oxplow:tsk1", title: "New" }]));
+  await waitFor(() => expect(state["form:x/l"]).toBe(null));
 });

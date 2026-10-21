@@ -263,13 +263,15 @@ export function isComposite(viz: LensViz): boolean {
   return viz === "document" || viz === "dashboard";
 }
 
-/** Lens runs split for a page of sections (tsk1036): the ones to show, and
- *  the ones with nothing to show — no rows, no error, not a composite
- *  (whose parts decide) — folded into one "Nothing found" line. */
+/** Lens runs split for a page of sections: the ones to show, and the ones
+ *  with nothing to show — no rows, no error, not a composite (whose parts
+ *  decide) and not a form (which has no rows of its own) — folded into one
+ *  "Nothing found" line. */
 export function foldEmpty<T extends { run: LensRun | null; error: string | null }>(
   runs: T[],
 ): { shown: T[]; empty: T[] } {
-  const isEmpty = (r: T) => r.error === null && r.run !== null && !isComposite(r.run.lens.viz) && r.run.result.rows.length === 0;
+  const isEmpty = (r: T) =>
+    r.error === null && r.run !== null && !isComposite(r.run.lens.viz) && r.run.lens.viz !== "form" && r.run.result.rows.length === 0;
   return { shown: runs.filter((r) => !isEmpty(r)), empty: runs.filter(isEmpty) };
 }
 

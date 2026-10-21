@@ -2042,7 +2042,8 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   missing one drops the composite. `lens_text` renders a composite as a
   `###` section per part. A standalone spec can't be either
   (`spec_problem`). The UI draws a document as kit `Section`s (empty ones
-  fold into one "Nothing found" line) and a dashboard as a kit `TileGrid`
+  fold into one "Nothing found" line; a form part never does: it has no
+  rows of its own) and a dashboard as a kit `TileGrid`
   (`lens/PartsViz.tsx`), running every part together and re-running all of
   them on any part's reads (`useLensRuns`).
 - **Columns** also take `width` (pixels: the table lays out fixed, so

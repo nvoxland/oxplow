@@ -1,4 +1,4 @@
-import { useCollapsedSet, type CollapsedSet } from "../tabs/useViewParam.js";
+import { useCollapsedSet, useDraft, type CollapsedSet } from "../tabs/useViewParam.js";
 import { Approvals } from "../kit/Approvals.js";
 import type { PageAction } from "../kit/actions.js";
 import type { PickedRow } from "./LensRail.js";
@@ -16,6 +16,7 @@ import { DiffPane } from "../components/Diff/DiffPane.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { ResultCompleteness } from "./ResultCompleteness.js";
 import { SchemaForm } from "../components/SchemaForm/SchemaForm.js";
+import type { Drafts } from "../components/SchemaForm/schemaFormModel.js";
 import { fieldErrors, needsConfirmation } from "../ipc-error.js";
 import { RouteLink } from "../tabs/RouteLink.js";
 import { parseRef } from "../refs/ref.js";
@@ -708,6 +709,10 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
   const [start, setStart] = useState<FormStart | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [round, setRound] = useState(0);
+  // What the person typed is this step of the tab's (Back, Forward and a
+  // restart give it back); null is untouched: the form shows the saved
+  // values, whatever they are now. A secret is never in it.
+  const [draft, setDraft, clearDraft] = useDraft<Drafts | null>(`form:${run.lens.id}`, null);
   const openAfter = useOpenAfter();
   const paramsKey = JSON.stringify(run.params);
   const form = useFormSubmit(
@@ -716,6 +721,7 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
     (outcome) => {
       // A fresh form for the next entry, started again from the current
       // values: an edit form shows what it saved.
+      clearDraft();
       setRound((r) => r + 1);
       if (start) {
         void openAfterAction({ label: run.lens.title, command: start.command.id, then: run.lens.form?.then ?? "open" }, outcome, openAfter);
@@ -739,6 +745,7 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
   }, [run.lens.id, paramsKey, streamId, round]);
   if (error) return <div style={{ color: "var(--severity-critical)", fontSize: "var(--text-sm)" }}>{error}</div>;
   if (!start) return null;
+  const mode = run.lens.form?.mode ?? "create";
   return (
     <div data-testid="lens-form">
       {form.pending ? (
@@ -758,7 +765,10 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
         fixed={start.fixed}
         choices={start.choices}
         serverErrors={form.serverErrors}
-        submitLabel={run.lens.title}
+        mode={mode}
+        submitLabel={mode === "edit" ? undefined : run.lens.title}
+        draft={draft}
+        onDraft={setDraft}
         busy={form.busy}
         onSubmit={(input) => void form.submit(input, false)}
         testIdPrefix="lens-form-fields"

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens } from "../tauri-bridge/generated/bindings.js";
-import { markParts, treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./lensModel.js";
+import { markParts, treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, foldEmpty, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./lensModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -571,5 +571,15 @@ describe("a column that highlights a param", () => {
       { text: ".", mark: true },
       { text: "b", mark: false },
     ]);
+  });
+});
+
+// A form has no rows of its own: it is never "nothing found".
+describe("foldEmpty", () => {
+  const part = (viz: string) => ({ run: { lens: { viz }, result: { rows: [] } } as unknown as import("../tauri-bridge/generated/bindings.js").LensRun, error: null });
+  test("a form part is shown with no rows; an empty table folds", () => {
+    const { shown, empty } = foldEmpty([part("form"), part("table")]);
+    expect(shown.map((r) => r.run!.lens.viz)).toEqual(["form"]);
+    expect(empty.map((r) => r.run!.lens.viz)).toEqual(["table"]);
   });
 });

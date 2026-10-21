@@ -20,6 +20,16 @@ Things I keep forgetting. Read this before adding any UI.
 
 ## Forms
 
+- **A form that edits what is saved saves only when changed.** Save is
+  disabled until a value differs from the saved one; Discard (and
+  Escape) puts the saved values back. What the person typed is a draft
+  in the tab's history state (`useDraft`; a lens form keeps it as
+  `form:<lens id>`), so Back, Forward and a restart give it back, and a
+  re-read of the saved values never wipes it. A secret (a key, a token)
+  is masked, never kept in a draft (history state is written to disk),
+  and blank means "keep the saved one". `SchemaForm`'s `mode: "edit"`,
+  `draft` / `onDraft` and `fields` specs do all of this; a lens form
+  declares it (`form: { mode: edit }`, `fields: [{ name, secret }]`).
 - **Edit-X-in-place actions are inline, not modal.** Click the
   displayed value to swap to an input; Enter commits, Escape reverts,
   blur commits unless Escape was pressed. The shared helper is
