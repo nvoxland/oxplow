@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { remoteBaseUrl } from "../tauri-bridge/transport.js";
 import type { LensRun } from "../tauri-bridge/generated/bindings.js";
 import { ComponentFrame, CustomBadge, noteStyle, useComponentBundle } from "./ComponentFrame.js";
+import type { HostedView } from "./hostedView.js";
 
 export function CustomComponentViz({
   run,
@@ -19,6 +20,7 @@ export function CustomComponentViz({
   fallback,
   onFailure,
   onReady,
+  view = null,
   base = remoteBaseUrl(),
   readyTimeoutMs = 3000,
 }: {
@@ -33,6 +35,9 @@ export function CustomComponentViz({
   onFailure?(reason: string): void;
   /** Its component said `ready`. */
   onReady?(): void;
+  /** Its host's view, where the host shares one (a replacement, a lens's
+   *  own page); none in a tile or a slot. */
+  view?: HostedView | null;
   /** The daemon that serves bundles; none means no component. */
   base?: string | null;
   readyTimeoutMs?: number;
@@ -93,6 +98,7 @@ export function CustomComponentViz({
         readyTimeoutMs={readyTimeoutMs}
         onFail={(why) => setFailed({ src, reason: why })}
         onReady={onReady}
+        view={view}
       />
     </div>
   );

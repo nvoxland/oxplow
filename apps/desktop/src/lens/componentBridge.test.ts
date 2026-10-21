@@ -65,25 +65,35 @@ test("theme tokens carry the root's color-scheme, so the frame paints no opaque 
   expect(tokensFromStyle(style)).toEqual({ "--accent": "#08f", "color-scheme": "dark" });
 });
 
-// tsk961: `init` carries the theme's tokens; the kit is a stylesheet the
-// bundle links from the daemon. Dropping `kitCss` made the protocol 2;
+// `init` carries the theme's tokens; the kit is a stylesheet the bundle
+// links from the daemon. Dropping `kitCss` made the protocol 2;
 // `navigate`'s `newTab` made it 3; an error's `field`, 4; a component as a
-// page (`page`, a null `run`) and the calls a page makes, 5.
-test("init carries the run, props and tokens, at protocol 7", () => {
+// page (`page`, a null `run`) and the calls a page makes, 5; a host's view
+// (`view`), apart from the page, 8.
+test("init carries the run, props and tokens, at protocol 8", () => {
   const r = { lens: { id: "x/b", custom: { component: "b", props: { a: 1 } } }, params: {}, result: { columns: [], rows: [], truncated: false } } as unknown as LensRun;
   expect(initMessage(r, { "--accent": "#08f" })).toEqual({
     type: "init",
-    protocol: 7,
+    protocol: 8,
     run: r,
     props: { a: 1 },
     page: null,
+    view: null,
     tokens: { "--accent": "#08f" },
   });
 });
 
-test("a component shown as a page gets its page and no run", () => {
-  const page = { viewParams: { from: "2026-10-01" }, historyState: { scroll: 3 }, streamId: "str1", threadId: "thr2" };
-  expect(initMessage(null, {}, page)).toEqual({ type: "init", protocol: 7, run: null, props: null, page, tokens: {} });
+test("a component shown as a page gets its page and its view, and no run", () => {
+  const page = { streamId: "str1", threadId: "thr2" };
+  const view = { viewParams: { from: "2026-10-01" }, historyState: { scroll: 3 } };
+  expect(initMessage(null, {}, page, view)).toEqual({ type: "init", protocol: 8, run: null, props: null, page, view, tokens: {} });
+});
+
+// A replacement or a lens page's component: a lens's run, and its host's view.
+test("a component shown by a lens may have its host's view", () => {
+  const r = { lens: { id: "x/b" }, params: {}, result: { columns: [], rows: [], truncated: false } } as unknown as LensRun;
+  const view = { viewParams: { q: "fix" }, historyState: {} };
+  expect(initMessage(r, {}, null, view)).toMatchObject({ run: r, page: null, view });
 });
 
 test("a page's calls parse: setTitle, setActions, openForm and querySql", () => {
@@ -317,15 +327,45 @@ test("a component reads and writes its page memory through the host; a refused w
   h.channel.port1.close();
 });
 
-test("shown by a lens, a component sets no page title, actions, form, view params or history state", async () => {
+test("shown by a lens, a component sets no page title, actions or form", async () => {
   const h = harness();
   h.send({ id: "t", method: "setTitle", title: "Oct" });
   h.send({ id: "a", method: "setActions", actions: [] });
   h.send({ id: "f", method: "openForm", command: "x.y.z" });
+  await h.settle();
+  expect(h.received.map((m) => (m as { error?: { message: string } }).error?.message)).toEqual([
+    "Only a component shown as a page sets its title, actions or forms.",
+    "Only a component shown as a page sets its title, actions or forms.",
+    "Only a component shown as a page sets its title, actions or forms.",
+  ]);
+  h.channel.port1.close();
+});
+
+// A tile, a slot, the rail: its host gives it no view.
+test("a host with no view refuses view params and history state", async () => {
+  const h = harness();
   h.send({ id: "p", method: "setViewParams", params: {} });
   h.send({ id: "s", method: "setHistoryState", patch: {} });
   await h.settle();
-  expect(h.received.map((m) => (m as { error?: { code: string } }).error?.code)).toEqual(["INVALID", "INVALID", "INVALID", "INVALID", "INVALID"]);
+  expect(h.received).toEqual([
+    { id: "p", ok: false, error: { code: "INVALID", message: "This host gives the component no view: only a page, a replacement or a lens's own page does." } },
+    { id: "s", ok: false, error: { code: "INVALID", message: "This host gives the component no view: only a page, a replacement or a lens's own page does." } },
+  ]);
+  h.channel.port1.close();
+});
+
+// A replacement shares only the keys its target's contract lists.
+test("a view param the host refuses says why", async () => {
+  const h = harness({
+    setViewParams: () => {
+      throw Object.assign(new Error("`sha` isn't in vcs.history.graph's view (q, author, branch)."), { code: "INVALID" });
+    },
+  });
+  h.send({ id: "p", method: "setViewParams", params: { sha: "abc" } });
+  await h.settle();
+  expect(h.received).toEqual([
+    { id: "p", ok: false, error: { code: "INVALID", message: "`sha` isn't in vcs.history.graph's view (q, author, branch)." } },
+  ]);
   h.channel.port1.close();
 });
 

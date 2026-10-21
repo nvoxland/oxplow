@@ -9,7 +9,8 @@ import { lensRef } from "../tabs/pageRefs.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { formatContextMention } from "../agent-context-ref.js";
-import { changedParams } from "../lens/lensModel.js";
+import { changedParams, lensViewChange } from "../lens/lensModel.js";
+import { useHostedView } from "../lens/hostedView.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { useRequestGuard } from "../request-guard.js";
 import { LensResultView } from "../lens/LensResultView.js";
@@ -117,20 +118,30 @@ export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage 
   // Kept in the entry's history state, so Back and a restart still show the
   // row's facts, not the bare value.
   const [picked, setPicked] = useHistoryState<Record<string, PickedRow>>("picked", NO_PICKED);
+  // What the ref carries: the values that differ from the defaults. A
+  // filter refines what's shown (the entry is replaced); a row picked is
+  // somewhere to come back from (an entry is pushed).
+  const setView = (patch: Record<string, SqlCell>) => {
+    const { params: next, push } = lens
+      ? lensViewChange(lens, overridesRef.current, patch)
+      : { params: { ...overridesRef.current, ...patch }, push: false };
+    if (inTab) nav!.setViewParams!(next, { push });
+    else setOwn(next);
+  };
   const setParam = (name: string, value: SqlCell, row?: PickedRow) => {
-    // What the ref carries: the values that differ from the defaults.
-    const next = lens ? changedParams(lens, { ...overridesRef.current, [name]: value }) : { ...overridesRef.current, [name]: value };
-    if (inTab) {
-      // A filter refines what's shown (the entry is replaced); a row picked
-      // is somewhere to come back from (an entry is pushed).
-      const role = lens?.params.find((p) => p.name === name)?.role;
-      nav!.setViewParams!(next, { push: role === "selection" && value !== null });
-    } else {
-      setOwn(next);
-    }
+    setView({ [name]: value });
     const { [name]: _, ...rest } = picked;
     setPicked(row ? { ...rest, [name]: row } : rest);
   };
+  // A custom component on its own page sets the lens's params, as the
+  // rail does.
+  const setViewRef = useRef(setView);
+  setViewRef.current = setView;
+  const componentView = useHostedView({
+    keys: lens?.params.map((p) => p.name) ?? NO_KEYS,
+    scope: "lens",
+    write: (changes) => setViewRef.current(changes),
+  });
   const outOfDate = useOutOfDate(lens?.origin.extension ?? null, lens?.origin.deployment ?? null);
   const rightRail = lens ? (
     <LensRail lens={lens} values={run?.params ?? {}} picked={picked} outOfDate={outOfDate} onApply={setParam} onOpenPage={onOpenPage} />
@@ -160,13 +171,14 @@ export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage 
           </div>
         </div>
       ) : null}
-      {run ? <LensResultView run={run} onOpenPage={onOpenPage} onSetParam={setParam} toolbarTo={setLensActions} /> : error ? null : <p>Loading…</p>}
+      {run ? <LensResultView run={run} onOpenPage={onOpenPage} onSetParam={setParam} toolbarTo={setLensActions} componentView={componentView} /> : error ? null : <p>Loading…</p>}
       </div>
     </Page>
   );
 }
 
 const NO_PARAMS: Record<string, SqlCell> = {};
+const NO_KEYS: string[] = [];
 const NO_PICKED: Record<string, PickedRow> = {};
 
 /** Whether an extension's source changed after the deployment that runs:

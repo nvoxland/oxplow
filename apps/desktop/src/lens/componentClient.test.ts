@@ -184,6 +184,7 @@ test("connect gives up when no init arrives", async () => {
 /** A component shown as a page: its `init` has the page and no run, and
  *  the host answers the page's own calls. */
 function pageHarness(deps: Partial<BridgeDeps> = {}) {
+  const view = { viewParams: { from: "2026-10-01" }, historyState: { scroll: 3 } };
   const channel = new MessageChannel();
   const titles: string[] = [];
   const host = createBridgeHost(
@@ -201,11 +202,12 @@ function pageHarness(deps: Partial<BridgeDeps> = {}) {
       ...deps,
     },
     null,
+    view,
   );
   const frame = new EventTarget();
-  const page = { viewParams: { from: "2026-10-01" }, historyState: { scroll: 3 }, streamId: "str1", threadId: null };
+  const page = { streamId: "str1", threadId: null };
   const init = () =>
-    frame.dispatchEvent(Object.assign(new Event("message"), { data: initMessage(null, {}, page), ports: [channel.port2] }));
+    frame.dispatchEvent(Object.assign(new Event("message"), { data: initMessage(null, {}, page, view), ports: [channel.port2] }));
   return { frame, init, host, titles, close: () => channel.port1.close() };
 }
 
@@ -283,5 +285,53 @@ test("onAction hears each press of a page action", async () => {
   h.host.action("today");
   await settle();
   expect(pressed).toEqual(["fit"]);
+  h.close();
+});
+
+// A replacement: a lens's run, and the keys of its host's view its
+// target's contract lists.
+test("a component shown by a lens with its host's view reads, sets and hears it", async () => {
+  const channel = new MessageChannel();
+  const views: unknown[] = [];
+  const view = { viewParams: { q: "fix" }, historyState: {} };
+  const host = createBridgeHost(
+    channel.port1,
+    {
+      query: async () => run(0),
+      invoke: async () => ({ result: null }) as never,
+      navigate: () => true,
+      confirm: async () => true,
+      onReady: () => {},
+      setViewParams: (p) => views.push(p),
+      setHistoryState: () => {},
+    },
+    run(1),
+    view,
+  );
+  const frame = new EventTarget();
+  const connecting = connect({ target: frame });
+  frame.dispatchEvent(Object.assign(new Event("message"), { data: initMessage(run(1), {}, null, view), ports: [channel.port2] }));
+  const c = await connecting;
+  expect(c.run.result.rows).toEqual([[1]]);
+  expect(c.page).toBeNull();
+  expect(c.viewParams).toEqual({ q: "fix" });
+  await c.setViewParams({ q: null });
+  expect(views).toEqual([{ q: null }]);
+  const heard: unknown[] = [];
+  c.onViewParams((p: unknown) => heard.push(p));
+  host.viewParams({ author: "ann" });
+  await settle();
+  expect(heard).toEqual([{ author: "ann" }]);
+  channel.port1.close();
+});
+
+test("a component shown by a lens with no view has none", async () => {
+  const h = harness();
+  const connecting = connect({ target: h.frame });
+  h.init();
+  const c = await connecting;
+  expect(c.viewParams).toBeNull();
+  expect(c.historyState).toBeNull();
+  await expect(c.setViewParams({ q: "x" })).rejects.toMatchObject({ code: "INVALID" });
   h.close();
 });

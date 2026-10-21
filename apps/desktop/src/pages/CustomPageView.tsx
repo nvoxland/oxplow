@@ -14,8 +14,9 @@ import type { PageAction } from "../kit/actions.js";
 import { ComponentFrame, CustomBadge, noteStyle, useComponentBundle, type BridgeHost } from "../lens/ComponentFrame.js";
 import type { FrameAction, PageInit } from "../lens/componentBridge.js";
 import { FormSlideover, useFormSubmit } from "../lens/LensResultView.js";
+import { useHostedView } from "../lens/hostedView.js";
 import { Page } from "../tabs/Page.js";
-import { useOptionalPageNavigation, usePageTitle } from "../tabs/PageNavigationContext.js";
+import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { PagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { remoteBaseUrl } from "../tauri-bridge/transport.js";
@@ -71,26 +72,15 @@ export function CustomPageView({
   );
 
   const streamId = stream?.id ?? null;
-  // Its view params and history state are its tab entry's: a view change
-  // replaces the entry (a component has no selection to push; going
-  // somewhere is `navigate`).
-  const nav = useOptionalPageNavigation();
-  const historyState = nav?.historyState ?? NO_STATE;
-  const init: PageInit = useMemo(
-    () => ({ viewParams: page.params, historyState, streamId, threadId }),
-    // Fresh objects per render; their content is the key.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [JSON.stringify(page.params), JSON.stringify(historyState), streamId, threadId],
-  );
-  const navRef = useRef(nav);
-  navRef.current = nav;
+  // Its view params and history state are its tab entry's, whole: a view
+  // change replaces the entry (a component has no selection to push;
+  // going somewhere is `navigate`).
+  const view = useHostedView({ keys: "all", scope: null });
+  const init: PageInit = useMemo(() => ({ streamId, threadId }), [streamId, threadId]);
   const pageDeps = useMemo(
     () => ({
       setTitle: setFrameTitle,
       setActions: setFrameActions,
-      setHistoryState: (patch: Record<string, unknown>) => navRef.current?.setHistoryState?.(patch),
-      setViewParams: (changes: Record<string, string | null>) =>
-        navRef.current?.patchViewParams?.(Object.fromEntries(Object.entries(changes).map(([k, v]) => [k, v ?? undefined]))),
       openForm: (command: string, input: unknown, version: string) =>
         new Promise<{ result: unknown } | null>((resolve, reject) => {
           setAsked({ command, input, version, resolve, reject });
@@ -138,6 +128,7 @@ export function CustomPageView({
           run={null}
           page={init}
           pageDeps={pageDeps}
+          view={view}
           hostRef={hostRef}
           title={frameTitle ?? declared.title}
           streamId={streamId}
@@ -223,4 +214,3 @@ function PageForm({
   );
 }
 
-const NO_STATE: Record<string, unknown> = {};

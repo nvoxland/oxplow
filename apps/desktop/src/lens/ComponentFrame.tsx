@@ -22,6 +22,7 @@ import {
   type FrameAction,
   type PageInit,
 } from "./componentBridge.js";
+import type { HostedView } from "./hostedView.js";
 import { componentMemoryProblem, useRememberedStore } from "../prefs/remembered.js";
 
 export type BridgeHost = ReturnType<typeof createBridgeHost>;
@@ -31,9 +32,6 @@ export interface PageDeps {
   setTitle(title: string): void;
   setActions(actions: FrameAction[]): void;
   openForm(command: string, input: unknown, version: string): Promise<{ result: unknown } | null>;
-  /** Change the page's view (its tab entry's params; null drops one). */
-  setViewParams(params: Record<string, string | null>): void;
-  setHistoryState(patch: Record<string, unknown>): void;
 }
 
 /** The bundle a component's frame runs, loaded for `componentKey` (from
@@ -85,7 +83,9 @@ export function CustomBadge({ extension }: { extension: string }) {
 }
 
 /** One frame at one bundle URL and its bridge. A lens passes its `run`; a
- *  page passes `page` (and `pageDeps`), with a null `run`. */
+ *  page passes `page` (and `pageDeps`), with a null `run`. A host that
+ *  shares its view (a page, a replacement, a lens's own page) passes
+ *  `view` (`useHostedView`). */
 export function ComponentFrame({
   src,
   version,
@@ -95,6 +95,7 @@ export function ComponentFrame({
   title,
   page = null,
   pageDeps,
+  view = null,
   hostRef: hostRefProp,
   readyTimeoutMs,
   onFail,
@@ -111,6 +112,8 @@ export function ComponentFrame({
   title: string;
   page?: PageInit | null;
   pageDeps?: PageDeps;
+  /** Its host's view, or none (a tile, a slot). */
+  view?: HostedView | null;
   /** Receives the bridge host (a page presses its actions through it). */
   hostRef?: MutableRefObject<BridgeHost | null>;
   readyTimeoutMs: number;
@@ -129,6 +132,8 @@ export function ComponentFrame({
   runRef.current = run;
   const pageDepsRef = useRef(pageDeps);
   pageDepsRef.current = pageDeps;
+  const viewRef = useRef(view);
+  viewRef.current = view;
 
   // A re-run reaches a ready component as `update` (the host posts only a
   // result it hasn't shown).
@@ -136,16 +141,16 @@ export function ComponentFrame({
     if (run) hostRef.current?.update(run);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run]);
-  // A page's view params or history state changed (Back, Forward, an
+  // Its host's view params or history state changed (Back, Forward, an
   // echo of its own set): the frame hears them.
-  const viewKey = page ? JSON.stringify(page.viewParams) : null;
+  const viewKey = view ? JSON.stringify(view.viewParams) : null;
   useEffect(() => {
-    if (page) hostRef.current?.viewParams(page.viewParams);
+    if (view) hostRef.current?.viewParams(view.viewParams);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewKey]);
-  const stateKey = page ? JSON.stringify(page.historyState) : null;
+  const stateKey = view ? JSON.stringify(view.historyState) : null;
   useEffect(() => {
-    if (page) hostRef.current?.historyState(page.historyState);
+    if (view) hostRef.current?.historyState(view.historyState);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stateKey]);
   // Its page memory: the component's own, for the person, every tab of it.
@@ -177,6 +182,8 @@ export function ComponentFrame({
     if (!frame) return;
     channel = new MessageChannel();
     const initial = runRef.current;
+    const hosted = viewRef.current;
+    const sentView = hosted ? { viewParams: hosted.viewParams, historyState: hosted.historyState } : null;
     hostRef.current = createBridgeHost(
       channel.port1,
       {
@@ -213,8 +220,12 @@ export function ComponentFrame({
               setActions: (a: FrameAction[]) => pageDepsRef.current?.setActions(a),
               openForm: (command: string, input: unknown) =>
                 pageDepsRef.current ? pageDepsRef.current.openForm(command, input, version) : Promise.resolve(null),
-              setViewParams: (params: Record<string, string | null>) => pageDepsRef.current?.setViewParams(params),
-              setHistoryState: (patch: Record<string, unknown>) => pageDepsRef.current?.setHistoryState(patch),
+            }
+          : {}),
+        ...(hosted
+          ? {
+              setViewParams: (params: Record<string, string | null>) => viewRef.current?.setViewParams(params),
+              setHistoryState: (patch: Record<string, unknown>) => viewRef.current?.setHistoryState(patch),
             }
           : {}),
         confirm: (command) => new Promise<boolean>((answer) => setAsking({ command, answer })),
@@ -226,12 +237,12 @@ export function ComponentFrame({
         },
       },
       initial,
-      page ?? null,
+      sentView,
     );
     const tokens = tokensFromStyle(getComputedStyle(document.documentElement));
     // An opaque-origin frame can only be addressed with "*"; the port goes
     // to this frame's window alone.
-    frame.postMessage(initMessage(initial, tokens, page), "*", [channel.port2]);
+    frame.postMessage(initMessage(initial, tokens, page, sentView), "*", [channel.port2]);
   };
 
   return (

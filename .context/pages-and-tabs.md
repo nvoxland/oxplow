@@ -208,9 +208,9 @@ id among the enabled extensions), draws a built-in from the
 `builtInPages` table (`pages/builtInPages.tsx`) by name, a lens page through
 `DeclaredPageView` (`LensPage` with the id's params), and a custom page
 (`body.kind === "component"`) through `CustomPageView`: the component's
-frame filling the body under the nav bar, told the page's params, stream
-and thread, its title and actions the frame's (`setTitle`,
-`setActions`). oxplow's Timeline (`page:timeline`, params `from`, `to`,
+frame filling the body under the nav bar, told its stream and thread
+and given the whole entry as its view (`useHostedView`), its title and
+actions the frame's (`setTitle`, `setActions`). oxplow's Timeline (`page:timeline`, params `from`, `to`,
 `thread`) is one: its window is its view params, written on every change
 (not its opening default) and followed on Back/Forward. A frame's
 `setViewParams` reaches the tab as `patchViewParams` (null drops a key). Each built-in body is a
@@ -907,6 +907,14 @@ is refused as an op error and the tab stays, rather than silently
 remounting the page. A list's cursor (↑/↓ before a pick) is the list's
 own (`useListNav`); only a pick is a selection, and `useListNav`'s
 `selected` puts the cursor on a kept pick.
+
+**A component inside a page shares the page's view only where its host
+says which keys** (`lens/hostedView.ts`; `.context/extensions.md` "Whose
+view a component has"): a replacement the keys its target's contract
+lists (the history graph: Git History's `q`, `author`, `branch`, the
+same ones core's commit list reads), a lens page's component the lens's
+params. Its history state is its own object in the entry
+(`component:<scope>`). A tile or a slot gives none.
 
 **A page never navigates to itself, and a mode is a param, not a page
 name.** Settings' areas, Diff View's endpoints and Local History's

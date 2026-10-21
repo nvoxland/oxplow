@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens } from "../tauri-bridge/generated/bindings.js";
-import { markParts, treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./lensModel.js";
+import { markParts, treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./lensModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -180,6 +180,25 @@ describe("parseParamInput", () => {
     expect(parseParamInput("done")).toBe("done");
     expect(parseParamInput("  ")).toBeNull();
     expect(parseParamInput("007x")).toBe("007x");
+  });
+});
+
+// A lens page's view is its params, set by its rail, a row's pick or its
+// component: a filter replaces the entry, a pick pushes one.
+describe("lensViewChange", () => {
+  const l = lens({
+    params: [
+      { name: "days", label: null, default: 7 },
+      { name: "task", label: null, default: null, role: "selection" },
+    ],
+  } as never);
+  test("a filter replaces; values at their defaults leave the ref", () => {
+    expect(lensViewChange(l, { task: "tsk1" }, { days: 14 })).toEqual({ params: { days: 14, task: "tsk1" }, push: false });
+    expect(lensViewChange(l, { days: 14 }, { days: 7 })).toEqual({ params: {}, push: false });
+  });
+  test("a pick pushes; a cleared one replaces", () => {
+    expect(lensViewChange(l, {}, { task: "tsk2" })).toEqual({ params: { task: "tsk2" }, push: true });
+    expect(lensViewChange(l, { task: "tsk2" }, { task: null })).toEqual({ params: {}, push: false });
   });
 });
 

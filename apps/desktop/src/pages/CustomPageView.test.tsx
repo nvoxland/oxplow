@@ -50,6 +50,9 @@ function setup() {
     canGoBack: false,
     canGoForward: false,
     setTitle: (t: string) => titles.push(t),
+    viewParams: { a: "1" },
+    historyState: { scroll: 3 },
+    setHistoryState: () => {},
   } as unknown as PageNavigation;
   const view = render(
     <PageNavigationContext.Provider value={nav}>
@@ -87,7 +90,8 @@ test("a component page mounts a marked frame under the declared title, with its 
   expect(view.getByTestId("custom-component-badge").textContent).toBe("custom");
   expect(titles[titles.length - 1]).toBe("Board");
   expect(init.run).toBeNull();
-  expect(init.page).toEqual({ viewParams: { a: "1" }, historyState: {}, streamId: null, threadId: "thr1" });
+  expect(init.page).toEqual({ streamId: null, threadId: "thr1" });
+  expect(init.view).toEqual({ viewParams: { a: "1" }, historyState: { scroll: 3 } });
 });
 
 test("the frame's setTitle changes the page's title", async () => {

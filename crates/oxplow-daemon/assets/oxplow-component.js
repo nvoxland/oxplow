@@ -46,7 +46,7 @@
   "use strict";
 
   // The protocol this library speaks; `init` says which one the host does.
-  const PROTOCOL = 7;
+  const PROTOCOL = 8;
 
   function component(port, init) {
     let next = 0;
@@ -56,10 +56,10 @@
     const actionListeners = new Set();
     const viewListeners = new Set();
     const stateListeners = new Set();
-    const initPage = init.page === undefined || init.page === null ? null : init.page;
-    let viewParams = initPage ? initPage.viewParams || {} : null;
-    let historyState = initPage ? initPage.historyState || {} : null;
-    const page = initPage ? { streamId: initPage.streamId, threadId: initPage.threadId } : null;
+    const initView = init.view === undefined || init.view === null ? null : init.view;
+    let viewParams = initView ? initView.viewParams || {} : null;
+    let historyState = initView ? initView.historyState || {} : null;
+    const page = init.page ? { streamId: init.page.streamId, threadId: init.page.threadId } : null;
 
     port.onmessage = (event) => {
       const data = event.data;
@@ -109,11 +109,13 @@
       // The page it is — `{ streamId, threadId }` — or null when a lens
       // shows it.
       page,
-      // Its view params (a page only; null when a lens shows it).
+      // Its host's view params: a page's, a replacement's (the keys its
+      // target lists) or a lens page's; null when its host gives none (a
+      // tile, a slot).
       get viewParams() {
         return viewParams;
       },
-      // Its history state (a page only; null when a lens shows it).
+      // Its history state, where its host gives a view; else null.
       get historyState() {
         return historyState;
       },
@@ -150,9 +152,9 @@
       // The page's actions — `[{ id, label, primary?, disabled? }]` — drawn
       // by oxplow in the page's bar. A page only.
       setActions: (actions) => call({ method: "setActions", actions }),
-      // Change the page's view params (a value null drops one): its tab's
+      // Change its host's view params (a value null drops one): its tab's
       // entry is replaced, so Back, a bookmark and a reopened tab keep them.
-      // A page only.
+      // A host with a view only; a key not its to set rejects `INVALID`.
       setViewParams: (params) => call({ method: "setViewParams", params }),
       // Hear its view params each time they change (Back, Forward, an echo
       // of setViewParams); returns how to stop.
@@ -162,7 +164,7 @@
           viewListeners.delete(listener);
         };
       },
-      // Merge `patch` into its history state. A page only.
+      // Merge `patch` into its history state. A host with a view only.
       setHistoryState: (patch) => call({ method: "setHistoryState", patch }),
       // Hear its history state each time it changes (Back, Forward);
       // returns how to stop.

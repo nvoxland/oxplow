@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from "react";
 
 import type { SqlCell } from "../api.js";
 import { LensResultView } from "../lens/LensResultView.js";
+import { useHostedView } from "../lens/hostedView.js";
 import { useReplacement } from "../lens/useReplacement.js";
 import type { TabRef } from "../tabs/tabState.js";
 
@@ -10,8 +11,10 @@ import type { TabRef } from "../tabs/tabState.js";
  * `.context/extensions.md` → "Replacements"): `fallback` is oxplow's own,
  * shown unless the extension of the provider it is for — `provider`, or
  * the capability's active one — replaces it; then its lens renders
- * instead, given `props` (the target's contract) and nothing of the
- * host's, under a badge naming the extension. A replacement that can't
+ * instead, given `props` (the target's contract) and, for a custom
+ * component, the host page's view params its contract lists (`view`:
+ * Git History's filters for the history graph) — nothing else of the
+ * host's — under a badge naming the extension. A replacement that can't
  * load shows `fallback` and says why.
  */
 export function Replaceable({
@@ -35,6 +38,7 @@ export function Replaceable({
   onOpenPage?(ref: TabRef, opts?: { newTab?: boolean }): void;
 }) {
   const r = useReplacement(target, props, streamId, provider);
+  const view = useHostedView({ keys: r.state === "replaced" ? r.replacement.view : NO_KEYS, scope: target });
   if (r.state === "pending") return null;
   if (r.state === "core") return <>{fallback}</>;
   const extension = r.replacement.extension;
@@ -58,10 +62,12 @@ export function Replaceable({
       </span>
       {/* A custom component that can't load says so here, and the whole
           replacement gives way to oxplow's own above (tsk855). */}
-      <LensResultView run={r.run} streamId={streamId} onOpenPage={onOpenPage} onCustomFailure={r.fail} onCustomReady={r.shown} />
+      <LensResultView run={r.run} streamId={streamId} onOpenPage={onOpenPage} onCustomFailure={r.fail} onCustomReady={r.shown} componentView={view} />
     </div>
   );
 }
+
+const NO_KEYS: string[] = [];
 
 /** `message` ending as a sentence does. */
 const sentence = (message: string) => (/[.!?]$/.test(message) ? message : `${message}.`);

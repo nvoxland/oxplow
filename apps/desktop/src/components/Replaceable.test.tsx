@@ -95,7 +95,7 @@ const replacing = (name: string) => ({
     commands: [],
     decorators: [],
     replacements: [
-      { id: `${name}/work_item.board`, extension: name, target: "work_item.board", capability: "work_items", boundToProvider: false, lensId: `${name}/board`, label: "board", version: 1 },
+      { id: `${name}/work_item.board`, extension: name, target: "work_item.board", capability: "work_items", boundToProvider: false, lensId: `${name}/board`, label: "board", version: 1, view: [] },
     ],
   },
   lenses: [
@@ -112,7 +112,7 @@ const stating = (name: string) => ({
     commands: [],
     decorators: [],
     replacements: [
-      { id: `${name}/work_item.detail.state`, extension: name, target: "work_item.detail.state", capability: "work_items", boundToProvider: true, lensId: `${name}/state`, label: "state control", version: 1 },
+      { id: `${name}/work_item.detail.state`, extension: name, target: "work_item.detail.state", capability: "work_items", boundToProvider: true, lensId: `${name}/state`, label: "state control", version: 1, view: [] },
     ],
   },
   lenses: [{ id: `${name}/state`, params: [{ name: "ref", label: null, default: null }] }],
@@ -285,7 +285,7 @@ const graphing = (name: string) => ({
     commands: [],
     decorators: [],
     replacements: [
-      { id: `${name}/vcs.history.graph`, extension: name, target: "vcs.history.graph", capability: "vcs", boundToProvider: false, lensId: `${name}/graph`, label: "history graph", version: 1 },
+      { id: `${name}/vcs.history.graph`, extension: name, target: "vcs.history.graph", capability: "vcs", boundToProvider: false, lensId: `${name}/graph`, label: "history graph", version: 2, view: ["q", "author", "branch"] },
     ],
   },
   lenses: [
@@ -334,7 +334,7 @@ test("an effort's verdict is only ever an extension's", async () => {
       commands: [],
       decorators: [],
       replacements: [
-        { id: `${name}/effort.verdict`, extension: name, target: "effort.verdict", capability: "effort_policy", boundToProvider: false, lensId: `${name}/effort-verdict`, label: "effort verdict", version: 1 },
+        { id: `${name}/effort.verdict`, extension: name, target: "effort.verdict", capability: "effort_policy", boundToProvider: false, lensId: `${name}/effort-verdict`, label: "effort verdict", version: 1, view: [] },
       ],
     },
     lenses: [{ id: `${name}/effort-verdict`, params: [{ name: "effort_id", label: null, default: null }] }],

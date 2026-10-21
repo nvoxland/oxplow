@@ -190,7 +190,7 @@ test("a person chooses whose replaced component shows", async () => {
   cleanup();
 
   replacements = [
-    { id: "tracker/work_item.board", extension: "tracker", target: "work_item.board", capability: "work_items", boundToProvider: false, lensId: "tracker/board", label: "board", version: 1 },
+    { id: "tracker/work_item.board", extension: "tracker", target: "work_item.board", capability: "work_items", boundToProvider: false, lensId: "tracker/board", label: "board", version: 1, view: [] },
   ];
   const view = render(<IntegrationsSection />);
   const row = await waitFor(() => view.getByTestId("integrations-replacement-work_item.board"));
@@ -212,7 +212,7 @@ test("a person chooses whose replaced component shows", async () => {
 test("replaced components are listed with no provider instance", async () => {
   noInstances = true;
   replacements = [
-    { id: "views/work_item.board", extension: "views", target: "work_item.board", capability: "work_items", boundToProvider: false, lensId: "views/board", label: "board", version: 1 },
+    { id: "views/work_item.board", extension: "views", target: "work_item.board", capability: "work_items", boundToProvider: false, lensId: "views/board", label: "board", version: 1, view: [] },
   ];
   const view = render(<IntegrationsSection />);
   await waitFor(() => view.getByTestId("integrations-replacement-work_item.board"));

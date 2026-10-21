@@ -29,8 +29,6 @@ export interface OxplowRows {
 
 /** The page a component is, when it is one (`pages: [{ component }]`). */
 export interface OxplowPage {
-  /** The page's params, from its id (`page:x/timeline?from=…`). */
-  params: Record<string, string>;
   streamId: string | null;
   threadId: string | null;
 }
@@ -81,18 +79,23 @@ export interface OxplowComponent {
   setActions(actions: OxplowAction[]): Promise<null>;
   /** Hear each press of a page action, by id; returns how to stop. */
   onAction(listener: (id: string) => void): () => void;
-  /** **View params** — its tab's address: what the page shows. A page
-   *  only; null when a lens shows it. */
+  /** **View params** — its tab's address, as far as it is the
+   *  component's: a page's own (`page:x/timeline?from=…`), a replacement's
+   *  (the keys its target's contract lists, `v_replaceable.view`) or a
+   *  lens page's (the lens's params). Null when its host gives no view (a
+   *  dashboard tile, a slot). */
   readonly viewParams: Record<string, string> | null;
   /** Change its view params (null drops one): its tab's entry is replaced,
-   *  so Back, a bookmark and a reopened tab keep them. A page only. */
+   *  so Back, a bookmark and a reopened tab keep them. A host with a view
+   *  only; a key not its to set rejects `INVALID`. */
   setViewParams(params: Record<string, string | null>): Promise<null>;
   /** Hear its view params each time they change; returns how to stop. */
   onViewParams(listener: (params: Record<string, string>) => void): () => void;
   /** **History state** — this step of its tab's history (scroll, what's
-   *  expanded, a draft). A page only; null when a lens shows it. */
+   *  expanded, a draft): its own, apart from its host's. Null when its
+   *  host gives no view. */
   readonly historyState: Record<string, unknown> | null;
-  /** Merge `patch` into its history state. A page only. */
+  /** Merge `patch` into its history state. A host with a view only. */
   setHistoryState(patch: Record<string, unknown>): Promise<null>;
   /** Hear its history state each time it changes; returns how to stop. */
   onHistoryState(listener: (state: Record<string, unknown>) => void): () => void;

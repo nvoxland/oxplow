@@ -56,6 +56,7 @@ import { safeColor } from "../components/decorators.js";
 import { useDecorations } from "../components/useDecorations.js";
 import { RefBadge } from "../components/RefBadge.js";
 import { CustomComponentViz } from "./CustomComponentViz.js";
+import type { HostedView } from "./hostedView.js";
 import { DashboardViz, DocumentViz } from "./PartsViz.js";
 import { DataTable, type DataColumn, type RowProps } from "../kit/DataTable.js";
 import { Facts } from "../kit/Facts.js";
@@ -134,6 +135,9 @@ interface LensResultViewProps {
   onCustomFailure?(reason: string): void;
   /** For a `viz: custom` lens: its component said `ready`. */
   onCustomReady?(): void;
+  /** For a `viz: custom` lens: its host's view, where the host shares
+   *  one with its component (a replacement, a lens's own page). */
+  componentView?: HostedView | null;
   /** Set one of the lens's params (a row click on a column that
    *  `select`s it, with the row it picked); without it, rows are no
    *  picks. */
@@ -320,6 +324,7 @@ function RowsBody({
   actions,
   onCustomFailure,
   onCustomReady,
+  componentView = null,
   onSetParam,
 }: LensResultViewProps & { actions?: LensActionsState }) {
   const lens = run.lens;
@@ -471,7 +476,7 @@ function RowsBody({
   return (
     <>
       {compact ? null : <ResultCompleteness result={result} />}
-      <LensViz {...{ run, result, lens, cols, cell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady }} />
+      <LensViz {...{ run, result, lens, cols, cell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady, componentView }} />
       {ctxMenu.menu}
     </>
   );
@@ -590,6 +595,7 @@ function LensViz({
   rowsView,
   onCustomFailure,
   onCustomReady,
+  componentView,
 }: {
   run: LensRun;
   result: LensRun["result"];
@@ -604,6 +610,7 @@ function LensViz({
   rowsView: RowsView;
   onCustomFailure?(reason: string): void;
   onCustomReady?(): void;
+  componentView: HostedView | null;
 }) {
   switch (lens.viz) {
     case "bar":
@@ -652,6 +659,7 @@ function LensViz({
           fallback={<TableViz rows={result.rows} cols={cols} cell={cell} rowMenu={rowMenu} />}
           onFailure={onCustomFailure}
           onReady={onCustomReady}
+          view={componentView}
         />
       );
     case "table":

@@ -374,6 +374,21 @@ export function changedParams(lens: Lens, values: Record<string, SqlCell>): Reco
   return out;
 }
 
+/** A lens page's view after `patch` (its rail, a row's pick, its
+ *  component): the params its ref carries, and whether the change is
+ *  somewhere to come back from — a `selection` param set (pushed) — or
+ *  a filter (replaced). */
+export function lensViewChange(
+  lens: Lens,
+  current: Record<string, SqlCell>,
+  patch: Record<string, SqlCell>,
+): { params: Record<string, SqlCell>; push: boolean } {
+  const push = Object.entries(patch).some(
+    ([name, value]) => value !== null && lens.params.find((p) => p.name === name)?.role === "selection",
+  );
+  return { params: changedParams(lens, { ...current, ...patch }), push };
+}
+
 /** Whether `value` is `param`'s default: a bool by truth (its echo is
  *  0/1, a ref's `true`/`false`), anything else by its text. */
 export function isDefaultValue(param: Pick<LensParam, "type" | "options" | "default">, value: SqlCell): boolean {

@@ -13,11 +13,11 @@
 ///                 { id, method: "openForm", command, input } a declared command's form, in the host
 ///                 { id, method: "setTitle", title }          a page's title (a page only)
 ///                 { id, method: "setActions", actions }      a page's actions (a page only)
-///                 { id, method: "setViewParams", params }    a page's view params (a page only)
-///                 { id, method: "setHistoryState", patch }   this step of its tab (a page only)
+///                 { id, method: "setViewParams", params }    its host's view params (a host with a view)
+///                 { id, method: "setHistoryState", patch }   this step of its tab (a host with a view)
 ///                 { id, method: "pageMemoryGet", key }       its own memory, for the person
 ///                 { id, method: "pageMemorySet", key, value } (null forgets it)
-///   host → frame  { type: "init", protocol, run, props, page, tokens }
+///   host → frame  { type: "init", protocol, run, props, page, view, tokens }
 ///                 { type: "update", run }                    the lens re-ran
 ///                 { type: "action", id }                     a page action was pressed
 ///                 { type: "viewParams", params }             its view params changed (Back, Forward)
@@ -26,7 +26,11 @@
 ///
 /// Shown by a lens, `init` carries the lens's run and `page` is null; shown
 /// as a page (`pages[].component`), `run` is null and `page` carries the
-/// page's params, stream and thread.
+/// page's stream and thread. `view` is its host's view — view params and
+/// history state — or null: a page has one (the whole tab entry), so does
+/// a replacement (the keys its target's contract lists) and a lens's own
+/// page's component (the lens's params); a tile, a slot or the rail gives
+/// none.
 ///
 /// A command that asks is confirmed by the person in the host, never in
 /// the frame. The daemon serves a client library wrapping this
@@ -49,8 +53,10 @@ import type { CommandOutcome, LensRun, SqlCell, SqlQueryResult } from "../tauri-
 /// **view params** (`page.viewParams`, `setViewParams`, `viewParams`),
 /// **history state** (`page.historyState`, `setHistoryState`,
 /// `historyState`) and **page memory** (`pageMemoryGet`, `pageMemorySet`:
-/// the component's own, for the person, every tab of it).
-export const BRIDGE_PROTOCOL = 7;
+/// the component's own, for the person, every tab of it). 8: the view is
+/// the host's, not the page's — `init.view` beside `init.page` — so a
+/// replacement and a lens page's component have one too.
+export const BRIDGE_PROTOCOL = 8;
 
 /** A page action a component declares; core draws it in the nav bar. */
 export interface FrameAction {
@@ -62,12 +68,17 @@ export interface FrameAction {
 
 /** What a component shown as a page is told about it. */
 export interface PageInit {
-  /** Its tab's address: what the page shows. */
+  streamId: string | null;
+  threadId: string | null;
+}
+
+/** Its host's view: what a page, a replacement or a lens page's
+ *  component shares of its tab. */
+export interface ViewInit {
+  /** Its tab's address, as far as it is the component's: what it shows. */
   viewParams: Record<string, string>;
   /** This step of its tab's history: what it kept there. */
   historyState: Record<string, unknown>;
-  streamId: string | null;
-  threadId: string | null;
 }
 
 export type BridgeRequest =
@@ -179,15 +190,22 @@ export function tokensFromStyle(style: {
 
 /** The `init` the host posts to a component's frame: the protocol it
  *  speaks, the first run and the lens's `custom.props` (a lens shows it)
- *  or the page it is (`page`), and the theme's tokens. One builder, so the
- *  library's tests read the message the host really sends. */
-export function initMessage(run: LensRun | null, tokens: Record<string, string>, page: PageInit | null = null) {
+ *  or the page it is (`page`), its host's view (`view`), and the theme's
+ *  tokens. One builder, so the library's tests read the message the host
+ *  really sends. */
+export function initMessage(
+  run: LensRun | null,
+  tokens: Record<string, string>,
+  page: PageInit | null = null,
+  view: ViewInit | null = null,
+) {
   return {
     type: "init" as const,
     protocol: BRIDGE_PROTOCOL,
     run,
     props: run?.lens.custom?.props ?? null,
     page,
+    view,
     tokens,
   };
 }
@@ -212,10 +230,10 @@ export interface BridgeDeps {
   setTitle?(title: string): void;
   /** The page's actions, drawn by core in the nav bar. A page only. */
   setActions?(actions: FrameAction[]): void;
-  /** Change the page's view params (null drops one): its tab's entry is
-   *  replaced. A page only. */
+  /** Change its host's view params (null drops one); throws `{ code:
+   *  "INVALID" }` for a key not its to set. A host with a view only. */
   setViewParams?(params: Record<string, string | null>): void;
-  /** Merge `patch` into its history state. A page only. */
+  /** Merge `patch` into its history state. A host with a view only. */
   setHistoryState?(patch: Record<string, unknown>): void;
   /** Its page memory's `key`; null when none is kept. */
   pageMemoryGet?(key: string): Promise<unknown>;
@@ -243,18 +261,20 @@ export function componentMayOpen(ref: string): boolean {
 /** What a run shows the frame: an `update` repeats none of it. */
 const shown = (run: LensRun | null) => (run ? JSON.stringify([run.params, run.result]) : "");
 
-/** What a component shown by a lens may not do: the lens owns the page. */
-const PAGE_ONLY = "A lens shows this component: only a component shown as a page sets its title, actions, forms, view params or history state.";
+/** What a component shown by a lens may not do: the page is its host's. */
+const PAGE_ONLY = "Only a component shown as a page sets its title, actions or forms.";
+/** What a component in a host with no view may not do. */
+const NO_VIEW = "This host gives the component no view: only a page, a replacement or a lens's own page does.";
 
 /** Answer the frame's requests arriving on `port`. `sent` is the run the
- *  `init` message carried and `sentPage` the page it told; `update`,
+ *  `init` message carried and `sentView` the view it told; `update`,
  *  `viewParams` and `historyState` post only what the frame hasn't seen,
  *  and `ready` is heard once. */
 export function createBridgeHost(
   port: MessagePort,
   deps: BridgeDeps,
   sent: LensRun | null,
-  sentPage: PageInit | null = null,
+  sentView: ViewInit | null = null,
 ): {
   update(run: LensRun): void;
   viewParams(params: Record<string, string>): void;
@@ -263,8 +283,8 @@ export function createBridgeHost(
   close(): void;
 } {
   let last = shown(sent);
-  let lastView = sentPage ? JSON.stringify(sentPage.viewParams) : null;
-  let lastState = sentPage ? JSON.stringify(sentPage.historyState) : null;
+  let lastView = sentView ? JSON.stringify(sentView.viewParams) : null;
+  let lastState = sentView ? JSON.stringify(sentView.historyState) : null;
   let ready = false;
   const reply = (id: string, result: unknown) => port.postMessage({ id, ok: true, result });
   const fail = (id: string, code: string, message: string, field: string | null = null) =>
@@ -335,13 +355,23 @@ export function createBridgeHost(
         deps.setActions(r.actions);
         return reply(r.id, null);
       case "setViewParams":
-        if (!deps.setViewParams) return fail(r.id, "INVALID", PAGE_ONLY);
-        deps.setViewParams(r.params);
-        return reply(r.id, null);
+        if (!deps.setViewParams) return fail(r.id, "INVALID", NO_VIEW);
+        try {
+          deps.setViewParams(r.params);
+          reply(r.id, null);
+        } catch (e) {
+          failWith(r.id, e);
+        }
+        return;
       case "setHistoryState":
-        if (!deps.setHistoryState) return fail(r.id, "INVALID", PAGE_ONLY);
-        deps.setHistoryState(r.patch);
-        return reply(r.id, null);
+        if (!deps.setHistoryState) return fail(r.id, "INVALID", NO_VIEW);
+        try {
+          deps.setHistoryState(r.patch);
+          reply(r.id, null);
+        } catch (e) {
+          failWith(r.id, e);
+        }
+        return;
       case "pageMemoryGet":
         if (!deps.pageMemoryGet) return fail(r.id, "INVALID", "This host keeps no page memory.");
         try {

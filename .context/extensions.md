@@ -2580,10 +2580,11 @@ referrerPolicy="no-referrer">` at `componentBundleUrl(base, version)`
 a bundle that can't be loaded shows the table and why; with no daemon
 base — `remoteBaseUrl()` null — the lens shows its table), under a
 **custom** badge. On the frame's first
-`load` the host posts `init { protocol, run, props, page, tokens }`
+`load` the host posts `init { protocol, run, props, page, view, tokens }`
 (`initMessage`, the one builder: a lens's run and props with `page`
-null, or — a custom page — a null `run` and `page { params, streamId,
-threadId }`) with one end
+null, or — a custom page — a null `run` and `page { streamId,
+threadId }`; `view { viewParams, historyState }` is its host's view, or
+null) with one end
 of a `MessageChannel` (to `"*"`: the frame's origin is opaque; the port
 goes to that frame alone) and listens on the other end only. Frame
 messages (`parseFrameMessage`): `ready`, `{ id, method: query, asset,
@@ -2603,17 +2604,33 @@ submission through `invoke_component_command`; closing it answers
 setActions, actions: [{ id, label, primary?, disabled? }] }` (the page's
 title and its nav-bar actions, data core draws; a press posts
 `{ type: action, id }` to the frame). `openForm`, `setTitle` and
-`setActions` are a custom page's, and — protocol 7, each kind of page
-state by the name of its scope — `{ id, method: setViewParams, params }`
-(string values, null drops one: its tab entry's view, replaced —
-`CustomPageView` passes them to `PageNavigation.setViewParams`; a
-component has no selection role, so it never pushes, and going somewhere
-is `navigate`) and `{ id, method: setHistoryState, patch }` (this step of
-its tab). The host posts `{ type: viewParams, params }` and `{ type:
-historyState, state }` when the entry's change (Back, Forward, an echo;
-`createBridgeHost` sends only what the frame hasn't seen); `init.page`
-carries both. Shown by a lens (which owns its page) these answer
-`INVALID`. Any component, page or not, has **page memory**: `{ id,
+`setActions` are a custom page's (`INVALID` elsewhere), and — each kind
+of page state by the name of its scope — `{ id, method: setViewParams,
+params }` (string values, null drops one: its tab entry's view, replaced;
+a component has no selection role, so it never pushes, and going
+somewhere is `navigate`) and `{ id, method: setHistoryState, patch }`
+(this step of its tab). The host posts `{ type: viewParams, params }` and
+`{ type: historyState, state }` when the entry's change (Back, Forward,
+an echo; `createBridgeHost` sends only what the frame hasn't seen);
+`init.view` carries both.
+
+**Whose view a component has** (protocol 8, `lens/hostedView.ts`
+`useHostedView`): its host's, where the host shares one, and only what
+the host's contract names. A custom page has the whole entry — all its
+params (`patchViewParams`) and its history state. A **replacement** has
+the host page's view params its target's contract lists
+(`UiReplacement.view`, `v_replaceable.view`: Git History's `q`,
+`author`, `branch` for the history graph), the ones the core part it
+replaces reads, so the two leave the same address; another key answers
+`INVALID` naming the contract. A `viz: custom` lens on **its own lens
+page** has the lens's params, set by the rail's rule (`lensViewChange`:
+a `selection` param pushes, the rest replace). A hosted component's
+history state is its own object in the entry, `component:<target>` or
+`component:lens`, so it never overwrites its page's (the lens page's
+`picked`, a draft). Every other host — a dashboard tile, a slot, an
+answer, the rail HUD — gives none: `init.view` is null, `setViewParams`
+and `setHistoryState` answer `INVALID`, and the component keeps its
+filters itself. Any component, page or not, has **page memory**: `{ id,
 method: pageMemoryGet, key }` and `{ id, method: pageMemorySet, key,
 value }` (null forgets), scope `component:<ext>/<id>` in `ui_preference`
 — for the person, in every tab of it; a value over 64 KB or a component
@@ -2656,8 +2673,12 @@ global `oxplow`**, not a module: module scripts are fetched with CORS,
 which an opaque origin never passes and nothing served to a frame allows
 — the same reason a bundle's own scripts are classic. `oxplow.connect()`
 waits for `init`, answers `ready`, and resolves with `{ run (the latest),
-props, tokens, protocol, onUpdate(fn) → unsubscribe, query(asset,
-params), invoke(command, input), navigate(ref), applyTheme(doc?) }`; a
+page, props, tokens, protocol, onUpdate(fn) → unsubscribe, query(asset,
+params), invoke(command, input), navigate(ref, { newTab }), querySql,
+openForm, setTitle, setActions, onAction, viewParams, setViewParams,
+onViewParams, historyState, setHistoryState, onHistoryState, pageMemory,
+applyTheme(doc?) }` (the `.d.ts` beside it is the reference;
+`viewParams` / `historyState` are null where the host gives no view); a
 failed request rejects with the host's `{ code, message }`. `init`
 carries `protocol` (`BRIDGE_PROTOCOL` in `componentBridge.ts`, `PROTOCOL`
 in the library — one number, bumped when a message's shape changes), and
