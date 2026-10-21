@@ -14,9 +14,13 @@ export async function expandRailSection(page: Page, id: string): Promise<void> {
 /** Open the New Task page the way a person does: ⇧⌘N, focus outside a
  *  text field. */
 export async function openNewTask(page: Page): Promise<void> {
-  await page.getByTestId("rail-hud").click({ position: { x: 4, y: 4 } });
-  await page.keyboard.press("ControlOrMeta+Shift+N");
-  await expect(page.getByTestId("lens-form-fields-title")).toBeVisible();
+  // The page is a lens form: it opens once the extensions have loaded, and
+  // a shortcut pressed before that goes nowhere, so press until it shows.
+  await expect(async () => {
+    await page.getByTestId("rail-hud").click({ position: { x: 4, y: 4 } });
+    await page.keyboard.press("ControlOrMeta+Shift+N");
+    await expect(page.getByTestId("lens-form-fields-title")).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
 }
 
 /** Open the launcher and type `query` into it — once it has the focus: it
