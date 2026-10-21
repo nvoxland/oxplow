@@ -1525,7 +1525,7 @@ commands:
     scope: work_items.write
     op: create
     invokers: { human: true, agent: true, lens: true }
-    ui: {"label": "New Task…", "group": "Tasks", "keywords": ["work item"], "form": "page:new-task", "shortcut": "Ctrl/Cmd+Shift+N"}
+    ui: {"label": "New Task…", "group": "Tasks", "keywords": ["work item"], "form": "page:new-task", "shortcut": "Ctrl/Cmd+Shift+N", "open_after": "{{result.ref}}"}
     example: {"title": "Fix the login redirect loop", "body": "Signing in from /settings bounces back to /login.", "state": "todo"}
   - name: work_item.delete
     summary: "Delete a work item."

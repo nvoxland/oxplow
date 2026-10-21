@@ -120,6 +120,9 @@ test("the swimlanes work over another work list too (e2e/fake active)", async ({
 });
 
 test("the editor, the list and oxplow's own, each chosen from Settings", async ({ fresh }) => {
+  // Four Settings choices twice over and three pages: about a minute on a
+  // quiet machine, so the default 60s leaves it no room.
+  test.setTimeout(180_000);
   const { page, daemon } = fresh;
   await install(daemon);
   await run(daemon, "oxplow.work_item.create", { title: "Item to edit", thread: daemon.thread });
