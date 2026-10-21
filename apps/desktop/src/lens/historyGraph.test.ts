@@ -35,14 +35,28 @@ const run = (commits: Commit[], reveal: string | null = null) => ({
 
 let updates: Array<(r: unknown) => void> = [];
 let opened: Array<[string, unknown]> = [];
+/** What the graph wrote to its host's view, and how to tell it the view
+ *  changed (Back, Forward, an echo). */
+let written: Array<Record<string, string | null>> = [];
+let viewChanged: Array<(p: Record<string, string>) => void> = [];
 
-/** Load the page and start its script on `first`. */
-async function start(first: ReturnType<typeof run>) {
+/** Load the page and start its script on `first`; `view` is its host's
+ *  view params (Git History's), none in a tile. */
+async function start(first: ReturnType<typeof run>, view: Record<string, string> | null = null) {
   document.body.innerHTML = page;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (globalThis as any).oxplow = {
     connect: async () => ({
       run: first,
+      viewParams: view,
+      setViewParams: async (p: Record<string, string | null>) => {
+        written.push(p);
+        return null;
+      },
+      onViewParams(fn: (p: Record<string, string>) => void) {
+        viewChanged.push(fn);
+        return () => {};
+      },
       applyTheme() {},
       onUpdate(fn: (r: unknown) => void) {
         updates.push(fn);
@@ -65,6 +79,8 @@ const columns = () => rows().map((r) => (Number(r.querySelector("circle")!.getAt
 beforeEach(() => {
   updates = [];
   opened = [];
+  written = [];
+  viewChanged = [];
 });
 afterEach(() => {
   document.body.innerHTML = "";
@@ -149,4 +165,53 @@ test("the revealed commit is marked, and a re-run keeps the filters", async () =
 test("no commits says so", async () => {
   await start(run([]));
   expect(document.getElementById("empty")!.hidden).toBe(false);
+});
+
+const HISTORY: Commit[] = [
+  { sha: "f1", parents: ["a"], branches: ["feature"], subject: "feature work", author: "bo" },
+  { sha: "m", parents: ["a"], branches: ["main"], subject: "fix bug" },
+  { sha: "a", subject: "start" },
+];
+const shown = () => rows().filter((r) => !r.classList.contains("dimmed")).map((r) => r.dataset.sha);
+const input = (id: string, value: string) => {
+  const el = document.getElementById(id) as HTMLInputElement | HTMLSelectElement;
+  el.value = value;
+  el.dispatchEvent(new Event("input"));
+};
+
+// On Git History its filters are the page's view params (`q`, `author`,
+// `branch`): a reload, a bookmark and Back show them, and core's own list
+// reads the same ones.
+test("on its page the filters start from the page's view and write it", async () => {
+  await start(run(HISTORY), { q: "work", author: "bo" });
+  expect((document.getElementById("query") as HTMLInputElement).value).toBe("work");
+  expect((document.getElementById("author") as HTMLSelectElement).value).toBe("bo");
+  expect(shown()).toEqual(["f1"]);
+  input("query", "");
+  input("branch", "main");
+  expect(written).toEqual([
+    { q: null, author: "bo", branch: null },
+    { q: null, author: "bo", branch: "main" },
+  ]);
+});
+
+test("Back changes the filters; its own echo changes nothing", async () => {
+  await start(run(HISTORY), {});
+  input("query", "fi");
+  input("query", "fix");
+  // The echo of the first write arrives after the second was typed.
+  viewChanged[0]!({ q: "fi" });
+  expect((document.getElementById("query") as HTMLInputElement).value).toBe("fix");
+  viewChanged[0]!({ q: "fix" });
+  // Back, to before any of it.
+  viewChanged[0]!({});
+  expect((document.getElementById("query") as HTMLInputElement).value).toBe("");
+  expect(shown()).toEqual(["f1", "m", "a"]);
+});
+
+test("where its host gives no view, the filters are its own", async () => {
+  await start(run(HISTORY));
+  input("query", "bug");
+  expect(shown()).toEqual(["m"]);
+  expect(written).toEqual([]);
 });

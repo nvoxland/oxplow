@@ -3,6 +3,11 @@
 // parents — in place of core's plain commit list (the `vcs.history.graph`
 // replacement). Its lens walks `v_commit` from the stream's head; the
 // filters here only dim or hide rows, so typing never re-runs the lens.
+// On Git History the filters are the page's view params (`q`, `author`,
+// `branch`, the replacement's contract): they start from the page's,
+// each change writes them, and Back sets them again — a reload, a
+// bookmark and core's own list see the same. Where its host gives no
+// view (a tile) they are its own.
 // A row opens its commit; Cmd/Ctrl-click opens it in a new tab.
 (function () {
   "use strict";
@@ -35,12 +40,27 @@
       revealed = render(history, filters(), open);
       if (revealed) revealed.scrollIntoView({ block: "nearest" });
     };
-    const refill = () => {
-      fill(authorEl, "All authors", unique(history.commits.map((c) => c.author)));
-      fill(branchEl, "All branches", unique(history.branchHeads.map((b) => b.name)));
+    const refill = (author = authorEl.value, branch = branchEl.value) => {
+      fill(authorEl, "All authors", unique(history.commits.map((c) => c.author)), author);
+      fill(branchEl, "All branches", unique(history.branchHeads.map((b) => b.name)), branch);
+    };
+    // The page's view, as the filters show it.
+    const showView = (params) => {
+      queryEl.value = params.q || "";
+      refill(params.author || "", params.branch || "");
+    };
+    // Each view written and not yet heard back: its echo isn't a change
+    // (typing goes on while an older write comes back).
+    const written = [];
+    const viewKey = (p) => JSON.stringify([p.q || "", p.author || "", p.branch || ""]);
+    const writeView = () => {
+      const params = { q: queryEl.value || null, author: authorEl.value || null, branch: branchEl.value || null };
+      written.push(viewKey(params));
+      component.setViewParams(params).catch(say);
     };
 
-    refill();
+    if (component.viewParams) showView(component.viewParams);
+    else refill();
     draw();
     // The host runs the lens again when a commit lands or a ref moves (or
     // the page asks to reveal another commit); the filters stay as set.
@@ -49,7 +69,24 @@
       refill();
       draw();
     });
-    for (const el of [queryEl, authorEl, branchEl]) el.addEventListener("input", draw);
+    for (const el of [queryEl, authorEl, branchEl]) {
+      el.addEventListener("input", () => {
+        draw();
+        if (component.viewParams) writeView();
+      });
+    }
+    if (component.viewParams) {
+      component.onViewParams((params) => {
+        const at = written.indexOf(viewKey(params));
+        if (at >= 0) {
+          written.splice(0, at + 1);
+          return;
+        }
+        written.length = 0;
+        showView(params);
+        draw();
+      });
+    }
   }, (e) => say(new Error("Couldn't connect to oxplow: " + (e && e.message ? e.message : e))));
 
   /** The run's commits (children before parents), branch heads and tags,
@@ -96,9 +133,9 @@
     return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
   }
 
-  /** Put `values` in `select` after its "all" option, keeping the choice. */
-  function fill(select, all, values) {
-    const chosen = select.value;
+  /** Put `values` in `select` after its "all" option, choosing `chosen`
+   *  when it is one of them. */
+  function fill(select, all, values, chosen) {
     select.textContent = "";
     const first = document.createElement("option");
     first.value = "";

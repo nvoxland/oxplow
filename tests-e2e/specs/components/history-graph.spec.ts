@@ -46,6 +46,34 @@ test("the history graph draws lanes, filters and opens a commit", async ({ fresh
   await expect(page.getByTestId("page-git-commit")).toContainText("Main work");
 });
 
+// The graph's filters are Git History's view params (its contract's
+// `view`): typing puts `q` in the tab's address as a filter (Back stays
+// where it was), a reload keeps it, and oxplow's own list reads the same.
+test("the history graph's filter is the page's: in the address and kept on a reload", async ({ fresh }) => {
+  const { page, daemon } = fresh;
+  history(daemon);
+  await page.goto("/");
+  await openFromLauncher(page, "Git History");
+  const frame = page.frameLocator('[data-testid="custom-component-frame"]');
+  await expect(frame.locator(".row", { hasText: "Merge side" })).toBeVisible();
+  const body = page.locator('[data-testid^="center-tab-body-page:git-history"]:visible');
+  await expect(body).toHaveAttribute("data-testid", "center-tab-body-page:git-history");
+
+  await frame.locator("#query").fill("side");
+  await expect(body).toHaveAttribute("data-testid", "center-tab-body-page:git-history?q=side");
+  await expect(page.getByTestId("page-nav-back").filter({ visible: true })).toBeDisabled();
+
+  await page.reload();
+  await expect(body).toHaveAttribute("data-testid", "center-tab-body-page:git-history?q=side");
+  await expect(frame.locator("#query")).toHaveValue("side");
+  await expect(frame.locator(".row:not(.dimmed)")).toHaveCount(2);
+
+  // Oxplow's own list, given the same address, filters by it.
+  await run(daemon, "oxplow.extension.disable", { name: "oxplow-bundled" });
+  await expect(page.getByTestId("commit-list-row").filter({ hasText: "Side work" })).toBeVisible();
+  await expect(page.getByPlaceholder("Filter commits (message, sha, author)").filter({ visible: true })).toHaveValue("side");
+});
+
 test("without oxplow-bundled, Git History is oxplow's plain list", async ({ fresh }) => {
   const { page, daemon } = fresh;
   history(daemon);

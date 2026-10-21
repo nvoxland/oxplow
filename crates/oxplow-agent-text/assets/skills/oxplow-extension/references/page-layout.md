@@ -99,6 +99,12 @@ the open page sees the same values. So:
   tab; skip a value it already shows. A default it computes ("the last
   week") stays out of the params, so a bookmark doesn't freeze it to one
   date. oxplow-foundation's Timeline does exactly this with `from`/`to`.
+- **A component inside a page has its host's view, or none.** As a
+  replacement it gets the keys its target lists (`SELECT target, view
+  FROM v_replaceable`; the history graph: `q`, `author`, `branch`); on a
+  lens's own page, the lens's params. In a dashboard tile or a slot
+  `component.viewParams` is null: keep the filters in the component.
+  A hosted component's history state is its own, apart from the page's.
 - **The page never opens itself.** Another mode or "View all" is a param
   on the same page, not a second page.
 

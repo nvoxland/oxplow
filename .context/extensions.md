@@ -2223,8 +2223,13 @@ on the client library and the kit) draws the stream's commits as `git log
 --graph` does — a lane per line of descent, a dot per commit — from its
 hidden lens `history-graph` (a recursive walk of `v_commit` from
 `:head_sha`, with local branch and tag labels from `v_branch` / `v_tag`).
-Its text, author and branch filters are its own and only dim or hide rows,
-so typing never re-runs the lens; the host re-runs it when a commit lands
+Its text, author and branch filters only dim or hide rows, so typing
+never re-runs the lens. On Git History they are the page's `q`, `author`
+and `branch` (the contract's `view`): they start from the page's, each
+change writes them (`setViewParams`; an echo of its own write is
+ignored, so typing isn't undone by a late one) and Back sets them again
+(`onViewParams`). With no view (a tile) they are its own. The host
+re-runs the lens when a commit lands
 or a ref moves (its reads). A row opens `commit:<sha>`; a Cmd/Ctrl-click
 opens it in a new tab (`navigate(ref, { newTab: true })`, bridge protocol
 3). The commit page's prev/next siblings, which oxplow's list passes, a

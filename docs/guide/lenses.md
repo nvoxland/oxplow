@@ -517,9 +517,13 @@ oxplow.connect().then(async (component) => {
 
 `querySql` needs `sql: read` on the component and `permissions: { sql:
 read }` on the extension; it reads oxplow's models only, never writes.
-`setTitle`, `setActions`, `openForm`, `setViewParams` and
-`setHistoryState` are a page's: a component a lens shows can't use them
-(the lens owns its page). Each kind of state has a name that says how far
+`setTitle`, `setActions` and `openForm` are a page's: a component a lens
+shows can't use them. `viewParams`, `setViewParams` and `historyState`
+are its host's view, where the host shares one: a page's component has
+all of its page's params; a replacement has the keys its view's contract
+lists (`v_replaceable.view`); a `viz: custom` lens on its own page has
+the lens's params. In a dashboard tile or a slot `viewParams` is null and
+the component keeps its filters itself. Each kind of state has a name that says how far
 it reaches: **view params** (the tab's address: what the page shows, kept
 by Back, a bookmark and a reopened tab, seen by an agent), **history
 state** (this step of the tab: scroll, what's expanded) and **page
@@ -557,7 +561,11 @@ gets `scope` (`thread`, `stream` or `all`) and `thread_id`, and its lens may
 declare `stream_id`; the editor gets `ref`. Settings → Integrations lists
 each replaced view with a choice of whose to show (Default, oxplow's own, or
 an extension); a small "replaced by" badge says whose it is, and if it can't
-load, oxplow's own shows with a line saying why. A `viz: custom` view that
+load, oxplow's own shows with a line saying why. Some views also share
+their page's view params: Git History's graph (`vcs.history.graph`) has
+the page's `q`, `author` and `branch`, so a custom graph reads them from
+`component.viewParams`, writes them with `setViewParams` and follows
+`onViewParams` — the same address oxplow's own list keeps. A `viz: custom` view that
 changes items needs its commands declared like any component, and the
 extension must declare the permissions for them.
 

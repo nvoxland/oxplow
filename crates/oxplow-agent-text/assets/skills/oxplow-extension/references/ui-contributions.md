@@ -76,3 +76,8 @@ ui:
   replacing a view shows by itself.
 - The page around the view stays oxplow's (the Board's scope picker, a
   work item's state pill and Move To), so an item can always move.
+- A target whose `view` (in `v_replaceable`) lists keys shares them with
+  its page: a `viz: custom` replacement reads `component.viewParams`,
+  writes `setViewParams` and follows `onViewParams` for exactly those
+  keys (any other is refused), so it leaves the same address oxplow's own
+  view does. Pin the contract's `version:`.
