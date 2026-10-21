@@ -956,7 +956,7 @@ body `PageNavigation.historyState` and, to the tab's current page only,
 `setHistoryState(patch)` (`patchHistoryState` in the model, which ignores
 a write that changes nothing). Outside a tab it is local state. Used by the editor
 and the diff pane (Monaco's view state, `useMonacoViewState`), a wiki page (scroll, and its unsaved edit: `editing`, `draft`), the collapsed sections
-(`CollapsibleSections`) and a lens's "More" params; and the unsaved forms (`useDraft`): New item,
+(`CollapsibleSections`) and a lens's "More" params and the rows it picked (`picked`); and the unsaved forms (`useDraft`): New item,
 New stream, the stream and thread prompt, the Agents settings form, the
 uncommitted commit message and a task's title. Keep values JSON: one
 value that isn't drops the entry's whole state from storage.

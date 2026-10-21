@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Page } from "../tabs/Page.js";
+import { useHistoryState } from "../tabs/useHistoryState.js";
 import { useOptionalPageNavigation, usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Stream } from "../tauri-bridge/index.js";
@@ -113,7 +114,9 @@ export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage 
 
   // A param set from the rail or by a row click (a column's `select`,
   // with the row it picked for the rail's Selection).
-  const [picked, setPicked] = useState<Record<string, PickedRow>>({});
+  // Kept in the entry's history state, so Back and a restart still show the
+  // row's facts, not the bare value.
+  const [picked, setPicked] = useHistoryState<Record<string, PickedRow>>("picked", NO_PICKED);
   const setParam = (name: string, value: SqlCell, row?: PickedRow) => {
     // What the ref carries: the values that differ from the defaults.
     const next = lens ? changedParams(lens, { ...overridesRef.current, [name]: value }) : { ...overridesRef.current, [name]: value };
@@ -125,10 +128,8 @@ export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage 
     } else {
       setOwn(next);
     }
-    setPicked((p) => {
-      const { [name]: _, ...rest } = p;
-      return row ? { ...rest, [name]: row } : rest;
-    });
+    const { [name]: _, ...rest } = picked;
+    setPicked(row ? { ...rest, [name]: row } : rest);
   };
   const outOfDate = useOutOfDate(lens?.origin.extension ?? null, lens?.origin.deployment ?? null);
   const rightRail = lens ? (
@@ -166,6 +167,7 @@ export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage 
 }
 
 const NO_PARAMS: Record<string, SqlCell> = {};
+const NO_PICKED: Record<string, PickedRow> = {};
 
 /** Whether an extension's source changed after the deployment that runs:
  *  its live source hash against the deployed one. False with no
