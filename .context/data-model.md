@@ -923,7 +923,7 @@ histories, and `listSnapshotsForStream` queries `WHERE stream_id =
 service per active stream, each watching its own
 `worktree_path`. `Services::boot` enumerates every active stream
 and registers a service for each; the stream lifecycle
-commands (`oxplow.stream.create_worktree`, `oxplow.stream.adopt_worktree`,
+commands (`oxplow.stream.create`,
 `oxplow.stream.archive`) register/unregister at
 runtime. Callers resolve the right service via
 `snapshot_captures.get(&stream_id)` (when the stream is known)

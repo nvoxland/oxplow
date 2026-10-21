@@ -102,20 +102,6 @@ function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error:
   );
 }
 
-/// Pure slug derivation: lowercase ASCII alphanumerics, runs of any
-/// other character collapse to a single hyphen, leading/trailing
-/// hyphens trimmed. Worktree slug is fixed at creation and never
-/// changes, so the formatting needs to be conservative.
-function slugifyTitle(title: string): string {
-  const base = title
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return base.length > 0 ? base : `stream-${Date.now()}`;
-}
-
 /// Desktop bridge facade: a small object that exposes the few
 /// runtime IPC methods consumers reach for via
 /// `desktopBridge().X(...)` (menu / lsp / terminal / external-url
@@ -1166,34 +1152,6 @@ export async function setupProject(path: string): Promise<void> {
 /// Decline first-run setup — closes the setup window (exits the process).
 export async function abortSetup(): Promise<void> {
   unwrap(await commands.abortSetup());
-}
-
-export async function createStream(input:
-  | { title: string; source: "existing"; ref: string }
-  | { title: string; source: "new"; branch: string; startPointRef: string }
-  | { title: string; source: "worktree"; worktreePath: string },
-): Promise<Stream> {
-  const slug = slugifyTitle(input.title);
-  const run = async (name: string, body: Record<string, unknown>) =>
-    (await runCommand(name, body)).result as Stream;
-  switch (input.source) {
-    case "existing":
-      return run("oxplow.stream.create_worktree", {
-        slug,
-        title: input.title,
-        branch: input.ref,
-        branch_source: input.ref,
-      });
-    case "new":
-      return run("oxplow.stream.create_worktree", {
-        slug,
-        title: input.title,
-        branch: input.branch,
-        branch_source: input.startPointRef ?? input.branch,
-      });
-    case "worktree":
-      return run("oxplow.stream.adopt_worktree", { path: input.worktreePath, title: input.title });
-  }
 }
 
 /** Switch the stream's workspace to `branch` (`create` makes it at the

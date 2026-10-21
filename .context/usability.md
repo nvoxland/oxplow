@@ -9,7 +9,7 @@ Things I keep forgetting. Read this before adding any UI.
 > `⋯` buttons were reverted — see "Per-row actions" below); per-stream
 > and per-thread settings
 > ship as Page tabs (the `stream-settings` and `thread-settings` lens pages); new-
-> stream and new-task flows ship as Page tabs (`NewStreamPage`,
+> stream and new-task flows ship as Page tabs (the New Stream lens form,
 > `NewTaskPage`); snapshot- and commit-detail Slideover wrappers
 > (`SnapshotDetailSlideover`, `CommitDetailSlideover`) cover the
 > cross-page open path. The rules below describe the redesigned
@@ -50,7 +50,7 @@ Things I keep forgetting. Read this before adding any UI.
   the strip is dismissed by the panel's local `pendingPrompt` state.
 - **Form-shaped flows that warrant a focused workspace use a page tab
   or a slideover, not a centered modal.** The "+ New" flows ship as
-  Page tabs (`NewStreamPage`, `NewTaskPage`, the `Stream/Thread`
+  Page tabs (the New Stream lens form, `NewTaskPage`, the `Stream/Thread`
   settings pages); cross-page detail openings (snapshot, commit,
   branch rename, file commit) ship as Slideovers. The remaining
   legacy hand-rolled modal chrome inside `PlanPane.tsx`'s

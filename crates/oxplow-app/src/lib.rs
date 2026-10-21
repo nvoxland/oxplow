@@ -2342,9 +2342,8 @@ mod tests {
                 "oxplow.snapshot.restore_file",
                 "oxplow.sql.query",
                 // A stream's worktree and its capture service (P8.A4).
-                "oxplow.stream.adopt_worktree",
                 "oxplow.stream.archive",
-                "oxplow.stream.create_worktree",
+                "oxplow.stream.create",
                 // A run's capture, through the collection service (P8.A8).
                 "oxplow.test.record_run",
                 "oxplow.vcs.blame",
@@ -2507,6 +2506,10 @@ mod tests {
                 "work_items.write/transition",
                 "work_items.write/unlink",
                 "work_items.write/update",
+                // A stream on a worktree: a person's submit of the New Stream form
+                // (a lens), or an agent's on a branch; adopting a worktree is refused
+                // to an agent in the handler.
+                "worktrees.write/create",
             ]
         );
     }

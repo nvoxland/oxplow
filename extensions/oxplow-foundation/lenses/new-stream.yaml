@@ -1,0 +1,24 @@
+title: New Stream
+description: A stream is its own worktree and its own threads. Put it on a branch that exists, on a new branch forked from another, or adopt a worktree that is already on disk.
+hidden: true
+needs: [vcs]
+query: |
+  SELECT 'Stream ' || (SELECT count(*) + 1 FROM v_stream WHERE archived_at IS NULL) AS title,
+         'existing' AS source,
+         (SELECT name FROM v_branch WHERE kind = 'local' ORDER BY is_default DESC, name LIMIT 1) AS existing_branch,
+         (SELECT name FROM v_branch WHERE kind = 'local' ORDER BY is_default DESC, name LIMIT 1) AS start_point
+viz: form
+form:
+  command: oxplow.stream.create
+  then: replace
+  fields:
+    - title
+    - source
+    - { name: existing_branch, visible_if: { source: [existing] } }
+    - { name: new_branch, visible_if: { source: [new] } }
+    - { name: start_point, visible_if: { source: [new] } }
+    - { name: worktree, visible_if: { source: [worktree] } }
+  choices:
+    existing_branch: oxplow-foundation/new-stream-branches
+    start_point: oxplow-foundation/new-stream-branches
+    worktree: oxplow-foundation/new-stream-worktrees

@@ -1675,10 +1675,11 @@ export function App() {
    * palette (the window's opener), a search hit. Kept in a ref so the
    * page contexts built in a memo always call the latest.
    */
-  const openRefRef = useRef<(ref: string, how: import("./tabs/openRef.js").OpenHow, open: import("./tabs/openRef.js").RefHost["open"]) => void>(() => {});
-  openRefRef.current = (ref, how, open) => {
+  const openRefRef = useRef<(ref: string, how: import("./tabs/openRef.js").OpenHow, open: import("./tabs/openRef.js").RefHost["open"], closePage?: () => void) => void>(() => {});
+  openRefRef.current = (ref, how, open, closePage) => {
     void openRefAt(ref, how, {
       open,
+      closePage,
       showThread: async (thread) => {
         const streamId = streamOfThread(threadStatesRef.current, thread);
         if (!streamId) return false;
@@ -1686,7 +1687,14 @@ export function App() {
         return true;
       },
       showStream: async (id) => {
-        if (!threadStatesRef.current[id]) return false;
+        if (!threadStatesRef.current[id]) {
+          // A stream just made (New Stream) isn't in the window's state yet:
+          // read it and take it in as the create flow always did.
+          const made = (await listStreams()).find((candidate) => candidate.id === id);
+          if (!made) return false;
+          await handleStreamCreated(made);
+          return true;
+        }
         if (stream?.id !== id) await handleSwitch(id);
         return true;
       },
@@ -2395,10 +2403,15 @@ export function App() {
           else handleNavigateInTab(currentId, newRef, opts?.origin, opts?.replace);
         },
         openRef: (target, how) =>
-          openRefRef.current(target, how ?? {}, (opened, h) => {
-            if (h.newTab) handleOpenPage(opened);
-            else handleNavigateInTab(currentId, opened, h.origin, h.replace);
-          }),
+          openRefRef.current(
+            target,
+            how ?? {},
+            (opened, h) => {
+              if (h.newTab) handleOpenPage(opened);
+              else handleNavigateInTab(currentId, opened, h.origin, h.replace);
+            },
+            () => closePageTab(currentId),
+          ),
         goBack: () => handleGoBack(slot),
         goForward: () => handleGoForward(slot),
         canGoBack: sessionTab.at > 0,

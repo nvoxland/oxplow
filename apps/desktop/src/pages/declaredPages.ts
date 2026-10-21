@@ -22,7 +22,6 @@ export const BUILT_IN_PAGES = [
   "git-dashboard",
   "metrics-recorded",
   "new-session",
-  "new-stream",
   "new-task",
   "settings",
   "terminal",

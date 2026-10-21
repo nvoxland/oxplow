@@ -487,8 +487,8 @@ mod tests {
             .commands
             .run(
                 &oxplow_domain::Actor::Human,
-                "oxplow.stream.adopt_worktree",
-                json!({ "path": dir.to_string_lossy(), "title": "Side" }),
+                "oxplow.stream.create",
+                json!({ "title": "Side", "source": "worktree", "worktree": dir.to_string_lossy() }),
                 true,
             )
             .await

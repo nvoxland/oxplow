@@ -1,0 +1,10 @@
+title: Worktrees to adopt
+description: The repository's worktrees that are not a stream yet.
+hidden: true
+needs: [vcs]
+query: |
+  SELECT w.path AS value,
+         CASE WHEN w.branch IS NULL OR w.branch = '' THEN '[detached] ' ELSE '[' || w.branch || '] ' END || w.path AS label
+  FROM v_vcs_workspace w
+  WHERE w.is_main = 0 AND w.stream_id IS NULL
+  ORDER BY w.path

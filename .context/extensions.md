@@ -2019,8 +2019,9 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   action's `then` (a form lens's `form.then`): `open` (default) — the
   page opens in this tab and Back returns; `replace` — it takes this tab
   and the lens's page leaves history (`NavigateOptions.replace`, so Back
-  never returns to a submitted form; a page that can't live in a tab,
-  an agent session, closes this one and is focused); `stay` — nothing
+  never returns to a submitted form; a target that can't live in a tab —
+  an agent session, a stream or a thread — closes this one and is shown or
+  focused: New Stream's `oxplow.stream.create` opens `stream:<id>`); `stay` — nothing
   opens (a form for the next entry). Outside a page (a panel) a page
   opens in a new tab whatever `then` says.
 - `alert`: a row-count or threshold condition that shows a panel badge

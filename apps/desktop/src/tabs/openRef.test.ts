@@ -47,3 +47,23 @@ test("an unopenable ref and a failed lookup are reported, never silent", async (
   });
   expect(log).toEqual(["failed `event:e1` has no page", "failed query failed"]);
 });
+
+// A submitted form gives way to what it made: a stream or a thread is not a
+// tab, so the page leaves (`replace`) once the stream or thread is shown.
+test("a replace that shows a stream or a thread closes the page it came from", async () => {
+  const { h, log } = host({ threads: ["thr1"], streams: ["str1"] });
+  const closing = { ...h, closePage: () => log.push("close page") };
+  await openRef("stream:str1", { replace: true }, closing, resolving({ stream: "str1" }));
+  await openRef("thread:thr1", { replace: true }, closing, resolving({ thread: "thr1" }));
+  await openRef("stream:str9", { replace: true }, closing, resolving({ stream: "str9" }));
+  await openRef("stream:str1", {}, closing, resolving({ stream: "str1" }));
+  expect(log).toEqual([
+    "stream str1",
+    "close page",
+    "thread thr1",
+    "close page",
+    "stream str9",
+    "failed no stream `str9`",
+    "stream str1",
+  ]);
+});

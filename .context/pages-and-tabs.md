@@ -229,7 +229,7 @@ oxplow's pages and their params:
 
 - Lens pages: `problems`, `symbols` (`path`, `filter`), `closed-threads`,
   `wiki-index`, `wiki-freshness` (`slug`), `go-to`, `dashboards`,
-  `hook-events`, `done-work`, `catalog`, `stream-settings` (`stream`) and `thread-settings` (`thread`) (documents: a hint, the thread's open sessions, and the prompt as an edit form over `v_stream` / `v_thread` with `oxplow.*.set_prompt`), `git-history` (a document with one replaceable part: the commit list, or the history graph; params `q`, `author`, `branch`), `local-history` (a document of
+  `hook-events`, `done-work`, `catalog`, `new-stream` (a form: `visible_if` on its `source`, `oxplow.stream.create`), `stream-settings` (`stream`) and `thread-settings` (`thread`) (documents: a hint, the thread's open sessions, and the prompt as an edit form over `v_stream` / `v_thread` with `oxplow.*.set_prompt`), `git-history` (a document with one replaceable part: the commit list, or the history graph; params `q`, `author`, `branch`), `local-history` (a document of
   two lenses; params `mode` `recent` | `by-commit` and `all`, which lifts
   the caps — the rail's, so no "View all" step to go Back from).
 - Built-in pages: `tasks`, `backlog` (badge: `backlog-count`), `board`,
@@ -237,7 +237,7 @@ oxplow's pages and their params:
   `comments`, `explore-data`, `metrics-recorded`,
   `terminal`, `alerts`, `settings` (view: `area`, `section` — another
   area is a pushed view change, never a page opened over it),
-  `custom-dashboard` (`id`), `new-session`, `new-stream`, `new-task`
+  `custom-dashboard` (`id`), `new-session`, `new-task`
   (`parent`),
   `external-url` (`url`), `diff` (`path`, `left`, `right`, `label`,
   `base` — the left side's name when it isn't the version's own — and

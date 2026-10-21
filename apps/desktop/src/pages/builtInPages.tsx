@@ -26,7 +26,6 @@ import { CustomDashboardPage } from "./CustomDashboardPage.js";
 import { ExploreDataPage } from "./ExploreDataPage.js";
 import { BoardPage } from "./BoardPage.js";
 import { ExternalUrlPage } from "./ExternalUrlPage.js";
-import { NewStreamPage } from "./NewStreamPage.js";
 import { NewTaskPage } from "./NewTaskPage.js";
 import { AlertsPage } from "./AlertsPage.js";
 
@@ -372,24 +371,6 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
     };
   },
 
-  "new-stream": ({ ref, scope }) => {
-    return {
-      id: ref.id,
-      label: "New Stream",
-      closable: true,
-      render: () => (
-        <NewStreamPage
-          vcsEnabled={scope.vcsEnabled}
-          defaultTitle={`Stream ${scope.streams.length + 1}`}
-          onClose={() => scope.closePageTab(ref.id)}
-          onCreated={(created) => {
-            scope.handleStreamCreated(created);
-            scope.closePageTab(ref.id);
-          }}
-        />
-      ),
-    };
-  },
   "new-task": ({ ref, params, scope }) => {
     return {
       id: ref.id,

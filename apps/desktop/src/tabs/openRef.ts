@@ -31,6 +31,9 @@ export interface RefHost {
   showStream(stream: string): boolean | Promise<boolean>;
   /** A ref that didn't open, and why. */
   failed(message: string): void;
+  /** Leave the page the open came from: a `replace` that showed a stream or
+   *  a thread, which is no tab to take the page's place. */
+  closePage?(): void;
 }
 
 /** Open `ref` through `host`: where its kind's page says. */
@@ -50,9 +53,13 @@ export async function openRef(
   if ("tab" in target) {
     host.open(target.tab, how);
   } else if ("thread" in target) {
-    if (!(await host.showThread(target.thread))) host.failed(`no thread \`${target.thread}\``);
+    if (await host.showThread(target.thread)) {
+      if (how.replace) host.closePage?.();
+    } else host.failed(`no thread \`${target.thread}\``);
   } else if ("stream" in target) {
-    if (!(await host.showStream(target.stream))) host.failed(`no stream \`${target.stream}\``);
+    if (await host.showStream(target.stream)) {
+      if (how.replace) host.closePage?.();
+    } else host.failed(`no stream \`${target.stream}\``);
   } else {
     host.failed(target.unopenable);
   }

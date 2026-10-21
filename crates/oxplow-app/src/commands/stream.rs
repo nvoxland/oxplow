@@ -1,5 +1,6 @@
 //! Stream commands (P8.A4, `.context/commands.md`): a stream's lifecycle
-//! — a new worktree, adopting one already on disk, archiving — and its
+//! — a new worktree (one of a branch, a new branch, or one already on
+//! disk), archiving — and its
 //! title and custom prompt. Creating, adopting and archiving reach the
 //! VCS and the stream's capture service, so they are `External` and a
 //! person's; archiving is destructive (it can remove the working copy).
@@ -20,30 +21,44 @@ use super::thread::agent_scope;
 use super::util::{invalid, parse, ref_id, schema, sql};
 use super::{Handler, HandlerOutput, Invocation, TxCtx};
 
-pub const CREATE_WORKTREE: &str = "oxplow.stream.create_worktree";
-pub const ADOPT_WORKTREE: &str = "oxplow.stream.adopt_worktree";
+pub const CREATE: &str = "oxplow.stream.create";
 pub const ARCHIVE: &str = "oxplow.stream.archive";
 pub const RENAME: &str = "oxplow.stream.rename";
 pub const SET_PROMPT: &str = "oxplow.stream.set_prompt";
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct CreateWorktreeInput {
-    /// The worktree's folder name (beside the project, fixed for good).
-    pub slug: String,
-    pub title: String,
-    /// The branch to create for it.
-    pub branch: String,
-    /// The branch it forks from.
-    pub branch_source: String,
+// No docs on the variants: a documented variant is a `oneOf` of
+// constants in the schema, and a plain `enum` is what a form draws as a
+// select.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamSource {
+    Existing,
+    New,
+    Worktree,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AdoptWorktreeInput {
-    /// An existing worktree of this repository.
-    pub path: String,
+pub struct CreateInput {
+    /// The stream's name; its worktree's folder is made from it.
     pub title: String,
+    /// Where its worktree comes from: `existing` (a branch that exists),
+    /// `new` (a new branch forked from a start point) or `worktree` (one
+    /// already on disk, adopted as it is: a person's).
+    pub source: StreamSource,
+    /// `source: existing`: the branch to put the stream on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub existing_branch: Option<String>,
+    /// `source: new`: the branch to create for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_branch: Option<String>,
+    /// `source: new`: the branch or revision it forks from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_point: Option<String>,
+    /// `source: worktree`: the path of an existing worktree of this
+    /// repository.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -98,7 +113,7 @@ pub struct StreamDeps {
 fn session(e: oxplow_session::SessionError) -> CommandError {
     use oxplow_session::SessionError as E;
     match e {
-        E::DuplicateWorktreeSlug(_) => invalid("/slug", e.to_string()),
+        E::DuplicateWorktreeSlug(_) => invalid("/title", e.to_string()),
         E::Storage(oxplow_domain::DomainError::NotFound) => invalid("/stream", "no such stream"),
         other => CommandError::Failed {
             message: other.to_string(),
@@ -128,22 +143,99 @@ fn start_capture(deps: &StreamDeps, stream: &Stream) {
     }
 }
 
-/// `stream.create_worktree { slug, title, branch, branch_source }`.
-pub fn create_worktree_op(deps: StreamDeps) -> Op {
+/// A folder name for a stream titled `title`: lowercase words joined by
+/// hyphens, accents dropped; a title with no words gets a stamp. The
+/// slug is fixed when the worktree is made, so it stays conservative.
+fn slug_of(title: &str) -> String {
+    let mut slug = String::new();
+    for c in title.chars().flat_map(char::to_lowercase) {
+        // Latin letters with a mark (é, ü) fold to their base letter.
+        let c = match c {
+            'à'..='å' => 'a',
+            'ç' => 'c',
+            'è'..='ë' => 'e',
+            'ì'..='ï' => 'i',
+            'ñ' => 'n',
+            'ò'..='ö' => 'o',
+            'ù'..='ü' => 'u',
+            'ý' | 'ÿ' => 'y',
+            c => c,
+        };
+        if c.is_ascii_alphanumeric() {
+            slug.push(c);
+        } else if !slug.is_empty() && !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    let slug = slug.trim_end_matches('-').to_string();
+    if slug.is_empty() {
+        format!("stream-{}", Timestamp::now().unix_ms())
+    } else {
+        slug
+    }
+}
+
+/// `stream.create { title, source, … }` — a stream on a worktree: of an
+/// existing branch, of a new one forked from a start point, or adopted
+/// from disk. Each source names the fields it needs. The worktree's folder
+/// comes from the title. A person's or an agent's (agents set up parallel
+/// work), except adopting a worktree that is already on disk: a person's.
+/// It reaches the VCS and starts the stream's capture service.
+pub fn create_op(deps: StreamDeps) -> Op {
     Op::new(
         "worktrees.write",
-        "create_worktree",
-        schema::<CreateWorktreeInput>(),
+        "create",
+        schema::<CreateInput>(),
         false,
-        Handler::External(Arc::new(move |_: Invocation, input| {
+        Handler::External(Arc::new(move |invocation: Invocation, input| {
             let deps = deps.clone();
             Box::pin(async move {
-                let input: CreateWorktreeInput = parse(input)?;
-                let stream = deps
-                    .streams
-                    .create_worktree(&input.slug, input.title, input.branch, input.branch_source)
-                    .await
-                    .map_err(session)?;
+                let input: CreateInput = parse(input)?;
+                let need = |value: &Option<String>, field: &str| -> Result<String, CommandError> {
+                    value
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|v| !v.is_empty())
+                        .map(str::to_string)
+                        .ok_or_else(|| {
+                            invalid(
+                                &format!("/{field}"),
+                                format!("`source: {}` needs `{field}`", source_name(input.source)),
+                            )
+                        })
+                };
+                let title = input.title.trim().to_string();
+                if title.is_empty() {
+                    return Err(invalid("/title", "a stream needs a name"));
+                }
+                let stream = match input.source {
+                    StreamSource::Existing => {
+                        let branch = need(&input.existing_branch, "existing_branch")?;
+                        deps.streams
+                            .create_worktree(&slug_of(&title), title, branch.clone(), branch)
+                            .await
+                    }
+                    StreamSource::New => {
+                        let branch = need(&input.new_branch, "new_branch")?;
+                        let from = need(&input.start_point, "start_point")?;
+                        deps.streams
+                            .create_worktree(&slug_of(&title), title, branch, from)
+                            .await
+                    }
+                    StreamSource::Worktree => {
+                        let path = need(&input.worktree, "worktree")?;
+                        if invocation.actor().agent_thread().is_some() {
+                            return Err(CommandError::Denied {
+                                reason: "adopting a worktree that is already on disk is a person's"
+                                    .into(),
+                            });
+                        }
+                        deps.streams
+                            .adopt_worktree(std::path::PathBuf::from(path), title)
+                            .await
+                    }
+                }
+                .map_err(session)?;
                 start_capture(&deps, &stream);
                 Ok(result(&stream))
             })
@@ -152,33 +244,17 @@ pub fn create_worktree_op(deps: StreamDeps) -> Op {
     .open_to(Invokers {
         human: true,
         agent: true,
-        lens: false,
+        lens: true,
         job: false,
     })
 }
 
-/// `stream.adopt_worktree { path, title }`.
-pub fn adopt_worktree_op(deps: StreamDeps) -> Op {
-    Op::new(
-        "worktrees.write",
-        "adopt_worktree",
-        schema::<AdoptWorktreeInput>(),
-        false,
-        Handler::External(Arc::new(move |_: Invocation, input| {
-            let deps = deps.clone();
-            Box::pin(async move {
-                let input: AdoptWorktreeInput = parse(input)?;
-                let stream = deps
-                    .streams
-                    .adopt_worktree(std::path::PathBuf::from(&input.path), input.title)
-                    .await
-                    .map_err(session)?;
-                start_capture(&deps, &stream);
-                Ok(result(&stream))
-            })
-        })),
-    )
-    .open_to(Invokers::HUMAN_ONLY)
+fn source_name(source: StreamSource) -> &'static str {
+    match source {
+        StreamSource::Existing => "existing",
+        StreamSource::New => "new",
+        StreamSource::Worktree => "worktree",
+    }
 }
 
 /// `stream.archive { stream, delete_worktree? }`: refused while an agent
@@ -355,8 +431,7 @@ pub fn set_prompt_op() -> Op {
 /// The stream commands, for the bus.
 pub fn ops(deps: StreamDeps) -> Vec<Op> {
     vec![
-        create_worktree_op(deps.clone()),
-        adopt_worktree_op(deps.clone()),
+        create_op(deps.clone()),
         archive_op(deps),
         rename_op(),
         set_prompt_op(),
@@ -502,6 +577,125 @@ mod tests {
         assert_eq!(open.map(|e| e.id), Some(fx.effort), "the effort stays open");
     }
 
+    async fn main_branch(fx: &EffortFixture) -> String {
+        let root = fx.svc.layout.project_dir.clone();
+        fx.svc.vcs.head(&root).await.unwrap().branch.unwrap()
+    }
+
+    /// A stream is created from a branch: a new one forked from a start
+    /// point, or one that exists. Its worktree folder is the title's slug,
+    /// worked out here and not by the caller.
+    #[tokio::test]
+    async fn a_stream_is_created_from_a_new_or_an_existing_branch() {
+        let fx = services_with_effort().await;
+        let main = main_branch(&fx).await;
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                CREATE,
+                json!({ "title": "Side Work!", "source": "new", "new_branch": "side-work", "start_point": main }),
+                false,
+            )
+            .await
+            .unwrap();
+        let made = serde_json::from_value::<Stream>(out.result).unwrap();
+        assert_eq!(
+            (made.title.as_str(), made.branch.as_str()),
+            ("Side Work!", "side-work")
+        );
+        assert!(
+            made.worktree_path.ends_with("-side-work"),
+            "{}",
+            made.worktree_path
+        );
+
+        let root = fx.svc.layout.project_dir.clone();
+        let git = std::process::Command::new("git")
+            .args(["branch", "feature"])
+            .current_dir(&root)
+            .status()
+            .unwrap();
+        assert!(git.success());
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                CREATE,
+                json!({ "title": "Feature", "source": "existing", "existing_branch": "feature" }),
+                false,
+            )
+            .await
+            .unwrap();
+        let made = serde_json::from_value::<Stream>(out.result).unwrap();
+        assert_eq!(made.branch, "feature");
+        assert_eq!(made.branch_source, "feature");
+    }
+
+    /// Each source needs its own fields, named when they are missing.
+    #[tokio::test]
+    async fn a_source_without_its_fields_is_refused() {
+        let fx = services_with_effort().await;
+        for (input, field) in [
+            (
+                json!({ "title": "T", "source": "existing" }),
+                "/existing_branch",
+            ),
+            (
+                json!({ "title": "T", "source": "new", "new_branch": "b" }),
+                "/start_point",
+            ),
+            (
+                json!({ "title": "T", "source": "new", "start_point": "main" }),
+                "/new_branch",
+            ),
+            (json!({ "title": "T", "source": "worktree" }), "/worktree"),
+        ] {
+            let err = fx
+                .svc
+                .commands
+                .run(&Actor::Human, CREATE, input, false)
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == field),
+                "{field}: {err:?}"
+            );
+        }
+    }
+
+    /// An agent sets up parallel work on a branch; adopting a worktree
+    /// that is already on disk is a person's.
+    #[tokio::test]
+    async fn an_agent_creates_from_a_branch_but_adopts_nothing() {
+        let fx = services_with_effort().await;
+        let main = main_branch(&fx).await;
+        fx.svc
+            .commands
+            .run(
+                &agent(&fx),
+                CREATE,
+                json!({ "title": "Agent work", "source": "new", "new_branch": "agent-work", "start_point": main }),
+                false,
+            )
+            .await
+            .unwrap();
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &agent(&fx),
+                CREATE,
+                json!({ "title": "Adopted", "source": "worktree", "worktree": "/tmp/somewhere" }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+    }
+
     /// An agent running in any of a thread's sessions — not only its first
     /// — keeps the stream from being archived.
     #[tokio::test]
@@ -514,8 +708,8 @@ mod tests {
             .commands
             .run(
                 &Actor::Human,
-                CREATE_WORKTREE,
-                json!({ "slug": "busy", "title": "Busy", "branch": "busy", "branch_source": main }),
+                CREATE,
+                json!({ "title": "Busy", "source": "new", "new_branch": "busy", "start_point": main }),
                 false,
             )
             .await
@@ -582,8 +776,8 @@ mod tests {
             .commands
             .run(
                 &Actor::Human,
-                CREATE_WORKTREE,
-                json!({ "slug": "arch", "title": "Arch", "branch": "arch", "branch_source": main }),
+                CREATE,
+                json!({ "title": "Arch", "source": "new", "new_branch": "arch", "start_point": main }),
                 false,
             )
             .await

@@ -183,7 +183,7 @@ pages:
   - { id: alerts, title: Alerts, icon: bell, component: "oxplow:alerts" }
   - { id: custom-dashboard, title: Dashboard, icon: layout-dashboard, params: [id], component: "oxplow:custom-dashboard" }
   - { id: new-session, title: New Session, icon: plus, component: "oxplow:new-session" }
-  - { id: new-stream, title: New Stream, icon: plus, component: "oxplow:new-stream" }
+  - { id: new-stream, title: New Stream, icon: plus, lens: new-stream }
   - { id: new-task, title: New Item, icon: plus, component: "oxplow:new-task" }
   - { id: stream-settings, title: Stream Settings, icon: settings, params: [stream], lens: stream-settings }
   - { id: thread-settings, title: Thread Settings, icon: settings, params: [thread], lens: thread-settings }
@@ -1278,24 +1278,19 @@ commands:
     invokers: { human: true, agent: true, lens: true }
     example: {"ref": "work_item:oxplow:tsk12", "title": "Fix the login redirect loop", "body": "Reproduces only with a stale session cookie."}
   # worktrees.write
-  - name: stream.adopt_worktree
-    summary: "Make an existing worktree of this repository a stream. A person's."
-    scope: worktrees.write
-    op: adopt_worktree
-    invokers: { human: true, agent: false, lens: false }
   - name: stream.archive
     summary: "Archive a stream and its threads (`delete_worktree` also removes its working copy from disk). Refused while an agent is running in it. A person's, confirmed."
     scope: worktrees.write
     op: archive
     invokers: { human: true, agent: false, lens: false }
     confirm: destructive
-  - name: stream.create_worktree
-    summary: "Create a stream on a new worktree beside the project (`git worktree add`), on a new branch forked from `branch_source`."
+  - name: stream.create
+    summary: "Create a stream on a worktree beside the project: of an existing branch (`existing_branch`), of a new one forked from `start_point` (`new_branch`), or adopted from one already on disk (`worktree`, a person's). The folder is made from the title."
     scope: worktrees.write
-    op: create_worktree
-    invokers: { human: true, agent: true, lens: false }
-    ui: {"label": "New Stream…", "group": "Tasks", "keywords": ["worktree", "branch"], "form": "page:new-stream"}
-    example: {"slug": "login-fix", "title": "Login fix", "branch": "login-fix", "branch_source": "main"}
+    op: create
+    invokers: { human: true, agent: true, lens: true }
+    ui: {"label": "New Stream…", "group": "Tasks", "keywords": ["worktree", "branch"], "form": "page:new-stream", "open_after": "stream:{{result.id}}"}
+    example: {"title": "Login fix", "source": "new", "new_branch": "login-fix", "start_point": "main"}
 
 # What oxplow records itself. The measures and dimensions its producers
 # (tokens, efforts, tests, coverage, analysis) and the code collectors write
