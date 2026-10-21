@@ -9,8 +9,8 @@ Things I keep forgetting. Read this before adding any UI.
 > `⋯` buttons were reverted — see "Per-row actions" below); per-stream
 > and per-thread settings
 > ship as Page tabs (the `stream-settings` and `thread-settings` lens pages); new-
-> stream and new-task flows ship as Page tabs (the New Stream lens form,
-> `NewTaskPage`); snapshot- and commit-detail Slideover wrappers
+> stream and new-task flows ship as Page tabs (the New Stream and New Item
+> lens forms); snapshot- and commit-detail Slideover wrappers
 > (`SnapshotDetailSlideover`, `CommitDetailSlideover`) cover the
 > cross-page open path. The rules below describe the redesigned
 > target. Phase 7 (density + visual polish) details live in
@@ -50,7 +50,7 @@ Things I keep forgetting. Read this before adding any UI.
   the strip is dismissed by the panel's local `pendingPrompt` state.
 - **Form-shaped flows that warrant a focused workspace use a page tab
   or a slideover, not a centered modal.** The "+ New" flows ship as
-  Page tabs (the New Stream lens form, `NewTaskPage`, the `Stream/Thread`
+  Page tabs (the New Stream and New Item lens forms, the `Stream/Thread`
   settings pages); cross-page detail openings (snapshot, commit,
   branch rename, file commit) ship as Slideovers. The remaining
   legacy hand-rolled modal chrome inside `PlanPane.tsx`'s
@@ -209,10 +209,11 @@ Things I keep forgetting. Read this before adding any UI.
   element that took focus; the fix was made without seeing it in a failing
   `settings/pages.spec.ts` run.
 - **"Save and Another"** for repetitive-entry flows (see the New Work
-  Item modal): saves and re-opens the form with the same
-  category/priority/parent pre-filled so the user doesn't re-select
-  them. Carry this convention forward when New task migrates to
-  a page (phase 5e).
+  Item form): a form lens declares `again: { label, keep }`, a second
+  button that files and restarts the form with the `keep` fields (state,
+  thread, parent, the list's own fields) carried over and the rest
+  cleared, so a series of similar items isn't re-picked. Enter keeps the
+  primary submit.
 
 ## Copy names things as a person knows them
 

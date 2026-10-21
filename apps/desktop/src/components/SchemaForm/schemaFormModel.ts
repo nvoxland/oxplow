@@ -94,6 +94,43 @@ function labelOf(key: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
+/** A child of an object field the host reads from a lens: one row of it. */
+export interface Subfield {
+  name: string;
+  title: string;
+  /** `enum`, `text` or `number`. */
+  kind: string;
+  values: string[];
+  /** Set by its source: not asked for. */
+  read_only: boolean;
+}
+
+/** `schema` with each named top-level field made an object whose children
+ *  are `subfields` (read-only ones left out): an open object the command
+ *  takes (`native`) whose keys only the host knows. A name the schema
+ *  doesn't have is ignored. */
+export function withSubfields(schema: Schema, subfields: Record<string, Subfield[]>): Schema {
+  const props = schema.properties as Record<string, Schema> | undefined;
+  if (!props) return schema;
+  const out: Record<string, Schema> = { ...props };
+  for (const [name, rows] of Object.entries(subfields)) {
+    if (!(name in props)) continue;
+    const children: Record<string, Schema> = {};
+    for (const row of rows) {
+      if (row.read_only) continue;
+      const base = { title: row.title };
+      children[row.name] =
+        row.kind === "enum"
+          ? { ...base, type: "string", enum: row.values }
+          : row.kind === "number"
+            ? { ...base, type: "number" }
+            : { ...base, type: "string" };
+    }
+    out[name] = { type: "object", properties: children };
+  }
+  return { ...schema, properties: out };
+}
+
 /** The root object's fields (a non-object root is one JSON field). */
 export function fieldsOf(schema: Schema): Field[] {
   return fieldsIn(resolve(schema, schema), schema, "");

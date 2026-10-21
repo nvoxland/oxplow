@@ -1932,7 +1932,24 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   command must keep a secret out of its record (`unrecorded`), or the
   form refuses to open (`form_start`). The load checks: a `visible_if`
   names one of `fields` and not the field itself, a field isn't both
-  `fixed` and `secret`, and `mode: edit` lists its `fields`) or
+  `fixed` and `secret`, and `mode: edit` lists its `fields`).
+  A field may be an object whose children another lens names:
+  `{ name: native, from: <ext>/<slug> }`. That lens (run with the form's
+  params, a `from` lens the extension doesn't have is a load error) has one
+  row per child — `name`, `title`, `kind` (`enum`, `text` or `number`),
+  `values` (an enum's, a JSON array), `read_only` (left out of the form) —
+  and the field's value is the object of those children
+  (`native.priority` is a path). The command's schema stays the same
+  whatever the rows say; `form_start` returns them as `subfields` with
+  what the lens read (`reads`), and the form reads again when that changes
+  (a switch of work list), keeping what was typed. New Item's `native` is
+  this, over the active list's declared fields (`work-item-fields`).
+  `again: { label, keep: [...] }` adds a second submit
+  ("Save and Another"): it runs the command, never opens a page, and the
+  form starts again with the `keep` fields (each one of `fields`) as they
+  were submitted and the rest from the form's defaults, its draft cleared;
+  Enter still runs the primary. An optional field whose `choices` lens has
+  no rows, and an object with no children, are not shown) or
   `custom` (`custom: {
   component, props? }`, one of the extension's `custom_components`; see
   "Custom components"). Each component names the columns it draws from in

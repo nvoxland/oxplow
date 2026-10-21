@@ -94,6 +94,25 @@ pub struct Reads {
     pub measures: Vec<String>,
 }
 
+impl Reads {
+    /// Everything several runs read, sorted and distinct.
+    pub fn union(all: &[Reads]) -> Reads {
+        use std::collections::BTreeSet;
+        let merge = |of: fn(&Reads) -> &Vec<String>| -> Vec<String> {
+            all.iter()
+                .flat_map(|r| of(r).iter().cloned())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect()
+        };
+        Reads {
+            models: merge(|r| &r.models),
+            tables: merge(|r| &r.tables),
+            measures: merge(|r| &r.measures),
+        }
+    }
+}
+
 /// One read-only query: its SQL, parameters, row cap and time budget.
 #[derive(Debug, Clone)]
 pub struct SqlQuery {

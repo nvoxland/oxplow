@@ -16,7 +16,7 @@ export async function expandRailSection(page: Page, id: string): Promise<void> {
 export async function openNewTask(page: Page): Promise<void> {
   await page.getByTestId("rail-hud").click({ position: { x: 4, y: 4 } });
   await page.keyboard.press("ControlOrMeta+Shift+N");
-  await expect(page.getByTestId("tasks-title")).toBeVisible();
+  await expect(page.getByTestId("lens-form-fields-title")).toBeVisible();
 }
 
 /** Open the launcher and type `query` into it — once it has the focus: it

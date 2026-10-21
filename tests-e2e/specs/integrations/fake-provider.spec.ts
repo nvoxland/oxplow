@@ -56,9 +56,9 @@ test("a person configures, checks and enables the fake tracker, and an item reac
   // The New Task page files on the active tracker too, on this thread
   // (tsk1059): it offers what any tracker takes, not oxplow's priority.
   await openNewTask(page);
-  await expect(page.getByTestId("tasks-status")).toBeVisible();
-  await expect(page.getByTestId("tasks-priority")).toHaveCount(0);
-  await page.getByTestId("tasks-title").fill("Kiwi from the page");
+  await expect(page.getByTestId("lens-form-fields-state")).toBeVisible();
+  await expect(page.getByTestId("lens-form-fields-native.priority")).toHaveCount(0);
+  await page.getByTestId("lens-form-fields-title").fill("Kiwi from the page");
   await page.keyboard.press("Enter");
   await expect.poll(() => fakeState(daemon.project)).toContain("Kiwi from the page");
   await run(daemon, "oxplow.provider.sync", { instance: "e2e/fake", collector: "work_items" });

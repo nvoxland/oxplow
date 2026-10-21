@@ -8,10 +8,30 @@ test("a task made in the UI is on the thread's list", async ({ fresh }) => {
   const { page } = fresh;
   await page.goto("/");
   await openNewTask(page);
-  await page.getByTestId("tasks-title").fill("Made in the UI");
-  await page.getByTestId("tasks-save").click();
+  await page.getByTestId("lens-form-fields-title").fill("Made in the UI");
+  await page.getByTestId("lens-form-fields-submit").click();
   await expandRailSection(page, "ext:oxplow-bundled/work");
   await expect(page.getByTestId("rail-section-ext:oxplow-bundled/work")).toContainText("Made in the UI");
+});
+
+// The New Item form asks for the active list's own fields, and its second
+// submit files the item and starts the next with the list's fields kept.
+test("Save and Another keeps the state and the list's fields", async ({ fresh }) => {
+  const { page } = fresh;
+  await page.goto("/");
+  await openNewTask(page);
+  const form = page.locator('[data-testid="lens-form"]:visible');
+  await form.getByTestId("lens-form-fields-native.priority").selectOption("high");
+  await form.getByTestId("lens-form-fields-title").fill("First of two");
+  await form.getByTestId("lens-form-fields-again").click();
+  await expect(form.getByTestId("lens-form-fields-title")).toHaveValue("");
+  await expect(form.getByTestId("lens-form-fields-native.priority")).toHaveValue("high");
+  await form.getByTestId("lens-form-fields-title").fill("Second of two");
+  await form.getByTestId("lens-form-fields-submit").click();
+  await expandRailSection(page, "ext:oxplow-bundled/work");
+  const work = page.getByTestId("rail-section-ext:oxplow-bundled/work");
+  await expect(work).toContainText("First of two");
+  await expect(work).toContainText("Second of two");
 });
 
 test("a task made elsewhere appears without a reload", async ({ fresh }) => {

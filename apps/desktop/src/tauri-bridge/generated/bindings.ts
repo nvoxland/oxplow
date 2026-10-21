@@ -3302,6 +3302,17 @@ export type ForeignSubscription = {
 	declaredAt: string,
 };
 
+/**  A form's second submit (Save and Another). */
+export type FormAgain = {
+	/**  Its button. */
+	label: string,
+	/**
+	 *  The fields whose values the next entry starts with; the rest start
+	 *  from the form's defaults.
+	 */
+	keep?: string[],
+};
+
 /**  What a form is for. */
 export type FormMode = 
 /**  Gathers something new; after a submit it starts again. */
@@ -3331,6 +3342,13 @@ export type FormStart_Deserialize = {
 	fields: LensFormField_Deserialize[] | null,
 	/**  Fields picked from a list, with their choices. */
 	choices: { [key in string]: Choice[] },
+	/**  Object fields' children, read from their `from` lens. */
+	subfields: { [key in string]: Subfield[] },
+	/**
+	 *  What the `from` lenses read: when it changes, the form is read
+	 *  again.
+	 */
+	reads: Reads,
 };
 
 /**
@@ -3345,6 +3363,13 @@ export type FormStart_Serialize = {
 	fields: LensFormField_Serialize[] | null,
 	/**  Fields picked from a list, with their choices. */
 	choices: { [key in string]: Choice[] },
+	/**  Object fields' children, read from their `from` lens. */
+	subfields: { [key in string]: Subfield[] },
+	/**
+	 *  What the `from` lenses read: when it changes, the form is read
+	 *  again.
+	 */
+	reads: Reads,
 };
 
 /**
@@ -4004,6 +4029,14 @@ export type LensFormFieldSpec_Deserialize = {
 	 *  input; the command must keep it out of its record (`unrecorded`).
 	 */
 	secret?: boolean,
+	/**
+	 *  An object field whose children are the rows of this lens
+	 *  (`<extension>/<slug>`: `name`, `title`, `kind` of `enum`, `text` or
+	 *  `number`, `values`, `read_only`), run with the form's params. The
+	 *  field's value is the object of those children; it is read again
+	 *  when the lens's data changes.
+	 */
+	from?: string | null,
 };
 
 export type LensFormFieldSpec_Serialize = {
@@ -4018,6 +4051,14 @@ export type LensFormFieldSpec_Serialize = {
 	 *  input; the command must keep it out of its record (`unrecorded`).
 	 */
 	secret?: boolean,
+	/**
+	 *  An object field whose children are the rows of this lens
+	 *  (`<extension>/<slug>`: `name`, `title`, `kind` of `enum`, `text` or
+	 *  `number`, `values`, `read_only`), run with the form's params. The
+	 *  field's value is the object of those children; it is read again
+	 *  when the lens's data changes.
+	 */
+	from?: string | null,
 };
 
 /**  One of a form's `fields`: its name, or its name and how it shows. */
@@ -4055,6 +4096,11 @@ export type LensForm_Deserialize = {
 	choices?: { [key in string]: string },
 	/**  What becomes of the page after a submit whose command opens one. */
 	then?: ActionThen,
+	/**
+	 *  A second submit: it runs the same command, then the form starts
+	 *  again with the `keep` fields' values carried over.
+	 */
+	again?: FormAgain | null,
 };
 
 /**  `form` viz: the command it submits and the values it starts from. */
@@ -4086,6 +4132,11 @@ export type LensForm_Serialize = {
 	choices?: { [key in string]: string },
 	/**  What becomes of the page after a submit whose command opens one. */
 	then: ActionThen,
+	/**
+	 *  A second submit: it runs the same command, then the form starts
+	 *  again with the `keep` fields' values carried over.
+	 */
+	again?: FormAgain | null,
 };
 
 /**
@@ -6334,6 +6385,18 @@ export type StreamId = string;
 
 /**  Whether a stream is the project's primary stream or a worktree. */
 export type StreamKind = "primary" | "worktree";
+
+/**  A child of an object field (a row of its `from` lens). */
+export type Subfield = {
+	name: string,
+	title: string,
+	/**  `enum`, `text` or `number`. */
+	kind: string,
+	/**  An `enum`'s values. */
+	values: string[],
+	/**  Set by the source, shown by nothing here: left out of the form. */
+	read_only: boolean,
+};
 
 /**
  *  Where a symbol is: its file and the line/column of its name (1-based),

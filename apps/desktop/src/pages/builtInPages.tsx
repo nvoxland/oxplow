@@ -22,7 +22,6 @@ import { CustomDashboardPage } from "./CustomDashboardPage.js";
 import { ExploreDataPage } from "./ExploreDataPage.js";
 import { BoardPage } from "./BoardPage.js";
 import { ExternalUrlPage } from "./ExternalUrlPage.js";
-import { NewTaskPage } from "./NewTaskPage.js";
 import { AlertsPage } from "./AlertsPage.js";
 
 /** What a built-in page body gets: its tab ref and the ref's payload, the slot's navigation, and core's scope. */
@@ -315,22 +314,6 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
         <ExternalUrlPage
           url={externalUrl}
           onOpenInBrowser={(u) => { void openExternalUrl(u); }}
-        />
-      ),
-    };
-  },
-
-  "new-task": ({ ref, params, scope }) => {
-    return {
-      id: ref.id,
-      label: "New item",
-      closable: true,
-      render: () => (
-        <NewTaskPage
-          defaults={{ parentRef: params.parent ?? null }}
-          epics={scope.threadWork?.epics ?? []}
-          onClose={() => scope.closePageTab(ref.id)}
-          onSubmit={(input) => scope.handleCreateTask({ ...input, state: input.state ?? "todo" })}
         />
       ),
     };

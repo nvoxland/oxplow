@@ -385,36 +385,6 @@ export async function readItemEfforts(ref: string): Promise<{ efforts: EffortDet
 
 // ---- writes (work_item.* commands, by ref) ----
 
-/** What a new item has: the interface's fields and the list's own. */
-export interface NewWorkItem {
-  title: string;
-  body?: string;
-  parentRef?: string | null;
-  state?: CanonicalState;
-  native: Record<string, unknown>;
-}
-
-/** What `oxplow.work_item.create` takes for a new item on a thread (or the
- *  backlog, `null`). It names no list: every create files on the active
- *  one. */
-export function createWorkItemInput(threadId: string | null, input: NewWorkItem): Record<string, unknown> {
-  return {
-    title: input.title,
-    ...(input.body ? { body: input.body } : {}),
-    ...(input.state ? { state: input.state } : {}),
-    ...(input.parentRef ? { parent_ref: input.parentRef } : {}),
-    ...(threadId ? { thread: threadId } : {}),
-    ...(Object.keys(input.native).length > 0 ? { native: input.native } : {}),
-  };
-}
-
-/** File an item on a thread (or the backlog), on the active list; its
- *  ref, or "" when the list keeps nothing (none). */
-export async function createWorkItem(threadId: string | null, input: NewWorkItem): Promise<string> {
-  const out = await runCommand("oxplow.work_item.create", createWorkItemInput(threadId, input));
-  return String((out.result as { ref?: unknown } | null)?.ref ?? "");
-}
-
 /** An edit to an item: its text, parent (`null` to clear) or own fields. */
 export interface WorkItemChanges {
   title?: string;

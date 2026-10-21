@@ -70,6 +70,9 @@ export interface SchemaFormProps {
   /** Top-level fields picked from a list: a select of these choices
    *  instead of the field's own input. */
   choices?: Record<string, FieldChoice[]>;
+  /** A second submit beside the first: the same value, sent to its own
+   *  handler (Save and Another). Enter still runs the primary. */
+  again?: { label: string; onSubmit(value: Record<string, unknown>): void };
 }
 
 export function SchemaForm({
@@ -84,6 +87,7 @@ export function SchemaForm({
   fixed,
   serverErrors,
   choices,
+  again,
   mode = "create",
   draft,
   onDraft,
@@ -163,13 +167,21 @@ export function SchemaForm({
     report(initialDrafts);
   };
   const hidden = specs ? hiddenOf(specs, drafts) : new Set<string>();
-  const rendered = listed.filter((f) => !hidden.has(f.path));
+  // Nothing to pick from, or nothing to ask for, shows nothing: an
+  // optional field whose choices came back empty, an object without
+  // children.
+  const askable = (f: Field) =>
+    f.kind === "object" ? f.children.length > 0 : !(choices?.[f.path]?.length === 0 && !f.required);
+  const rendered = listed.filter((f) => !hidden.has(f.path) && askable(f));
   const live = Object.entries(serverErrors ?? {}).filter(([name]) => !edited.has(name));
   const shownPaths = new Set(rendered.map((f) => f.path));
   const stray = live.filter(([name]) => !shownPaths.has(name));
   const firstEditable = rendered.findIndex((f) => !fixedSet.has(f.path));
   const submit = () => {
     if (onSubmit && valid && !busy && (mode === "create" || dirty)) onSubmit(value);
+  };
+  const submitAgain = () => {
+    if (again && valid && !busy) again.onSubmit(value);
   };
   return (
     <form
@@ -223,6 +235,11 @@ export function SchemaForm({
           <button type="submit" data-testid={`${testIdPrefix}-submit`} disabled={!valid || busy || (mode === "edit" && !dirty)}>
             {busy ? `${label}…` : label}
           </button>
+          {again ? (
+            <button type="button" data-testid={`${testIdPrefix}-again`} disabled={!valid || busy} onClick={submitAgain}>
+              {again.label}
+            </button>
+          ) : null}
           {mode === "edit" ? (
             <button type="button" data-testid={`${testIdPrefix}-discard`} disabled={!dirty || busy} onClick={discard}>
               Discard

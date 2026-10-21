@@ -1,0 +1,27 @@
+title: New Item
+description: File an item on the active work list - its title, its description, the state it starts in, and the list's own fields.
+hidden: true
+needs: [work_items]
+params:
+  - { name: thread_id }
+  - { name: parent }
+query: |
+  SELECT 'todo' AS state, :parent AS parent_ref,
+         -- `thread` of the create command is the thread's own id (`thr3`), not its ref.
+         (SELECT 'thr' || t.id FROM v_thread t WHERE t.id = :thread_id) AS thread
+viz: form
+form:
+  command: oxplow.work_item.create
+  then: stay
+  fields:
+    - title
+    - body
+    - state
+    - thread
+    - parent_ref
+    - { name: native, from: oxplow-foundation/work-item-fields }
+  choices:
+    state: oxplow-foundation/new-task-states
+    thread: oxplow-foundation/new-task-threads
+    parent_ref: oxplow-foundation/new-task-parents
+  again: { label: Save and Another, keep: [state, thread, parent_ref, native] }

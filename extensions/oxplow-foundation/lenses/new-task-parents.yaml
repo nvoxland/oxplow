@@ -1,0 +1,16 @@
+title: Parents for a new item
+description: The items on this thread that have children, when the active work list nests items.
+hidden: true
+needs: [work_items]
+params:
+  - { name: thread_id }
+query: |
+  SELECT w.ref AS value, w.title AS label
+  FROM v_work_item w
+  WHERE w.thread_id = :thread_id
+    AND w.state NOT IN ('done', 'canceled')
+    AND EXISTS (SELECT 1 FROM v_capability_provider p
+                WHERE p.capability = 'work_items' AND p.active = 1
+                  AND json_extract(p.features, '$.hierarchy') = 1)
+    AND EXISTS (SELECT 1 FROM v_work_item c WHERE c.parent_ref = w.ref)
+  ORDER BY w.rank

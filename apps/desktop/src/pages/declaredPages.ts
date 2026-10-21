@@ -21,7 +21,6 @@ export const BUILT_IN_PAGES = [
   "files",
   "git-dashboard",
   "metrics-recorded",
-  "new-task",
   "settings",
   "terminal",
   "uncommitted-changes",

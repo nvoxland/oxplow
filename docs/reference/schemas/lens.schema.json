@@ -867,6 +867,17 @@
               "$ref": "#/definitions/ActionThen"
             }
           ]
+        },
+        "again": {
+          "description": "A second submit: it runs the same command, then the form starts\nagain with the `keep` fields' values carried over.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FormAgain"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -913,6 +924,13 @@
         "secret": {
           "description": "Masked, never kept in a draft, and blank leaves it out of the\ninput; the command must keep it out of its record (`unrecorded`).",
           "type": "boolean"
+        },
+        "from": {
+          "description": "An object field whose children are the rows of this lens\n(`<extension>/<slug>`: `name`, `title`, `kind` of `enum`, `text` or\n`number`, `values`, `read_only`), run with the form's params. The\nfield's value is the object of those children; it is read again\nwhen the lens's data changes.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": false,
@@ -967,6 +985,28 @@
           "type": "string",
           "const": "stay"
         }
+      ]
+    },
+    "FormAgain": {
+      "description": "A form's second submit (Save and Another).",
+      "type": "object",
+      "properties": {
+        "label": {
+          "description": "Its button.",
+          "type": "string"
+        },
+        "keep": {
+          "description": "The fields whose values the next entry starts with; the rest start\nfrom the form's defaults.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "label"
       ]
     },
     "LensCustom": {

@@ -172,6 +172,97 @@ pub struct FormStart {
     pub fields: Option<Vec<crate::extensions::LensFormField>>,
     /// Fields picked from a list, with their choices.
     pub choices: BTreeMap<String, Vec<Choice>>,
+    /// Object fields' children, read from their `from` lens.
+    pub subfields: BTreeMap<String, Vec<Subfield>>,
+    /// What the `from` lenses read: when it changes, the form is read
+    /// again.
+    pub reads: oxplow_db::Reads,
+}
+
+/// A child of an object field (a row of its `from` lens).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, specta::Type)]
+pub struct Subfield {
+    pub name: String,
+    pub title: String,
+    /// `enum`, `text` or `number`.
+    pub kind: String,
+    /// An `enum`'s values.
+    pub values: Vec<String>,
+    /// Set by the source, shown by nothing here: left out of the form.
+    pub read_only: bool,
+}
+
+/// Each object field's children: its `from` lens run with the form's
+/// params, one row per child (`name`, `title`, `kind`, `values` as a JSON
+/// array, `read_only`).
+async fn subfields_for(
+    svc: &crate::Services,
+    lens_root: &Path,
+    fields: &[crate::extensions::LensFormField],
+    params: &BTreeMap<String, SqlCell>,
+    ctx: &extensions::LensContext,
+) -> Result<(BTreeMap<String, Vec<Subfield>>, oxplow_db::Reads), CommandError> {
+    let mut out = BTreeMap::new();
+    let mut reads = Vec::new();
+    for field in fields {
+        let Some(lens_id) = field.from() else {
+            continue;
+        };
+        let lens = svc
+            .extension_catalog
+            .find_lens(lens_root, lens_id)
+            .map_err(CommandError::from)?;
+        let given: BTreeMap<String, SqlCell> = params
+            .iter()
+            .filter(|(name, _)| lens.params.iter().any(|p| &p.name == *name))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let run = extensions::run_lens(
+            &svc.sql,
+            &svc.extension_catalog,
+            lens_root,
+            lens_id,
+            given,
+            ctx,
+        )
+        .await
+        .map_err(CommandError::from)?;
+        reads.push(run.result.reads.clone());
+        let col = |name: &str| run.result.columns.iter().position(|c| c == name);
+        let (Some(name), Some(title), Some(kind)) = (col("name"), col("title"), col("kind")) else {
+            return Err(CommandError::Invalid {
+                field: Some(format!("/{}", field.name())),
+                message: format!(
+                    "`from` lens `{lens_id}` needs `name`, `title` and `kind` columns"
+                ),
+            });
+        };
+        let (values, read_only) = (col("values"), col("read_only"));
+        let text = |c: &SqlCell| match c {
+            SqlCell::Text(t) => Some(t.clone()),
+            _ => None,
+        };
+        let rows = run
+            .result
+            .rows
+            .iter()
+            .filter_map(|r| {
+                Some(Subfield {
+                    name: text(&r[name])?,
+                    title: text(&r[title])?,
+                    kind: text(&r[kind])?,
+                    values: values
+                        .and_then(|v| text(&r[v]))
+                        .and_then(|t| serde_json::from_str(&t).ok())
+                        .unwrap_or_default(),
+                    read_only: read_only
+                        .is_some_and(|c| matches!(&r[c], SqlCell::Int(n) if *n != 0)),
+                })
+            })
+            .collect();
+        out.insert(field.name().to_string(), rows);
+    }
+    Ok((out, oxplow_db::Reads::union(&reads)))
 }
 
 /// One choice for a form field: the value it submits, what the person
@@ -308,6 +399,8 @@ pub async fn action_form(
                 fixed: action.fixed,
                 fields: None,
                 choices,
+                subfields: BTreeMap::new(),
+                reads: oxplow_db::Reads::default(),
             })
         })
         .await
@@ -392,12 +485,22 @@ async fn form_start_unpinned(
         values.remove(name);
     }
     let choices = choices_for(svc, lens_root, &form.choices, &run.params, ctx).await?;
+    let (subfields, reads) = subfields_for(
+        svc,
+        lens_root,
+        form.fields.as_deref().unwrap_or_default(),
+        &run.params,
+        ctx,
+    )
+    .await?;
     Ok(FormStart {
         command,
         values: Value::Object(values),
         fixed: form.fixed,
         fields: form.fields,
         choices,
+        subfields,
+        reads,
     })
 }
 
@@ -627,6 +730,8 @@ pub fn component_form(
         fixed: Vec::new(),
         fields: None,
         choices: BTreeMap::new(),
+        subfields: BTreeMap::new(),
+        reads: oxplow_db::Reads::default(),
     })
 }
 
@@ -1231,6 +1336,50 @@ actions:
             .map(|c| c.value.as_str())
             .collect();
         assert_eq!(items, vec![work_item_ref(fx.task)]);
+    }
+
+    /// New Item is one form over `oxplow.work_item.create`: its `native`
+    /// field's children are the active list's own fields (read from a lens,
+    /// the read-only ones marked), its state is picked from the two a new
+    /// item may start in, and its second submit keeps what a series of
+    /// similar items shares.
+    #[tokio::test]
+    async fn the_new_item_form_asks_for_the_lists_own_fields() {
+        let (fx, root) = fixture().await;
+        let start = form_start(
+            &fx.svc,
+            &root,
+            "oxplow-foundation/new-task",
+            BTreeMap::new(),
+            &extensions::LensContext::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(start.command.id, "oxplow.work_item.create");
+        assert_eq!(start.values["state"], json!("todo"));
+        let priority = &start.subfields["native"]
+            .iter()
+            .find(|f| f.name == "priority")
+            .unwrap_or_else(|| panic!("{:?}", start.subfields));
+        assert_eq!(priority.kind, "enum");
+        assert_eq!(priority.values, ["urgent", "high", "medium", "low"]);
+        assert!(!priority.read_only);
+        let states: Vec<&str> = start.choices["state"]
+            .iter()
+            .map(|c| c.value.as_str())
+            .collect();
+        assert_eq!(states, ["todo", "blocked"]);
+        // The list's fields are read from the capability rows, so a switch
+        // reads the form again.
+        assert!(
+            start
+                .reads
+                .models
+                .iter()
+                .any(|m| m == "v_capability_provider"),
+            "{:?}",
+            start.reads
+        );
     }
 
     /// New Stream is one form over `oxplow.stream.create`: it starts on an
