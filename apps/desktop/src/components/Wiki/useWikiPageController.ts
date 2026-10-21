@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useDraft } from "../../tabs/useViewParam.js";
 import { deleteWikiPage, writeWikiPage } from "../../api.js";
 import { readWikiPage, type WikiPageSummary } from "../../knowledge.js";
 import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
@@ -10,7 +11,6 @@ export interface WikiPageController {
   body: string;
   draft: string;
   setDraft(value: string): void;
-  draftInitialized: boolean;
   editing: boolean;
   notFound: boolean;
   loadError: string | null;
@@ -26,11 +26,13 @@ export interface WikiPageController {
 export function useWikiPageController(slug: string, onClosed: () => void): WikiPageController {
   const [summary, setSummary] = useState<WikiPageSummary | null>(null);
   const [body, setBody] = useState<string>("");
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<string>("");
+  // The edit is the step's history state: Back and a restart bring an
+  // unsaved edit back. No draft yet means the draft is the saved body.
+  const [editing, setEditing] = useDraft("editing", false);
+  const [draftText, setDraft, clearDraft] = useDraft<string | null>("draft", null);
+  const draft = draftText ?? body;
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
-  const [draftInitialized, setDraftInitialized] = useState(false);
 
   const [reads, setReads] = useState<Reads>(NO_READS);
 
@@ -50,51 +52,32 @@ export function useWikiPageController(slug: string, onClosed: () => void): WikiP
 
   useEffect(() => {
     void refresh();
-    setEditing(false);
   }, [refresh]);
 
   // Re-read when a model the read read changes (the page row, its body,
   // its refs) — the one rerun rule every model read uses.
   useRerunOnChange(reads, () => void refresh());
 
-  useEffect(() => {
-    if (!draftInitialized) {
-      setDraft(body);
-      setDraftInitialized(true);
-    }
-  }, [body, draftInitialized]);
-
-  useEffect(() => {
-    setDraftInitialized(false);
-  }, [slug]);
-
-  const enterEdit = useCallback(() => {
-    if (!draftInitialized) {
-      setDraft(body);
-      setDraftInitialized(true);
-    }
-    setEditing(true);
-  }, [body, draftInitialized]);
+  const enterEdit = useCallback(() => setEditing(true), [setEditing]);
 
   const enterView = useCallback(() => {
     setEditing(false);
-  }, []);
+  }, [setEditing]);
 
-  const revert = useCallback(() => {
-    setDraft(body);
-  }, [body]);
+  const revert = clearDraft;
 
   const save = useCallback(async () => {
     try {
       await writeWikiPage(slug, draft);
       setBody(draft);
+      clearDraft();
     } catch (error) {
       recordOpError({
         label: `Save wiki page "${slug}"`,
         message: String(error),
       });
     }
-  }, [slug, draft]);
+  }, [slug, draft, clearDraft]);
 
   const create = useCallback(async () => {
     const seed = `# ${slug}\n\n`;
@@ -102,8 +85,7 @@ export function useWikiPageController(slug: string, onClosed: () => void): WikiP
       await writeWikiPage(slug, seed);
       setNotFound(false);
       setBody(seed);
-      setDraft(seed);
-      setDraftInitialized(true);
+      clearDraft();
       setEditing(true);
     } catch (error) {
       recordOpError({
@@ -111,7 +93,7 @@ export function useWikiPageController(slug: string, onClosed: () => void): WikiP
         message: String(error),
       });
     }
-  }, [slug]);
+  }, [slug, clearDraft, setEditing]);
 
   // The page's Delete asks inline first; that is the confirmation the
   // destructive `oxplow.knowledge.delete_page` asks for.
@@ -132,7 +114,6 @@ export function useWikiPageController(slug: string, onClosed: () => void): WikiP
     body,
     draft,
     setDraft,
-    draftInitialized,
     editing,
     notFound,
     loadError,
