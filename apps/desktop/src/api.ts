@@ -364,7 +364,6 @@ import type {
   FileStatus,
   RevisionDetail,
   RevisionInfo,
-  VcsWorkspace,
   WorkspaceEntry,
   WorkspaceIndexedFile,
 } from "./tauri-bridge/generated/bindings.js";
@@ -373,7 +372,6 @@ export type {
   Divergence,
   FileStatus,
   RevisionInfo,
-  VcsWorkspace,
   RevisionDetail,
   WorkspaceEntry,
   WorkspaceIndexedFile,
