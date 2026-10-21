@@ -239,6 +239,12 @@ impl ExtensionActivation {
                 (LiveChanges::new(), VocabularyErrors::new())
             }
         };
+        // What startup couldn't deploy is the first activation's to list
+        // (each is a required extension, kept until it runs).
+        for (name, why) in &unstaged {
+            tracing::warn!(%name, why = %why.join("; "), "oxplow's own extension couldn't be deployed at startup");
+        }
+        *self.problems.lock() = unstaged;
         // A candidate overtaken by a change made while it was staged is
         // staged again: the startup deploys must not be lost with it. An
         // extension that can't activate is held (a bundled one gives way to
@@ -266,14 +272,6 @@ impl ExtensionActivation {
                     )));
                 }
             }
-        }
-        if !unstaged.is_empty() {
-            let mut problems = self.problems.lock();
-            for (name, why) in unstaged {
-                problems.entry(name).or_default().extend(why);
-            }
-            drop(problems);
-            svc.extension_catalog.runtime_changed();
         }
         Ok(())
     }
@@ -572,7 +570,8 @@ impl ExtensionActivation {
         let mut gave_way = VocabularyErrors::new();
         let mut restaged = false;
         let (published, retired, mut held) = loop {
-            let (snapshot, held) = raw.admitted(svc.extension_catalog.active().as_deref(), &failed);
+            let (snapshot, mut held) =
+                raw.admitted(svc.extension_catalog.active().as_deref(), &failed);
             // A deployment of an extension that ships with oxplow that is
             // held with nothing of it running gives way to the copy that
             // ships, and the candidate is admitted again.
@@ -623,6 +622,7 @@ impl ExtensionActivation {
                 capabilities,
                 mut database,
             } = prepared;
+            Self::explain_required(&settings, &raw, &snapshot, &self.problems(), &mut held);
             database.list_held(&held, &raw);
             let db = svc.db.clone();
             let published = snapshot.clone();
@@ -803,6 +803,65 @@ impl ExtensionActivation {
 }
 
 impl ExtensionActivation {
+    /// oxplow's own required extension with nothing of it running
+    /// (`oxplow-foundation` while developing oxplow, when nothing ships to
+    /// give way to) is the reason agents, Alerts and core's commands are
+    /// missing, so its problem says so and how to bring it back. A later
+    /// activation doesn't hold it again (nothing of it is live any more),
+    /// so its last problems (`previous`) stand until it runs.
+    fn explain_required(
+        settings: &oxplow_config::ExtensionSettings,
+        raw: &CatalogSnapshot,
+        snapshot: &CatalogSnapshot,
+        previous: &VocabularyErrors,
+        held: &mut VocabularyErrors,
+    ) {
+        let runs = |name: &str| {
+            snapshot
+                .extensions()
+                .iter()
+                .any(|e| e.name == name && e.enabled)
+        };
+        for b in crate::bundled_extensions::BUNDLED
+            .iter()
+            .filter(|b| b.required)
+        {
+            if runs(b.name) || crate::bundled_extensions::shipped(b.name, settings).is_some() {
+                continue;
+            }
+            if !held.contains_key(b.name) {
+                let Some(why) = previous.get(b.name) else {
+                    continue;
+                };
+                held.insert(b.name.to_string(), why.clone());
+                continue;
+            }
+            let failed = raw
+                .extensions()
+                .iter()
+                .find(|e| e.name == b.name)
+                .and_then(|e| match &e.deployment {
+                    crate::extensions::Deployment::Deployed { hash } => {
+                        Some(format!("its deployment {hash} doesn't activate"))
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| "it doesn't activate".to_string());
+            let line = format!(
+                "oxplow's own `{name}` isn't running: {failed}, and while developing oxplow \
+                 nothing runs in its place, so what it provides (the agent harnesses, \
+                 Alerts, core commands and pages) is missing. Fix its source and restart \
+                 oxplow, which deploys it, or deploy it",
+                name = b.name
+            );
+            tracing::warn!(name = b.name, why = %held[b.name].join("; "), "{line}");
+            let why = held.get_mut(b.name).expect("checked above");
+            if !why.contains(&line) {
+                why.push(line);
+            }
+        }
+    }
+
     /// The publication's writer, saying who it waits for while readers
     /// hold the generation. The one write future is kept, so its place in
     /// the fair lock's queue is too.

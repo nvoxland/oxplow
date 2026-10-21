@@ -1257,7 +1257,21 @@ deployed again". While developing oxplow nothing ships, so a broken
 foundation is held like any extension: the rest activates, its problem
 says why, and fixing and deploying (or restarting) brings it back. A
 required extension `start` can't stage (no source, a `build:`) is a
-problem too. Boot stops only when a generation can't publish at all (the
+problem too. Nothing runs in its place on purpose — it is fixed from
+outside, in its source — so its problem has to be enough to act on
+(`ExtensionActivation::explain_required`): which deployment doesn't
+activate, that the agent harnesses, Alerts and core's commands are
+missing without it, and to fix the source and restart or deploy. It is
+logged, listed in `v_extension.errors` by the activation that finds it
+(startup's own problems too: `initialize` hands them to the first
+activation), and stands across later activations — which don't hold it
+again, since nothing of it is live — until it runs. Without that the
+listing went blank on the next activation and Alerts, itself
+foundation's, couldn't open to say anything. The usual cause is a
+deployment an older oxplow recorded meeting a newer core: core and
+foundation's source change together in one commit, but the recorded
+deployment is the source as it was (a page naming a built-in component
+core then removed). Boot stops only when a generation can't publish at all (the
 host, the database).
 
 **Sharing is one explicit act.** `.oxplow/.gitignore` ignores everything

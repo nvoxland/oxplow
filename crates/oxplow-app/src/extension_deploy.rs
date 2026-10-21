@@ -2207,12 +2207,96 @@ mod tests {
         }
         assert!(running(&svc, "oxplow-foundation").is_none());
         assert!(running(&svc, "acme").is_some());
-        let why = svc.extension_activation.problems();
-        assert!(
-            why.get("oxplow-foundation")
-                .is_some_and(|p| p.iter().any(|m| m.contains("not_a_key"))),
-            "{why:?}"
+        // Its problem says why, in its listing too (what Alerts reads), and
+        // still after a later activation: it isn't running until it's fixed.
+        for _ in 0..2 {
+            let why = svc.extension_activation.problems();
+            assert!(
+                why.get("oxplow-foundation")
+                    .is_some_and(|p| p.iter().any(|m| m.contains("not_a_key"))),
+                "{why:?}"
+            );
+            let listed = listed_errors(&svc, "oxplow-foundation").await;
+            assert!(listed.contains("not_a_key"), "{listed}");
+            svc.extension_activation
+                .activate(svc.clone())
+                .await
+                .unwrap();
+        }
+    }
+
+    /// `v_extension.errors` for `name`, as the Alerts page reads it.
+    async fn listed_errors(svc: &Services, name: &str) -> String {
+        let rows = svc
+            .sql
+            .query_sql(
+                "SELECT errors FROM v_extension WHERE name = ?1",
+                vec![oxplow_db::SqlCell::Text(name.into())],
+                None,
+            )
+            .await
+            .unwrap()
+            .rows;
+        match rows.first().map(|r| &r[0]) {
+            Some(oxplow_db::SqlCell::Text(errors)) => errors.clone(),
+            other => panic!("{name}: {other:?}"),
+        }
+    }
+
+    /// While developing oxplow nothing replaces a foundation deployment
+    /// that doesn't activate at boot (one an older oxplow recorded): it is
+    /// held, and its problem — in the listing Alerts reads, and still after
+    /// later activations — says which deployment failed, what is missing
+    /// without it, and how to bring it back.
+    #[tokio::test]
+    async fn developing_oxplow_a_foundation_deployment_that_fails_at_boot_says_what_happened() {
+        let (dir, svc) = unbooted();
+        let source = dir.path().join(".oxplow/extensions/oxplow-foundation");
+        for (rel, text) in shipped_with("oxplow-foundation", |t| {
+            t.replacen(crate::test_fixtures::FOUNDATION_BUILD, "\"true\"", 1)
+        }) {
+            write(&source, rel, &text);
+        }
+        write(
+            dir.path(),
+            ".oxplow/project.yaml",
+            "enableBundledExtensions: false\n",
         );
+        // Built after the files: the mode is read when it is made.
+        let svc = {
+            drop(svc);
+            Services::in_memory_inactive(dir.path()).unwrap()
+        };
+        active_deployment(
+            &svc,
+            "oxplow-foundation",
+            "00000000000000ba",
+            &shipped_with("oxplow-foundation", |t| format!("{t}not_a_key: 1\n")),
+        )
+        .await;
+        svc.extension_activation
+            .initialize(svc.clone())
+            .await
+            .unwrap();
+        if !cfg!(debug_assertions) {
+            return;
+        }
+        assert!(running(&svc, "oxplow-foundation").is_none());
+        for _ in 0..2 {
+            let listed = listed_errors(&svc, "oxplow-foundation").await;
+            for said in [
+                "not_a_key",
+                "deployment 00000000000000ba doesn't activate",
+                "agent harnesses",
+                "restart oxplow",
+            ] {
+                assert!(listed.contains(said), "{said}: {listed}");
+            }
+            svc.extension_activation
+                .activate(svc.clone())
+                .await
+                .unwrap();
+        }
     }
 
     /// A held extension is listed with why: its last working version's
@@ -2325,6 +2409,8 @@ mod tests {
                         .is_some_and(|p| p.iter().any(|m| m.contains("`dist` isn't built"))),
                     "{why:?}"
                 );
+                let listed = listed_errors(&svc, "oxplow-foundation").await;
+                assert!(listed.contains("`dist` isn't built"), "{listed}");
             }
         }
     }
