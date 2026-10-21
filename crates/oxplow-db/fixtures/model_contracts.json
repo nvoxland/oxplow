@@ -5989,6 +5989,56 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "The captured file's id (a `file_snapshot` id, as `get_file_snapshot` takes)."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "The snapshot that captured it (v_snapshot.id)."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream whose worktree it was captured in."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "Repo-relative file path."
+        },
+        {
+          "name": "storage",
+          "type": "TEXT",
+          "doc": "`oxplow` (bytes in oxplow's blob store), `git` (a clean file, read from git), `oversize` (too large to keep) or `deleted` (the file was removed)."
+        },
+        {
+          "name": "size_bytes",
+          "type": "INTEGER",
+          "doc": "Its size in bytes."
+        },
+        {
+          "name": "content_hash",
+          "type": "TEXT",
+          "doc": "The identity of its bytes: two rows with the same hash hold the same content. NULL when oversize or deleted, and for a `git` row not yet compared."
+        },
+        {
+          "name": "captured_at",
+          "type": "TEXT",
+          "doc": "When it was captured (RFC 3339)."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "What the snapshot did to the path against its previous row in the stream: `added` (new, or back after a deletion), `modified` (other bytes) or `deleted`; NULL when the row changed nothing (same bytes again, or a tombstone for a path already gone). (v2)"
+        }
+      ],
+      "key": []
     }
   },
   "snapshot_op": {

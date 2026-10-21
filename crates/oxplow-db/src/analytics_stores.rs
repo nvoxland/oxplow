@@ -3710,7 +3710,7 @@ mod tests {
     async fn stats_for_snapshot_classifies_created_modified_deleted() {
         let db = Database::in_memory();
         seed_stream(&db, 1);
-        let store = SqliteSnapshotStore::new(db);
+        let store = SqliteSnapshotStore::new(db.clone());
         let stream = StreamId::new(1);
 
         // Parent 1: baseline of three paths.
@@ -3786,6 +3786,32 @@ mod tests {
         assert_eq!(summary.modified, 1, "a.txt had a prior hash");
         assert_eq!(summary.deleted, 1, "c.txt has no blob");
         assert_eq!(summary.total, 3);
+
+        // The same classification, published: `v_snapshot_file.kind` is what a
+        // snapshot did to each path (`added`, `modified`, `deleted`).
+        let kinds = db
+            .read(move |tx| {
+                let rows = || -> rusqlite::Result<Vec<(String, Option<String>)>> {
+                    let mut st = tx.prepare(
+                        "SELECT path, kind FROM v_snapshot_file WHERE snapshot_id = ?1 ORDER BY path",
+                    )?;
+                    let rows = st
+                        .query_map([p2], |r| Ok((r.get(0)?, r.get(1)?)))?
+                        .collect::<rusqlite::Result<Vec<_>>>()?;
+                    Ok(rows)
+                };
+                rows().map_err(|e| DomainError::Storage(e.to_string()))
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            kinds,
+            vec![
+                ("a.txt".to_string(), Some("modified".to_string())),
+                ("c.txt".to_string(), Some("deleted".to_string())),
+                ("d.txt".to_string(), Some("added".to_string())),
+            ]
+        );
 
         // p1 itself: three created rows, nothing else.
         let p1_summary = store.stats_for_snapshot(p1).await.unwrap();
