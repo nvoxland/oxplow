@@ -136,8 +136,19 @@ test("the editor, the list and oxplow's own, each chosen from Settings", async (
   await expect(detail.getByTestId("lens-form-fields-title")).toHaveValue("Item to edit");
   await expect(page.getByLabel("State")).toBeVisible();
   await expect(detail.getByLabel("State")).toHaveCount(0);
+  // It edits what is saved: Save waits for a change; what was typed is the
+  // tab's, so a reload gives it back; Discard puts the saved title back.
+  const save = detail.getByTestId("lens-form-fields-submit");
+  await expect(save).toBeDisabled();
+  await detail.getByTestId("lens-form-fields-title").fill("Half typed");
+  await expect(save).toBeEnabled();
+  await page.reload();
+  await expect(detail.getByTestId("lens-form-fields-title")).toHaveValue("Half typed");
+  await detail.getByTestId("lens-form-fields-discard").click();
+  await expect(detail.getByTestId("lens-form-fields-title")).toHaveValue("Item to edit");
+  await expect(save).toBeDisabled();
   await detail.getByTestId("lens-form-fields-title").fill("Item edited");
-  await detail.getByTestId("lens-form-fields-submit").click();
+  await save.click();
   await until("the edit to be stored", 15_000, () => titled(daemon, "Item edited"));
   await expect(detail.getByTestId("lens-form-fields-title")).toHaveValue("Item edited");
 

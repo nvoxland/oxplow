@@ -8,6 +8,8 @@ query: |
 viz: form
 form:
   command: oxplow.work_item.update
+  # It edits what is saved: Save when changed, Discard puts it back.
+  mode: edit
   defaults: { ref: "{{param.ref}}" }
   fixed: [ref]
   fields: [title, body]

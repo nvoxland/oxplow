@@ -64,6 +64,20 @@
   `{{param.x}}`; a `query` prefills from its first row; `fixed` fields
   show their default and can't be changed (an item's `ref`); `fields`
   says which to show.
+- **Editing what is saved:** `mode: edit` (and list its `fields`). Save
+  is enabled only when changed, Discard puts the saved values back, and
+  what the person typed survives Back and a restart. Without it the form
+  is for creating something new.
+- **A field by another's value:** a `fields` entry
+  `{ name: url, visible_if: { kind: [http, https] } }` shows only while
+  `kind` is one of those; hidden, it is neither required nor sent. New
+  Stream's three modes are this.
+- **A secret** (a token, a key): `{ name: token, secret: true }`. It is
+  masked, never kept, and blank leaves it out (the saved one stays). The
+  command must keep it out of its record: a script command declares
+  `unrecorded: [token]` on its `commands:` entry, or the form won't open.
+- **Several forms on one page:** a document whose parts are form lenses;
+  each submits its own command.
 - **After a submit**, a command with `ui.open_after` opens that page;
   `then:` on the action (or `form.then`) says what becomes of the lens's
   page: `open` (default; Back returns), `replace` (it leaves history —

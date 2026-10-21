@@ -177,6 +177,29 @@ actions:
 A `viz: form` lens takes the same `fixed`, and `fields` to show only some
 of the command's fields. When the command refuses a field (an empty
 title), the message shows under that field.
+
+A form that edits something already saved says `mode: edit`: Save is
+enabled only when you changed something, Discard (or Escape) puts back
+what is saved, and what you typed stays through Back and a restart. A
+`fields` entry can show a field only for some values of another, and can
+be secret:
+
+```yaml
+viz: form
+form:
+  command: acme.source.configure
+  mode: edit
+  fields:
+    - kind
+    - { name: url, visible_if: { kind: [http, https] } }
+    - { name: token, secret: true, visible_if: { kind: https } }
+```
+
+A secret is masked and never kept; left blank, the saved one stays. The
+command must keep it out of its record — `unrecorded: [token]` on its
+`commands:` entry — or the form won't open. For several forms on one
+page, make a document whose parts are form lenses; each submits on its
+own.
 An action runs as the lens acting for you, so it can't do anything you
 couldn't. Copy and Add to Agent Context are on every lens; you don't
 declare them.
