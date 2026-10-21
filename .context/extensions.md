@@ -1271,7 +1271,11 @@ foundation's, couldn't open to say anything. The usual cause is a
 deployment an older oxplow recorded meeting a newer core: core and
 foundation's source change together in one commit, but the recorded
 deployment is the source as it was (a page naming a built-in component
-core then removed). Boot stops only when a generation can't publish at all (the
+core then removed). It is fixed from outside oxplow: `oxplow-dev extension
+status` shows what the next boot would run and hold back without starting
+it (`extension_deploy::next_boot`: the active deployments activated in a
+throwaway in memory), and `oxplow-dev extension deploy <name>` deploys a
+source with oxplow quit (`.context/working-in-this-repo.md` "oxplow-dev"). Boot stops only when a generation can't publish at all (the
 host, the database).
 
 **Sharing is one explicit act.** `.oxplow/.gitignore` ignores everything

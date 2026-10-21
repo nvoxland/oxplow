@@ -43,6 +43,12 @@ oxplow-dev wiki delete <slug>
 oxplow-dev wiki note <body>                  a note on the acting thread (needs --thread)
 oxplow-dev wiki search <text>                pages whose slug, title or body has it
 
+oxplow-dev extension status                  what the next boot would run, and what it
+                                             would hold back and why (safe while oxplow runs)
+oxplow-dev extension deploy <name>           deploy <name>'s source as the app does,
+                                             confirming its permissions and build as you;
+                                             only while oxplow is quit
+
 oxplow-dev --help                            this
 
 <id> is a task's id (tsk12) or ref (work_item:oxplow:tsk12); a link's
@@ -85,6 +91,84 @@ async fn run(mut args: Vec<String>, env_thread: Option<String>) -> Result<String
         Some("wiki") => {
             let tasks = Tasks::open(&project, thread.as_deref())?;
             tasks.wiki(args.split_off(1)).await
+        }
+        Some("extension") => extension(&project, &args[1..]).await,
+        _ => Err(format!("usage:\n{USAGE}")),
+    }
+}
+
+/// `extension status` and `extension deploy <name>`: an agent outside
+/// oxplow finding and fixing what the next boot would run — a deployment
+/// an older oxplow recorded that no longer activates (foundation's, while
+/// developing oxplow, takes the agents and Alerts with it), or a source
+/// changed and never deployed.
+async fn extension(project: &Path, args: &[String]) -> Result<String, String> {
+    match args {
+        [status] if status == "status" => {
+            let layout = oxplow_app::AppLayout::for_project(project);
+            let db = Database::open_existing(&layout.state_db_path)
+                .map_err(|e| format!("{}: {e}", layout.state_db_path.display()))?;
+            let rows = db
+                .read(|c| oxplow_db::extension_deployment_store::list_tx(c, None))
+                .await
+                .map_err(|e| e.to_string())?;
+            let next = oxplow_app::extension_deploy::next_boot(project, &rows).await?;
+            let mut out: Vec<String> = next
+                .runs
+                .iter()
+                .map(|(name, what)| format!("{name}: {what}"))
+                .collect();
+            for (name, why) in &next.problems {
+                out.push(format!("\nheld back: {name}"));
+                out.extend(why.iter().map(|w| format!("  - {w}")));
+            }
+            if next.problems.is_empty() {
+                out.push("\nnothing held back".into());
+            }
+            Ok(out.join("\n"))
+        }
+        [deploy, name] if deploy == "deploy" => {
+            let layout = oxplow_app::AppLayout::for_project(project);
+            let running = "oxplow is running on this project: quit it first, or deploy from \
+                           inside it (`oxplow.extension.deploy`) if its foundation runs";
+            if oxplow_app::is_project_locked(project) {
+                return Err(running.into());
+            }
+            // Held while this boots and deploys, as a daemon holds it.
+            let _lock = oxplow_app::try_acquire_instance_lock(&layout)
+                .map_err(|e| e.to_string())?
+                .ok_or(running)?;
+            let svc = Arc::new(
+                oxplow_app::Services::boot(
+                    layout,
+                    Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+                )
+                .map_err(|e| e.to_string())?,
+            );
+            // Startup, as a boot runs it: the live set it starts from is
+            // what the deploy replaces.
+            svc.extension_activation
+                .initialize(svc.clone())
+                .await
+                .map_err(|e| e.to_string())?;
+            let deployed = oxplow_app::extension_deploy::deploy(&svc, name, project, None, true)
+                .await
+                .map_err(|e| format!("deploy `{name}`: {e}"))?;
+            let mut out = vec![format!(
+                "{name}: {} {}",
+                if deployed.already {
+                    "already runs"
+                } else {
+                    "deployed"
+                },
+                deployed.hash
+            )];
+            out.extend(deployed.warnings.iter().map(|w| format!("  warning: {w}")));
+            for (other, why) in svc.extension_activation.problems() {
+                out.push(format!("held back: {other}"));
+                out.extend(why.iter().map(|w| format!("  - {w}")));
+            }
+            Ok(out.join("\n"))
         }
         _ => Err(format!("usage:\n{USAGE}")),
     }
@@ -669,5 +753,121 @@ mod tests {
                 "{args:?}: {err}"
             );
         }
+    }
+
+    /// A project developing oxplow (`enableBundledExtensions: false`):
+    /// foundation's source as it ships (its build a no-op, the output
+    /// cargo built already there), set up by the app, and an older
+    /// foundation recorded as its active deployment that no longer loads.
+    async fn developing_oxplow_with_a_stale_foundation() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path();
+        let ok = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(p)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+        let shipped = oxplow_app::bundled_extensions::find("oxplow-foundation").unwrap();
+        let write_files = |to: &Path, edit: &dyn Fn(String) -> String| {
+            for (rel, bytes) in shipped.files {
+                let file = to.join(rel);
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                let text = String::from_utf8_lossy(bytes).into_owned();
+                let text = if *rel == "extension.yaml" {
+                    edit(text)
+                } else {
+                    text
+                };
+                std::fs::write(file, text).unwrap();
+            }
+        };
+        write_files(&p.join(".oxplow/extensions/oxplow-foundation"), &|t| {
+            t.replacen(
+                "\"bun install --frozen-lockfile && bun run build\"",
+                "\"true\"",
+                1,
+            )
+        });
+        std::fs::write(
+            p.join(".oxplow/project.yaml"),
+            "enableBundledExtensions: false\n",
+        )
+        .unwrap();
+        let svc = oxplow_app::Services::boot(
+            oxplow_app::AppLayout::for_project(p),
+            Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+        )
+        .unwrap();
+        svc.streams.ensure_primary().await.unwrap();
+        let hash = "00000000000000ba";
+        write_files(
+            &oxplow_app::extension_store::deployment_dir(p, "oxplow-foundation", hash),
+            &|t| format!("{t}not_a_key: 1\n"),
+        );
+        let row = oxplow_db::extension_deployment_store::DeploymentRow {
+            name: "oxplow-foundation".into(),
+            hash: hash.into(),
+            deployed_at: "2026-10-19T00:00:00Z".into(),
+            from_stream: None,
+            source: "extensions/oxplow-foundation".into(),
+            active: false,
+            permissions: Default::default(),
+            build_run: None,
+        };
+        svc.db
+            .transaction(move |tx| {
+                oxplow_db::extension_deployment_store::record_tx(tx, &row)?;
+                oxplow_db::extension_deployment_store::set_active_tx(
+                    tx,
+                    &[("oxplow-foundation".into(), hash.into())],
+                )
+            })
+            .await
+            .unwrap();
+        drop(svc);
+        dir
+    }
+
+    /// From outside oxplow: `extension status` says a recorded foundation
+    /// won't activate against this oxplow and that its source moved on;
+    /// `extension deploy` deploys the source as the app would — refused
+    /// while oxplow holds the project — and the next boot runs it.
+    #[tokio::test]
+    async fn a_stale_foundation_is_found_and_deployed_from_outside() {
+        if !cfg!(debug_assertions) {
+            return;
+        }
+        let dir = developing_oxplow_with_a_stale_foundation().await;
+        let p = dir.path();
+        let status = dev(p, &["extension", "status"]).await.unwrap();
+        for said in [
+            "00000000000000ba doesn't activate",
+            "not_a_key",
+            "source has changed",
+        ] {
+            assert!(status.contains(said), "{said}: {status}");
+        }
+
+        let layout = oxplow_app::AppLayout::for_project(p);
+        let held = oxplow_app::try_acquire_instance_lock(&layout)
+            .unwrap()
+            .unwrap();
+        let err = dev(p, &["extension", "deploy", "oxplow-foundation"])
+            .await
+            .unwrap_err();
+        assert!(err.contains("oxplow is running"), "{err}");
+        drop(held);
+
+        let source = p.join(".oxplow/extensions/oxplow-foundation");
+        let hash = oxplow_app::extension_store::source_hash(&source).unwrap();
+        let deployed = dev(p, &["extension", "deploy", "oxplow-foundation"])
+            .await
+            .unwrap();
+        assert!(deployed.contains(&hash), "{deployed}");
+        let status = dev(p, &["extension", "status"]).await.unwrap();
+        assert!(!status.contains("doesn't activate"), "{status}");
+        assert!(status.contains(&hash), "{status}");
     }
 }

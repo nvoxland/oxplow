@@ -15,6 +15,7 @@ name = "oxplow-dev"
 path = "src/main.rs"
 
 [dependencies]
+oxplow-ai = { workspace = true }
 oxplow-app = { workspace = true }
 oxplow-db = { workspace = true }
 oxplow-domain = { workspace = true }
@@ -25,7 +26,6 @@ tokio = { workspace = true }
 oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [dev-dependencies]
-oxplow-ai = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]

@@ -971,6 +971,143 @@ pub(crate) async fn start(
     Ok((changes, problems))
 }
 
+/// What the next boot of a project would run, found without starting it.
+pub struct NextBoot {
+    /// Each extension that would be on, and what of it would run (a
+    /// deployment, the copy built in, or nothing), saying when its source
+    /// has changed since that deployment.
+    pub runs: Vec<(String, String)>,
+    /// What its activation would hold back, and why.
+    pub problems: VocabularyErrors,
+}
+
+/// What the next boot of `project` would run and hold back, without
+/// touching it: its settings and active deployments (`rows`, as recorded)
+/// are activated in a throwaway oxplow in memory, as boot activates them
+/// (`start`, then the first generation), over copies of those
+/// deployments and the sources where they are. So a deployment an older
+/// oxplow recorded that no longer activates against this one is found
+/// before anyone starts it (`oxplow-dev extension status`).
+pub async fn next_boot(project: &Path, rows: &[DeploymentRow]) -> Result<NextBoot, String> {
+    let settings = oxplow_config::extension_settings(project);
+    let mut names: Vec<String> = settings.enabled().into_iter().map(|(n, _)| n).collect();
+    for b in crate::bundled_extensions::BUNDLED
+        .iter()
+        .filter(|b| b.required)
+    {
+        if !names.iter().any(|n| n == b.name) {
+            names.push(b.name.to_string());
+        }
+    }
+    let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let root = dir.path().to_path_buf();
+    crate::vcs::GitProvider
+        .init_repository(&root)
+        .await
+        .map_err(|e| e.to_string())?;
+    // The settings as they are, each source where it is.
+    let sources: std::collections::BTreeMap<String, String> = names
+        .iter()
+        .map(|n| (n.clone(), settings.source(project, n).display().to_string()))
+        .collect();
+    let mut config =
+        serde_json::json!({ "extensions": settings.team, "extensionSources": sources });
+    if let Some(requested) = settings.bundled_requested {
+        config["enableBundledExtensions"] = requested.into();
+    }
+    let personal = serde_json::json!({
+        "enableExtensions": settings.personal.enable,
+        "disableExtensions": settings.personal.disable,
+    });
+    std::fs::create_dir_all(root.join(".oxplow")).map_err(|e| e.to_string())?;
+    for (file, value) in [("project.yaml", config), ("personal.yaml", personal)] {
+        let yaml = serde_yaml::to_string(&value).map_err(|e| e.to_string())?;
+        std::fs::write(root.join(".oxplow").join(file), yaml).map_err(|e| e.to_string())?;
+    }
+    let svc = Services::on_machine_inactive(
+        &root,
+        root.join(".global"),
+        Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+        Arc::new(|_: &str| None),
+        oxplow_db::Database::in_memory(),
+    )
+    .map_err(|e| e.to_string())?;
+    // The store as boot finds it: each active deployment still there.
+    let active: Vec<DeploymentRow> = rows
+        .iter()
+        .filter(|r| r.active && extension_store::deployment_dir(project, &r.name, &r.hash).is_dir())
+        .cloned()
+        .collect();
+    for row in &active {
+        let from = extension_store::deployment_dir(project, &row.name, &row.hash);
+        extension_store::copy_into_store(&root, &row.name, &from, &row.hash)
+            .map_err(|e| format!("copy `{}`'s deployment {}: {e}", row.name, row.hash))?;
+    }
+    let live: Vec<(String, String)> = active
+        .iter()
+        .map(|r| (r.name.clone(), r.hash.clone()))
+        .collect();
+    svc.db
+        .transaction(move |tx| {
+            for row in &active {
+                store_rows::record_tx(tx, row)?;
+            }
+            store_rows::set_active_tx(tx, &live)
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    svc.extension_activation
+        .initialize(svc.clone())
+        .await
+        .map_err(|e| e.to_string())?;
+    let running = svc.extension_catalog.active();
+    let runs = names
+        .into_iter()
+        .map(|name| {
+            let entry = running.as_ref().and_then(|snapshot| {
+                snapshot
+                    .extensions()
+                    .iter()
+                    .find(|e| e.name == name && e.enabled)
+                    .cloned()
+            });
+            let deployed = rows.iter().find(|r| r.active && r.name == name);
+            let what = match entry.map(|e| e.deployment) {
+                Some(crate::extensions::Deployment::Deployed { hash }) => {
+                    let at = rows
+                        .iter()
+                        .find(|r| r.name == name && r.hash == hash)
+                        .map(|r| format!(" of {}", r.deployed_at))
+                        .unwrap_or_else(|| " (startup deploys its source)".into());
+                    format!("its deployment {hash}{at}")
+                }
+                Some(crate::extensions::Deployment::Shipped { .. }) => {
+                    "the copy built into oxplow".to_string()
+                }
+                Some(_) => "its source".to_string(),
+                None => match deployed {
+                    Some(row) => format!("nothing (its deployment {} doesn't activate)", row.hash),
+                    None => "nothing".to_string(),
+                },
+            };
+            let source = settings.source(project, &name);
+            let moved_on = deployed.is_some_and(|row| {
+                extension_store::source_hash(&source).is_ok_and(|now| now != row.hash)
+            });
+            let what = if moved_on {
+                format!("{what}; its source has changed since it was deployed")
+            } else {
+                what
+            };
+            (name, what)
+        })
+        .collect();
+    Ok(NextBoot {
+        runs,
+        problems: svc.extension_activation.problems(),
+    })
+}
+
 /// For tests that write an extension's files and activate, as an agent
 /// that wrote them would deploy them: every source in the project whose
 /// deployment isn't the live one is staged, turned on for the person
@@ -2223,6 +2360,86 @@ mod tests {
                 .await
                 .unwrap();
         }
+    }
+
+    /// What the next boot would run is found without touching the
+    /// project: its active deployments activate in a throwaway, so a
+    /// foundation deployment that no longer activates against this oxplow
+    /// is said before anyone starts it, with whether its source moved on.
+    /// Deploying the source (here, recording it active) clears it.
+    #[tokio::test]
+    async fn the_next_boot_is_checked_without_starting_oxplow() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        let project = dir.path();
+        let source = project.join(".oxplow/extensions/oxplow-foundation");
+        for (rel, text) in shipped_with("oxplow-foundation", |t| {
+            t.replacen(crate::test_fixtures::FOUNDATION_BUILD, "\"true\"", 1)
+        }) {
+            write(&source, rel, &text);
+        }
+        write(
+            project,
+            ".oxplow/project.yaml",
+            "enableBundledExtensions: false\n",
+        );
+        if !cfg!(debug_assertions) {
+            return;
+        }
+        let row = |hash: &str| DeploymentRow {
+            name: "oxplow-foundation".into(),
+            hash: hash.into(),
+            deployed_at: "2026-10-19T00:00:00Z".into(),
+            from_stream: None,
+            source: source.display().to_string(),
+            active: true,
+            permissions: Permissions::default(),
+            build_run: None,
+        };
+
+        // An older foundation, recorded active, that doesn't activate.
+        let stale =
+            extension_store::deployment_dir(project, "oxplow-foundation", "00000000000000ba");
+        for (rel, text) in shipped_with("oxplow-foundation", |t| format!("{t}not_a_key: 1\n")) {
+            write(&stale, rel, &text);
+        }
+        let next = next_boot(project, &[row("00000000000000ba")])
+            .await
+            .unwrap();
+        let why = next
+            .problems
+            .get("oxplow-foundation")
+            .expect("it is held")
+            .join("\n");
+        assert!(
+            why.contains("not_a_key") && why.contains("00000000000000ba"),
+            "{why}"
+        );
+        let runs = &next
+            .runs
+            .iter()
+            .find(|(n, _)| n == "oxplow-foundation")
+            .unwrap()
+            .1;
+        assert!(
+            runs.contains("nothing") && runs.contains("its source has changed"),
+            "{runs}"
+        );
+
+        // Its source, deployed: nothing is held, and it is what runs.
+        let hash = extension_store::source_hash(&source).unwrap();
+        extension_store::copy_into_store(project, "oxplow-foundation", &source, &hash).unwrap();
+        let next = next_boot(project, &[row(&hash)]).await.unwrap();
+        assert!(next.problems.is_empty(), "{:?}", next.problems);
+        let runs = &next
+            .runs
+            .iter()
+            .find(|(n, _)| n == "oxplow-foundation")
+            .unwrap()
+            .1;
+        assert!(runs.contains(&hash) && !runs.contains("changed"), "{runs}");
+        // The project itself was only read.
+        assert!(!project.join(".oxplow/local.sqlite").exists());
     }
 
     /// `v_extension.errors` for `name`, as the Alerts page reads it.

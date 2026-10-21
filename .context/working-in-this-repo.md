@@ -115,8 +115,27 @@ cargo run -q -p oxplow-dev -- wiki write some-page [--title …] [--file body.md
 cargo run -q -p oxplow-dev -- wiki delete some-page
 cargo run -q -p oxplow-dev -- --thread thr1 wiki note "…"
 cargo run -q -p oxplow-dev -- wiki search burrows
+cargo run -q -p oxplow-dev -- extension status
+cargo run -q -p oxplow-dev -- extension deploy oxplow-foundation
 cargo run -q -p oxplow-dev -- --help
 ```
+
+`extension status` and `extension deploy` are for fixing what oxplow would
+run from outside it, when it can't fix itself: oxplow-foundation not
+running (no agents, no Alerts, no core commands — a deployment an older
+oxplow recorded that doesn't activate against this one), or a source
+changed and never deployed. `status` is read-only and safe while oxplow
+runs: it activates the active deployments in a throwaway oxplow in
+memory, as the next boot would (`extension_deploy::next_boot`), and says
+what each runs, whether its source changed since, and what would be held
+back and why. `deploy <name>` deploys the source as the app does (built,
+copied into the store, activated, recorded active), confirming its
+permissions and build as the person running it. It refuses while oxplow
+holds the project (the instance lock: a running daemon keeps the live set
+in memory and its next publication would undo it), so quit oxplow, deploy,
+then start it. With foundation running, deploy from inside oxplow instead
+(`oxplow.extension.deploy`). Nothing deploys foundation on its own: a
+deployment may be mid-way on purpose, so a person or their agent decides.
 
 `wiki` runs the `oxplow.knowledge.*` commands on the same bus with oxplow's
 wiki as the store, whatever the project has active (pages are
