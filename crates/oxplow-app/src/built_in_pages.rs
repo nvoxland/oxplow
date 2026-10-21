@@ -25,10 +25,8 @@ pub const BUILT_IN_PAGES: &[&str] = &[
     "new-stream",
     "new-task",
     "settings",
-    "stream-settings",
     "tasks",
     "terminal",
-    "thread-settings",
     "uncommitted-changes",
 ];
 

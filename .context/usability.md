@@ -8,7 +8,7 @@ Things I keep forgetting. Read this before adding any UI.
 > per-row actions live on **right-click** menus (the redesign's kebab
 > `⋯` buttons were reverted — see "Per-row actions" below); per-stream
 > and per-thread settings
-> ship as Page tabs (`StreamSettingsPage`, `ThreadSettingsPage`); new-
+> ship as Page tabs (the `stream-settings` and `thread-settings` lens pages); new-
 > stream and new-task flows ship as Page tabs (`NewStreamPage`,
 > `NewTaskPage`); snapshot- and commit-detail Slideover wrappers
 > (`SnapshotDetailSlideover`, `CommitDetailSlideover`) cover the
@@ -410,12 +410,13 @@ another branch.
 
 ## A page changes its own view, it doesn't open itself
 
-A filter, a mode, a pick or "View all" on a page is that page at another
-view: it writes its view params (`useViewParam`, `useViewSelection`,
+A filter, a mode, a pick or "Show every snapshot" on a page is that page at
+another view: it writes its view params (`useViewParam`, `useViewSelection`,
 `.context/pages-and-tabs.md` "Page state"), and the page stays mounted —
-its scroll, open groups and drafts stay. A filter replaces the tab's
-entry; a pick or a step the person will want Back from ("View all",
-another Settings area, another diff endpoint) pushes one. A mode is a
+its scroll, open groups and drafts stay. A filter (a toggle such as
+"Show every snapshot" too) replaces the tab's entry; a pick or a step the
+person will want Back from (another Settings area, another diff endpoint)
+pushes one. A mode is a
 param, never a second page name. A list's cursor (↑/↓ before Enter) is
 not a pick and isn't in the address.
 

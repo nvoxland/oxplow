@@ -26,8 +26,6 @@ import { CustomDashboardPage } from "./CustomDashboardPage.js";
 import { ExploreDataPage } from "./ExploreDataPage.js";
 import { BoardPage } from "./BoardPage.js";
 import { ExternalUrlPage } from "./ExternalUrlPage.js";
-import { StreamSettingsPage } from "./StreamSettingsPage.js";
-import { ThreadSettingsPage } from "./ThreadSettingsPage.js";
 import { NewStreamPage } from "./NewStreamPage.js";
 import { NewTaskPage } from "./NewTaskPage.js";
 import { AlertsPage } from "./AlertsPage.js";
@@ -373,48 +371,7 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
       ),
     };
   },
-  "stream-settings": ({ ref, params, scope }) => {
-    const targetStreamId = params.stream ?? "";
-    const targetStream = scope.streams.find((s) => s.id === targetStreamId) ?? null;
-    return {
-      id: ref.id,
-      label: targetStream ? `Settings · ${targetStream.title}` : "Stream Settings",
-      closable: true,
-      render: () => (
-        <StreamSettingsPage
-          stream={targetStream}
-          onClose={() => scope.closePageTab(ref.id)}
-          onSaved={(next) => scope.setStreams(next)}
-        />
-      ),
-    };
-  },
-  "thread-settings": ({ ref, params, nav, scope }) => {
-    const targetThreadId = params.thread ?? "";
-    const targetThread = scope.threads.find((t) => t.id === targetThreadId) ?? null;
-    return {
-      id: ref.id,
-      label: targetThread ? `Settings · ${targetThread.title}` : "Thread Settings",
-      closable: true,
-      render: () => (
-        <ThreadSettingsPage
-          streamId={scope.stream?.id ?? ""}
-          thread={targetThread}
-          onClose={() => scope.closePageTab(ref.id)}
-          onSaved={(nextThreads) => {
-            if (!scope.stream) return;
-            scope.setThreadStates((prev) => ({
-              ...prev,
-              [scope.stream.id]: {
-                ...(prev[scope.stream.id] ?? { selectedThreadId: null, threads: [] }),
-                threads: nextThreads,
-              },
-            }));
-          }}
-        />
-      ),
-    };
-  },
+
   "new-stream": ({ ref, scope }) => {
     return {
       id: ref.id,

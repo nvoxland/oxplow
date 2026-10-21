@@ -1,0 +1,14 @@
+title: Custom prompt
+description: The standing instructions the person set for every agent session in a stream. Save applies them to sessions started after it.
+params:
+  - { name: stream, label: Stream }
+query: |
+  SELECT s.ref AS stream, coalesce(s.prompt, '') AS prompt
+  FROM v_stream s
+  WHERE s.id = CAST(replace(:stream, 'str', '') AS INTEGER)
+viz: form
+form:
+  command: oxplow.stream.set_prompt
+  mode: edit
+  fields: [prompt]
+hidden: true

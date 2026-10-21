@@ -1,0 +1,11 @@
+title: Thread Settings
+description: A thread's settings — its open agent sessions and its custom prompt.
+params:
+  - { name: thread, label: Thread }
+viz: document
+sections:
+  - { id: sessions, lens: thread-settings-sessions }
+  - id: hint
+    markdown: Appended to the agent's system prompt for this thread (on top of any stream-level prompt). Applies to agent sessions started after Save — existing sessions keep the prompt they launched with.
+  - { id: prompt, title: Custom Prompt, lens: thread-settings-prompt }
+hidden: true

@@ -71,6 +71,7 @@ pub struct SetPromptInput {
     pub stream: String,
     /// Appended to every agent prompt in this stream; empty or absent
     /// clears it.
+    #[schemars(extend("contentMediaType" = "text/markdown"))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
 }

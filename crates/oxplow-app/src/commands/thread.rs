@@ -63,6 +63,7 @@ pub struct SetPromptInput {
     /// The thread (`thread:thr12`).
     pub thread: String,
     /// Appended to the agent's prompt; empty or absent clears it.
+    #[schemars(extend("contentMediaType" = "text/markdown"))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
 }

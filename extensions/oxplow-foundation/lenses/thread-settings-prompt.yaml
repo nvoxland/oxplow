@@ -1,0 +1,14 @@
+title: Custom prompt
+description: The standing instructions the person set for a thread's agent sessions, after the stream's. Save applies them to sessions started after it.
+params:
+  - { name: thread, label: Thread }
+query: |
+  SELECT t.ref AS thread, coalesce(t.prompt, '') AS prompt
+  FROM v_thread t
+  WHERE t.id = CAST(replace(:thread, 'thr', '') AS INTEGER)
+viz: form
+form:
+  command: oxplow.thread.set_prompt
+  mode: edit
+  fields: [prompt]
+hidden: true

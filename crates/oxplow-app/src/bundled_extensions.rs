@@ -2118,6 +2118,8 @@ mod tests {
             ("dashboards", "oxplow-foundation/dashboards"),
             ("local-history", "oxplow-foundation/local-history"),
             ("git-history", "oxplow-foundation/git-history"),
+            ("stream-settings", "oxplow-foundation/stream-settings"),
+            ("thread-settings", "oxplow-foundation/thread-settings"),
         ] {
             assert!(pages.contains(&(page, lens)), "{page}: {pages:?}");
         }
@@ -2708,6 +2710,57 @@ mod tests {
             texts(&lens(vec![("branch", Text("side".into()))]).await, 1),
             ["First"]
         );
+    }
+
+    /// Stream and Thread Settings: each page's prompt form starts from the
+    /// saved prompt and names the stream or thread by its ref, which the
+    /// command takes; a thread lists its open agent sessions.
+    #[tokio::test]
+    async fn the_settings_lenses_start_from_the_saved_prompt() {
+        use oxplow_db::SqlCell::Text;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let thread = oxplow_domain::refs::build::thread_ref(f.thread);
+        f.svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "oxplow.thread.set_prompt",
+                serde_json::json!({ "thread": thread, "prompt": "Be brief." }),
+                false,
+            )
+            .await
+            .unwrap();
+        let lens = |slug: &'static str, param: &'static str, value: String| {
+            let f = &f;
+            async move {
+                run_bundled_lens_with(
+                    f,
+                    &format!("oxplow-foundation/{slug}"),
+                    &[(param, Text(value))],
+                )
+                .await
+            }
+        };
+        let rows = lens(
+            "thread-settings-prompt",
+            "thread",
+            format!("thr{}", f.thread.value()),
+        )
+        .await;
+        assert_eq!(texts(&rows, 0), std::slice::from_ref(&thread), "{rows}");
+        assert_eq!(texts(&rows, 1), ["Be brief."], "{rows}");
+        let rows = lens("stream-settings-prompt", "stream", "str1".into()).await;
+        assert_eq!(texts(&rows, 0), ["stream:str1"], "{rows}");
+        assert_eq!(texts(&rows, 1), [""], "{rows}");
+        let rows = lens(
+            "thread-settings-sessions",
+            "thread",
+            format!("thr{}", f.thread.value()),
+        )
+        .await;
+        assert_eq!(texts(&rows, 3), ["agent_session:ses1"], "{rows}");
+        let rows = lens("thread-settings-sessions", "thread", "thr999".into()).await;
+        assert!(rows.as_array().unwrap().is_empty(), "{rows}");
     }
 
     /// Go To (the page): the thread's bookmarks with the scope each is at,

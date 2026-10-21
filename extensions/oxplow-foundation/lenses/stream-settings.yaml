@@ -1,0 +1,10 @@
+title: Stream Settings
+description: A stream's settings — today its custom prompt.
+params:
+  - { name: stream, label: Stream }
+viz: document
+sections:
+  - id: hint
+    markdown: Appended to the agent's system prompt for every thread inside this stream. Applies to agent sessions started after Save — existing sessions keep the prompt they launched with.
+  - { id: prompt, title: Custom Prompt, lens: stream-settings-prompt }
+hidden: true

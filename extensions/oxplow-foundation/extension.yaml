@@ -185,8 +185,8 @@ pages:
   - { id: new-session, title: New Session, icon: plus, component: "oxplow:new-session" }
   - { id: new-stream, title: New Stream, icon: plus, component: "oxplow:new-stream" }
   - { id: new-task, title: New Item, icon: plus, component: "oxplow:new-task" }
-  - { id: stream-settings, title: Stream Settings, icon: settings, params: [stream], component: "oxplow:stream-settings" }
-  - { id: thread-settings, title: Thread Settings, icon: settings, params: [thread], component: "oxplow:thread-settings" }
+  - { id: stream-settings, title: Stream Settings, icon: settings, params: [stream], lens: stream-settings }
+  - { id: thread-settings, title: Thread Settings, icon: settings, params: [thread], lens: thread-settings }
   - { id: external-url, title: Web Page, icon: external-link, params: [url], component: "oxplow:external-url" }
   - { id: diff, title: Diff, icon: git-compare, params: [path, left, right, label], component: "oxplow:diff" }
   - { id: diff-view, title: Changes, icon: git-compare, params: [snapshot, effort, start, end], component: "oxplow:diff-view" }

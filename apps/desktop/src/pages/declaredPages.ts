@@ -25,9 +25,7 @@ export const BUILT_IN_PAGES = [
   "new-stream",
   "new-task",
   "settings",
-  "stream-settings",
   "terminal",
-  "thread-settings",
   "uncommitted-changes",
   "tasks",
 ] as const;

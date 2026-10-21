@@ -63,3 +63,22 @@ test("a config edit is saved to project.yaml and read back", async ({ page, daem
   await openFromLauncher(page, "Settings: Agents");
   await expect(page.getByTestId("settings-page-prompt-append")).toHaveValue("Prefer small, reviewable commits.");
 });
+
+// Stream Settings is the foundation's document over `v_stream`: its prompt
+// is an edit form (Save only when changed), saved through the command, and
+// kept across a reload.
+test("a stream's prompt is edited and saved on its Settings page", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('[data-testid^="navigator-strip-stream-"]').first().click({ button: "right" });
+  await page.getByTestId("menu-item-stream.settings").click();
+  const prompt = page.locator('[data-testid="lens-part-prompt"]:visible');
+  const box = prompt.getByRole("textbox");
+  const save = prompt.getByRole("button", { name: "Save" });
+  await expect(save).toBeDisabled();
+  await box.fill("Always answer in rhyme.");
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(save).toBeDisabled();
+  await page.reload();
+  await expect(page.locator('[data-testid="lens-part-prompt"]:visible').getByRole("textbox")).toHaveValue("Always answer in rhyme.");
+});

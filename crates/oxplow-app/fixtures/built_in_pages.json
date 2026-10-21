@@ -16,9 +16,7 @@
   "new-stream",
   "new-task",
   "settings",
-  "stream-settings",
   "tasks",
   "terminal",
-  "thread-settings",
   "uncommitted-changes"
 ]
