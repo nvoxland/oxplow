@@ -303,7 +303,9 @@ pub fn contract_drift(golden: &serde_json::Value, decls: &[ModelDecl]) -> Vec<St
 }
 
 /// `golden` with every declared model's current contract pinned at its
-/// version — earlier versions kept, so the file is the publication
+/// version when that version isn't pinned yet — a pinned version is
+/// published and never rewritten, so a change to one still drifts (bump
+/// its version). Earlier versions are kept: the file is the publication
 /// history (what `OXPLOW_BLESS=1` writes).
 pub fn pin_contracts(golden: &serde_json::Value, decls: &[ModelDecl]) -> serde_json::Value {
     let mut golden = golden.as_object().cloned().unwrap_or_default();
@@ -312,7 +314,8 @@ pub fn pin_contracts(golden: &serde_json::Value, decls: &[ModelDecl]) -> serde_j
             .entry(d.name.clone())
             .or_insert_with(|| serde_json::Value::Object(Default::default()));
         if let Some(map) = versions.as_object_mut() {
-            map.insert(d.version.to_string(), contract_json(d));
+            map.entry(d.version.to_string())
+                .or_insert_with(|| contract_json(d));
         }
     }
     serde_json::Value::Object(golden)
@@ -2334,6 +2337,16 @@ mod tests {
             pinned["a"]["1"]["columns"].is_array(),
             "the earlier version stays pinned"
         );
+        // Blessing never rewrites a published version: the reworded v1
+        // stays as it was pinned, and still drifts.
+        let mut reworded_again = decl.clone();
+        reworded_again.columns[0].doc = "The row's id.".into();
+        let reblessed = pin_contracts(&golden, std::slice::from_ref(&reworded_again));
+        assert_eq!(reblessed["a"]["1"], golden["a"]["1"]);
+        assert_eq!(
+            contract_drift(&reblessed, std::slice::from_ref(&reworded_again)).len(),
+            1
+        );
     }
 
     /// Every core model's contract is pinned at its version in
@@ -2621,12 +2634,16 @@ mod tests {
             .ok()
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_else(|| serde_json::json!({}));
-        if std::env::var_os("OXPLOW_BLESS").is_some() {
+        // A bless pins new versions only, then checks like any run: a
+        // changed published version stays red.
+        let golden = if std::env::var_os("OXPLOW_BLESS").is_some() {
             let pinned = pin_contracts(&golden, &decls);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, serde_json::to_string_pretty(&pinned).unwrap() + "\n").unwrap();
-            return;
-        }
+            pinned
+        } else {
+            golden
+        };
         let drift = contract_drift(&golden, &decls);
         assert!(drift.is_empty(), "{}", drift.join("\n"));
     }
