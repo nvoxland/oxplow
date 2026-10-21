@@ -455,10 +455,6 @@ pub const MANIFEST: &[Capability] = &[
     model("git_resolve_commit_ref_labels", &["v_branch", "v_tag"]),
     model("git_list_recent_remote_branches", &["v_branch"]),
     ui(
-        "vcs_list_adoptable_workspaces",
-        "worktrees on disk a person may adopt as streams",
-    ),
-    ui(
         "vcs_divergence",
         "an ancestry walk the VCS answers; an agent runs git in its worktree",
     ),

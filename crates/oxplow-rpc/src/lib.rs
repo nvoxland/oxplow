@@ -313,7 +313,6 @@ macro_rules! oxplow_command_table {
                 vcs_divergence => $crate::commands::vcs::vcs_divergence { stream_id: Option<String>, base: ::oxplow_domain::vcs::Revision, head: ::oxplow_domain::vcs::Revision } -> ::oxplow_domain::vcs::Divergence,
                 vcs_revisions_between => $crate::commands::vcs::vcs_revisions_between { stream_id: Option<String>, base: ::oxplow_domain::vcs::Revision, head: ::oxplow_domain::vcs::Revision, limit: u32 } -> Vec<::oxplow_domain::vcs::RevisionInfo>,
                 vcs_file_history => $crate::commands::vcs::vcs_file_history { stream_id: Option<String>, path: String, limit: u32 } -> Vec<::oxplow_domain::vcs::RevisionInfo>,
-                vcs_list_adoptable_workspaces => $crate::commands::vcs::vcs_list_adoptable_workspaces {} -> Vec<::oxplow_domain::vcs::VcsWorkspace>,
                 list_workspace_entries => $crate::commands::workspace::list_workspace_entries { stream_id: Option<String>, relative_path: String } -> Vec<::oxplow_app::workspace_files::WorkspaceEntry>,
                 list_workspace_files => $crate::commands::workspace::list_workspace_files { stream_id: Option<String> } -> Vec<::oxplow_app::workspace_files::WorkspaceIndexedFile>,
                 read_workspace_file => $crate::commands::workspace::read_workspace_file { stream_id: Option<String>, relative_path: String } -> ::oxplow_app::workspace_files::WorkspaceFile,

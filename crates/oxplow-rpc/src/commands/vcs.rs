@@ -4,9 +4,7 @@
 
 use oxplow_app::vcs::reads;
 use oxplow_app::Services;
-use oxplow_domain::vcs::{
-    BlameLine, Branch, Divergence, Revision, RevisionDetail, RevisionInfo, VcsWorkspace,
-};
+use oxplow_domain::vcs::{BlameLine, Branch, Divergence, Revision, RevisionDetail, RevisionInfo};
 
 use crate::error::IpcError;
 
@@ -85,10 +83,6 @@ pub async fn vcs_file_history(
     Ok(reads::file_history(svc, stream_id.as_deref(), &path, limit).await?)
 }
 
-pub async fn vcs_list_adoptable_workspaces(svc: &Services) -> Result<Vec<VcsWorkspace>, IpcError> {
-    Ok(reads::adoptable_workspaces(svc).await?)
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -165,7 +159,5 @@ mod tests {
         )
         .await;
         assert_eq!(history[0]["id"], json!(sha));
-        let adoptable = call("vcs_list_adoptable_workspaces", json!({})).await;
-        assert_eq!(adoptable, json!([]));
     }
 }

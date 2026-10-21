@@ -250,9 +250,6 @@ async fn git_list_commands_return_empty_for_fresh_repo() {
             .unwrap()
             .is_empty()
     );
-    let _ = commands::generated::vcs_list_adoptable_workspaces(s.clone())
-        .await
-        .unwrap();
 }
 
 // ---- stream commands ----

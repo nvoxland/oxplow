@@ -78,6 +78,11 @@ async fn fixture() -> Fixture {
         })
         .await
         .unwrap();
+    // Only the harnesses a test registers answer: the shipped ones run the
+    // machine's own `codex` and `opencode`.
+    for h in fx.svc.harnesses.all() {
+        fx.svc.harnesses.unregister(h.id());
+    }
     let stream = fx.svc.streams.ensure_primary().await.unwrap().id;
     let other = crate::test_fixtures::new_thread(&fx.svc, stream, "elsewhere").await;
     Fixture {
@@ -421,4 +426,21 @@ async fn rows_come_newest_first() {
         .map(|r| r.conversation.clone().unwrap())
         .collect();
     assert_eq!(ids, ["new", "old"]);
+}
+
+/// The listing asks the harnesses a test registers and no others: the
+/// shipped ones would run the machine's `codex` and `opencode`, whose answer
+/// (or lateness under load) would be rows the test didn't ask for.
+#[tokio::test]
+async fn only_the_registered_test_harnesses_are_asked() {
+    let f = fixture().await;
+    list(&f, vec![harness("h", vec![])]).await;
+    let ids: Vec<_> =
+        f.fx.svc
+            .harnesses
+            .all()
+            .iter()
+            .map(|h| h.id().to_string())
+            .collect();
+    assert_eq!(ids, ["h"]);
 }

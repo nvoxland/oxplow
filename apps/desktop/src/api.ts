@@ -443,11 +443,6 @@ export async function vcsFileHistory(
   return unwrap(await commands.vcsFileHistory(streamId || null, path, limit));
 }
 
-/** Working copies of the repository no stream uses yet. */
-export async function vcsListAdoptableWorkspaces(): Promise<VcsWorkspace[]> {
-  return unwrap(await commands.vcsListAdoptableWorkspaces());
-}
-
 /** Where the histories of `a` and `b` fork. */
 export async function vcsMergeBase(
   streamId: string,

@@ -249,7 +249,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::vcs_divergence,
             commands::generated::vcs_revisions_between,
             commands::generated::vcs_file_history,
-            commands::generated::vcs_list_adoptable_workspaces,
             // background tasks
             commands::generated::list_background_tasks,
             commands::generated::get_background_task,

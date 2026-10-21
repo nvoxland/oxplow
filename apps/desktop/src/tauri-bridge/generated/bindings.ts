@@ -832,11 +832,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	vcsListAdoptableWorkspaces: () => typedError<VcsWorkspace[], IpcError_Serialize>(__TAURI_INVOKE("vcs_list_adoptable_workspaces")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listBackgroundTasks: () => typedError<BackgroundTask[], IpcError_Serialize>(__TAURI_INVOKE("list_background_tasks")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -6633,15 +6628,6 @@ export type UsageEvent = {
 	kind: string,
 	payload_json: string,
 	occurred_at: Timestamp,
-};
-
-/**  One working copy of the repository (feature `isolated_workspaces`). */
-export type VcsWorkspace = {
-	path: string,
-	branch: string | null,
-	head: string | null,
-	/**  The repository's primary working copy. */
-	is_main: boolean,
 };
 
 export type Visibility = "private" | "experimental" | "stable";

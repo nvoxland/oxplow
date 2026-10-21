@@ -234,8 +234,7 @@ rename in between stays; tsk573). A `v_branch.name` is the branch's local name f
 (a remote-tracking branch's remote is its own column), so the picker
 checks out and shows `name` as is (`pickedBranch`, tsk567). What is computed stays live: `vcs_divergence` (any pair of revisions: a stream against the default branch, a remote branch against HEAD — a branch against its own upstream is `v_branch.ahead` / `behind`),
 `vcs_revisions_between`, `vcs_file_history` (the index keeps 500
-commits per head; a file's full history can be older),
-`vcs_list_adoptable_workspaces`, and for agents `v_commit`,
+commits per head; a file's full history can be older), and for agents `v_commit`,
 `v_commit_file` and `v_branch` through `oxplow_query_sql`. Git-native reads keep `git_` names:
 `git_change_scopes`, `git_resolve_commit_ref_labels`,
 `git_list_recent_remote_branches`. Deleted: `get_git_log`,
