@@ -187,7 +187,7 @@ mod tests {
     #[test]
     fn answerability_prompts_are_about_registered_ref_kinds() {
         let prompts = answerability_prompts();
-        let kinds = oxplow_domain::refs::kind::core_kinds();
+        let kinds = oxplow_domain::uri::types::core_types();
         for p in &prompts {
             if let Some(about) = &p.about {
                 assert!(kinds.get(about).is_some(), "{}: `{about}`", p.prompt);

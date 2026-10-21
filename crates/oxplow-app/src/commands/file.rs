@@ -100,7 +100,7 @@ fn failed(e: WorkspaceError) -> CommandError {
 /// `event`, anchored on `stream` and about `subject`.
 fn logged(mut event: Envelope, stream: StreamId, subject: &str) -> Envelope {
     event.anchors.stream_id = Some(stream);
-    event.with_subject([oxplow_domain::refs::build::file_ref(subject)])
+    event.with_subject([oxplow_domain::uri::build::file_uri(subject)])
 }
 
 /// `save { stream, path, content }`.
@@ -304,7 +304,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn save_writes_is_audited_without_its_content_and_logs_file_saved() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        let stream = oxplow_domain::refs::build::stream_ref(
+        let stream = oxplow_domain::uri::build::stream_uri(
             fx.svc.streams.list_streams().await.unwrap()[0].id,
         );
         let out = fx
@@ -358,7 +358,7 @@ mod tests {
     }
 
     async fn stream_ref_of(fx: &crate::test_fixtures::EffortFixture) -> String {
-        oxplow_domain::refs::build::stream_ref(fx.svc.streams.list_streams().await.unwrap()[0].id)
+        oxplow_domain::uri::build::stream_uri(fx.svc.streams.list_streams().await.unwrap()[0].id)
     }
 
     async fn logged(
@@ -552,7 +552,7 @@ mod tests {
                         .run(
                             &actor,
                             "oxplow.file.save",
-                            json!({ "stream": oxplow_domain::refs::build::stream_ref(stream), "path": "notes.txt", "content": "hi" }),
+                            json!({ "stream": oxplow_domain::uri::build::stream_uri(stream), "path": "notes.txt", "content": "hi" }),
                             false,
                         )
                         .await
@@ -590,7 +590,7 @@ mod tests {
     async fn an_agent_saves_only_in_its_own_stream() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let stream = fx.svc.streams.list_streams().await.unwrap()[0].id;
-        let input = json!({ "stream": oxplow_domain::refs::build::stream_ref(stream), "path": "n.txt", "content": "x" });
+        let input = json!({ "stream": oxplow_domain::uri::build::stream_uri(stream), "path": "n.txt", "content": "x" });
         let elsewhere = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),

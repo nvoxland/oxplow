@@ -82,7 +82,7 @@ pub fn parse_decorators(
             vec![at(file, block, "`ui.decorators` must be a list")],
         );
     };
-    let kinds = oxplow_domain::refs::kind::core_kinds();
+    let kinds = oxplow_domain::uri::types::core_types();
     let mut out = Vec::new();
     let mut errors = Vec::new();
     let lines = item_lines(manifest, "ui.decorators");

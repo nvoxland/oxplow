@@ -37,8 +37,8 @@
 //! lands nothing, so it closes nothing. Work after the commit is the next
 //! effort's (rule 2 opens it, adopting no further back than the close).
 
-use oxplow_domain::refs::build::{effort_ref, thread_ref};
 use oxplow_domain::run::{Mode, Outcome as RunOutcome, RunContext};
+use oxplow_domain::uri::build::{effort_uri, thread_uri};
 use std::sync::{Arc, RwLock, Weak};
 
 use async_trait::async_trait;
@@ -74,7 +74,7 @@ pub const BUILT_IN: &str = "oxplow:commit-or-switch";
 
 /// Whether `source` is a policy's own run: reacting to it would loop.
 fn is_a_policys(source: &str) -> bool {
-    oxplow_domain::refs::build::effect_of_source(source)
+    oxplow_domain::uri::build::effect_of_source(source)
         .is_some_and(|e| e.starts_with(&format!("{CAPABILITY}:")))
 }
 
@@ -197,7 +197,7 @@ impl CommitOrSwitch {
         let open_new = || {
             call(
                 crate::commands::effort::OPEN,
-                json!({ "thread": thread_ref(thread), "work_item": item_ref }),
+                json!({ "thread": thread_uri(thread), "work_item": item_ref }),
             )
         };
         let Some(open) = self.open_on(thread).await? else {
@@ -209,13 +209,13 @@ impl CommitOrSwitch {
             Some(linked) if !self.is_under(item_ref, linked).await? => vec![
                 call(
                     crate::commands::effort::CLOSE,
-                    json!({ "effort": effort_ref(open.id), "reason": "switch" }),
+                    json!({ "effort": effort_uri(open.id), "reason": "switch" }),
                 ),
                 open_new(),
             ],
             _ => vec![call(
                 crate::commands::effort::LINK,
-                json!({ "effort": effort_ref(open.id), "work_item": item_ref }),
+                json!({ "effort": effort_uri(open.id), "work_item": item_ref }),
             )],
         })
     }
@@ -246,7 +246,7 @@ impl CommitOrSwitch {
         };
         Ok(vec![call(
             crate::commands::effort::OPEN,
-            json!({ "thread": thread_ref(thread), "adopt_since": started }),
+            json!({ "thread": thread_uri(thread), "adopt_since": started }),
         )])
     }
 
@@ -301,7 +301,7 @@ impl EffortPolicy for CommitOrSwitch {
                 match event.anchors.effort_id {
                     Some(effort) if self.is_open(effort).await? => Ok(vec![call(
                         crate::commands::effort::CLOSE,
-                        json!({ "effort": effort_ref(effort), "reason": "commit" }),
+                        json!({ "effort": effort_uri(effort), "reason": "commit" }),
                     )]),
                     _ => Ok(Vec::new()),
                 }
@@ -342,7 +342,7 @@ async fn close_open(
         .filter_map(|row| match row.first() {
             Some(SqlCell::Int(id)) => Some(call(
                 crate::commands::effort::CLOSE,
-                json!({ "effort": effort_ref(EffortId::new(*id)), "reason": "switch" }),
+                json!({ "effort": effort_uri(EffortId::new(*id)), "reason": "switch" }),
             )),
             _ => None,
         })
@@ -538,7 +538,7 @@ impl AsyncEventConsumer for EffortPolicyConsumer {
         let lineage = crate::event_lineage::lineage(
             &self.db,
             event,
-            &oxplow_domain::refs::build::effect_source(&format!("{CAPABILITY}:{id}")),
+            &oxplow_domain::uri::build::effect_source(&format!("{CAPABILITY}:{id}")),
         )
         .await?;
         if lineage.refusal().is_some() {
@@ -677,7 +677,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 crate::commands::effort::CLOSE,
-                json!({ "effort": effort_ref(fx.effort) }),
+                json!({ "effort": effort_uri(fx.effort) }),
                 false,
             )
             .await
@@ -755,7 +755,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 crate::commands::effort::LINK,
-                json!({ "effort": effort_ref(fx.effort), "work_item": todo }),
+                json!({ "effort": effort_uri(fx.effort), "work_item": todo }),
                 false,
             )
             .await

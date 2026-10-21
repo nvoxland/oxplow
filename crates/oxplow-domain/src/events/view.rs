@@ -89,7 +89,7 @@ impl EventView {
             .map_err(|e| invalid(e.message()))?;
         let subject = f.subject.unwrap_or_default();
         for s in &subject {
-            crate::refs::validate_ref(&vocabulary.kinds, s)
+            crate::uri::validate_ref(&vocabulary.kinds, s)
                 .map_err(|e| invalid(format!("subject `{s}`: {}", e.message())))?;
         }
         Ok(Self {
@@ -183,7 +183,7 @@ mod tests {
     use super::*;
     use crate::events::schema::{DeclaredEventType, EventSchemaRegistry};
     use crate::events::{Envelope, EventId};
-    use crate::refs::kind::core_kinds;
+    use crate::uri::types::core_types;
 
     /// Core's types plus `acme.thing`, v1 `{ n }` and v2 `{ count }`, its
     /// upcast renaming the field.
@@ -217,7 +217,7 @@ mod tests {
                 },
             )
             .unwrap();
-        Vocabulary::new(events, core_kinds())
+        Vocabulary::new(events, core_types())
     }
 
     fn stored(v: u32, payload: Value) -> StoredEvent {

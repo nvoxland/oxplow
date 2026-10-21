@@ -166,7 +166,7 @@ fn record_tx(
         )
     })?;
     if let Some(subject) = input.subject.as_deref() {
-        if oxplow_domain::refs::build::kind_of(subject).is_none() {
+        if oxplow_domain::uri::build::type_of(subject).is_none() {
             return Err(invalid(
                 "/subject",
                 format!("`{subject}` isn't a ref (`<kind>:<id>`, like `file:src/a.rs`)"),

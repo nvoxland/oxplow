@@ -348,7 +348,7 @@ impl Sample {
                 format!(
                     "{{ measure: {}, value: {value}, subject: {}, path: {}, line: {line}, dims: {{ {}: {} }} }}",
                     self.measure,
-                    json!(oxplow_domain::refs::build::file_ref(path)),
+                    json!(oxplow_domain::uri::build::file_uri(path)),
                     json!(path),
                     json!(self.area),
                     json!(path.split('/').next().unwrap_or_default()),

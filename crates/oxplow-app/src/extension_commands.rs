@@ -821,7 +821,7 @@ fn anchor_to_efforts(
         let Some(effort) = event
             .subject
             .iter()
-            .find_map(|r| oxplow_domain::refs::build::effort_of_ref(r))
+            .find_map(|r| oxplow_domain::uri::build::effort_of_uri(r))
         else {
             continue;
         };
@@ -990,7 +990,7 @@ pub fn extension_command(
     };
     let (needs, reads) = (decl.needs.clone(), decl.access.reads_only());
     let (vocabulary, extension) = (bus.vocabulary().clone(), extension.to_string());
-    let source = oxplow_domain::refs::build::command_ref(&decl.name);
+    let source = oxplow_domain::uri::build::command_uri(&decl.name);
     let compose: std::sync::Arc<Composer> = std::sync::Arc::new(
         move |composing: &crate::commands::compose::Composing<'_>,
               run: &oxplow_domain::run::RunContext,
@@ -1071,7 +1071,7 @@ pub fn register_declared(bus: &std::sync::Arc<crate::commands::CommandBus>) {
             .collect();
         bus.register_namespace(
             oxplow_domain::OXPLOW_NAMESPACE,
-            &oxplow_domain::refs::build::extension_ref(b.name),
+            &oxplow_domain::uri::build::extension_uri(b.name),
             built,
         )
         .expect("they register");
@@ -1251,7 +1251,7 @@ impl ExtensionCommands {
             match self.build(extension, registration) {
                 Ok(commands) => replacements.push(crate::commands::NamespaceCommands {
                     namespace: registration.namespace.clone(),
-                    source: oxplow_domain::refs::build::extension_ref(extension),
+                    source: oxplow_domain::uri::build::extension_uri(extension),
                     commands,
                 }),
                 Err(problem) => {
@@ -1266,7 +1266,7 @@ impl ExtensionCommands {
             if !wanted.contains_key(extension) {
                 replacements.push(crate::commands::NamespaceCommands {
                     namespace: previous.namespace.clone(),
-                    source: oxplow_domain::refs::build::extension_ref(extension),
+                    source: oxplow_domain::uri::build::extension_uri(extension),
                     commands: Vec::new(),
                 });
             }
@@ -1279,7 +1279,7 @@ impl ExtensionCommands {
                 // The source refused is held, and the one it collided with
                 // when that is an extension of this batch; nothing else.
                 let ours = |source: &str| {
-                    oxplow_domain::refs::build::id_of(source, oxplow_domain::refs::kind::EXTENSION)
+                    oxplow_domain::uri::build::id_of(source, oxplow_domain::uri::types::EXTENSION)
                         .ok()
                         .filter(|name| wanted.contains_key(name) || registered.contains_key(name))
                 };
@@ -1446,7 +1446,7 @@ pub async fn check_extension_commands(
 ) {
     if let (Some(registry), false) = (commands, ext.commands.is_empty()) {
         let ns = ext.namespace.clone();
-        let mine = oxplow_domain::refs::build::extension_ref(&ext.name);
+        let mine = oxplow_domain::uri::build::extension_uri(&ext.name);
         // `oxplow` is shared by oxplow's own extensions (its namespace check
         // already refused it to anyone else); any other is one owner's.
         if let Some(owner) = registry
@@ -2507,7 +2507,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 "acme.page.star",
-                json!({ "ref": "page:metrics", "page_kind": "metrics", "scope": "project", "thread": oxplow_domain::refs::build::thread_ref(fx.thread) }),
+                json!({ "ref": "page:metrics", "page_kind": "metrics", "scope": "project", "thread": oxplow_domain::uri::build::thread_uri(fx.thread) }),
                 false,
             )
             .await

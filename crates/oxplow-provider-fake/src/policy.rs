@@ -59,7 +59,7 @@ pub(crate) async fn react(
         Some("in_progress") => match event["anchors"]["thread_id"].as_str() {
             Some(thread) => Ok(json!({ "commands": [{
                 "name": "oxplow.effort.open",
-                "input": { "thread": oxplow_domain::refs::build::of(oxplow_domain::refs::kind::THREAD, thread), "work_item": item },
+                "input": { "thread": oxplow_domain::uri::build::of(oxplow_domain::uri::types::THREAD, thread), "work_item": item },
             }] })),
             None => Ok(skip("started on no thread")),
         },
@@ -84,7 +84,7 @@ pub(crate) async fn react(
                 .filter_map(|row| row["id"].as_i64())
                 .map(|id| {
                     json!({ "name": "oxplow.effort.close",
-                            "input": { "effort": oxplow_domain::refs::build::of(oxplow_domain::refs::kind::EFFORT, &format!("eff{id}")), "reason": "switch" } })
+                            "input": { "effort": oxplow_domain::uri::build::of(oxplow_domain::uri::types::EFFORT, &format!("eff{id}")), "reason": "switch" } })
                 })
                 .collect();
             Ok(json!({ "commands": commands }))

@@ -14,7 +14,7 @@
 use std::time::Duration;
 
 use oxplow_db::SqlCell;
-use oxplow_domain::refs::build::{effort_ref, thread_ref};
+use oxplow_domain::uri::build::{effort_uri, thread_uri};
 use oxplow_domain::{Actor, EffortId, StreamId, ThreadId};
 use serde_json::json;
 
@@ -60,7 +60,7 @@ async fn run(
         thread_id: Some(thread),
         stream_id: Some(stream),
     };
-    let actor = oxplow_domain::refs::build::effect_source(&format!(
+    let actor = oxplow_domain::uri::build::effect_source(&format!(
         "{}:{policy}",
         crate::effort_policy::CAPABILITY
     ));
@@ -70,7 +70,7 @@ async fn run(
             .run(
                 &Actor::Human,
                 crate::commands::effort::CLOSE,
-                json!({ "effort": effort_ref(effort) }),
+                json!({ "effort": effort_uri(effort) }),
                 false,
             )
             .await
@@ -100,7 +100,7 @@ async fn run(
             check: "a_started_item_opens_a_linked_effort",
             message: format!(
                 "an agent starting {item} on {} left {} open efforts linked to it, not one",
-                thread_ref(thread),
+                thread_uri(thread),
                 open.len()
             ),
         });

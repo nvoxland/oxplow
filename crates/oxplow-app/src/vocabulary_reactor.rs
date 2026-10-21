@@ -27,7 +27,7 @@ use oxplow_db::event_retention::{restate_declared_tx, DeclaredRetention};
 use oxplow_db::event_type_store::{recorded_schema_tx, restate_tx, EventTypeRow};
 use oxplow_db::ref_kind_store::RefKindRow;
 use oxplow_domain::events::schema::{extension_namespace, EventSchemaRegistry};
-use oxplow_domain::refs::kind::{core_kinds, KindRegistry};
+use oxplow_domain::uri::types::{core_types, TypeRegistry};
 use oxplow_domain::vocabulary::Vocabulary;
 use oxplow_domain::DomainError;
 
@@ -185,7 +185,7 @@ impl VocabularyService {
 }
 
 /// `kinds` recognizing the active work list's ids (`ids`), or none.
-pub fn with_work_item_ids(kinds: KindRegistry, ids: Option<&(String, String)>) -> KindRegistry {
+pub fn with_work_item_ids(kinds: TypeRegistry, ids: Option<&(String, String)>) -> TypeRegistry {
     match ids {
         Some((provider, pattern)) => kinds
             .clone()
@@ -285,8 +285,8 @@ fn build_tx(
 /// error on each and costs only the sugar — the namespaced kind still
 /// registers, so installing one extension never unlinks another's refs
 /// (P10, K2). A kind or prefix core holds is that extension's error.
-fn register_kinds(declared: &Declared, errors: &mut BTreeMap<String, Vec<String>>) -> KindRegistry {
-    let mut kinds = core_kinds();
+fn register_kinds(declared: &Declared, errors: &mut BTreeMap<String, Vec<String>>) -> TypeRegistry {
+    let mut kinds = core_types();
     // Who declares each name as a kind, and as a prefix.
     let mut as_kind: HashMap<&str, BTreeSet<&str>> = HashMap::new();
     let mut as_prefix: HashMap<&str, BTreeSet<&str>> = HashMap::new();
@@ -362,7 +362,7 @@ fn register_kinds(declared: &Declared, errors: &mut BTreeMap<String, Vec<String>
 /// says of it — an extension's `ref_kinds:` entry, or core's
 /// (`oxplow_db::ref_models`): the model that holds one, where one opens
 /// and what search indexes it from.
-fn kind_rows(kinds: &KindRegistry, declared: &Declared) -> Vec<RefKindRow> {
+fn kind_rows(kinds: &TypeRegistry, declared: &Declared) -> Vec<RefKindRow> {
     kinds
         .kinds()
         .map(|k| {
@@ -636,7 +636,7 @@ mod tests {
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         let link = || {
-            oxplow_domain::refs::canonical_wikilink(&svc.vocabulary.current().kinds, "pr:12")
+            oxplow_domain::uri::canonical_wikilink(&svc.vocabulary.current().kinds, "pr:12")
                 .map(|r| r.to_string())
         };
         assert_eq!(link(), None);
@@ -708,7 +708,7 @@ mod tests {
         let kinds = &svc.vocabulary.current().kinds;
         assert!(kinds.get("acme_pr").is_none() && kinds.get("beta_pr").is_none());
         let link =
-            |l: &str| oxplow_domain::refs::canonical_wikilink(kinds, l).map(|r| r.to_string());
+            |l: &str| oxplow_domain::uri::canonical_wikilink(kinds, l).map(|r| r.to_string());
         assert_eq!(link("pr:12"), None, "the sugar links neither");
         assert_eq!(link("acme_pr:12"), None);
         assert_eq!(link("beta_pr:12"), None);
@@ -766,7 +766,7 @@ mod tests {
         let kinds = &svc.vocabulary.current().kinds;
         assert!(kinds.get("acme_pr_x").is_some(), "acme-pr keeps its kind");
         let link =
-            |l: &str| oxplow_domain::refs::canonical_wikilink(kinds, l).map(|r| r.to_string());
+            |l: &str| oxplow_domain::uri::canonical_wikilink(kinds, l).map(|r| r.to_string());
         assert_eq!(link("px:1").as_deref(), Some("acme_pr_x:1"));
         assert_eq!(link("ax:1"), None, "acme's refused kind brings no sugar");
     }

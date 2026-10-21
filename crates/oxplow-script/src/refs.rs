@@ -6,7 +6,7 @@
 //! subject); the grammar — escaping, the revision's shape — is checked
 //! here.
 
-use oxplow_domain::refs::grammar::CanonicalRef;
+use oxplow_domain::uri::grammar::Uri;
 use starlark::environment::GlobalsBuilder;
 use starlark::values::{Heap, Value};
 
@@ -15,8 +15,8 @@ pub(crate) fn ref_builtins(globals: &mut GlobalsBuilder) {
     globals.namespace("ref", ref_members);
 }
 
-fn parse_ref(text: &str) -> anyhow::Result<CanonicalRef> {
-    CanonicalRef::parse(text).map_err(|e| anyhow::anyhow!("`{text}`: {e}"))
+fn parse_ref(text: &str) -> anyhow::Result<Uri> {
+    Uri::parse(text).map_err(|e| anyhow::anyhow!("`{text}`: {e}"))
 }
 
 #[starlark::starlark_module]
@@ -37,7 +37,7 @@ fn ref_members(builder: &mut GlobalsBuilder) {
                 id.get_type()
             ),
         };
-        Ok(CanonicalRef::new(kind, &id, rev, frag)
+        Ok(Uri::new(kind, &id, rev, frag)
             .map_err(|e| anyhow::anyhow!("ref.build({kind}, {id}): {e}"))?
             .to_string())
     }
@@ -67,7 +67,7 @@ fn ref_members(builder: &mut GlobalsBuilder) {
     ) -> anyhow::Result<String> {
         match kind {
             Some(k) => {
-                oxplow_domain::refs::build::id_of(text, k).map_err(|e| anyhow::anyhow!("{e}"))
+                oxplow_domain::uri::build::id_of(text, k).map_err(|e| anyhow::anyhow!("{e}"))
             }
             None => Ok(crate::refs::parse_ref(text)?.id),
         }
@@ -88,9 +88,7 @@ fn ref_members(builder: &mut GlobalsBuilder) {
 
     /// Whether `value` is a string that parses as a ref (never fails).
     fn is_ref(#[starlark(require = pos)] value: Value) -> anyhow::Result<bool> {
-        Ok(value
-            .unpack_str()
-            .is_some_and(|s| CanonicalRef::parse(s).is_ok()))
+        Ok(value.unpack_str().is_some_and(|s| Uri::parse(s).is_ok()))
     }
 }
 

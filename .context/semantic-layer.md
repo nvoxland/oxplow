@@ -141,7 +141,7 @@ struggle signals (the bundled review policy's `v_oxplow_bundled_struggle`, over 
 
 Every connection registers one scalar function for refs,
 `lens_ref(id, key1, value1, …)` (`oxplow-db/src/sql_functions.rs`): it builds a
-`lens:` ref through `refs::build::lens_ref_with` — the params escaped like a
+`lens:` ref through `uri::build::lens_ref_with` — the params escaped like a
 URL query, a NULL value left out, a NULL id giving NULL, an even argument
 count an error — so a model or lens links to another lens
 (`lens_ref('oxplow-bundled/job-run-output', 'job_run', ref)`) without

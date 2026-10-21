@@ -180,7 +180,7 @@ pub fn build_results(
         let c = churn.get(&(path.clone(), key.clone()));
         functions.push(ChangeFunctionRow {
             path: path.clone(),
-            symbol_ref: oxplow_domain::refs::build::symbol_ref(path, key),
+            symbol_ref: oxplow_domain::uri::build::symbol_uri(path, key),
             container: f.container_path.join("::"),
             name: f.name.clone(),
             status: status.into(),

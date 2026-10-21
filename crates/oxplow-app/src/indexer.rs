@@ -52,11 +52,11 @@ impl crate::event_pump::AsyncEventConsumer for SearchIndexConsumer {
         };
         let payload = &event.envelope.payload;
         let stream = payload["stream"].as_str().and_then(|r| {
-            oxplow_domain::refs::build::parse_as::<StreamId>(r, oxplow_domain::refs::kind::STREAM)
+            oxplow_domain::uri::build::parse_as::<StreamId>(r, oxplow_domain::uri::types::STREAM)
                 .ok()
         });
         let snapshot = payload["snapshot"].as_str().and_then(|r| {
-            oxplow_domain::refs::build::parse_as::<i64>(r, oxplow_domain::refs::kind::SNAPSHOT).ok()
+            oxplow_domain::uri::build::parse_as::<i64>(r, oxplow_domain::uri::types::SNAPSHOT).ok()
         });
         let files = payload["file_count"].as_u64().unwrap_or(0);
         if let (Some(stream), Some(snapshot), true) = (stream, snapshot, files > 0) {

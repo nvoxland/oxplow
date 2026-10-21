@@ -41,7 +41,7 @@ async fn a_real_adapter_answers_a_prompt() {
             &oxplow_domain::Actor::Human,
             oxplow_app::commands::thread::CREATE,
             serde_json::json!({
-                "stream": oxplow_domain::refs::build::stream_ref(stream.id),
+                "stream": oxplow_domain::uri::build::stream_uri(stream.id),
                 "title": "live",
             }),
             false,

@@ -1182,7 +1182,7 @@ mod tests {
     #[tokio::test]
     async fn consumers_receive_the_newest_version_of_a_type() {
         use oxplow_domain::events::schema::{DeclaredEventType, EventSchemaRegistry};
-        use oxplow_domain::refs::kind::core_kinds;
+        use oxplow_domain::uri::types::core_types;
         use oxplow_domain::vocabulary::Vocabulary;
         let (db, _) = setup().await;
         let object = |field: &str| {
@@ -1209,7 +1209,7 @@ mod tests {
                 .unwrap();
         }
         let vocabulary = VocabularyHandle::core();
-        vocabulary.swap(Vocabulary::new(registry, core_kinds()));
+        vocabulary.swap(Vocabulary::new(registry, core_types()));
         let store = SqliteEventLogStore::new(db.clone(), vocabulary);
         let v1 = Envelope::new("acme.thing", 1, "test", json!({ "count": 3 })).unwrap();
         store.append(v1).await.unwrap();
@@ -1225,13 +1225,13 @@ mod tests {
     #[tokio::test]
     async fn an_unregistered_type_is_delivered_at_its_logged_version() {
         use oxplow_domain::events::schema::EventSchemaRegistry;
-        use oxplow_domain::refs::kind::core_kinds;
+        use oxplow_domain::uri::types::core_types;
         use oxplow_domain::vocabulary::Vocabulary;
         let (db, _) = setup().await;
         let vocabulary = VocabularyHandle::core();
         let store = SqliteEventLogStore::new(db.clone(), vocabulary.clone());
         store.append(config_changed("a")).await.unwrap();
-        vocabulary.swap(Vocabulary::new(EventSchemaRegistry::new(), core_kinds()));
+        vocabulary.swap(Vocabulary::new(EventSchemaRegistry::new(), core_types()));
         let report = pump(&db, &store, vec![Recorder::new("rec", None)])
             .run_once()
             .await

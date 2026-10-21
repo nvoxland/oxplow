@@ -366,7 +366,7 @@ impl CommandUi {
             return bad("label", "a `ui.label` says what a person reads".into());
         }
         if let Some(kind) = &self.about {
-            if !crate::refs::grammar::is_valid_kind(kind) {
+            if !crate::uri::grammar::is_valid_type(kind) {
                 return bad("about", format!("`{kind}` isn't a ref kind"));
             }
         }
@@ -377,8 +377,7 @@ impl CommandUi {
                     "a command with a `form` gathers its input there — drop `input`".into(),
                 );
             }
-            let page =
-                form.contains(':') && crate::refs::grammar::CanonicalRef::parse(form).is_ok();
+            let page = form.contains(':') && crate::uri::grammar::Uri::parse(form).is_ok();
             if !page && !WINDOW_FORMS.contains(&form.as_str()) {
                 return bad(
                     "form",
@@ -443,7 +442,7 @@ impl CommandUi {
             let sample =
                 crate::template::splice::<()>(open, |_| Ok("1".into())).unwrap_or_default();
             if whole_placeholder(open).is_none()
-                && crate::refs::grammar::CanonicalRef::parse(&sample).is_err()
+                && crate::uri::grammar::Uri::parse(&sample).is_err()
             {
                 return bad("open_after", format!("`{open}` isn't a ref to open"));
             }
@@ -713,7 +712,7 @@ impl Actor {
             Actor::Agent {
                 thread_id: None, ..
             } => "agent".into(),
-            Actor::Lens { lens_id, .. } => crate::refs::build::lens_ref(lens_id),
+            Actor::Lens { lens_id, .. } => crate::uri::build::lens_uri(lens_id),
             // It is its contribution, by its ref.
             Actor::Component { component, .. } => {
                 let (extension, id) = component.split_once('/').unwrap_or(("", component));
@@ -726,9 +725,9 @@ impl Actor {
                 .to_string()
             }
             Actor::System => "system".into(),
-            Actor::Effect { effect, .. } => crate::refs::build::effect_source(effect),
+            Actor::Effect { effect, .. } => crate::uri::build::effect_source(effect),
             // The run, by its ref; its attempt and fence are on the run's row.
-            Actor::Job { job_id, .. } => crate::refs::build::job_run_ref(job_id),
+            Actor::Job { job_id, .. } => crate::uri::build::job_run_uri(job_id),
         }
     }
 

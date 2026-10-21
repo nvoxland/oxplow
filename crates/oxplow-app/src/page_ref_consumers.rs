@@ -59,7 +59,7 @@ impl EventConsumer for PageRefWorkItemConsumer {
             .and_then(|v| v.as_str())
             .ok_or_else(|| DomainError::Invalid("payload names no work item".into()))?;
         let vocabulary = self.vocabulary.current();
-        let r = oxplow_domain::refs::validate_ref(&vocabulary.kinds, subject)?;
+        let r = oxplow_domain::uri::validate_ref(&vocabulary.kinds, subject)?;
         if r.kind != "work_item" {
             return Err(DomainError::Invalid(format!(
                 "subject `{subject}` is not a work_item"

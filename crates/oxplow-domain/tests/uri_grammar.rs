@@ -1,7 +1,7 @@
 //! Golden tests for the canonical ref grammar (`.context/refs.md`).
 //! The fixture is shared with the TS parser (`apps/desktop/src/refs/ref.test.ts`).
 
-use oxplow_domain::refs::grammar::{CanonicalRef, RefParseError};
+use oxplow_domain::uri::grammar::{Uri, UriParseError};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -43,7 +43,7 @@ fn fixture() -> Fixture {
 #[test]
 fn valid_refs_parse_to_their_components_and_round_trip() {
     for c in fixture().valid {
-        let r = CanonicalRef::parse(&c.text).unwrap_or_else(|e| panic!("{}: {e}", c.text));
+        let r = Uri::parse(&c.text).unwrap_or_else(|e| panic!("{}: {e}", c.text));
         assert_eq!(r.kind, c.kind, "kind of {}", c.text);
         assert_eq!(r.id, c.id, "id of {}", c.text);
         assert_eq!(r.rev, c.rev, "rev of {}", c.text);
@@ -55,7 +55,7 @@ fn valid_refs_parse_to_their_components_and_round_trip() {
 #[test]
 fn invalid_refs_are_rejected_for_the_stated_reason() {
     for c in fixture().invalid {
-        let err = CanonicalRef::parse(&c.text)
+        let err = Uri::parse(&c.text)
             .err()
             .unwrap_or_else(|| panic!("{:?} should not parse", c.text));
         assert_eq!(err.reason(), c.reason, "{:?}: {err}", c.text);
@@ -65,18 +65,18 @@ fn invalid_refs_are_rejected_for_the_stated_reason() {
 #[test]
 fn formatting_escapes_only_the_reserved_characters() {
     for c in fixture().format {
-        let r = CanonicalRef::new(&c.kind, &c.id, c.rev.as_deref(), c.frag.as_deref())
+        let r = Uri::new(&c.kind, &c.id, c.rev.as_deref(), c.frag.as_deref())
             .unwrap_or_else(|e| panic!("{}: {e}", c.text));
         assert_eq!(r.to_string(), c.text);
-        assert_eq!(CanonicalRef::parse(&c.text).unwrap(), r);
+        assert_eq!(Uri::parse(&c.text).unwrap(), r);
     }
 }
 
 #[test]
 fn a_bad_kind_error_names_the_kind() {
-    let err = CanonicalRef::parse("Git-Commit:abc").unwrap_err();
+    let err = Uri::parse("Git-Commit:abc").unwrap_err();
     assert!(
-        matches!(err, RefParseError::BadKind(ref k) if k == "Git-Commit"),
+        matches!(err, UriParseError::BadKind(ref k) if k == "Git-Commit"),
         "{err:?}"
     );
     assert!(err.to_string().contains("Git-Commit"), "{err}");
@@ -86,7 +86,7 @@ fn a_bad_kind_error_names_the_kind() {
 /// (`apps/desktop/src/refs/refs.guard.test.ts`) reads the same array.
 #[test]
 fn the_fixture_lists_exactly_the_core_kinds() {
-    let registry = oxplow_domain::refs::kind::core_kinds();
+    let registry = oxplow_domain::uri::types::core_types();
     let core: Vec<String> = registry.kinds().map(|k| k.kind.clone()).collect();
     assert_eq!(fixture().kinds, core);
 }

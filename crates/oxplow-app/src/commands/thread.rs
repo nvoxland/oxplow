@@ -19,7 +19,7 @@ use crate::commands::ops::Op;
 use std::sync::Arc;
 
 use oxplow_db::thread_store::{get_tx, list_for_stream_tx, upsert_tx};
-use oxplow_domain::refs::build::{stream_ref, thread_ref};
+use oxplow_domain::uri::build::{stream_uri, thread_uri};
 use oxplow_domain::{
     CommandCall, CommandError, Invokers, StreamId, Thread, ThreadId, ThreadMark, Timestamp,
 };
@@ -91,7 +91,7 @@ fn load(ctx: &TxCtx<'_>, id: ThreadId, field: &str) -> Result<Thread, CommandErr
     get_tx(ctx.conn, id)
         .map_err(sql)?
         .filter(|t| t.archived_at.is_none())
-        .ok_or_else(|| invalid(field, format!("no thread `{}`", thread_ref(id))))
+        .ok_or_else(|| invalid(field, format!("no thread `{}`", thread_uri(id))))
 }
 
 fn save(ctx: &TxCtx<'_>, thread: &Thread) -> Result<ThreadId, CommandError> {
@@ -109,7 +109,7 @@ pub(super) fn agent_scope(ctx: &TxCtx<'_>) -> Result<Option<(ThreadId, StreamId)
         Some(Some(own)) => match ctx.actor().stream_id() {
             Some(stream) => Ok(Some((own, stream))),
             None => Err(CommandError::Denied {
-                reason: format!("the agent's thread `{}` has no stream", thread_ref(own)),
+                reason: format!("the agent's thread `{}` has no stream", thread_uri(own)),
             }),
         },
     }
@@ -133,7 +133,7 @@ fn record_thread(
             Some(t) if t != own => Err(CommandError::Denied {
                 reason: format!(
                     "an agent writes only in its own thread (`{}`)",
-                    thread_ref(own)
+                    thread_uri(own)
                 ),
             }),
             _ => Ok(own),
@@ -166,7 +166,7 @@ fn own_thread_only(ctx: &TxCtx<'_>, id: ThreadId, verb: &str) -> Result<(), Comm
         Some((own, _)) if own != id => Err(CommandError::Denied {
             reason: format!(
                 "an agent {verb} only its own thread (`{}`)",
-                thread_ref(own)
+                thread_uri(own)
             ),
         }),
         _ => Ok(()),
@@ -178,7 +178,7 @@ fn on_own_stream(ctx: &TxCtx<'_>, stream: StreamId) -> Result<(), CommandError> 
         Some((_, own)) if own != stream => Err(CommandError::Denied {
             reason: format!(
                 "an agent changes threads only on its own stream (`{}`)",
-                stream_ref(own)
+                stream_uri(own)
             ),
         }),
         _ => Ok(()),
@@ -462,7 +462,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 CLOSE,
-                json!({ "thread": oxplow_domain::refs::build::thread_ref(fx.thread) }),
+                json!({ "thread": oxplow_domain::uri::build::thread_uri(fx.thread) }),
                 false,
             )
             .await
@@ -505,7 +505,7 @@ mod tests {
             fx,
             &Actor::Human,
             CREATE,
-            json!({ "stream": stream_ref(stream), "title": title }),
+            json!({ "stream": stream_uri(stream), "title": title }),
         )
         .await
         .unwrap();
@@ -540,8 +540,8 @@ mod tests {
             &fx,
             &agent(&fx),
             CREATE,
-            json!({ "stream": stream_ref(t.stream_id), "title": "fork",
-                    "from": thread_ref(fx.thread) }),
+            json!({ "stream": stream_uri(t.stream_id), "title": "fork",
+                    "from": thread_uri(fx.thread) }),
         )
         .await
         .unwrap();
@@ -562,7 +562,7 @@ mod tests {
     #[tokio::test]
     async fn a_thread_names_no_agent() {
         let fx = services_with_effort().await;
-        let stream = stream_ref(thread(&fx, fx.thread).await.stream_id);
+        let stream = stream_uri(thread(&fx, fx.thread).await.stream_id);
         let err = run(
             &fx,
             &Actor::Human,
@@ -579,7 +579,7 @@ mod tests {
     #[tokio::test]
     async fn a_mark_is_a_persons_and_undoes_to_what_it_was() {
         let fx = services_with_effort().await;
-        let r = thread_ref(fx.thread);
+        let r = thread_uri(fx.thread);
         assert_eq!(thread(&fx, fx.thread).await.mark, None);
         run(
             &fx,
@@ -650,7 +650,7 @@ mod tests {
             &fx,
             &Actor::Human,
             CLOSE,
-            json!({ "thread": thread_ref(second) }),
+            json!({ "thread": thread_uri(second) }),
         )
         .await
         .unwrap();
@@ -669,7 +669,7 @@ mod tests {
     async fn a_move_to_the_state_a_thread_is_in_leaves_no_record() {
         let fx = services_with_effort().await;
         let second = create(&fx, "second").await;
-        let open = json!({ "thread": thread_ref(second) });
+        let open = json!({ "thread": thread_uri(second) });
         // An open thread reopened, an unmarked one unmarked.
         for (name, input) in [(REOPEN, &open), (MARK, &open)] {
             let out = run(&fx, &Actor::Human, name, input.clone()).await.unwrap();
@@ -691,7 +691,7 @@ mod tests {
             &fx,
             &agent(&fx),
             CLOSE,
-            json!({ "thread": thread_ref(second) }),
+            json!({ "thread": thread_uri(second) }),
         )
         .await
         .unwrap_err();
@@ -710,7 +710,7 @@ mod tests {
             &fx,
             &Actor::Human,
             CLOSE,
-            json!({ "thread": thread_ref(second) }),
+            json!({ "thread": thread_uri(second) }),
         )
         .await
         .unwrap();
@@ -728,7 +728,7 @@ mod tests {
             &fx,
             &Actor::Human,
             CLOSE,
-            json!({ "thread": thread_ref(second) }),
+            json!({ "thread": thread_uri(second) }),
         )
         .await
         .unwrap();
@@ -736,7 +736,7 @@ mod tests {
             &fx,
             &agent(&fx),
             REOPEN,
-            json!({ "thread": thread_ref(second) }),
+            json!({ "thread": thread_uri(second) }),
         )
         .await
         .unwrap_err();
@@ -748,7 +748,7 @@ mod tests {
     #[tokio::test]
     async fn rename_and_prompt_undo_to_what_they_were() {
         let fx = services_with_effort().await;
-        let r = thread_ref(fx.thread);
+        let r = thread_uri(fx.thread);
         let out = run(
             &fx,
             &agent(&fx),

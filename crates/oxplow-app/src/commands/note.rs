@@ -12,7 +12,7 @@ use crate::commands::ops::Op;
 use std::sync::Arc;
 
 use oxplow_db::thread_note_store::{add_thread_note_tx, note_tx, update_note_tx};
-use oxplow_domain::refs::build::thread_ref;
+use oxplow_domain::uri::build::thread_uri;
 use oxplow_domain::{CommandCall, CommandError, NoteId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -103,7 +103,7 @@ pub fn update_op(deps: LinkDeps) -> Op {
                     return Err(CommandError::Denied {
                         reason: format!(
                             "an agent updates only its own thread's notes (`{}`)",
-                            thread_ref(own)
+                            thread_uri(own)
                         ),
                     });
                 }
@@ -234,7 +234,7 @@ mod tests {
             .run(
                 &other,
                 ADD,
-                json!({ "thread": thread_ref(fx.thread), "body": "x" }),
+                json!({ "thread": thread_uri(fx.thread), "body": "x" }),
                 false,
             )
             .await

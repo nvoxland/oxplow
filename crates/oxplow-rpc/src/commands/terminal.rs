@@ -517,7 +517,7 @@ mod tests {
         let out = crate::dispatch(
             "run_command",
             json!({ "id": "oxplow.agent_session.open", "input": {
-                "thread": oxplow_domain::refs::build::thread_ref(thread),
+                "thread": oxplow_domain::uri::build::thread_uri(thread),
             }, "confirmed": false }),
             ctx,
         )
@@ -775,7 +775,7 @@ mod tests {
             let out = crate::dispatch(
                 "run_command",
                 json!({ "id": "oxplow.agent_session.open", "input": {
-                "thread": oxplow_domain::refs::build::thread_ref(thread),
+                "thread": oxplow_domain::uri::build::thread_uri(thread),
                 "harness": "codex",
             }, "confirmed": false }),
                 &ctx,

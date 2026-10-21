@@ -29,8 +29,8 @@ use oxplow_domain::events::schema::{
     EffortClosed, EffortClosedV2, EffortLinked, EffortLinkedV1, EffortOpened, EffortOpenedV2,
     EffortRetitled, EffortRetitledV1,
 };
-use oxplow_domain::refs::build::{
-    effort_ref, snapshot_ref, thread_ref, validate_work_item_ref, work_item_id_of_ref,
+use oxplow_domain::uri::build::{
+    effort_uri, snapshot_uri, thread_uri, validate_work_item_uri, work_item_id_of_uri,
 };
 use oxplow_domain::{Anchors, StreamId};
 
@@ -281,17 +281,17 @@ pub fn start_tx(
     }
     let env = ev
         .typed::<EffortOpened>(&EffortOpenedV2 {
-            effort: effort_ref(id),
+            effort: effort_uri(id),
             work_item: work_item.map(str::to_string),
-            thread: thread_ref(thread),
-            start_snapshot: start_snapshot_id.map(snapshot_ref),
+            thread: thread_uri(thread),
+            start_snapshot: start_snapshot_id.map(snapshot_uri),
         })
         .with_anchors(Anchors {
             effort_id: Some(id),
             snapshot_id: start_snapshot_id,
             ..anchors_for_thread_tx(conn, thread)?
         })
-        .with_subject(std::iter::once(effort_ref(id)).chain(work_item.map(str::to_string)));
+        .with_subject(std::iter::once(effort_uri(id)).chain(work_item.map(str::to_string)));
     ev.append(conn, &env)?;
     Ok(id)
 }
@@ -313,14 +313,14 @@ pub fn link_tx(
     .map_err(map_sql_err)?;
     let env = ev
         .typed::<EffortLinked>(&EffortLinkedV1 {
-            effort: effort_ref(id),
+            effort: effort_uri(id),
             work_item: work_item.map(str::to_string),
         })
         .with_anchors(Anchors {
             effort_id: Some(id),
             ..anchors_for_thread_tx(conn, thread)?
         })
-        .with_subject(std::iter::once(effort_ref(id)).chain(work_item.map(str::to_string)));
+        .with_subject(std::iter::once(effort_uri(id)).chain(work_item.map(str::to_string)));
     ev.append(conn, &env)?;
     Ok(before)
 }
@@ -342,14 +342,14 @@ pub fn retitle_tx(
     .map_err(map_sql_err)?;
     let env = ev
         .typed::<EffortRetitled>(&EffortRetitledV1 {
-            effort: effort_ref(id),
+            effort: effort_uri(id),
             title: title.map(str::to_string),
         })
         .with_anchors(Anchors {
             effort_id: Some(id),
             ..anchors_for_thread_tx(conn, thread)?
         })
-        .with_subject([effort_ref(id)]);
+        .with_subject([effort_uri(id)]);
     ev.append(conn, &env)?;
     Ok(before)
 }
@@ -464,9 +464,9 @@ pub fn finish_tx(
     }
     let env = ev
         .typed::<EffortClosed>(&EffortClosedV2 {
-            effort: effort_ref(id),
+            effort: effort_uri(id),
             work_item: work_item.clone(),
-            end_snapshot: end_snapshot_id.map(snapshot_ref),
+            end_snapshot: end_snapshot_id.map(snapshot_uri),
             closed_by: Some(closed_by.as_str().to_string()),
         })
         .with_anchors(Anchors {
@@ -474,7 +474,7 @@ pub fn finish_tx(
             snapshot_id: end_snapshot_id,
             ..anchors_for_thread_tx(conn, ThreadId::new(thread))?
         })
-        .with_subject(std::iter::once(effort_ref(id)).chain(work_item));
+        .with_subject(std::iter::once(effort_uri(id)).chain(work_item));
     ev.append(conn, &env)?;
     Ok(true)
 }
@@ -1131,7 +1131,7 @@ impl EffortStore for SqliteEffortStore {
         thread: &ThreadId,
         start_snapshot_id: Option<i64>,
     ) -> Result<Effort, DomainError> {
-        validate_work_item_ref(work_item)?;
+        validate_work_item_uri(work_item)?;
         let thread = *thread;
         let now = Timestamp::now();
         let work_item = work_item.to_string();
@@ -1565,10 +1565,10 @@ impl EffortStore for SqliteEffortStore {
 /// [`SqliteEffortStore::project_effort_slice`]), from its efforts' rows.
 fn effort_slice_on(
     conn: &rusqlite::Connection,
-    kinds: &oxplow_domain::refs::kind::KindRegistry,
+    kinds: &oxplow_domain::uri::types::TypeRegistry,
     work_item: &str,
 ) -> rusqlite::Result<crate::SourceSlice> {
-    let Some(source) = work_item_id_of_ref(work_item).map(str::to_string) else {
+    let Some(source) = work_item_id_of_uri(work_item).map(str::to_string) else {
         return Err(rusqlite::Error::InvalidParameterName(format!(
             "`{work_item}` is not a work_item ref"
         )));

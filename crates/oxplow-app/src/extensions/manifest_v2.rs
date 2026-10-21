@@ -604,7 +604,7 @@ pub fn check(m: &ManifestV2, file: &str, text: &str) -> (Vec<String>, Vec<String
                 errors.push(at(file, key_line(text, "intent"), "`intent.purpose` is empty"));
             }
             if let Some(origin) = &intent.origin {
-                if oxplow_domain::refs::grammar::CanonicalRef::parse(origin).is_err() {
+                if oxplow_domain::uri::grammar::Uri::parse(origin).is_err() {
                     errors.push(at(
                         file,
                         key_line(text, "intent"),
@@ -612,7 +612,7 @@ pub fn check(m: &ManifestV2, file: &str, text: &str) -> (Vec<String>, Vec<String
                     ));
                 }
             }
-            let kinds = oxplow_domain::refs::kind::core_kinds();
+            let kinds = oxplow_domain::uri::types::core_types();
             for p in &intent.prompts {
                 let line = line_under(text, "intent", &p.prompt).or(key_line(text, "intent"));
                 if p.prompt.trim().is_empty() {

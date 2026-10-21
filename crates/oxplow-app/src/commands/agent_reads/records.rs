@@ -52,20 +52,17 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 };
                 let at = match stream.as_deref() {
                     Some(stream) => Some(
-                        oxplow_domain::refs::build::id_of(
-                            stream,
-                            oxplow_domain::refs::kind::STREAM,
-                        )
-                        .ok()
-                        .and_then(|id| oxplow_domain::StreamId::try_from_str(&id))
-                        .ok_or_else(|| {
-                            invalid(
-                                "/stream",
-                                format!(
+                        oxplow_domain::uri::build::id_of(stream, oxplow_domain::uri::types::STREAM)
+                            .ok()
+                            .and_then(|id| oxplow_domain::StreamId::try_from_str(&id))
+                            .ok_or_else(|| {
+                                invalid(
+                                    "/stream",
+                                    format!(
                                     "`stream` is a stream's ref (`stream:str2`), not `{stream}`"
                                 ),
-                            )
-                        })?,
+                                )
+                            })?,
                     ),
                     None => None,
                 };

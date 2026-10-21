@@ -41,7 +41,7 @@ use oxplow_db::{
     SourceSlice, SqliteCodeQualityStore, SqliteEffortStore, SqliteHandoffStore, SqlitePageRefStore,
     SqliteThreadNoteStore,
 };
-use oxplow_domain::refs::kind::HANDOFF as KIND_HANDOFF;
+use oxplow_domain::uri::types::HANDOFF as KIND_HANDOFF;
 use oxplow_domain::vocabulary::VocabularyHandle;
 
 /// Counts of rows touched per kind. Logged at INFO so the boot

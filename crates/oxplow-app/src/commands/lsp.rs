@@ -192,7 +192,7 @@ mod tests {
     #[tokio::test]
     async fn restarting_a_server_is_a_persons() {
         let fx = services_with_effort().await;
-        let stream = oxplow_domain::refs::build::stream_ref(
+        let stream = oxplow_domain::uri::build::stream_uri(
             fx.svc.streams.list_streams().await.unwrap()[0].id,
         );
         let input = json!({ "stream": stream, "language": "no-such-language" });

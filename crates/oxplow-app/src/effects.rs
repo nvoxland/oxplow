@@ -444,9 +444,9 @@ pub fn finished_tx(
         RunState::Started | RunState::Failed => EffectOutcome::Failed,
     };
     let extension = key.effect.split('/').next().unwrap_or_default();
-    let event_ref = oxplow_domain::refs::build::event_ref(&key.event_id.to_string());
+    let event_ref = oxplow_domain::uri::build::event_uri(&key.event_id.to_string());
     let mut result = oxplow_domain::Envelope::typed::<EffectResult>(
-        oxplow_domain::refs::build::effect_source(&key.effect),
+        oxplow_domain::uri::build::effect_source(&key.effect),
         &EffectResultV4 {
             effect: key.effect.clone(),
             event: Some(event_ref.clone()),
@@ -454,7 +454,7 @@ pub fn finished_tx(
             reason: done.reason.clone(),
             proposal: done
                 .proposal_id
-                .map(oxplow_domain::refs::build::proposal_ref),
+                .map(oxplow_domain::uri::build::proposal_uri),
             detail: serde_json::Value::Null,
             attempt: key.attempt,
             origin: match key.origin {
@@ -467,7 +467,7 @@ pub fn finished_tx(
     )
     .with_subject([
         event_ref,
-        oxplow_domain::refs::build::extension_ref(extension),
+        oxplow_domain::uri::build::extension_uri(extension),
     ]);
     result.cause = cause;
     oxplow_db::event_log_store::append_tx(tx, vocabulary, &result)?;

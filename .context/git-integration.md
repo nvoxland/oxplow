@@ -574,7 +574,7 @@ commit into the unified `page_ref` graph (see
 
 - Diff against parent#0 → one `(commit:<sha>) -- touched_file -->
   (file:<path>)` edge per file.
-- Subject + body run through `oxplow_domain::refs::extract` so the
+- Subject + body run through `oxplow_domain::uri::extract` so the
   same wikilink + inline-mention rules used by wiki bodies and
   task descriptions also apply to commit messages
   (`wi-…`, `[[architecture]]`, `finding:fnd-1`, bare 7-40 hex shas).

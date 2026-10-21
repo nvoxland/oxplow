@@ -160,7 +160,7 @@ pub(super) async fn ask(fx: &Fixture, intent: &str) -> String {
         }),
     )
     .await;
-    oxplow_domain::refs::build::id_of(queued["jobRun"].as_str().unwrap(), "job_run")
+    oxplow_domain::uri::build::id_of(queued["jobRun"].as_str().unwrap(), "job_run")
         .unwrap()
         .to_owned()
 }
@@ -172,7 +172,7 @@ pub(super) async fn until(fx: &Fixture, id: &str, done: impl Fn(&Value) -> bool)
             fx,
             &Actor::Human,
             "triage.review.result",
-            json!({ "job_run": oxplow_domain::refs::build::job_run_ref(id) }),
+            json!({ "job_run": oxplow_domain::uri::build::job_run_uri(id) }),
         )
         .await;
         if done(&snapshot) {
@@ -218,7 +218,7 @@ pub(super) async fn completions(fx: &Fixture, id: &str) -> Vec<String> {
         fx,
         "SELECT json_extract(payload, '$.outcome') FROM v_event
           WHERE type = 'contribution.job.completed' AND json_extract(payload, '$.job_run') = ?1",
-        vec![json!(oxplow_domain::refs::build::job_run_ref(id))],
+        vec![json!(oxplow_domain::uri::build::job_run_uri(id))],
     )
     .await
     .into_iter()
@@ -297,7 +297,7 @@ async fn cancelling_a_running_job_stops_its_stream() {
         &fx,
         &Actor::Human,
         "triage.review.cancel",
-        json!({ "job_run": oxplow_domain::refs::build::job_run_ref(&id) }),
+        json!({ "job_run": oxplow_domain::uri::build::job_run_uri(&id) }),
     )
     .await;
     let done = until(&fx, &id, |s| s["state"] == json!("cancelled")).await;
@@ -378,12 +378,12 @@ async fn a_tool_call_runs_the_extensions_command_and_answers_the_model() {
     assert_eq!(ran[0][0], json!("job"));
     assert_eq!(
         ran[0][1],
-        json!(oxplow_domain::refs::build::job_run_ref(&id)),
+        json!(oxplow_domain::uri::build::job_run_uri(&id)),
         "the job run is the actor"
     );
 
     // oxplow's own Job Runs lens lists it, and its output lens follows it.
-    let run_ref = oxplow_domain::refs::build::job_run_ref(&id);
+    let run_ref = oxplow_domain::uri::build::job_run_uri(&id);
     let jobs = lens(&fx, "oxplow-bundled/job-runs", vec![]).await;
     assert_eq!(jobs[0][0], json!(run_ref), "{jobs}");
     assert_eq!(jobs[0][2], json!("job:triage/review"));
@@ -503,7 +503,7 @@ async fn a_person_cancels_any_job() {
         &fx,
         &Actor::Human,
         "oxplow.job_run.cancel",
-        json!({ "job_run": oxplow_domain::refs::build::job_run_ref(&id) }),
+        json!({ "job_run": oxplow_domain::uri::build::job_run_uri(&id) }),
     )
     .await;
     until(&fx, &id, |s| s["state"] == json!("cancelled")).await;
@@ -517,7 +517,7 @@ async fn a_person_cancels_any_job() {
                 stream_id: None,
             },
             "oxplow.job_run.cancel",
-            json!({ "job_run": oxplow_domain::refs::build::job_run_ref(&id) }),
+            json!({ "job_run": oxplow_domain::uri::build::job_run_uri(&id) }),
             false,
         )
         .await;

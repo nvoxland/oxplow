@@ -724,7 +724,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 crate::commands::effort::CLOSE,
-                serde_json::json!({ "effort": oxplow_domain::refs::build::effort_ref(f.effort) }),
+                serde_json::json!({ "effort": oxplow_domain::uri::build::effort_uri(f.effort) }),
                 false,
             )
             .await
@@ -1060,7 +1060,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 crate::commands::effort::CLOSE,
-                serde_json::json!({ "effort": oxplow_domain::refs::build::effort_ref(f.effort), "reason": "commit" }),
+                serde_json::json!({ "effort": oxplow_domain::uri::build::effort_uri(f.effort), "reason": "commit" }),
                 false,
             )
             .await
@@ -1145,7 +1145,7 @@ mod tests {
     async fn bundled_landed_hint_stays_quiet_unless_a_commit_landed_an_unfinished_item() {
         let item_ref =
             |f: &crate::test_fixtures::TaskEffortFixture| oxplow_tasks::work_item_ref(f.task);
-        let close = |reason: &'static str| move |f: &crate::test_fixtures::TaskEffortFixture| serde_json::json!({ "effort": oxplow_domain::refs::build::effort_ref(f.effort), "reason": reason });
+        let close = |reason: &'static str| move |f: &crate::test_fixtures::TaskEffortFixture| serde_json::json!({ "effort": oxplow_domain::uri::build::effort_uri(f.effort), "reason": reason });
 
         // Still being worked on: its effort is open.
         let f = crate::test_fixtures::services_with_task_effort().await;
@@ -1176,7 +1176,7 @@ mod tests {
         // A commit landed it, but a new effort is open on the item.
         let f = crate::test_fixtures::services_with_task_effort().await;
         run_command(&f, crate::commands::effort::CLOSE, close("commit")(&f)).await;
-        run_command(&f, crate::commands::effort::OPEN, serde_json::json!({ "thread": oxplow_domain::refs::build::thread_ref(f.thread), "work_item": item_ref(&f) })).await;
+        run_command(&f, crate::commands::effort::OPEN, serde_json::json!({ "thread": oxplow_domain::uri::build::thread_uri(f.thread), "work_item": item_ref(&f) })).await;
         assert!(bundled_hits(&f, LANDED, AdvisoryOn::TurnEnd, None)
             .await
             .is_empty());
@@ -1222,7 +1222,7 @@ mod tests {
         run_command(
             &f,
             crate::commands::effort::CLOSE,
-            serde_json::json!({ "effort": oxplow_domain::refs::build::effort_ref(f.effort), "reason": "commit" }),
+            serde_json::json!({ "effort": oxplow_domain::uri::build::effort_uri(f.effort), "reason": "commit" }),
         )
         .await;
         let hits = bundled_hits(
@@ -1256,14 +1256,14 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 crate::commands::effort::OPEN,
-                serde_json::json!({ "thread": oxplow_domain::refs::build::thread_ref(thread.id) }),
+                serde_json::json!({ "thread": oxplow_domain::uri::build::thread_uri(thread.id) }),
                 false,
             )
             .await
             .unwrap();
         let effort = opened.result["effort"]
             .as_str()
-            .and_then(oxplow_domain::refs::build::effort_of_ref)
+            .and_then(oxplow_domain::uri::build::effort_of_uri)
             .unwrap();
         (thread, effort)
     }
@@ -1389,7 +1389,7 @@ mod tests {
         run_command(
             &f,
             crate::commands::effort::CLOSE,
-            serde_json::json!({ "effort": oxplow_domain::refs::build::effort_ref(beta_effort), "reason": "commit" }),
+            serde_json::json!({ "effort": oxplow_domain::uri::build::effort_uri(beta_effort), "reason": "commit" }),
         )
         .await;
         assert!(

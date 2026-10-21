@@ -794,7 +794,7 @@ store's `new()`, and call the slice or full replace from its write
 methods.
 For body-text sources that should pick up the same wikilink rules
 the wiki + tasks use, route through
-`oxplow_domain::refs::extract` rather than re-implementing the
+`oxplow_domain::uri::extract` rather than re-implementing the
 parser.
 
 ## Exception: the shell surface

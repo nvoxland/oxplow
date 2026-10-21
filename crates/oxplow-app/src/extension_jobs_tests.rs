@@ -138,7 +138,7 @@ async fn until_on(svc: &crate::Services, id: &str, done: impl Fn(&Value) -> bool
         let snapshot = run_on(
             svc,
             "triage.summary.result",
-            json!({ "job_run": oxplow_domain::refs::build::job_run_ref(id) }),
+            json!({ "job_run": oxplow_domain::uri::build::job_run_uri(id) }),
         )
         .await;
         if done(&snapshot) {
@@ -157,7 +157,7 @@ async fn a_job_runs_and_its_result_is_read_back() {
     let fx = fixture().await;
     let queued = run(&fx, "triage.summary.ask", ask("item-1")).await;
     assert_eq!(queued["created"], json!(true), "{queued}");
-    let id = oxplow_domain::refs::build::id_of(queued["jobRun"].as_str().unwrap(), "job_run")
+    let id = oxplow_domain::uri::build::id_of(queued["jobRun"].as_str().unwrap(), "job_run")
         .unwrap()
         .to_owned();
 
@@ -207,7 +207,7 @@ async fn a_restricted_binding_fails_a_job_needing_what_it_forbids() {
         )
         .unwrap();
     let job_run = |v: Value| {
-        oxplow_domain::refs::build::id_of(v["jobRun"].as_str().unwrap(), "job_run")
+        oxplow_domain::uri::build::id_of(v["jobRun"].as_str().unwrap(), "job_run")
             .unwrap()
             .to_owned()
     };
@@ -233,7 +233,7 @@ async fn a_restricted_binding_fails_a_job_needing_what_it_forbids() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_job_runs_on_its_extensions_ai_profile() {
     let fx = fixture().await;
-    let id = oxplow_domain::refs::build::id_of(
+    let id = oxplow_domain::uri::build::id_of(
         run(&fx, "triage.summary.ask", ask_as("item-p", "sort")).await["jobRun"]
             .as_str()
             .unwrap(),
@@ -296,7 +296,7 @@ async fn a_recorded_job_runs_after_a_restart() {
     let before = open().await;
     configure(&before, base);
     start(&before, false).await;
-    let id = oxplow_domain::refs::build::id_of(
+    let id = oxplow_domain::uri::build::id_of(
         run_on(&before, "triage.summary.ask", ask("item-3")).await["jobRun"]
             .as_str()
             .unwrap(),

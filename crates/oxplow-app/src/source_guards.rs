@@ -1061,7 +1061,7 @@ fn without_comments(text: &str) -> String {
 /// hand, as `path:line text`.
 fn hand_made_refs() -> Vec<String> {
     use regex::Regex;
-    let kinds: Vec<String> = oxplow_domain::refs::kind::core_kinds()
+    let kinds: Vec<String> = oxplow_domain::uri::types::core_types()
         .kinds()
         .map(|k| k.kind.clone())
         .collect();
@@ -1079,7 +1079,7 @@ fn hand_made_refs() -> Vec<String> {
     for (path, text) in production_sources() {
         // A work list builds its own items' refs; the grammar module is the
         // one place a prefix is written.
-        if path.starts_with("crates/oxplow-domain/src/refs/")
+        if path.starts_with("crates/oxplow-domain/src/uri/")
             || path == "crates/oxplow-tasks/src/refs.rs"
         {
             continue;
@@ -1094,8 +1094,8 @@ fn hand_made_refs() -> Vec<String> {
 }
 
 /// A ref's owner spells it and everyone else carries it: production code
-/// builds a ref with `oxplow_domain::refs::build` and reads one with
-/// `parse_as` / `id_of` / `parse_kind` / `CanonicalRef::parse`, never with
+/// builds a ref with `oxplow_domain::uri::build` and reads one with
+/// `parse_as` / `id_of` / `parse_kind` / `Uri::parse`, never with
 /// `format!("effort:…")`, `strip_prefix("wiki:")` or a split at the colon
 /// (`.context/refs.md`, "Using refs"). The kept list is empty.
 #[test]
@@ -1158,7 +1158,7 @@ fn script_and_sql_sources() -> Vec<(String, String)> {
 /// column and is exempt.
 fn hand_made_script_refs() -> Vec<String> {
     use regex::Regex;
-    let kinds: Vec<String> = oxplow_domain::refs::kind::core_kinds()
+    let kinds: Vec<String> = oxplow_domain::uri::types::core_types()
         .kinds()
         .map(|k| k.kind.clone())
         .collect();

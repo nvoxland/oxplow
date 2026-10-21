@@ -16,8 +16,8 @@ use oxplow_domain::events::schema::{
     CheckpointReason, EventType as _, SnapshotTaken, SnapshotTakenV2, ThreadCheckpoint,
     ThreadCheckpointV1,
 };
-use oxplow_domain::refs::build::{snapshot_ref, system_source, thread_ref, turn_ref};
 use oxplow_domain::snapshot::SnapshotTrigger;
+use oxplow_domain::uri::build::{snapshot_uri, system_source, thread_uri, turn_uri};
 use oxplow_domain::{AgentTurnId, DomainError, Envelope, StoredEvent, ThreadId};
 
 use oxplow_domain::agent::tool::ToolKind;
@@ -116,10 +116,10 @@ impl AsyncEventConsumer for ThreadCheckpointConsumer {
         let env = Envelope::typed::<ThreadCheckpoint>(
             system_source(NAME),
             &ThreadCheckpointV1 {
-                thread: thread_ref(thread),
-                turn: turn_ref(turn),
+                thread: thread_uri(thread),
+                turn: turn_uri(turn),
                 reason: CheckpointReason::TurnEnd,
-                snapshot: snapshot_ref(snapshot),
+                snapshot: snapshot_uri(snapshot),
                 changed: start != Some(snapshot),
                 writing_tools: self.writing_tools(turn).await?,
             },
@@ -130,7 +130,7 @@ impl AsyncEventConsumer for ThreadCheckpointConsumer {
             effort_id: None,
             ..anchors.clone()
         })
-        .with_subject([thread_ref(thread), turn_ref(turn)])
+        .with_subject([thread_uri(thread), turn_uri(turn)])
         .with_cause(event.envelope.id.clone())
         .with_dedupe_key(format!("thread.checkpoint:{turn}"));
         // A re-delivered take logs the same checkpoint: once.
@@ -251,7 +251,7 @@ pub(crate) mod tests {
         assert!(edited.changed);
         assert_eq!(edited.writing_tools, 2);
         assert_eq!(edited.reason, CheckpointReason::TurnEnd);
-        assert_eq!(edited.thread, thread_ref(f.thread));
+        assert_eq!(edited.thread, thread_uri(f.thread));
 
         let asked = turn(&f, None, &["read", "fetch"]).await;
         assert!(!asked.changed);

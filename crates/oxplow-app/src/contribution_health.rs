@@ -19,7 +19,7 @@ use oxplow_db::Database;
 use oxplow_domain::events::schema::{
     ContributionDisabled, ContributionDisabledV1, ContributionEnabled, ContributionEnabledV1,
 };
-use oxplow_domain::refs::build::extension_ref;
+use oxplow_domain::uri::build::extension_uri;
 use oxplow_domain::{CommandError, DomainError, Envelope, Invokers};
 use serde::Deserialize;
 
@@ -78,7 +78,7 @@ fn disabled_event(key: &ContributionKey, reason: &str) -> Envelope {
             reason: reason.to_string(),
         },
     )
-    .with_subject([key.id().to_string(), extension_ref(&key.extension)])
+    .with_subject([key.id().to_string(), extension_uri(&key.extension)])
 }
 
 impl ContributionHealth {
@@ -180,7 +180,7 @@ impl ContributionHealth {
                         contribution: key.id().to_string(),
                     },
                 )
-                .with_subject([key.id().to_string(), extension_ref(&key.extension)]);
+                .with_subject([key.id().to_string(), extension_uri(&key.extension)]);
                 oxplow_db::event_log_store::append_tx(tx, &vocabulary.current(), &event).map(|_| ())
             })
             .await

@@ -47,7 +47,7 @@ command, measure, metric, dimension, event type, ref kind),
 Storage (`v_contribution.ref`, `v_extension_run.contribution`,
 `v_job_run.job`), events, manifests (imports, exports, `where:`), grant
 keys and the desktop carry that string; every contribution kind registers
-its ref kind from `KINDS` (`refs::kind::core_kinds`), so a new kind is
+its ref kind from `KINDS` (`uri::types::core_types`), so a new kind is
 linkable with no other change. Text names a contribution as a
 `ContributionRef` (`FromStr`); a local ref says its owner, a global one is
 resolved by the catalog (who declares that name). Starlark reads one with

@@ -211,9 +211,9 @@ async fn announce(svc: &Services, stream_id: i64, paths: BTreeSet<String>) {
             }
         };
         let env = oxplow_domain::Envelope::typed::<CodeDiagnosticsChanged>(
-            oxplow_domain::refs::build::system_source("lsp_diagnostics"),
+            oxplow_domain::uri::build::system_source("lsp_diagnostics"),
             &CodeDiagnosticsChangedV1 {
-                stream: oxplow_domain::refs::build::stream_ref(stream),
+                stream: oxplow_domain::uri::build::stream_uri(stream),
                 path: path.clone(),
                 counts,
             },
@@ -222,7 +222,7 @@ async fn announce(svc: &Services, stream_id: i64, paths: BTreeSet<String>) {
             stream_id: Some(stream),
             ..oxplow_domain::Anchors::default()
         })
-        .with_subject([oxplow_domain::refs::build::file_ref(&path)]);
+        .with_subject([oxplow_domain::uri::build::file_uri(&path)]);
         if let Err(e) = svc.event_log_store.append(env).await {
             tracing::warn!(error = %e, path, "logging code.diagnostics.changed failed");
         }

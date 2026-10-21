@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use oxplow_db::SqlCell;
-use oxplow_domain::refs::build as refs;
+use oxplow_domain::uri::build as refs;
 use oxplow_domain::{Actor, CommandError, StreamId, ThreadId, Timestamp};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -63,7 +63,7 @@ pub struct ListTabsInput {
 
 /// `value` as a thread: its ref or its bare id.
 fn thread_of(field: &str, value: &str) -> Result<ThreadId, CommandError> {
-    refs::parse_as::<ThreadId>(value, oxplow_domain::refs::kind::THREAD)
+    refs::parse_as::<ThreadId>(value, oxplow_domain::uri::types::THREAD)
         .ok()
         .or_else(|| ThreadId::try_from_str(value))
         .ok_or_else(|| {
@@ -110,7 +110,7 @@ async fn lens_text(
     page_id: &str,
     detail: &Value,
 ) -> Result<Value, CommandError> {
-    let Ok(lens_id) = refs::id_of(page_id, oxplow_domain::refs::kind::LENS) else {
+    let Ok(lens_id) = refs::id_of(page_id, oxplow_domain::uri::types::LENS) else {
         return Ok(Value::Null);
     };
     // The app shows the main worktree's lenses, whatever the thread's stream.
@@ -198,7 +198,7 @@ async fn open(svc: &Services, input: OpenPageInput) -> Result<Value, CommandErro
         Value::Null
     };
     let this = pages.iter().find(|p| p.page_id == page_id);
-    let (page, view) = oxplow_domain::refs::build::view_of(&page_id);
+    let (page, view) = oxplow_domain::uri::build::view_of(&page_id);
     let params: serde_json::Map<String, Value> = view
         .into_iter()
         .map(|(k, v)| (k, Value::String(v)))
@@ -272,9 +272,9 @@ async fn list_tabs(
                 "tab": t.tab,
                 "kind": t.kind,
                 "title": t.title,
-                "thread": refs::thread_ref(t.thread),
-                "stream": stream_of(t.thread).map(refs::stream_ref),
-                "session": (t.kind == oxplow_domain::refs::kind::AGENT_SESSION).then(|| t.tab.clone()),
+                "thread": refs::thread_uri(t.thread),
+                "stream": stream_of(t.thread).map(refs::stream_uri),
+                "session": (t.kind == oxplow_domain::uri::types::AGENT_SESSION).then(|| t.tab.clone()),
                 "selected": t.selected,
                 "visible": t.visible,
                 "client": t.client,
@@ -286,7 +286,7 @@ async fn list_tabs(
     let unreported: Vec<String> = wanted
         .iter()
         .filter(|t| !reported.contains(t))
-        .map(|t| refs::thread_ref(*t))
+        .map(|t| refs::thread_uri(*t))
         .collect();
     Ok(json!({ "tabs": tabs, "unreported": unreported }))
 }
@@ -521,7 +521,7 @@ mod tests {
         };
         let empty = run(json!({})).await;
         assert_eq!(empty["tabs"], json!([]));
-        assert_eq!(empty["unreported"], json!([refs::thread_ref(fx.thread)]));
+        assert_eq!(empty["unreported"], json!([refs::thread_uri(fx.thread)]));
 
         report(
             &fx.svc,
@@ -539,7 +539,7 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0]["tab"], "wiki:home");
         assert_eq!(rows[0]["title"], "wiki:home title");
-        assert_eq!(rows[0]["thread"], refs::thread_ref(fx.thread));
+        assert_eq!(rows[0]["thread"], refs::thread_uri(fx.thread));
         assert_eq!(
             (rows[0]["selected"].clone(), rows[0]["visible"].clone()),
             (json!(true), json!(true))
@@ -554,7 +554,7 @@ mod tests {
                 .len(),
             2
         );
-        let named = run(json!({ "thread": refs::thread_ref(fx.thread) })).await;
+        let named = run(json!({ "thread": refs::thread_uri(fx.thread) })).await;
         assert_eq!(named["tabs"].as_array().unwrap().len(), 2);
     }
 }

@@ -737,7 +737,7 @@ forgotten, a report older than a minute is listed as stale.
   thread in the window the person was in last (most recently focused),
   with `others` (each other window's), or the listed `tab`: its
   `pageId`, its `page` (identity) and `params` (the view, decoded —
-  `refs::build::view_of`; an agent never parses an id), its tab's
+  `uri::build::view_of`; an agent never parses an id), its tab's
   `back`, `forward` and `origin`, and, for a lens, the lens re-run as
   text. Detail comes only from a window showing that thread's page. Two windows never
   collapse into one "open page".

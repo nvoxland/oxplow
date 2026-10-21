@@ -4294,9 +4294,9 @@ fn parse_pages(
         } else {
             pages.push(ExtensionPage {
                 page_ref: if core_named {
-                    oxplow_domain::refs::build::page_ref(&p.id, None)
+                    oxplow_domain::uri::build::page_uri(&p.id, None)
                 } else {
-                    oxplow_domain::refs::build::extension_page_ref(extension, &p.id)
+                    oxplow_domain::uri::build::extension_page_uri(extension, &p.id)
                 },
                 id: p.id,
                 extension: extension.to_string(),
@@ -4357,8 +4357,8 @@ fn parse_panels(
         };
         let mut ok = true;
         if let Some(open) = &p.open {
-            let page = oxplow_domain::refs::grammar::CanonicalRef::parse(open)
-                .is_ok_and(|r| r.kind == "page");
+            let page =
+                oxplow_domain::uri::grammar::Uri::parse(open).is_ok_and(|r| r.kind == "page");
             if !page {
                 errors.push(err(format!(
                     "`open` must be a page ref (`page:<kind>`), not `{open}`"

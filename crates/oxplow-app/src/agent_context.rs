@@ -421,7 +421,7 @@ async fn handoffs(svc: &Services, thread: ThreadId) -> Option<(String, Vec<Hando
          moves its work item onto this thread, and its sender reads the note.\n",
     );
     for h in taken {
-        let r = oxplow_domain::refs::build::handoff_ref(h.id);
+        let r = oxplow_domain::uri::build::handoff_uri(h.id);
         let (from_title, from_name, item_title) = labels.get(&r).cloned().unwrap_or_default();
         let by = from_name.unwrap_or_else(|| "the person".into());
         let item = item_title
@@ -620,8 +620,8 @@ mod tests {
                 &Actor::Human,
                 crate::commands::handoff::SEND,
                 serde_json::json!({
-                    "from_thread": oxplow_domain::refs::build::thread_ref(fx.thread),
-                    "to_thread": oxplow_domain::refs::build::thread_ref(to.id),
+                    "from_thread": oxplow_domain::uri::build::thread_uri(fx.thread),
+                    "to_thread": oxplow_domain::uri::build::thread_uri(to.id),
                     "body": "the parser half is yours",
                 }),
                 false,
@@ -684,8 +684,8 @@ mod tests {
                 &Actor::Human,
                 crate::commands::handoff::SEND,
                 serde_json::json!({
-                    "from_thread": oxplow_domain::refs::build::thread_ref(fx.thread),
-                    "to_thread": oxplow_domain::refs::build::thread_ref(to.id),
+                    "from_thread": oxplow_domain::uri::build::thread_uri(fx.thread),
+                    "to_thread": oxplow_domain::uri::build::thread_uri(to.id),
                     "body": "yours",
                 }),
                 false,
@@ -713,8 +713,8 @@ mod tests {
                 &Actor::Human,
                 crate::commands::handoff::SEND,
                 serde_json::json!({
-                    "from_thread": oxplow_domain::refs::build::thread_ref(fx.thread),
-                    "to_thread": oxplow_domain::refs::build::thread_ref(to.id),
+                    "from_thread": oxplow_domain::uri::build::thread_uri(fx.thread),
+                    "to_thread": oxplow_domain::uri::build::thread_uri(to.id),
                     "body": body,
                 }),
                 false,

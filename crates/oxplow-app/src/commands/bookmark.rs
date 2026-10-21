@@ -213,7 +213,7 @@ mod tests {
     #[tokio::test]
     async fn set_moves_and_undo_walks_it_back() {
         let fx = services_with_effort().await;
-        let thread = oxplow_domain::refs::build::thread_ref(fx.thread);
+        let thread = oxplow_domain::uri::build::thread_uri(fx.thread);
         let set = |scope: &str| {
             json!({ "ref": "page:git-dashboard", "page_kind": "git-dashboard",
                     "label": "Git", "scope": scope, "thread": thread })
@@ -255,7 +255,7 @@ mod tests {
     #[tokio::test]
     async fn remove_undoes_and_agents_cannot_bookmark() {
         let fx = services_with_effort().await;
-        let thread = oxplow_domain::refs::build::thread_ref(fx.thread);
+        let thread = oxplow_domain::uri::build::thread_uri(fx.thread);
         let input = json!({ "ref": "file:src/a.rs", "page_kind": "file", "scope": "stream", "thread": thread });
         let agent = Actor::Agent {
             session_id: None,

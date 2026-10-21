@@ -46,7 +46,7 @@ impl<'a> EventCtx<'a> {
     pub fn system(vocabulary: &'a Vocabulary, component: &str) -> Self {
         Self {
             vocabulary,
-            source: oxplow_domain::refs::build::system_source(component),
+            source: oxplow_domain::uri::build::system_source(component),
             cause: None,
         }
     }
@@ -590,11 +590,11 @@ mod tests {
     #[tokio::test]
     async fn a_store_accepts_a_type_swapped_in_after_it_was_built() {
         use oxplow_domain::events::schema::EventSchemaRegistry;
-        use oxplow_domain::refs::kind::core_kinds;
+        use oxplow_domain::uri::types::core_types;
         use oxplow_domain::vocabulary::Vocabulary;
         let db = Database::in_memory();
         let handle =
-            VocabularyHandle::new(Vocabulary::new(EventSchemaRegistry::new(), core_kinds()));
+            VocabularyHandle::new(Vocabulary::new(EventSchemaRegistry::new(), core_types()));
         let store = SqliteEventLogStore::new(db.clone(), handle.clone());
         assert!(store.append(env(None)).await.is_err());
         handle.swap(Vocabulary::core());

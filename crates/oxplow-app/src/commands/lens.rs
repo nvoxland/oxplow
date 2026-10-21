@@ -15,7 +15,7 @@ use oxplow_db::thread_answer_store::{self as answers, AnswerShows};
 use oxplow_db::SqlCell;
 use oxplow_domain::events::schema::{LensKept, LensKeptV2, LensShown, LensShownV1};
 use oxplow_domain::events::Envelope;
-use oxplow_domain::refs::build::{answer_ref, lens_ref, thread_ref};
+use oxplow_domain::uri::build::{answer_uri, lens_uri, thread_uri};
 use oxplow_domain::{CommandError, DomainError, ThreadId};
 use rusqlite::OptionalExtension;
 use schemars::JsonSchema;
@@ -189,8 +189,8 @@ fn cells(params: &BTreeMap<String, Value>) -> BTreeMap<String, SqlCell> {
 fn answer_id(raw: &str) -> Result<i64, CommandError> {
     // A bare number is the answer too.
     raw.parse().or_else(|_| {
-        oxplow_domain::refs::build::parse_as(raw, oxplow_domain::refs::kind::ANSWER)
-            .map_err(|e: oxplow_domain::refs::build::NotA| invalid("/answer", e.to_string()))
+        oxplow_domain::uri::build::parse_as(raw, oxplow_domain::uri::types::ANSWER)
+            .map_err(|e: oxplow_domain::uri::build::NotA| invalid("/answer", e.to_string()))
     })
 }
 
@@ -236,14 +236,14 @@ fn show(target: LensTarget) -> Op {
             let event = Envelope::typed::<LensShown>(
                 source,
                 &LensShownV1 {
-                    answer: answer_ref(shown.id),
-                    thread: thread_ref(ThreadId::new(shown.thread)),
-                    lens: shown.lens.as_deref().map(lens_ref),
+                    answer: answer_uri(shown.id),
+                    thread: thread_uri(ThreadId::new(shown.thread)),
+                    lens: shown.lens.as_deref().map(lens_uri),
                 },
             )
-            .with_subject([answer_ref(shown.id)]);
+            .with_subject([answer_uri(shown.id)]);
             Ok(HandlerOutput {
-                result: json!({ "answer": answer_ref(shown.id), "title": shown.title, "text": text }),
+                result: json!({ "answer": answer_uri(shown.id), "title": shown.title, "text": text }),
                 events: vec![event],
                 ..HandlerOutput::default()
             })
@@ -492,7 +492,7 @@ fn keep(target: LensTarget) -> Op {
             let slug = input
                 .slug
                 .unwrap_or_else(|| extensions::slug_of(&spec.title));
-            let origin = thread.map(|t| thread_ref(ThreadId::new(t)));
+            let origin = thread.map(|t| thread_uri(ThreadId::new(t)));
             // An answer is claimed before its lens is written, so of two
             // keeps of one answer only one writes; a write that fails gives
             // the claim back.
@@ -554,15 +554,15 @@ fn keep(target: LensTarget) -> Op {
                 });
             }
             let subject: Vec<String> = answer
-                .map(answer_ref)
+                .map(answer_uri)
                 .into_iter()
-                .chain([lens_ref(&lens.id)])
+                .chain([lens_uri(&lens.id)])
                 .collect();
             let event = Envelope::typed::<LensKept>(
                 actor.source(),
                 &LensKeptV2 {
-                    answer: answer.map(answer_ref),
-                    lens: lens_ref(&lens.id),
+                    answer: answer.map(answer_uri),
+                    lens: lens_uri(&lens.id),
                 },
             )
             .with_subject(subject);
@@ -697,7 +697,7 @@ mod tests {
         let shown = events_of(&fx, "lens.shown").await;
         assert_eq!(shown.len(), 1);
         assert_eq!(shown[0]["answer"], answer.as_str());
-        assert_eq!(shown[0]["thread"], thread_ref(fx.thread).as_str());
+        assert_eq!(shown[0]["thread"], thread_uri(fx.thread).as_str());
         let row = fx.svc.thread_answer_store.get(id).await.unwrap().unwrap();
         assert_eq!(row.title, "Busy Tasks");
         assert_eq!(row.thread_id, fx.thread.value());
@@ -792,7 +792,7 @@ mod tests {
             .run(
                 &agent(&fx),
                 SHOW,
-                json!({ "spec": spec(), "thread": thread_ref(fx.thread) }),
+                json!({ "spec": spec(), "thread": thread_uri(fx.thread) }),
                 false,
             )
             .await
@@ -894,7 +894,7 @@ mod tests {
             std::fs::read_to_string(root.join(".oxplow/extensions/my-lenses/extension.yaml"))
                 .unwrap();
         assert!(
-            manifest.contains(&format!("origin: {}", thread_ref(fx.thread))),
+            manifest.contains(&format!("origin: {}", thread_uri(fx.thread))),
             "{manifest}"
         );
         crate::test_fixtures::activate(&fx.svc).await;
@@ -948,7 +948,7 @@ mod tests {
                 KEEP,
                 json!({
                     "spec": spec(),
-                    "stream": oxplow_domain::refs::build::stream_ref(stream),
+                    "stream": oxplow_domain::uri::build::stream_uri(stream),
                     "extension": "saved",
                     "slug": "busy-tasks"
                 }),
@@ -1162,7 +1162,7 @@ mod tests {
             "{err:?}"
         );
         assert!(!wt.path().join(".oxplow/extensions/kept").exists());
-        let own = oxplow_domain::refs::build::stream_ref(
+        let own = oxplow_domain::uri::build::stream_uri(
             fx.svc.streams.list_streams().await.unwrap()[0].id,
         );
         // Kept, it is deployed: it shows now.

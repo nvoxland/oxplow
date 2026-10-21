@@ -12,10 +12,10 @@ use std::collections::BTreeMap;
 
 use regex::Regex;
 
-use super::grammar::{is_valid_kind, CanonicalRef};
+use super::grammar::{is_valid_type, Uri};
 
 #[derive(Debug, Clone)]
-pub struct KindSpec {
+pub struct TypeSpec {
     pub kind: String,
     /// Matched against the decoded id.
     pub id_regex: Regex,
@@ -29,7 +29,7 @@ pub struct KindSpec {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum KindError {
+pub enum TypeError {
     #[error("bad kind name `{0}`: lowercase letters, digits and `_`, starting with a letter")]
     BadName(String),
     #[error("bad id regex for kind `{kind}`: {error}")]
@@ -48,12 +48,12 @@ pub enum KindError {
     NotRevisioned(String),
 }
 
-impl KindSpec {
-    pub fn new(kind: &str, id_regex: &str) -> Result<Self, KindError> {
-        if !is_valid_kind(kind) {
-            return Err(KindError::BadName(kind.to_string()));
+impl TypeSpec {
+    pub fn new(kind: &str, id_regex: &str) -> Result<Self, TypeError> {
+        if !is_valid_type(kind) {
+            return Err(TypeError::BadName(kind.to_string()));
         }
-        let id_regex = Regex::new(id_regex).map_err(|e| KindError::BadRegex {
+        let id_regex = Regex::new(id_regex).map_err(|e| TypeError::BadRegex {
             kind: kind.to_string(),
             error: e.to_string(),
         })?;
@@ -83,8 +83,8 @@ impl KindSpec {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct KindRegistry {
-    kinds: BTreeMap<String, KindSpec>,
+pub struct TypeRegistry {
+    kinds: BTreeMap<String, TypeSpec>,
     /// The active work list's own ids, when it declares them: what makes a
     /// loose `tsk42` (or `ENG-12`) in text one of its items.
     work_item_ids: Option<WorkItemIds>,
@@ -98,11 +98,11 @@ struct WorkItemIds {
     whole: Regex,
 }
 
-impl KindRegistry {
+impl TypeRegistry {
     /// This registry recognizing `provider`'s ids (`pattern`, a regex
     /// matched whole): the active work list's, set by the app.
-    pub fn with_work_item_ids(mut self, provider: &str, pattern: &str) -> Result<Self, KindError> {
-        let whole = Regex::new(&format!("^(?:{pattern})$")).map_err(|e| KindError::BadRegex {
+    pub fn with_work_item_ids(mut self, provider: &str, pattern: &str) -> Result<Self, TypeError> {
+        let whole = Regex::new(&format!("^(?:{pattern})$")).map_err(|e| TypeError::BadRegex {
             kind: "work_item".into(),
             error: e.to_string(),
         })?;
@@ -147,50 +147,50 @@ impl KindRegistry {
         out
     }
 
-    pub fn register(&mut self, spec: KindSpec) -> Result<(), KindError> {
+    pub fn register(&mut self, spec: TypeSpec) -> Result<(), TypeError> {
         if self.kinds.contains_key(&spec.kind) {
-            return Err(KindError::Collision(spec.kind));
+            return Err(TypeError::Collision(spec.kind));
         }
         self.kinds.insert(spec.kind.clone(), spec);
         Ok(())
     }
 
-    pub fn get(&self, kind: &str) -> Option<&KindSpec> {
+    pub fn get(&self, kind: &str) -> Option<&TypeSpec> {
         self.kinds.get(kind)
     }
 
-    pub fn kinds(&self) -> impl Iterator<Item = &KindSpec> {
+    pub fn kinds(&self) -> impl Iterator<Item = &TypeSpec> {
         self.kinds.values()
     }
 
     /// The kind a `[[prefix:…]]` sugar prefix means, if any.
-    pub fn kind_for_wikilink_prefix(&self, prefix: &str) -> Option<&KindSpec> {
+    pub fn kind_for_wikilink_prefix(&self, prefix: &str) -> Option<&TypeSpec> {
         self.kinds
             .values()
             .find(|k| k.wikilink_prefixes.iter().any(|p| p == prefix))
     }
 
     /// Is `r` a ref this registry knows, with a well-formed id?
-    pub fn validate(&self, r: &CanonicalRef) -> Result<(), KindError> {
+    pub fn validate(&self, r: &Uri) -> Result<(), TypeError> {
         let spec = self
             .get(&r.kind)
-            .ok_or_else(|| KindError::UnknownKind(r.kind.clone()))?;
+            .ok_or_else(|| TypeError::UnknownKind(r.kind.clone()))?;
         if !spec.id_regex.is_match(&r.id) {
-            return Err(KindError::BadId {
+            return Err(TypeError::BadId {
                 kind: r.kind.clone(),
                 id: r.id.clone(),
                 pattern: spec.id_regex.to_string(),
             });
         }
         if r.rev.is_some() && !spec.revisioned {
-            return Err(KindError::NotRevisioned(r.kind.clone()));
+            return Err(TypeError::NotRevisioned(r.kind.clone()));
         }
         Ok(())
     }
 }
 
 /// The core kinds' names: the one place in Rust each is spelled. Build a
-/// ref with `refs::build`, read one with `refs::build::{parse_as, id_of}`.
+/// ref with `uri::build`, read one with `uri::build::{parse_as, id_of}`.
 pub const PROJECT: &str = "project";
 pub const STREAM: &str = "stream";
 pub const THREAD: &str = "thread";
@@ -246,58 +246,58 @@ fn prefixed(prefix: &str) -> String {
 /// The core kinds (`.context/refs.md`). `work_item` is the only
 /// provider-scoped kind in P1; `wiki`, `commit` and `symbol` use the
 /// capability's active provider and keep bare ids.
-pub fn core_kinds() -> KindRegistry {
-    let mut reg = KindRegistry::default();
+pub fn core_types() -> TypeRegistry {
+    let mut reg = TypeRegistry::default();
     let specs = [
-        KindSpec::new(PROJECT, r"^[A-Za-z0-9._-]+$"),
-        KindSpec::new(STREAM, &prefixed("str")),
-        KindSpec::new(THREAD, &prefixed("thr")),
-        KindSpec::new(EFFORT, &prefixed("eff")),
-        KindSpec::new(TURN, &prefixed("trn")),
-        KindSpec::new(SNAPSHOT, r"^[A-Za-z0-9]+$"),
+        TypeSpec::new(PROJECT, r"^[A-Za-z0-9._-]+$"),
+        TypeSpec::new(STREAM, &prefixed("str")),
+        TypeSpec::new(THREAD, &prefixed("thr")),
+        TypeSpec::new(EFFORT, &prefixed("eff")),
+        TypeSpec::new(TURN, &prefixed("trn")),
+        TypeSpec::new(SNAPSHOT, r"^[A-Za-z0-9]+$"),
         // 7..=40 hex for SHA-1 abbreviations and ids, up to 64 for SHA-256.
-        KindSpec::new(COMMIT, r"^[0-9a-f]{7,64}$").map(|k| k.wikilink_prefix("git")),
-        KindSpec::new(BRANCH, r"^[^\s]+$"),
-        KindSpec::new(FILE, PATH_ID).map(KindSpec::revisioned),
-        KindSpec::new(DIR, PATH_ID).map(KindSpec::revisioned),
+        TypeSpec::new(COMMIT, r"^[0-9a-f]{7,64}$").map(|k| k.wikilink_prefix("git")),
+        TypeSpec::new(BRANCH, r"^[^\s]+$"),
+        TypeSpec::new(FILE, PATH_ID).map(TypeSpec::revisioned),
+        TypeSpec::new(DIR, PATH_ID).map(TypeSpec::revisioned),
         // `<path>/<id>`: any repo path, then the symbol's id in the file.
-        KindSpec::new(SYMBOL, r"^[^/\n][^\n]*/[^\n]+$").map(KindSpec::revisioned),
-        KindSpec::new(WORK_ITEM, r"^[a-z][a-z0-9_-]*:.+$").map(KindSpec::provider_scoped),
-        KindSpec::new(WIKI, r"^[A-Za-z0-9][A-Za-z0-9_-]*$"),
-        KindSpec::new(COMMENT, &prefixed("cmt")),
-        KindSpec::new(EVENT, r"^[0-9a-f-]{36}$"),
+        TypeSpec::new(SYMBOL, r"^[^/\n][^\n]*/[^\n]+$").map(TypeSpec::revisioned),
+        TypeSpec::new(WORK_ITEM, r"^[a-z][a-z0-9_-]*:.+$").map(TypeSpec::provider_scoped),
+        TypeSpec::new(WIKI, r"^[A-Za-z0-9][A-Za-z0-9_-]*$"),
+        TypeSpec::new(COMMENT, &prefixed("cmt")),
+        TypeSpec::new(EVENT, r"^[0-9a-f-]{36}$"),
         // An agent's answer in a thread (`thread_answer.id`, P6.C1).
-        KindSpec::new(ANSWER, r"^[0-9]+$"),
+        TypeSpec::new(ANSWER, r"^[0-9]+$"),
         // A language model by the name its harness or provider reports
         // (`claude-opus-4-8`, `gpt-5.5`): a token-usage fact's subject.
-        KindSpec::new(AI_MODEL, r"^\S+$"),
-        KindSpec::new(EXTENSION, r"^[a-z0-9-]+$"),
+        TypeSpec::new(AI_MODEL, r"^\S+$"),
+        TypeSpec::new(EXTENSION, r"^[a-z0-9-]+$"),
         // A `.oxplow/project.yaml` key (`config.changed`'s subject).
-        KindSpec::new(CONFIG, r"^[A-Za-z][A-Za-z0-9]*$"),
-        KindSpec::new(FINDING, r"^\S+$"),
-        KindSpec::new(THREAD_NOTE, &prefixed("not")),
+        TypeSpec::new(CONFIG, r"^[A-Za-z][A-Za-z0-9]*$"),
+        TypeSpec::new(FINDING, r"^\S+$"),
+        TypeSpec::new(THREAD_NOTE, &prefixed("not")),
         // An agent slot opened on a thread (`agent_session.id`).
-        KindSpec::new(AGENT_SESSION, &prefixed("ses")),
+        TypeSpec::new(AGENT_SESSION, &prefixed("ses")),
         // Work handed from one thread to another (`handoff.id`).
-        KindSpec::new(HANDOFF, &prefixed("hnd")),
+        TypeSpec::new(HANDOFF, &prefixed("hnd")),
         // A user-created dashboard (`dashboard.id`).
-        KindSpec::new(DASHBOARD, &prefixed("dsh")),
+        TypeSpec::new(DASHBOARD, &prefixed("dsh")),
         // A subagent of an agent session (`ses3/agent-7f`).
-        KindSpec::new(SUBAGENT, r"^ses[0-9]+/[^\s/]+$"),
-        KindSpec::new(RUN, r"^\d+$"),
+        TypeSpec::new(SUBAGENT, r"^ses[0-9]+/[^\s/]+$"),
+        TypeSpec::new(RUN, r"^\d+$"),
         // A command waiting for a person's decision (`command_proposal.id`, P6b).
-        KindSpec::new(PROPOSAL, r"^[0-9]+$"),
+        TypeSpec::new(PROPOSAL, r"^[0-9]+$"),
         // An agent's claim about its work and a decision it made or oxplow
         // inferred (`claim.id`, `decision.id`; P7.C4 reviews them).
-        KindSpec::new(CLAIM, r"^[0-9]+$"),
-        KindSpec::new(DECISION, r"^[0-9]+$"),
+        TypeSpec::new(CLAIM, r"^[0-9]+$"),
+        TypeSpec::new(DECISION, r"^[0-9]+$"),
         // One run of a declared job (`v_job_run.id`); the job itself is
         // the contribution `job:<extension>/<id>`.
-        KindSpec::new(JOB_RUN, r"^[0-9a-f-]{36}$"),
+        TypeSpec::new(JOB_RUN, r"^[0-9a-f-]{36}$"),
         // A recorded model call (`ai_call.id`): its bodies are `#request`
         // and `#response`.
-        KindSpec::new(AI_CALL, r"^[0-9]+$"),
-        KindSpec::new(CONSUMER, r"^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$"),
+        TypeSpec::new(AI_CALL, r"^[0-9]+$"),
+        TypeSpec::new(CONSUMER, r"^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$"),
     ];
     for spec in specs {
         reg.register(spec.expect("core kind spec is valid"))
@@ -318,7 +318,7 @@ pub fn core_kinds() -> KindRegistry {
 /// (`collector:project/repo.scan`), and a lens or
 /// page ref may carry its params (`lens:acme/blocked?stream_id=2`), and a
 /// metric's page its view (`metric:oxplow.todos?range=7d`).
-fn contribution_kind(kind: crate::contribution::ContributionKind) -> Result<KindSpec, KindError> {
+fn contribution_kind(kind: crate::contribution::ContributionKind) -> Result<TypeSpec, TypeError> {
     use crate::contribution::ContributionKind as C;
     let local = if kind.spec().dotted {
         r"[a-z][a-z0-9_.-]*"
@@ -337,5 +337,5 @@ fn contribution_kind(kind: crate::contribution::ContributionKind) -> Result<Kind
         C::Model => format!(r"^(?:[a-z][a-z0-9_]*|{owned})$"),
         _ => format!("^{owned}$"),
     };
-    KindSpec::new(kind.segment(), &pattern)
+    TypeSpec::new(kind.segment(), &pattern)
 }

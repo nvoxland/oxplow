@@ -365,7 +365,7 @@ async fn the_lens_rows_carry_file_refs_to_the_path_and_line() {
         .iter()
         .map(|r| {
             let r#ref = format!("file:{}#L{}", text(&r[path_col]), int(&r[line_col]));
-            oxplow_domain::refs::grammar::CanonicalRef::parse(&r#ref)
+            oxplow_domain::uri::grammar::Uri::parse(&r#ref)
                 .unwrap_or_else(|e| panic!("{}: {}", r#ref, e.reason()));
             r#ref
         })
@@ -650,13 +650,13 @@ async fn a_lens_joins_metric_facts_with_an_efforts_files() {
         .run(
             &oxplow_domain::Actor::Human,
             crate::commands::effort::OPEN,
-            serde_json::json!({ "thread": oxplow_domain::refs::build::thread_ref(oxplow_domain::ThreadId::new(1)) }),
+            serde_json::json!({ "thread": oxplow_domain::uri::build::thread_uri(oxplow_domain::ThreadId::new(1)) }),
             false,
         )
         .await
         .unwrap();
     let effort =
-        oxplow_domain::refs::build::effort_of_ref(opened.result["effort"].as_str().unwrap())
+        oxplow_domain::uri::build::effort_of_uri(opened.result["effort"].as_str().unwrap())
             .expect("an effort");
     let effort = effort.value();
     p.svc

@@ -376,7 +376,7 @@ impl Instance {
         Envelope::new(
             event_type,
             v,
-            oxplow_domain::refs::build::provider_source(&self.id),
+            oxplow_domain::uri::build::provider_source(&self.id),
             payload,
         )
         .map(|e| e.with_subject([own]))

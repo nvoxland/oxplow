@@ -132,7 +132,7 @@ def transform(x):
             .run(
                 &Actor::Human,
                 crate::commands::effort::CLOSE,
-                json!({ "effort": oxplow_domain::refs::build::effort_ref(fx.effort) }),
+                json!({ "effort": oxplow_domain::uri::build::effort_uri(fx.effort) }),
                 false,
             )
             .await

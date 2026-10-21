@@ -10,8 +10,8 @@ use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
 
 use oxplow_domain::events::schema::{HandoffSent, HandoffSentV1, HandoffSettled, HandoffSettledV1};
-use oxplow_domain::refs::build::{handoff_ref, thread_ref};
-use oxplow_domain::refs::kind::{KindRegistry, HANDOFF};
+use oxplow_domain::uri::build::{handoff_uri, thread_uri};
+use oxplow_domain::uri::types::{TypeRegistry, HANDOFF};
 use oxplow_domain::{AgentSessionId, DomainError, Envelope, HandoffId, ThreadId, Timestamp};
 
 use crate::database::{map_sql_err, string_to_ts, ts_to_string, Database};
@@ -141,7 +141,7 @@ pub fn handoff_tx(
 /// transaction). Returns it and the `handoff.sent` to log.
 pub fn send_tx(
     conn: &rusqlite::Connection,
-    kinds: &KindRegistry,
+    kinds: &TypeRegistry,
     new: NewHandoff<'_>,
 ) -> Result<(Handoff, Envelope), DomainError> {
     let now = Timestamp::now();
@@ -173,9 +173,9 @@ pub fn send_tx(
     let event = Envelope::typed::<HandoffSent>(
         SOURCE,
         &HandoffSentV1 {
-            handoff: handoff_ref(id),
-            from_thread: thread_ref(new.from_thread),
-            to_thread: thread_ref(new.to_thread),
+            handoff: handoff_uri(id),
+            from_thread: thread_uri(new.from_thread),
+            to_thread: thread_uri(new.to_thread),
             work_item: new.work_item.map(str::to_string),
         },
     )
@@ -213,10 +213,10 @@ pub fn settle_tx(
     Ok(Envelope::typed::<HandoffSettled>(
         SOURCE,
         &HandoffSettledV1 {
-            handoff: handoff_ref(id),
+            handoff: handoff_uri(id),
             state: state.as_str().into(),
-            from_thread: thread_ref(handoff.from_thread_id),
-            to_thread: thread_ref(handoff.to_thread_id),
+            from_thread: thread_uri(handoff.from_thread_id),
+            to_thread: thread_uri(handoff.to_thread_id),
         },
     )
     .with_subject(subject(&handoff)))
@@ -224,9 +224,9 @@ pub fn settle_tx(
 
 fn subject(h: &Handoff) -> Vec<String> {
     let mut subject = vec![
-        handoff_ref(h.id),
-        thread_ref(h.from_thread_id),
-        thread_ref(h.to_thread_id),
+        handoff_uri(h.id),
+        thread_uri(h.from_thread_id),
+        thread_uri(h.to_thread_id),
     ];
     subject.extend(h.work_item.clone());
     subject

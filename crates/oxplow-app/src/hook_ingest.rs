@@ -60,7 +60,7 @@ use oxplow_domain::events::schema::{
     AgentSubagentStartedV1, AgentToolFinished, AgentToolFinishedV3, AgentToolRequested,
     AgentToolRequestedV3, ContentRef, SubagentRef, ToolDecision as Decision,
 };
-use oxplow_domain::refs::build::{thread_ref, turn_ref};
+use oxplow_domain::uri::build::{thread_uri, turn_uri};
 use oxplow_domain::{
     AgentStatus, AgentStatusState, AgentTurnId, DomainError, HookKind, StreamId, ThreadId,
     Timestamp,
@@ -603,15 +603,15 @@ fn record_tx(
             if let Some(from) = &env.peer {
                 let envelope = ev
                     .typed::<AgentPeerMessageReceived>(&AgentPeerMessageReceivedV1 {
-                        thread: thread_ref(thread),
-                        turn: applied.turn.map(turn_ref),
+                        thread: thread_uri(thread),
+                        turn: applied.turn.map(turn_uri),
                         from: from.clone(),
                     })
                     .with_anchors(activity_anchors_tx(conn, thread, slot)?)
                     .with_subject([applied
                         .turn
-                        .map(turn_ref)
-                        .unwrap_or_else(|| thread_ref(thread))]);
+                        .map(turn_uri)
+                        .unwrap_or_else(|| thread_uri(thread))]);
                 ev.append(conn, &envelope)?;
             }
             status = Some((AgentStatusState::Running, None));
@@ -641,8 +641,8 @@ fn record_tx(
             }
             let text = env.prompt.as_deref().filter(|p| !p.is_empty());
             let payload = AgentPromptSubmittedV1 {
-                thread: thread_ref(thread),
-                turn: applied.turn.map(turn_ref),
+                thread: thread_uri(thread),
+                turn: applied.turn.map(turn_uri),
                 session: session.map(str::to_string),
                 reprompt,
                 prompt: text
@@ -654,8 +654,8 @@ fn record_tx(
                 .with_anchors(activity_anchors_tx(conn, thread, slot)?)
                 .with_subject([applied
                     .turn
-                    .map(turn_ref)
-                    .unwrap_or_else(|| thread_ref(thread))]);
+                    .map(turn_uri)
+                    .unwrap_or_else(|| thread_uri(thread))]);
             ev.append(conn, &env)?;
             status = Some((AgentStatusState::Running, None));
         }
@@ -802,7 +802,7 @@ fn record_tx(
         }
         // The context was summarized: logged, and nothing else moves.
         HookKind::PostCompact => {
-            let turn = applied.turn.map(turn_ref);
+            let turn = applied.turn.map(turn_uri);
             let summary = body
                 .get("compact_summary")
                 .and_then(|v| v.as_str())
@@ -811,7 +811,7 @@ fn record_tx(
                 .transpose()?;
             let env = ev
                 .typed::<AgentContextCompacted>(&AgentContextCompactedV1 {
-                    thread: thread_ref(thread),
+                    thread: thread_uri(thread),
                     turn: turn.clone(),
                     trigger: body
                         .get("trigger")
@@ -820,7 +820,7 @@ fn record_tx(
                     summary,
                 })
                 .with_anchors(activity_anchors_tx(conn, thread, slot)?)
-                .with_subject([turn.unwrap_or_else(|| thread_ref(thread))]);
+                .with_subject([turn.unwrap_or_else(|| thread_uri(thread))]);
             ev.append(conn, &env)?;
         }
         HookKind::SessionStart => {} // handled above
@@ -913,7 +913,7 @@ fn track_session_tx(
     let env = ev
         .typed::<AgentSessionStarted>(&AgentSessionStartedV2 {
             session: session.to_string(),
-            thread: thread_ref(thread),
+            thread: thread_uri(thread),
             harness: row.harness.clone().unwrap_or_default(),
             resumed: row.resume_session_id == session,
         })
@@ -946,8 +946,8 @@ fn track_session_tx(
 /// What an `agent.session.*` event is about: its thread, and its agent
 /// session when one claims it.
 fn session_subject(thread: ThreadId, slot: Option<oxplow_domain::AgentSessionId>) -> Vec<String> {
-    std::iter::once(thread_ref(thread))
-        .chain(slot.map(oxplow_domain::refs::build::agent_session_ref))
+    std::iter::once(thread_uri(thread))
+        .chain(slot.map(oxplow_domain::uri::build::agent_session_uri))
         .collect()
 }
 
@@ -990,7 +990,7 @@ fn end_session_tx(
     let env = ev
         .typed::<AgentSessionEnded>(&AgentSessionEndedV1 {
             session: session.to_string(),
-            thread: thread_ref(thread),
+            thread: thread_uri(thread),
             reason: reason.map(str::to_string),
         })
         .with_anchors(activity_anchors_tx(conn, thread, row.session)?)
@@ -1029,18 +1029,18 @@ fn log_subagent_tx(
         Some(SubagentPhase::Finished(said)) => said,
         _ => None,
     };
-    let turn = anchors.turn_id.map(|t| turn_ref(AgentTurnId::new(t)));
+    let turn = anchors.turn_id.map(|t| turn_uri(AgentTurnId::new(t)));
     let subagent_ref = subagent_ref(subagent);
     let phase = if started { "started" } else { "finished" };
     let envelope = if started {
         ev.typed::<AgentSubagentStarted>(&AgentSubagentStartedV1 {
-            thread: thread_ref(thread),
+            thread: thread_uri(thread),
             turn: turn.clone(),
             subagent: subagent_ref,
         })
     } else {
         ev.typed::<AgentSubagentFinished>(&AgentSubagentFinishedV1 {
-            thread: thread_ref(thread),
+            thread: thread_uri(thread),
             turn: turn.clone(),
             subagent: subagent_ref,
             result: said
@@ -1051,7 +1051,7 @@ fn log_subagent_tx(
     let envelope = envelope
         .with_dedupe_key(subagent_key(slot, session, &subagent.id, phase))
         .with_anchors(anchors)
-        .with_subject([turn.unwrap_or_else(|| thread_ref(thread))]);
+        .with_subject([turn.unwrap_or_else(|| thread_uri(thread))]);
     append_unique_tx(conn, ev.vocabulary, &envelope)?;
     Ok(())
 }
@@ -1150,18 +1150,18 @@ fn log_plan_tx(
     dedupe: Option<String>,
 ) -> Result<(), DomainError> {
     let anchors = activity_anchors_tx(conn, thread, row.session)?;
-    let turn = anchors.turn_id.map(|t| turn_ref(AgentTurnId::new(t)));
+    let turn = anchors.turn_id.map(|t| turn_uri(AgentTurnId::new(t)));
     let text: String = plan.text.chars().take(PLAN_TEXT_CAP).collect();
     let envelope = ev
         .typed::<AgentPlanProposed>(&AgentPlanProposedV1 {
-            thread: thread_ref(thread),
+            thread: thread_uri(thread),
             turn: turn.clone(),
             text,
             path: plan.path.clone(),
         })
         .with_dedupe_key_opt(dedupe)
         .with_anchors(anchors)
-        .with_subject([turn.unwrap_or_else(|| thread_ref(thread))]);
+        .with_subject([turn.unwrap_or_else(|| thread_uri(thread))]);
     append_unique_tx(conn, ev.vocabulary, &envelope)?;
     Ok(())
 }
@@ -1205,8 +1205,8 @@ fn log_tool_tx(
     .map(subagent_ref);
     let subject = anchors
         .turn_id
-        .map(|t| turn_ref(AgentTurnId::new(t)))
-        .unwrap_or_else(|| thread_ref(thread));
+        .map(|t| turn_uri(AgentTurnId::new(t)))
+        .unwrap_or_else(|| thread_uri(thread));
     let envelope = if env.kind == HookKind::PreToolUse {
         let decision = env.decision.clone().unwrap_or(ToolDecision {
             allowed: true,
@@ -1979,7 +1979,7 @@ mod tests {
         assert!(ended[0]
             .envelope
             .subject
-            .contains(&oxplow_domain::refs::build::agent_session_ref(a)));
+            .contains(&oxplow_domain::uri::build::agent_session_uri(a)));
 
         // The harness ends it itself, then its process exits: one more.
         svc.ingest(hook_in(

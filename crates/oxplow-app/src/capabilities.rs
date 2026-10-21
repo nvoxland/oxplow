@@ -1951,7 +1951,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
         let found = || {
-            oxplow_domain::refs::extract(&svc.vocabulary.current().kinds, "see tsk42 and [[tsk7]]")
+            oxplow_domain::uri::extract(&svc.vocabulary.current().kinds, "see tsk42 and [[tsk7]]")
                 .work_items
         };
         assert_eq!(

@@ -905,7 +905,7 @@ impl MetricsService {
             return Err(format!("`{name}` is reserved for oxplow's own extensions"));
         }
         if let Some(origin) = origin.as_deref() {
-            oxplow_domain::refs::grammar::CanonicalRef::parse(origin).map_err(|e| {
+            oxplow_domain::uri::grammar::Uri::parse(origin).map_err(|e| {
                 format!(
                     "origin `{origin}` is not a canonical ref (`effort:eff42`, `thread:thr3`): {}",
                     e.reason()
@@ -2257,7 +2257,7 @@ impl MetricsService {
         if let Some(ai) = &self.ai {
             sources = sources.with_ai(
                 ai.clone(),
-                oxplow_domain::refs::build::collector_ref(&collector.owner, &collector.key),
+                oxplow_domain::uri::build::collector_uri(&collector.owner, &collector.key),
             );
         }
         crate::services::prepare(run, script, &collector.needs, &sources)
@@ -2489,7 +2489,7 @@ impl MetricsService {
         if let Some((f, subject)) = collector_facts.iter().find_map(|f| {
             f.subject
                 .as_deref()
-                .filter(|s| oxplow_domain::refs::build::kind_of(s).is_none())
+                .filter(|s| oxplow_domain::uri::build::type_of(s).is_none())
                 .map(|s| (f, s))
         }) {
             return Some(format!(
@@ -2886,7 +2886,7 @@ fn collector_source(collector: &FactCollector) -> String {
     if collector.runtime == CollectorRuntime::Exec {
         format!("exec:{}", collector.key)
     } else {
-        oxplow_domain::refs::build::metric_ref(&collector.key)
+        oxplow_domain::uri::build::metric_uri(&collector.key)
     }
 }
 

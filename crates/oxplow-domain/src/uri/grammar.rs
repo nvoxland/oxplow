@@ -24,7 +24,7 @@ use std::fmt;
 /// A parsed canonical ref. `id` is decoded (an `@` in a file name is a
 /// real `@` here); `Display` re-encodes it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct CanonicalRef {
+pub struct Uri {
     pub kind: String,
     pub id: String,
     /// `<rev_kind>:<value>`, e.g. `git:HEAD`; `None` means the working tree.
@@ -33,7 +33,7 @@ pub struct CanonicalRef {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum RefParseError {
+pub enum UriParseError {
     #[error("empty ref")]
     Empty,
     #[error("ref `{0}` has no `:` between kind and id")]
@@ -56,7 +56,7 @@ pub enum RefParseError {
     BadEscape(String),
 }
 
-impl RefParseError {
+impl UriParseError {
     /// A stable snake_case name for the fixture to assert on.
     pub fn reason(&self) -> &'static str {
         match self {
@@ -77,35 +77,35 @@ impl RefParseError {
 /// The characters an id or revision must percent-encode.
 const RESERVED: [char; 3] = ['@', '#', '%'];
 
-pub fn is_valid_kind(kind: &str) -> bool {
+pub fn is_valid_type(kind: &str) -> bool {
     let mut chars = kind.chars();
     matches!(chars.next(), Some(c) if c.is_ascii_lowercase())
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
-impl CanonicalRef {
+impl Uri {
     /// Build from decoded parts, validating the kind and the revision shape.
     pub fn new(
         kind: &str,
         id: &str,
         rev: Option<&str>,
         frag: Option<&str>,
-    ) -> Result<Self, RefParseError> {
-        if !is_valid_kind(kind) {
+    ) -> Result<Self, UriParseError> {
+        if !is_valid_type(kind) {
             return Err(if kind.is_empty() {
-                RefParseError::EmptyKind
+                UriParseError::EmptyKind
             } else {
-                RefParseError::BadKind(kind.to_string())
+                UriParseError::BadKind(kind.to_string())
             });
         }
         if id.is_empty() {
-            return Err(RefParseError::EmptyId);
+            return Err(UriParseError::EmptyId);
         }
         if let Some(r) = rev {
             check_rev(r)?;
         }
         if frag.is_some_and(str::is_empty) {
-            return Err(RefParseError::EmptyFrag);
+            return Err(UriParseError::EmptyFrag);
         }
         Ok(Self {
             kind: kind.to_string(),
@@ -115,18 +115,18 @@ impl CanonicalRef {
         })
     }
 
-    pub fn parse(text: &str) -> Result<Self, RefParseError> {
+    pub fn parse(text: &str) -> Result<Self, UriParseError> {
         if text.is_empty() {
-            return Err(RefParseError::Empty);
+            return Err(UriParseError::Empty);
         }
         let Some((kind, rest)) = text.split_once(':') else {
-            return Err(RefParseError::MissingColon(text.to_string()));
+            return Err(UriParseError::MissingColon(text.to_string()));
         };
         if kind.is_empty() {
-            return Err(RefParseError::EmptyKind);
+            return Err(UriParseError::EmptyKind);
         }
-        if !is_valid_kind(kind) {
-            return Err(RefParseError::BadKind(kind.to_string()));
+        if !is_valid_type(kind) {
+            return Err(UriParseError::BadKind(kind.to_string()));
         }
         // The fragment is everything after the first `#`; it isn't encoded.
         let (before_frag, frag) = match rest.split_once('#') {
@@ -134,18 +134,18 @@ impl CanonicalRef {
             None => (rest, None),
         };
         if frag.is_some_and(str::is_empty) {
-            return Err(RefParseError::EmptyFrag);
+            return Err(UriParseError::EmptyFrag);
         }
         let (id_enc, rev_enc) = match before_frag.split_once('@') {
             Some((i, r)) => (i, Some(r)),
             None => (before_frag, None),
         };
         if id_enc.is_empty() {
-            return Err(RefParseError::EmptyId);
+            return Err(UriParseError::EmptyId);
         }
         let id = decode(id_enc)?;
         let rev = match rev_enc {
-            Some("") => return Err(RefParseError::EmptyRev),
+            Some("") => return Err(UriParseError::EmptyRev),
             Some(r) => {
                 let r = decode(r)?;
                 check_rev(&r)?;
@@ -164,15 +164,15 @@ impl CanonicalRef {
 
 /// A revision is `<kind>:<value>` with a valid kind, so a bare `HEAD` is
 /// refused: the reader must know which system's revision it is.
-fn check_rev(rev: &str) -> Result<(), RefParseError> {
+fn check_rev(rev: &str) -> Result<(), UriParseError> {
     match rev.split_once(':') {
-        Some((k, v)) if is_valid_kind(k) && !v.is_empty() => Ok(()),
-        _ => Err(RefParseError::BadRev(rev.to_string())),
+        Some((k, v)) if is_valid_type(k) && !v.is_empty() => Ok(()),
+        _ => Err(UriParseError::BadRev(rev.to_string())),
     }
 }
 
 /// Decode `%XX` escapes; a raw reserved character is an error.
-fn decode(s: &str) -> Result<String, RefParseError> {
+fn decode(s: &str) -> Result<String, UriParseError> {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.char_indices();
     while let Some((i, c)) = chars.next() {
@@ -188,11 +188,11 @@ fn decode(s: &str) -> Result<String, RefParseError> {
                     }
                     None => {
                         let shown = s.get(i..(i + 3).min(s.len())).unwrap_or("%");
-                        return Err(RefParseError::BadEscape(shown.to_string()));
+                        return Err(UriParseError::BadEscape(shown.to_string()));
                     }
                 }
             }
-            c if RESERVED.contains(&c) => return Err(RefParseError::Unescaped(c, c as u8)),
+            c if RESERVED.contains(&c) => return Err(UriParseError::Unescaped(c, c as u8)),
             c => out.push(c),
         }
     }
@@ -209,7 +209,7 @@ fn encode(s: &str, out: &mut String) {
     }
 }
 
-impl fmt::Display for CanonicalRef {
+impl fmt::Display for Uri {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut s = String::with_capacity(self.kind.len() + self.id.len() + 8);
         s.push_str(&self.kind);
@@ -227,8 +227,8 @@ impl fmt::Display for CanonicalRef {
     }
 }
 
-impl std::str::FromStr for CanonicalRef {
-    type Err = RefParseError;
+impl std::str::FromStr for Uri {
+    type Err = UriParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::parse(s)
     }

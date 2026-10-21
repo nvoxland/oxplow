@@ -24,7 +24,7 @@ use std::sync::Arc;
 use oxplow_db::effort_store::{
     finish_tx, link_tx, open_for_thread_tx, retitle_tx, start_tx, ClosedBy, EffortEnd, EffortStart,
 };
-use oxplow_domain::refs::build::{effort_ref, thread_ref, validate_work_item_ref};
+use oxplow_domain::uri::build::{effort_uri, thread_uri, validate_work_item_uri};
 use oxplow_domain::work_items::WorkItemsRegistry;
 
 use super::work_item::with_loose_refs;
@@ -200,7 +200,7 @@ pub fn open_op(work_items: WorkItemsRegistry) -> Op {
     let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: EffortOpenInput = parse(with_loose_refs(&work_items, input)?)?;
         if let Some(w) = &input.work_item {
-            validate_work_item_ref(w).map_err(|e| invalid("/work_item", e.to_string()))?;
+            validate_work_item_uri(w).map_err(|e| invalid("/work_item", e.to_string()))?;
         }
         let thread = match input.thread.as_deref() {
             Some(raw) => ref_id(raw, "thread", "/thread")?,
@@ -229,8 +229,8 @@ pub fn open_op(work_items: WorkItemsRegistry) -> Op {
         }
         Ok(output(
             json!({
-                "effort": effort_ref(effort),
-                "thread": thread_ref(thread),
+                "effort": effort_uri(effort),
+                "thread": thread_uri(thread),
                 "work_item": input.work_item,
                 "title": input.title,
             }),
@@ -290,7 +290,7 @@ pub fn close_op() -> Op {
                 format!("effort `{id}` is already closed"),
             ));
         }
-        Ok(output(json!({ "effort": effort_ref(id) }), None))
+        Ok(output(json!({ "effort": effort_uri(id) }), None))
     }));
     Op::new(
         "efforts.write",
@@ -305,15 +305,15 @@ pub fn link_op(work_items: WorkItemsRegistry) -> Op {
     let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
         let input: EffortLinkInput = parse(with_loose_refs(&work_items, input)?)?;
         if let Some(w) = &input.work_item {
-            validate_work_item_ref(w).map_err(|e| invalid("/work_item", e.to_string()))?;
+            validate_work_item_uri(w).map_err(|e| invalid("/work_item", e.to_string()))?;
         }
         let (id, _) = target_effort(ctx, input.effort.as_deref(), input.thread.as_deref())?;
         let before = link_tx(ctx.conn, &ctx.events, id, input.work_item.as_deref())?;
         Ok(output(
-            json!({ "effort": effort_ref(id), "work_item": input.work_item }),
+            json!({ "effort": effort_uri(id), "work_item": input.work_item }),
             Some(CommandCall {
                 name: LINK.into(),
-                input: json!({ "effort": effort_ref(id), "work_item": before }),
+                input: json!({ "effort": effort_uri(id), "work_item": before }),
             }),
         ))
     }));
@@ -332,10 +332,10 @@ pub fn update_op() -> Op {
         let (id, _) = target_effort(ctx, Some(&input.effort), None)?;
         let before = retitle_tx(ctx.conn, &ctx.events, id, input.title.as_deref())?;
         Ok(output(
-            json!({ "effort": effort_ref(id), "title": input.title }),
+            json!({ "effort": effort_uri(id), "title": input.title }),
             Some(CommandCall {
                 name: UPDATE.into(),
-                input: json!({ "effort": effort_ref(id), "title": before }),
+                input: json!({ "effort": effort_uri(id), "title": before }),
             }),
         ))
     }));
@@ -389,7 +389,7 @@ mod tests {
             "the result says what it set"
         );
         let effort: EffortId =
-            oxplow_domain::refs::build::effort_of_ref(opened.result["effort"].as_str().unwrap())
+            oxplow_domain::uri::build::effort_of_uri(opened.result["effort"].as_str().unwrap())
                 .unwrap();
         let row = |fx: &crate::test_fixtures::EffortFixture| {
             let svc = fx.svc.clone();
@@ -400,7 +400,7 @@ mod tests {
             .run(
                 &agent(&fx),
                 LINK,
-                json!({ "thread": thread_ref(fx.thread), "work_item": ISSUES }),
+                json!({ "thread": thread_uri(fx.thread), "work_item": ISSUES }),
                 false,
             )
             .await
@@ -413,7 +413,7 @@ mod tests {
         bus.run(
             &Actor::Human,
             UPDATE,
-            json!({ "effort": effort_ref(effort), "title": "Login page" }),
+            json!({ "effort": effort_uri(effort), "title": "Login page" }),
             false,
         )
         .await
@@ -422,7 +422,7 @@ mod tests {
         bus.run(
             &agent(&fx),
             CLOSE,
-            json!({ "thread": thread_ref(fx.thread), "summary": "done" }),
+            json!({ "thread": thread_uri(fx.thread), "summary": "done" }),
             false,
         )
         .await

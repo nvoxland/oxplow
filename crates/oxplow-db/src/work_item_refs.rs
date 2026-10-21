@@ -8,7 +8,7 @@
 
 use rusqlite::OptionalExtension;
 
-use oxplow_domain::refs::kind::KindRegistry;
+use oxplow_domain::uri::types::TypeRegistry;
 use oxplow_domain::DomainError;
 
 use crate::database::map_sql_err;
@@ -22,10 +22,10 @@ use crate::page_ref_store::replace_source_for_ref_types_tx;
 /// in the caller's transaction.
 pub fn restate_tx(
     conn: &rusqlite::Connection,
-    kinds: &KindRegistry,
+    kinds: &TypeRegistry,
     item_ref: &str,
 ) -> Result<(), DomainError> {
-    let id = oxplow_domain::refs::build::work_item_id_of_ref(item_ref)
+    let id = oxplow_domain::uri::build::work_item_id_of_uri(item_ref)
         .ok_or_else(|| DomainError::Invalid(format!("`{item_ref}` is not a work item")))?;
     let live: Option<(String, String)> = conn
         .query_row(

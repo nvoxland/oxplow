@@ -19,8 +19,8 @@ use async_trait::async_trait;
 use oxplow_domain::events::schema::{
     EffortLanded, EffortLandedV1, EventType as _, VcsCommitIndexed, VcsCommitIndexedV1,
 };
-use oxplow_domain::refs::build::{effort_ref, system_source};
 use oxplow_domain::stores::AgentTurnStore as _;
+use oxplow_domain::uri::build::{effort_uri, system_source};
 use oxplow_domain::vcs::Revision;
 use oxplow_domain::{DomainError, Envelope, StoredEvent};
 
@@ -124,7 +124,7 @@ impl AsyncEventConsumer for EffortLandingConsumer {
             return Ok(());
         };
         let Ok(sha) =
-            oxplow_domain::refs::build::id_of(&indexed.commit, oxplow_domain::refs::kind::COMMIT)
+            oxplow_domain::uri::build::id_of(&indexed.commit, oxplow_domain::uri::types::COMMIT)
         else {
             return Ok(());
         };
@@ -143,7 +143,7 @@ impl AsyncEventConsumer for EffortLandingConsumer {
             let env = Envelope::typed::<EffortLanded>(
                 system_source(NAME),
                 &EffortLandedV1 {
-                    effort: effort_ref(effort.id),
+                    effort: effort_uri(effort.id),
                     commit: indexed.commit.clone(),
                     complete,
                 },
@@ -154,7 +154,7 @@ impl AsyncEventConsumer for EffortLandingConsumer {
                 effort_id: Some(effort.id),
                 ..Default::default()
             })
-            .with_subject([effort_ref(effort.id), indexed.commit.clone()])
+            .with_subject([effort_uri(effort.id), indexed.commit.clone()])
             .with_cause(event.envelope.id.clone())
             .with_dedupe_key(format!("effort.landed:{}:{sha}", effort.id));
             match svc.event_log_store.append(env).await {
@@ -252,7 +252,7 @@ mod tests {
         claim(&f, "mine.rs").await;
         commit_all(&root, "mine");
         index(&f).await;
-        assert_eq!(landed(&f).await, vec![(effort_ref(f.effort), true)]);
+        assert_eq!(landed(&f).await, vec![(effort_uri(f.effort), true)]);
         assert_eq!(closed_by(&f).await.as_deref(), Some("commit"));
     }
 
@@ -268,7 +268,7 @@ mod tests {
         claim(&f, "a.rs").await;
         claim(&f, "b.rs").await;
         index(&f).await;
-        assert_eq!(landed(&f).await, vec![(effort_ref(f.effort), false)]);
+        assert_eq!(landed(&f).await, vec![(effort_uri(f.effort), false)]);
         assert_eq!(closed_by(&f).await, None);
 
         std::fs::write(root.join("b.rs"), "fn b() { 1 }\n").unwrap();
@@ -314,7 +314,7 @@ mod tests {
         std::fs::write(root.join("shell.rs"), "fn shell() {}\n").unwrap();
         commit_all(&root, "shell");
         index(&f).await;
-        assert_eq!(landed(&f).await, vec![(effort_ref(f.effort), true)]);
+        assert_eq!(landed(&f).await, vec![(effort_uri(f.effort), true)]);
     }
 
     /// A commit, then more edits in the same turn: the commit closes the

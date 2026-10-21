@@ -351,7 +351,7 @@ impl ReportSync {
     pub fn to_json(&self) -> serde_json::Value {
         match self {
             ReportSync::Tests { run: Some(run) } => {
-                json!({ "status": "stored", "records": "tests", "run": oxplow_domain::refs::build::run_ref(*run) })
+                json!({ "status": "stored", "records": "tests", "run": oxplow_domain::uri::build::run_uri(*run) })
             }
             ReportSync::Tests { run: None } => {
                 json!({ "status": "no_cases", "records": "tests" })
@@ -374,7 +374,7 @@ impl ReportSync {
             }) => json!({
                 "status": "stored",
                 "records": "coverage",
-                "run": oxplow_domain::refs::build::run_ref(*run),
+                "run": oxplow_domain::uri::build::run_uri(*run),
                 "summaryPct": summary_pct,
                 "instrumentedLines": changed_lines,
                 "coveredLines": covered_lines,
@@ -389,7 +389,7 @@ impl ReportSync {
             }) => json!({
                 "status": "stored",
                 "records": "analysis",
-                "run": oxplow_domain::refs::build::run_ref(*run),
+                "run": oxplow_domain::uri::build::run_uri(*run),
                 "errorCount": error_count,
                 "warningCount": warning_count,
                 "infoCount": info_count,
@@ -1435,9 +1435,9 @@ impl CollectionService {
         oxplow_db::fact_store::CaptureEvent {
             vocabulary: self.vocabulary.clone(),
             build: Box::new(move |capture_id| {
-                let run = oxplow_domain::refs::build::run_ref(capture_id);
+                let run = oxplow_domain::uri::build::run_uri(capture_id);
                 let env = oxplow_domain::Envelope::typed::<TestRunRecorded>(
-                    oxplow_domain::refs::build::system_source("collection"),
+                    oxplow_domain::uri::build::system_source("collection"),
                     &oxplow_domain::events::schema::TestRunRecordedV2 {
                         run: run.clone(),
                         ..payload.clone()
@@ -1723,7 +1723,7 @@ impl CollectionService {
                     Note => "note",
                 };
                 facts.push(NewFact {
-                    subject: Some(oxplow_domain::refs::build::file_ref(&f.path)),
+                    subject: Some(oxplow_domain::uri::build::file_uri(&f.path)),
                     path: Some(f.path.clone()),
                     line: f.line.map(|l| l as i64),
                     severity: Some(severity.into()),
@@ -1872,7 +1872,7 @@ impl CollectionService {
                     let ratio_fact = |measure_id: i64, hit: u32, found: u32| NewFact {
                         numerator: Some(hit as f64),
                         denominator: Some(found as f64),
-                        subject: Some(oxplow_domain::refs::build::file_ref(path)),
+                        subject: Some(oxplow_domain::uri::build::file_uri(path)),
                         path: Some(path.clone()),
                         ..NewFact::new(measure_id, hit as f64 / found as f64 * 100.0)
                     };
@@ -1895,7 +1895,7 @@ impl CollectionService {
                     facts.push(NewFact {
                         numerator: Some(covered as f64),
                         denominator: Some(instr as f64),
-                        subject: Some(oxplow_domain::refs::build::file_ref(path)),
+                        subject: Some(oxplow_domain::uri::build::file_uri(path)),
                         path: Some(path.clone()),
                         ..NewFact::new(measure.id, pct)
                     });
@@ -2127,7 +2127,7 @@ impl CollectionService {
         };
         let subject: Vec<String> = anchors
             .effort_id
-            .map(oxplow_domain::refs::build::effort_ref)
+            .map(oxplow_domain::uri::build::effort_uri)
             .into_iter()
             .collect();
         let cause_id = cause.map(|c| oxplow_domain::EventId(c.event_id.clone()));
@@ -2137,7 +2137,7 @@ impl CollectionService {
             vocabulary: self.vocabulary.clone(),
             build: Box::new(move |capture_id| {
                 let env = oxplow_domain::Envelope::typed::<TestCoverageRecorded>(
-                    oxplow_domain::refs::build::system_source("collection"),
+                    oxplow_domain::uri::build::system_source("collection"),
                     &TestCoverageRecordedV1 {
                         capture: capture_id,
                         lines_pct: Some(lines_pct),
@@ -2282,7 +2282,7 @@ impl CollectionService {
             let [owner] = owners.as_slice() else {
                 continue; // 0 or ambiguous → no attribution
             };
-            let owner_ref = oxplow_domain::refs::build::effort_ref(owner.id);
+            let owner_ref = oxplow_domain::uri::build::effort_uri(owner.id);
             let spend: f64 = self
                 .facts
                 .facts_for_measure_in_stream(effort_tokens_measure.id, stream_val)
@@ -2571,7 +2571,7 @@ impl CollectionService {
             // kind as subject so Sum() reconstructs the fired count (epic tsk12).
             if let Some(measure) = self.facts.get_measure("oxplow.nudge").await? {
                 let fact = NewFact {
-                    subject: Some(oxplow_domain::refs::build::of("nudge", kind)),
+                    subject: Some(oxplow_domain::uri::build::of("nudge", kind)),
                     ..NewFact::new(measure.id, 1.0)
                 };
                 // The nudge's effort, else the one its run was anchored to;
@@ -5359,7 +5359,7 @@ mod tests {
                 .record_facts(
                     cap,
                     vec![oxplow_db::NewFact {
-                        subject: Some(oxplow_domain::refs::build::effort_ref(effort.id)),
+                        subject: Some(oxplow_domain::uri::build::effort_uri(effort.id)),
                         ..oxplow_db::NewFact::new(etm.id, 5000.0)
                     }],
                 )
@@ -5401,7 +5401,7 @@ mod tests {
             assert_eq!(waste[0].denominator, Some(0.0), "numerator-only ratio row");
             assert_eq!(
                 waste[0].subject.as_deref(),
-                Some(oxplow_domain::refs::build::effort_ref(effort.id).as_str())
+                Some(oxplow_domain::uri::build::effort_uri(effort.id).as_str())
             );
 
             // Re-firing (same revert seen again) is idempotent per effort.

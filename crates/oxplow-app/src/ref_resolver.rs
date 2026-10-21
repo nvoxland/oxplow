@@ -85,7 +85,7 @@ pub async fn resolve_ref(services: &Services, kind: &str, id: &str) -> RefSummar
 /// A kind some model owns: its title, by its ref.
 async fn resolve_owned(services: &Services, kind: &str, id: &str) -> RefSummary {
     let mut summary = RefSummary::bare(kind, id);
-    let Ok(parsed) = oxplow_domain::refs::grammar::CanonicalRef::new(kind, id, None, None) else {
+    let Ok(parsed) = oxplow_domain::uri::grammar::Uri::new(kind, id, None, None) else {
         return summary;
     };
     let text = |cell: &oxplow_db::SqlCell| match cell {
@@ -145,8 +145,8 @@ async fn resolve_work_item(services: &Services, id: &str) -> RefSummary {
         .sql
         .query_sql(
             "SELECT title, state, body FROM v_work_item WHERE ref = ?1",
-            vec![oxplow_db::SqlCell::Text(oxplow_domain::refs::build::of(
-                oxplow_domain::refs::kind::WORK_ITEM,
+            vec![oxplow_db::SqlCell::Text(oxplow_domain::uri::build::of(
+                oxplow_domain::uri::types::WORK_ITEM,
                 id,
             ))],
             None,

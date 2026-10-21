@@ -442,7 +442,7 @@ impl std::fmt::Display for ContributionRef {
             Some(ext) => format!("{ext}/{}", self.0.name),
             None => self.0.name.clone(),
         };
-        f.write_str(&crate::refs::build::of(self.0.kind.segment(), &id))
+        f.write_str(&crate::uri::build::of(self.0.kind.segment(), &id))
     }
 }
 
@@ -450,8 +450,8 @@ impl std::str::FromStr for ContributionRef {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, String> {
-        let parsed = crate::refs::grammar::CanonicalRef::parse(s)
-            .map_err(|e| format!("`{s}` isn't a ref: {e}"))?;
+        let parsed =
+            crate::uri::grammar::Uri::parse(s).map_err(|e| format!("`{s}` isn't a ref: {e}"))?;
         if parsed.rev.is_some() || parsed.frag.is_some() {
             return Err(format!(
                 "`{s}` names a contribution with a revision or fragment"
@@ -774,7 +774,7 @@ mod tests {
         }
 
         // Every kind's refs are registered kinds whose ids fit.
-        let kinds = crate::refs::kind::core_kinds();
+        let kinds = crate::uri::types::core_types();
         for spec in KINDS {
             let local = match (spec.kind.global_name(), spec.dotted) {
                 (true, true) => "acme.x",
@@ -782,7 +782,7 @@ mod tests {
                 (false, _) => "x",
             };
             let r = ContributionId::new("acme", spec.kind, local).to_string();
-            let c = crate::refs::grammar::CanonicalRef::parse(&r).unwrap();
+            let c = crate::uri::grammar::Uri::parse(&r).unwrap();
             kinds.validate(&c).unwrap_or_else(|e| panic!("{r}: {e}"));
         }
         assert!(

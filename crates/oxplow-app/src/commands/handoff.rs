@@ -27,8 +27,8 @@
 use std::sync::Arc;
 
 use oxplow_db::handoff_store::{handoff_tx, send_tx, settle_tx, Handoff, HandoffState, NewHandoff};
-use oxplow_domain::refs::build::{handoff_ref, thread_ref};
 use oxplow_domain::run::RunContext;
+use oxplow_domain::uri::build::{handoff_uri, thread_uri};
 use oxplow_domain::work_items::WorkItemsRegistry;
 use oxplow_domain::{Actor, CommandCall, CommandError, HandoffId, ThreadId};
 use rusqlite::OptionalExtension;
@@ -133,7 +133,7 @@ fn sending_thread(ctx: &TxCtx<'_>, named: Option<&str>) -> Result<ThreadId, Comm
                 return Err(CommandError::Denied {
                     reason: format!(
                         "an effect hands off only from its event's thread (`{}`)",
-                        thread_ref(own)
+                        thread_uri(own)
                     ),
                 });
             }
@@ -252,7 +252,7 @@ fn may_settle(actor: &Actor, h: &Handoff, to: HandoffState) -> Result<(), Comman
                 "/state",
                 format!(
                     "`{}` is {}: it can't become {}",
-                    handoff_ref(h.id),
+                    handoff_uri(h.id),
                     from.as_str(),
                     to.as_str()
                 ),
@@ -266,8 +266,8 @@ fn may_settle(actor: &Actor, h: &Handoff, to: HandoffState) -> Result<(), Comman
             reason: format!(
                 "only {} (`{}`) {verb} `{}`",
                 side.1,
-                thread_ref(side.0),
-                handoff_ref(h.id)
+                thread_uri(side.0),
+                handoff_uri(h.id)
             ),
         }),
     }
@@ -297,7 +297,7 @@ pub fn settle_op() -> Op {
             )?;
             let after = handoff_tx(ctx.conn, id)?
                 .ok_or_else(|| invalid("/handoff", format!("no handoff `{}`", input.handoff)))?;
-            let mut undo = json!({ "handoff": handoff_ref(id), "state": before.state.as_str() });
+            let mut undo = json!({ "handoff": handoff_uri(id), "state": before.state.as_str() });
             if let Some(note) = &before.note {
                 undo["note"] = Value::String(note.clone());
             }
@@ -364,7 +364,7 @@ pub fn resolve_op() -> Op {
                     });
                 }
             }
-            let mut settle = json!({ "handoff": handoff_ref(id), "state": to.as_str() });
+            let mut settle = json!({ "handoff": handoff_uri(id), "state": to.as_str() });
             if let Some(note) = &input.note {
                 settle["note"] = Value::String(note.clone());
             }
@@ -375,7 +375,7 @@ pub fn resolve_op() -> Op {
             Ok(Composition {
                 calls,
                 result: Some(json!({
-                    "handoff": handoff_ref(id),
+                    "handoff": handoff_uri(id),
                     "state": to.as_str(),
                     "work_item": handoff.work_item,
                 })),
@@ -395,9 +395,9 @@ pub fn resolve_op() -> Op {
 /// A handoff as a result shows it: by ref, its threads by ref.
 fn shown(h: &Handoff) -> Value {
     json!({
-        "ref": handoff_ref(h.id),
-        "from_thread": thread_ref(h.from_thread_id),
-        "to_thread": thread_ref(h.to_thread_id),
+        "ref": handoff_uri(h.id),
+        "from_thread": thread_uri(h.from_thread_id),
+        "to_thread": thread_uri(h.to_thread_id),
         "work_item": h.work_item,
         "state": h.state.as_str(),
         "sent_at": h.sent_at,
@@ -451,12 +451,12 @@ mod tests {
             &fx.svc,
             &agent_on(fx.thread),
             SEND,
-            json!({ "to_thread": thread_ref(to.id), "body": "see [[tsk999]]" }),
+            json!({ "to_thread": thread_uri(to.id), "body": "see [[tsk999]]" }),
         )
         .await
         .unwrap();
-        assert_eq!(out.result["handoff"]["from_thread"], thread_ref(fx.thread));
-        assert_eq!(out.result["handoff"]["to_thread"], thread_ref(to.id));
+        assert_eq!(out.result["handoff"]["from_thread"], thread_uri(fx.thread));
+        assert_eq!(out.result["handoff"]["to_thread"], thread_uri(to.id));
         assert_eq!(out.result["handoff"]["state"], "open");
         assert_eq!(out.result["link_warnings"][0]["target"], "tsk999");
         let events = fx.svc.event_log_store.read_after(0, 500).await.unwrap();
@@ -484,7 +484,7 @@ mod tests {
         let fx = services_with_effort().await;
         let to = second_thread(&fx.svc).await;
         let agent = agent_on(fx.thread);
-        let to_ref = thread_ref(to.id);
+        let to_ref = thread_uri(to.id);
 
         let err = run(
             &fx.svc,
@@ -500,7 +500,7 @@ mod tests {
             &fx.svc,
             &agent,
             SEND,
-            json!({ "to_thread": thread_ref(fx.thread), "body": "x" }),
+            json!({ "to_thread": thread_uri(fx.thread), "body": "x" }),
         )
         .await
         .unwrap_err();
@@ -582,7 +582,7 @@ mod tests {
             &fx.svc,
             &sender,
             SEND,
-            json!({ "to_thread": thread_ref(to.id), "body": "yours" }),
+            json!({ "to_thread": thread_uri(to.id), "body": "yours" }),
         )
         .await
         .unwrap();
@@ -656,7 +656,7 @@ mod tests {
         let recipient = agent_on(to.id);
         let send = |body: &str| {
             json!({
-                "to_thread": thread_ref(to.id),
+                "to_thread": thread_uri(to.id),
                 "work_item": work_item_ref(fx.task),
                 "body": body,
             })

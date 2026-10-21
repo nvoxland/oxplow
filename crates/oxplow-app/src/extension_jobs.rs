@@ -497,7 +497,7 @@ pub(crate) fn announce_tx(
     let context = extension_job_store::get_context_tx(conn, &job.id)
         .map_err(|e| oxplow_domain::DomainError::Invalid(e.to_string()))?;
     let payload = ContributionJobCompletedV1 {
-        job_run: oxplow_domain::refs::build::job_run_ref(job.id.as_str()),
+        job_run: oxplow_domain::uri::build::job_run_uri(job.id.as_str()),
         job: job.owner.contribution.to_string(),
         version: job.owner.contract_version,
         attempt: job.attempt,
@@ -530,7 +530,7 @@ fn job_problem() -> crate::vocabulary_reactor::VocabularyErrors {
 }
 /// The run a `job_run:<id>` ref names.
 fn job_id(job_run: &str) -> Result<JobId, CommandError> {
-    let id = oxplow_domain::refs::build::id_of(job_run, oxplow_domain::refs::kind::JOB_RUN)
+    let id = oxplow_domain::uri::build::id_of(job_run, oxplow_domain::uri::types::JOB_RUN)
         .map_err(|e| invalid(&e.to_string()))?;
     if id.len() > 64 {
         return Err(invalid("invalid job run identity"));
@@ -539,7 +539,7 @@ fn job_id(job_run: &str) -> Result<JobId, CommandError> {
 }
 
 fn job_run_ref(id: &JobId) -> String {
-    oxplow_domain::refs::build::job_run_ref(id.as_str())
+    oxplow_domain::uri::build::job_run_uri(id.as_str())
 }
 fn check_stream(run: &RunContext, context: &JobInvocationContext) -> Result<(), CommandError> {
     if run.actor().confined_to_own_stream()

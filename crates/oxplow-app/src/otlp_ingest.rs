@@ -13,7 +13,7 @@ use oxplow_db::event_log_store::{append_unique_tx, EventCtx};
 use oxplow_db::Database;
 use oxplow_domain::agent::registry::HarnessRegistry;
 use oxplow_domain::events::schema::{AgentTokensReported, AgentTokensReportedV1, TokenCount};
-use oxplow_domain::refs::build::{thread_ref, turn_ref};
+use oxplow_domain::uri::build::{thread_uri, turn_uri};
 use oxplow_domain::vocabulary::VocabularyHandle;
 use oxplow_domain::{AgentSessionId, DomainError, EffortId, ThreadId};
 
@@ -66,7 +66,7 @@ impl OtlpIngestService {
             xxhash_rust::xxh3::xxh3_128(body)
         );
         let payload = AgentTokensReportedV1 {
-            thread: thread_ref(thread),
+            thread: thread_uri(thread),
             counts: export
                 .counts
                 .iter()
@@ -118,8 +118,8 @@ impl OtlpIngestService {
                 }
                 let subject = anchors
                     .turn_id
-                    .map(|t| turn_ref(oxplow_domain::AgentTurnId::new(t)))
-                    .unwrap_or_else(|| thread_ref(thread));
+                    .map(|t| turn_uri(oxplow_domain::AgentTurnId::new(t)))
+                    .unwrap_or_else(|| thread_uri(thread));
                 let env = EventCtx::system(&vocabulary, "otlp")
                     .typed::<AgentTokensReported>(&payload)
                     .with_anchors(anchors)

@@ -65,7 +65,7 @@ pub async fn read(
     let (caller, request, response) = row.ok_or(AiCallBodyError::UnknownCall(id))?;
     // An agent reads any call but one another agent's thread asked for.
     let another_agents =
-        oxplow_domain::refs::build::parse_kind(&caller, oxplow_domain::refs::kind::THREAD).is_ok();
+        oxplow_domain::uri::build::parse_type(&caller, oxplow_domain::uri::types::THREAD).is_ok();
     if scope.is_some_and(|s| another_agents && s != caller) {
         return Err(AiCallBodyError::OtherCaller(id));
     }

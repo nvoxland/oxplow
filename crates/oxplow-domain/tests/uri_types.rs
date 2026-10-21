@@ -5,24 +5,24 @@
 //! sees `work_item:oxplow:tsk42`, `commit:abc1234`,
 //! `file:src/a.rs@git:HEAD#L42`.
 
-use oxplow_domain::refs::grammar::CanonicalRef;
-use oxplow_domain::refs::kind::{core_kinds, KindSpec};
-use oxplow_domain::refs::{canonical_wikilink, classify_wikilinks, Reference};
+use oxplow_domain::uri::grammar::Uri;
+use oxplow_domain::uri::types::{core_types, TypeSpec};
+use oxplow_domain::uri::{canonical_wikilink, classify_wikilinks, Reference};
 
-fn canon(s: &str) -> CanonicalRef {
-    CanonicalRef::parse(s).unwrap_or_else(|e| panic!("{s}: {e}"))
+fn canon(s: &str) -> Uri {
+    Uri::parse(s).unwrap_or_else(|e| panic!("{s}: {e}"))
 }
 
 /// The core kinds with oxplow's tasks as the work list (`tsk<n>`).
-fn tasks_kinds() -> oxplow_domain::refs::kind::KindRegistry {
-    oxplow_domain::refs::kind::core_kinds()
+fn tasks_kinds() -> oxplow_domain::uri::types::TypeRegistry {
+    oxplow_domain::uri::types::core_types()
         .with_work_item_ids("oxplow", r"tsk\d+")
         .expect("the pattern compiles")
 }
 
 #[test]
 fn the_core_kinds_are_registered_and_validate_ids() {
-    let reg = core_kinds();
+    let reg = core_types();
     for k in [
         "project",
         "stream",
@@ -128,20 +128,20 @@ fn the_core_kinds_are_registered_and_validate_ids() {
 
 #[test]
 fn registering_a_colliding_kind_is_an_error() {
-    let mut reg = core_kinds();
-    let dup = KindSpec::new("commit", r"^[0-9a-f]{7,40}$").expect("spec");
+    let mut reg = core_types();
+    let dup = TypeSpec::new("commit", r"^[0-9a-f]{7,40}$").expect("spec");
     let err = reg.register(dup).unwrap_err();
     assert!(err.to_string().contains("commit"), "{err}");
     // An extension's kind with a fresh name registers.
-    let acme = KindSpec::new("acme_widget", r"^\d+$").expect("spec");
+    let acme = TypeSpec::new("acme_widget", r"^\d+$").expect("spec");
     reg.register(acme).unwrap();
     assert!(reg.validate(&canon("acme_widget:7")).is_ok());
 }
 
 #[test]
 fn a_kind_spec_rejects_a_bad_name_or_regex() {
-    assert!(KindSpec::new("Git-Commit", "^x$").is_err());
-    assert!(KindSpec::new("ok", "^(").is_err());
+    assert!(TypeSpec::new("Git-Commit", "^x$").is_err());
+    assert!(TypeSpec::new("ok", "^(").is_err());
 }
 
 #[test]

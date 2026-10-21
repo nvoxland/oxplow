@@ -168,7 +168,7 @@ pub fn scaffold_with(
         )));
     }
     if let Some(o) = origin {
-        oxplow_domain::refs::grammar::CanonicalRef::parse(o).map_err(|e| {
+        oxplow_domain::uri::grammar::Uri::parse(o).map_err(|e| {
             SdkError::Invalid(format!(
                 "--origin `{o}` is not a canonical ref (`effort:eff42`, `thread:thr3`): {}",
                 e.reason()
@@ -217,7 +217,7 @@ pub fn scaffold_with(
     let provider_id = oxplow_domain::contribution::extension_namespace(name);
     // The intent example, and its fixture (what `extension test` runs).
     // The refs the examples name, spelled by the grammar like every other.
-    let rb = |kind: &str, id: &str| oxplow_domain::refs::build::of(kind, id);
+    let rb = |kind: &str, id: &str| oxplow_domain::uri::build::of(kind, id);
     let work_item = rb("work_item", "oxplow:tsk1");
     let (example_input, example_expect, fixture_expect) = match kind {
         Kind::Lens | Kind::Component | Kind::Page | Kind::Panel => (
@@ -739,7 +739,7 @@ fn provider_starter(capability: &str) -> ProviderStarter {
             // A small tree beside the fixtures (`fixtures/tree`) stands in for a worktree.
             input: format!(
                 "{{ command: mark, input: {{ stream: '{}', worktree: fixtures/tree, trigger: manual, parent: null }} }}",
-                oxplow_domain::refs::build::of("stream", "str1")
+                oxplow_domain::uri::build::of("stream", "str1")
             ),
             expect: "a handle for the marked state",
             fixture: "{ handle: $any, unchanged: false, file_count: 1 }".to_string(),
@@ -750,7 +750,7 @@ fn provider_starter(capability: &str) -> ProviderStarter {
             input: "{ command: write_page, input: { slug: example, body: '# Example', verified_refs: [], removed_refs: [] } }"
                 .to_string(),
             expect: "the page's ref",
-            fixture: format!("{{ page: '{}' }}", oxplow_domain::refs::build::wiki_ref("example")),
+            fixture: format!("{{ page: '{}' }}", oxplow_domain::uri::build::wiki_uri("example")),
             needs: None,
             data: serde_json::Value::Null,
         },

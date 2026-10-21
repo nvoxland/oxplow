@@ -282,7 +282,7 @@ pub(crate) fn change(
             layer: layer.logged(),
         },
     )
-    .with_subject([oxplow_domain::refs::build::config_ref(key)]);
+    .with_subject([oxplow_domain::uri::build::config_uri(key)]);
     let committed = target.clone();
     let key_owned = key.to_string();
     Ok(HandlerOutput {

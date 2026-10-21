@@ -35,10 +35,10 @@ pub struct UiPreference {
 /// refs.
 fn scope_problem(scope: &str) -> Option<String> {
     use oxplow_domain::contribution::ContributionKind;
-    use oxplow_domain::refs::grammar::CanonicalRef;
-    use oxplow_domain::refs::kind;
-    let a_ref = CanonicalRef::parse(scope).is_ok_and(|r| {
-        [kind::PAGE, kind::LENS, ContributionKind::Panel.segment()].contains(&r.kind.as_str())
+    use oxplow_domain::uri::grammar::Uri;
+    use oxplow_domain::uri::types;
+    let a_ref = Uri::parse(scope).is_ok_and(|r| {
+        [types::PAGE, types::LENS, ContributionKind::Panel.segment()].contains(&r.kind.as_str())
     });
     let named = |prefix: &str| {
         scope

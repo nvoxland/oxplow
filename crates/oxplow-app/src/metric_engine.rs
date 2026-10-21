@@ -414,9 +414,9 @@ pub(crate) fn dim_value_cached(
         "oxplow.branch" => f.branch.clone(),
         "subject" => f.subject.clone(),
         "oxplow.model" => match &f.subject {
-            Some(s) if f.subject_kind.as_deref() == Some(oxplow_domain::refs::kind::AI_MODEL) => {
+            Some(s) if f.subject_kind.as_deref() == Some(oxplow_domain::uri::types::AI_MODEL) => {
                 Some(
-                    oxplow_domain::refs::build::id_of(s, oxplow_domain::refs::kind::AI_MODEL)
+                    oxplow_domain::uri::build::id_of(s, oxplow_domain::uri::types::AI_MODEL)
                         .unwrap_or_else(|_| s.clone()),
                 )
             }
@@ -2560,7 +2560,7 @@ mod tests {
         // than defensively over-broad, which would cost the fast path).
         let f = FactRow {
             path: Some("src/deep/mod.rs".into()),
-            subject: Some(oxplow_domain::refs::build::ai_model_ref("opus")),
+            subject: Some(oxplow_domain::uri::build::ai_model_uri("opus")),
             subject_kind: Some("ai_model".into()),
             branch: Some("feature/x".into()),
             thread_id: Some(4),
@@ -3350,7 +3350,7 @@ mod tests {
             dims_json: Some("{\"oxplow.language\":\"rust\"}".into()),
             path: Some("crates/a/src/lib.rs".into()),
             branch: Some("main".into()),
-            subject: Some(oxplow_domain::refs::build::ai_model_ref("opus")),
+            subject: Some(oxplow_domain::uri::build::ai_model_uri("opus")),
             subject_kind: Some("ai_model".into()),
             ..fact(1, "2026-06-30T10:00:00Z", 1.0)
         };

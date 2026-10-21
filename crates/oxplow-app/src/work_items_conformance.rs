@@ -108,7 +108,7 @@ pub async fn suite(
 ) -> SuiteRun {
     let mut findings = Vec::new();
     let mut fail = |check: &'static str, message: String| findings.push(Finding { check, message });
-    let prefix = oxplow_domain::refs::build::of("work_item", &format!("{provider}:"));
+    let prefix = oxplow_domain::uri::build::of("work_item", &format!("{provider}:"));
     // Every create files on the active tracker (tsk1058): the host runs the
     // suite with `provider` active.
     let active = probe.active().await;
@@ -310,7 +310,7 @@ pub async fn suite(
     // 5b. A list with links takes `about` to any ref — one that names
     // nothing too — and removes a link with `unlink`.
     if features.links {
-        let about = &oxplow_domain::refs::build::effort_ref(oxplow_domain::EffortId::new(999_999));
+        let about = &oxplow_domain::uri::build::effort_uri(oxplow_domain::EffortId::new(999_999));
         match items.link(actor, &item, about, "about").await {
             Err(e) => fail("links", format!("link `about` {about}: {e}")),
             Ok(_) => {
@@ -726,7 +726,7 @@ impl WorkItemsProbe for ServicesProbe<'_> {
         let (prefix, title) = (
             format!(
                 "{}%",
-                oxplow_domain::refs::build::of("work_item", &format!("{provider}:"))
+                oxplow_domain::uri::build::of("work_item", &format!("{provider}:"))
             ),
             title.to_string(),
         );

@@ -20,8 +20,8 @@
 use std::collections::BTreeMap;
 
 use oxplow_db::SqlCell;
-use oxplow_domain::refs::grammar::CanonicalRef;
-use oxplow_domain::refs::kind;
+use oxplow_domain::uri::grammar::Uri;
+use oxplow_domain::uri::types;
 use oxplow_domain::{StreamId, ThreadId};
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -70,22 +70,22 @@ pub enum ReadError {
 /// the canonical ref.
 const RELATED: &[(&str, &str, &str)] = &[
     (
-        kind::WORK_ITEM,
+        types::WORK_ITEM,
         "links",
         "SELECT * FROM v_work_item_link WHERE from_ref = ?1 ORDER BY created_at",
     ),
     (
-        kind::WORK_ITEM,
+        types::WORK_ITEM,
         "comments",
         "SELECT * FROM v_work_item_comment WHERE ref = ?1 ORDER BY created_at",
     ),
     (
-        kind::COMMIT,
+        types::COMMIT,
         "files",
         "SELECT * FROM v_commit_file WHERE sha = (SELECT sha FROM v_commit WHERE ref = ?1) ORDER BY path",
     ),
     (
-        kind::EFFORT,
+        types::EFFORT,
         "files",
         "SELECT * FROM v_effort_file WHERE effort_id = (SELECT id FROM v_effort WHERE ref = ?1) ORDER BY path",
     ),
@@ -110,8 +110,8 @@ pub async fn read(
     at: Option<StreamId>,
 ) -> Result<RefRead, ReadError> {
     let stream = at.or(reader.stream);
-    let parsed = CanonicalRef::parse(raw.trim()).map_err(|e| ReadError::Invalid(e.to_string()))?;
-    let reference = CanonicalRef {
+    let parsed = Uri::parse(raw.trim()).map_err(|e| ReadError::Invalid(e.to_string()))?;
+    let reference = Uri {
         frag: None,
         ..parsed.clone()
     }
@@ -125,7 +125,7 @@ pub async fn read(
         truncated: false,
     };
     match parsed.kind.as_str() {
-        kind::FILE => {
+        types::FILE => {
             let text = file_text(svc, &parsed, stream).await?;
             let text = match parsed.frag.as_deref() {
                 Some(frag) => lines(&text, frag)?,
@@ -133,7 +133,7 @@ pub async fn read(
             };
             out.set_content(text);
         }
-        kind::LENS => {
+        types::LENS => {
             let root = svc
                 .worktrees
                 .resolve(stream.map(|s| s.to_string()).as_deref())
@@ -167,15 +167,15 @@ pub async fn read(
                 out.related.insert(name, rows(svc, sql, &reference).await?);
             }
             match (parsed.kind.as_str(), parsed.frag.as_deref()) {
-                (kind::EVENT, Some(frag)) => {
+                (types::EVENT, Some(frag)) => {
                     out.set_content(event_body(svc, &parsed.id, frag, reader.stream).await?);
                 }
-                (kind::SUBAGENT, Some(frag)) => {
+                (types::SUBAGENT, Some(frag)) => {
                     out.set_content(
                         subagent_result(svc, out.row.as_ref(), frag, reader.stream).await?,
                     );
                 }
-                (kind::AI_CALL, Some(frag)) => {
+                (types::AI_CALL, Some(frag)) => {
                     out.set_content(ai_call_body(svc, &parsed.id, frag, reader.thread).await?);
                 }
                 _ => {}
@@ -203,7 +203,7 @@ impl RefRead {
 /// none), in the caller's stream's worktree.
 async fn file_text(
     svc: &Services,
-    parsed: &CanonicalRef,
+    parsed: &Uri,
     stream: Option<StreamId>,
 ) -> Result<String, ReadError> {
     let revision: oxplow_domain::vcs::Revision = parsed
@@ -360,8 +360,8 @@ async fn event_body(
             other => ReadError::Invalid(other.to_string()),
         })?;
     let body = body.ok_or_else(|| {
-        let named = CanonicalRef {
-            kind: kind::EVENT.into(),
+        let named = Uri {
+            kind: types::EVENT.into(),
             id: id.into(),
             rev: None,
             frag: Some(part.into()),
@@ -414,7 +414,7 @@ async fn ai_call_body(
     let id: i64 = id
         .parse()
         .map_err(|_| ReadError::Invalid(format!("`{id}` isn't a model call id")))?;
-    let reader = thread.map(oxplow_domain::refs::build::thread_ref);
+    let reader = thread.map(oxplow_domain::uri::build::thread_uri);
     let body = read(svc, id, body, reader.as_deref())
         .await
         .map_err(|e| match e {

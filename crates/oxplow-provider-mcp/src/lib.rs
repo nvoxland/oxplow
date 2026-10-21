@@ -140,8 +140,8 @@ impl Adapter {
     }
 
     fn prefix(&self) -> String {
-        oxplow_domain::refs::build::of(
-            oxplow_domain::refs::kind::WORK_ITEM,
+        oxplow_domain::uri::build::of(
+            oxplow_domain::uri::types::WORK_ITEM,
             &format!("{}:", self.provider_id),
         )
     }

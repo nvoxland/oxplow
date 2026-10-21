@@ -113,7 +113,7 @@ fn note_author(actor: &Actor) -> String {
         Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
             note_author(on_behalf_of)
         }
-        Actor::Effect { effect, .. } => oxplow_domain::refs::build::effect_source(effect),
+        Actor::Effect { effect, .. } => oxplow_domain::uri::build::effect_source(effect),
         Actor::System => "oxplow".into(),
         Actor::Job { .. } => actor.source(),
     }
@@ -324,12 +324,12 @@ fn link_target_tx(
     conn: &rusqlite::Connection,
     target: &str,
 ) -> Result<Option<TaskId>, CommandError> {
-    match oxplow_domain::refs::build::kind_of(target) {
+    match oxplow_domain::uri::build::type_of(target) {
         None => Err(invalid_at(
             "/target",
             format!("`{target}` isn't a ref (<kind>:<id>)"),
         )),
-        Some(kind) if kind == oxplow_domain::refs::kind::WORK_ITEM => {
+        Some(kind) if kind == oxplow_domain::uri::types::WORK_ITEM => {
             let to = task_ref(target, "/target")?;
             live_task_tx(conn, to, target, "/target")?;
             Ok(Some(to))

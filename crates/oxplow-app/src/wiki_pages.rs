@@ -108,7 +108,7 @@ pub fn parse_refs(body: &str) -> ParsedRefs {
     // Blank out code spans / fenced blocks first (shared with the
     // unified `refs::extract`) so illustrative `[[...]]` or path
     // tokens written inside backticks don't become refs.
-    let masked = oxplow_domain::refs::mask_code_regions(body);
+    let masked = oxplow_domain::uri::mask_code_regions(body);
     let body = masked.as_str();
     let mut files = BTreeSet::new();
     let mut dirs = BTreeSet::new();
@@ -324,7 +324,7 @@ pub fn strip_body_version_literals(body: &str) -> String {
             // The link's scheme is a ref kind: `file` or `dir`, then `:`.
             let scheme_len = match after_paren.split_once(':').map(|(scheme, _)| scheme) {
                 Some(
-                    scheme @ (oxplow_domain::refs::kind::FILE | oxplow_domain::refs::kind::DIR),
+                    scheme @ (oxplow_domain::uri::types::FILE | oxplow_domain::uri::types::DIR),
                 ) => Some(scheme.len() + 1),
                 _ => None,
             };
@@ -484,7 +484,7 @@ fn find_wikilinks(body: &str) -> Vec<&str> {
 fn looks_like_dir(s: &str) -> Option<String> {
     let trimmed = s.trim();
     let (kind, rest) = trimmed.split_once(':')?;
-    if kind != oxplow_domain::refs::kind::DIR {
+    if kind != oxplow_domain::uri::types::DIR {
         return None;
     }
     let raw = rest.trim_start();

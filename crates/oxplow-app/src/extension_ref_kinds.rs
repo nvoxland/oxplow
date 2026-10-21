@@ -1,7 +1,7 @@
 //! An extension's ref kinds (`ref_kinds:` in its manifest; P8.D6, stable
 //! since P10 on the github example's pull requests): new kinds of thing a
 //! ref can name,
-//! registered into the running vocabulary's `KindRegistry` by
+//! registered into the running vocabulary's `TypeRegistry` by
 //! `vocabulary_reactor`, so `[[acme_pr:12]]` (and `[[pr:12]]`, with a
 //! `wikilink:` prefix) links while the extension is installed.
 //!
@@ -118,8 +118,8 @@ pub(crate) struct RefKindFile {
 /// register an extension's kinds with.
 pub fn kind_spec(
     decl: &RefKindDecl,
-) -> Result<oxplow_domain::refs::kind::KindSpec, oxplow_domain::refs::kind::KindError> {
-    let spec = oxplow_domain::refs::kind::KindSpec::new(&decl.kind, &decl.id_pattern)?;
+) -> Result<oxplow_domain::uri::types::TypeSpec, oxplow_domain::uri::types::TypeError> {
+    let spec = oxplow_domain::uri::types::TypeSpec::new(&decl.kind, &decl.id_pattern)?;
     Ok(match &decl.wikilink {
         Some(w) => spec.wikilink_prefix(w),
         None => spec,
@@ -486,7 +486,7 @@ fn decl_of(
         "{}_",
         oxplow_domain::events::schema::extension_namespace(extension)
     );
-    if !oxplow_domain::refs::grammar::is_valid_kind(&f.kind)
+    if !oxplow_domain::uri::grammar::is_valid_type(&f.kind)
         || !f.kind.starts_with(&prefix)
         || f.kind.len() == prefix.len()
     {
@@ -496,7 +496,7 @@ fn decl_of(
         ));
     }
     let id = id_pattern(&f.id).map_err(|why| named(format!("`id: {}`: {why}", f.id)))?;
-    oxplow_domain::refs::kind::KindSpec::new(&f.kind, &id).map_err(|e| named(e.to_string()))?;
+    oxplow_domain::uri::types::TypeSpec::new(&f.kind, &id).map_err(|e| named(e.to_string()))?;
     // A model of the extension's own with these columns, for `key:`.
     let model_with = |key: &str, name: &str, columns: &[&str], why: &str| {
         let model = models.iter().find(|m| m.decl.name == name).ok_or_else(|| {
@@ -535,8 +535,8 @@ fn decl_of(
         ))
     })?;
     if let Some(w) = &f.wikilink {
-        let core = oxplow_domain::refs::kind::core_kinds();
-        if !oxplow_domain::refs::grammar::is_valid_kind(w) {
+        let core = oxplow_domain::uri::types::core_types();
+        if !oxplow_domain::uri::grammar::is_valid_type(w) {
             return Err(named(format!(
                 "`wikilink: {w}` must be lowercase letters, digits and `_`"
             )));
@@ -776,7 +776,7 @@ ref_kinds:
             assert_eq!(super::id_pattern(written).as_deref(), Ok(kept), "{written}");
         }
         let kept = super::id_pattern(r"^\d+$").unwrap();
-        let spec = oxplow_domain::refs::kind::KindSpec::new("acme_pr", &kept).unwrap();
+        let spec = oxplow_domain::uri::types::TypeSpec::new("acme_pr", &kept).unwrap();
         assert!(spec.id_regex.is_match("12"));
         assert!(
             !spec.id_regex.is_match("\u{0661}\u{0662}"),

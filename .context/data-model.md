@@ -746,7 +746,7 @@ one `in_progress → done` (or blocked/canceled) cycle of a task. V100
 TABLE, so every child row survived; see the migration's header) and
 replaced the `task_id` FK with `work_item TEXT NOT NULL`, a canonical
 ref (`work_item:oxplow:tsk42`, or another provider's
-`work_item:issues:ENG-12`; built with `refs::build::work_item_ref`).
+`work_item:issues:ENG-12`; built with `uri::build::work_item_uri`).
 `v_effort` / `v_effort_file` carry the ref only (no oxplow task id: a
 reader joins `v_work_item` on it, so it sees the active list's item and
 nothing with none). An effort goes with its thread (`thread_id … ON
@@ -762,7 +762,7 @@ replaces only its unreviewed ones.
 
 In Rust the row is `Effort { work_item, … }`; `EffortStore` (was `TaskEffortStore`)
 is keyed by the ref — `start(work_item, …)` refuses anything that isn't
-a `work_item` ref (`refs::build::validate_work_item_ref`),
+a `work_item` ref (`uri::build::validate_work_item_uri`),
 `find_open_for_work_item`, `most_recent_for_work_item`,
 `list_for_work_item`, `work_item_for_effort`. The effort's `page_ref`
 slice is projected from the work item's provider-scoped id, so another
@@ -1351,7 +1351,7 @@ renamed the `task_…` spellings: a mention is `work_item_mention` /
 | `analytics_stores::SqliteCodeQualityStore::append_finding` | `finding:<id>` | full source |
 | `commit_indexer.rs` (`oxplow-app`) | `commit:<sha>` | full source — diff yields `touched_file`, message yields the same body-mention set |
 
-The shared extractor `oxplow_domain::refs::extract(body) ->
+The shared extractor `oxplow_domain::uri::extract(body) ->
 ExtractedRefs` is the single parser used by every writer that
 takes a free-text body, so wiki/task/commit-message ref
 recognition stays in lock-step. Pure projections live in
@@ -1406,7 +1406,7 @@ disagree. The envelope is `oxplow_domain::events::Envelope`
 (`crates/oxplow-domain/src/events/mod.rs`): `id` (UUIDv7 text, sorts by
 time), `type` (`namespace.name`, snake_case, validated on append), `v`
 (schema version), `at`, `source` (`agent:thr3`, `human`, `lens:<id>`,
-`system`, or `system:<component>` from `refs::build::system_source` —
+`system`, or `system:<component>` from `uri::build::system_source` —
 `system:task_service`, `system:hook_ingest`, `system:snapshot_capture`),
 `anchors` (nullable stream / thread / effort / turn / snapshot / agent
 session columns, so per-anchor timelines are indexed range scans; an
@@ -1415,7 +1415,7 @@ carries the agent session it came from — `hook_ingest`'s resolution,
 agent-model.md; V153 adds a partial index on a
 `work_item.recorded`'s item ref, for a provider read's "did this
 change?" lookup — providers.md), `subject` (JSON array of canonical
-refs built with `oxplow_domain::refs::build` and validated against the
+refs built with `oxplow_domain::uri::build` and validated against the
 kind registry on append, see [refs.md](./refs.md)), `payload` (JSON;
 validated against `type@v`'s schema on append), `payload_hash` (reserved for
 forgettable bodies stored by content hash), `cause`, `dedupe_key`
@@ -1660,7 +1660,7 @@ lifecycle metrics, then logs
 (caused by the `effort.closed`, dedupe key `effort.finished:<effort>` so a
 re-delivery's second append is a no-op). `effort` is the ref
 (`effort:eff12`), never a bare id: every consumer reads it through
-`effort_lifecycle::effort_of` (over `refs::build::effort_of_ref`), so no
+`effort_lifecycle::effort_of` (over `uri::build::effort_of_uri`), so no
 consumer parses it its own way. Re-delivery is safe: pins are stamped only
 while NULL (`set_start_snapshot` / `set_end_snapshot`), the lifecycle
 metrics stop when the effort already has its `effort-lifecycle` capture,
@@ -2347,7 +2347,7 @@ status, last_activity_at DESC)`, `(thread_id, last_activity_at DESC)`,
   mentions), so highlighting a filename tells the agent it is a file.
   The store's `create` is the single source of truth for "what's
   referenced": it unions the FE-supplied refs (DOM `<a>` links inside the
-  Range) with `oxplow_domain::refs::extract(quote)` over the durable
+  Range) with `oxplow_domain::uri::extract(quote)` over the durable
   quote, deduped on `(kind,id)`. So inline mentions (`task:42`,
   `src/x.rs`, `[[slug]]`) become typed refs even on surfaces that never
   rendered them as links, and no frontend reimplements ref parsing.

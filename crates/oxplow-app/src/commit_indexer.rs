@@ -27,8 +27,8 @@ use oxplow_db::page_ref_projections::{
     RT_BODY_FINDING, RT_BODY_WORK_ITEM, RT_TOUCHED_FILE, RT_WIKILINK,
 };
 use oxplow_db::{PageRefEdge, SqlitePageRefStore};
-use oxplow_domain::refs::extract;
-use oxplow_domain::refs::kind::KindRegistry;
+use oxplow_domain::uri::extract;
+use oxplow_domain::uri::types::TypeRegistry;
 use oxplow_domain::vcs::{Branch, LogQuery, RevisionDetail, Vcs};
 
 /// How far a pass walks from a head. It reads `window` revisions, and
@@ -54,7 +54,7 @@ impl IndexDepth {
 
 /// Pure: build the edge set for one commit. Exposed so tests can
 /// exercise the projection independently of a real repo.
-pub fn commit_edges(kinds: &KindRegistry, detail: &RevisionDetail) -> Vec<PageRefEdge> {
+pub fn commit_edges(kinds: &TypeRegistry, detail: &RevisionDetail) -> Vec<PageRefEdge> {
     let sha = detail.info.id.as_str();
     let mut out = Vec::new();
     // touched-file edges from the diff.
@@ -130,7 +130,7 @@ pub fn commit_edges(kinds: &KindRegistry, detail: &RevisionDetail) -> Vec<PageRe
 /// `v_commit_file`) and project it into `page_ref`. Returns the ones
 /// newly indexed, with when each was committed.
 pub async fn index_recent(
-    kinds: &KindRegistry,
+    kinds: &TypeRegistry,
     vcs: &dyn Vcs,
     ws: &Path,
     page_refs: &SqlitePageRefStore,
@@ -181,7 +181,7 @@ pub async fn index_recent(
 /// Store and project one revision; when it was committed, if it was
 /// stored.
 async fn index_one(
-    kinds: &KindRegistry,
+    kinds: &TypeRegistry,
     vcs: &dyn Vcs,
     ws: &Path,
     page_refs: &SqlitePageRefStore,
@@ -287,10 +287,10 @@ async fn log_indexed(
 ) {
     use oxplow_domain::events::schema::{VcsCommitIndexed, VcsCommitIndexedV1};
     let env = oxplow_domain::Envelope::typed::<VcsCommitIndexed>(
-        oxplow_domain::refs::build::system_source("commit_indexer"),
+        oxplow_domain::uri::build::system_source("commit_indexer"),
         &VcsCommitIndexedV1 {
-            commit: oxplow_domain::refs::build::commit_ref(sha),
-            stream: oxplow_domain::refs::build::stream_ref(stream),
+            commit: oxplow_domain::uri::build::commit_uri(sha),
+            stream: oxplow_domain::uri::build::stream_uri(stream),
             committed_at: committed.to_text(),
         },
     )
@@ -298,7 +298,7 @@ async fn log_indexed(
         stream_id: Some(stream),
         ..Default::default()
     })
-    .with_subject([oxplow_domain::refs::build::commit_ref(sha)])
+    .with_subject([oxplow_domain::uri::build::commit_uri(sha)])
     .with_dedupe_key(format!("vcs.commit.indexed:{sha}"));
     match svc.event_log_store.append(env).await {
         Ok(_) | Err(oxplow_domain::DomainError::Constraint(_)) => {}
@@ -397,8 +397,8 @@ mod tests {
     use super::*;
 
     /// The core kinds with oxplow's tasks as the work list (`tsk<n>`).
-    fn tasks_kinds() -> oxplow_domain::refs::kind::KindRegistry {
-        oxplow_domain::refs::kind::core_kinds()
+    fn tasks_kinds() -> oxplow_domain::uri::types::TypeRegistry {
+        oxplow_domain::uri::types::core_types()
             .with_work_item_ids("oxplow", r"tsk\d+")
             .unwrap()
     }
