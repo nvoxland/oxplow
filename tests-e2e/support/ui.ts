@@ -60,10 +60,3 @@ export function workItemIdOf(ref: string): string {
   if (!id) throw new Error(`\`${ref}\` names no work item`);
   return decodeURIComponent(id);
 }
-
-/** The id of a work item's URI (`tsk42` of `oxplow:oxplow/work_item?id=tsk42&provider=oxplow`). */
-export function workItemIdOf(ref: string): string {
-  const id = /[?&]id=([^&#]+)/.exec(ref)?.[1];
-  if (!id) throw new Error(`\`${ref}\` names no work item`);
-  return decodeURIComponent(id);
-}
