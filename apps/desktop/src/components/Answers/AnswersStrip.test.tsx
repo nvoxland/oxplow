@@ -171,6 +171,21 @@ test("a kept answer is one line until shown", async () => {
   await waitFor(() => view.getByTestId("thread-answer-body"));
 });
 
+test("whether a kept answer is shown is the step's history state", async () => {
+  const { PageNavigationContext } = await import("../../tabs/PageNavigationContext.js");
+  const states: Record<string, unknown>[] = [];
+  const nav = { viewParams: {}, patchViewParams() {}, historyState: { "answer-shown:answer:1": true }, setHistoryState: (p: Record<string, unknown>) => states.push(p) } as never;
+  const answer = { ref: "answer:1", title: "Open tasks", lens: "review/waiting", keptLens: "review/waiting" };
+  const view = render(
+    <PageNavigationContext.Provider value={nav}>
+      <ThreadAnswer answer={answer} />
+    </PageNavigationContext.Provider>,
+  );
+  await waitFor(() => view.getByTestId("thread-answer-body"));
+  fireEvent.click(view.getByTestId("thread-answer-show"));
+  expect(states).toEqual([{ "answer-shown:answer:1": false }]);
+});
+
 // P9.A3: what the agent asked for waits where the conversation is.
 test("a thread's pending proposals wait above its answers; Approve decides as the person", async () => {
   answerRows = [];

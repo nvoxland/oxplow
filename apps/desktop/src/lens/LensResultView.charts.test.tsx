@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
+import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
 import type { Lens, LensRun } from "../tauri-bridge/generated/bindings.js";
 import { LensResultView } from "./LensResultView.js";
 
@@ -183,4 +184,27 @@ test("detail and steps lenses", () => {
   );
   expect(steps.container.querySelector('[data-testid="lens-step-0"]')?.getAttribute("data-status")).toBe("done");
   expect(steps.container.querySelector('[data-testid="lens-step-1"]')?.getAttribute("data-status")).toBe("pending");
+});
+
+// Which branches are closed is the step's history state: Back and a restart
+// show the tree as it was left.
+test("a tree's closed branches are the step's history state", () => {
+  const states: Record<string, unknown>[] = [];
+  const nav = { viewParams: {}, patchViewParams() {}, historyState: { "lens-tree.closed": ["0"] }, setHistoryState: (p: Record<string, unknown>) => states.push(p) } as unknown as PageNavigation;
+  const tree = run(
+    { viz: "tree", tree: { id: "id", parent: "p", label: "n" } },
+    ["id", "p", "n"],
+    [
+      ["a", "", "root"],
+      ["b", "a", "child"],
+    ],
+  );
+  const { container, getByLabelText } = render(
+    <PageNavigationContext.Provider value={nav}>
+      <LensResultView run={tree} onOpenPage={() => {}} />
+    </PageNavigationContext.Provider>,
+  );
+  expect(container.querySelectorAll('[data-testid="lens-tree-node"]').length).toBe(1);
+  fireEvent.click(getByLabelText("Expand"));
+  expect(states).toEqual([{ "lens-tree.closed": [] }]);
 });

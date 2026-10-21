@@ -2,6 +2,7 @@
 /// re-run live, with Keep This (`oxplow.lens.keep`) — or, once it is a lens, a
 /// link to it. Rendered by the Answers strip. See `.context/extensions.md` → "Thread answers".
 import type { CSSProperties } from "react";
+import { useHistoryState } from "../../tabs/useHistoryState.js";
 import { useCallback, useEffect, useState } from "react";
 
 import { runAnswer, type LensRun } from "../../api.js";
@@ -26,7 +27,7 @@ export function ThreadAnswer({ answer, onOpenPage }: ThreadAnswerProps) {
   useEffect(() => setKept(answer.keptLens), [answer.keptLens]);
   // A kept answer is a lens now, a link away: one line until asked for,
   // so kept answers don't crowd the terminal (tsk1042).
-  const [shown, setShown] = useState(answer.keptLens === null);
+  const [shown, setShown] = useHistoryState(`answer-shown:${answer.ref}`, answer.keptLens === null);
   const refresh = useCallback(async () => {
     try {
       setRun(await runAnswer(answer.ref));

@@ -2,7 +2,7 @@ import { EmptyState } from "../Prompts/EmptyState.js";
 import type { CSSProperties } from "react";
 import { InlinePromptStrip } from "../InlinePromptStrip.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useCollapsedSet, useViewParam } from "../../tabs/useViewParam.js";
+import { useCollapsedSet, useDraft, useViewParam } from "../../tabs/useViewParam.js";
 import { coalescedRefresh, type CoalescedRefresh } from "../../coalesced-refresh.js";
 import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
 import type { Reads } from "../../tauri-bridge/generated/bindings.js";
@@ -1212,7 +1212,8 @@ function CommitDialog({
   onClose(): void;
   onComplete(result: OpOutcome): void;
 }) {
-  const [message, setMessage] = useState("");
+  // An unsaved message is the step's history state; a commit clears it.
+  const [message, setMessage, clearMessage] = useDraft("commitMessage", "");
   const [running, setRunning] = useState(false);
   // Default OFF so probe scripts / lock files don't ride along — three
   // dogfood passes shipped commits that bundled local-only files.
@@ -1229,6 +1230,7 @@ function CommitDialog({
       return { success: true, log: `Committed ${revision}`, conflicts: [], auto_resolved: 0 };
     });
     setRunning(false);
+    if (result.success) clearMessage();
     onComplete(result);
   };
 

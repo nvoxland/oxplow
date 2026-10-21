@@ -47,7 +47,7 @@ export function NewTaskPage({ defaults = {}, epics = [], onClose, onSubmit }: Ne
   // restart bring it back (the parent is the page's, below).
   const [native, setNative] = useDraft<Record<string, unknown>>("native", {});
   const [state, setState] = useDraft<"todo" | "blocked">("state", "todo");
-  const [parentRef, setParentRef] = useState<string | null>(defaults.parentRef ?? null);
+  const [parentRef, setParentRef] = useDraft<string | null>("parentRef", defaults.parentRef ?? null);
   const [title, setTitle] = useDraft<string>("title", "");
   const [body, setBody] = useDraft<string>("body", "");
   const [submitting, setSubmitting] = useState(false);

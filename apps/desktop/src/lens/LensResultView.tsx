@@ -1,3 +1,4 @@
+import { useCollapsedSet, type CollapsedSet } from "../tabs/useViewParam.js";
 import { Approvals } from "../kit/Approvals.js";
 import type { PageAction } from "../kit/actions.js";
 import type { PickedRow } from "./LensRail.js";
@@ -880,18 +881,20 @@ interface TreeVizProps {
 
 /** `tree`: nested rows, each branch collapsible (expanded by default). */
 function TreeViz({ nodes, ...rest }: TreeVizProps & { nodes: TreeNode[] }) {
+  // The closed branches (by their index path) are this step's history state.
+  const closed = useCollapsedSet("lens-tree.closed");
   return (
     <ul data-testid="lens-tree" style={treeListStyle}>
       {nodes.map((n, i) => (
-        <TreeItem key={i} node={n} {...rest} />
+        <TreeItem key={i} node={n} path={String(i)} closed={closed} {...rest} />
       ))}
     </ul>
   );
 }
 
-function TreeItem({ node, ...rest }: TreeVizProps & { node: TreeNode }) {
+function TreeItem({ node, path, closed, ...rest }: TreeVizProps & { node: TreeNode; path: string; closed: CollapsedSet }) {
   const { label, cell, rowMenu, rowLook } = rest;
-  const [open, setOpen] = useState(true);
+  const open = !closed.has(path);
   const branch = node.children.length > 0;
   const look = rowLook(node.row);
   return (
@@ -907,7 +910,7 @@ function TreeItem({ node, ...rest }: TreeVizProps & { node: TreeNode }) {
             type="button"
             aria-expanded={open}
             aria-label={open ? "Collapse" : "Expand"}
-            onClick={() => setOpen((o) => !o)}
+            onClick={() => closed.toggle(path)}
             style={disclosureStyle}
           >
             {open ? "▾" : "▸"}
@@ -920,7 +923,7 @@ function TreeItem({ node, ...rest }: TreeVizProps & { node: TreeNode }) {
       {branch && open ? (
         <ul style={{ ...treeListStyle, paddingLeft: 16 }}>
           {node.children.map((c, i) => (
-            <TreeItem key={i} node={c} {...rest} />
+            <TreeItem key={i} node={c} path={`${path}.${i}`} closed={closed} {...rest} />
           ))}
         </ul>
       ) : null}
@@ -1004,7 +1007,13 @@ function StepsViz({ steps, rowMenu }: { steps: ReturnType<typeof stepItems>; row
 /** `hunks`: each file and its revisions; expanding one shows its diff in
  *  the diff viewer (one at a time — each is an editor). */
 function HunksViz({ rows, streamId, rowMenu }: { rows: ReturnType<typeof hunkRows>; streamId: string | null; rowMenu: RowMenu }) {
-  const [open, setOpen] = useState<number | null>(rows.length === 1 ? 0 : null);
+  // At most one diff is open (each is an editor); it is this step's history state.
+  const openSet = useCollapsedSet("lens-hunks.open", rows.length === 1 ? ["0"] : []);
+  const open = openSet.ids.length > 0 ? Number(openSet.ids[0]) : null;
+  const setOpen = (next: (o: number | null) => number | null) => {
+    const to = next(open);
+    openSet.set(to === null ? [] : [String(to)]);
+  };
   return (
     <div data-testid="lens-hunks">
       {rows.map((r, i) => (

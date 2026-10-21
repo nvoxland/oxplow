@@ -1,5 +1,6 @@
 import { LensSlots } from "../lens/LensSlots.js";
 import { useChange } from "../lens/useChange.js";
+import { useHistoryState } from "../tabs/useHistoryState.js";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RevisionDetail, Stream } from "../api.js";
 import type { WorkList } from "../workItems.js";
@@ -199,7 +200,7 @@ function CommitMeta({ detail, collapsedMaxHeight, onRunOp }: CommitMetaProps) {
   const date = formatAbsolute(new Date(info.time * 1000).toISOString());
   const author = info.email ? `${info.author} <${info.email}>` : info.author;
   const sectionRef = useRef<HTMLElement>(null);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useHistoryState("messageExpanded", false);
   const [overflowing, setOverflowing] = useState(false);
   useLayoutEffect(() => {
     const el = sectionRef.current;
@@ -278,7 +279,7 @@ function CommitMeta({ detail, collapsedMaxHeight, onRunOp }: CommitMetaProps) {
       {overflowing ? (
         <button
           type="button"
-          onClick={() => setExpanded((v) => !v)}
+          onClick={() => setExpanded(!expanded)}
           style={{
             position: "absolute",
             right: 8,
