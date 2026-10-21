@@ -6,6 +6,7 @@ import { askAboutSelection } from "../../agent-context-ref.js";
 import { diffAskTarget } from "./diffAsk.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
 import { DiffFileHeaderSlot } from "./DiffFileHeaderSlot.js";
+import { useMonacoViewState } from "../useMonacoViewState.js";
 
 export interface DiffSpec {
   path: string;
@@ -61,6 +62,9 @@ export function DiffPane({ streamId, spec, visible, onJumpToSource }: Props) {
     askableRef.current?.set(askable);
   }, [askable]);
   const monacoRef = useRef<any>(null);
+  // Scroll and cursor stay with the tab's entry, per diff shown.
+  const attachViewState = useMonacoViewState(`viewState:${spec.path}@${JSON.stringify([spec.leftVersion, spec.rightVersion])}`);
+  const detachViewStateRef = useRef<(() => void) | null>(null);
   const [editorReady, setEditorReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Set of modified-side line numbers that begin a diff change. Combined
@@ -108,6 +112,8 @@ export function DiffPane({ streamId, spec, visible, onJumpToSource }: Props) {
     })();
     return () => {
       cancelled = true;
+      detachViewStateRef.current?.();
+      detachViewStateRef.current = null;
       const editor = editorRef.current;
       const models = modelsRef.current;
       editorRef.current = null;
@@ -144,6 +150,10 @@ export function DiffPane({ streamId, spec, visible, onJumpToSource }: Props) {
         previous?.left?.dispose();
         previous?.right?.dispose();
         setError(null);
+        // The saved view comes back once the models are in; a reveal asked
+        // for below wins over it.
+        detachViewStateRef.current?.();
+        detachViewStateRef.current = attachViewState(editor, editor.getModifiedEditor());
         if (spec.revealLine && spec.revealLine > 0) {
           // Reveal on the modified (right) editor, which is what the
           // analysis-page jump targets. The diff editor exposes the

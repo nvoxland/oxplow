@@ -13,7 +13,7 @@ import { registerLspProviders } from "./editor-lsp-providers.js";
 import { logUi } from "../logger.js";
 import { useLspClients } from "./useLspClients.js";
 import { BLAME_WIDTH, useBlame } from "./useBlame.js";
-import { useHistoryState } from "../tabs/useHistoryState.js";
+import { useMonacoViewState } from "./useMonacoViewState.js";
 import type { MenuItem } from "../menu.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { gitRevision } from "../revision.js";
@@ -117,14 +117,10 @@ export function EditorPane({
   filePathRef.current = filePath;
   openFilesRef.current = { order: openFileOrder, files: openFiles };
 
-  // Keep Monaco's view state (cursor / scroll / folds / selection) with the
-  // tab's entry: Back and a restart land on the same line. The state is an
-  // opaque, JSON-safe blob from saveViewState; it is written when the
-  // editor settles after a move, and read once when the editor mounts.
-  const [viewState, setViewState] = useHistoryState<unknown>(`viewState:${filePath ?? ""}`, null);
-  const viewStateRef = useRef({ viewState, setViewState });
-  viewStateRef.current = { viewState, setViewState };
-  const saveViewStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Monaco's view state (cursor / scroll / folds / selection) stays with the
+  // tab's entry: Back and a restart land on the same line.
+  const attachViewState = useMonacoViewState(`viewState:${filePath ?? ""}`);
+  const detachViewStateRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -141,24 +137,7 @@ export function EditorPane({
         contextmenu: false,
       });
       editorRef.current = editor;
-      // Apply any pending view-state that was restored before the
-      // editor finished mounting.
-      const saved = viewStateRef.current.viewState;
-      if (saved) {
-        try {
-          editor.restoreViewState(saved as Parameters<typeof editor.restoreViewState>[0]);
-        } catch { /* ignore */ }
-      }
-      const scheduleViewStateSave = () => {
-        if (saveViewStateTimerRef.current) clearTimeout(saveViewStateTimerRef.current);
-        saveViewStateTimerRef.current = setTimeout(() => {
-          saveViewStateTimerRef.current = null;
-          const vs = editor.saveViewState?.() ?? null;
-          if (vs) viewStateRef.current.setViewState(vs);
-        }, 300);
-      };
-      focusDisposersRef.current.push(editor.onDidChangeCursorPosition(scheduleViewStateSave));
-      focusDisposersRef.current.push(editor.onDidScrollChange(scheduleViewStateSave));
+      detachViewStateRef.current = attachViewState(editor);
       // Register Cmd/Ctrl+S inside Monaco so the shortcut works when the
       // editor has focus. The native Electron menu also binds this — menu
       // accelerators fire at the OS level BEFORE the keydown reaches the
@@ -222,11 +201,7 @@ export function EditorPane({
       focusDisposersRef.current.forEach((d) => d.dispose());
       focusDisposersRef.current = [];
       if (focusDebounceRef.current) clearTimeout(focusDebounceRef.current);
-      if (saveViewStateTimerRef.current) {
-        clearTimeout(saveViewStateTimerRef.current);
-        const vs = editorRef.current?.saveViewState?.() ?? null;
-        if (vs) viewStateRef.current.setViewState(vs);
-      }
+      detachViewStateRef.current?.();
       // LSP client + diagnostics disposal is owned by useLspClients.
       editorRef.current?.dispose();
     };
