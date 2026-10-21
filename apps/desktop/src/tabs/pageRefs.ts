@@ -1,6 +1,6 @@
 /**
  * Helpers for constructing `TabRef` values consistently. Every tab id is
- * a canonical ref (`.context/refs.md`), built only here — never
+ * a canonical ref (`.context/resources.md`), built only here — never
  * hand-format an id.
  *
  * - An **entity** page's id is the entity's own ref: `file:<path>[@rev]`,

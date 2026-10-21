@@ -1,4 +1,4 @@
-//! Canonical ref builders and readers (`.context/refs.md` "Using refs").
+//! Canonical ref builders and readers (`.context/resources.md` "Using refs").
 //!
 //! Every Rust producer that names a thing — in an event subject, a
 //! payload, a `page_uri` row, a command's input — builds the ref here, and

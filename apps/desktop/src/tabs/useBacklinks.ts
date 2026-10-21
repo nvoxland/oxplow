@@ -77,7 +77,7 @@ export function usePageOutbound(source: TabRef, version = 0): BacklinkEntry[] {
 
 /**
  * The `page_ref` id for a TabRef: exactly the canonical ref's id
- * (`.context/refs.md`), which is what the graph stores. A task is
+ * (`.context/resources.md`), which is what the graph stores. A task is
  * `oxplow:tsk42` under kind `work_item`. Returns null for pages that are
  * not a ref's (settings, dialogs, …) so the hook short-circuits.
  */

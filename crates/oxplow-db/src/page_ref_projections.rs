@@ -8,7 +8,7 @@
 //! mapping from existing rows.
 //!
 //! Every stored `(kind, id)` is a canonical ref's `(kind, id)`
-//! (`.context/refs.md`), so a row can be turned back into a ref by
+//! (`.context/resources.md`), so a row can be turned back into a ref by
 //! `uri::build::of(kind, id)` and nothing downstream needs a per-kind id
 //! scheme:
 //! - wiki:      `"<slug>"`

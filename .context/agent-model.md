@@ -353,7 +353,7 @@ Writes are the `knowledge.*` commands ([knowledge.md](./knowledge.md)).
 they keep (`oxplow_app::link_check`) and return `link_warnings`, so the
 agent fixes them in the same turn; `knowledge.write_page` refuses
 instead. What counts as a link is `oxplow_domain::uri::classify_wikilinks`
-([refs.md](./refs.md)).
+([resources.md](./resources.md)).
 
 **Id checks at the boundary.** A tool taking a thread or stream id calls
 `expect_id_kind(tool, param, value, expected)` (`IdPrefix`, `ID_STREAM`,

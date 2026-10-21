@@ -1,4 +1,4 @@
-// The canonical ref grammar (.context/refs.md), asserted against the same
+// The canonical ref grammar (.context/resources.md), asserted against the same
 // golden fixture the Rust parser uses, so the two can't drift.
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";

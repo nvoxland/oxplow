@@ -1,4 +1,4 @@
-//! What core declares of each of its ref kinds (`.context/refs.md` "The
+//! What core declares of each of its ref kinds (`.context/resources.md` "The
 //! kind registry"), the way an extension's `ref_kinds:` declares its own:
 //!
 //! - **owner** — the one published model whose SQL spells the kind's

@@ -1,4 +1,4 @@
-//! `oxplow_read`: one reader for anything a ref names (`.context/refs.md`,
+//! `oxplow_read`: one reader for anything a ref names (`.context/resources.md`,
 //! `.context/agent-model.md` "The agent's tools"). The agent's single way to look at
 //! a thing it was pointed at or found in a model's `ref` column:
 //!

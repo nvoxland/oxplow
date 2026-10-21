@@ -1313,7 +1313,7 @@ the table with per-ref + per-page "Mark verified" actions, which run
 chip that routes to the page.
 
 Every stored `(source_kind, source_id)` / `(target_kind, target_id)`
-is a canonical ref's `(kind, id)` (see `.context/refs.md`, tsk404), so
+is a canonical ref's `(kind, id)` (see `.context/resources.md`, tsk404), so
 `format!("{kind}:{id}")` is the ref and nothing needs a per-kind id
 scheme:
 - `wiki` — the slug
@@ -1416,7 +1416,7 @@ agent-model.md; V153 adds a partial index on a
 `work_item.recorded`'s item ref, for a provider read's "did this
 change?" lookup — providers.md), `subject` (JSON array of canonical
 refs built with `oxplow_domain::uri::build` and validated against the
-kind registry on append, see [refs.md](./refs.md)), `payload` (JSON;
+kind registry on append, see [resources.md](./resources.md)), `payload` (JSON;
 validated against `type@v`'s schema on append), `payload_hash` (reserved for
 forgettable bodies stored by content hash), `cause`, `dedupe_key`
 (UNIQUE — the emitter derives it from the occurrence, so an at-least-once
@@ -1434,7 +1434,7 @@ Rust type per `type@v` (`trait EventType { TYPE, V, Payload: JsonSchema,
 upcast }`) and `EventSchemaRegistry`, which holds every type the log
 accepts. It sits with the ref kinds in the running `Vocabulary { events,
 kinds }`, held in the swappable `VocabularyHandle` `Services.vocabulary`
-(P8.D1; see refs.md) — `Vocabulary::core()` is every core type; the golden files under `schemas/events/` are the
+(P8.D1; see resources.md) — `Vocabulary::core()` is every core type; the golden files under `schemas/events/` are the
 authoritative list (the `core_registry_knows_every_core_type_and_version`
 test pins it). An extension's types join it as data, not Rust types:
 `register_declared(extension, DeclaredEventType { event_type, v, schema,
@@ -2260,7 +2260,7 @@ Append-only event log of in-app page navigations. One row per visit
 recorded by `App.handleOpenPage` (skipping `agent`, `new-stream`,
 `new-task`).
 
-Rows carry canonical tab ids ([refs.md](./refs.md)); V93 wiped the
+Rows carry canonical tab ids ([resources.md](./resources.md)); V93 wiped the
 pre-canonical ones. Columns: `id`, `page_kind`, `page_id`, `visited_at` (ISO),
 `duration_ms?`, `thread_id?` (added in v3 — nullable so legacy rows and
 boot-screen visits with no selected thread still record). Indexes on
@@ -2406,7 +2406,7 @@ enforces identity, treating global rows' `NULL` stream as `''`).
   entries added, changed or gone; tsk896); core's read `v_search_work_item`
   (the active work list's items, through the interface) / `_comment` /
   `_thread_note` / `_wiki` and the feeds for the other kinds named above
-  (`models/search_<kind>.sql`; `.context/refs.md` "Searchable kinds" says
+  (`models/search_<kind>.sql`; `.context/resources.md` "Searchable kinds" says
   what each indexes and whether archived work is included). Files are upserted by the `search.index` pump consumer from
   `snapshot.taken` (`indexer.rs`).
 - `stream_id` is `NULL` for project-global rows (wiki, a backlog task) and

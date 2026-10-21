@@ -4,7 +4,7 @@
 //! `lens_ref(id, key1, value1, …)` is the one way SQL spells a link to a
 //! lens: it builds the `lens:` ref through `uri::build` and escapes the
 //! params, so a lens, model or script never concatenates a `lens:` prefix
-//! (`.context/refs.md` "Using refs"). A NULL value leaves its param out;
+//! (`.context/resources.md` "Using refs"). A NULL value leaves its param out;
 //! a NULL id gives NULL.
 
 use rusqlite::functions::{Context, FunctionFlags};

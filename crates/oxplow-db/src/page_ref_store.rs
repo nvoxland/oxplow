@@ -13,7 +13,7 @@
 //! `kind` is denormalised next to `id` so kind-filtered lookups
 //! ("all backlinks where target is a file") don't need a LIKE on a
 //! synthetic combined column. `(kind, id)` is exactly a canonical
-//! ref's (.context/refs.md): `("wiki", "architecture")`,
+//! ref's (.context/resources.md): `("wiki", "architecture")`,
 //! `("work_item", "oxplow:tsk42")`, `("file", "src/app.rs")`,
 //! `("commit", "abc123")`.
 

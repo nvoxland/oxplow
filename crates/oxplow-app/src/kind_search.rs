@@ -1,5 +1,5 @@
 //! Search kinds whose rows come from a model (P9.D3, tsk864;
-//! `.context/refs.md` "Searchable kinds"): every kind `ref_kind` lists
+//! `.context/resources.md` "Searchable kinds"): every kind `ref_kind` lists
 //! with a `searchable` view — core's (`oxplow_db::ref_models`) and an
 //! extension's (`searchable: <model>`) alike — has that view's rows
 //! (`ref`, `title`, `body`, `stream_id`) in the site-wide index

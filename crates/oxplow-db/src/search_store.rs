@@ -12,7 +12,7 @@
 //! restated by its asset (`kind_search`, [`restate_kind_tx`]: only the
 //! entries that changed are written); file
 //! contents are upserted by the `search.index` consumer (`indexer`). See
-//! `.context/refs.md`.
+//! `.context/resources.md`.
 
 use rusqlite::types::Value;
 use rusqlite::{params, params_from_iter, OptionalExtension};

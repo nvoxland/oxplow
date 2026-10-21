@@ -1,4 +1,4 @@
-//! Golden tests for the canonical ref grammar (`.context/refs.md`).
+//! Golden tests for the canonical ref grammar (`.context/resources.md`).
 //! The fixture is shared with the TS parser (`apps/desktop/src/uri/uri.test.ts`).
 
 use oxplow_domain::uri::grammar::{Uri, UriParseError};

@@ -1,5 +1,5 @@
 /**
- * Every ref kind the vocabulary knows (`.context/refs.md` "The kind
+ * Every ref kind the vocabulary knows (`.context/resources.md` "The kind
  * registry"), read from `v_ref_kind`: core's and those extensions declare
  * (P8.D6–D7, `.context/extensions.md` → "Ref kinds"). How the chrome draws
  * one (an extension's icon and label), where one opens (its page

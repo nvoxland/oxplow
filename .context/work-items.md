@@ -35,7 +35,7 @@ to another item of the list (`blocks`, `discovered_from`, `relates_to`,
 `duplicates`, `supersedes`, `replies_to`), or `about` any ref — what the
 item is about (`collector:triage/hot`, `effort:eff12`). A link's target
 needn't resolve; it may name something deleted or an extension's kind
-since uninstalled (refs.md "Using refs"),
+since uninstalled (resources.md "Using refs"),
 `v_work_item_comment` its comments. Core reads work items only through
 these: a thread's items (`v_work_item`), a work item's ref summary
 (`ref_resolver`), a `[[…]]` link's check (`link_check`) and search

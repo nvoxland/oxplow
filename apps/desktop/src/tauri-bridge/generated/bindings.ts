@@ -2160,7 +2160,7 @@ export type Confirm = "never" | "always" |
  *  ([`ContributionId::reference`], also its `Display`):
  *  `job:effort-review/review`, `command:oxplow.review.accept`. Storage,
  *  events, manifests and the desktop all carry that ref
- *  (`.context/refs.md` "Using refs").
+ *  (`.context/resources.md` "Using refs").
  */
 export type ContributionId = {
 	extension: string,

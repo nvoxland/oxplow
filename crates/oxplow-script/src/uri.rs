@@ -1,4 +1,4 @@
-//! `uri`, the Starlark face of oxplow's URI grammar (`.context/refs.md`
+//! `uri`, the Starlark face of oxplow's URI grammar (`.context/resources.md`
 //! "Using refs"): a script builds a URI with `uri.build(type, id)` and
 //! reads one with `uri.parse` / `uri.id` / `uri.type`, never by string
 //! concatenation or slicing. The sandbox has no type registry, so a type

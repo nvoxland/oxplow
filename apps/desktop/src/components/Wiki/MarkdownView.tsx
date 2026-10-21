@@ -7,7 +7,7 @@ import { MediaLightbox, type LightboxContent } from "./MediaLightbox.js";
 /**
  * react-markdown's defaultUrlTransform only allows
  * http/https/ircs/mailto/xmpp; our internal schemes (the canonical ref
- * kinds `file:`, `dir:`, `commit:`, `work_item:`; see .context/refs.md)
+ * kinds `file:`, `dir:`, `commit:`, `work_item:`; see .context/resources.md)
  * get stripped to empty strings, which makes the click handler see
  * `kind: "empty"` and no-op. Pass our schemes through untouched and
  * defer everything else to the default sanitizer.

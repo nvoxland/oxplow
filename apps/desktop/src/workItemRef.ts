@@ -1,6 +1,6 @@
 /**
  * Work-item refs on the TS side — the mirror of Rust's
- * `oxplow_domain::uri::build` work-item helpers (`.context/refs.md`).
+ * `oxplow_domain::uri::build` work-item helpers (`.context/resources.md`).
  * A work item's ref is `work_item:<provider>:<id>`, whichever list it's
  * on (`work_item:oxplow:tsk42`, `work_item:issues:ENG-12`); the UI never
  * reads meaning into the id.

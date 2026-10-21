@@ -1097,7 +1097,7 @@ fn hand_made_refs() -> Vec<String> {
 /// builds a ref with `oxplow_domain::uri::build` and reads one with
 /// `parse_as` / `id_of` / `parse_kind` / `Uri::parse`, never with
 /// `format!("effort:…")`, `strip_prefix("wiki:")` or a split at the colon
-/// (`.context/refs.md`, "Using refs"). The kept list is empty.
+/// (`.context/resources.md`, "Using refs"). The kept list is empty.
 #[test]
 fn refs_are_built_and_parsed_through_the_grammar() {
     let offenders = hand_made_refs();
@@ -1198,7 +1198,7 @@ fn hand_made_script_refs() -> Vec<String> {
 /// ref with `ref.build` and read one with `ref.id` / `ref.parse`, and SQL
 /// selects or joins on the owning model's `ref` column — never
 /// `"file:" + path`, `'effort:eff' || id`, `startswith("effort:eff")`
-/// (`.context/refs.md`, "Using refs"). The kept list is empty.
+/// (`.context/resources.md`, "Using refs"). The kept list is empty.
 #[test]
 fn scripts_and_sql_carry_refs_rather_than_spelling_them() {
     let offenders = hand_made_script_refs();

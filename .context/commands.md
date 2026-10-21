@@ -14,7 +14,7 @@ A command is a typed operation identified by its **command id**,
 The id is the machine name; what a person reads is the command's label.
 **An input names a record by its canonical ref** (`thread:thr3`,
 `stream:str1`, `effort:eff12`, `comment:cmt4`, `thread_note:not7`,
-`claim:7`; [refs.md](./refs.md)), parsed by `commands::util::ref_id` —
+`claim:7`; [resources.md](./resources.md)), parsed by `commands::util::ref_id` —
 a bare id is refused at its field, saying the form — and a result names
 the records it made the same way, so it feeds the next call. (The
 work-item interface keeps its own `thread` and `move { to: { thread } }`

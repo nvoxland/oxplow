@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 // A ref's owner spells it and everyone else carries it. In the desktop the
 // one place that writes a kind prefix is `uri/uri.ts` (builders) and the
 // one place that reads one is `parseRef`; every other file takes a ref from
-// a builder or from data and passes it on (`.context/refs.md`, "The TS side
+// a builder or from data and passes it on (`.context/resources.md`, "The TS side
 // is on canonical refs"). The kinds are the shared fixture's, the same list
 // the Rust registry is asserted against.
 

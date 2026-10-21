@@ -1,5 +1,5 @@
 // The canonical uri grammar: `<kind>:<id>[@<rev>][#<frag>]`.
-// See .context/refs.md. Rust (`oxplow_domain::uri::grammar`) is the
+// See .context/resources.md. Rust (`oxplow_domain::uri::grammar`) is the
 // source of truth; `uri.test.ts` asserts this parser against the same
 // golden fixture so the two can't drift.
 //

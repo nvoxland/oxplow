@@ -604,7 +604,7 @@ declaring *what it is* and mounting the generic layer.
 - **`data-ref-kind` / `data-ref-id` mark a region as a typed "context
   node."** The `(kind,id)` pair uses the same canonical vocabulary as
   tab ids and the `page_ref` graph — the canonical ref kinds of
-  [refs.md](./refs.md): `file` / `dir` / `wiki` / `work_item` /
+  [resources.md](./resources.md): `file` / `dir` / `wiki` / `work_item` /
   `commit` / `finding`. Stamp them on the element that *is* that thing
   (e.g. a task row carries `data-ref-kind="work_item"
   data-ref-id="oxplow:tsk42"`). Nesting is meaningful: a file row inside

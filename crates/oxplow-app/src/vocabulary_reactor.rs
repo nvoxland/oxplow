@@ -1,5 +1,5 @@
 //! The running vocabulary follows the primary worktree's extensions
-//! (P8.D3, `.context/refs.md` "There is no process-wide registry"): core
+//! (P8.D3, `.context/resources.md` "There is no process-wide registry"): core
 //! event types and ref kinds, plus what each enabled extension declares
 //! (`event_types:`, `ref_kinds:` — both stable). A pass rebuilds the whole vocabulary and
 //! swaps it into `Services.vocabulary`; writers already in a transaction

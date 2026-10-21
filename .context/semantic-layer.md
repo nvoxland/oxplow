@@ -146,7 +146,7 @@ URL query, a NULL value left out, a NULL id giving NULL, an even argument
 count an error — so a model or lens links to another lens
 (`lens_ref('oxplow-bundled/job-run-output', 'job_run', ref)`) without
 concatenating a prefix. Other refs are selected from their owning model's
-`ref` column (`.context/refs.md`).
+`ref` column (`.context/resources.md`).
 
 Extension models and lenses may use `import_ref('binding')` for a model declared
 in the extension's explicit public `imports`. The host resolves the canonical

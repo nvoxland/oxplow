@@ -88,7 +88,7 @@ describe("pageRefs", () => {
 
   test("wikiPageRef and workItemTabRef encode canonical refs", () => {
     expect(wikiPageRef("how-x-works").id).toBe("wiki:how-x-works");
-    // A work item's tab is its ref, whichever list (.context/refs.md).
+    // A work item's tab is its ref, whichever list (.context/resources.md).
     expect(workItemTabRef("work_item:oxplow:tsk123")).toEqual({
       id: "work_item:oxplow:tsk123",
       kind: "work_item",

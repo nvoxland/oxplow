@@ -38,7 +38,7 @@ The kinds' table (`contribution::KINDS`: manifest key, title, whether two
 extensions may share a name) is the one place those facts live.
 
 **A contribution's only public name is its ref** (`ContributionId::reference`,
-its `Display`; [refs.md](./refs.md) "Using refs"): `<kind>:<extension>/<id>`
+its `Display`; [resources.md](./resources.md) "Using refs"): `<kind>:<extension>/<id>`
 — `job:effort-review/review`, `collector:triage/todos`,
 `lens:acme/blocked`, `page:github/pr`, `model:effort-review/reviews` — or,
 for a kind whose names are already global (`ContributionKind::global_name`:
@@ -3483,7 +3483,7 @@ helpers consult and `useRefKinds` subscribes to:
   (`REF_KIND_ICONS`, a lucide component per allowed name — a Rust test
   keeps the two lists equal) and label;
 - `openRef("acme_pr:12", …)` (a link to the ref) opens
-  `page:acme/pr?ref=acme_pr:12` through the kind's page template, `page:acme/pr?ref={ref}` (refs.md
+  `page:acme/pr?ref=acme_pr:12` through the kind's page template, `page:acme/pr?ref={ref}` (resources.md
   "Where a ref opens"; `extPageRef` carries params; `DeclaredPageView`
   hands them to the lens as `initialParams`);
 - `preprocessWikilinks` turns `[[acme_pr:12]]` / `[[pr:12]]` into a link
@@ -3498,7 +3498,7 @@ names one of the extension's models with `ref`, `title` and `body`
 (V155). Its rows are in the site-wide search index (`search_fts`) under
 the kind, so the launcher finds a pull request by its title or text and
 the hit opens the kind's page as any ref of it does (the desktop's
-opener, refs.md "Where a ref opens"; the row shows the kind's icon and
+opener, resources.md "Where a ref opens"; the row shows the kind's icon and
 label). A feed may add a `version` column (a row's `updated_at`): a
 recompute then reads every row's version and the title and body of the
 changed rows only.
@@ -3536,7 +3536,7 @@ design, so building it is filling in, not deciding:
 - **The page:** its lens declares a `rev` param, and the page opens as
   `page:<ext>/<page>?ref=<ref>&rev=<rev>` (`rev` omitted: current).
 - **Refs:** `[[pr:12@git:abc1234]]` and `github_pr:12@git:abc1234` parse
-  through the one ref grammar (refs.md); the registry's `validate`
+  through the one ref grammar (resources.md); the registry's `validate`
   accepts `@rev` only for a revisioned kind, as for core ones. A rev is
   opaque to the kind — the kind's model decides what it matches.
 - **Search** entries stay rev-less: a hit is the thing, at its current

@@ -1,4 +1,4 @@
-//! The canonical ref grammar (`.context/refs.md`):
+//! The canonical ref grammar (`.context/resources.md`):
 //!
 //! ```text
 //! ref  := kind ":" id [ "@" rev ] [ "#" frag ]
