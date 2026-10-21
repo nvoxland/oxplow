@@ -1,0 +1,162 @@
+{
+  "$comment": "Golden cases for oxplow's URI grammar `oxplow:<extension>/<resource>[?<params>][#<view>]` (.context/resources.md). Asserted by crates/oxplow-domain/tests/oxplow_uri.rs and by apps/desktop/src/uri/oxplowUri.test.ts, so the Rust and TS parsers can't drift. `params` and `view` are DECODED; `canonical` is the one string every parse formats back to: keys sorted, and only ASCII letters, digits and -._~/:?,@!$'()*; left raw in a key or value (everything else %XX, uppercase hex). `identity` is the canonical URI without its view. `invalid` cases name the reason both parsers give.",
+  "valid": [
+    {
+      "text": "oxplow:oxplow/effort?id=eff12",
+      "resource": { "extension": "oxplow", "name": "effort" },
+      "params": { "id": "eff12" },
+      "view": {},
+      "canonical": "oxplow:oxplow/effort?id=eff12",
+      "identity": "oxplow:oxplow/effort?id=eff12"
+    },
+    {
+      "text": "oxplow:oxplow/file?rev=git:HEAD&path=src/a.rs#lines=10-20",
+      "resource": { "extension": "oxplow", "name": "file" },
+      "params": { "path": "src/a.rs", "rev": "git:HEAD" },
+      "view": { "lines": "10-20" },
+      "canonical": "oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-20",
+      "identity": "oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD"
+    },
+    {
+      "text": "oxplow:oxplow/work_item?provider=oxplow&id=tsk42",
+      "resource": { "extension": "oxplow", "name": "work_item" },
+      "params": { "id": "tsk42", "provider": "oxplow" },
+      "view": {},
+      "canonical": "oxplow:oxplow/work_item?id=tsk42&provider=oxplow",
+      "identity": "oxplow:oxplow/work_item?id=tsk42&provider=oxplow"
+    },
+    {
+      "text": "oxplow:acme-tools/pr?id=12",
+      "resource": { "extension": "acme-tools", "name": "pr" },
+      "params": { "id": "12" },
+      "view": {},
+      "canonical": "oxplow:acme-tools/pr?id=12",
+      "identity": "oxplow:acme-tools/pr?id=12"
+    },
+    {
+      "text": "oxplow:oxplow/page?page=tasks",
+      "resource": { "extension": "oxplow", "name": "page" },
+      "params": { "page": "tasks" },
+      "view": {},
+      "canonical": "oxplow:oxplow/page?page=tasks",
+      "identity": "oxplow:oxplow/page?page=tasks"
+    },
+    {
+      "text": "oxplow:oxplow/page",
+      "resource": { "extension": "oxplow", "name": "page" },
+      "params": {},
+      "view": {},
+      "canonical": "oxplow:oxplow/page",
+      "identity": "oxplow:oxplow/page"
+    },
+    {
+      "text": "oxplow:oxplow/lens?stream_id=2&lens=acme/blocked#q=fix&oxplow.renderer=acme/cards",
+      "resource": { "extension": "oxplow", "name": "lens" },
+      "params": { "lens": "acme/blocked", "stream_id": "2" },
+      "view": { "oxplow.renderer": "acme/cards", "q": "fix" },
+      "canonical": "oxplow:oxplow/lens?lens=acme/blocked&stream_id=2#oxplow.renderer=acme/cards&q=fix",
+      "identity": "oxplow:oxplow/lens?lens=acme/blocked&stream_id=2"
+    },
+    {
+      "$comment": "Order doesn't matter: the same resource as the one above.",
+      "text": "oxplow:oxplow/lens?lens=acme/blocked&stream_id=2",
+      "resource": { "extension": "oxplow", "name": "lens" },
+      "params": { "lens": "acme/blocked", "stream_id": "2" },
+      "view": {},
+      "canonical": "oxplow:oxplow/lens?lens=acme/blocked&stream_id=2",
+      "identity": "oxplow:oxplow/lens?lens=acme/blocked&stream_id=2"
+    },
+    {
+      "$comment": "A value holding the grammar's own characters, a space, a plus and non-ASCII: each encoded once, uppercase hex.",
+      "text": "oxplow:oxplow/file?path=docs/a%26b%3Dc%23d%25e%20f%2Bg%C3%A9.md",
+      "resource": { "extension": "oxplow", "name": "file" },
+      "params": { "path": "docs/a&b=c#d%e f+gé.md" },
+      "view": {},
+      "canonical": "oxplow:oxplow/file?path=docs/a%26b%3Dc%23d%25e%20f%2Bg%C3%A9.md",
+      "identity": "oxplow:oxplow/file?path=docs/a%26b%3Dc%23d%25e%20f%2Bg%C3%A9.md"
+    },
+    {
+      "$comment": "Lowercase hex and needless escapes parse; the canonical form drops them.",
+      "text": "oxplow:oxplow/file?path=src%2fa%2Ers%3a1",
+      "resource": { "extension": "oxplow", "name": "file" },
+      "params": { "path": "src/a.rs:1" },
+      "view": {},
+      "canonical": "oxplow:oxplow/file?path=src/a.rs:1",
+      "identity": "oxplow:oxplow/file?path=src/a.rs:1"
+    },
+    {
+      "$comment": "A raw plus is a plus (never a space); it is encoded in the canonical form.",
+      "text": "oxplow:oxplow/search?q=a+b",
+      "resource": { "extension": "oxplow", "name": "search" },
+      "params": { "q": "a+b" },
+      "view": {},
+      "canonical": "oxplow:oxplow/search?q=a%2Bb",
+      "identity": "oxplow:oxplow/search?q=a%2Bb"
+    },
+    {
+      "$comment": "An empty value is a value; an empty ? or # is nothing.",
+      "text": "oxplow:oxplow/page?q=&page=git-history?#",
+      "resource": { "extension": "oxplow", "name": "page" },
+      "params": { "page": "git-history?", "q": "" },
+      "view": {},
+      "canonical": "oxplow:oxplow/page?page=git-history?&q=",
+      "identity": "oxplow:oxplow/page?page=git-history?&q="
+    },
+    {
+      "$comment": "Keys may hold dots and dashes (a chip filter, a namespaced view key) and capitals (a config key).",
+      "text": "oxplow:oxplow/config?key=newThreadSession#f.state=todo",
+      "resource": { "extension": "oxplow", "name": "config" },
+      "params": { "key": "newThreadSession" },
+      "view": { "f.state": "todo" },
+      "canonical": "oxplow:oxplow/config?key=newThreadSession#f.state=todo",
+      "identity": "oxplow:oxplow/config?key=newThreadSession"
+    },
+    {
+      "$comment": "A value holding a whole URI is encoded where the grammar needs it.",
+      "text": "oxplow:oxplow/page?page=new-task&parent=oxplow:oxplow/work_item?id%3Dtsk1%26provider%3Doxplow",
+      "resource": { "extension": "oxplow", "name": "page" },
+      "params": { "page": "new-task", "parent": "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" },
+      "view": {},
+      "canonical": "oxplow:oxplow/page?page=new-task&parent=oxplow:oxplow/work_item?id%3Dtsk1%26provider%3Doxplow",
+      "identity": "oxplow:oxplow/page?page=new-task&parent=oxplow:oxplow/work_item?id%3Dtsk1%26provider%3Doxplow"
+    }
+  ],
+  "invalid": [
+    { "text": "", "reason": "empty" },
+    { "text": "effort:eff12", "reason": "not_oxplow" },
+    { "text": "https://example.com/a", "reason": "not_oxplow" },
+    { "text": "OXPLOW:oxplow/effort?id=eff1", "reason": "not_oxplow" },
+    { "text": "oxplow://oxplow/effort?id=eff1", "reason": "authority" },
+    { "text": "oxplow:effort?id=eff1", "reason": "bad_resource" },
+    { "text": "oxplow:oxplow/effort/x?id=eff1", "reason": "bad_resource" },
+    { "text": "oxplow:Acme/pr?id=1", "reason": "bad_resource" },
+    { "text": "oxplow:acme/Pr?id=1", "reason": "bad_resource" },
+    { "text": "oxplow:acme/pr-x?id=1", "reason": "bad_resource" },
+    { "text": "oxplow:/pr?id=1", "reason": "bad_resource" },
+    { "text": "oxplow:oxplow/effort?id", "reason": "bad_param" },
+    { "text": "oxplow:oxplow/effort?=eff1", "reason": "bad_param" },
+    { "text": "oxplow:oxplow/effort?id=eff1&&x=1", "reason": "bad_param" },
+    { "text": "oxplow:oxplow/effort?i%64=eff1", "reason": "bad_param" },
+    { "text": "oxplow:oxplow/effort?id=a&id=b", "reason": "duplicate_param" },
+    { "text": "oxplow:oxplow/effort?id=eff1#q=a&q=b", "reason": "duplicate_param" },
+    { "text": "oxplow:oxplow/file?path=a%2", "reason": "bad_escape" },
+    { "text": "oxplow:oxplow/file?path=a%zz", "reason": "bad_escape" },
+    { "text": "oxplow:oxplow/file?path=a%FF", "reason": "not_utf8" },
+    { "text": "oxplow:oxplow/file?path=a b", "reason": "unescaped" },
+    { "text": "oxplow:oxplow/file?path=a\"b", "reason": "unescaped" }
+  ],
+  "build": [
+    {
+      "resource": "oxplow/file",
+      "params": { "rev": "snap:3", "path": "a b/c&d.rs" },
+      "view": { "lines": "1-2" },
+      "canonical": "oxplow:oxplow/file?path=a%20b/c%26d.rs&rev=snap:3#lines=1-2"
+    },
+    {
+      "resource": "acme/pr",
+      "params": { "id": "12" },
+      "view": {},
+      "canonical": "oxplow:acme/pr?id=12"
+    }
+  ]
+}
